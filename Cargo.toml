@@ -12,6 +12,7 @@ members = [
   "crates/rne_sensor",
   "crates/rne_render",
   "crates/rne_render_wgpu",
+  "crates/rne_ai",
   "crates/rne_py",
   "adapters/ros2/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
@@ -20,6 +21,7 @@ members = [
   "examples/01_diff_drive_lidar",
   "examples/02_render_clear",
   "examples/03_urdf_import",
+  "examples/05_episode_diff_drive",
   "tests/determinism",
   "xtask",
 ]

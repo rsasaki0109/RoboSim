@@ -12,15 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.23", features = ["abi3-py39"] }
-rne_core = { path = "../rne_core" }
-rne_data = { path = "../rne_data" }
-rne_ecs = { path = "../rne_ecs" }
-rne_math = { path = "../rne_math" }
-rne_physics = { path = "../rne_physics" }
-rne_physics_rapier = { path = "../rne_physics_rapier" }
-rne_robot = { path = "../rne_robot" }
-rne_sensor = { path = "../rne_sensor" }
-rne_world = { path = "../rne_world" }
+rne_ai = { path = "../rne_ai" }
 
 [dev-dependencies]
 approx = "0.5"
