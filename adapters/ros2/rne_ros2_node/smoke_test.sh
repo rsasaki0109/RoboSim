@@ -3,6 +3,15 @@ set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 NODE_DIR="$ROOT/adapters/ros2/rne_ros2_node"
+NODE_PID=""
+
+cleanup() {
+  if [[ -n "$NODE_PID" ]]; then
+    kill "$NODE_PID" 2>/dev/null || true
+    wait "$NODE_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 if [[ -f /opt/ros/jazzy/setup.bash ]]; then
   set +u
@@ -29,6 +38,7 @@ echo "Building native ROS 2 node..."
 cargo build --release --manifest-path "$NODE_DIR/Cargo.toml"
 
 echo "Running bridge smoke test..."
+export RNE_ROS2_HOLD_SECS="${RNE_ROS2_HOLD_SECS:-60}"
 "$NODE_DIR/target/release/rne_ros2_node" &
 NODE_PID=$!
 
@@ -38,17 +48,18 @@ for _ in $(seq 1 150); do
     SERVICE_READY=1
     break
   fi
+  if ! kill -0 "$NODE_PID" 2>/dev/null; then
+    echo "rne_ros2_node exited before services became available" >&2
+    wait "$NODE_PID" || true
+    exit 1
+  fi
   sleep 0.1
 done
 
 if [[ "$SERVICE_READY" -ne 1 ]]; then
   echo "timed out waiting for /get_simulation_state (15s)" >&2
-  kill "$NODE_PID" 2>/dev/null || true
-  wait "$NODE_PID" 2>/dev/null || true
   exit 1
 fi
 
 echo "Checking get_simulation_state service..."
 timeout 20 ros2 service call /get_simulation_state simulation_interfaces/srv/GetSimulationState "{}"
-
-wait "$NODE_PID"

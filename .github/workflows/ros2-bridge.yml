@@ -55,7 +55,7 @@ jobs:
       - name: Install Python tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-venv python3-pip
+          sudo apt-get install -y python3-venv python3-pip ros-jazzy-rclpy
 
       - name: Smoke test rne_ros2_bridge
         run: ./adapters/ros2/rne_ros2_bridge/smoke_test.sh

@@ -98,3 +98,7 @@ cargo run -p xtask -- ci-ros2
 
 GitHub Actions runs the same smoke script in `.github/workflows/ros2-node.yml` on changes
 under `adapters/ros2/` and core simulation crates the node depends on.
+
+Smoke tests set `RNE_ROS2_HOLD_SECS=60` so the node keeps serving
+`simulation_interfaces` while `ros2 service call` runs. Without it, the process exits
+immediately after the built-in forward-motion check.
