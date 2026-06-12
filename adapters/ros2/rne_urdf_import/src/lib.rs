@@ -7,7 +7,7 @@ pub mod parse;
 pub mod schema;
 pub mod spawn;
 
-pub use parse::{parse_urdf, rpy_to_quat, UrdfParseError};
+pub use parse::{parse_urdf, parse_urdf_file, rpy_to_quat, UrdfParseError};
 pub use schema::{
     UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot,
 };

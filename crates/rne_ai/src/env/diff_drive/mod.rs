@@ -1,13 +1,17 @@
 //! Differential drive simulation and episode environment.
 
 mod sim;
+mod vectorized;
 
 pub use sim::DiffDriveSim;
+pub use vectorized::{VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveStep};
 
 use crate::action::DiffDriveAction;
+use crate::domain_randomization::DiffDriveDomainRandomization;
 use crate::episode::{Episode, EpisodeStep};
 use crate::observation::DiffDriveObservation;
 use crate::reward::DiffDriveRewardConfig;
+use crate::rng::DeterministicRng;
 use rne_log::SimulationLog;
 use rne_math::Vec3;
 use std::path::PathBuf;
@@ -27,6 +31,10 @@ pub struct DiffDriveEpisodeConfig {
     pub record_log: bool,
     /// When set, the episode loads world and robot state from this scene asset.
     pub scene_path: Option<PathBuf>,
+    /// Optional domain randomization applied on each reset.
+    pub domain_randomization: Option<DiffDriveDomainRandomization>,
+    /// Seed for reproducible domain randomization.
+    pub rng_seed: u64,
 }
 
 impl Default for DiffDriveEpisodeConfig {
@@ -38,6 +46,8 @@ impl Default for DiffDriveEpisodeConfig {
             reward: DiffDriveRewardConfig::default(),
             record_log: false,
             scene_path: None,
+            domain_randomization: None,
+            rng_seed: 1,
         }
     }
 }
@@ -51,12 +61,16 @@ pub struct DiffDriveEpisode {
     prev_x_m: f64,
     total_reward: f64,
     log: SimulationLog,
+    rng: DeterministicRng,
+    goal_x_m: f64,
 }
 
 impl DiffDriveEpisode {
     /// Creates a new episode environment with the given configuration.
     pub fn new(config: DiffDriveEpisodeConfig) -> Self {
-        let sim = new_sim(&config).expect("episode simulation");
+        let rng = DeterministicRng::new(config.rng_seed);
+        let goal_x_m = config.goal_x_m;
+        let sim = new_sim(&config, config.initial_translation_m).expect("episode simulation");
         Self {
             sim,
             config,
@@ -65,7 +79,14 @@ impl DiffDriveEpisode {
             prev_x_m: 0.0,
             total_reward: 0.0,
             log: SimulationLog::new(),
+            rng,
+            goal_x_m,
         }
+    }
+
+    /// Returns the goal X position for the current episode.
+    pub fn goal_x_m(&self) -> f64 {
+        self.goal_x_m
     }
 
     /// Returns the world seed when running from a scene asset.
@@ -95,7 +116,7 @@ impl DiffDriveEpisode {
         let delta_x_m = observation.base_x_m - self.prev_x_m;
         self.prev_x_m = observation.base_x_m;
 
-        let reached_goal = observation.base_x_m >= self.config.goal_x_m;
+        let reached_goal = observation.base_x_m >= self.goal_x_m;
         let truncated = !reached_goal && self.step_in_episode >= self.config.max_steps;
 
         let reward = self.config.reward.compute(delta_x_m, reached_goal);
@@ -115,7 +136,17 @@ impl Episode for DiffDriveEpisode {
     type Action = DiffDriveAction;
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
-        self.sim = new_sim(&self.config).expect("episode simulation");
+        let mut initial_translation_m = self.config.initial_translation_m;
+        self.goal_x_m = self.config.goal_x_m;
+        if let Some(domain_randomization) = &self.config.domain_randomization {
+            domain_randomization.apply(
+                &mut self.rng,
+                &mut initial_translation_m,
+                &mut self.goal_x_m,
+            );
+        }
+
+        self.sim = new_sim(&self.config, initial_translation_m).expect("episode simulation");
         self.step_in_episode = 0;
         self.prev_x_m = 0.0;
         self.total_reward = 0.0;
@@ -157,12 +188,15 @@ impl Episode for DiffDriveEpisode {
     }
 }
 
-fn new_sim(config: &DiffDriveEpisodeConfig) -> Result<DiffDriveSim, rne_assets::AssetError> {
+fn new_sim(
+    config: &DiffDriveEpisodeConfig,
+    initial_translation_m: Vec3,
+) -> Result<DiffDriveSim, rne_assets::AssetError> {
     if let Some(scene_path) = &config.scene_path {
         DiffDriveSim::from_scene_path(scene_path)
     } else {
         Ok(DiffDriveSim::with_initial_translation(
-            config.initial_translation_m,
+            initial_translation_m,
         ))
     }
 }
@@ -235,5 +269,21 @@ mod tests {
 
         assert!(step.terminated);
         assert!(step.observation.base_x_m >= 2.0);
+    }
+
+    #[test]
+    fn domain_randomization_changes_goal_on_reset() {
+        let mut env = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
+            domain_randomization: Some(DiffDriveDomainRandomization::forward_goal_training()),
+            rng_seed: 11,
+            ..DiffDriveEpisodeConfig::default()
+        });
+
+        env.reset();
+        let first_goal = env.goal_x_m();
+        env.reset();
+        let second_goal = env.goal_x_m();
+
+        assert_ne!(first_goal, second_goal);
     }
 }

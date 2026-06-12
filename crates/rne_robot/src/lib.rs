@@ -13,8 +13,11 @@ pub use actuator::{ActuatorLimits, ActuatorTarget, ControlMode};
 pub use commands::{ActuatorCommand, ActuatorCommandBuffer, ActuatorCommandEntry};
 pub use components::{Actuator, Joint, JointKind, JointLimits, Link, Robot, RobotId};
 pub use diff_drive::{
-    spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveSpawned,
-    DifferentialDrive,
+    spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,
+    DiffDriveSpawned, DifferentialDrive,
 };
 pub use joint::validate_joint_limits;
-pub use systems::{apply_actuator_commands, differential_drive_kinematics, CommandApplyResult};
+pub use systems::{
+    apply_actuator_commands, differential_drive_kinematics, sync_joint_motors_from_actuators,
+    CommandApplyResult,
+};

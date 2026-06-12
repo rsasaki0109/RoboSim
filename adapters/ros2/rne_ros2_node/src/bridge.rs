@@ -16,7 +16,8 @@ use rne_world::Transform3;
 use crate::convert::{to_clock_message, to_pointcloud2_message, to_tf_message};
 
 const SIM_DT_NS: u64 = 1_000_000_000 / 60;
-const SIM_STEPS: usize = 180;
+const SIM_STEPS: usize = 300;
+const MIN_FORWARD_X_M: f64 = 0.8;
 
 type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
@@ -66,7 +67,7 @@ pub fn run() -> Result<()> {
     }
 
     eprintln!("final base_x={:.2} m", obs.base_x_m);
-    if obs.base_x_m < 1.0 {
+    if obs.base_x_m < MIN_FORWARD_X_M {
         bail!("expected forward motion from diff-drive policy");
     }
 

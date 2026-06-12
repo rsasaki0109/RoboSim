@@ -1,0 +1,17 @@
+[package]
+name = "urdf_mesh_render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_render = { path = "../../crates/rne_render" }
+rne_render_wgpu = { path = "../../crates/rne_render_wgpu" }
+rne_urdf_import = { path = "../../adapters/ros2/rne_urdf_import" }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "09_urdf_mesh_render"
+path = "main.rs"

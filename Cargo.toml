@@ -26,6 +26,9 @@ members = [
   "examples/06_scene_load",
   "examples/07_render_primitives",
   "examples/08_scene_episode",
+  "examples/09_urdf_mesh_render",
+  "examples/10_vectorized_episode",
+  "examples/11_agent_policy",
   "tests/determinism",
   "xtask",
 ]
@@ -38,7 +41,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
 anyhow = "1"

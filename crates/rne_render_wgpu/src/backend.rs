@@ -127,7 +127,7 @@ impl RenderBackend for WgpuRenderBackend {
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             ));
         }
-        let renderer = self.primitive.as_ref().expect("primitive renderer");
+        let renderer = self.primitive.as_mut().expect("primitive renderer");
         renderer.render(PrimitiveRenderPass {
             device: &self.device,
             queue: &self.queue,
@@ -226,6 +226,8 @@ mod tests {
     use super::*;
     use rne_math::{Quat, Vec3};
     use rne_render::{hash_depth_f32, hash_rgba8, RenderScene, RenderSceneItem, VisualShape};
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[test]
     fn wgpu_clear_render_produces_image() {
@@ -274,6 +276,7 @@ mod tests {
                     size_m: Vec3::new(0.5, 0.3, 0.4),
                 },
                 color_rgba: [0.8, 0.2, 0.2, 1.0],
+                mesh: None,
             }],
         };
 
@@ -288,5 +291,48 @@ mod tests {
             .depth_m
             .iter()
             .any(|depth| *depth < camera.far_m as f32));
+    }
+
+    #[test]
+    fn wgpu_mesh_scene_render_produces_depth() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_render/tests/fixtures/mesh_diff_drive");
+        let mesh = Arc::new(
+            rne_render::load_stl(&package_root.join("meshes/base_link.stl")).expect("load stl"),
+        );
+        let scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(0.0, 0.25, 0.0),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::ONE,
+                },
+                shape: VisualShape::Mesh {
+                    path: "package://mesh_diff_drive/meshes/base_link.stl".into(),
+                    scale: Vec3::ONE,
+                },
+                color_rgba: [0.35, 0.55, 0.95, 1.0],
+                mesh: Some(mesh),
+            }],
+        };
+
+        let camera = Camera::new(64, 48, std::f64::consts::FRAC_PI_4);
+        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.5, 4.0), Quat::IDENTITY);
+        let output = backend
+            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("mesh scene render");
+
+        assert_ne!(hash_rgba8(&output.color.rgba8), 0);
+        assert_ne!(hash_depth_f32(&output.depth.depth_m), 0);
     }
 }

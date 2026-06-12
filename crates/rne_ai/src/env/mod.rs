@@ -3,4 +3,7 @@
 pub mod diff_drive;
 
 pub use diff_drive::DiffDriveSim;
-pub use diff_drive::{DiffDriveEpisode, DiffDriveEpisodeConfig};
+pub use diff_drive::{
+    DiffDriveEpisode, DiffDriveEpisodeConfig, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
+    VectorizedDiffDriveStep,
+};

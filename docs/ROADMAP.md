@@ -1,35 +1,48 @@
-# v0.1.0 Roadmap (post-release)
+# Roadmap
 
-## Completed in v0.1.0
+## v0.2.0 (released)
 
-- [x] Core ECS + world + math
-- [x] Rapier physics + determinism tests
-- [x] Diff-drive robot + sensors + DataBus
-- [x] Render skeleton + Python bindings
-- [x] URDF import + ROS 2 Python bridge
-- [x] GitHub Release
+Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 
-## v0.2 candidates
+### Completed in v0.2 scope
 
-| Area | Task | Status |
-|------|------|--------|
-| AI | Episode API, reward/termination | Done (`rne_ai`, `05_episode_diff_drive`) |
-| Robot | URDF → collider/visual auto attach | Done (`rne_urdf_import`, `Visual`) |
-| Assets | `.rne.scene.toml` / `.rne.robot.toml` format | Done (`rne_assets`, `06_scene_load`) |
-| Rendering | Mesh rendering, depth pass | Done (`rne_render_wgpu`, `07_render_primitives`) |
-| ROS 2 | Native `rclrs` node when type-support is available | Done (`rne_ros2_node`) |
+| Area | Feature |
+|------|---------|
+| AI | Episode API, reward/termination (`rne_ai`, `05_episode_diff_drive`) |
+| Robot | URDF → collider/visual auto attach (`rne_urdf_import`) |
+| Assets | `.rne.scene.toml` / `.rne.robot.toml` (`rne_assets`, `06_scene_load`) |
+| Rendering | Mesh rendering, depth pass (`07_render_primitives`) |
+| ROS 2 | Native `rclrs` node (`rne_ros2_node`) |
+
+### Also shipped in v0.2.0 (v0.3 scope)
+
+| Area | Feature |
+|------|---------|
+| Integration | End-to-end scene + episode (`08_scene_episode`) |
+| Rendering | URDF mesh load + wgpu draw (`09_urdf_mesh_render`) |
+| AI | Domain randomization, vectorized envs (`10_vectorized_episode`) |
+| Robot | Rapier joint-driven wheels (`DiffDriveDriveMode::JointDriven`) |
+| Agent | Agent Entity + policy attach (`11_agent_policy`) |
+| ROS 2 | Optional CI for `rne_ros2_node` (`.github/workflows/ros2-node.yml`, `xtask ci-ros2`) |
+| CI | GitHub Actions core workspace job (`ci.yml`) |
+
+## v0.1.0 (initial release)
+
+- Core ECS + world + math
+- Rapier physics + determinism tests
+- Diff-drive robot + sensors + DataBus
+- Render skeleton + Python bindings
+- URDF import + ROS 2 Python bridge
 
 ## v0.3 candidates
 
-| Area | Task | Status |
-|------|------|--------|
-| Integration | End-to-end scene + episode example | Done (`08_scene_episode`) |
-| Rendering | URDF mesh load + wgpu draw | Planned |
-| AI | Domain randomization, vectorized envs | Planned |
-| Robot | Rapier joint-driven wheels | Planned |
-| Agent | Agent Entity component + policy attach | Planned |
-| ROS 2 | Optional CI for `rne_ros2_node` | Planned |
-| Release | v0.2.0 tag + docs refresh | Planned |
+| Area | Idea |
+|------|------|
+| AI | Multi-robot episodes, richer observation spaces |
+| Physics | Shared-world agents (agent ECS ↔ sim world) |
+| Rendering | Interactive viewer / camera teleop |
+| Assets | Hot reload, asset pipeline CLI |
+| ROS 2 | Python bridge CI, topic/service parity with native node |
 
 ## Native ROS 2 (`rclrs`)
 
@@ -38,14 +51,25 @@ Two runtime paths are available:
 - **Python** (`adapters/ros2/rne_ros2_bridge/`): `rclpy` node, optional `rne_py` bindings
 - **Rust** (`adapters/ros2/rne_ros2_node/`): native `rclrs` node with headless `rne_ai` sim
 
-The native node requires ROS message crates from the underlay. On Jazzy:
+On Jazzy:
 
 ```bash
 sudo apt install ros-jazzy-rosidl-generator-rs ros-jazzy-test-msgs
 source /opt/ros/jazzy/setup.bash
-cd adapters/ros2/rne_ros2_node
-./smoke_test.sh
+cargo run -p xtask -- ci-ros2
 ```
 
-Message crates use `"*"` version pins and are patched via `generate_cargo_config.sh`.
-The node is built with `--manifest-path` and is not part of the core workspace CI.
+The native node is built with `--manifest-path` and is not part of the core workspace CI.
+
+## Release checklist
+
+After merging release changes:
+
+```bash
+cargo run -p xtask -- ci
+git tag -a v0.2.0 -m "Robot Native Engine v0.2.0"
+git push origin main --tags
+gh release create v0.2.0 --title "v0.2.0" --notes-file CHANGELOG.md
+```
+
+Adjust the `gh release create` notes to the `[0.2.0]` section only if you prefer a shorter GitHub release body.

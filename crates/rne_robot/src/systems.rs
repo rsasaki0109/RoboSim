@@ -8,7 +8,7 @@ use crate::joint::{validate_joint_position, validate_joint_velocity, JointValida
 use bevy_ecs::prelude::{Entity, World};
 use rne_core::SimDuration;
 use rne_math::{Quat, Vec3};
-use rne_physics::RigidBody;
+use rne_physics::{JointMotor, RigidBody};
 use rne_world::Transform3;
 
 /// Result of applying one actuator command.
@@ -213,6 +213,24 @@ pub fn differential_drive_kinematics(
             let forward_flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
             body.linear_velocity_m_s = forward_flat * linear_m_s;
             body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rad_s, 0.0);
+        }
+    }
+}
+
+/// Copies actuator velocity targets into [`JointMotor`] components for physics stepping.
+pub fn sync_joint_motors_from_actuators(world: &mut World, drives: &[DifferentialDrive]) {
+    for drive in drives {
+        for actuator_entity in [drive.left_actuator, drive.right_actuator] {
+            let Some(actuator) = world.get::<Actuator>(actuator_entity) else {
+                continue;
+            };
+            let Some(joint_entity) = actuator.joint else {
+                continue;
+            };
+            let velocity = actuator.target.velocity_rad_s;
+            if let Some(mut motor) = world.get_mut::<JointMotor>(joint_entity) {
+                motor.velocity_rad_s = velocity;
+            }
         }
     }
 }

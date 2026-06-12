@@ -1,6 +1,7 @@
 //! Physics ECS components.
 
 use bevy_ecs::prelude::Component;
+use rne_ecs::Entity;
 use rne_math::Vec3;
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -133,4 +134,24 @@ impl Default for PhysicsMaterial {
             restitution: 0.0,
         }
     }
+}
+
+/// Revolute joint description for physics backends.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct RevoluteJointDesc {
+    /// Parent rigid body entity.
+    pub parent: Entity,
+    /// Joint axis in parent-local coordinates.
+    pub axis: Vec3,
+    /// Anchor point in the parent body's local frame.
+    pub anchor_parent_m: Vec3,
+    /// Anchor point in the child body's local frame.
+    pub anchor_child_m: Vec3,
+}
+
+/// Velocity motor command applied to a revolute joint before each physics step.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointMotor {
+    /// Target angular velocity in radians per second.
+    pub velocity_rad_s: f64,
 }

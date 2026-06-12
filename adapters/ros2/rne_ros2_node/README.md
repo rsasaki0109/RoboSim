@@ -35,7 +35,7 @@ cargo build --release --manifest-path Cargo.toml
 ./target/release/rne_ros2_node
 ```
 
-Or use the smoke script (unit tests + build + 180-step motion check):
+Or use the smoke script (unit tests + build + 300-step motion check):
 
 ```bash
 ./smoke_test.sh
@@ -64,6 +64,16 @@ rclrs publishers  (/clock, /points, /tf)
 
 ## CI note
 
-Core workspace CI (`cargo xtask ci`) does not build this crate because it requires
-a sourced ROS environment and patched message crates. Run `smoke_test.sh` locally
-or in a ROS-equipped CI job when changing bridge code.
+Core workspace CI (`cargo run -p xtask -- ci`) does not build this crate because it requires
+a sourced ROS environment and patched message crates.
+
+When ROS 2 Jazzy (or Humble) is installed locally:
+
+```bash
+cargo run -p xtask -- ci-ros2
+# or
+./adapters/ros2/rne_ros2_node/smoke_test.sh
+```
+
+GitHub Actions runs the same smoke script in `.github/workflows/ros2-node.yml` on changes
+under `adapters/ros2/` and core simulation crates the node depends on.

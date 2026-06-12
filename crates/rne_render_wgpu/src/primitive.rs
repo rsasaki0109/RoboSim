@@ -40,7 +40,10 @@ use rne_math::Mat4;
 use rne_math::Transform3;
 use rne_render::{
     Camera, CameraPassOutput, DepthFrame, ImageFrame, RenderError, RenderScene, RenderTarget,
+    TriangleMesh,
 };
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -71,6 +74,14 @@ pub struct PrimitiveRenderer {
     index_count: u32,
     camera_buffer: wgpu::Buffer,
     draw_buffer: wgpu::Buffer,
+    mesh_cache: HashMap<usize, GpuMesh>,
+}
+
+struct GpuMesh {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    index_format: wgpu::IndexFormat,
 }
 
 /// Inputs for one off-screen primitive render pass.
@@ -218,10 +229,14 @@ impl PrimitiveRenderer {
             index_count: indices.len() as u32,
             camera_buffer,
             draw_buffer,
+            mesh_cache: HashMap::new(),
         }
     }
 
-    pub fn render(&self, pass: PrimitiveRenderPass<'_>) -> Result<CameraPassOutput, RenderError> {
+    pub fn render(
+        &mut self,
+        pass: PrimitiveRenderPass<'_>,
+    ) -> Result<CameraPassOutput, RenderError> {
         let target = pass.target;
         let camera = pass.camera;
         let view = pass.view;
@@ -334,7 +349,17 @@ impl PrimitiveRenderer {
                     }],
                 });
                 pass.set_bind_group(1, &draw_bind_group, &[]);
-                pass.draw_indexed(0..self.index_count, 0, 0..1);
+
+                if let Some(mesh) = &item.mesh {
+                    let gpu_mesh = self.gpu_mesh(device, mesh);
+                    pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
+                    pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
+                } else {
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..self.index_count, 0, 0..1);
+                }
             }
         }
 
@@ -404,6 +429,59 @@ impl PrimitiveRenderer {
         let color = map_color_buffer(device, &color_buffer, target)?;
         let depth = map_depth_buffer(device, &depth_buffer, target, camera)?;
         Ok(CameraPassOutput { color, depth })
+    }
+
+    fn gpu_mesh(&mut self, device: &wgpu::Device, mesh: &Arc<TriangleMesh>) -> &GpuMesh {
+        let key = Arc::as_ptr(mesh) as usize;
+        self.mesh_cache
+            .entry(key)
+            .or_insert_with(|| upload_mesh(device, mesh))
+    }
+}
+
+fn upload_mesh(device: &wgpu::Device, mesh: &TriangleMesh) -> GpuMesh {
+    let vertices: Vec<Vertex> = mesh
+        .positions
+        .iter()
+        .zip(mesh.normals.iter())
+        .map(|(position, normal)| Vertex {
+            position: *position,
+            normal: *normal,
+        })
+        .collect();
+
+    let use_u32 = mesh.indices.len() > u16::MAX as usize;
+    let (index_bytes, index_format, index_count) = if use_u32 {
+        (
+            bytemuck::cast_slice(&mesh.indices).to_vec(),
+            wgpu::IndexFormat::Uint32,
+            mesh.indices.len() as u32,
+        )
+    } else {
+        let indices_u16: Vec<u16> = mesh.indices.iter().map(|index| *index as u16).collect();
+        (
+            bytemuck::cast_slice(&indices_u16).to_vec(),
+            wgpu::IndexFormat::Uint16,
+            indices_u16.len() as u32,
+        )
+    };
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("rne_mesh_vertices"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("rne_mesh_indices"),
+        contents: &index_bytes,
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    GpuMesh {
+        vertex_buffer,
+        index_buffer,
+        index_count,
+        index_format,
     }
 }
 

@@ -1,0 +1,12 @@
+[package]
+name = "vectorized_episode"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "10_vectorized_episode"
+path = "main.rs"
