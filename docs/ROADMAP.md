@@ -1,5 +1,17 @@
 # Roadmap
 
+## v0.4.0 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| AI | Goal-conditioned policies and curriculum (`16_goal_conditioned_agent`) |
+| Physics | Multi-robot collision and interaction (`17_multi_robot_collision`) |
+| ROS 2 | Services, actions, and parameter parity with native node |
+| Rendering | URDF world transforms, orbit camera, multi-draw wgpu fix, sim-captured README hero |
+| DevEx | `rne_urdf_import` promoted to core crate; CI boundary lint passes |
+
 ## v0.3.0 (released)
 
 Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
@@ -80,9 +92,9 @@ After merging release changes:
 
 ```bash
 cargo run -p xtask -- ci
-git tag -a v0.3.0 -m "Robot Native Engine v0.3.0"
+git tag -a v0.4.0 -m "Robot Native Engine v0.4.0"
 git push origin main --tags
-gh release create v0.3.0 --title "v0.3.0" --notes-file CHANGELOG.md
+gh release create v0.4.0 --title "v0.4.0" --notes-file CHANGELOG.md
 ```
 
-Adjust the `gh release create` notes to the `[0.3.0]` section only if you prefer a shorter GitHub release body.
+Adjust the `gh release create` notes to the `[0.4.0]` section only if you prefer a shorter GitHub release body.

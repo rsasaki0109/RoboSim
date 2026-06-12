@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 rne_ecs = { path = "../../crates/rne_ecs" }
-rne_urdf_import = { path = "../../adapters/ros2/rne_urdf_import" }
+rne_urdf_import = { path = "../../crates/rne_urdf_import" }
 
 [[example]]
 name = "03_urdf_import"

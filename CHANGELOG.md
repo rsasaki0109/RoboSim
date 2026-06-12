@@ -2,6 +2,28 @@
 
 All notable changes to Robot Native Engine are documented in this file.
 
+## [0.4.0] - 2026-06-12
+
+### Added
+
+- **Goal-conditioned episodes** (`16_goal_conditioned_agent`): `GoalSeekingPolicy`, `GoalCurriculum`, and multi-task goal sampling
+- **Multi-robot collision** (`17_multi_robot_collision`): shared-world contact scenarios and peer-relative observations
+- **ROS 2 sim control parity**: `simulation_interfaces` services, `/simulate_steps` action, and `wheel_velocity_rad_s` parameter on both native `rclrs` and Python bridge nodes
+- **README hero capture** (`18_readme_hero`, `docs/media/generate-hero.sh`): orbit-rendered PNG/GIF from the real wgpu simulator
+- **`world_transform_of()`** for composed URDF / parent-child render transforms
+
+### Changed
+
+- **`rne_urdf_import` moved to `crates/`** so core workspace CI no longer depends on `adapters/ros2/`
+- **Rendering**: physics-synced bases use yaw-only rotation; orbit camera helpers live in `rne_render_wgpu::camera` (no winit required)
+- **wgpu multi-draw fix**: per-item draw uniforms use dynamic offsets so multi-link URDF scenes render correctly
+- **Depth readback** uses `TextureAspect::DepthOnly` for reliable off-screen passes
+
+### Fixed
+
+- URDF mesh scenes no longer disappear when child links carry local rotations
+- Interactive viewer and headless examples frame robots with `CameraOrbit` instead of a fixed offset camera
+
 ## [0.3.0] - 2026-06-12
 
 ### Added

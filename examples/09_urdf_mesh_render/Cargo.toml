@@ -9,7 +9,7 @@ rne_ecs = { path = "../../crates/rne_ecs" }
 rne_math = { path = "../../crates/rne_math" }
 rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
-rne_urdf_import = { path = "../../adapters/ros2/rne_urdf_import" }
+rne_urdf_import = { path = "../../crates/rne_urdf_import" }
 rne_world = { path = "../../crates/rne_world" }
 
 [[example]]

@@ -57,7 +57,12 @@ fn main() {
     };
 
     let output = backend
-        .render_scene_camera(&camera, &orbit.camera_transform(), &scene, [0.05, 0.08, 0.12, 1.0])
+        .render_scene_camera(
+            &camera,
+            &orbit.camera_transform(),
+            &scene,
+            [0.05, 0.08, 0.12, 1.0],
+        )
         .expect("render scene");
 
     let center_depth = output.depth.depth_m

@@ -22,5 +22,5 @@ winit = { version = "0.30", optional = true }
 [dev-dependencies]
 approx = "0.5"
 rne_ecs = { path = "../rne_ecs" }
-rne_urdf_import = { path = "../../adapters/ros2/rne_urdf_import" }
+rne_urdf_import = { path = "../rne_urdf_import" }
 rne_world = { path = "../rne_world" }

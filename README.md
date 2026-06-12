@@ -64,7 +64,7 @@ cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scen
 
 See [examples/README.md](examples/README.md) for the full list.
 
-**Highlights in v0.3:** shared-world agents, multi-robot sim, interactive viewer, asset hot reload, ROS 2 bridge CI.
+**Highlights in v0.4:** goal-conditioned agents, multi-robot collision, ROS 2 sim-control parity, URDF render fixes, sim-captured README hero.
 
 Architecture docs live under [docs/architecture/](docs/architecture/000_overview.md).
 
@@ -95,7 +95,7 @@ cargo run -p xtask -- ci-ros2
 cargo run -p xtask -- ci-ros2-bridge
 ```
 
-Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.3.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0) · [v0.2.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)
+Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.4.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0) · [v0.3.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0) · [v0.2.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)
 
 ## Development
 

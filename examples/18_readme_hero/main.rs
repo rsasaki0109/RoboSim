@@ -49,7 +49,10 @@ fn main() {
         .iter()
         .filter(|item| matches!(item.shape, VisualShape::Mesh { .. }))
         .count();
-    assert!(mesh_items > 0, "expected at least one mesh visual in hero scene");
+    assert!(
+        mesh_items > 0,
+        "expected at least one mesh visual in hero scene"
+    );
 
     let focus = robot_focus(&sim);
     let camera = Camera::new(RENDER_WIDTH, RENDER_HEIGHT, std::f64::consts::FRAC_PI_4);
@@ -71,7 +74,8 @@ fn main() {
             .expect("render hero frame");
 
         let unique = unique_colors(&output.color.rgba8);
-        let center = (output.depth.height / 2 * output.color.width + output.color.width / 2) as usize;
+        let center =
+            (output.depth.height / 2 * output.color.width + output.color.width / 2) as usize;
         let center_depth = output.depth.depth_m[center];
         if frame == 0 {
             assert!(
@@ -152,11 +156,9 @@ fn build_gif(frames_dir: &Path, frame_count: usize, gif_path: &Path) -> std::io:
 
 fn upscale_png(src: &Path, dst: &Path, width: u32, height: u32) -> std::io::Result<()> {
     let image = image::open(src)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?
+        .map_err(std::io::Error::other)?
         .resize_to_fill(width, height, image::imageops::FilterType::Lanczos3);
-    image
-        .save(dst)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
+    image.save(dst).map_err(std::io::Error::other)
 }
 
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
@@ -167,6 +169,6 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Resu
     let mut writer = encoder.write_header()?;
     writer
         .write_image_data(rgba)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+        .map_err(std::io::Error::other)?;
     Ok(())
 }
