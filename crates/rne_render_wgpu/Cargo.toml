@@ -10,7 +10,9 @@ repository.workspace = true
 default = []
 
 [dependencies]
+bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
+rne_math = { path = "../rne_math" }
 rne_render = { path = "../rne_render" }
 thiserror = { workspace = true }
 wgpu = "24"

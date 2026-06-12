@@ -1,6 +1,7 @@
 //! Camera parameters for rendering and camera sensors.
 
 use crate::RenderTarget;
+use rne_math::{Mat4, Transform3, Vec3};
 
 /// Pinhole camera parameters.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,5 +44,25 @@ impl Camera {
     /// Returns the render target for this camera.
     pub fn render_target(&self) -> RenderTarget {
         RenderTarget::new(self.width, self.height)
+    }
+
+    /// Builds a right-handed perspective projection matrix.
+    pub fn projection_matrix(&self) -> Mat4 {
+        let aspect = self.width as f64 / self.height.max(1) as f64;
+        Mat4::perspective_rh(self.fov_y_rad, aspect, self.near_m, self.far_m)
+    }
+
+    /// Builds a view matrix from a camera world transform looking down local -Z.
+    pub fn view_matrix(camera_world: &Transform3) -> Mat4 {
+        let eye = camera_world.translation;
+        let forward = camera_world.rotation * -Vec3::Z;
+        let target = eye + forward;
+        let up = camera_world.rotation * Vec3::Y;
+        Mat4::look_at_rh(eye, target, up)
+    }
+
+    /// Returns the combined view-projection matrix for a camera pose.
+    pub fn view_projection(&self, camera_world: &Transform3) -> Mat4 {
+        self.projection_matrix() * Self::view_matrix(camera_world)
     }
 }
