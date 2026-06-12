@@ -1,0 +1,16 @@
+[package]
+name = "hello_world"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_core = { path = "../../crates/rne_core" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "00_hello_world"
+path = "main.rs"

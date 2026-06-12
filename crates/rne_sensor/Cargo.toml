@@ -1,0 +1,22 @@
+[package]
+name = "rne_sensor"
+description = "Sensor framework for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_core = { path = "../rne_core" }
+rne_data = { path = "../rne_data" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+rne_physics = { path = "../rne_physics" }
+rne_render = { path = "../rne_render" }
+rne_robot = { path = "../rne_robot" }
+rne_world = { path = "../rne_world" }
+serde = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

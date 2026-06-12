@@ -1,0 +1,20 @@
+[package]
+name = "rne_log"
+description = "Simulation log record and replay for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_core = { path = "../rne_core" }
+rne_data = { path = "../rne_data" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+rne_robot = { path = "../rne_robot" }
+serde = { workspace = true }
+serde_json = "1"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,20 @@
+[package]
+name = "rne_adapter_ros2"
+description = "ROS2 adapter mappings for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+ros2 = []
+
+[dependencies]
+rne_core = { path = "../../../crates/rne_core" }
+rne_data = { path = "../../../crates/rne_data" }
+rne_math = { path = "../../../crates/rne_math" }
+rne_world = { path = "../../../crates/rne_world" }
+
+[dev-dependencies]
+approx = "0.5"

@@ -1,0 +1,19 @@
+[package]
+name = "rne_render_wgpu"
+description = "wgpu render backend for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+pollster = "0.4"
+rne_render = { path = "../rne_render" }
+thiserror = { workspace = true }
+wgpu = "24"
+
+[dev-dependencies]
+approx = "0.5"

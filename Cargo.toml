@@ -1,0 +1,48 @@
+[workspace]
+members = [
+  "crates/rne_math",
+  "crates/rne_core",
+  "crates/rne_ecs",
+  "crates/rne_world",
+  "crates/rne_physics",
+  "crates/rne_physics_rapier",
+  "crates/rne_robot",
+  "crates/rne_data",
+  "crates/rne_log",
+  "crates/rne_sensor",
+  "crates/rne_render",
+  "crates/rne_render_wgpu",
+  "crates/rne_py",
+  "adapters/ros2/rne_urdf_import",
+  "adapters/ros2/rne_adapter_ros2",
+  "examples/00_hello_world",
+  "examples/01_falling_cube",
+  "examples/01_diff_drive_lidar",
+  "examples/02_render_clear",
+  "examples/03_urdf_import",
+  "tests/determinism",
+  "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/robot-native-engine/robot-native-engine"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1"
+bevy_ecs = "0.15"
+glam = { version = "0.29", features = ["serde"] }
+petgraph = "0.7"
+rapier3d = "0.22"
+serde = { version = "1", features = ["derive"] }
+smallvec = { version = "1", features = ["serde"] }
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+wgpu = "24"
+pollster = "0.4"
+pyo3 = { version = "0.23", features = ["abi3-py39"] }
+roxmltree = "0.20"

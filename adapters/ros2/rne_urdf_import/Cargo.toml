@@ -1,0 +1,18 @@
+[package]
+name = "rne_urdf_import"
+description = "Minimal URDF importer for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_ecs = { path = "../../../crates/rne_ecs" }
+rne_math = { path = "../../../crates/rne_math" }
+rne_robot = { path = "../../../crates/rne_robot" }
+rne_world = { path = "../../../crates/rne_world" }
+roxmltree = "0.20"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

@@ -1,0 +1,18 @@
+[package]
+name = "rne_world"
+description = "World entity, scene index, and frame graph for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs = { workspace = true }
+petgraph = { workspace = true }
+rne_core = { path = "../rne_core" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+serde = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
