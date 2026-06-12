@@ -17,7 +17,7 @@
 | Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
 | Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Multi-robot agent | `cargo run -p multi_robot_agent --example 13_multi_robot_agent` | Two agents, two robots, one shared world |
-| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | winit window, WASD teleop, orbit camera (`--smoke` for headless) |
+| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene asset load, WASD teleop, orbit camera, live hot reload (`--smoke` for headless) |
 | Asset hot reload | `cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke` | Validate scene deps and reload on file change |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |

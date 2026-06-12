@@ -51,10 +51,10 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 | Area | Idea |
 |------|------|
 | AI | Goal-conditioned policies, curriculum / multi-task episodes |
-| Rendering | Viewer + scene assets integration, URDF mesh in interactive mode |
+| Rendering | Viewer + scene assets integration, URDF mesh in interactive mode | In progress (`14_interactive_viewer` scene load + hot reload) |
 | Physics | Multi-robot collision and interaction scenarios |
 | ROS 2 | Services, actions, and parameter parity with native node |
-| DevEx | Live asset reload wired into interactive viewer |
+| DevEx | Live asset reload wired into interactive viewer | Done (`14_interactive_viewer`) |
 
 ## Native ROS 2 (`rclrs`)
 

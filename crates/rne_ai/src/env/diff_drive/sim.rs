@@ -140,6 +140,15 @@ impl DiffDriveSim {
         self.scene_path.as_deref()
     }
 
+    /// Reloads the simulation from its scene asset when one was used to create it.
+    pub fn reload_scene(&mut self) -> Result<(), AssetError> {
+        let Some(scene_path) = self.scene_path.clone() else {
+            return Ok(());
+        };
+        *self = Self::from_scene_path(&scene_path)?;
+        Ok(())
+    }
+
     /// Provides read access to the ECS world (for rendering or inspection).
     pub fn world(&self) -> &World {
         &self.world
@@ -572,5 +581,15 @@ mod tests {
         }
 
         assert!(final_x > 1.5, "expected forward motion, got x={final_x}");
+    }
+
+    #[test]
+    fn reload_scene_from_fixture() {
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_assets/tests/fixtures/episode_diff_drive.rne.scene.toml");
+        let mut sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
+        assert_eq!(sim.world_seed(), 42);
+        sim.reload_scene().expect("reload scene");
+        assert_eq!(sim.world_seed(), 42);
     }
 }

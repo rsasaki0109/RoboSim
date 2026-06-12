@@ -1,4 +1,4 @@
-//! Interactive diff-drive viewer with keyboard teleop and orbit camera.
+//! Interactive diff-drive viewer with keyboard teleop, scene assets, and hot reload.
 //!
 //! Controls:
 //! - W / S: drive forward / backward
@@ -7,10 +7,15 @@
 //! - Up / Down: zoom camera
 //! - Escape: quit
 //!
-//! Headless smoke (no window):
+//! Usage:
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/episode_diff_drive.rne.scene.toml
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
+//!
+//! Edit the scene or referenced robot files while running; the viewer reloads automatically.
 
 use rne_ai::{DiffDriveAction, DiffDriveSim};
+use rne_assets::AssetHotReloader;
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_physics::Collider;
@@ -22,6 +27,7 @@ use rne_robot::DiffDriveSpawned;
 use rne_world::Transform3 as WorldTransform3;
 use std::collections::HashSet;
 use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -37,22 +43,36 @@ fn main() {
     let smoke = env::args().any(|arg| arg == "--smoke") || env::var("RNE_VIEWER_SMOKE").is_ok();
 
     if smoke || env::var("RNE_SKIP_GPU").is_ok() {
-        run_smoke(smoke);
+        run_smoke(smoke, &default_scene_path());
         return;
     }
 
+    let scene_path = scene_path_from_args();
     let event_loop = EventLoop::new().expect("create event loop");
-    let mut app = App::default();
+    let mut app = App::new(scene_path);
     event_loop.run_app(&mut app).expect("run viewer");
 }
 
-fn run_smoke(explicit: bool) {
+fn default_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/episode_diff_drive.rne.scene.toml")
+}
+
+fn scene_path_from_args() -> PathBuf {
+    env::args()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-'))
+        .map(PathBuf::from)
+        .unwrap_or_else(default_scene_path)
+}
+
+fn run_smoke(explicit: bool, scene_path: &Path) {
     if env::var("RNE_SKIP_GPU").is_ok() {
         println!("RNE_SKIP_GPU set; skipping interactive viewer smoke");
         return;
     }
 
-    let mut sim = DiffDriveSim::new();
+    let mut sim = DiffDriveSim::from_scene_path(scene_path).expect("load scene");
     for _ in 0..60 {
         sim.step_action(DiffDriveAction::forward(DRIVE_SPEED_RAD_S));
     }
@@ -78,8 +98,10 @@ fn run_smoke(explicit: bool) {
         .expect("smoke render");
 
     println!(
-        "interactive viewer smoke{}: items={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
+        "interactive viewer smoke{}: scene={} seed={} items={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
         if explicit { "" } else { " (RNE_SKIP_GPU fallback)" },
+        scene_path.display(),
+        sim.world_seed(),
         scene.items.len(),
         hash_rgba8(&output.color.rgba8),
         hash_depth_f32(&output.depth.depth_m),
@@ -91,13 +113,30 @@ fn run_smoke(explicit: bool) {
     }
 }
 
-#[derive(Default)]
 struct App {
+    scene_path: PathBuf,
     window: Option<Arc<Window>>,
     viewer: Option<InteractiveViewer>,
     sim: Option<DiffDriveSim>,
+    hot_reloader: Option<AssetHotReloader>,
+    reload_count: u32,
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
+}
+
+impl App {
+    fn new(scene_path: PathBuf) -> Self {
+        Self {
+            scene_path,
+            window: None,
+            viewer: None,
+            sim: None,
+            hot_reloader: None,
+            reload_count: 0,
+            orbit: CameraOrbit::default(),
+            pressed: HashSet::new(),
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -106,11 +145,18 @@ impl ApplicationHandler for App {
             return;
         }
 
+        let title = format!(
+            "RNE Interactive Viewer — {}",
+            self.scene_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("scene")
+        );
         let window = Arc::new(
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("RNE Interactive Viewer")
+                        .with_title(title)
                         .with_inner_size(winit::dpi::LogicalSize::new(960, 720)),
                 )
                 .expect("create window"),
@@ -125,12 +171,41 @@ impl ApplicationHandler for App {
             }
         };
 
-        let sim = DiffDriveSim::new();
+        let sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
+            Ok(sim) => sim,
+            Err(error) => {
+                eprintln!(
+                    "failed to load scene {}: {error}",
+                    self.scene_path.display()
+                );
+                event_loop.exit();
+                return;
+            }
+        };
+        let hot_reloader = match AssetHotReloader::load(&self.scene_path) {
+            Ok(reloader) => reloader,
+            Err(error) => {
+                eprintln!(
+                    "failed to watch scene dependencies for {}: {error}",
+                    self.scene_path.display()
+                );
+                event_loop.exit();
+                return;
+            }
+        };
+
         self.orbit.focus = robot_focus(&sim);
+        println!(
+            "loaded scene {} (seed={}, robots={})",
+            self.scene_path.display(),
+            sim.world_seed(),
+            sim.robots().len()
+        );
 
         self.window = Some(window);
         self.viewer = Some(viewer);
         self.sim = Some(sim);
+        self.hot_reloader = Some(hot_reloader);
     }
 
     fn window_event(
@@ -186,6 +261,7 @@ impl App {
 
     fn frame(&mut self) -> Result<(), String> {
         self.apply_camera_input();
+        self.poll_hot_reload()?;
 
         let action = teleop_action(&self.pressed);
         let sim = self.sim.as_mut().ok_or("simulation not ready")?;
@@ -199,6 +275,28 @@ impl App {
         viewer
             .render(&view, &scene, CLEAR_COLOR)
             .map_err(|error| error.to_string())
+    }
+
+    fn poll_hot_reload(&mut self) -> Result<(), String> {
+        let Some(reloader) = self.hot_reloader.as_mut() else {
+            return Ok(());
+        };
+        if !reloader.poll().map_err(|error| error.to_string())? {
+            return Ok(());
+        }
+
+        let sim = self.sim.as_mut().ok_or("simulation not ready")?;
+        sim.reload_scene()
+            .map_err(|error| format!("reload scene: {error}"))?;
+        self.reload_count += 1;
+        self.orbit.focus = robot_focus(sim);
+        println!(
+            "reloaded scene {} (#{}) seed={}",
+            self.scene_path.display(),
+            self.reload_count,
+            sim.world_seed()
+        );
+        Ok(())
     }
 
     fn apply_camera_input(&mut self) {
@@ -315,4 +413,14 @@ fn base_size_m(world: &World, base_link: rne_ecs::Entity) -> Vec3 {
             _ => None,
         })
         .unwrap_or_else(|| Vec3::new(0.5, 0.3, 0.4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_scene_path_exists() {
+        assert!(default_scene_path().is_file());
+    }
 }
