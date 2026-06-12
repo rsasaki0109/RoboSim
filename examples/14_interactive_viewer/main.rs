@@ -68,7 +68,6 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     }
 
     let mut sim = DiffDriveSim::from_scene_path(scene_path).expect("load scene");
-    sim.enable_lidar_demo();
     for _ in 0..60 {
         sim.step_action(DiffDriveAction::forward(DRIVE_SPEED_RAD_S));
     }
@@ -197,7 +196,7 @@ impl ApplicationHandler for App {
             }
         };
 
-        let mut sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
+        let sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
             Ok(sim) => sim,
             Err(error) => {
                 eprintln!(
@@ -208,7 +207,6 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        sim.enable_lidar_demo();
         let hot_reloader = match AssetHotReloader::load(&self.scene_path) {
             Ok(reloader) => reloader,
             Err(error) => {
@@ -224,11 +222,12 @@ impl ApplicationHandler for App {
         self.orbit.focus = robot_focus(&sim);
         self.mesh_cache.clear();
         println!(
-            "loaded scene {} (seed={}, robots={}, mesh_roots={}, lidar=on)",
+            "loaded scene {} (seed={}, robots={}, mesh_roots={}, lidar_mounts={})",
             self.scene_path.display(),
             sim.world_seed(),
             sim.robots().len(),
-            sim.mesh_package_roots().len()
+            sim.mesh_package_roots().len(),
+            sim.lidar_mounts().len()
         );
 
         self.window = Some(window);

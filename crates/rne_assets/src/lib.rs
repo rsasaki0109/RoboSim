@@ -14,6 +14,12 @@ pub use pipeline::{
     scene_dependency_paths, smoke_spawn_scene, validate_asset, validate_robot_references,
     AssetHotReloader, AssetRevision, SceneAssetBundle, ValidatedAsset,
 };
-pub use robot::{load_robot_asset, RobotAsset, RobotKind, UrdfRobotAsset, VisualsRobotAsset};
-pub use scene::{load_scene_asset, SceneAsset};
-pub use spawn::{load_and_spawn_scene, spawn_robot_asset, spawn_scene, SpawnedRobot, SpawnedScene};
+pub use robot::{
+    load_robot_asset, parse_robot_asset, LidarRobotAsset, RobotAsset, RobotKind, UrdfRobotAsset,
+    VisualsRobotAsset,
+};
+pub use scene::{load_scene_asset, SceneAsset, SceneObstacleAsset};
+pub use spawn::{
+    load_and_spawn_scene, spawn_robot_asset, spawn_scene, LidarMountSpawned, SpawnedRobot,
+    SpawnedScene,
+};

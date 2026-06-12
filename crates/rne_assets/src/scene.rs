@@ -17,6 +17,21 @@ pub struct SceneAsset {
     /// Robot asset references to spawn into the scene.
     #[serde(default)]
     pub robots: Vec<SceneRobotRef>,
+    /// Fixed obstacles spawned as cuboid colliders.
+    #[serde(default)]
+    pub obstacles: Vec<SceneObstacleAsset>,
+}
+
+/// Fixed cuboid obstacle in a scene asset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneObstacleAsset {
+    /// Entity name used when spawning.
+    pub name: String,
+    /// Obstacle center translation in meters.
+    #[serde(default)]
+    pub translation_m: [f64; 3],
+    /// Cuboid half extents in meters.
+    pub half_extents_m: [f64; 3],
 }
 
 /// World configuration stored in a scene asset.
@@ -127,6 +142,20 @@ mod tests {
         assert_eq!(scene.world.seed, 42);
         assert!(scene.ground.enabled);
         assert_eq!(scene.robots.len(), 1);
+        assert!(scene.obstacles.is_empty());
+    }
+
+    #[test]
+    fn parses_scene_with_obstacles() {
+        let text = r#"
+[[obstacles]]
+name = "wall"
+translation_m = [0.0, 1.0, 8.0]
+half_extents_m = [8.0, 1.0, 0.25]
+"#;
+        let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
+        assert_eq!(scene.obstacles.len(), 1);
+        assert_eq!(scene.obstacles[0].name, "wall");
     }
 
     #[test]

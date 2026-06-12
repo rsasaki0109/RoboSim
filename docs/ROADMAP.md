@@ -6,7 +6,7 @@
 |------|------|
 | Rendering | LiDAR hit visualization in wgpu and interactive viewer | Done (`19_lidar_render`, `append_lidar_overlay`, `L` toggle) |
 | Rendering | Simple normal-based lighting in wgpu fragment shader | Done (Lambert + ambient in `rne_render_wgpu`) |
-| Sensors | Scene-defined LiDAR mounts (not demo-only wall spawn) | Planned |
+| Sensors | Scene-defined LiDAR mounts (not demo-only wall spawn) | Done (`[lidar]` robot asset, `[[obstacles]]` scene asset) |
 | ROS 2 | Publish `/scan` from native node when LiDAR is present | Planned |
 
 ## v0.4.0 (released)
