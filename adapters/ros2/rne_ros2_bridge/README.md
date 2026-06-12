@@ -53,8 +53,8 @@ Message layout helpers also exist in Rust at `../rne_adapter_ros2/`.
 The Python node is the supported runtime path when `rclrs` type-support
 libraries are not installed.
 
-## Future: native `rclrs` node
+## Native `rclrs` node
 
-A native Rust ROS 2 node requires `ros2-rust` message crates built into
-the ROS underlay. Track native runtime support behind the `ros2` feature
-in `rne_adapter_ros2`.
+A Rust-native bridge with the same topics lives at `../rne_ros2_node/`.
+It uses `rne_ai::DiffDriveSim` directly (no Python bindings) and is built
+with `--manifest-path` after sourcing ROS and running `generate_cargo_config.sh`.

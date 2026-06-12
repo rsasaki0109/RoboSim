@@ -1,0 +1,28 @@
+[package]
+name = "rne_ros2_node"
+description = "Native ROS 2 bridge node for Robot Native Engine (rclrs)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "rne_ros2_node"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+builtin_interfaces = "*"
+geometry_msgs = "*"
+rclrs = "0.7"
+rosgraph_msgs = "*"
+sensor_msgs = "*"
+std_msgs = "*"
+tf2_msgs = "*"
+
+rne_adapter_ros2 = { path = "../rne_adapter_ros2" }
+rne_ai = { path = "../../../crates/rne_ai" }
+rne_core = { path = "../../../crates/rne_core" }
+rne_data = { path = "../../../crates/rne_data" }
+rne_math = { path = "../../../crates/rne_math" }
+rne_world = { path = "../../../crates/rne_world" }
