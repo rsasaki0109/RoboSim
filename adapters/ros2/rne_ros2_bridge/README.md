@@ -47,6 +47,25 @@ cd adapters/ros2/rne_ros2_bridge
 python3 test_ros_convert.py
 ```
 
+## Smoke test (ROS 2 + optional rne_py)
+
+Builds `rne_py`, runs the bridge with live diff-drive simulation, and verifies
+`/clock`, `/points`, and `/tf` with `ros2 topic echo`:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+./adapters/ros2/rne_ros2_bridge/smoke_test.sh
+```
+
+From the repo root:
+
+```bash
+cargo run -p xtask -- ci-ros2-bridge
+```
+
+GitHub Actions runs the same script in `.github/workflows/ros2-bridge.yml`.
+The native `rclrs` node uses the symmetric `ci-ros2` task.
+
 ## Rust mapping layer
 
 Message layout helpers also exist in Rust at `../rne_adapter_ros2/`.

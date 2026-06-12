@@ -24,6 +24,7 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 | Robot | Rapier joint-driven wheels (`DiffDriveDriveMode::JointDriven`) |
 | Agent | Agent Entity + policy attach (`11_agent_policy`) |
 | ROS 2 | Optional CI for `rne_ros2_node` (`.github/workflows/ros2-node.yml`, `xtask ci-ros2`) |
+| ROS 2 | Optional CI for Python bridge (`.github/workflows/ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
 | CI | GitHub Actions core workspace job (`ci.yml`) |
 
 ## v0.1.0 (initial release)
@@ -40,9 +41,9 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 |------|------|
 | AI | Multi-robot episodes, richer observation spaces | Done (`13_multi_robot_agent`) |
 | Physics | Shared-world agents (agent ECS ↔ sim world) | Done (`12_shared_world_agent`) |
-| Rendering | Interactive viewer / camera teleop |
+| Rendering | Interactive viewer / camera teleop | Done (`14_interactive_viewer`) |
 | Assets | Hot reload, asset pipeline CLI |
-| ROS 2 | Python bridge CI, topic/service parity with native node |
+| ROS 2 | Python bridge CI, topic/service parity with native node | Done (`ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
 
 ## Native ROS 2 (`rclrs`)
 
@@ -57,6 +58,7 @@ On Jazzy:
 sudo apt install ros-jazzy-rosidl-generator-rs ros-jazzy-test-msgs
 source /opt/ros/jazzy/setup.bash
 cargo run -p xtask -- ci-ros2
+cargo run -p xtask -- ci-ros2-bridge
 ```
 
 The native node is built with `--manifest-path` and is not part of the core workspace CI.

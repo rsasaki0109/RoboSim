@@ -17,8 +17,10 @@
 | Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
 | Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Multi-robot agent | `cargo run -p multi_robot_agent --example 13_multi_robot_agent` | Two agents, two robots, one shared world |
+| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | winit window, WASD teleop, orbit camera (`--smoke` for headless) |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |
+| ROS 2 bridge CI | `cargo run -p xtask -- ci-ros2-bridge` | Python bridge smoke + topic check (requires ROS 2 Jazzy/Humble) |
 | ROS 2 native | `cargo run -p xtask -- ci-ros2` | `rclrs` node smoke test (requires ROS 2 Jazzy/Humble) |
 
-All Rust examples run headless and are suitable for CI.
+All Rust examples run headless and are suitable for CI, except the interactive viewer which requires a display (use `--smoke` for headless verification).

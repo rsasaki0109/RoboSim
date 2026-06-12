@@ -48,6 +48,7 @@ cargo run -p vectorized_episode --example 10_vectorized_episode
 cargo run -p agent_policy --example 11_agent_policy
 cargo run -p shared_world_agent --example 12_shared_world_agent
 cargo run -p multi_robot_agent --example 13_multi_robot_agent
+cargo run -p interactive_viewer --example 14_interactive_viewer
 ```
 
 See [examples/README.md](examples/README.md) for the full list.
@@ -70,6 +71,7 @@ python3 -m venv .venv
 ```bash
 source /opt/ros/jazzy/setup.bash
 ./adapters/ros2/rne_ros2_bridge/smoke_test.sh
+cargo run -p xtask -- ci-ros2-bridge
 ```
 
 See [adapters/ros2/rne_ros2_bridge/README.md](adapters/ros2/rne_ros2_bridge/README.md).
@@ -79,6 +81,7 @@ Native Rust node (`rclrs`): [adapters/ros2/rne_ros2_node/README.md](adapters/ros
 ```bash
 source /opt/ros/jazzy/setup.bash
 cargo run -p xtask -- ci-ros2
+cargo run -p xtask -- ci-ros2-bridge
 ```
 
 Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.2.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)

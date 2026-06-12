@@ -1,0 +1,20 @@
+[package]
+name = "interactive_viewer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_physics = { path = "../../crates/rne_physics" }
+rne_render = { path = "../../crates/rne_render" }
+rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
+rne_robot = { path = "../../crates/rne_robot" }
+rne_world = { path = "../../crates/rne_world" }
+winit = "0.30"
+
+[[example]]
+name = "14_interactive_viewer"
+path = "main.rs"

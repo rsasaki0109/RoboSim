@@ -8,6 +8,7 @@ repository.workspace = true
 
 [features]
 default = []
+viewer = ["dep:winit"]
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
@@ -16,6 +17,7 @@ rne_math = { path = "../rne_math" }
 rne_render = { path = "../rne_render" }
 thiserror = { workspace = true }
 wgpu = "24"
+winit = { version = "0.30", optional = true }
 
 [dev-dependencies]
 approx = "0.5"

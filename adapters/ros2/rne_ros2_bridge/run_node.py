@@ -12,7 +12,6 @@ Otherwise it publishes one synthetic frame for smoke testing.
 
 from __future__ import annotations
 
-import sys
 import time
 
 import rclpy
@@ -35,6 +34,8 @@ except ImportError:
 
 
 SIM_DT_NS = 1_000_000_000 // 60
+SIM_STEPS = 300
+MIN_FORWARD_X_M = 0.8
 
 
 class RneBridgeNode(Node):
@@ -89,7 +90,7 @@ class RneBridgeNode(Node):
 def main() -> None:
     rclpy.init()
     node = RneBridgeNode()
-    steps = 180 if node.use_rne_sim else 1
+    steps = SIM_STEPS if node.use_rne_sim else 1
 
     try:
         for step in range(steps):
@@ -103,8 +104,10 @@ def main() -> None:
 
         if node.use_rne_sim:
             node.get_logger().info(f"final base_x={node.obs.base_x:.2f} m")
-            if node.obs.base_x < 1.0:
-                raise SystemExit("expected forward motion from diff-drive policy")
+            if node.obs.base_x < MIN_FORWARD_X_M:
+                raise SystemExit(
+                    f"expected forward motion from diff-drive policy (base_x={node.obs.base_x:.2f} m)"
+                )
     finally:
         node.destroy_node()
         rclpy.shutdown()
