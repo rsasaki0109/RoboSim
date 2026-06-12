@@ -10,7 +10,8 @@ use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, ContactEvent, PhysicsBackend, PhysicsWorldDesc, RigidBody,
+    RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
@@ -93,53 +94,43 @@ impl DiffDriveSim {
             .get::<WorldEntity>(spawned.world)
             .map(|world_entity| world_entity.seed)
             .unwrap_or(0);
-        let (_, robot) = spawned.robots.first().ok_or_else(|| AssetError::Invalid {
+        let (_, first_robot) = spawned.robots.first().ok_or_else(|| AssetError::Invalid {
             path: scene_path.display().to_string(),
             message: "no robots".into(),
         })?;
-        let drive = world
-            .get::<DiffDriveComponent>(robot.robot)
-            .ok_or_else(|| AssetError::Invalid {
-                path: scene_path.display().to_string(),
-                message: "first robot is not a diff drive".into(),
-            })?
-            .0;
-        let left_wheel =
-            find_robot_link(&mut world, drive.robot, "left_wheel").ok_or_else(|| {
-                AssetError::Invalid {
-                    path: scene_path.display().to_string(),
-                    message: "missing left_wheel link".into(),
-                }
-            })?;
-        let right_wheel =
-            find_robot_link(&mut world, drive.robot, "right_wheel").ok_or_else(|| {
-                AssetError::Invalid {
-                    path: scene_path.display().to_string(),
-                    message: "missing right_wheel link".into(),
-                }
-            })?;
 
-        let robot_spawned = DiffDriveSpawned {
-            robot: drive.robot,
-            base_link: drive.base_link,
-            left_wheel,
-            right_wheel,
-            left_actuator: drive.left_actuator,
-            right_actuator: drive.right_actuator,
-            drive,
-        };
+        let mut robots = Vec::new();
+        for (_, spawned_robot) in &spawned.robots {
+            robots.push(build_diff_drive_spawned(
+                &mut world,
+                spawned_robot.robot,
+                scene_path,
+            )?);
+        }
+
+        let drive_mode = infer_drive_mode(&world, first_robot.robot);
 
         let bundle = load_scene_bundle(scene_path)?;
         let mesh_roots = mesh_package_roots(&bundle);
 
         Ok(Self::from_spawned_world(
             world,
-            vec![robot_spawned],
+            robots,
             Some(scene_path.to_path_buf()),
             world_seed,
-            DiffDriveDriveMode::Kinematic,
+            drive_mode,
             mesh_roots,
         ))
+    }
+
+    /// Returns the wheel actuation model used by this simulation.
+    pub fn drive_mode(&self) -> DiffDriveDriveMode {
+        self.drive_mode
+    }
+
+    /// Returns contact events produced by the last physics step.
+    pub fn last_contacts(&self) -> &[ContactEvent] {
+        self.backend.contacts(self.physics_world).unwrap_or(&[])
     }
 
     /// Returns the world seed from a loaded scene, or zero for built-in scenes.
@@ -355,6 +346,7 @@ impl DiffDriveSim {
             .map(|actuator| actuator.target.velocity_rad_s)
             .unwrap_or(0.0);
         let imu = imu_ay_for_base(&self.world, &self.data_bus, base_link);
+        let peer = crate::multi_robot::nearest_peer_observation(self, robot);
 
         DiffDriveObservation {
             base_x_m: transform.translation.x,
@@ -366,6 +358,9 @@ impl DiffDriveSim {
             imu_ay_m_s2: imu,
             lidar_points: 0,
             goal_delta_x_m: goal_x_m.map(|goal| goal - transform.translation.x),
+            peer_delta_x_m: peer.map(|peer| peer.delta_x_m),
+            peer_delta_z_m: peer.map(|peer| peer.delta_z_m),
+            peer_separation_m: peer.map(|peer| peer.separation_m),
         }
     }
 
@@ -522,6 +517,53 @@ fn find_robot_link(world: &mut World, robot: Entity, link_name: &str) -> Option<
         .map(|(entity, _)| entity)
 }
 
+fn build_diff_drive_spawned(
+    world: &mut World,
+    robot: Entity,
+    scene_path: &Path,
+) -> Result<DiffDriveSpawned, AssetError> {
+    let drive = world
+        .get::<DiffDriveComponent>(robot)
+        .ok_or_else(|| AssetError::Invalid {
+            path: scene_path.display().to_string(),
+            message: format!("robot {:?} is not a diff drive", robot),
+        })?
+        .0;
+    let left_wheel =
+        find_robot_link(world, drive.robot, "left_wheel").ok_or_else(|| AssetError::Invalid {
+            path: scene_path.display().to_string(),
+            message: "missing left_wheel link".into(),
+        })?;
+    let right_wheel =
+        find_robot_link(world, drive.robot, "right_wheel").ok_or_else(|| AssetError::Invalid {
+            path: scene_path.display().to_string(),
+            message: "missing right_wheel link".into(),
+        })?;
+
+    Ok(DiffDriveSpawned {
+        robot: drive.robot,
+        base_link: drive.base_link,
+        left_wheel,
+        right_wheel,
+        left_actuator: drive.left_actuator,
+        right_actuator: drive.right_actuator,
+        drive,
+    })
+}
+
+fn infer_drive_mode(world: &World, robot: Entity) -> DiffDriveDriveMode {
+    let Some(drive) = world.get::<DiffDriveComponent>(robot) else {
+        return DiffDriveDriveMode::Kinematic;
+    };
+    match world
+        .get::<RigidBody>(drive.0.base_link)
+        .map(|body| body.body_type)
+    {
+        Some(RigidBodyType::Dynamic) => DiffDriveDriveMode::JointDriven,
+        _ => DiffDriveDriveMode::Kinematic,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,5 +652,14 @@ mod tests {
         assert_eq!(sim.world_seed(), 42);
         sim.reload_scene().expect("reload scene");
         assert_eq!(sim.world_seed(), 42);
+    }
+
+    #[test]
+    fn multi_robot_scene_loads_all_robots() {
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/multi_robot_collision.rne.scene.toml");
+        let sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
+        assert_eq!(sim.robots().len(), 2);
+        assert_eq!(sim.drive_mode(), DiffDriveDriveMode::JointDriven);
     }
 }

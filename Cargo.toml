@@ -34,6 +34,7 @@ members = [
   "examples/14_interactive_viewer",
   "examples/15_asset_hot_reload",
   "examples/16_goal_conditioned_agent",
+  "examples/17_multi_robot_collision",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",

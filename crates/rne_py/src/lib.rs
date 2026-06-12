@@ -19,6 +19,9 @@ struct PyObservation {
     imu_ay_m_s2: f64,
     lidar_points: usize,
     goal_delta_x_m: Option<f64>,
+    peer_delta_x_m: Option<f64>,
+    peer_delta_z_m: Option<f64>,
+    peer_separation_m: Option<f64>,
 }
 
 #[pymethods]
@@ -68,6 +71,21 @@ impl PyObservation {
         self.goal_delta_x_m
     }
 
+    #[getter]
+    fn peer_delta_x(&self) -> Option<f64> {
+        self.peer_delta_x_m
+    }
+
+    #[getter]
+    fn peer_delta_z(&self) -> Option<f64> {
+        self.peer_delta_z_m
+    }
+
+    #[getter]
+    fn peer_separation(&self) -> Option<f64> {
+        self.peer_separation_m
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Observation(base_x={:.3}, base_y={:.3}, yaw={:.3}, imu_ay={:.3})",
@@ -88,6 +106,9 @@ impl From<DiffDriveObservation> for PyObservation {
             imu_ay_m_s2: value.imu_ay_m_s2,
             lidar_points: value.lidar_points,
             goal_delta_x_m: value.goal_delta_x_m,
+            peer_delta_x_m: value.peer_delta_x_m,
+            peer_delta_z_m: value.peer_delta_z_m,
+            peer_separation_m: value.peer_separation_m,
         }
     }
 }

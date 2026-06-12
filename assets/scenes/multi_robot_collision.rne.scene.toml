@@ -1,0 +1,12 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 7
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/collision_robot_a.rne.robot.toml"
+
+[[robots]]
+path = "../robots/collision_robot_b.rne.robot.toml"

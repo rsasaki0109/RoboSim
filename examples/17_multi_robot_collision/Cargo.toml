@@ -1,0 +1,12 @@
+[package]
+name = "multi_robot_collision"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "17_multi_robot_collision"
+path = "main.rs"
