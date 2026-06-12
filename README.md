@@ -39,6 +39,7 @@ cargo run -p falling_cube --example 01_falling_cube
 cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
 cargo run -p render_clear --example 02_render_clear
 cargo run -p urdf_import --example 03_urdf_import
+cargo run -p episode_diff_drive --example 05_episode_diff_drive
 ```
 
 See [examples/README.md](examples/README.md) for the full list.

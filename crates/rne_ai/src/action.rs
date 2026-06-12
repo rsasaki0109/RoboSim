@@ -1,0 +1,20 @@
+//! Action types for robot-native environments.
+
+/// Wheel velocity command for a differential drive robot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DiffDriveAction {
+    /// Left wheel angular velocity in radians per second.
+    pub left_velocity_rad_s: f64,
+    /// Right wheel angular velocity in radians per second.
+    pub right_velocity_rad_s: f64,
+}
+
+impl DiffDriveAction {
+    /// Creates equal wheel velocities for straight-line motion.
+    pub fn forward(velocity_rad_s: f64) -> Self {
+        Self {
+            left_velocity_rad_s: velocity_rad_s,
+            right_velocity_rad_s: velocity_rad_s,
+        }
+    }
+}

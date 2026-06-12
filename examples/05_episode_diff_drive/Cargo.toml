@@ -1,0 +1,12 @@
+[package]
+name = "episode_diff_drive"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "05_episode_diff_drive"
+path = "main.rs"
