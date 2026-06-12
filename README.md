@@ -46,6 +46,7 @@ cargo run -p scene_episode --example 08_scene_episode
 cargo run -p urdf_mesh_render --example 09_urdf_mesh_render
 cargo run -p vectorized_episode --example 10_vectorized_episode
 cargo run -p agent_policy --example 11_agent_policy
+cargo run -p shared_world_agent --example 12_shared_world_agent
 ```
 
 See [examples/README.md](examples/README.md) for the full list.

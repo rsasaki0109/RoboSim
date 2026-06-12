@@ -29,6 +29,7 @@ members = [
   "examples/09_urdf_mesh_render",
   "examples/10_vectorized_episode",
   "examples/11_agent_policy",
+  "examples/12_shared_world_agent",
   "tests/determinism",
   "xtask",
 ]

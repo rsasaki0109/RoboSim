@@ -1,5 +1,6 @@
 //! Headless differential drive simulation.
 
+use crate::action::DiffDriveAction;
 use crate::observation::DiffDriveObservation;
 use rne_assets::{load_and_spawn_scene, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -128,6 +129,11 @@ impl DiffDriveSim {
         &self.world
     }
 
+    /// Provides mutable access to the ECS world (for spawning agents or inspecting).
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Provides read access to the spawned diff-drive robot handles.
     pub fn robot(&self) -> &DiffDriveSpawned {
         &self.robot
@@ -186,6 +192,11 @@ impl DiffDriveSim {
         right_velocity_rad_s: f64,
     ) -> DiffDriveObservation {
         self.step_with_recording(left_velocity_rad_s, right_velocity_rad_s, false, &mut ())
+    }
+
+    /// Applies a diff-drive action and advances one simulation step.
+    pub fn step_action(&mut self, action: DiffDriveAction) -> DiffDriveObservation {
+        self.step(action.left_velocity_rad_s, action.right_velocity_rad_s)
     }
 
     /// Applies wheel velocities, optionally recording actuator commands to a log.
@@ -268,9 +279,19 @@ impl DiffDriveSim {
 
     /// Builds an observation from the current world state.
     pub fn observe(&self) -> DiffDriveObservation {
+        self.observe_robot(self.robot.robot)
+    }
+
+    /// Builds an observation for a specific diff-drive robot in this world.
+    pub fn observe_robot(&self, robot: Entity) -> DiffDriveObservation {
+        let base_link = self
+            .world
+            .get::<DiffDriveComponent>(robot)
+            .map(|drive| drive.0.base_link)
+            .unwrap_or(self.robot.base_link);
         let pose = self
             .world
-            .get::<Transform3>(self.robot.base_link)
+            .get::<Transform3>(base_link)
             .copied()
             .unwrap_or_default()
             .translation;
