@@ -4,3 +4,5 @@ __pycache__/
 **/*.pyc
 **/*.rs.bk
 Cargo.lock
+adapters/ros2/rne_ros2_node/.cargo/
+adapters/ros2/rne_ros2_node/target/

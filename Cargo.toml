@@ -28,6 +28,9 @@ members = [
   "tests/determinism",
   "xtask",
 ]
+exclude = [
+  "adapters/ros2/rne_ros2_node",
+]
 resolver = "2"
 
 [workspace.package]

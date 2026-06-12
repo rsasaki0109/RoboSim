@@ -17,18 +17,23 @@
 | Robot | URDF → collider/visual auto attach | Done (`rne_urdf_import`, `Visual`) |
 | Assets | `.rne.scene.toml` / `.rne.robot.toml` format | Done (`rne_assets`, `06_scene_load`) |
 | Rendering | Mesh rendering, depth pass | Done (`rne_render_wgpu`, `07_render_primitives`) |
-| ROS 2 | Native `rclrs` node when type-support is available | Planned |
+| ROS 2 | Native `rclrs` node when type-support is available | Done (`rne_ros2_node`) |
 
 ## Native ROS 2 (`rclrs`)
 
-The Python bridge in `adapters/ros2/rne_ros2_bridge/` is the supported runtime path today.
+Two runtime paths are available:
 
-A native Rust node requires `ros2-rust` message crates built into the ROS underlay.
-On Jazzy, install generator support:
+- **Python** (`adapters/ros2/rne_ros2_bridge/`): `rclpy` node, optional `rne_py` bindings
+- **Rust** (`adapters/ros2/rne_ros2_node/`): native `rclrs` node with headless `rne_ai` sim
+
+The native node requires ROS message crates from the underlay. On Jazzy:
 
 ```bash
-sudo apt install ros-jazzy-rosidl-generator-rs
+sudo apt install ros-jazzy-rosidl-generator-rs ros-jazzy-test-msgs
+source /opt/ros/jazzy/setup.bash
+cd adapters/ros2/rne_ros2_node
+./smoke_test.sh
 ```
 
-Then build `ros2_rust` from source into the workspace overlay before enabling
-the `ros2` feature on `rne_adapter_ros2`.
+Message crates use `"*"` version pins and are patched via `generate_cargo_config.sh`.
+The node is built with `--manifest-path` and is not part of the core workspace CI.
