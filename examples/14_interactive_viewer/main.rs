@@ -400,5 +400,18 @@ mod tests {
         assert!(!sim.mesh_package_roots().is_empty());
         let scene = build_diff_drive_render_scene(sim.world(), sim.robots());
         assert!(count_mesh_items(&scene) >= 1);
+        let cylinder_items = scene
+            .items
+            .iter()
+            .filter(|item| matches!(item.shape, VisualShape::Cylinder { .. }))
+            .count();
+        assert!(
+            cylinder_items >= 2,
+            "expected wheel cylinder visuals, got {cylinder_items}"
+        );
+        assert!(
+            scene.items.len() >= 4,
+            "expected base + wheels + ground plane items"
+        );
     }
 }

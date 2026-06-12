@@ -49,9 +49,18 @@ fn main() {
         .iter()
         .filter(|item| matches!(item.shape, VisualShape::Mesh { .. }))
         .count();
+    let cylinder_items = scene
+        .items
+        .iter()
+        .filter(|item| matches!(item.shape, VisualShape::Cylinder { .. }))
+        .count();
     assert!(
         mesh_items > 0,
         "expected at least one mesh visual in hero scene"
+    );
+    assert!(
+        cylinder_items >= 2,
+        "expected wheel cylinder visuals in hero scene, got {cylinder_items}"
     );
 
     let focus = robot_focus(&sim);
@@ -107,9 +116,10 @@ fn main() {
     let color_hash = hash_rgba8(&poster_bytes);
 
     println!(
-        "rendered README hero media to {} and {} (poster_hash={color_hash:#018x}, mesh_items={mesh_items}, base_x={:.2} m)",
+        "rendered README hero media to {} and {} (poster_hash={color_hash:#018x}, mesh_items={mesh_items}, cylinder_items={cylinder_items}, scene_items={}, base_x={:.2} m)",
         poster_path.display(),
         gif_path.display(),
+        scene.items.len(),
         sim.observe().base_x_m
     );
 }
