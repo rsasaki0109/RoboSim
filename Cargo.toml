@@ -13,6 +13,7 @@ members = [
   "crates/rne_render",
   "crates/rne_render_wgpu",
   "crates/rne_ai",
+  "crates/rne_assets",
   "crates/rne_py",
   "adapters/ros2/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
@@ -22,6 +23,7 @@ members = [
   "examples/02_render_clear",
   "examples/03_urdf_import",
   "examples/05_episode_diff_drive",
+  "examples/06_scene_load",
   "tests/determinism",
   "xtask",
 ]
@@ -42,6 +44,7 @@ rapier3d = "0.22"
 serde = { version = "1", features = ["derive"] }
 smallvec = { version = "1", features = ["serde"] }
 thiserror = "2"
+toml = "0.8"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 wgpu = "24"

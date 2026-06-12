@@ -1,6 +1,8 @@
 //! URDF parsing.
 
-use crate::schema::{UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
+use crate::schema::{
+    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot,
+};
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
 use thiserror::Error;
@@ -65,7 +67,93 @@ fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError>
         .attribute("name")
         .ok_or_else(|| UrdfParseError::Missing("link@name".into()))?
         .to_string();
-    Ok(UrdfLink { name })
+
+    let mut collisions = Vec::new();
+    let mut visuals = Vec::new();
+    for child in node.children().filter(|node| node.is_element()) {
+        match child.tag_name().name() {
+            "collision" => collisions.push(parse_geometry_element(child)?),
+            "visual" => visuals.push(parse_geometry_element(child)?),
+            _ => {}
+        }
+    }
+
+    Ok(UrdfLink {
+        name,
+        collisions,
+        visuals,
+    })
+}
+
+fn parse_geometry_element(
+    node: roxmltree::Node<'_, '_>,
+) -> Result<UrdfGeometryElement, UrdfParseError> {
+    let origin = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "origin");
+    let (origin_xyz, origin_rpy) = parse_origin(origin);
+    let geometry = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "geometry")
+        .ok_or_else(|| UrdfParseError::Missing("geometry".into()))
+        .and_then(parse_geometry)?;
+
+    Ok(UrdfGeometryElement {
+        origin_xyz,
+        origin_rpy,
+        geometry,
+    })
+}
+
+fn parse_geometry(node: roxmltree::Node<'_, '_>) -> Result<UrdfGeometry, UrdfParseError> {
+    let primitive = node
+        .children()
+        .find(|node| node.is_element())
+        .ok_or_else(|| UrdfParseError::Missing("geometry primitive".into()))?;
+
+    match primitive.tag_name().name() {
+        "box" => {
+            let size = primitive
+                .attribute("size")
+                .ok_or_else(|| UrdfParseError::Missing("box@size".into()))
+                .and_then(parse_vec3)?;
+            Ok(UrdfGeometry::Box { size_m: size })
+        }
+        "sphere" => {
+            let radius_m = primitive
+                .attribute("radius")
+                .ok_or_else(|| UrdfParseError::Missing("sphere@radius".into()))
+                .and_then(parse_f64)?;
+            Ok(UrdfGeometry::Sphere { radius_m })
+        }
+        "cylinder" => {
+            let radius_m = primitive
+                .attribute("radius")
+                .ok_or_else(|| UrdfParseError::Missing("cylinder@radius".into()))
+                .and_then(parse_f64)?;
+            let length_m = primitive
+                .attribute("length")
+                .ok_or_else(|| UrdfParseError::Missing("cylinder@length".into()))
+                .and_then(parse_f64)?;
+            Ok(UrdfGeometry::Cylinder { radius_m, length_m })
+        }
+        "mesh" => {
+            let path = primitive
+                .attribute("filename")
+                .ok_or_else(|| UrdfParseError::Missing("mesh@filename".into()))?
+                .to_string();
+            let scale = primitive
+                .attribute("scale")
+                .map(parse_vec3)
+                .transpose()?
+                .unwrap_or(Vec3::ONE);
+            Ok(UrdfGeometry::Mesh { path, scale })
+        }
+        other => Err(UrdfParseError::InvalidValue {
+            field: "geometry".into(),
+            value: other.into(),
+        }),
+    }
 }
 
 fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseError> {
@@ -167,6 +255,13 @@ fn parse_vec3(value: &str) -> Result<Vec3, UrdfParseError> {
     ))
 }
 
+fn parse_f64(value: &str) -> Result<f64, UrdfParseError> {
+    value.parse().map_err(|_| UrdfParseError::InvalidValue {
+        field: "f64".into(),
+        value: value.into(),
+    })
+}
+
 /// Converts roll-pitch-yaw to a quaternion.
 pub fn rpy_to_quat(rpy: Vec3) -> Quat {
     Quat::from_rotation_z(rpy.z) * Quat::from_rotation_y(rpy.y) * Quat::from_rotation_x(rpy.x)
@@ -185,5 +280,27 @@ mod tests {
         assert_eq!(robot.links.len(), 3);
         assert_eq!(robot.joints.len(), 2);
         assert_eq!(robot.joints[0].joint_type, UrdfJointType::Continuous);
+
+        let base = robot
+            .links
+            .iter()
+            .find(|link| link.name == "base_link")
+            .expect("base_link");
+        assert_eq!(base.collisions.len(), 1);
+        assert_eq!(base.visuals.len(), 1);
+        assert!(matches!(
+            base.collisions[0].geometry,
+            UrdfGeometry::Box { .. }
+        ));
+
+        let wheel = robot
+            .links
+            .iter()
+            .find(|link| link.name == "left_wheel")
+            .expect("left_wheel");
+        assert!(matches!(
+            wheel.collisions[0].geometry,
+            UrdfGeometry::Cylinder { .. }
+        ));
     }
 }

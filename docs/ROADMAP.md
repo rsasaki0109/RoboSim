@@ -14,10 +14,10 @@
 | Area | Task | Status |
 |------|------|--------|
 | AI | Episode API, reward/termination | Done (`rne_ai`, `05_episode_diff_drive`) |
+| Robot | URDF → collider/visual auto attach | Done (`rne_urdf_import`, `Visual`) |
+| Assets | `.rne.scene.toml` / `.rne.robot.toml` format | Done (`rne_assets`, `06_scene_load`) |
 | Rendering | Mesh rendering, depth pass | Planned |
-| Robot | URDF → collider/visual auto attach | Planned |
 | ROS 2 | Native `rclrs` node when type-support is available | Planned |
-| Assets | `.rne.scene.toml` / `.rne.robot.toml` format | Planned |
 
 ## Native ROS 2 (`rclrs`)
 

@@ -6,8 +6,10 @@ pub mod backend;
 pub mod camera;
 pub mod headless;
 pub mod image;
+pub mod visual;
 
 pub use backend::{RenderBackend, RenderError};
 pub use camera::Camera;
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};
+pub use visual::{Visual, VisualShape};

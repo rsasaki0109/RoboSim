@@ -1,0 +1,5 @@
+kind = "urdf"
+model_name = "diff_drive"
+
+[urdf]
+path = "minimal_diff_drive.urdf"

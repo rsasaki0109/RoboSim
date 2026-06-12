@@ -1,12 +1,35 @@
 //! Spawn RNE entities from parsed URDF.
 
+use crate::geometry::{collider_from_element, visual_from_element};
 use crate::parse::rpy_to_quat;
-use crate::schema::{UrdfJointType, UrdfRobot};
+use crate::schema::{UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
+use rne_physics::{RigidBody, RigidBodyType};
 use rne_robot::{Joint, JointKind, JointLimits, Link, Robot, RobotId};
 use rne_world::Transform3;
 use std::collections::HashMap;
 use thiserror::Error;
+
+/// Configuration for URDF entity spawning.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfSpawnConfig {
+    /// When true, links with collision geometry receive rigid bodies.
+    pub attach_physics: bool,
+    /// Rigid body type applied to the base link.
+    pub base_body_type: RigidBodyType,
+    /// Default RGBA color for visual elements.
+    pub visual_color_rgba: [f32; 4],
+}
+
+impl Default for UrdfSpawnConfig {
+    fn default() -> Self {
+        Self {
+            attach_physics: true,
+            base_body_type: RigidBodyType::Kinematic,
+            visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
+        }
+    }
+}
 
 /// Entities created from a URDF import.
 #[derive(Clone, Debug, PartialEq)]
@@ -19,6 +42,10 @@ pub struct SpawnedUrdfRobot {
     pub links: HashMap<String, Entity>,
     /// Joint entities keyed by URDF joint name.
     pub joints: HashMap<String, Entity>,
+    /// Number of colliders attached to link entities.
+    pub collider_count: usize,
+    /// Number of visuals attached to link entities.
+    pub visual_count: usize,
 }
 
 /// URDF spawn error.
@@ -37,8 +64,18 @@ pub fn spawn_urdf_robot(
     world: &mut World,
     urdf: &UrdfRobot,
 ) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
+    spawn_urdf_robot_with_config(world, urdf, UrdfSpawnConfig::default())
+}
+
+/// Spawns a URDF robot with explicit spawn configuration.
+pub fn spawn_urdf_robot_with_config(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    config: UrdfSpawnConfig,
+) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
     let robot_entity = spawn_named(world, &urdf.name);
     let mut links = HashMap::new();
+    let mut link_defs = HashMap::new();
 
     for link in &urdf.links {
         let entity = spawn_named(world, &link.name);
@@ -47,6 +84,7 @@ pub fn spawn_urdf_robot(
             name: link.name.clone(),
         });
         links.insert(link.name.clone(), entity);
+        link_defs.insert(link.name.clone(), link.clone());
     }
 
     let base_link = links
@@ -54,6 +92,8 @@ pub fn spawn_urdf_robot(
         .copied()
         .or_else(|| links.values().copied().next())
         .ok_or_else(|| UrdfSpawnError::InvalidGraph("no links".into()))?;
+
+    world.entity_mut(base_link).insert(Transform3::IDENTITY);
 
     world.entity_mut(robot_entity).insert(Robot {
         robot_id: RobotId::new_v4(),
@@ -88,12 +128,72 @@ pub fn spawn_urdf_robot(
         joints.insert(joint.name.clone(), entity);
     }
 
+    let mut collider_count = 0;
+    let mut visual_count = 0;
+    for (name, entity) in &links {
+        let Some(link) = link_defs.get(name) else {
+            continue;
+        };
+        let counts = attach_link_geometry(world, *entity, link, *entity == base_link, config);
+        collider_count += counts.colliders;
+        visual_count += counts.visuals;
+    }
+
     Ok(SpawnedUrdfRobot {
         robot: robot_entity,
         base_link,
         links,
         joints,
+        collider_count,
+        visual_count,
     })
+}
+
+struct AttachCounts {
+    colliders: usize,
+    visuals: usize,
+}
+
+fn attach_link_geometry(
+    world: &mut World,
+    entity: Entity,
+    link: &UrdfLink,
+    is_base_link: bool,
+    config: UrdfSpawnConfig,
+) -> AttachCounts {
+    let mut counts = AttachCounts {
+        colliders: 0,
+        visuals: 0,
+    };
+
+    if let Some(element) = link.collisions.first() {
+        if let Some(collider) = collider_from_element(element) {
+            world.entity_mut(entity).insert(collider);
+            counts.colliders += 1;
+
+            if config.attach_physics {
+                let body_type = if is_base_link {
+                    config.base_body_type
+                } else {
+                    RigidBodyType::Dynamic
+                };
+                world.entity_mut(entity).insert(RigidBody {
+                    body_type,
+                    mass_kg: if is_base_link { 5.0 } else { 1.0 },
+                    ..RigidBody::default()
+                });
+            }
+        }
+    }
+
+    if let Some(element) = link.visuals.first() {
+        world
+            .entity_mut(entity)
+            .insert(visual_from_element(element, config.visual_color_rgba));
+        counts.visuals += 1;
+    }
+
+    counts
 }
 
 fn map_joint_kind(joint_type: UrdfJointType) -> JointKind {
@@ -109,6 +209,9 @@ fn map_joint_kind(joint_type: UrdfJointType) -> JointKind {
 mod tests {
     use super::*;
     use crate::parse::parse_urdf;
+    use rne_physics::{Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc};
+    use rne_physics_rapier::RapierBackend;
+    use rne_render::Visual;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/minimal_diff_drive.urdf");
 
@@ -126,5 +229,35 @@ mod tests {
         for joint_entity in spawned.joints.values() {
             assert!(world.get::<Joint>(*joint_entity).is_some());
         }
+    }
+
+    #[test]
+    fn fixture_attaches_colliders_and_visuals() {
+        let urdf = parse_urdf(FIXTURE).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot(&mut world, &urdf).unwrap();
+
+        assert_eq!(spawned.collider_count, 3);
+        assert_eq!(spawned.visual_count, 3);
+        assert!(world.get::<Collider>(spawned.base_link).is_some());
+        assert!(world.get::<Visual>(spawned.base_link).is_some());
+        assert!(world.get::<RigidBody>(spawned.base_link).is_some());
+
+        let left_wheel = spawned.links["left_wheel"];
+        let collider = world.get::<Collider>(left_wheel).expect("wheel collider");
+        assert!(matches!(collider.shape, ColliderShape::Capsule { .. }));
+    }
+
+    #[test]
+    fn fixture_colliders_sync_to_physics() {
+        let urdf = parse_urdf(FIXTURE).unwrap();
+        let mut world = World::new();
+        spawn_urdf_robot(&mut world, &urdf).unwrap();
+
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .expect("physics world");
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
     }
 }
