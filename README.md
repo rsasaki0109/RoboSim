@@ -49,6 +49,8 @@ cargo run -p agent_policy --example 11_agent_policy
 cargo run -p shared_world_agent --example 12_shared_world_agent
 cargo run -p multi_robot_agent --example 13_multi_robot_agent
 cargo run -p interactive_viewer --example 14_interactive_viewer
+cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke
+cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn
 ```
 
 See [examples/README.md](examples/README.md) for the full list.

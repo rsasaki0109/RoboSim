@@ -21,5 +21,8 @@ ci-ros2:
 ci-ros2-bridge:
     cargo run -p xtask -- ci-ros2-bridge
 
+asset-validate:
+    cargo run -p xtask -- asset validate
+
 check:
     cargo check --workspace

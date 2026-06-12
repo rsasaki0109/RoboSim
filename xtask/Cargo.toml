@@ -6,4 +6,5 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+rne_assets = { path = "../crates/rne_assets" }
 serde_json = "1"

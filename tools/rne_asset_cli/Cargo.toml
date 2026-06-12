@@ -1,0 +1,17 @@
+[package]
+name = "rne_asset_cli"
+description = "CLI for validating and hot-reloading RNE asset files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+rne_assets = { path = "../../crates/rne_assets" }
+
+[[bin]]
+name = "rne-asset"
+path = "src/main.rs"

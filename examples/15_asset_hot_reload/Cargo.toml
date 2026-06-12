@@ -1,0 +1,12 @@
+[package]
+name = "asset_hot_reload"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_assets = { path = "../../crates/rne_assets" }
+
+[[example]]
+name = "15_asset_hot_reload"
+path = "main.rs"

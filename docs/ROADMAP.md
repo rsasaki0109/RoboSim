@@ -42,7 +42,7 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 | AI | Multi-robot episodes, richer observation spaces | Done (`13_multi_robot_agent`) |
 | Physics | Shared-world agents (agent ECS ↔ sim world) | Done (`12_shared_world_agent`) |
 | Rendering | Interactive viewer / camera teleop | Done (`14_interactive_viewer`) |
-| Assets | Hot reload, asset pipeline CLI |
+| Assets | Hot reload, asset pipeline CLI | Done (`15_asset_hot_reload`, `rne-asset`, `xtask asset`) |
 | ROS 2 | Python bridge CI, topic/service parity with native node | Done (`ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
 
 ## Native ROS 2 (`rclrs`)
