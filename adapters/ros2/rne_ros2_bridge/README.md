@@ -21,7 +21,7 @@ Python adapter node that publishes RNE simulation outputs to ROS 2 topics.
 source /opt/ros/jazzy/setup.bash
 
 # optional: live simulation via Python bindings
-cd /path/to/robot_simulator
+cd /path/to/RoboSim
 python3 -m venv .venv
 .venv/bin/pip install maturin
 .venv/bin/maturin develop -m crates/rne_py/Cargo.toml

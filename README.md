@@ -1,5 +1,8 @@
 # Robot Native Engine
 
+[![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
+[![CI](https://img.shields.io/badge/CI-cargo%20xtask-blue)](https://github.com/rsasaki0109/RoboSim)
+
 Robots are not plugins.
 
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
@@ -9,6 +12,24 @@ embodied AI, synthetic sensor data, and policy evaluation.
 - Run headless in CI or render interactively with wgpu.
 - Build robots from Robot/Sensor/Actuator entities.
 - Record and replay deterministic simulation episodes.
+
+## Demo (60 seconds)
+
+```bash
+git clone https://github.com/rsasaki0109/RoboSim.git
+cd RoboSim
+cargo run -p xtask -- ci
+cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
+```
+
+Example output:
+
+```
+step 60:  base=(0.60, 0.25, 0.00) m, lidar points=46, imu ay=-9.81 m/s²
+step 120: base=(1.20, 0.25, 0.00) m, lidar points=46, imu ay=-9.81 m/s²
+step 180: base=(1.80, 0.25, 0.00) m, lidar points=45, imu ay=-9.81 m/s²
+final forward travel = 1.80 m
+```
 
 ## Quickstart
 
@@ -37,14 +58,12 @@ python3 -m venv .venv
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd adapters/ros2/rne_ros2_bridge
-python3 test_ros_convert.py
-PYTHONPATH="$(pwd)/../../.venv/lib/python3.12/site-packages:${PYTHONPATH:-}" python3 run_node.py
+./adapters/ros2/rne_ros2_bridge/smoke_test.sh
 ```
 
 See [adapters/ros2/rne_ros2_bridge/README.md](adapters/ros2/rne_ros2_bridge/README.md).
 
-Release notes: [CHANGELOG.md](CHANGELOG.md)
+Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)
 
 ## Development
 
