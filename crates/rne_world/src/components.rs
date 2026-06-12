@@ -84,6 +84,26 @@ impl Transform3 {
         }
         .to_matrix()
     }
+
+    /// Composes this transform with a local child transform.
+    pub fn mul_transform(&self, local: &Self) -> Self {
+        let parent = MathTransform3 {
+            translation: self.translation,
+            rotation: self.rotation,
+            scale: self.scale,
+        };
+        let child = MathTransform3 {
+            translation: local.translation,
+            rotation: local.rotation,
+            scale: local.scale,
+        };
+        let composed = parent.mul_transform(&child);
+        Self {
+            translation: composed.translation,
+            rotation: composed.rotation,
+            scale: composed.scale,
+        }
+    }
 }
 
 /// Cached global transform matrix.

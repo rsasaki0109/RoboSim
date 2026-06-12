@@ -1,11 +1,11 @@
 //! Loads URDF mesh visuals and renders them with wgpu.
 
 use rne_ecs::World;
-use rne_math::{Quat, Transform3, Vec3};
+use rne_math::Vec3;
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, RenderBackend, RenderScene, Visual};
-use rne_render_wgpu::WgpuRenderBackend;
+use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_urdf_import::{parse_urdf_file, spawn_urdf_robot};
-use rne_world::Transform3 as WorldTransform3;
+use rne_world::world_transform_of;
 use std::path::PathBuf;
 
 fn main() {
@@ -38,12 +38,8 @@ fn main() {
         if matches!(visual.shape, rne_render::VisualShape::Mesh { .. }) {
             mesh_items += 1;
         }
-        let world_transform = world
-            .get::<WorldTransform3>(*entity)
-            .copied()
-            .unwrap_or_default();
         scene.items.push(RenderScene::item_from_visual(
-            world_transform,
+            world_transform_of(&world, *entity),
             visual.shape,
             visual.color_rgba,
             visual.local_offset,
@@ -55,10 +51,13 @@ fn main() {
         .expect("resolve mesh assets");
 
     let camera = Camera::new(128, 96, std::f64::consts::FRAC_PI_4);
-    let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.5, 4.0), Quat::IDENTITY);
+    let orbit = CameraOrbit {
+        focus: Vec3::new(0.0, 0.0, 0.0),
+        ..CameraOrbit::default()
+    };
 
     let output = backend
-        .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+        .render_scene_camera(&camera, &orbit.camera_transform(), &scene, [0.05, 0.08, 0.12, 1.0])
         .expect("render scene");
 
     let center_depth = output.depth.depth_m

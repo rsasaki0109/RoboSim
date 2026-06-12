@@ -1,10 +1,10 @@
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
-    <img src="docs/media/rne-hero.gif" alt="RNE mesh diff-drive robot with LiDAR point cloud and synthetic sensor overlays" width="960">
+    <img src="docs/media/rne-hero.gif" alt="RNE mesh diff-drive URDF rendered from the mesh_diff_drive scene" width="960">
   </picture>
   <br>
-  <sub>Mesh diff-drive URDF · LiDAR scan · IMU / point-cloud visualization</sub>
+  <sub>Captured from <code>mesh_diff_drive</code> via wgpu (<code>examples/18_readme_hero</code>)</sub>
 </p>
 
 # Robot Native Engine

@@ -462,7 +462,7 @@ impl PrimitiveRenderer {
                     texture: &depth_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
+                    aspect: wgpu::TextureAspect::DepthOnly,
                 },
                 wgpu::TexelCopyBufferInfo {
                     buffer: &depth_buffer,
