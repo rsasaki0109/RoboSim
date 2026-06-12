@@ -2,6 +2,7 @@
 
 use bevy_ecs::prelude::Component;
 use rne_math::Vec3;
+use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 
 /// Rigid body motion type.
@@ -76,12 +77,24 @@ impl Default for ColliderShape {
 }
 
 /// Collider attached to an entity.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collider {
     /// Shape definition.
     pub shape: ColliderShape,
     /// Surface material properties.
     pub material: PhysicsMaterial,
+    /// Pose relative to the entity transform.
+    pub local_offset: Transform3,
+}
+
+impl Default for Collider {
+    fn default() -> Self {
+        Self {
+            shape: ColliderShape::default(),
+            material: PhysicsMaterial::default(),
+            local_offset: Transform3::IDENTITY,
+        }
+    }
 }
 
 impl Collider {
@@ -90,6 +103,7 @@ impl Collider {
         Self {
             shape: ColliderShape::Cuboid { half_extents_m },
             material: PhysicsMaterial::default(),
+            local_offset: Transform3::IDENTITY,
         }
     }
 
@@ -98,6 +112,7 @@ impl Collider {
         Self {
             shape: ColliderShape::Sphere { radius_m },
             material: PhysicsMaterial::default(),
+            local_offset: Transform3::IDENTITY,
         }
     }
 }

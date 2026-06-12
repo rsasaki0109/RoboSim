@@ -1,0 +1,5 @@
+kind = "urdf"
+model_name = "diff_drive"
+
+[urdf]
+path = "../../adapters/ros2/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf"

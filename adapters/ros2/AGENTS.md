@@ -11,6 +11,6 @@ This directory contains optional adapters between Robot Native Engine and extern
 
 ## Crates
 
-- `rne_urdf_import`: URDF → RNE Robot/Link/Joint entities
+- `rne_urdf_import`: URDF → RNE Robot/Link/Joint entities with collider/visual attach
 - `rne_adapter_ros2`: `/clock`, TF, PointCloud2 mapping helpers (Rust)
 - `rne_ros2_bridge`: Python `rclpy` runtime node publishing `/clock`, `/points`, `/tf`

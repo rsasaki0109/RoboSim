@@ -148,6 +148,7 @@ impl PhysicsBackend for RapierBackend {
             let body_handle = state.bodies.insert(builder.build());
             let collider_handle = state.colliders.insert_with_parent(
                 ColliderBuilder::new(shape_to_shared(collider.shape))
+                    .position(transform_to_isometry(&collider.local_offset))
                     .friction(collider.material.friction)
                     .restitution(collider.material.restitution)
                     .build(),

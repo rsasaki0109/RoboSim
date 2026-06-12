@@ -10,10 +10,12 @@ fn main() {
     let spawned = spawn_urdf_robot(&mut world, &urdf).expect("spawn URDF robot");
 
     println!(
-        "imported robot={} links={} joints={}",
+        "imported robot={} links={} joints={} colliders={} visuals={}",
         urdf.name,
         spawned.links.len(),
-        spawned.joints.len()
+        spawned.joints.len(),
+        spawned.collider_count,
+        spawned.visual_count
     );
     println!("base_link entity index = {}", spawned.base_link.index());
 }
