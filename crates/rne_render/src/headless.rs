@@ -2,7 +2,10 @@
 
 use crate::backend::{RenderBackend, RenderError};
 use crate::camera::Camera;
+use crate::depth::DepthFrame;
 use crate::image::{ImageFrame, RenderTarget};
+use crate::pass::CameraPassOutput;
+use crate::scene::RenderScene;
 use rne_core::SimTime;
 use rne_math::Transform3;
 
@@ -83,6 +86,30 @@ impl RenderBackend for HeadlessRenderBackend {
     ) -> Result<ImageFrame, RenderError> {
         let _ = clear_color;
         Ok(Self::camera_image(camera, view, sim_time, seed))
+    }
+
+    fn render_scene_camera(
+        &mut self,
+        camera: &Camera,
+        view: &Transform3,
+        scene: &RenderScene,
+        clear_color: [f32; 4],
+    ) -> Result<CameraPassOutput, RenderError> {
+        let color = self.render_clear(camera.render_target(), clear_color)?;
+        let mut depth_m = vec![camera.far_m as f32; (camera.width * camera.height) as usize];
+
+        if let Some(item) = scene.items.first() {
+            let distance = (view.translation - item.transform.translation).length() as f32;
+            let center = (camera.height / 2 * camera.width + camera.width / 2) as usize;
+            if center < depth_m.len() {
+                depth_m[center] = distance;
+            }
+        }
+
+        Ok(CameraPassOutput {
+            color,
+            depth: DepthFrame::new(camera.width, camera.height, depth_m),
+        })
     }
 }
 

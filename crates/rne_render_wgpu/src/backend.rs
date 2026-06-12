@@ -1,12 +1,17 @@
 //! wgpu render backend implementation.
 
+use crate::primitive::{PrimitiveRenderPass, PrimitiveRenderer};
 use pollster::block_on;
-use rne_render::{ImageFrame, RenderBackend, RenderError, RenderTarget};
+use rne_math::Transform3;
+use rne_render::{
+    Camera, CameraPassOutput, ImageFrame, RenderBackend, RenderError, RenderScene, RenderTarget,
+};
 
 /// wgpu-backed renderer with off-screen render targets.
 pub struct WgpuRenderBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    primitive: Option<PrimitiveRenderer>,
 }
 
 impl WgpuRenderBackend {
@@ -40,7 +45,11 @@ impl WgpuRenderBackend {
         ))
         .map_err(|error| RenderError::InitFailed(error.to_string()))?;
 
-        Ok(Self { device, queue })
+        Ok(Self {
+            device,
+            queue,
+            primitive: None,
+        })
     }
 
     fn render_clear_inner(
@@ -92,64 +101,7 @@ impl WgpuRenderBackend {
             });
         }
 
-        let bytes_per_row = align_to(target.width * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-        let buffer_size = bytes_per_row as u64 * target.height as u64;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("rne_readback"),
-            size: buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(target.height),
-                },
-            },
-            wgpu::Extent3d {
-                width: target.width,
-                height: target.height,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        self.queue.submit(Some(encoder.finish()));
-
-        let slice = buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-
-        receiver
-            .recv()
-            .map_err(|_| RenderError::RenderFailed("readback channel closed".into()))?
-            .map_err(|error| RenderError::RenderFailed(error.to_string()))?;
-
-        let mapped = slice.get_mapped_range();
-        let mut rgba8 = vec![0_u8; target.rgba8_len()];
-        for y in 0..target.height as usize {
-            let src_start = y * bytes_per_row as usize;
-            let dst_start = y * target.width as usize * 4;
-            let row_len = target.width as usize * 4;
-            rgba8[dst_start..dst_start + row_len]
-                .copy_from_slice(&mapped[src_start..src_start + row_len]);
-        }
-        drop(mapped);
-        buffer.unmap();
-
-        Ok(ImageFrame::from_rgba8(target.width, target.height, rgba8))
+        read_color_texture(&self.device, &self.queue, &texture, target)
     }
 }
 
@@ -161,6 +113,108 @@ impl RenderBackend for WgpuRenderBackend {
     ) -> Result<ImageFrame, RenderError> {
         self.render_clear_inner(target, clear_color)
     }
+
+    fn render_scene_camera(
+        &mut self,
+        camera: &Camera,
+        view: &Transform3,
+        scene: &RenderScene,
+        clear_color: [f32; 4],
+    ) -> Result<CameraPassOutput, RenderError> {
+        if self.primitive.is_none() {
+            self.primitive = Some(PrimitiveRenderer::new(
+                &self.device,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            ));
+        }
+        let renderer = self.primitive.as_ref().expect("primitive renderer");
+        renderer.render(PrimitiveRenderPass {
+            device: &self.device,
+            queue: &self.queue,
+            target: camera.render_target(),
+            camera,
+            view,
+            scene,
+            clear_color,
+        })
+    }
+}
+
+fn read_color_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    target: RenderTarget,
+) -> Result<ImageFrame, RenderError> {
+    let bytes_per_row = align_to(target.width * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = bytes_per_row as u64 * target.height as u64;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rne_readback"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("rne_clear_readback_encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(target.height),
+            },
+        },
+        wgpu::Extent3d {
+            width: target.width,
+            height: target.height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    queue.submit(Some(encoder.finish()));
+    map_rgba8_buffer(device, &buffer, target, bytes_per_row)
+}
+
+fn map_rgba8_buffer(
+    device: &wgpu::Device,
+    buffer: &wgpu::Buffer,
+    target: RenderTarget,
+    bytes_per_row: u32,
+) -> Result<ImageFrame, RenderError> {
+    let slice = buffer.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device.poll(wgpu::Maintain::Wait);
+
+    receiver
+        .recv()
+        .map_err(|_| RenderError::RenderFailed("readback channel closed".into()))?
+        .map_err(|error| RenderError::RenderFailed(error.to_string()))?;
+
+    let mapped = slice.get_mapped_range();
+    let mut rgba8 = vec![0_u8; target.rgba8_len()];
+    for y in 0..target.height as usize {
+        let src_start = y * bytes_per_row as usize;
+        let dst_start = y * target.width as usize * 4;
+        let row_len = target.width as usize * 4;
+        rgba8[dst_start..dst_start + row_len]
+            .copy_from_slice(&mapped[src_start..src_start + row_len]);
+    }
+    drop(mapped);
+    buffer.unmap();
+
+    Ok(ImageFrame::from_rgba8(target.width, target.height, rgba8))
 }
 
 fn align_to(value: u32, alignment: u32) -> u32 {
@@ -170,7 +224,8 @@ fn align_to(value: u32, alignment: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rne_render::hash_rgba8;
+    use rne_math::{Quat, Vec3};
+    use rne_render::{hash_depth_f32, hash_rgba8, RenderScene, RenderSceneItem, VisualShape};
 
     #[test]
     fn wgpu_clear_render_produces_image() {
@@ -192,5 +247,46 @@ mod tests {
         assert_eq!(frame.height, 8);
         assert_eq!(frame.rgba8.len(), 8 * 8 * 4);
         assert_ne!(hash_rgba8(&frame.rgba8), 0);
+    }
+
+    #[test]
+    fn wgpu_scene_render_produces_color_and_depth() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let camera = Camera::new(64, 48, std::f64::consts::FRAC_PI_4);
+        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 3.0), Quat::IDENTITY);
+        let scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(0.0, 0.25, 0.0),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::new(0.5, 0.3, 0.4),
+                },
+                shape: VisualShape::Box {
+                    size_m: Vec3::new(0.5, 0.3, 0.4),
+                },
+                color_rgba: [0.8, 0.2, 0.2, 1.0],
+            }],
+        };
+
+        let output = backend
+            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("scene render");
+
+        assert_ne!(hash_rgba8(&output.color.rgba8), 0);
+        assert_ne!(hash_depth_f32(&output.depth.depth_m), 0);
+        assert!(output
+            .depth
+            .depth_m
+            .iter()
+            .any(|depth| *depth < camera.far_m as f32));
     }
 }
