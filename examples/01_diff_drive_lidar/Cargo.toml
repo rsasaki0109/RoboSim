@@ -1,0 +1,21 @@
+[package]
+name = "diff_drive_lidar"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_core = { path = "../../crates/rne_core" }
+rne_data = { path = "../../crates/rne_data" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_log = { path = "../../crates/rne_log" }
+rne_math = { path = "../../crates/rne_math" }
+rne_physics = { path = "../../crates/rne_physics" }
+rne_physics_rapier = { path = "../../crates/rne_physics_rapier" }
+rne_robot = { path = "../../crates/rne_robot" }
+rne_sensor = { path = "../../crates/rne_sensor" }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "01_diff_drive_lidar"
+path = "main.rs"

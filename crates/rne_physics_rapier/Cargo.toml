@@ -1,0 +1,19 @@
+[package]
+name = "rne_physics_rapier"
+description = "Rapier physics backend for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rapier3d = { workspace = true }
+rne_core = { path = "../rne_core" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+rne_physics = { path = "../rne_physics" }
+rne_world = { path = "../rne_world" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

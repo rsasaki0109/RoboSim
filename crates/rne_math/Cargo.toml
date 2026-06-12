@@ -1,0 +1,14 @@
+[package]
+name = "rne_math"
+description = "Spatial math and explicit units for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

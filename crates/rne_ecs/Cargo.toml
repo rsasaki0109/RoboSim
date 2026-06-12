@@ -1,0 +1,15 @@
+[package]
+name = "rne_ecs"
+description = "ECS wrapper and shared entity conventions for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_core = { path = "../rne_core" }
+rne_math = { path = "../rne_math" }
+serde = { workspace = true }
+smallvec = { workspace = true }
+uuid = { workspace = true }

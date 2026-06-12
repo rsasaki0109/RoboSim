@@ -1,0 +1,15 @@
+[package]
+name = "rne_core"
+description = "Core app, schedule, and simulation time for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_math = { path = "../rne_math" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

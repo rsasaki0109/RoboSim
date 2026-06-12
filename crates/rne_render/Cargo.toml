@@ -1,0 +1,15 @@
+[package]
+name = "rne_render"
+description = "Render backend traits for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_core = { path = "../rne_core" }
+rne_math = { path = "../rne_math" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

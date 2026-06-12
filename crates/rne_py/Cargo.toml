@@ -1,0 +1,30 @@
+[package]
+name = "rne_py"
+description = "Python bindings for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "rne_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["abi3-py39"] }
+rne_core = { path = "../rne_core" }
+rne_data = { path = "../rne_data" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+rne_physics = { path = "../rne_physics" }
+rne_physics_rapier = { path = "../rne_physics_rapier" }
+rne_robot = { path = "../rne_robot" }
+rne_sensor = { path = "../rne_sensor" }
+rne_world = { path = "../rne_world" }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]

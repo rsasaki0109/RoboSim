@@ -1,0 +1,17 @@
+[package]
+name = "rne_data"
+description = "Typed DataBus and frame payloads for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_core = { path = "../rne_core" }
+rne_ecs = { path = "../rne_ecs" }
+rne_math = { path = "../rne_math" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
