@@ -21,6 +21,7 @@ cd "$BRIDGE_DIR"
 
 echo "Running convert unit tests..."
 python3 test_ros_convert.py
+python3 test_sim_control.py
 
 echo "Running synthetic bridge smoke (no rne_py)..."
 (
@@ -41,11 +42,21 @@ echo "Running live simulation bridge smoke..."
 python3 run_node.py &
 BRIDGE_PID=$!
 
-sleep 0.5
+for _ in $(seq 1 50); do
+  if ros2 service list | grep -q '/get_simulation_state'; then
+    break
+  fi
+  sleep 0.1
+done
+
+sleep 0.2
 for topic in /clock /points /tf; do
   echo "Checking ${topic}..."
   ros2 topic echo "$topic" --once
 done
+
+echo "Checking get_simulation_state service..."
+ros2 service call /get_simulation_state simulation_interfaces/srv/GetSimulationState "{}"
 
 wait "$BRIDGE_PID"
 

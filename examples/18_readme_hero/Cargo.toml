@@ -1,0 +1,16 @@
+[package]
+name = "readme_hero"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+png = "0.17"
+rne_ai = { path = "../../crates/rne_ai" }
+rne_math = { path = "../../crates/rne_math" }
+rne_render = { path = "../../crates/rne_render" }
+rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
+
+[[example]]
+name = "18_readme_hero"
+path = "main.rs"

@@ -35,6 +35,7 @@ members = [
   "examples/15_asset_hot_reload",
   "examples/16_goal_conditioned_agent",
   "examples/17_multi_robot_collision",
+  "examples/18_readme_hero",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",
