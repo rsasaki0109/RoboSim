@@ -1,10 +1,15 @@
 const SHADER: &str = r#"
 struct CameraUniform {
     view_proj: mat4x4<f32>,
+    light_ambient: vec4<f32>,
+    diffuse_pad: vec4<f32>,
 }
 
 struct DrawUniform {
     model: mat4x4<f32>,
+    normal_col0: vec4<f32>,
+    normal_col1: vec4<f32>,
+    normal_col2: vec4<f32>,
     color: vec4<f32>,
 }
 
@@ -14,6 +19,7 @@ struct DrawUniform {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) world_normal: vec3<f32>,
 }
 
 @vertex
@@ -21,17 +27,32 @@ fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
 ) -> VertexOutput {
-    _ = normal;
     var out: VertexOutput;
     let world = draw.model * vec4<f32>(position, 1.0);
     out.clip_position = camera.view_proj * world;
     out.color = draw.color;
+
+    let normal_matrix = mat3x3<f32>(
+        draw.normal_col0.xyz,
+        draw.normal_col1.xyz,
+        draw.normal_col2.xyz,
+    );
+    var world_normal = normal_matrix * normal;
+    if (dot(world_normal, world_normal) < 1e-8) {
+        world_normal = vec3<f32>(0.0, 1.0, 0.0);
+    } else {
+        world_normal = normalize(world_normal);
+    }
+    out.world_normal = world_normal;
     return out;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return input.color;
+    let light_dir = normalize(camera.light_ambient.xyz);
+    let ndotl = max(dot(normalize(input.world_normal), light_dir), 0.0);
+    let shade = camera.light_ambient.w + camera.diffuse_pad.x * ndotl;
+    return vec4<f32>(input.color.rgb * shade, input.color.a);
 }
 "#;
 
@@ -57,12 +78,37 @@ struct Vertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    light_ambient: [f32; 4],
+    diffuse_pad: [f32; 4],
+}
+
+/// Default directional light for primitive shading (world space, not normalized).
+pub const DEFAULT_LIGHT_DIR: [f32; 3] = [0.35, 0.9, 0.25];
+/// Minimum lit channel multiplier applied away from the light.
+pub const DEFAULT_AMBIENT: f32 = 0.28;
+/// Additional diffuse multiplier at surfaces facing the light.
+pub const DEFAULT_DIFFUSE: f32 = 0.72;
+
+fn default_camera_uniform(view_proj: rne_math::Mat4) -> CameraUniform {
+    CameraUniform {
+        view_proj: mat4_to_cols(view_proj),
+        light_ambient: [
+            DEFAULT_LIGHT_DIR[0],
+            DEFAULT_LIGHT_DIR[1],
+            DEFAULT_LIGHT_DIR[2],
+            DEFAULT_AMBIENT,
+        ],
+        diffuse_pad: [DEFAULT_DIFFUSE, 0.0, 0.0, 0.0],
+    }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct DrawUniform {
     model: [[f32; 4]; 4],
+    normal_col0: [f32; 4],
+    normal_col1: [f32; 4],
+    normal_col2: [f32; 4],
     color: [f32; 4],
 }
 
@@ -147,7 +193,7 @@ impl PrimitiveRenderer {
             label: Some("rne_camera_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -295,9 +341,7 @@ impl PrimitiveRenderer {
         queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::bytes_of(&CameraUniform {
-                view_proj: mat4_to_cols(view_proj),
-            }),
+            bytemuck::bytes_of(&default_camera_uniform(view_proj)),
         );
 
         if scene.items.len() > MAX_SCENE_ITEMS as usize {
@@ -309,8 +353,13 @@ impl PrimitiveRenderer {
 
         let mut draw_bytes = vec![0_u8; self.draw_uniform_stride as usize * scene.items.len()];
         for (index, item) in scene.items.iter().enumerate() {
+            let model = item.transform.to_matrix();
+            let normal_cols = normal_matrix_cols(model);
             let uniform = DrawUniform {
-                model: mat4_to_cols(item.transform.to_matrix()),
+                model: mat4_to_cols(model),
+                normal_col0: normal_cols[0],
+                normal_col1: normal_cols[1],
+                normal_col2: normal_cols[2],
                 color: item.color_rgba,
             };
             let offset = index * self.draw_uniform_stride as usize;
@@ -690,6 +739,15 @@ fn mat4_to_cols(matrix: Mat4) -> [[f32; 4]; 4] {
             cols[3][2] as f32,
             cols[3][3] as f32,
         ],
+    ]
+}
+
+fn normal_matrix_cols(model: Mat4) -> [[f32; 4]; 3] {
+    let cols = model.inverse().transpose().to_cols_array_2d();
+    [
+        [cols[0][0] as f32, cols[0][1] as f32, cols[0][2] as f32, 0.0],
+        [cols[1][0] as f32, cols[1][1] as f32, cols[1][2] as f32, 0.0],
+        [cols[2][0] as f32, cols[2][1] as f32, cols[2][2] as f32, 0.0],
     ]
 }
 

@@ -311,6 +311,10 @@ mod tests {
 
         assert_ne!(hash_rgba8(&output.color.rgba8), 0);
         assert_ne!(hash_depth_f32(&output.depth.depth_m), 0);
+        assert!(
+            unique_colors(&output.color.rgba8) > 1,
+            "expected normal-based shading on box faces"
+        );
         assert!(output
             .depth
             .depth_m

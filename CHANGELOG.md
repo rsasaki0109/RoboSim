@@ -10,6 +10,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **LiDAR render example** (`19_lidar_render`): diff-drive scan visualized in wgpu
 - **Interactive viewer LiDAR overlay** (`14_interactive_viewer`): live hit markers, `L` toggle, `DiffDriveSim::enable_lidar_demo()`
 - **`append_lidar_overlay()`** in `rne_ai::render` and `DiffDriveObservation::lidar_points` populated from DataBus
+- **Normal-based wgpu lighting**: Lambert diffuse + ambient in the primitive fragment shader using vertex normals
 
 ## [0.4.0] - 2026-06-12
 
