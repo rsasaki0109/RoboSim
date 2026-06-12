@@ -10,9 +10,10 @@ use crate::observation::DiffDriveObservation;
 use crate::reward::DiffDriveRewardConfig;
 use rne_log::SimulationLog;
 use rne_math::Vec3;
+use std::path::PathBuf;
 
 /// Configuration for a forward-drive goal episode.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DiffDriveEpisodeConfig {
     /// Maximum steps before truncation.
     pub max_steps: u64,
@@ -24,6 +25,8 @@ pub struct DiffDriveEpisodeConfig {
     pub reward: DiffDriveRewardConfig,
     /// When true, actuator commands are appended to an internal log.
     pub record_log: bool,
+    /// When set, the episode loads world and robot state from this scene asset.
+    pub scene_path: Option<PathBuf>,
 }
 
 impl Default for DiffDriveEpisodeConfig {
@@ -34,6 +37,7 @@ impl Default for DiffDriveEpisodeConfig {
             initial_translation_m: Vec3::new(0.0, 0.25, 0.0),
             reward: DiffDriveRewardConfig::default(),
             record_log: false,
+            scene_path: None,
         }
     }
 }
@@ -52,7 +56,7 @@ pub struct DiffDriveEpisode {
 impl DiffDriveEpisode {
     /// Creates a new episode environment with the given configuration.
     pub fn new(config: DiffDriveEpisodeConfig) -> Self {
-        let sim = DiffDriveSim::with_initial_translation(config.initial_translation_m);
+        let sim = new_sim(&config).expect("episode simulation");
         Self {
             sim,
             config,
@@ -62,6 +66,16 @@ impl DiffDriveEpisode {
             total_reward: 0.0,
             log: SimulationLog::new(),
         }
+    }
+
+    /// Returns the world seed when running from a scene asset.
+    pub fn world_seed(&self) -> u64 {
+        self.sim.world_seed()
+    }
+
+    /// Returns read access to the underlying simulation (for rendering or inspection).
+    pub fn simulation(&self) -> &DiffDriveSim {
+        &self.sim
     }
 
     /// Returns cumulative reward for the current episode.
@@ -101,7 +115,7 @@ impl Episode for DiffDriveEpisode {
     type Action = DiffDriveAction;
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
-        self.sim = DiffDriveSim::with_initial_translation(self.config.initial_translation_m);
+        self.sim = new_sim(&self.config).expect("episode simulation");
         self.step_in_episode = 0;
         self.prev_x_m = 0.0;
         self.total_reward = 0.0;
@@ -140,6 +154,16 @@ impl Episode for DiffDriveEpisode {
 
     fn step_in_episode(&self) -> u64 {
         self.step_in_episode
+    }
+}
+
+fn new_sim(config: &DiffDriveEpisodeConfig) -> Result<DiffDriveSim, rne_assets::AssetError> {
+    if let Some(scene_path) = &config.scene_path {
+        DiffDriveSim::from_scene_path(scene_path)
+    } else {
+        Ok(DiffDriveSim::with_initial_translation(
+            config.initial_translation_m,
+        ))
     }
 }
 
@@ -188,5 +212,28 @@ mod tests {
 
         assert!(last.truncated);
         assert!(!last.terminated);
+    }
+
+    #[test]
+    fn scene_episode_reaches_goal() {
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_assets/tests/fixtures/episode_diff_drive.rne.scene.toml");
+        let mut env = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
+            goal_x_m: 2.0,
+            max_steps: 300,
+            scene_path: Some(scene_path),
+            ..DiffDriveEpisodeConfig::default()
+        });
+        let mut policy = ConstantVelocityPolicy::new(6.0);
+
+        let mut step = env.reset();
+        assert_eq!(env.world_seed(), 42);
+
+        while !step.is_done() {
+            step = env.step(policy.act(&step.observation));
+        }
+
+        assert!(step.terminated);
+        assert!(step.observation.base_x_m >= 2.0);
     }
 }

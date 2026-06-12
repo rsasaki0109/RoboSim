@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rne_assets = { path = "../rne_assets" }
 rne_core = { path = "../rne_core" }
 rne_data = { path = "../rne_data" }
 rne_ecs = { path = "../rne_ecs" }

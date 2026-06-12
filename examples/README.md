@@ -11,6 +11,7 @@
 | Episode API | `cargo run -p episode_diff_drive --example 05_episode_diff_drive` | Reward, termination, log recording |
 | Scene assets | `cargo run -p scene_load --example 06_scene_load` | `.rne.scene.toml` / `.rne.robot.toml` load |
 | Render primitives | `cargo run -p render_primitives --example 07_render_primitives` | wgpu color + depth pass |
+| Scene episode | `cargo run -p scene_episode --example 08_scene_episode` | Scene asset → episode → optional render |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` |
 

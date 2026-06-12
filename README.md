@@ -42,6 +42,7 @@ cargo run -p urdf_import --example 03_urdf_import
 cargo run -p episode_diff_drive --example 05_episode_diff_drive
 cargo run -p scene_load --example 06_scene_load
 cargo run -p render_primitives --example 07_render_primitives
+cargo run -p scene_episode --example 08_scene_episode
 ```
 
 See [examples/README.md](examples/README.md) for the full list.

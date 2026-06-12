@@ -19,6 +19,18 @@
 | Rendering | Mesh rendering, depth pass | Done (`rne_render_wgpu`, `07_render_primitives`) |
 | ROS 2 | Native `rclrs` node when type-support is available | Done (`rne_ros2_node`) |
 
+## v0.3 candidates
+
+| Area | Task | Status |
+|------|------|--------|
+| Integration | End-to-end scene + episode example | Done (`08_scene_episode`) |
+| Rendering | URDF mesh load + wgpu draw | Planned |
+| AI | Domain randomization, vectorized envs | Planned |
+| Robot | Rapier joint-driven wheels | Planned |
+| Agent | Agent Entity component + policy attach | Planned |
+| ROS 2 | Optional CI for `rne_ros2_node` | Planned |
+| Release | v0.2.0 tag + docs refresh | Planned |
+
 ## Native ROS 2 (`rclrs`)
 
 Two runtime paths are available:
