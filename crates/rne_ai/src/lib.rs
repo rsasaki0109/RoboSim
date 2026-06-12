@@ -7,6 +7,7 @@ pub mod agent;
 pub mod domain_randomization;
 pub mod env;
 pub mod episode;
+pub mod goal;
 pub mod observation;
 pub mod policy;
 pub mod render;
@@ -15,11 +16,12 @@ pub mod rng;
 
 pub use action::DiffDriveAction;
 pub use agent::{
-    attach_diff_drive_policy, attach_shared_diff_drive_policy, observe_shared_diff_drive_agent,
-    reset_diff_drive_agent, spawn_diff_drive_agent, spawn_shared_diff_drive_agent,
-    spawn_shared_diff_drive_agent_for_robot, step_diff_drive_agent, step_diff_drive_agents,
-    step_shared_diff_drive_agent, step_shared_diff_drive_agents, Agent, AgentGoal, AgentKind,
-    AgentTarget, AttachedPolicy, DiffDriveAgentState, SharedDiffDriveAgentState,
+    attach_diff_drive_policy, attach_goal_conditioned_policy, attach_shared_diff_drive_policy,
+    attach_shared_goal_conditioned_policy, observe_shared_diff_drive_agent, reset_diff_drive_agent,
+    spawn_diff_drive_agent, spawn_shared_diff_drive_agent, spawn_shared_diff_drive_agent_for_robot,
+    step_diff_drive_agent, step_diff_drive_agents, step_shared_diff_drive_agent,
+    step_shared_diff_drive_agents, Agent, AgentGoal, AgentKind, AgentTarget, AttachedPolicy,
+    DiffDriveAgentState, SharedDiffDriveAgentState,
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
@@ -27,6 +29,10 @@ pub use env::{
     VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
+pub use goal::{
+    goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
+    GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
+};
 pub use observation::DiffDriveObservation;
 pub use policy::{ConstantVelocityPolicy, Policy};
 pub use render::build_diff_drive_render_scene;

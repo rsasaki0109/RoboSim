@@ -5,6 +5,7 @@ use super::diff_drive::DiffDrivePolicySource;
 use crate::action::DiffDriveAction;
 use crate::env::DiffDriveEpisode;
 use crate::env::DiffDriveSim;
+use crate::goal::{GoalConditionedAdapter, GoalConditionedPolicy};
 use crate::observation::DiffDriveObservation;
 use crate::policy::Policy;
 use bevy_ecs::prelude::Component;
@@ -88,6 +89,14 @@ pub fn spawn_shared_diff_drive_agent_for_robot(
             .insert(AgentGoal { goal_x_m });
     }
     entity
+}
+
+/// Attaches a goal-conditioned policy to a shared-world agent entity.
+pub fn attach_shared_goal_conditioned_policy<P>(sim: &mut DiffDriveSim, agent: Entity, policy: P)
+where
+    P: GoalConditionedPolicy + Send + Sync + 'static,
+{
+    attach_shared_diff_drive_policy(sim, agent, GoalConditionedAdapter::new(policy));
 }
 
 /// Attaches a policy to a shared-world agent entity.

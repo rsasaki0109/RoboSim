@@ -50,7 +50,7 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 
 | Area | Idea |
 |------|------|
-| AI | Goal-conditioned policies, curriculum / multi-task episodes |
+| AI | Goal-conditioned policies, curriculum / multi-task episodes | Done (`GoalSeekingPolicy`, `GoalCurriculum`, `16_goal_conditioned_agent`) |
 | Rendering | Viewer + scene assets integration, URDF mesh in interactive mode | Done (`14_interactive_viewer`, `[visuals]` robot assets) |
 | Physics | Multi-robot collision and interaction scenarios |
 | ROS 2 | Services, actions, and parameter parity with native node |

@@ -1,5 +1,6 @@
 //! Agent stepping helpers.
 
+use super::components::AgentGoal;
 use super::diff_drive::DiffDriveAgentState;
 use crate::episode::EpisodeStep;
 use crate::observation::DiffDriveObservation;
@@ -10,10 +11,17 @@ pub fn reset_diff_drive_agent(
     world: &mut World,
     agent: Entity,
 ) -> EpisodeStep<DiffDriveObservation> {
-    world
+    let step = world
         .get_mut::<DiffDriveAgentState>(agent)
         .expect("diff-drive agent must have DiffDriveAgentState")
-        .reset()
+        .reset();
+    let goal_x_m = world
+        .get::<DiffDriveAgentState>(agent)
+        .expect("diff-drive agent must have DiffDriveAgentState")
+        .episode()
+        .goal_x_m();
+    world.entity_mut(agent).insert(AgentGoal { goal_x_m });
+    step
 }
 
 /// Steps one diff-drive agent using its attached policy.

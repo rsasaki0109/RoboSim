@@ -9,6 +9,7 @@ pub use vectorized::{VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, Vectoriz
 use crate::action::DiffDriveAction;
 use crate::domain_randomization::DiffDriveDomainRandomization;
 use crate::episode::{Episode, EpisodeStep};
+use crate::goal::{GoalCurriculum, GoalCurriculumConfig, GoalTaskSet};
 use crate::observation::DiffDriveObservation;
 use crate::reward::DiffDriveRewardConfig;
 use crate::rng::DeterministicRng;
@@ -33,6 +34,10 @@ pub struct DiffDriveEpisodeConfig {
     pub scene_path: Option<PathBuf>,
     /// Optional domain randomization applied on each reset.
     pub domain_randomization: Option<DiffDriveDomainRandomization>,
+    /// Optional fixed goal set sampled on each reset.
+    pub goal_tasks: Option<GoalTaskSet>,
+    /// Optional curriculum that advances after successful episodes.
+    pub goal_curriculum: Option<GoalCurriculumConfig>,
     /// Seed for reproducible domain randomization.
     pub rng_seed: u64,
 }
@@ -47,6 +52,8 @@ impl Default for DiffDriveEpisodeConfig {
             record_log: false,
             scene_path: None,
             domain_randomization: None,
+            goal_tasks: None,
+            goal_curriculum: None,
             rng_seed: 1,
         }
     }
@@ -63,6 +70,7 @@ pub struct DiffDriveEpisode {
     log: SimulationLog,
     rng: DeterministicRng,
     goal_x_m: f64,
+    curriculum: Option<GoalCurriculum>,
 }
 
 impl DiffDriveEpisode {
@@ -70,6 +78,7 @@ impl DiffDriveEpisode {
     pub fn new(config: DiffDriveEpisodeConfig) -> Self {
         let rng = DeterministicRng::new(config.rng_seed);
         let goal_x_m = config.goal_x_m;
+        let curriculum = config.goal_curriculum.clone().map(GoalCurriculum::new);
         let sim = new_sim(&config, config.initial_translation_m).expect("episode simulation");
         Self {
             sim,
@@ -81,7 +90,13 @@ impl DiffDriveEpisode {
             log: SimulationLog::new(),
             rng,
             goal_x_m,
+            curriculum,
         }
+    }
+
+    /// Returns the active curriculum stage when curriculum training is enabled.
+    pub fn curriculum_stage_index(&self) -> Option<usize> {
+        self.curriculum.as_ref().map(GoalCurriculum::stage_index)
     }
 
     /// Returns the goal X position for the current episode.
@@ -107,6 +122,30 @@ impl DiffDriveEpisode {
     /// Returns the simulation log when recording is enabled.
     pub fn log(&self) -> &SimulationLog {
         &self.log
+    }
+
+    fn sample_goal_for_reset(&mut self) -> f64 {
+        if let Some(curriculum) = self.curriculum.as_mut() {
+            return curriculum.sample_goal(&mut self.rng);
+        }
+        if let Some(tasks) = &self.config.goal_tasks {
+            return tasks.sample(&mut self.rng);
+        }
+        self.config.goal_x_m
+    }
+
+    fn observe_with_current_goal(&self) -> DiffDriveObservation {
+        self.sim
+            .observe_robot_with_goal(self.sim.robot().robot, Some(self.goal_x_m))
+    }
+
+    fn queue_primary_action(&mut self, action: DiffDriveAction) {
+        self.sim.queue_robot_action(self.sim.robot().robot, action);
+    }
+
+    fn advance_primary_sim_step(&mut self) {
+        self.sim
+            .advance_one_tick(self.config.record_log, &mut self.log);
     }
 
     fn make_step(
@@ -137,7 +176,7 @@ impl Episode for DiffDriveEpisode {
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
         let mut initial_translation_m = self.config.initial_translation_m;
-        self.goal_x_m = self.config.goal_x_m;
+        self.goal_x_m = self.sample_goal_for_reset();
         if let Some(domain_randomization) = &self.config.domain_randomization {
             domain_randomization.apply(
                 &mut self.rng,
@@ -152,7 +191,7 @@ impl Episode for DiffDriveEpisode {
         self.total_reward = 0.0;
         self.log = SimulationLog::new();
 
-        let observation = self.sim.observe();
+        let observation = self.observe_with_current_goal();
         self.prev_x_m = observation.base_x_m;
 
         EpisodeStep {
@@ -164,16 +203,18 @@ impl Episode for DiffDriveEpisode {
     }
 
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
-        let observation = self.sim.step_with_recording(
-            action.left_velocity_rad_s,
-            action.right_velocity_rad_s,
-            self.config.record_log,
-            &mut self.log,
-        );
+        self.queue_primary_action(action);
+        self.advance_primary_sim_step();
         self.step_in_episode += 1;
 
+        let observation = self.observe_with_current_goal();
         let result = self.make_step(observation);
         if result.is_done() {
+            if result.terminated {
+                if let Some(curriculum) = self.curriculum.as_mut() {
+                    curriculum.record_episode_end(true);
+                }
+            }
             self.episode_index += 1;
         }
         result
@@ -285,5 +326,40 @@ mod tests {
         let second_goal = env.goal_x_m();
 
         assert_ne!(first_goal, second_goal);
+    }
+
+    #[test]
+    fn reset_populates_goal_relative_observation() {
+        let mut env = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
+            goal_x_m: 2.0,
+            ..DiffDriveEpisodeConfig::default()
+        });
+        let step = env.reset();
+        assert_eq!(step.observation.goal_delta_x_m, Some(2.0));
+    }
+
+    #[test]
+    fn goal_seeking_policy_reaches_sampled_task_goal() {
+        use crate::goal::{GoalCurriculumConfig, GoalSeekingPolicy};
+
+        let mut env = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
+            goal_curriculum: Some(GoalCurriculumConfig::easy_to_hard()),
+            max_steps: 400,
+            rng_seed: 5,
+            ..DiffDriveEpisodeConfig::default()
+        });
+        let mut policy = GoalSeekingPolicy::new(6.0, 0.05);
+
+        let mut step = env.reset();
+        assert!(step.observation.goal_delta_x_m.is_some());
+
+        while !step.is_done() {
+            step = env.step(policy.act(&step.observation));
+        }
+
+        assert!(
+            step.terminated,
+            "goal-seeking policy should reach curriculum goal"
+        );
     }
 }

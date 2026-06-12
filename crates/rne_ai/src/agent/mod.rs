@@ -7,12 +7,15 @@ mod spawn;
 mod systems;
 
 pub use components::{Agent, AgentGoal, AgentKind, AgentTarget, AttachedPolicy};
-pub use diff_drive::{attach_diff_drive_policy, DiffDriveAgentState, DiffDrivePolicySource};
+pub use diff_drive::{
+    attach_diff_drive_policy, attach_goal_conditioned_policy, DiffDriveAgentState,
+    DiffDrivePolicySource,
+};
 pub use shared::{
-    attach_shared_diff_drive_policy, observe_shared_diff_drive_agent,
-    spawn_shared_diff_drive_agent, spawn_shared_diff_drive_agent_for_robot,
-    step_shared_diff_drive_action, step_shared_diff_drive_agent, step_shared_diff_drive_agents,
-    SharedDiffDriveAgentState,
+    attach_shared_diff_drive_policy, attach_shared_goal_conditioned_policy,
+    observe_shared_diff_drive_agent, spawn_shared_diff_drive_agent,
+    spawn_shared_diff_drive_agent_for_robot, step_shared_diff_drive_action,
+    step_shared_diff_drive_agent, step_shared_diff_drive_agents, SharedDiffDriveAgentState,
 };
 pub use spawn::spawn_diff_drive_agent;
 pub use systems::{reset_diff_drive_agent, step_diff_drive_agent, step_diff_drive_agents};
@@ -22,6 +25,32 @@ mod tests {
     use super::*;
     use crate::{ConstantVelocityPolicy, DiffDriveEpisodeConfig, DiffDriveSim};
     use rne_ecs::World;
+
+    #[test]
+    fn diff_drive_agent_reaches_goal_with_goal_seeking_policy() {
+        let mut world = World::new();
+        let agent = spawn_diff_drive_agent(
+            &mut world,
+            "goal_agent",
+            DiffDriveEpisodeConfig {
+                goal_x_m: 1.5,
+                max_steps: 300,
+                ..DiffDriveEpisodeConfig::default()
+            },
+            AgentKind::Policy,
+        );
+        attach_goal_conditioned_policy(&mut world, agent, crate::GoalSeekingPolicy::new(6.0, 0.05));
+
+        let mut step = reset_diff_drive_agent(&mut world, agent);
+        assert_eq!(step.observation.goal_delta_x_m, Some(1.5));
+
+        while !step.is_done() {
+            step = step_diff_drive_agent(&mut world, agent);
+        }
+
+        assert!(step.terminated, "expected goal success");
+        assert!(step.observation.base_x_m >= 1.5);
+    }
 
     #[test]
     fn diff_drive_agent_reaches_goal_with_attached_policy() {

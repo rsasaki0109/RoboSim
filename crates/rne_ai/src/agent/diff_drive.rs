@@ -4,6 +4,7 @@ use super::components::AttachedPolicy;
 use crate::action::DiffDriveAction;
 use crate::env::DiffDriveEpisode;
 use crate::episode::{Episode, EpisodeStep};
+use crate::goal::{GoalConditionedAdapter, GoalConditionedPolicy};
 use crate::observation::DiffDriveObservation;
 use crate::policy::Policy;
 use crate::DiffDriveEpisodeConfig;
@@ -91,6 +92,14 @@ impl DiffDriveAgentState {
     pub fn episode(&self) -> &DiffDriveEpisode {
         &self.episode
     }
+}
+
+/// Attaches a goal-conditioned policy to a diff-drive agent entity.
+pub fn attach_goal_conditioned_policy<P>(world: &mut World, agent: Entity, policy: P)
+where
+    P: GoalConditionedPolicy + Send + Sync + 'static,
+{
+    attach_diff_drive_policy(world, agent, GoalConditionedAdapter::new(policy));
 }
 
 /// Attaches a policy to a diff-drive agent entity.
