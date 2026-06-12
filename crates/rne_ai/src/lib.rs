@@ -8,6 +8,7 @@ pub mod domain_randomization;
 pub mod env;
 pub mod episode;
 pub mod goal;
+pub mod lidar;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
@@ -34,12 +35,15 @@ pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
     GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
 };
+pub use lidar::{
+    attach_lidar_sensor, enable_lidar_demo, lidar_stream_for_index, sync_lidar_mounts,
+};
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
 pub use observation::DiffDriveObservation;
 pub use policy::{ConstantVelocityPolicy, Policy};
-pub use render::build_diff_drive_render_scene;
+pub use render::{append_lidar_overlay, build_diff_drive_render_scene, LidarOverlayStats};
 pub use reward::DiffDriveRewardConfig;
 pub use rng::DeterministicRng;

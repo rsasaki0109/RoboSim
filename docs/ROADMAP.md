@@ -1,5 +1,14 @@
 # Roadmap
 
+## v0.5 candidates
+
+| Area | Idea |
+|------|------|
+| Rendering | LiDAR hit visualization in wgpu and interactive viewer | Done (`19_lidar_render`, `append_lidar_overlay`, `L` toggle) |
+| Rendering | Simple normal-based lighting in wgpu fragment shader | Planned |
+| Sensors | Scene-defined LiDAR mounts (not demo-only wall spawn) | Planned |
+| ROS 2 | Publish `/scan` from native node when LiDAR is present | Planned |
+
 ## v0.4.0 (released)
 
 Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).

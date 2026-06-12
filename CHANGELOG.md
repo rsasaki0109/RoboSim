@@ -2,6 +2,15 @@
 
 All notable changes to Robot Native Engine are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **LiDAR render helpers** (`rne_render::lidar`): sphere markers for ray hits via `RenderScene::append_lidar_points`
+- **LiDAR render example** (`19_lidar_render`): diff-drive scan visualized in wgpu
+- **Interactive viewer LiDAR overlay** (`14_interactive_viewer`): live hit markers, `L` toggle, `DiffDriveSim::enable_lidar_demo()`
+- **`append_lidar_overlay()`** in `rne_ai::render` and `DiffDriveObservation::lidar_points` populated from DataBus
+
 ## [0.4.0] - 2026-06-12
 
 ### Added

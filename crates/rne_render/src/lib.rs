@@ -7,6 +7,7 @@ pub mod camera;
 pub mod depth;
 pub mod headless;
 pub mod image;
+pub mod lidar;
 pub mod mesh;
 pub mod mesh_cache;
 pub mod pass;

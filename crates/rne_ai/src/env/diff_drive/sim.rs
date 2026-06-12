@@ -1,6 +1,7 @@
 //! Headless differential drive simulation.
 
 use crate::action::DiffDriveAction;
+use crate::lidar::{enable_lidar_demo, sync_lidar_mounts};
 use crate::observation::DiffDriveObservation;
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -35,6 +36,7 @@ pub struct DiffDriveSim {
     robots: Vec<DiffDriveSpawned>,
     command_buffer: ActuatorCommandBuffer,
     data_bus: InMemoryDataBus,
+    lidar_mounts: Vec<(Entity, Entity)>,
     sim_time: SimTime,
     dt: SimDuration,
     step_count: u64,
@@ -177,6 +179,27 @@ impl DiffDriveSim {
         &self.mesh_package_roots
     }
 
+    /// Provides read access to the simulation DataBus (sensor frames).
+    pub fn data_bus(&self) -> &InMemoryDataBus {
+        &self.data_bus
+    }
+
+    /// Returns tracked LiDAR mount entities when the LiDAR demo is enabled.
+    pub fn lidar_mounts(&self) -> &[(Entity, Entity)] {
+        &self.lidar_mounts
+    }
+
+    /// Spawns a demo wall and LiDAR sensors for every robot in the scene.
+    pub fn enable_lidar_demo(&mut self) {
+        enable_lidar_demo(
+            &mut self.world,
+            &self.robots,
+            &mut self.backend,
+            self.physics_world,
+            &mut self.lidar_mounts,
+        );
+    }
+
     /// Spawns an additional diff-drive robot into the live simulation world.
     pub fn spawn_robot(&mut self, config: DiffDriveConfig) -> DiffDriveSpawned {
         let spawned = spawn_diff_drive_robot(&mut self.world, &config);
@@ -219,6 +242,7 @@ impl DiffDriveSim {
             robots,
             command_buffer: ActuatorCommandBuffer::new(),
             data_bus: InMemoryDataBus::new(),
+            lidar_mounts: Vec::new(),
             sim_time: SimTime::ZERO,
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             step_count: 0,
@@ -346,6 +370,8 @@ impl DiffDriveSim {
             .map(|actuator| actuator.target.velocity_rad_s)
             .unwrap_or(0.0);
         let imu = imu_ay_for_base(&self.world, &self.data_bus, base_link);
+        let lidar_points =
+            lidar_point_count_for_robot(&self.world, &self.data_bus, spawned, &self.lidar_mounts);
         let peer = crate::multi_robot::nearest_peer_observation(self, robot);
 
         DiffDriveObservation {
@@ -356,7 +382,7 @@ impl DiffDriveSim {
             left_wheel_velocity_rad_s,
             right_wheel_velocity_rad_s,
             imu_ay_m_s2: imu,
-            lidar_points: 0,
+            lidar_points,
             goal_delta_x_m: goal_x_m.map(|goal| goal - transform.translation.x),
             peer_delta_x_m: peer.map(|peer| peer.delta_x_m),
             peer_delta_z_m: peer.map(|peer| peer.delta_z_m),
@@ -418,6 +444,7 @@ impl DiffDriveSim {
         )
         .unwrap();
 
+        sync_lidar_mounts(&mut self.world, &self.lidar_mounts);
         sample_sensors(
             &mut SensorSampleContext {
                 world: &mut self.world,
@@ -476,6 +503,27 @@ fn imu_ay_for_base(world: &World, data_bus: &InMemoryDataBus, base_link: Entity)
         .latest::<rne_data::ImuSample>(sensor.stream_id)
         .map(|frame| frame.payload.linear_acceleration_m_s2.y)
         .unwrap_or(0.0)
+}
+
+fn lidar_point_count_for_robot(
+    world: &World,
+    data_bus: &InMemoryDataBus,
+    spawned: &DiffDriveSpawned,
+    lidar_mounts: &[(Entity, Entity)],
+) -> usize {
+    let Some((_, lidar)) = lidar_mounts
+        .iter()
+        .find(|(base_link, _)| *base_link == spawned.base_link)
+    else {
+        return 0;
+    };
+    let Some(sensor) = world.get::<Sensor>(*lidar) else {
+        return 0;
+    };
+    data_bus
+        .latest::<rne_data::PointCloud>(sensor.stream_id)
+        .map(|frame| frame.payload.points_m.len())
+        .unwrap_or(0)
 }
 
 fn spawn_ground(world: &mut World) {
@@ -652,6 +700,21 @@ mod tests {
         assert_eq!(sim.world_seed(), 42);
         sim.reload_scene().expect("reload scene");
         assert_eq!(sim.world_seed(), 42);
+    }
+
+    #[test]
+    fn lidar_demo_produces_point_cloud_hits() {
+        let mut sim = DiffDriveSim::new();
+        sim.enable_lidar_demo();
+        for _ in 0..120 {
+            sim.step(6.0, 6.0);
+        }
+        let obs = sim.observe();
+        assert!(
+            obs.lidar_points >= 8,
+            "expected lidar hits after driving toward demo wall, got {}",
+            obs.lidar_points
+        );
     }
 
     #[test]

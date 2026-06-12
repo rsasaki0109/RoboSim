@@ -17,10 +17,11 @@
 | Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
 | Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Multi-robot agent | `cargo run -p multi_robot_agent --example 13_multi_robot_agent` | Two agents, two robots, one shared world |
-| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene asset load, URDF mesh visuals, WASD teleop, orbit camera, live hot reload (`assets/scenes/mesh_diff_drive.rne.scene.toml`, `--smoke` for headless) |
+| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene asset load, URDF mesh visuals, WASD teleop, orbit camera, LiDAR hit overlay (`L`), live hot reload (`assets/scenes/mesh_diff_drive.rne.scene.toml`, `--smoke` for headless) |
 | Asset hot reload | `cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke` | Validate scene deps and reload on file change |
 | Goal-conditioned agent | `cargo run -p goal_conditioned_agent --example 16_goal_conditioned_agent` | Goal-seeking policy, curriculum, shared-world goal agent |
 | Multi-robot collision | `cargo run -p multi_robot_collision --example 17_multi_robot_collision` | Head-on contact detection from scene asset and built-in scenario |
+| LiDAR render | `cargo run -p lidar_render --example 19_lidar_render` | LiDAR hits as sphere markers in wgpu scene |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |
