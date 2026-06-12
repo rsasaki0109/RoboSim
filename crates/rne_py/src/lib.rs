@@ -13,8 +13,12 @@ struct PyObservation {
     base_x_m: f64,
     base_y_m: f64,
     base_z_m: f64,
+    base_yaw_rad: f64,
+    left_wheel_velocity_rad_s: f64,
+    right_wheel_velocity_rad_s: f64,
     imu_ay_m_s2: f64,
     lidar_points: usize,
+    goal_delta_x_m: Option<f64>,
 }
 
 #[pymethods]
@@ -35,6 +39,21 @@ impl PyObservation {
     }
 
     #[getter]
+    fn base_yaw(&self) -> f64 {
+        self.base_yaw_rad
+    }
+
+    #[getter]
+    fn left_wheel_velocity(&self) -> f64 {
+        self.left_wheel_velocity_rad_s
+    }
+
+    #[getter]
+    fn right_wheel_velocity(&self) -> f64 {
+        self.right_wheel_velocity_rad_s
+    }
+
+    #[getter]
     fn imu_ay(&self) -> f64 {
         self.imu_ay_m_s2
     }
@@ -44,10 +63,15 @@ impl PyObservation {
         self.lidar_points
     }
 
+    #[getter]
+    fn goal_delta_x(&self) -> Option<f64> {
+        self.goal_delta_x_m
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "Observation(base_x={:.3}, base_y={:.3}, imu_ay={:.3})",
-            self.base_x_m, self.base_y_m, self.imu_ay_m_s2
+            "Observation(base_x={:.3}, base_y={:.3}, yaw={:.3}, imu_ay={:.3})",
+            self.base_x_m, self.base_y_m, self.base_yaw_rad, self.imu_ay_m_s2
         )
     }
 }
@@ -58,8 +82,12 @@ impl From<DiffDriveObservation> for PyObservation {
             base_x_m: value.base_x_m,
             base_y_m: value.base_y_m,
             base_z_m: value.base_z_m,
+            base_yaw_rad: value.base_yaw_rad,
+            left_wheel_velocity_rad_s: value.left_wheel_velocity_rad_s,
+            right_wheel_velocity_rad_s: value.right_wheel_velocity_rad_s,
             imu_ay_m_s2: value.imu_ay_m_s2,
             lidar_points: value.lidar_points,
+            goal_delta_x_m: value.goal_delta_x_m,
         }
     }
 }

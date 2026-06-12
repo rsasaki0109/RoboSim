@@ -28,6 +28,20 @@ pub struct AgentTarget {
     pub robot: Option<Entity>,
 }
 
+/// Optional goal position for goal-relative observations.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct AgentGoal {
+    /// Target base X position in meters.
+    pub goal_x_m: f64,
+}
+
+impl AgentGoal {
+    /// Creates a forward goal at the given X coordinate.
+    pub fn at_x(goal_x_m: f64) -> Self {
+        Self { goal_x_m }
+    }
+}
+
 /// Marker set after a policy has been attached to the agent.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AttachedPolicy;

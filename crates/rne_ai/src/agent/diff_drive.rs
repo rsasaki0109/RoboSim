@@ -40,13 +40,7 @@ impl DiffDriveAgentState {
             episode: DiffDriveEpisode::new(config),
             policy: None,
             last_step: EpisodeStep {
-                observation: DiffDriveObservation {
-                    base_x_m: 0.0,
-                    base_y_m: 0.0,
-                    base_z_m: 0.0,
-                    imu_ay_m_s2: 0.0,
-                    lidar_points: 0,
-                },
+                observation: DiffDriveObservation::default(),
                 reward: 0.0,
                 terminated: false,
                 truncated: false,
