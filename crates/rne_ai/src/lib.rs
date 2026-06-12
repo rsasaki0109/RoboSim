@@ -9,6 +9,7 @@ pub mod env;
 pub mod episode;
 pub mod observation;
 pub mod policy;
+pub mod render;
 pub mod reward;
 pub mod rng;
 
@@ -28,5 +29,6 @@ pub use env::{
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use observation::DiffDriveObservation;
 pub use policy::{ConstantVelocityPolicy, Policy};
+pub use render::build_diff_drive_render_scene;
 pub use reward::DiffDriveRewardConfig;
 pub use rng::DeterministicRng;

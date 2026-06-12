@@ -2,7 +2,7 @@
 
 use crate::action::DiffDriveAction;
 use crate::observation::DiffDriveObservation;
-use rne_assets::{load_and_spawn_scene, AssetError};
+use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
 use rne_data::{InMemoryDataBus, StreamId};
@@ -38,6 +38,7 @@ pub struct DiffDriveSim {
     dt: SimDuration,
     step_count: u64,
     drive_mode: DiffDriveDriveMode,
+    mesh_package_roots: Vec<PathBuf>,
 }
 
 impl DiffDriveSim {
@@ -58,7 +59,14 @@ impl DiffDriveSim {
                 ..DiffDriveConfig::default()
             },
         );
-        Self::from_spawned_world(world, vec![robot], None, 0, DiffDriveDriveMode::JointDriven)
+        Self::from_spawned_world(
+            world,
+            vec![robot],
+            None,
+            0,
+            DiffDriveDriveMode::JointDriven,
+            Vec::new(),
+        )
     }
 
     /// Creates a simulation with multiple diff-drive robots on a shared ground plane.
@@ -74,7 +82,7 @@ impl DiffDriveSim {
             .map(|config| spawn_diff_drive_robot(&mut world, config))
             .collect();
         let drive_mode = configs[0].drive_mode;
-        Self::from_spawned_world(world, robots, None, 0, drive_mode)
+        Self::from_spawned_world(world, robots, None, 0, drive_mode, Vec::new())
     }
 
     /// Loads a `.rne.scene.toml` file and its referenced robot assets.
@@ -121,12 +129,16 @@ impl DiffDriveSim {
             drive,
         };
 
+        let bundle = load_scene_bundle(scene_path)?;
+        let mesh_roots = mesh_package_roots(&bundle);
+
         Ok(Self::from_spawned_world(
             world,
             vec![robot_spawned],
             Some(scene_path.to_path_buf()),
             world_seed,
             DiffDriveDriveMode::Kinematic,
+            mesh_roots,
         ))
     }
 
@@ -169,6 +181,11 @@ impl DiffDriveSim {
         &self.robots
     }
 
+    /// Returns package roots used to resolve URDF mesh assets for the loaded scene.
+    pub fn mesh_package_roots(&self) -> &[PathBuf] {
+        &self.mesh_package_roots
+    }
+
     /// Spawns an additional diff-drive robot into the live simulation world.
     pub fn spawn_robot(&mut self, config: DiffDriveConfig) -> DiffDriveSpawned {
         let spawned = spawn_diff_drive_robot(&mut self.world, &config);
@@ -190,6 +207,7 @@ impl DiffDriveSim {
         scene_path: Option<PathBuf>,
         world_seed: u64,
         drive_mode: DiffDriveDriveMode,
+        mesh_package_roots: Vec<PathBuf>,
     ) -> Self {
         for (index, robot) in robots.iter().enumerate() {
             attach_imu(&mut world, robot.base_link, imu_stream_for_index(index));
@@ -214,6 +232,7 @@ impl DiffDriveSim {
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             step_count: 0,
             drive_mode,
+            mesh_package_roots,
         }
     }
 

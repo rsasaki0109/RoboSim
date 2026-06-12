@@ -6,9 +6,11 @@ use crate::scene::SceneAsset;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
-use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned};
+use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
+use rne_urdf_import::{attach_urdf_visuals, parse_urdf_file};
 use rne_world::{spawn_world, Gravity, Transform3, WorldEntity};
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Result of spawning a robot asset into the ECS world.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +33,7 @@ pub struct SpawnedScene {
 /// Spawns entities described by a robot asset.
 pub fn spawn_robot_asset(
     world: &mut World,
+    asset_path: &Path,
     asset: &RobotAsset,
 ) -> Result<SpawnedRobot, AssetError> {
     match asset.kind {
@@ -40,6 +43,9 @@ pub fn spawn_robot_asset(
                 .as_ref()
                 .ok_or_else(|| AssetError::invalid("robot", "missing diff_drive section"))?;
             let spawned = spawn_diff_drive_robot(world, &section.to_config(&asset.model_name));
+            if let Some(visuals) = &asset.visuals {
+                attach_diff_drive_visuals(world, asset_path, visuals, &spawned)?;
+            }
             Ok(SpawnedRobot {
                 robot: spawned.robot,
                 base_link: spawned.base_link,
@@ -55,7 +61,7 @@ pub fn spawn_robot_asset(
 pub fn spawn_scene(
     world: &mut World,
     scene: &SceneAsset,
-    robots: &[RobotAsset],
+    robots: &[(PathBuf, RobotAsset)],
 ) -> Result<SpawnedScene, AssetError> {
     if robots.len() != scene.robots.len() {
         return Err(AssetError::invalid(
@@ -85,14 +91,15 @@ pub fn spawn_scene(
     }
 
     let mut spawned_robots = Vec::new();
-    for (index, robot_asset) in robots.iter().enumerate() {
-        let spawned = spawn_robot_asset(world, robot_asset).map_err(|error| match error {
-            AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
-                scene.robots[index].path.clone(),
-                format!("robot #{index} kind `{kind}` is not supported by spawn_scene"),
-            ),
-            other => other,
-        })?;
+    for (index, (robot_path, robot_asset)) in robots.iter().enumerate() {
+        let spawned =
+            spawn_robot_asset(world, robot_path, robot_asset).map_err(|error| match error {
+                AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
+                    scene.robots[index].path.clone(),
+                    format!("robot #{index} kind `{kind}` is not supported by spawn_scene"),
+                ),
+                other => other,
+            })?;
         spawned_robots.push((robot_asset.model_name.clone(), spawned));
     }
 
@@ -109,8 +116,7 @@ pub fn load_and_spawn_scene(
 ) -> Result<SpawnedScene, AssetError> {
     let scene = crate::scene::load_scene_asset(scene_path)?;
     let robots = crate::scene::load_scene_robots(scene_path, &scene)?;
-    let robot_assets: Vec<RobotAsset> = robots.into_iter().map(|(_, asset)| asset).collect();
-    spawn_scene(world, &scene, &robot_assets)
+    spawn_scene(world, &scene, &robots)
 }
 
 /// Spawns a fixed ground plane collider used by built-in scenes.
@@ -151,6 +157,49 @@ fn vec3_from_array(values: [f64; 3]) -> Vec3 {
     Vec3::new(values[0], values[1], values[2])
 }
 
+fn attach_diff_drive_visuals(
+    world: &mut World,
+    asset_path: &Path,
+    visuals: &crate::robot::VisualsRobotAsset,
+    spawned: &DiffDriveSpawned,
+) -> Result<(), AssetError> {
+    let base_dir = asset_path.parent().unwrap_or_else(|| Path::new("."));
+    let urdf_path = visuals.resolve_urdf_path(base_dir);
+    let urdf = parse_urdf_file(&urdf_path).map_err(|error| {
+        AssetError::invalid(
+            asset_path.display().to_string(),
+            format!(
+                "visuals urdf parse failed ({}): {error}",
+                urdf_path.display()
+            ),
+        )
+    })?;
+
+    let links = collect_robot_links(world, spawned.robot);
+    let attached = attach_urdf_visuals(world, &urdf, &links, [0.7, 0.7, 0.75, 1.0]);
+    if attached == 0 {
+        return Err(AssetError::invalid(
+            asset_path.display().to_string(),
+            format!(
+                "visuals urdf attached no matching links: {}",
+                urdf_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_robot_links(world: &mut World, robot: Entity) -> HashMap<String, Entity> {
+    let mut links = HashMap::new();
+    let mut query = world.query::<(Entity, &Link)>();
+    for (entity, link) in query.iter(world) {
+        if link.robot == robot {
+            links.insert(link.name.clone(), entity);
+        }
+    }
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,12 +219,22 @@ mod tests {
     }
 
     #[test]
+    fn diff_drive_visuals_attach_from_urdf() {
+        let robot_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mesh_diff_drive.rne.robot.toml");
+        let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_robot_asset(&mut world, &robot_path, &asset).unwrap();
+        assert!(world.get::<rne_render::Visual>(spawned.base_link).is_some());
+    }
+
+    #[test]
     fn urdf_robot_asset_cannot_spawn_in_core_loader() {
         let robot_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/diff_drive_urdf.rne.robot.toml");
         let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
         let mut world = World::new();
-        let error = spawn_robot_asset(&mut world, &asset).unwrap_err();
+        let error = spawn_robot_asset(&mut world, &robot_path, &asset).unwrap_err();
         assert!(matches!(error, AssetError::UnsupportedRobotKind { .. }));
     }
 }

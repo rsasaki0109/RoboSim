@@ -67,6 +67,32 @@ pub fn spawn_urdf_robot(
     spawn_urdf_robot_with_config(world, urdf, UrdfSpawnConfig::default())
 }
 
+/// Attaches URDF visual components to existing link entities keyed by link name.
+///
+/// Only the first visual element on each link is applied. Colliders and rigid bodies
+/// are not modified.
+pub fn attach_urdf_visuals(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    links: &HashMap<String, Entity>,
+    color_rgba: [f32; 4],
+) -> usize {
+    let mut visual_count = 0;
+    for link in &urdf.links {
+        let Some(entity) = links.get(&link.name) else {
+            continue;
+        };
+        let Some(element) = link.visuals.first() else {
+            continue;
+        };
+        world
+            .entity_mut(*entity)
+            .insert(visual_from_element(element, color_rgba));
+        visual_count += 1;
+    }
+    visual_count
+}
+
 /// Spawns a URDF robot with explicit spawn configuration.
 pub fn spawn_urdf_robot_with_config(
     world: &mut World,
@@ -246,6 +272,22 @@ mod tests {
         let left_wheel = spawned.links["left_wheel"];
         let collider = world.get::<Collider>(left_wheel).expect("wheel collider");
         assert!(matches!(collider.shape, ColliderShape::Capsule { .. }));
+    }
+
+    #[test]
+    fn attach_urdf_visuals_matches_existing_links() {
+        let urdf = parse_urdf(FIXTURE).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot(&mut world, &urdf).unwrap();
+
+        for entity in spawned.links.values() {
+            world.entity_mut(*entity).remove::<Visual>();
+        }
+
+        let attached =
+            attach_urdf_visuals(&mut world, &urdf, &spawned.links, [0.7, 0.7, 0.75, 1.0]);
+        assert_eq!(attached, 3);
+        assert!(world.get::<Visual>(spawned.base_link).is_some());
     }
 
     #[test]

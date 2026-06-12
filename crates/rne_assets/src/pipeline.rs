@@ -82,11 +82,11 @@ pub fn load_scene_bundle(scene_path: &Path) -> Result<SceneAssetBundle, AssetErr
 
 /// Validates on-disk references for a robot asset.
 pub fn validate_robot_references(path: &Path, asset: &RobotAsset) -> Result<(), AssetError> {
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     if asset.kind == RobotKind::Urdf {
         let urdf = asset.urdf.as_ref().ok_or_else(|| {
             AssetError::invalid(path.display().to_string(), "missing urdf section")
         })?;
-        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
         let urdf_path = urdf.resolve_path(base_dir);
         if !urdf_path.is_file() {
             return Err(AssetError::invalid(
@@ -95,7 +95,33 @@ pub fn validate_robot_references(path: &Path, asset: &RobotAsset) -> Result<(), 
             ));
         }
     }
+    if let Some(visuals) = &asset.visuals {
+        let urdf_path = visuals.resolve_urdf_path(base_dir);
+        if !urdf_path.is_file() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                format!("visuals urdf file not found: {}", urdf_path.display()),
+            ));
+        }
+    }
     Ok(())
+}
+
+/// Returns package roots used to resolve mesh URIs for a scene bundle.
+pub fn mesh_package_roots(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for (robot_path, robot) in &bundle.robots {
+        if let Some(visuals) = &robot.visuals {
+            let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
+            let urdf_path = visuals.resolve_urdf_path(base_dir);
+            if let Some(parent) = urdf_path.parent() {
+                roots.push(parent.to_path_buf());
+            }
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
 }
 
 /// Validates a scene or robot asset path.
@@ -132,9 +158,12 @@ pub fn scene_dependency_paths(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
     let mut paths = vec![bundle.scene_path.clone()];
     for (robot_path, robot) in &bundle.robots {
         paths.push(robot_path.clone());
+        let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(urdf) = &robot.urdf {
-            let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
             paths.push(urdf.resolve_path(base_dir));
+        }
+        if let Some(visuals) = &robot.visuals {
+            paths.push(visuals.resolve_urdf_path(base_dir));
         }
     }
     paths.sort();
@@ -250,6 +279,14 @@ fn format_robot_report(path: &Path, asset: &RobotAsset) -> String {
     if let Some(urdf) = &asset.urdf {
         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
         lines.push(format!("urdf: {}", urdf.resolve_path(base_dir).display()));
+    }
+
+    if let Some(visuals) = &asset.visuals {
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        lines.push(format!(
+            "visuals: {}",
+            visuals.resolve_urdf_path(base_dir).display()
+        ));
     }
 
     lines.join("\n")

@@ -6,6 +6,7 @@ use crate::visual::VisualShape;
 use rne_math::Transform3 as MathTransform3;
 use rne_world::Transform3;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// One renderable primitive in a scene pass.
@@ -54,15 +55,37 @@ impl RenderScene {
 
     /// Loads STL files referenced by mesh visuals in this scene.
     pub fn resolve_mesh_assets(&mut self, package_root: &Path) -> Result<(), MeshLoadError> {
+        self.resolve_mesh_assets_with_roots(&[package_root])
+    }
+
+    /// Loads STL files using the first package root that resolves each mesh URI.
+    pub fn resolve_mesh_assets_with_roots(
+        &mut self,
+        package_roots: &[&Path],
+    ) -> Result<(), MeshLoadError> {
         for item in &mut self.items {
             let VisualShape::Mesh { path, .. } = &item.shape else {
                 continue;
             };
-            let file_path = resolve_package_uri(path, package_root);
+            let file_path = resolve_mesh_path(path, package_roots)?;
             item.mesh = Some(Arc::new(load_stl(&file_path)?));
         }
         Ok(())
     }
+}
+
+fn resolve_mesh_path(uri: &str, package_roots: &[&Path]) -> Result<PathBuf, MeshLoadError> {
+    for root in package_roots {
+        let file_path = resolve_package_uri(uri, root);
+        if file_path.is_file() {
+            return Ok(file_path);
+        }
+    }
+
+    Err(MeshLoadError::Io {
+        path: uri.to_string(),
+        message: format!("mesh not found in {} package root(s)", package_roots.len()),
+    })
 }
 
 fn to_math_transform(transform: Transform3) -> MathTransform3 {
