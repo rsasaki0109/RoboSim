@@ -11,6 +11,7 @@ pub trait FramePayload: Clone + Send + Sync + 'static {}
 impl FramePayload for crate::payloads::ImuSample {}
 impl FramePayload for crate::payloads::PointCloud {}
 impl FramePayload for crate::payloads::WheelEncoderSample {}
+impl FramePayload for crate::payloads::JointState {}
 impl FramePayload for crate::payloads::ImageRgb8 {}
 
 /// Timestamped typed frame published on the DataBus.

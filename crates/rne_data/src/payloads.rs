@@ -43,6 +43,17 @@ pub struct WheelEncoderSample {
     pub velocity_rad_s: f64,
 }
 
+/// Articulated joint positions and velocities published on the DataBus.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointState {
+    /// Joint names matching `positions_rad` / `velocities_rad_s` order.
+    pub names: Vec<String>,
+    /// Joint positions in radians, in actuation order.
+    pub positions_rad: Vec<f64>,
+    /// Joint velocities in radians per second, in actuation order.
+    pub velocities_rad_s: Vec<f64>,
+}
+
 /// RGBA8 camera image payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageRgb8 {

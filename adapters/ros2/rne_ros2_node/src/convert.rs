@@ -1,8 +1,8 @@
 //! Convert `rne_adapter_ros2` message shapes into `rclrs` ROS message types.
 
 use rne_adapter_ros2::{
-    RosClock, RosHeader, RosLaserScan, RosPointCloud2, RosPointField, RosQuaternion, RosTfMessage,
-    RosTime, RosTransform, RosTransformStamped, RosVector3,
+    RosClock, RosHeader, RosJointState, RosLaserScan, RosPointCloud2, RosPointField, RosQuaternion,
+    RosTfMessage, RosTime, RosTransform, RosTransformStamped, RosVector3,
 };
 
 /// Maps adapter clock to `rosgraph_msgs/Clock`.
@@ -47,6 +47,17 @@ pub fn to_laserscan_message(scan: &RosLaserScan) -> sensor_msgs::msg::LaserScan 
 pub fn to_tf_message(tf: &RosTfMessage) -> tf2_msgs::msg::TFMessage {
     tf2_msgs::msg::TFMessage {
         transforms: tf.transforms.iter().map(to_transform_stamped).collect(),
+    }
+}
+
+/// Maps adapter joint state to `sensor_msgs/JointState`.
+pub fn to_joint_state_message(joint_state: &RosJointState) -> sensor_msgs::msg::JointState {
+    sensor_msgs::msg::JointState {
+        header: to_header(&joint_state.header),
+        name: joint_state.names.clone(),
+        position: joint_state.positions.clone(),
+        velocity: joint_state.velocities.clone(),
+        effort: joint_state.efforts.clone(),
     }
 }
 

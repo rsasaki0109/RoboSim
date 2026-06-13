@@ -1,0 +1,5 @@
+kind = "urdf"
+model_name = "mm_mobile"
+
+[urdf]
+path = "mm_mobile/mm_mobile.urdf"

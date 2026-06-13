@@ -9,8 +9,8 @@ use rclrs::{
     RclrsError, RequestedGoal, SpinOptions, TerminatedGoal,
 };
 use rne_adapter_ros2::{
-    pointcloud_to_laserscan, to_ros_clock, to_ros_pointcloud2, to_ros_transform_stamped,
-    RosTfMessage,
+    pointcloud_to_laserscan, to_ros_clock, to_ros_joint_state, to_ros_pointcloud2,
+    to_ros_transform_stamped, RosTfMessage,
 };
 use rne_data::PointCloud;
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
@@ -26,7 +26,10 @@ use simulation_interfaces::{
     },
 };
 
-use crate::convert::{to_clock_message, to_laserscan_message, to_pointcloud2_message, to_tf_message};
+use crate::convert::{
+    to_clock_message, to_joint_state_message, to_laserscan_message, to_pointcloud2_message,
+    to_tf_message,
+};
 use crate::sim_control::{BridgeFrame, BridgeSim};
 
 const SIM_STEPS: usize = 300;
@@ -37,6 +40,7 @@ type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
 type ScanPublisher = Publisher<sensor_msgs::msg::LaserScan>;
 type TfPublisher = Publisher<tf2_msgs::msg::TFMessage>;
+type JointStatePublisher = Publisher<sensor_msgs::msg::JointState>;
 
 struct BridgeLoop {
     sim: Mutex<BridgeSim>,
@@ -44,6 +48,7 @@ struct BridgeLoop {
     cloud_pub: CloudPublisher,
     scan_pub: ScanPublisher,
     tf_pub: TfPublisher,
+    joint_state_pub: JointStatePublisher,
     wheel_velocity: MandatoryParameter<f64>,
 }
 
@@ -54,6 +59,7 @@ impl BridgeLoop {
         cloud_pub: CloudPublisher,
         scan_pub: ScanPublisher,
         tf_pub: TfPublisher,
+        joint_state_pub: JointStatePublisher,
         wheel_velocity: MandatoryParameter<f64>,
     ) -> Self {
         Self {
@@ -62,6 +68,7 @@ impl BridgeLoop {
             cloud_pub,
             scan_pub,
             tf_pub,
+            joint_state_pub,
             wheel_velocity,
         }
     }
@@ -77,6 +84,7 @@ impl BridgeLoop {
             &self.cloud_pub,
             &self.scan_pub,
             &self.tf_pub,
+            &self.joint_state_pub,
             &sim.frame(),
         )
     }
@@ -93,6 +101,7 @@ impl BridgeLoop {
             &self.cloud_pub,
             &self.scan_pub,
             &self.tf_pub,
+            &self.joint_state_pub,
             &frame,
         )?;
         Ok(true)
@@ -130,6 +139,9 @@ pub fn run() -> Result<()> {
     let tf_pub = node
         .create_publisher::<tf2_msgs::msg::TFMessage>("/tf")
         .context("failed to create /tf publisher")?;
+    let joint_state_pub = node
+        .create_publisher::<sensor_msgs::msg::JointState>("/joint_states")
+        .context("failed to create /joint_states publisher")?;
 
     let bridge = Arc::new(BridgeLoop::new(
         BridgeSim::new(),
@@ -137,6 +149,7 @@ pub fn run() -> Result<()> {
         cloud_pub,
         scan_pub,
         tf_pub,
+        joint_state_pub,
         wheel_velocity,
     ));
 
@@ -318,6 +331,7 @@ fn publish_frame(
     cloud_pub: &CloudPublisher,
     scan_pub: &ScanPublisher,
     tf_pub: &TfPublisher,
+    joint_state_pub: &JointStatePublisher,
     frame: &BridgeFrame,
 ) -> Result<()> {
     let sim_time = rne_core::SimTime::from_ticks(frame.sim_ticks);
@@ -347,6 +361,11 @@ fn publish_frame(
 
     let tf = make_tf_message(base, frame.lidar_world, sim_time);
     tf_pub.publish(to_tf_message(&tf)).context("publish /tf")?;
+
+    let joint_state = to_ros_joint_state(&frame.joint_state, sim_time, "base_link");
+    joint_state_pub
+        .publish(to_joint_state_message(&joint_state))
+        .context("publish /joint_states")?;
 
     Ok(())
 }

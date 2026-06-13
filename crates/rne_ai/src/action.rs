@@ -18,3 +18,16 @@ impl DiffDriveAction {
         }
     }
 }
+
+/// Joint velocity command for a mobile manipulator (optional base wheels + arm).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MobileManipulatorAction {
+    /// Left wheel angular velocity in radians per second.
+    pub left_wheel_velocity_rad_s: f64,
+    /// Right wheel angular velocity in radians per second.
+    pub right_wheel_velocity_rad_s: f64,
+    /// Shoulder joint angular velocity in radians per second.
+    pub shoulder_velocity_rad_s: f64,
+    /// Elbow joint angular velocity in radians per second.
+    pub elbow_velocity_rad_s: f64,
+}

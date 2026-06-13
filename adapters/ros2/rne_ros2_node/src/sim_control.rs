@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use rne_ai::{DiffDriveObservation, DiffDriveSim};
-use rne_data::PointCloud;
+use rne_data::{JointState, PointCloud};
 use rne_sensor::LidarSpec;
 use rne_world::Transform3;
 use simulation_interfaces::{
@@ -26,6 +26,8 @@ pub struct BridgeFrame {
     pub lidar_world: Option<Transform3>,
     /// LiDAR sensor specification when present.
     pub lidar_spec: Option<LidarSpec>,
+    /// Latest wheel joint state for `/joint_states`.
+    pub joint_state: JointState,
 }
 
 /// Shared simulation playback and reset state for the ROS bridge loop.
@@ -81,6 +83,7 @@ impl BridgeSim {
                 .unwrap_or_else(PointCloud::new),
             lidar_world: self.sim.primary_lidar_world_transform(),
             lidar_spec: self.sim.primary_lidar_spec(),
+            joint_state: self.sim.joint_state(),
         }
     }
 

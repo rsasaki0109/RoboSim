@@ -3,16 +3,18 @@
 #![deny(missing_docs)]
 
 pub mod clock;
+pub mod jointstate;
 pub mod laserscan;
 pub mod messages;
 pub mod pointcloud;
 pub mod tf;
 
 pub use clock::{to_ros_clock, to_ros_time};
+pub use jointstate::to_ros_joint_state;
 pub use laserscan::pointcloud_to_laserscan;
 pub use messages::{
-    RosClock, RosHeader, RosLaserScan, RosPointCloud2, RosPointField, RosQuaternion, RosTfMessage,
-    RosTime, RosTransform, RosTransformStamped, RosVector3,
+    RosClock, RosHeader, RosJointState, RosLaserScan, RosPointCloud2, RosPointField, RosQuaternion,
+    RosTfMessage, RosTime, RosTransform, RosTransformStamped, RosVector3,
 };
 pub use pointcloud::{decode_xyz_points, to_ros_pointcloud2};
 pub use tf::{

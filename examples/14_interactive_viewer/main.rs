@@ -1,21 +1,31 @@
-//! Interactive diff-drive viewer with keyboard teleop, scene assets, URDF mesh visuals, and hot reload.
+//! Interactive viewer with keyboard teleop for diff-drive scenes and mobile manipulators.
 //!
-//! Controls:
+//! Controls (diff-drive scene):
 //! - W / S: drive forward / backward
 //! - A / D: turn left / right
+//!
+//! Controls (`--manipulator` / `--manipulator-mobile`):
+//! - Q / E: shoulder down / up
+//! - Z / X: elbow down / up
+//! - W / S / A / D: base drive (mobile variant only)
+//!
+//! Shared:
 //! - Left / Right: orbit camera
 //! - Up / Down: zoom camera
-//! - L: toggle LiDAR hit overlay
+//! - L: toggle LiDAR hit overlay (diff-drive scenes only)
 //! - Escape: quit
 //!
 //! Usage:
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/mesh_diff_drive.rne.scene.toml
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-mobile
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
-//!
-//! Edit the scene or referenced robot files while running; the viewer reloads automatically.
 
-use rne_ai::{append_lidar_overlay, build_diff_drive_render_scene, DiffDriveAction, DiffDriveSim};
+use rne_ai::{
+    append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
+    DiffDriveAction, DiffDriveSim, MobileManipulatorAction, MobileManipulatorSim,
+};
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
@@ -33,18 +43,142 @@ use winit::window::{Window, WindowId};
 const CLEAR_COLOR: [f32; 4] = [0.05, 0.08, 0.12, 1.0];
 const DRIVE_SPEED_RAD_S: f64 = 5.0;
 const TURN_DELTA_RAD_S: f64 = 3.0;
+const ARM_SPEED_RAD_S: f64 = 2.5;
+
+#[derive(Clone, Debug)]
+enum ViewerProfile {
+    DiffDriveScene(PathBuf),
+    ManipulatorFixed,
+    ManipulatorMobile,
+}
+
+enum ViewerSim {
+    DiffDrive(DiffDriveSim),
+    Manipulator(MobileManipulatorSim),
+}
+
+impl ViewerSim {
+    fn step(&mut self, keys: &HashSet<KeyCode>) {
+        match self {
+            Self::DiffDrive(sim) => {
+                sim.step_action(teleop_diff_drive(keys));
+            }
+            Self::Manipulator(sim) => {
+                sim.step(teleop_manipulator(keys, sim.mobile_base()));
+            }
+        }
+    }
+
+    fn focus(&self) -> Vec3 {
+        match self {
+            Self::DiffDrive(sim) => {
+                let obs = sim.observe();
+                Vec3::new(obs.base_x_m, 0.25, obs.base_z_m)
+            }
+            Self::Manipulator(sim) => {
+                let obs = sim.observe();
+                Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m)
+            }
+        }
+    }
+
+    fn hud_line(&self) -> String {
+        match self {
+            Self::DiffDrive(sim) => {
+                let obs = sim.observe();
+                format!(
+                    "base=({:.2}, {:.2}, {:.2}) yaw={:.2} rad",
+                    obs.base_x_m, obs.base_y_m, obs.base_z_m, obs.base_yaw_rad
+                )
+            }
+            Self::Manipulator(sim) => {
+                let obs = sim.observe();
+                format!(
+                    "ee=({:.2}, {:.2}, {:.2}) shoulder={:.2} rad elbow={:.2} rad base=({:.2}, {:.2})",
+                    obs.ee_x_m,
+                    obs.ee_y_m,
+                    obs.ee_z_m,
+                    obs.shoulder_position_rad,
+                    obs.elbow_position_rad,
+                    obs.base_x_m,
+                    obs.base_z_m
+                )
+            }
+        }
+    }
+
+    fn build_scene(&self, show_lidar: bool) -> rne_render::RenderScene {
+        match self {
+            Self::DiffDrive(sim) => {
+                let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+                if show_lidar {
+                    append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
+                }
+                scene
+            }
+            Self::Manipulator(sim) => build_visual_render_scene(sim.world()),
+        }
+    }
+
+    fn mesh_roots(&self) -> Vec<PathBuf> {
+        match self {
+            Self::DiffDrive(sim) => sim.mesh_package_roots().to_vec(),
+            Self::Manipulator(_) => Vec::new(),
+        }
+    }
+
+    fn supports_hot_reload(&self) -> bool {
+        matches!(self, Self::DiffDrive(_))
+    }
+
+    fn reload_scene(&mut self, scene_path: &Path) -> Result<(), String> {
+        match self {
+            Self::DiffDrive(sim) => sim
+                .reload_scene()
+                .map_err(|error| format!("reload scene: {error}")),
+            Self::Manipulator(_) => {
+                let _ = scene_path;
+                Ok(())
+            }
+        }
+    }
+
+    fn world_seed(&self) -> u64 {
+        match self {
+            Self::DiffDrive(sim) => sim.world_seed(),
+            Self::Manipulator(_) => 0,
+        }
+    }
+
+    fn smoke_base_x(&self) -> f64 {
+        match self {
+            Self::DiffDrive(sim) => sim.observe().base_x_m,
+            Self::Manipulator(sim) => sim.observe().base_x_m,
+        }
+    }
+
+    fn smoke_lidar_hits(&self) -> usize {
+        match self {
+            Self::DiffDrive(sim) => {
+                let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+                append_lidar_overlay(&mut scene, sim.world(), sim.data_bus()).hit_markers
+            }
+            Self::Manipulator(_) => 0,
+        }
+    }
+}
 
 fn main() {
     let smoke = env::args().any(|arg| arg == "--smoke") || env::var("RNE_VIEWER_SMOKE").is_ok();
-    let scene_path = scene_path_from_args();
+    let profile = viewer_profile_from_args();
 
     if smoke || env::var("RNE_SKIP_GPU").is_ok() {
-        run_smoke(smoke, &scene_path);
+        run_smoke(smoke, &profile);
         return;
     }
 
     let event_loop = EventLoop::new().expect("create event loop");
-    let mut app = App::new(scene_path);
+    let mut app = App::new(profile);
     event_loop.run_app(&mut app).expect("run viewer");
 }
 
@@ -53,23 +187,53 @@ fn default_scene_path() -> PathBuf {
         .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
 }
 
-fn scene_path_from_args() -> PathBuf {
-    env::args()
-        .skip(1)
+fn viewer_profile_from_args() -> ViewerProfile {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--manipulator-mobile") {
+        return ViewerProfile::ManipulatorMobile;
+    }
+    if args.iter().any(|arg| arg == "--manipulator") {
+        return ViewerProfile::ManipulatorFixed;
+    }
+    let scene_path = args
+        .iter()
         .find(|arg| !arg.starts_with('-'))
         .map(PathBuf::from)
-        .unwrap_or_else(default_scene_path)
+        .unwrap_or_else(default_scene_path);
+    ViewerProfile::DiffDriveScene(scene_path)
 }
 
-fn run_smoke(explicit: bool, scene_path: &Path) {
+fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
+    match profile {
+        ViewerProfile::DiffDriveScene(path) => DiffDriveSim::from_scene_path(path)
+            .map(ViewerSim::DiffDrive)
+            .map_err(|error| error.to_string()),
+        ViewerProfile::ManipulatorFixed => Ok(ViewerSim::Manipulator(
+            MobileManipulatorSim::new_mm_minimal(),
+        )),
+        ViewerProfile::ManipulatorMobile => {
+            Ok(ViewerSim::Manipulator(MobileManipulatorSim::new_mm_mobile()))
+        }
+    }
+}
+
+fn profile_label(profile: &ViewerProfile) -> String {
+    match profile {
+        ViewerProfile::DiffDriveScene(path) => path.display().to_string(),
+        ViewerProfile::ManipulatorFixed => "mm_minimal (fixed base)".into(),
+        ViewerProfile::ManipulatorMobile => "mm_mobile (diff-drive + arm)".into(),
+    }
+}
+
+fn run_smoke(explicit: bool, profile: &ViewerProfile) {
     if env::var("RNE_SKIP_GPU").is_ok() {
         println!("RNE_SKIP_GPU set; skipping interactive viewer smoke");
         return;
     }
 
-    let mut sim = DiffDriveSim::from_scene_path(scene_path).expect("load scene");
+    let mut sim = load_sim(profile).expect("load viewer simulation");
     for _ in 0..60 {
-        sim.step_action(DiffDriveAction::forward(DRIVE_SPEED_RAD_S));
+        sim.step(&smoke_keys(profile));
     }
 
     let mut backend = match WgpuRenderBackend::new() {
@@ -80,17 +244,17 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
         }
     };
 
-    let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
-    let lidar_stats = append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
+    let mut scene = sim.build_scene(matches!(profile, ViewerProfile::DiffDriveScene(_)));
     let mesh_items = count_mesh_items(&scene);
     let mut mesh_cache = MeshRenderCache::new();
-    let mesh_roots = mesh_roots_for_sim(&sim);
+    let mesh_roots = sim.mesh_roots();
+    let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
     mesh_cache
-        .resolve_scene(&mut scene, &mesh_roots)
+        .resolve_scene(&mut scene, &mesh_root_refs)
         .expect("resolve mesh assets");
 
     let orbit = CameraOrbit {
-        focus: robot_focus(&sim),
+        focus: sim.focus(),
         yaw_rad: -0.09,
         pitch_rad: 0.52,
         distance_m: 3.6,
@@ -102,28 +266,53 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
         .render_scene_camera(&camera, &view, &scene, CLEAR_COLOR)
         .expect("smoke render");
 
+    let lidar_hits = sim.smoke_lidar_hits();
     println!(
-        "interactive viewer smoke{}: scene={} seed={} items={} mesh_items={} lidar_hits={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
+        "interactive viewer smoke{}: profile={} seed={} items={} mesh_items={} lidar_hits={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m hud={}",
         if explicit { "" } else { " (RNE_SKIP_GPU fallback)" },
-        scene_path.display(),
+        profile_label(profile),
         sim.world_seed(),
         scene.items.len(),
         mesh_items,
-        lidar_stats.hit_markers,
+        lidar_hits,
         hash_rgba8(&output.color.rgba8),
         hash_depth_f32(&output.depth.depth_m),
-        sim.observe().base_x_m
+        sim.smoke_base_x(),
+        sim.hud_line()
     );
 
-    if scene.items.is_empty() || sim.observe().base_x_m <= 0.0 {
+    if scene.items.is_empty() {
         std::process::exit(1);
     }
-    if lidar_stats.hit_markers < 4 {
-        eprintln!(
-            "interactive viewer smoke expected lidar hits, got {}",
-            lidar_stats.hit_markers
-        );
-        std::process::exit(1);
+
+    match profile {
+        ViewerProfile::DiffDriveScene(_) => {
+            if sim.smoke_base_x() <= 0.0 {
+                std::process::exit(1);
+            }
+            if lidar_hits < 4 {
+                eprintln!("interactive viewer smoke expected lidar hits, got {lidar_hits}");
+                std::process::exit(1);
+            }
+        }
+        ViewerProfile::ManipulatorFixed => {
+            let obs = match &sim {
+                ViewerSim::Manipulator(sim) => sim.observe(),
+                _ => unreachable!(),
+            };
+            if obs.joint_state_count < 2 {
+                std::process::exit(1);
+            }
+        }
+        ViewerProfile::ManipulatorMobile => {
+            let obs = match &sim {
+                ViewerSim::Manipulator(sim) => sim.observe(),
+                _ => unreachable!(),
+            };
+            if obs.base_x_m.abs() <= 0.05 && obs.base_z_m.abs() <= 0.05 {
+                std::process::exit(1);
+            }
+        }
     }
 
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -134,23 +323,37 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     }
 }
 
+fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
+    let mut keys = HashSet::new();
+    match profile {
+        ViewerProfile::DiffDriveScene(_) | ViewerProfile::ManipulatorMobile => {
+            keys.insert(KeyCode::KeyW);
+        }
+        ViewerProfile::ManipulatorFixed => {
+            keys.insert(KeyCode::KeyQ);
+        }
+    }
+    keys
+}
+
 struct App {
-    scene_path: PathBuf,
+    profile: ViewerProfile,
     window: Option<Arc<Window>>,
     viewer: Option<InteractiveViewer>,
-    sim: Option<DiffDriveSim>,
+    sim: Option<ViewerSim>,
     hot_reloader: Option<AssetHotReloader>,
     mesh_cache: MeshRenderCache,
     reload_count: u32,
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
     show_lidar: bool,
+    last_hud: String,
 }
 
 impl App {
-    fn new(scene_path: PathBuf) -> Self {
+    fn new(profile: ViewerProfile) -> Self {
         Self {
-            scene_path,
+            profile,
             window: None,
             viewer: None,
             sim: None,
@@ -160,6 +363,7 @@ impl App {
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
             show_lidar: true,
+            last_hud: String::new(),
         }
     }
 }
@@ -170,13 +374,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let title = format!(
-            "RNE Interactive Viewer — {}",
-            self.scene_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("scene")
-        );
+        let title = format!("RNE Interactive Viewer — {}", profile_label(&self.profile));
         let window = Arc::new(
             event_loop
                 .create_window(
@@ -196,44 +394,41 @@ impl ApplicationHandler for App {
             }
         };
 
-        let sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
+        let sim = match load_sim(&self.profile) {
             Ok(sim) => sim,
             Err(error) => {
-                eprintln!(
-                    "failed to load scene {}: {error}",
-                    self.scene_path.display()
-                );
-                event_loop.exit();
-                return;
-            }
-        };
-        let hot_reloader = match AssetHotReloader::load(&self.scene_path) {
-            Ok(reloader) => reloader,
-            Err(error) => {
-                eprintln!(
-                    "failed to watch scene dependencies for {}: {error}",
-                    self.scene_path.display()
-                );
+                eprintln!("failed to load viewer profile: {error}");
                 event_loop.exit();
                 return;
             }
         };
 
-        self.orbit.focus = robot_focus(&sim);
+        let hot_reloader = if let ViewerProfile::DiffDriveScene(path) = &self.profile {
+            match AssetHotReloader::load(path) {
+                Ok(reloader) => Some(reloader),
+                Err(error) => {
+                    eprintln!("failed to watch scene dependencies: {error}");
+                    event_loop.exit();
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        self.orbit.focus = sim.focus();
         self.mesh_cache.clear();
         println!(
-            "loaded scene {} (seed={}, robots={}, mesh_roots={}, lidar_mounts={})",
-            self.scene_path.display(),
+            "loaded {} (seed={}, mesh_roots={})",
+            profile_label(&self.profile),
             sim.world_seed(),
-            sim.robots().len(),
-            sim.mesh_package_roots().len(),
-            sim.lidar_mounts().len()
+            sim.mesh_roots().len()
         );
 
         self.window = Some(window);
         self.viewer = Some(viewer);
         self.sim = Some(sim);
-        self.hot_reloader = Some(hot_reloader);
+        self.hot_reloader = hot_reloader;
     }
 
     fn window_event(
@@ -279,7 +474,9 @@ impl App {
                 if physical == KeyCode::Escape {
                     std::process::exit(0);
                 }
-                if physical == KeyCode::KeyL {
+                if physical == KeyCode::KeyL
+                    && matches!(self.profile, ViewerProfile::DiffDriveScene(_))
+                {
                     self.show_lidar = !self.show_lidar;
                     println!(
                         "lidar overlay {}",
@@ -302,18 +499,27 @@ impl App {
         self.apply_camera_input();
         self.poll_hot_reload()?;
 
-        let action = teleop_action(&self.pressed);
         let sim = self.sim.as_mut().ok_or("simulation not ready")?;
-        self.orbit.focus = robot_focus(sim);
-        sim.step_action(action);
+        sim.step(&self.pressed);
+        self.orbit.focus = sim.focus();
 
-        let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
-        if self.show_lidar {
-            append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
+        let hud = sim.hud_line();
+        if hud != self.last_hud {
+            if let Some(window) = &self.window {
+                window.set_title(&format!(
+                    "RNE Interactive Viewer — {} | {}",
+                    profile_label(&self.profile),
+                    hud
+                ));
+            }
+            self.last_hud = hud;
         }
-        let mesh_roots = mesh_roots_for_sim(sim);
+
+        let mut scene = sim.build_scene(self.show_lidar);
+        let mesh_roots = sim.mesh_roots();
+        let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
         self.mesh_cache
-            .resolve_scene(&mut scene, &mesh_roots)
+            .resolve_scene(&mut scene, &mesh_root_refs)
             .map_err(|error| error.to_string())?;
 
         let view = self.orbit.camera_transform();
@@ -332,17 +538,20 @@ impl App {
         }
 
         let sim = self.sim.as_mut().ok_or("simulation not ready")?;
-        sim.reload_scene()
-            .map_err(|error| format!("reload scene: {error}"))?;
+        if !sim.supports_hot_reload() {
+            return Ok(());
+        }
+        if let ViewerProfile::DiffDriveScene(path) = &self.profile {
+            sim.reload_scene(path)?;
+        }
         self.reload_count += 1;
         self.mesh_cache.clear();
-        self.orbit.focus = robot_focus(sim);
+        self.orbit.focus = sim.focus();
         println!(
-            "reloaded scene {} (#{}) seed={} mesh_roots={}",
-            self.scene_path.display(),
+            "reloaded scene (#{}) seed={} mesh_roots={}",
             self.reload_count,
             sim.world_seed(),
-            sim.mesh_package_roots().len()
+            sim.mesh_roots().len()
         );
         Ok(())
     }
@@ -363,7 +572,7 @@ impl App {
     }
 }
 
-fn teleop_action(keys: &HashSet<KeyCode>) -> DiffDriveAction {
+fn teleop_diff_drive(keys: &HashSet<KeyCode>) -> DiffDriveAction {
     let forward = keys.contains(&KeyCode::KeyW);
     let backward = keys.contains(&KeyCode::KeyS);
     let left = keys.contains(&KeyCode::KeyA);
@@ -391,16 +600,28 @@ fn teleop_action(keys: &HashSet<KeyCode>) -> DiffDriveAction {
     }
 }
 
-fn robot_focus(sim: &DiffDriveSim) -> Vec3 {
-    let obs = sim.observe();
-    Vec3::new(obs.base_x_m, 0.25, obs.base_z_m)
-}
+fn teleop_manipulator(keys: &HashSet<KeyCode>, mobile_base: bool) -> MobileManipulatorAction {
+    let mut action = MobileManipulatorAction::default();
+    if keys.contains(&KeyCode::KeyQ) {
+        action.shoulder_velocity_rad_s += ARM_SPEED_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyE) {
+        action.shoulder_velocity_rad_s -= ARM_SPEED_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyZ) {
+        action.elbow_velocity_rad_s += ARM_SPEED_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyX) {
+        action.elbow_velocity_rad_s -= ARM_SPEED_RAD_S;
+    }
 
-fn mesh_roots_for_sim(sim: &DiffDriveSim) -> Vec<&Path> {
-    sim.mesh_package_roots()
-        .iter()
-        .map(PathBuf::as_path)
-        .collect()
+    if mobile_base {
+        let drive = teleop_diff_drive(keys);
+        action.left_wheel_velocity_rad_s = drive.left_velocity_rad_s;
+        action.right_wheel_velocity_rad_s = drive.right_velocity_rad_s;
+    }
+
+    action
 }
 
 fn count_mesh_items(scene: &rne_render::RenderScene) -> usize {
@@ -439,6 +660,17 @@ mod tests {
         assert!(
             scene.items.len() >= 4,
             "expected base + wheels + ground plane items"
+        );
+    }
+
+    #[test]
+    fn manipulator_visual_scene_has_links() {
+        let sim = MobileManipulatorSim::new_mm_minimal();
+        let scene = build_visual_render_scene(sim.world());
+        assert!(
+            scene.items.len() >= 4,
+            "expected base + arm links + ground, got {}",
+            scene.items.len()
         );
     }
 }
