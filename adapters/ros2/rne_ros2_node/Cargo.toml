@@ -17,6 +17,7 @@ geometry_msgs = "*"
 rclrs = "0.7"
 rosgraph_msgs = "*"
 sensor_msgs = "*"
+simulation_interfaces = "*"
 std_msgs = "*"
 tf2_msgs = "*"
 

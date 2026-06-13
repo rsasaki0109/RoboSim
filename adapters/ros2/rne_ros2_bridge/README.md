@@ -10,6 +10,27 @@ Python adapter node that publishes RNE simulation outputs to ROS 2 topics.
 | `/points` | `sensor_msgs/PointCloud2` | LiDAR-style XYZ cloud |
 | `/tf` | `tf2_msgs/TFMessage` | `world → base_link → lidar` |
 
+## Services (`simulation_interfaces`)
+
+| Service | Type |
+|---------|------|
+| `/reset_simulation` | `simulation_interfaces/srv/ResetSimulation` |
+| `/get_simulation_state` | `simulation_interfaces/srv/GetSimulationState` |
+| `/set_simulation_state` | `simulation_interfaces/srv/SetSimulationState` |
+| `/step_simulation` | `simulation_interfaces/srv/StepSimulation` |
+
+## Action
+
+| Action | Type |
+|--------|------|
+| `/simulate_steps` | `simulation_interfaces/action/SimulateSteps` |
+
+## Parameters
+
+| Name | Type | Default |
+|------|------|---------|
+| `wheel_velocity_rad_s` | `double` | `6.0` |
+
 ## Prerequisites
 
 - ROS 2 (tested with Jazzy)
@@ -45,6 +66,7 @@ ros2 topic echo /tf --once
 ```bash
 cd adapters/ros2/rne_ros2_bridge
 python3 test_ros_convert.py
+python3 test_sim_control.py
 ```
 
 ## Smoke test (ROS 2 + optional rne_py)

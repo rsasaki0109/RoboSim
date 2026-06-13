@@ -11,6 +11,27 @@ Python node in `../rne_ros2_bridge/`.
 | `/points` | `sensor_msgs/PointCloud2` | LiDAR-style XYZ cloud |
 | `/tf` | `tf2_msgs/TFMessage` | `world → base_link → lidar` |
 
+## Services (`simulation_interfaces`)
+
+| Service | Type |
+|---------|------|
+| `/reset_simulation` | `simulation_interfaces/srv/ResetSimulation` |
+| `/get_simulation_state` | `simulation_interfaces/srv/GetSimulationState` |
+| `/set_simulation_state` | `simulation_interfaces/srv/SetSimulationState` |
+| `/step_simulation` | `simulation_interfaces/srv/StepSimulation` |
+
+## Action
+
+| Action | Type |
+|--------|------|
+| `/simulate_steps` | `simulation_interfaces/action/SimulateSteps` |
+
+## Parameters
+
+| Name | Type | Default |
+|------|------|---------|
+| `wheel_velocity_rad_s` | `double` | `6.0` |
+
 The node drives a headless diff-drive simulation via `rne_ai::DiffDriveSim` (no Python).
 
 ## Prerequisites

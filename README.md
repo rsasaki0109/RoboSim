@@ -1,3 +1,12 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
+    <img src="docs/media/rne-hero.gif" alt="RNE mesh diff-drive robot with LiDAR point cloud and synthetic sensor overlays" width="960">
+  </picture>
+  <br>
+  <sub>Mesh diff-drive URDF · LiDAR scan · IMU / point-cloud visualization</sub>
+</p>
+
 # Robot Native Engine
 
 [![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)

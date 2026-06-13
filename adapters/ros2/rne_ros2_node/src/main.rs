@@ -1,5 +1,6 @@
 mod bridge;
 mod convert;
+mod sim_control;
 
 fn main() {
     if let Err(error) = bridge::run() {
