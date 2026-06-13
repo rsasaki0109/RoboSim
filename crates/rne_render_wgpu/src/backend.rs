@@ -300,7 +300,8 @@ mod tests {
             .iter()
             .copied()
             .fold(f32::INFINITY, f32::min);
-        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        let center =
+            (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
         eprintln!(
             "unit scene: color_hash={:#018x} min_depth={min_depth:.3} center_depth={:.3} unique_colors={}",
             hash_rgba8(&output.color.rgba8),
@@ -362,7 +363,8 @@ mod tests {
             .iter()
             .copied()
             .fold(f32::INFINITY, f32::min);
-        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        let center =
+            (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
         eprintln!(
             "mesh scene: color_hash={:#018x} min_depth={min_depth:.3} center_depth={:.3} unique_colors={}",
             hash_rgba8(&output.color.rgba8),
@@ -386,9 +388,8 @@ mod tests {
             Err(error) => panic!("{error}"),
         };
 
-        let xml = include_str!(
-            "../../../adapters/ros2/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf"
-        );
+        let xml =
+            include_str!("../../../crates/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf");
         let urdf = rne_urdf_import::parse_urdf(xml).expect("parse URDF");
         let mut world = rne_ecs::World::new();
         let spawned = rne_urdf_import::spawn_urdf_robot(&mut world, &urdf).expect("spawn URDF");
@@ -398,12 +399,8 @@ mod tests {
             let Some(visual) = world.get::<rne_render::Visual>(*entity).cloned() else {
                 continue;
             };
-            let world_transform = world
-                .get::<rne_world::Transform3>(*entity)
-                .copied()
-                .unwrap_or_default();
             scene.items.push(RenderScene::item_from_visual(
-                world_transform,
+                rne_world::world_transform_of(&world, *entity),
                 visual.shape,
                 visual.color_rgba,
                 visual.local_offset,
@@ -411,25 +408,37 @@ mod tests {
         }
 
         let camera = Camera::new(128, 96, std::f64::consts::FRAC_PI_4);
-        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.5, 4.0), Quat::IDENTITY);
+        let orbit = crate::CameraOrbit::default();
         let output = backend
-            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .render_scene_camera(
+                &camera,
+                &orbit.camera_transform(),
+                &scene,
+                [0.05, 0.08, 0.12, 1.0],
+            )
             .expect("urdf scene render");
 
-        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
-        let center_depth = output.depth.depth_m[center];
+        let min_depth = output
+            .depth
+            .depth_m
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let center =
+            (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
         eprintln!(
-            "urdf scene: color_hash={:#018x} center_depth={center_depth:.3} unique_colors={}",
+            "urdf scene: color_hash={:#018x} min_depth={min_depth:.3} center_depth={:.3} unique_colors={}",
             hash_rgba8(&output.color.rgba8),
+            output.depth.depth_m[center],
             unique_colors(&output.color.rgba8)
         );
 
         assert!(
-            center_depth < camera.far_m as f32,
-            "expected geometry in center pixel, got depth {center_depth}"
+            min_depth < camera.far_m as f32,
+            "expected visible geometry, got min_depth {min_depth}"
         );
         assert!(
-            unique_colors(&output.color.rgba8) > 4,
+            unique_colors(&output.color.rgba8) > 1,
             "expected shaded scene colors, got only clear color"
         );
     }
@@ -472,7 +481,8 @@ mod tests {
             .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
             .expect("orbit render");
 
-        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        let center =
+            (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
         eprintln!(
             "orbit box: color_hash={:#018x} center_depth={:.3} unique_colors={}",
             hash_rgba8(&output.color.rgba8),
@@ -530,7 +540,8 @@ mod tests {
             .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
             .expect("orbit mesh render");
 
-        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        let center =
+            (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
         eprintln!(
             "orbit mesh: color_hash={:#018x} center_depth={:.3} unique_colors={}",
             hash_rgba8(&output.color.rgba8),

@@ -200,17 +200,17 @@ pub fn differential_drive_kinematics(
         let linear_m_s = (v_left + v_right) * 0.5;
         let yaw_rad_s = (v_right - v_left) / drive.track_width_m;
 
-        let Some(mut transform) = world.get_mut::<Transform3>(drive.base_link) else {
-            continue;
+        let (base_snapshot, forward) = {
+            let Some(mut transform) = world.get_mut::<Transform3>(drive.base_link) else {
+                continue;
+            };
+
+            let forward = transform.rotation * Vec3::X;
+            transform.translation += forward * linear_m_s * dt_s;
+            transform.rotation =
+                (Quat::from_rotation_y(yaw_rad_s * dt_s) * transform.rotation).normalize();
+            (*transform, forward)
         };
-
-        let forward = transform.rotation * Vec3::X;
-        transform.translation += forward * linear_m_s * dt_s;
-        transform.rotation =
-            (Quat::from_rotation_y(yaw_rad_s * dt_s) * transform.rotation).normalize();
-
-        let base_snapshot = *transform;
-        drop(transform);
 
         if world
             .get::<RigidBody>(drive.base_link)
@@ -239,8 +239,10 @@ fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Tr
         })
         .unwrap_or(0.0);
 
-    for (wheel, x_offset) in [(drive.left_actuator, -half_track), (drive.right_actuator, half_track)]
-    {
+    for (wheel, x_offset) in [
+        (drive.left_actuator, -half_track),
+        (drive.right_actuator, half_track),
+    ] {
         let Some(actuator) = world.get::<Actuator>(wheel) else {
             continue;
         };

@@ -68,7 +68,8 @@ struct DrawUniform {
 pub struct PrimitiveRenderer {
     pipeline: wgpu::RenderPipeline,
     camera_layout: wgpu::BindGroupLayout,
-    draw_layout: wgpu::BindGroupLayout,
+    draw_bind_group: wgpu::BindGroup,
+    draw_uniform_stride: u32,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -156,7 +157,7 @@ impl PrimitiveRenderer {
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
+                    has_dynamic_offset: true,
                     min_binding_size: None,
                 },
                 count: None,
@@ -239,17 +240,32 @@ impl PrimitiveRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let draw_uniform_stride =
+            uniform_stride(device.limits().min_uniform_buffer_offset_alignment);
         let draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rne_draw_uniform"),
-            size: std::mem::size_of::<DrawUniform>() as wgpu::BufferAddress,
+            size: (draw_uniform_stride * MAX_SCENE_ITEMS) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        });
+        let draw_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rne_draw_bind_group"),
+            layout: &draw_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &draw_buffer,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(std::mem::size_of::<DrawUniform>() as u64),
+                }),
+            }],
         });
 
         Self {
             pipeline,
             camera_layout,
-            draw_layout,
+            draw_bind_group,
+            draw_uniform_stride,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
@@ -276,6 +292,25 @@ impl PrimitiveRenderer {
                 view_proj: mat4_to_cols(view_proj),
             }),
         );
+
+        if scene.items.len() > MAX_SCENE_ITEMS as usize {
+            return Err(RenderError::RenderFailed(format!(
+                "scene item count {} exceeds limit {MAX_SCENE_ITEMS}",
+                scene.items.len()
+            )));
+        }
+
+        let mut draw_bytes = vec![0_u8; self.draw_uniform_stride as usize * scene.items.len()];
+        for (index, item) in scene.items.iter().enumerate() {
+            let uniform = DrawUniform {
+                model: mat4_to_cols(item.transform.to_matrix()),
+                color: item.color_rgba,
+            };
+            let offset = index * self.draw_uniform_stride as usize;
+            draw_bytes[offset..offset + std::mem::size_of::<DrawUniform>()]
+                .copy_from_slice(bytemuck::bytes_of(&uniform));
+        }
+        queue.write_buffer(&self.draw_buffer, 0, &draw_bytes);
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rne_camera_bind_group"),
@@ -323,24 +358,12 @@ impl PrimitiveRenderer {
             pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.set_bind_group(0, &camera_bind_group, &[]);
 
-            for item in &scene.items {
-                queue.write_buffer(
-                    &self.draw_buffer,
-                    0,
-                    bytemuck::bytes_of(&DrawUniform {
-                        model: mat4_to_cols(item.transform.to_matrix()),
-                        color: item.color_rgba,
-                    }),
+            for (index, item) in scene.items.iter().enumerate() {
+                pass.set_bind_group(
+                    1,
+                    &self.draw_bind_group,
+                    &[index as u32 * self.draw_uniform_stride],
                 );
-                let draw_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("rne_draw_bind_group"),
-                    layout: &self.draw_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.draw_buffer.as_entire_binding(),
-                    }],
-                });
-                pass.set_bind_group(1, &draw_bind_group, &[]);
 
                 if let Some(mesh) = &item.mesh {
                     let gpu_mesh = self.gpu_mesh(device, mesh);
@@ -640,6 +663,12 @@ fn mat4_to_cols(matrix: Mat4) -> [[f32; 4]; 4] {
 
 fn align_to(value: u32, alignment: u32) -> u32 {
     value.div_ceil(alignment) * alignment
+}
+
+const MAX_SCENE_ITEMS: u32 = 256;
+
+fn uniform_stride(alignment: u32) -> u32 {
+    align_to(std::mem::size_of::<DrawUniform>() as u32, alignment)
 }
 
 fn unit_cube() -> (Vec<Vertex>, Vec<u16>) {

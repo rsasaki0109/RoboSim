@@ -119,9 +119,7 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
     let center_depth = output.depth.depth_m[center];
     if center_depth >= camera.far_m as f32 {
-        eprintln!(
-            "interactive viewer smoke render invalid (center_depth={center_depth:.2} m)"
-        );
+        eprintln!("interactive viewer smoke render invalid (center_depth={center_depth:.2} m)");
         std::process::exit(1);
     }
 }

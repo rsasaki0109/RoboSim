@@ -26,10 +26,12 @@ mod tests {
         let mut world = EcsWorld::new();
         let parent = spawn_named(&mut world, "parent");
         let child = spawn_named(&mut world, "child");
-        world.entity_mut(parent).insert(Transform3::from_translation_rotation(
-            Vec3::new(1.0, 0.0, 0.0),
-            Quat::IDENTITY,
-        ));
+        world
+            .entity_mut(parent)
+            .insert(Transform3::from_translation_rotation(
+                Vec3::new(1.0, 0.0, 0.0),
+                Quat::IDENTITY,
+            ));
         world.entity_mut(child).insert((
             Parent(parent),
             Transform3::from_translation_rotation(Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY),

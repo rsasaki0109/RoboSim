@@ -1,6 +1,6 @@
 [package]
-name = "rne_assets"
-description = "RNE scene and robot asset formats (.rne.scene.toml / .rne.robot.toml)"
+name = "rne_urdf_import"
+description = "Minimal URDF importer for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,11 +12,10 @@ rne_math = { path = "../rne_math" }
 rne_physics = { path = "../rne_physics" }
 rne_render = { path = "../rne_render" }
 rne_robot = { path = "../rne_robot" }
-rne_urdf_import = { path = "../rne_urdf_import" }
 rne_world = { path = "../rne_world" }
-serde = { workspace = true }
+roxmltree = "0.20"
 thiserror = { workspace = true }
-toml = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"
+rne_physics_rapier = { path = "../rne_physics_rapier" }

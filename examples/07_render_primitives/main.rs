@@ -21,8 +21,7 @@ fn main() {
         }
     };
 
-    let xml =
-        include_str!("../../adapters/ros2/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf");
+    let xml = include_str!("../../crates/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf");
     let urdf = parse_urdf(xml).expect("parse URDF");
     let mut world = World::new();
     let spawned = spawn_urdf_robot(&mut world, &urdf).expect("spawn URDF");
@@ -47,7 +46,12 @@ fn main() {
     };
 
     let output = backend
-        .render_scene_camera(&camera, &orbit.camera_transform(), &scene, [0.05, 0.08, 0.12, 1.0])
+        .render_scene_camera(
+            &camera,
+            &orbit.camera_transform(),
+            &scene,
+            [0.05, 0.08, 0.12, 1.0],
+        )
         .expect("render scene");
 
     let center_depth = output.depth.depth_m
