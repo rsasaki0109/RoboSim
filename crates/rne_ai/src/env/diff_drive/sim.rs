@@ -369,7 +369,7 @@ impl DiffDriveSim {
         }
     }
 
-    fn queue_robot_action(&mut self, robot: Entity, action: DiffDriveAction) {
+    pub(crate) fn queue_robot_action(&mut self, robot: Entity, action: DiffDriveAction) {
         let spawned = self
             .robots
             .iter()
@@ -391,7 +391,7 @@ impl DiffDriveSim {
         );
     }
 
-    fn advance_one_tick(&mut self, record_log: bool, log: &mut impl StepLogTarget) {
+    pub(crate) fn advance_one_tick(&mut self, record_log: bool, log: &mut impl StepLogTarget) {
         let entries: Vec<_> = if record_log {
             self.command_buffer.pending().cloned().collect()
         } else {

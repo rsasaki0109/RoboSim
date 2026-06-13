@@ -1,6 +1,6 @@
 //! Agent spawn helpers.
 
-use super::components::{Agent, AgentKind, AgentTarget};
+use super::components::{Agent, AgentGoal, AgentKind, AgentTarget};
 use super::diff_drive::DiffDriveAgentState;
 use crate::DiffDriveEpisodeConfig;
 use rne_ecs::{spawn_named, Entity, World};
@@ -16,6 +16,9 @@ pub fn spawn_diff_drive_agent(
     world.entity_mut(entity).insert((
         Agent { kind },
         AgentTarget::default(),
+        AgentGoal {
+            goal_x_m: config.goal_x_m,
+        },
         DiffDriveAgentState::new(config),
     ));
     entity

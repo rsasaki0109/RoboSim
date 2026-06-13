@@ -26,6 +26,12 @@ impl DeterministicRng {
         let unit = (self.next_u64() as f64) / (u64::MAX as f64);
         min + unit * (max - min)
     }
+
+    /// Samples an index in `[0, len)`.
+    pub fn uniform_usize(&mut self, len: usize) -> usize {
+        assert!(len > 0, "uniform_usize requires len > 0");
+        (self.next_u64() as usize) % len
+    }
 }
 
 #[cfg(test)]

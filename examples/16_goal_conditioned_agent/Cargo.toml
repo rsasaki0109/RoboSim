@@ -1,0 +1,13 @@
+[package]
+name = "goal_conditioned_agent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+
+[[example]]
+name = "16_goal_conditioned_agent"
+path = "main.rs"
