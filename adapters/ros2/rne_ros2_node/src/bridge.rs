@@ -8,11 +8,12 @@ use rclrs::{
     Context, CreateBasicExecutor, Executor, MandatoryParameter, Publisher, RclReturnCode,
     RclrsError, RequestedGoal, SpinOptions, TerminatedGoal,
 };
-use rne_adapter_ros2::{to_ros_clock, to_ros_pointcloud2, to_ros_transform_stamped, RosTfMessage};
-use rne_ai::DiffDriveObservation;
-use rne_core::SimTime;
+use rne_adapter_ros2::{
+    pointcloud_to_laserscan, to_ros_clock, to_ros_pointcloud2, to_ros_transform_stamped,
+    RosTfMessage,
+};
 use rne_data::PointCloud;
-use rne_math::{Quat, Vec3};
+use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 use rne_world::Transform3;
 use simulation_interfaces::{
     action::{SimulateSteps, SimulateSteps_Feedback, SimulateSteps_Result},
@@ -25,20 +26,23 @@ use simulation_interfaces::{
     },
 };
 
-use crate::convert::{to_clock_message, to_pointcloud2_message, to_tf_message};
-use crate::sim_control::BridgeSim;
+use crate::convert::{to_clock_message, to_laserscan_message, to_pointcloud2_message, to_tf_message};
+use crate::sim_control::{BridgeFrame, BridgeSim};
 
 const SIM_STEPS: usize = 300;
 const MIN_FORWARD_X_M: f64 = 0.8;
+const MIN_LIDAR_HITS: usize = 8;
 
 type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
+type ScanPublisher = Publisher<sensor_msgs::msg::LaserScan>;
 type TfPublisher = Publisher<tf2_msgs::msg::TFMessage>;
 
 struct BridgeLoop {
     sim: Mutex<BridgeSim>,
     clock_pub: ClockPublisher,
     cloud_pub: CloudPublisher,
+    scan_pub: ScanPublisher,
     tf_pub: TfPublisher,
     wheel_velocity: MandatoryParameter<f64>,
 }
@@ -48,6 +52,7 @@ impl BridgeLoop {
         sim: BridgeSim,
         clock_pub: ClockPublisher,
         cloud_pub: CloudPublisher,
+        scan_pub: ScanPublisher,
         tf_pub: TfPublisher,
         wheel_velocity: MandatoryParameter<f64>,
     ) -> Self {
@@ -55,6 +60,7 @@ impl BridgeLoop {
             sim: Mutex::new(sim),
             clock_pub,
             cloud_pub,
+            scan_pub,
             tf_pub,
             wheel_velocity,
         }
@@ -69,9 +75,9 @@ impl BridgeLoop {
         publish_frame(
             &self.clock_pub,
             &self.cloud_pub,
+            &self.scan_pub,
             &self.tf_pub,
-            sim.sim_ticks(),
-            sim.observation(),
+            &sim.frame(),
         )
     }
 
@@ -80,10 +86,15 @@ impl BridgeLoop {
         if !sim.step_if_playing(self.wheel_velocity()) {
             return Ok(false);
         }
-        let ticks = sim.sim_ticks();
-        let obs = *sim.observation();
+        let frame = sim.frame();
         drop(sim);
-        publish_frame(&self.clock_pub, &self.cloud_pub, &self.tf_pub, ticks, &obs)?;
+        publish_frame(
+            &self.clock_pub,
+            &self.cloud_pub,
+            &self.scan_pub,
+            &self.tf_pub,
+            &frame,
+        )?;
         Ok(true)
     }
 
@@ -113,6 +124,9 @@ pub fn run() -> Result<()> {
     let cloud_pub = node
         .create_publisher::<sensor_msgs::msg::PointCloud2>("/points")
         .context("failed to create /points publisher")?;
+    let scan_pub = node
+        .create_publisher::<sensor_msgs::msg::LaserScan>("/scan")
+        .context("failed to create /scan publisher")?;
     let tf_pub = node
         .create_publisher::<tf2_msgs::msg::TFMessage>("/tf")
         .context("failed to create /tf publisher")?;
@@ -121,6 +135,7 @@ pub fn run() -> Result<()> {
         BridgeSim::new(),
         clock_pub,
         cloud_pub,
+        scan_pub,
         tf_pub,
         wheel_velocity,
     ));
@@ -146,6 +161,12 @@ pub fn run() -> Result<()> {
     eprintln!("final base_x={:.2} m", last_obs.base_x_m);
     if last_obs.base_x_m < MIN_FORWARD_X_M {
         bail!("expected forward motion from diff-drive policy");
+    }
+    if last_obs.lidar_points < MIN_LIDAR_HITS {
+        bail!(
+            "expected lidar hits from scene sim, got {}",
+            last_obs.lidar_points
+        );
     }
 
     hold_ros_graph_for_smoke(&bridge, &mut executor)?;
@@ -295,60 +316,93 @@ async fn simulate_steps_action(
 fn publish_frame(
     clock_pub: &ClockPublisher,
     cloud_pub: &CloudPublisher,
+    scan_pub: &ScanPublisher,
     tf_pub: &TfPublisher,
-    sim_ticks: u64,
-    obs: &DiffDriveObservation,
+    frame: &BridgeFrame,
 ) -> Result<()> {
-    let sim_time = SimTime::from_ticks(sim_ticks);
-    let base = Vec3::new(obs.base_x_m, obs.base_y_m, obs.base_z_m);
-    let distance = base.x.max(0.1) as f32;
-    let points = vec![
-        (distance, 0.0, 0.0),
-        (distance, 0.5, 0.0),
-        (distance, -0.5, 0.0),
-    ];
+    let sim_time = rne_core::SimTime::from_ticks(frame.sim_ticks);
+    let obs = &frame.obs;
+    let base = Transform3::from_translation_rotation(
+        Vec3::new(obs.base_x_m, obs.base_y_m, obs.base_z_m),
+        Quat::from_rotation_y(obs.base_yaw_rad),
+    );
 
     let clock = to_ros_clock(sim_time);
     clock_pub
         .publish(to_clock_message(&clock))
         .context("publish /clock")?;
 
-    let cloud = to_ros_pointcloud2(
-        &PointCloud {
-            points_m: points
-                .iter()
-                .map(|(x, y, z)| Vec3::new(*x as f64, *y as f64, *z as f64))
-                .collect(),
-        },
-        sim_time,
-        "lidar",
-    );
+    let lidar_cloud = cloud_in_lidar_frame(&frame.lidar_cloud, frame.lidar_world.as_ref());
+    let cloud = to_ros_pointcloud2(&lidar_cloud, sim_time, "lidar");
     cloud_pub
         .publish(to_pointcloud2_message(&cloud))
         .context("publish /points")?;
 
-    let tf = make_tf_message(base, sim_time);
+    if let (Some(lidar_world), Some(spec)) = (&frame.lidar_world, frame.lidar_spec) {
+        let scan = pointcloud_to_laserscan(&frame.lidar_cloud, lidar_world, &spec, sim_time, "lidar");
+        scan_pub
+            .publish(to_laserscan_message(&scan))
+            .context("publish /scan")?;
+    }
+
+    let tf = make_tf_message(base, frame.lidar_world, sim_time);
     tf_pub.publish(to_tf_message(&tf)).context("publish /tf")?;
 
     Ok(())
 }
 
-fn make_tf_message(base: Vec3, sim_time: SimTime) -> RosTfMessage {
+fn cloud_in_lidar_frame(cloud: &PointCloud, lidar_world: Option<&Transform3>) -> PointCloud {
+    let Some(lidar_world) = lidar_world else {
+        return cloud.clone();
+    };
+    let inv = to_math_transform(lidar_world).inverse();
+    PointCloud {
+        points_m: cloud
+            .points_m
+            .iter()
+            .map(|point| inv.transform_point(*point))
+            .collect(),
+    }
+}
+
+fn make_tf_message(
+    base: Transform3,
+    lidar_world: Option<Transform3>,
+    sim_time: rne_core::SimTime,
+) -> RosTfMessage {
+    let lidar_relative = lidar_world
+        .map(|lidar_world| {
+            from_math_transform(
+                to_math_transform(&base)
+                    .inverse()
+                    .mul_transform(&to_math_transform(&lidar_world)),
+            )
+        })
+        .unwrap_or_else(|| {
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.2, 0.0), Quat::IDENTITY)
+        });
+
     RosTfMessage {
         transforms: vec![
-            to_ros_transform_stamped(
-                "world",
-                "base_link",
-                Transform3::from_translation_rotation(base, Quat::IDENTITY),
-                sim_time,
-            ),
-            to_ros_transform_stamped(
-                "base_link",
-                "lidar",
-                Transform3::from_translation_rotation(Vec3::new(0.0, 0.2, 0.0), Quat::IDENTITY),
-                sim_time,
-            ),
+            to_ros_transform_stamped("world", "base_link", base, sim_time),
+            to_ros_transform_stamped("base_link", "lidar", lidar_relative, sim_time),
         ],
+    }
+}
+
+fn to_math_transform(transform: &Transform3) -> MathTransform3 {
+    MathTransform3 {
+        translation: transform.translation,
+        rotation: transform.rotation,
+        scale: transform.scale,
+    }
+}
+
+fn from_math_transform(transform: MathTransform3) -> Transform3 {
+    Transform3 {
+        translation: transform.translation,
+        rotation: transform.rotation,
+        scale: transform.scale,
     }
 }
 

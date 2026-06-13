@@ -63,3 +63,21 @@ fi
 
 echo "Checking get_simulation_state service..."
 timeout 20 ros2 service call /get_simulation_state simulation_interfaces/srv/GetSimulationState "{}"
+
+echo "Checking /points LiDAR width..."
+POINTS_WIDTH=$(
+  timeout 20 ros2 topic echo /points --once --field width --no-lost-messages 2>/dev/null \
+    | grep -E '^[0-9]+$' \
+    | tail -1 \
+    || true
+)
+if [[ -z "$POINTS_WIDTH" || "$POINTS_WIDTH" -lt 8 ]]; then
+  echo "expected /points width >= 8, got '${POINTS_WIDTH}'" >&2
+  exit 1
+fi
+
+echo "Checking /scan publication..."
+if ! timeout 20 ros2 topic echo /scan --once --field angle_increment --no-lost-messages >/dev/null 2>&1; then
+  echo "failed to receive /scan" >&2
+  exit 1
+fi

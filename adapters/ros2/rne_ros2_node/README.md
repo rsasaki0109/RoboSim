@@ -8,7 +8,8 @@ Python node in `../rne_ros2_bridge/`.
 | Topic | Type | Source |
 |-------|------|--------|
 | `/clock` | `rosgraph_msgs/Clock` | RNE `SimTime` ticks |
-| `/points` | `sensor_msgs/PointCloud2` | LiDAR-style XYZ cloud |
+| `/points` | `sensor_msgs/PointCloud2` | LiDAR hits in `lidar` frame (from DataBus) |
+| `/scan` | `sensor_msgs/LaserScan` | Binned 2D range scan when scene has `[lidar]` |
 | `/tf` | `tf2_msgs/TFMessage` | `world → base_link → lidar` |
 
 ## Services (`simulation_interfaces`)
@@ -31,8 +32,11 @@ Python node in `../rne_ros2_bridge/`.
 | Name | Type | Default |
 |------|------|---------|
 | `wheel_velocity_rad_s` | `double` | `6.0` |
+| `RNE_ROS2_SCENE_PATH` | env | `assets/scenes/mesh_diff_drive.rne.scene.toml` |
 
-The node drives a headless diff-drive simulation via `rne_ai::DiffDriveSim` (no Python).
+The node drives a headless diff-drive simulation via `rne_ai::DiffDriveSim`, loading the
+scene above (override with `RNE_ROS2_SCENE_PATH`). LiDAR point clouds and `/scan` come from
+the simulation DataBus when the robot asset defines `[lidar]`.
 
 ## Prerequisites
 
@@ -68,6 +72,7 @@ Verify in another terminal:
 source /opt/ros/jazzy/setup.bash
 ros2 topic echo /clock --once
 ros2 topic echo /points --once
+ros2 topic echo /scan --once
 ros2 topic echo /tf --once
 ```
 
@@ -76,11 +81,11 @@ ros2 topic echo /tf --once
 ```
 rne_ai::DiffDriveSim
         ↓
-rne_adapter_ros2  (RosClock / RosPointCloud2 / RosTfMessage)
+rne_adapter_ros2  (RosClock / RosPointCloud2 / RosLaserScan / RosTfMessage)
         ↓
 convert.rs        (→ rosgraph_msgs / sensor_msgs / tf2_msgs)
         ↓
-rclrs publishers  (/clock, /points, /tf)
+rclrs publishers  (/clock, /points, /scan, /tf)
 ```
 
 ## CI note
