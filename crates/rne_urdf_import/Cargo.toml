@@ -18,4 +18,5 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"
+rne_core = { path = "../rne_core" }
 rne_physics_rapier = { path = "../rne_physics_rapier" }

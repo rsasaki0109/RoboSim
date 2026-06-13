@@ -1,0 +1,18 @@
+[package]
+name = "mobile_manipulator_arm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_core = { path = "../../crates/rne_core" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_physics = { path = "../../crates/rne_physics" }
+rne_physics_rapier = { path = "../../crates/rne_physics_rapier" }
+rne_urdf_import = { path = "../../crates/rne_urdf_import" }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "20_mobile_manipulator_arm"
+path = "main.rs"
