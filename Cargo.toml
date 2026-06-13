@@ -36,6 +36,7 @@ members = [
   "examples/16_goal_conditioned_agent",
   "examples/17_multi_robot_collision",
   "examples/18_readme_hero",
+  "examples/19_lidar_render",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",

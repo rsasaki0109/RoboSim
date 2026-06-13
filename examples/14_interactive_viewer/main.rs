@@ -5,6 +5,7 @@
 //! - A / D: turn left / right
 //! - Left / Right: orbit camera
 //! - Up / Down: zoom camera
+//! - L: toggle LiDAR hit overlay
 //! - Escape: quit
 //!
 //! Usage:
@@ -14,7 +15,7 @@
 //!
 //! Edit the scene or referenced robot files while running; the viewer reloads automatically.
 
-use rne_ai::{build_diff_drive_render_scene, DiffDriveAction, DiffDriveSim};
+use rne_ai::{append_lidar_overlay, build_diff_drive_render_scene, DiffDriveAction, DiffDriveSim};
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
@@ -67,6 +68,7 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     }
 
     let mut sim = DiffDriveSim::from_scene_path(scene_path).expect("load scene");
+    sim.enable_lidar_demo();
     for _ in 0..60 {
         sim.step_action(DiffDriveAction::forward(DRIVE_SPEED_RAD_S));
     }
@@ -80,6 +82,7 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     };
 
     let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+    let lidar_stats = append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
     let mesh_items = count_mesh_items(&scene);
     let mut mesh_cache = MeshRenderCache::new();
     let mesh_roots = mesh_roots_for_sim(&sim);
@@ -101,18 +104,26 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
         .expect("smoke render");
 
     println!(
-        "interactive viewer smoke{}: scene={} seed={} items={} mesh_items={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
+        "interactive viewer smoke{}: scene={} seed={} items={} mesh_items={} lidar_hits={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
         if explicit { "" } else { " (RNE_SKIP_GPU fallback)" },
         scene_path.display(),
         sim.world_seed(),
         scene.items.len(),
         mesh_items,
+        lidar_stats.hit_markers,
         hash_rgba8(&output.color.rgba8),
         hash_depth_f32(&output.depth.depth_m),
         sim.observe().base_x_m
     );
 
     if scene.items.is_empty() || sim.observe().base_x_m <= 0.0 {
+        std::process::exit(1);
+    }
+    if lidar_stats.hit_markers < 4 {
+        eprintln!(
+            "interactive viewer smoke expected lidar hits, got {}",
+            lidar_stats.hit_markers
+        );
         std::process::exit(1);
     }
 
@@ -134,6 +145,7 @@ struct App {
     reload_count: u32,
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
+    show_lidar: bool,
 }
 
 impl App {
@@ -148,6 +160,7 @@ impl App {
             reload_count: 0,
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
+            show_lidar: true,
         }
     }
 }
@@ -184,7 +197,7 @@ impl ApplicationHandler for App {
             }
         };
 
-        let sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
+        let mut sim = match DiffDriveSim::from_scene_path(&self.scene_path) {
             Ok(sim) => sim,
             Err(error) => {
                 eprintln!(
@@ -195,6 +208,7 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        sim.enable_lidar_demo();
         let hot_reloader = match AssetHotReloader::load(&self.scene_path) {
             Ok(reloader) => reloader,
             Err(error) => {
@@ -210,7 +224,7 @@ impl ApplicationHandler for App {
         self.orbit.focus = robot_focus(&sim);
         self.mesh_cache.clear();
         println!(
-            "loaded scene {} (seed={}, robots={}, mesh_roots={})",
+            "loaded scene {} (seed={}, robots={}, mesh_roots={}, lidar=on)",
             self.scene_path.display(),
             sim.world_seed(),
             sim.robots().len(),
@@ -266,6 +280,17 @@ impl App {
                 if physical == KeyCode::Escape {
                     std::process::exit(0);
                 }
+                if physical == KeyCode::KeyL {
+                    self.show_lidar = !self.show_lidar;
+                    println!(
+                        "lidar overlay {}",
+                        if self.show_lidar {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
                 self.pressed.insert(physical);
             }
             ElementState::Released => {
@@ -284,6 +309,9 @@ impl App {
         sim.step_action(action);
 
         let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+        if self.show_lidar {
+            append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
+        }
         let mesh_roots = mesh_roots_for_sim(sim);
         self.mesh_cache
             .resolve_scene(&mut scene, &mesh_roots)

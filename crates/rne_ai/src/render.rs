@@ -1,15 +1,71 @@
 //! Render scene helpers for diff-drive simulation.
 
+use rne_data::{DataBus, InMemoryDataBus, PointCloud};
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{yaw_rad, Quat, Vec3};
 use rne_physics::Collider;
 use rne_render::{RenderScene, Visual, VisualShape};
 use rne_robot::DiffDriveSpawned;
+use rne_sensor::{Sensor, SensorKind};
 use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 
 const GROUND_COLOR: [f32; 4] = [0.25, 0.28, 0.32, 1.0];
 const BASE_COLOR: [f32; 4] = [0.35, 0.55, 0.95, 1.0];
 const WHEEL_COLOR: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
+const LIDAR_HIT_COLOR: [f32; 4] = [0.15, 0.95, 0.35, 0.85];
+const LIDAR_MOUNT_COLOR: [f32; 4] = [0.95, 0.35, 0.25, 1.0];
+
+/// Summary of LiDAR markers appended to a render scene.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LidarOverlayStats {
+    /// Number of ray hit markers drawn.
+    pub hit_markers: usize,
+    /// Number of sensor mount markers drawn.
+    pub mount_markers: usize,
+}
+
+impl LidarOverlayStats {
+    /// Total number of overlay spheres added to the scene.
+    pub fn total_markers(&self) -> usize {
+        self.hit_markers + self.mount_markers
+    }
+}
+
+/// Appends LiDAR hit and mount markers from the latest DataBus frames.
+pub fn append_lidar_overlay(
+    scene: &mut RenderScene,
+    world: &World,
+    data_bus: &InMemoryDataBus,
+) -> LidarOverlayStats {
+    let mut stats = LidarOverlayStats::default();
+    for entity_ref in world.iter_entities() {
+        let entity = entity_ref.id();
+        let Some(sensor) = world.get::<Sensor>(entity) else {
+            continue;
+        };
+        let SensorKind::Lidar(_) = sensor.kind else {
+            continue;
+        };
+        let Some(frame) = data_bus.latest::<PointCloud>(sensor.stream_id) else {
+            continue;
+        };
+        let hits = frame.payload.points_m.len();
+        if hits > 0 {
+            scene.append_lidar_points(&frame.payload.points_m, LIDAR_HIT_COLOR);
+            stats.hit_markers += hits;
+        }
+
+        if let Some(mount) = world
+            .get::<WorldTransform3>(entity)
+            .map(|transform| transform.translation)
+        {
+            scene.append_lidar_points_sized(std::slice::from_ref(&mount), 0.06, LIDAR_MOUNT_COLOR);
+            stats.mount_markers += 1;
+        }
+    }
+
+    stats
+}
 
 /// Builds a render scene for one or more diff-drive robots and an optional ground plane.
 pub fn build_diff_drive_render_scene(world: &World, robots: &[DiffDriveSpawned]) -> RenderScene {
