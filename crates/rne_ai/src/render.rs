@@ -1,11 +1,11 @@
 //! Render scene helpers for diff-drive simulation.
 
-use rne_ecs::World;
+use rne_ecs::{Entity, Parent, World};
 use rne_math::{yaw_rad, Quat, Vec3};
 use rne_physics::Collider;
 use rne_render::{RenderScene, Visual, VisualShape};
 use rne_robot::DiffDriveSpawned;
-use rne_world::Transform3 as WorldTransform3;
+use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 
 const GROUND_COLOR: [f32; 4] = [0.25, 0.28, 0.32, 1.0];
 const BASE_COLOR: [f32; 4] = [0.35, 0.55, 0.95, 1.0];
@@ -22,42 +22,67 @@ pub fn build_diff_drive_render_scene(world: &World, robots: &[DiffDriveSpawned])
 }
 
 fn append_robot_items(scene: &mut RenderScene, world: &World, robot: &DiffDriveSpawned) {
-    let drive = robot.drive;
-    append_link_item(
-        scene,
-        world,
-        robot.base_link,
-        VisualShape::Box {
-            size_m: base_size_m(world, robot.base_link),
-        },
-        BASE_COLOR,
-    );
-
-    for wheel in [robot.left_wheel, robot.right_wheel] {
-        if wheel == robot.base_link {
+    for (entity, yaw_only) in [
+        (robot.base_link, true),
+        (robot.left_wheel, false),
+        (robot.right_wheel, false),
+    ] {
+        if !yaw_only && entity == robot.base_link {
             continue;
         }
+        let (fallback_shape, fallback_color) = fallback_visual_for_link(world, robot, entity);
         append_link_item(
             scene,
             world,
-            wheel,
+            entity,
+            yaw_only,
+            fallback_shape,
+            fallback_color,
+        );
+    }
+}
+
+fn fallback_visual_for_link(
+    world: &World,
+    robot: &DiffDriveSpawned,
+    entity: Entity,
+) -> (VisualShape, [f32; 4]) {
+    if entity == robot.base_link {
+        return (
+            VisualShape::Box {
+                size_m: base_size_m(world, robot.base_link),
+            },
+            BASE_COLOR,
+        );
+    }
+
+    if entity == robot.left_wheel || entity == robot.right_wheel {
+        return (
             VisualShape::Cylinder {
-                radius_m: drive.wheel_radius_m,
-                length_m: drive.wheel_radius_m * 0.6,
+                radius_m: robot.drive.wheel_radius_m,
+                length_m: robot.drive.wheel_radius_m * 0.6,
             },
             WHEEL_COLOR,
         );
     }
+
+    (
+        VisualShape::Box {
+            size_m: Vec3::new(0.1, 0.1, 0.1),
+        },
+        BASE_COLOR,
+    )
 }
 
 fn append_link_item(
     scene: &mut RenderScene,
     world: &World,
-    entity: rne_ecs::Entity,
+    entity: Entity,
+    yaw_only: bool,
     fallback_shape: VisualShape,
     fallback_color: [f32; 4],
 ) {
-    let world_transform = render_transform(world, entity);
+    let world_transform = link_render_transform(world, entity, yaw_only);
 
     if let Some(visual) = world.get::<Visual>(entity) {
         scene.items.push(RenderScene::item_from_visual(
@@ -69,25 +94,33 @@ fn append_link_item(
         return;
     }
 
-    let local_offset = WorldTransform3::IDENTITY;
     scene.items.push(RenderScene::item_from_visual(
         world_transform,
         fallback_shape,
         fallback_color,
-        local_offset,
+        WorldTransform3::IDENTITY,
     ));
 }
 
-/// Builds a render transform using world translation and yaw-only rotation.
-fn render_transform(world: &World, entity: rne_ecs::Entity) -> WorldTransform3 {
-    let transform = world
-        .get::<WorldTransform3>(entity)
-        .copied()
-        .unwrap_or_default();
-    WorldTransform3::from_translation_rotation(
-        transform.translation,
-        Quat::from_rotation_y(yaw_rad(transform.rotation)),
-    )
+/// Resolves a link transform for rendering, composing parent chains when present.
+fn link_render_transform(world: &World, entity: Entity, yaw_only: bool) -> WorldTransform3 {
+    let world_tf = if world.get::<Parent>(entity).is_some() {
+        world_transform_of(world, entity)
+    } else {
+        world
+            .get::<WorldTransform3>(entity)
+            .copied()
+            .unwrap_or_default()
+    };
+
+    if yaw_only {
+        WorldTransform3::from_translation_rotation(
+            world_tf.translation,
+            Quat::from_rotation_y(yaw_rad(world_tf.rotation)),
+        )
+    } else {
+        world_tf
+    }
 }
 
 fn append_ground_plane(scene: &mut RenderScene) {
@@ -101,7 +134,7 @@ fn append_ground_plane(scene: &mut RenderScene) {
     ));
 }
 
-fn base_size_m(world: &World, base_link: rne_ecs::Entity) -> Vec3 {
+fn base_size_m(world: &World, base_link: Entity) -> Vec3 {
     world
         .get::<Collider>(base_link)
         .and_then(|collider| match collider.shape {
@@ -109,4 +142,50 @@ fn base_size_m(world: &World, base_link: rne_ecs::Entity) -> Vec3 {
             _ => None,
         })
         .unwrap_or_else(|| Vec3::new(0.5, 0.3, 0.4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::DiffDriveSim;
+    use std::path::PathBuf;
+
+    fn mesh_scene_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
+    }
+
+    #[test]
+    fn mesh_scene_includes_all_link_visuals() {
+        let scene_path = mesh_scene_path();
+        assert!(
+            scene_path.is_file(),
+            "missing mesh scene fixture at {}",
+            scene_path.display()
+        );
+
+        let sim = DiffDriveSim::from_scene_path(&scene_path).expect("load mesh scene");
+        let scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+        let robot_items = scene.items.len().saturating_sub(1);
+        assert!(
+            robot_items >= 3,
+            "expected base + wheel visuals, got {robot_items} robot items"
+        );
+
+        let mesh_items = scene
+            .items
+            .iter()
+            .filter(|item| matches!(item.shape, VisualShape::Mesh { .. }))
+            .count();
+        let cylinder_items = scene
+            .items
+            .iter()
+            .filter(|item| matches!(item.shape, VisualShape::Cylinder { .. }))
+            .count();
+        assert!(mesh_items >= 1, "expected base mesh visual");
+        assert!(
+            cylinder_items >= 2,
+            "expected cylinder wheel visuals, got {cylinder_items}"
+        );
+    }
 }
