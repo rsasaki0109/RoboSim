@@ -34,6 +34,7 @@ Python adapter node that publishes RNE simulation outputs to ROS 2 topics.
 ## Prerequisites
 
 - ROS 2 (tested with Jazzy)
+- `ros-jazzy-rclpy` (or distro equivalent)
 - Optional: `rne_py` built with maturin for live diff-drive simulation
 
 ## Run
@@ -86,6 +87,9 @@ cargo run -p xtask -- ci-ros2-bridge
 ```
 
 GitHub Actions runs the same script in `.github/workflows/ros2-bridge.yml`.
+
+Smoke tests set `RNE_ROS2_HOLD_SECS=60` so the bridge stays alive while `ros2 service call`
+and topic probes run.
 The native `rclrs` node uses the symmetric `ci-ros2` task.
 
 ## Rust mapping layer

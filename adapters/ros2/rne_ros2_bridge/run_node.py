@@ -12,6 +12,7 @@ with `rne_py`. Without bindings, publishes one synthetic frame for smoke testing
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -240,9 +241,23 @@ def main() -> None:
                 raise SystemExit(
                     f"expected forward motion from diff-drive policy (base_x={obs.base_x:.2f} m)"
                 )
+
+        hold_secs = float(os.environ.get("RNE_ROS2_HOLD_SECS", "0"))
+        if hold_secs > 0:
+            node.get_logger().info(
+                f"holding ROS graph for {hold_secs:.0f}s (RNE_ROS2_HOLD_SECS)"
+            )
+            end = time.time() + hold_secs
+            while time.time() < end and rclpy.ok():
+                try:
+                    node.spin_once()
+                    rclpy.spin_once(node, timeout_sec=0.05)
+                except rclpy.executors.ExternalShutdownException:
+                    break
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            node.destroy_node()
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

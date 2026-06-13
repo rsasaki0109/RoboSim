@@ -148,6 +148,26 @@ pub fn run() -> Result<()> {
         bail!("expected forward motion from diff-drive policy");
     }
 
+    hold_ros_graph_for_smoke(&bridge, &mut executor)?;
+
+    Ok(())
+}
+
+fn hold_ros_graph_for_smoke(bridge: &Arc<BridgeLoop>, executor: &mut Executor) -> Result<()> {
+    let hold_secs = std::env::var("RNE_ROS2_HOLD_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    if hold_secs == 0 {
+        return Ok(());
+    }
+
+    eprintln!("holding ROS graph for {hold_secs}s (RNE_ROS2_HOLD_SECS)");
+    let deadline = std::time::Instant::now() + Duration::from_secs(hold_secs);
+    while std::time::Instant::now() < deadline {
+        let _ = bridge.tick_playing()?;
+        spin_once(executor)?;
+    }
     Ok(())
 }
 
