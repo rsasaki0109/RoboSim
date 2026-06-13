@@ -319,6 +319,73 @@ mod tests {
     }
 
     #[test]
+    fn wgpu_primitive_shapes_render_visible_geometry() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let camera = Camera::new(128, 96, std::f64::consts::FRAC_PI_4);
+        let orbit = crate::CameraOrbit::default();
+        let scene = RenderScene {
+            items: vec![
+                RenderSceneItem {
+                    transform: Transform3 {
+                        translation: Vec3::new(-0.35, 0.2, 0.0),
+                        rotation: Quat::IDENTITY,
+                        scale: Vec3::splat(0.4),
+                    },
+                    shape: VisualShape::Sphere { radius_m: 0.2 },
+                    color_rgba: [0.2, 0.8, 0.3, 1.0],
+                    mesh: None,
+                },
+                RenderSceneItem {
+                    transform: Transform3 {
+                        translation: Vec3::new(0.35, 0.2, 0.0),
+                        rotation: Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+                        scale: Vec3::new(0.2, 0.2, 0.05),
+                    },
+                    shape: VisualShape::Cylinder {
+                        radius_m: 0.1,
+                        length_m: 0.05,
+                    },
+                    color_rgba: [0.2, 0.3, 0.9, 1.0],
+                    mesh: None,
+                },
+            ],
+        };
+
+        let output = backend
+            .render_scene_camera(
+                &camera,
+                &orbit.camera_transform(),
+                &scene,
+                [0.05, 0.08, 0.12, 1.0],
+            )
+            .expect("primitive shape render");
+
+        let min_depth = output
+            .depth
+            .depth_m
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            min_depth < camera.far_m as f32,
+            "expected sphere/cylinder geometry, got min_depth {min_depth}"
+        );
+        assert!(
+            unique_colors(&output.color.rgba8) > 1,
+            "expected shaded primitive colors"
+        );
+    }
+
+    #[test]
     fn wgpu_mesh_scene_render_produces_depth() {
         if std::env::var("RNE_SKIP_GPU").is_ok() {
             return;

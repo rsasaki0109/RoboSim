@@ -40,10 +40,11 @@ use rne_math::Mat4;
 use rne_math::Transform3;
 use rne_render::{
     Camera, CameraPassOutput, DepthFrame, ImageFrame, RenderError, RenderScene, RenderTarget,
-    TriangleMesh,
+    TriangleMesh, VisualShape,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -65,14 +66,20 @@ struct DrawUniform {
     color: [f32; 4],
 }
 
+struct BuiltPrimitiveMesh {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
 pub struct PrimitiveRenderer {
     pipeline: wgpu::RenderPipeline,
     camera_layout: wgpu::BindGroupLayout,
     draw_bind_group: wgpu::BindGroup,
     draw_uniform_stride: u32,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
+    box_mesh: BuiltPrimitiveMesh,
+    sphere_mesh: BuiltPrimitiveMesh,
+    cylinder_mesh: BuiltPrimitiveMesh,
     camera_buffer: wgpu::Buffer,
     draw_buffer: wgpu::Buffer,
     mesh_cache: HashMap<usize, GpuMesh>,
@@ -223,17 +230,9 @@ impl PrimitiveRenderer {
             cache: None,
         });
 
-        let (vertices, indices) = unit_cube();
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("rne_cube_vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("rne_cube_indices"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let box_mesh = upload_primitive(device, "rne_box", &unit_cube());
+        let sphere_mesh = upload_primitive(device, "rne_sphere", &unit_sphere());
+        let cylinder_mesh = upload_primitive(device, "rne_cylinder", &unit_cylinder());
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rne_camera_uniform"),
             size: std::mem::size_of::<CameraUniform>() as wgpu::BufferAddress,
@@ -266,12 +265,20 @@ impl PrimitiveRenderer {
             camera_layout,
             draw_bind_group,
             draw_uniform_stride,
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as u32,
+            box_mesh,
+            sphere_mesh,
+            cylinder_mesh,
             camera_buffer,
             draw_buffer,
             mesh_cache: HashMap::new(),
+        }
+    }
+
+    fn primitive_mesh_for(&self, shape: &VisualShape) -> &BuiltPrimitiveMesh {
+        match shape {
+            VisualShape::Sphere { .. } => &self.sphere_mesh,
+            VisualShape::Cylinder { .. } => &self.cylinder_mesh,
+            VisualShape::Box { .. } | VisualShape::Mesh { .. } => &self.box_mesh,
         }
     }
 
@@ -354,8 +361,6 @@ impl PrimitiveRenderer {
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.set_bind_group(0, &camera_bind_group, &[]);
 
             for (index, item) in scene.items.iter().enumerate() {
@@ -371,9 +376,13 @@ impl PrimitiveRenderer {
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 } else {
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..self.index_count, 0, 0..1);
+                    let primitive = self.primitive_mesh_for(&item.shape);
+                    pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        primitive.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint16,
+                    );
+                    pass.draw_indexed(0..primitive.index_count, 0, 0..1);
                 }
             }
         }
@@ -514,6 +523,29 @@ impl PrimitiveRenderer {
         self.mesh_cache
             .entry(key)
             .or_insert_with(|| upload_mesh(device, mesh))
+    }
+}
+
+fn upload_primitive(
+    device: &wgpu::Device,
+    label: &str,
+    mesh: &(Vec<Vertex>, Vec<u16>),
+) -> BuiltPrimitiveMesh {
+    let (vertices, indices) = mesh;
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{label}_vertices")),
+        contents: bytemuck::cast_slice(vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{label}_indices")),
+        contents: bytemuck::cast_slice(indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    BuiltPrimitiveMesh {
+        vertex_buffer,
+        index_buffer,
+        index_count: indices.len() as u32,
     }
 }
 
@@ -707,12 +739,105 @@ fn unit_cube() -> (Vec<Vertex>, Vec<u16>) {
     (vertices, indices)
 }
 
-trait BufferInitExt {
-    fn create_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer;
+/// Unit cylinder aligned with +Z, radius 0.5, height 1.0 centered at the origin.
+fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
+    const SEGMENTS: usize = 24;
+    let mut vertices = Vec::with_capacity(SEGMENTS * 2 + 2);
+    let mut indices = Vec::new();
+
+    for ring in [-0.5_f32, 0.5] {
+        for segment in 0..SEGMENTS {
+            let angle = std::f32::consts::TAU * segment as f32 / SEGMENTS as f32;
+            let x = angle.cos() * 0.5;
+            let y = angle.sin() * 0.5;
+            vertices.push(Vertex {
+                position: [x, y, ring],
+                normal: [angle.cos(), angle.sin(), 0.0],
+            });
+        }
+    }
+
+    for segment in 0..SEGMENTS {
+        let next = (segment + 1) % SEGMENTS;
+        let bottom = segment as u16;
+        let bottom_next = next as u16;
+        let top = (SEGMENTS + segment) as u16;
+        let top_next = (SEGMENTS + next) as u16;
+        indices.extend_from_slice(&[bottom, top, bottom_next, bottom_next, top, top_next]);
+    }
+
+    let bottom_center = vertices.len() as u16;
+    vertices.push(Vertex {
+        position: [0.0, 0.0, -0.5],
+        normal: [0.0, 0.0, -1.0],
+    });
+    let top_center = vertices.len() as u16;
+    vertices.push(Vertex {
+        position: [0.0, 0.0, 0.5],
+        normal: [0.0, 0.0, 1.0],
+    });
+
+    for segment in 0..SEGMENTS {
+        let next = (segment + 1) % SEGMENTS;
+        indices.extend_from_slice(&[bottom_center, next as u16, segment as u16]);
+        indices.extend_from_slice(&[
+            top_center,
+            (SEGMENTS + segment) as u16,
+            (SEGMENTS + next) as u16,
+        ]);
+    }
+
+    (vertices, indices)
 }
 
-impl BufferInitExt for wgpu::Device {
-    fn create_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
-        wgpu::util::DeviceExt::create_buffer_init(self, desc)
+/// Unit sphere with radius 0.5 centered at the origin.
+fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
+    const RINGS: usize = 16;
+    const SEGMENTS: usize = 24;
+    let mut vertices = Vec::with_capacity((RINGS + 1) * (SEGMENTS + 1));
+    let mut indices = Vec::new();
+
+    for ring in 0..=RINGS {
+        let v = ring as f32 / RINGS as f32;
+        let phi = v * std::f32::consts::PI;
+        let y = phi.cos();
+        let ring_radius = phi.sin();
+        for segment in 0..=SEGMENTS {
+            let u = segment as f32 / SEGMENTS as f32;
+            let theta = u * std::f32::consts::TAU;
+            let x = ring_radius * theta.cos();
+            let z = ring_radius * theta.sin();
+            let normal = [x, y, z];
+            vertices.push(Vertex {
+                position: [x * 0.5, y * 0.5, z * 0.5],
+                normal,
+            });
+        }
+    }
+
+    let stride = SEGMENTS + 1;
+    for ring in 0..RINGS {
+        for segment in 0..SEGMENTS {
+            let current = (ring * stride + segment) as u16;
+            let next = current + 1;
+            let below = current + stride as u16;
+            let below_next = below + 1;
+            indices.extend_from_slice(&[current, below, next, next, below, below_next]);
+        }
+    }
+
+    (vertices, indices)
+}
+
+#[cfg(test)]
+mod mesh_tests {
+    use super::{unit_cube, unit_cylinder, unit_sphere};
+
+    #[test]
+    fn primitive_meshes_have_triangles() {
+        for mesh in [unit_cube(), unit_cylinder(), unit_sphere()] {
+            assert!(!mesh.0.is_empty());
+            assert!(mesh.1.len() >= 3);
+        }
     }
 }
