@@ -1,11 +1,11 @@
 //! Renders URDF visuals with wgpu color and depth outputs.
 
 use rne_ecs::World;
-use rne_math::{Quat, Transform3, Vec3};
+use rne_math::Vec3;
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, RenderBackend, RenderScene, Visual};
-use rne_render_wgpu::WgpuRenderBackend;
+use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_urdf_import::{parse_urdf, spawn_urdf_robot};
-use rne_world::Transform3 as WorldTransform3;
+use rne_world::world_transform_of;
 
 fn main() {
     if std::env::var("RNE_SKIP_GPU").is_ok() {
@@ -32,12 +32,8 @@ fn main() {
         let Some(visual) = world.get::<Visual>(*entity).cloned() else {
             continue;
         };
-        let world_transform = world
-            .get::<WorldTransform3>(*entity)
-            .copied()
-            .unwrap_or_default();
         scene.items.push(RenderScene::item_from_visual(
-            world_transform,
+            world_transform_of(&world, *entity),
             visual.shape,
             visual.color_rgba,
             visual.local_offset,
@@ -45,24 +41,34 @@ fn main() {
     }
 
     let camera = Camera::new(128, 96, std::f64::consts::FRAC_PI_4);
-    let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.5, 4.0), Quat::IDENTITY);
+    let orbit = CameraOrbit {
+        focus: Vec3::new(0.0, 0.0, 0.0),
+        ..CameraOrbit::default()
+    };
 
     let output = backend
-        .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+        .render_scene_camera(&camera, &orbit.camera_transform(), &scene, [0.05, 0.08, 0.12, 1.0])
         .expect("render scene");
 
     let center_depth = output.depth.depth_m
         [(output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize];
+    let min_depth = output
+        .depth
+        .depth_m
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
 
     println!(
-        "rendered {} primitives: color_hash={:#018x} depth_hash={:#018x} center_depth={:.2} m",
+        "rendered {} primitives: color_hash={:#018x} depth_hash={:#018x} center_depth={:.2} m min_depth={:.2} m",
         scene.items.len(),
         hash_rgba8(&output.color.rgba8),
         hash_depth_f32(&output.depth.depth_m),
-        center_depth
+        center_depth,
+        min_depth
     );
 
-    if scene.items.is_empty() || center_depth >= camera.far_m as f32 {
+    if scene.items.is_empty() || min_depth >= camera.far_m as f32 {
         std::process::exit(1);
     }
 }

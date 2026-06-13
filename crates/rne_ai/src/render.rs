@@ -1,7 +1,7 @@
 //! Render scene helpers for diff-drive simulation.
 
 use rne_ecs::World;
-use rne_math::{Quat, Vec3};
+use rne_math::{yaw_rad, Quat, Vec3};
 use rne_physics::Collider;
 use rne_render::{RenderScene, Visual, VisualShape};
 use rne_robot::DiffDriveSpawned;
@@ -57,10 +57,7 @@ fn append_link_item(
     fallback_shape: VisualShape,
     fallback_color: [f32; 4],
 ) {
-    let world_transform = world
-        .get::<WorldTransform3>(entity)
-        .copied()
-        .unwrap_or_default();
+    let world_transform = render_transform(world, entity);
 
     if let Some(visual) = world.get::<Visual>(entity) {
         scene.items.push(RenderScene::item_from_visual(
@@ -79,6 +76,18 @@ fn append_link_item(
         fallback_color,
         local_offset,
     ));
+}
+
+/// Builds a render transform using world translation and yaw-only rotation.
+fn render_transform(world: &World, entity: rne_ecs::Entity) -> WorldTransform3 {
+    let transform = world
+        .get::<WorldTransform3>(entity)
+        .copied()
+        .unwrap_or_default();
+    WorldTransform3::from_translation_rotation(
+        transform.translation,
+        Quat::from_rotation_y(yaw_rad(transform.rotation)),
+    )
 }
 
 fn append_ground_plane(scene: &mut RenderScene) {

@@ -89,9 +89,11 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
 
     let orbit = CameraOrbit {
         focus: robot_focus(&sim),
-        ..CameraOrbit::default()
+        yaw_rad: -0.09,
+        pitch_rad: 0.52,
+        distance_m: 3.6,
     };
-    let camera = Camera::new(320, 240, std::f64::consts::FRAC_PI_4);
+    let camera = Camera::new(640, 360, std::f64::consts::FRAC_PI_4);
     let view = orbit.camera_transform();
 
     let output = backend
@@ -111,6 +113,15 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
     );
 
     if scene.items.is_empty() || sim.observe().base_x_m <= 0.0 {
+        std::process::exit(1);
+    }
+
+    let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
+    let center_depth = output.depth.depth_m[center];
+    if center_depth >= camera.far_m as f32 {
+        eprintln!(
+            "interactive viewer smoke render invalid (center_depth={center_depth:.2} m)"
+        );
         std::process::exit(1);
     }
 }

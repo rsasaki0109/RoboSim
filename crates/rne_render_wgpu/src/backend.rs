@@ -222,6 +222,16 @@ fn align_to(value: u32, alignment: u32) -> u32 {
 }
 
 #[cfg(test)]
+fn unique_colors(rgba8: &[u8]) -> usize {
+    use std::collections::HashSet;
+    rgba8
+        .chunks_exact(4)
+        .map(|px| (px[0], px[1], px[2], px[3]))
+        .collect::<HashSet<_>>()
+        .len()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use rne_math::{Quat, Vec3};
@@ -284,6 +294,20 @@ mod tests {
             .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
             .expect("scene render");
 
+        let min_depth = output
+            .depth
+            .depth_m
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        eprintln!(
+            "unit scene: color_hash={:#018x} min_depth={min_depth:.3} center_depth={:.3} unique_colors={}",
+            hash_rgba8(&output.color.rgba8),
+            output.depth.depth_m[center],
+            unique_colors(&output.color.rgba8)
+        );
+
         assert_ne!(hash_rgba8(&output.color.rgba8), 0);
         assert_ne!(hash_depth_f32(&output.depth.depth_m), 0);
         assert!(output
@@ -332,7 +356,191 @@ mod tests {
             .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
             .expect("mesh scene render");
 
+        let min_depth = output
+            .depth
+            .depth_m
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        eprintln!(
+            "mesh scene: color_hash={:#018x} min_depth={min_depth:.3} center_depth={:.3} unique_colors={}",
+            hash_rgba8(&output.color.rgba8),
+            output.depth.depth_m[center],
+            unique_colors(&output.color.rgba8)
+        );
+
         assert_ne!(hash_rgba8(&output.color.rgba8), 0);
         assert_ne!(hash_depth_f32(&output.depth.depth_m), 0);
+    }
+
+    #[test]
+    fn wgpu_urdf_primitive_scene_renders_visible_geometry() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let xml = include_str!(
+            "../../../adapters/ros2/rne_urdf_import/tests/fixtures/minimal_diff_drive.urdf"
+        );
+        let urdf = rne_urdf_import::parse_urdf(xml).expect("parse URDF");
+        let mut world = rne_ecs::World::new();
+        let spawned = rne_urdf_import::spawn_urdf_robot(&mut world, &urdf).expect("spawn URDF");
+
+        let mut scene = RenderScene::new();
+        for entity in spawned.links.values() {
+            let Some(visual) = world.get::<rne_render::Visual>(*entity).cloned() else {
+                continue;
+            };
+            let world_transform = world
+                .get::<rne_world::Transform3>(*entity)
+                .copied()
+                .unwrap_or_default();
+            scene.items.push(RenderScene::item_from_visual(
+                world_transform,
+                visual.shape,
+                visual.color_rgba,
+                visual.local_offset,
+            ));
+        }
+
+        let camera = Camera::new(128, 96, std::f64::consts::FRAC_PI_4);
+        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 1.5, 4.0), Quat::IDENTITY);
+        let output = backend
+            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("urdf scene render");
+
+        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        let center_depth = output.depth.depth_m[center];
+        eprintln!(
+            "urdf scene: color_hash={:#018x} center_depth={center_depth:.3} unique_colors={}",
+            hash_rgba8(&output.color.rgba8),
+            unique_colors(&output.color.rgba8)
+        );
+
+        assert!(
+            center_depth < camera.far_m as f32,
+            "expected geometry in center pixel, got depth {center_depth}"
+        );
+        assert!(
+            unique_colors(&output.color.rgba8) > 4,
+            "expected shaded scene colors, got only clear color"
+        );
+    }
+
+    #[test]
+    fn wgpu_orbit_camera_renders_focused_box() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let focus = Vec3::new(0.5, 0.25, 0.0);
+        let orbit = crate::CameraOrbit {
+            focus,
+            ..crate::CameraOrbit::default()
+        };
+        let scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3 {
+                    translation: focus,
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::new(0.5, 0.3, 0.4),
+                },
+                shape: VisualShape::Box {
+                    size_m: Vec3::new(0.5, 0.3, 0.4),
+                },
+                color_rgba: [0.8, 0.2, 0.2, 1.0],
+                mesh: None,
+            }],
+        };
+
+        let camera = Camera::new(320, 240, std::f64::consts::FRAC_PI_4);
+        let view = orbit.camera_transform();
+        let output = backend
+            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("orbit render");
+
+        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        eprintln!(
+            "orbit box: color_hash={:#018x} center_depth={:.3} unique_colors={}",
+            hash_rgba8(&output.color.rgba8),
+            output.depth.depth_m[center],
+            unique_colors(&output.color.rgba8)
+        );
+
+        assert!(
+            output.depth.depth_m[center] < camera.far_m as f32,
+            "orbit camera should render focused box in center"
+        );
+    }
+
+    #[test]
+    fn wgpu_orbit_camera_renders_focused_mesh() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+
+        let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_render/tests/fixtures/mesh_diff_drive");
+        let mesh = Arc::new(
+            rne_render::load_stl(&package_root.join("meshes/base_link.stl")).expect("load stl"),
+        );
+        let focus = Vec3::new(0.5, 0.25, 0.0);
+        let orbit = crate::CameraOrbit {
+            focus,
+            ..crate::CameraOrbit::default()
+        };
+        let scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3 {
+                    translation: focus,
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::ONE,
+                },
+                shape: VisualShape::Mesh {
+                    path: "package://mesh_diff_drive/meshes/base_link.stl".into(),
+                    scale: Vec3::ONE,
+                },
+                color_rgba: [0.35, 0.55, 0.95, 1.0],
+                mesh: Some(mesh),
+            }],
+        };
+
+        let camera = Camera::new(320, 240, std::f64::consts::FRAC_PI_4);
+        let view = orbit.camera_transform();
+        let output = backend
+            .render_scene_camera(&camera, &view, &scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("orbit mesh render");
+
+        let center = (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+        eprintln!(
+            "orbit mesh: color_hash={:#018x} center_depth={:.3} unique_colors={}",
+            hash_rgba8(&output.color.rgba8),
+            output.depth.depth_m[center],
+            unique_colors(&output.color.rgba8)
+        );
+
+        assert!(
+            output.depth.depth_m[center] < camera.far_m as f32,
+            "orbit camera should render focused mesh in center"
+        );
     }
 }

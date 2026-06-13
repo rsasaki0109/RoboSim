@@ -8,7 +8,7 @@ use crate::joint::{validate_joint_position, validate_joint_velocity, JointValida
 use bevy_ecs::prelude::{Entity, World};
 use rne_core::SimDuration;
 use rne_math::{Quat, Vec3};
-use rne_physics::{JointMotor, RigidBody};
+use rne_physics::{Collider, ColliderShape, JointMotor, RigidBody, RigidBodyType};
 use rne_world::Transform3;
 
 /// Result of applying one actuator command.
@@ -209,11 +209,50 @@ pub fn differential_drive_kinematics(
         transform.rotation =
             (Quat::from_rotation_y(yaw_rad_s * dt_s) * transform.rotation).normalize();
 
+        let base_snapshot = *transform;
+        drop(transform);
+
+        if world
+            .get::<RigidBody>(drive.base_link)
+            .is_some_and(|body| body.body_type == RigidBodyType::Kinematic)
+        {
+            sync_wheel_transforms(world, drive, &base_snapshot);
+        }
+
         if let Some(mut body) = world.get_mut::<RigidBody>(drive.base_link) {
             let forward_flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
             body.linear_velocity_m_s = forward_flat * linear_m_s;
             body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rad_s, 0.0);
         }
+    }
+}
+
+fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Transform3) {
+    let half_track = drive.track_width_m * 0.5;
+    let wheel_y = world
+        .get::<Collider>(drive.base_link)
+        .and_then(|collider| match collider.shape {
+            ColliderShape::Cuboid { half_extents_m } => {
+                Some(-half_extents_m.y + drive.wheel_radius_m)
+            }
+            _ => None,
+        })
+        .unwrap_or(0.0);
+
+    for (wheel, x_offset) in [(drive.left_actuator, -half_track), (drive.right_actuator, half_track)]
+    {
+        let Some(actuator) = world.get::<Actuator>(wheel) else {
+            continue;
+        };
+        let Some(wheel_entity) = actuator.joint else {
+            continue;
+        };
+        let Some(mut wheel_transform) = world.get_mut::<Transform3>(wheel_entity) else {
+            continue;
+        };
+        let offset = base.rotation * Vec3::new(x_offset, wheel_y, 0.0);
+        wheel_transform.translation = base.translation + offset;
+        wheel_transform.rotation = base.rotation;
     }
 }
 
