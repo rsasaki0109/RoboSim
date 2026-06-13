@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 rne_ai = { path = "../../crates/rne_ai" }
+rne_assets = { path = "../../crates/rne_assets" }
 rne_ecs = { path = "../../crates/rne_ecs" }
 rne_math = { path = "../../crates/rne_math" }
 rne_physics = { path = "../../crates/rne_physics" }
