@@ -6,7 +6,7 @@ pub mod transform;
 pub mod units;
 
 pub use glam::{DMat4, DQuat, DVec3};
-pub use transform::{Pose3, Transform3, Velocity3};
+pub use transform::{yaw_rad, Pose3, Transform3, Velocity3};
 pub use units::{Hertz, Meters, Radians, Seconds};
 
 /// Three-dimensional vector using double precision.

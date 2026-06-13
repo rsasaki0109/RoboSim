@@ -30,6 +30,7 @@ members = [
   "examples/10_vectorized_episode",
   "examples/11_agent_policy",
   "examples/12_shared_world_agent",
+  "examples/13_multi_robot_agent",
   "tests/determinism",
   "xtask",
 ]

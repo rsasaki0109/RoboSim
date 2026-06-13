@@ -8,21 +8,21 @@ use rne_data::DataBus;
 use rne_data::{InMemoryDataBus, StreamId};
 use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
-use rne_math::{Hertz, Quat, Vec3};
+use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
     Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, spawn_diff_drive_robot,
-    sync_joint_motors_from_actuators, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent,
-    DiffDriveConfig, DiffDriveDriveMode, DiffDriveSpawned, Link,
+    sync_joint_motors_from_actuators, Actuator, ActuatorCommand, ActuatorCommandBuffer,
+    DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode, DiffDriveSpawned, Link,
 };
 use rne_sensor::{sample_sensors, ImuSpec, Sensor, SensorKind, SensorSampleContext, SensorState};
 use rne_world::{Transform3, WorldEntity};
 use std::path::{Path, PathBuf};
 
-const IMU_STREAM: StreamId = StreamId::new(100);
+const IMU_STREAM_BASE: u32 = 100;
 
 /// Headless differential drive environment.
 pub struct DiffDriveSim {
@@ -31,7 +31,7 @@ pub struct DiffDriveSim {
     world: World,
     backend: RapierBackend,
     physics_world: rne_physics::PhysicsWorldId,
-    robot: DiffDriveSpawned,
+    robots: Vec<DiffDriveSpawned>,
     command_buffer: ActuatorCommandBuffer,
     data_bus: InMemoryDataBus,
     sim_time: SimTime,
@@ -58,7 +58,23 @@ impl DiffDriveSim {
                 ..DiffDriveConfig::default()
             },
         );
-        Self::from_spawned_world(world, robot, None, 0, DiffDriveDriveMode::JointDriven)
+        Self::from_spawned_world(world, vec![robot], None, 0, DiffDriveDriveMode::JointDriven)
+    }
+
+    /// Creates a simulation with multiple diff-drive robots on a shared ground plane.
+    pub fn with_robot_configs(configs: &[DiffDriveConfig]) -> Self {
+        assert!(
+            !configs.is_empty(),
+            "with_robot_configs requires at least one robot"
+        );
+        let mut world = World::new();
+        spawn_ground(&mut world);
+        let robots = configs
+            .iter()
+            .map(|config| spawn_diff_drive_robot(&mut world, config))
+            .collect();
+        let drive_mode = configs[0].drive_mode;
+        Self::from_spawned_world(world, robots, None, 0, drive_mode)
     }
 
     /// Loads a `.rne.scene.toml` file and its referenced robot assets.
@@ -107,7 +123,7 @@ impl DiffDriveSim {
 
         Ok(Self::from_spawned_world(
             world,
-            robot_spawned,
+            vec![robot_spawned],
             Some(scene_path.to_path_buf()),
             world_seed,
             DiffDriveDriveMode::Kinematic,
@@ -134,19 +150,41 @@ impl DiffDriveSim {
         &mut self.world
     }
 
-    /// Provides read access to the spawned diff-drive robot handles.
+    /// Provides read access to the primary diff-drive robot handles.
     pub fn robot(&self) -> &DiffDriveSpawned {
-        &self.robot
+        &self.robots[0]
+    }
+
+    /// Returns every diff-drive robot spawned in this simulation.
+    pub fn robots(&self) -> &[DiffDriveSpawned] {
+        &self.robots
+    }
+
+    /// Spawns an additional diff-drive robot into the live simulation world.
+    pub fn spawn_robot(&mut self, config: DiffDriveConfig) -> DiffDriveSpawned {
+        let spawned = spawn_diff_drive_robot(&mut self.world, &config);
+        attach_imu(
+            &mut self.world,
+            spawned.base_link,
+            imu_stream_for_index(self.robots.len()),
+        );
+        self.backend
+            .sync_from_ecs(&mut self.world, self.physics_world)
+            .expect("sync spawned robot into physics");
+        self.robots.push(spawned);
+        spawned
     }
 
     fn from_spawned_world(
         mut world: World,
-        robot: DiffDriveSpawned,
+        robots: Vec<DiffDriveSpawned>,
         scene_path: Option<PathBuf>,
         world_seed: u64,
         drive_mode: DiffDriveDriveMode,
     ) -> Self {
-        attach_imu(&mut world, robot.base_link);
+        for (index, robot) in robots.iter().enumerate() {
+            attach_imu(&mut world, robot.base_link, imu_stream_for_index(index));
+        }
 
         let mut backend = RapierBackend::new();
         let physics_world = backend
@@ -160,7 +198,7 @@ impl DiffDriveSim {
             world,
             backend,
             physics_world,
-            robot,
+            robots,
             command_buffer: ActuatorCommandBuffer::new(),
             data_bus: InMemoryDataBus::new(),
             sim_time: SimTime::ZERO,
@@ -177,7 +215,7 @@ impl DiffDriveSim {
         } else {
             let initial = self
                 .world
-                .get::<Transform3>(self.robot.base_link)
+                .get::<Transform3>(self.robots[0].base_link)
                 .map(|tf| tf.translation)
                 .unwrap_or_else(|| Vec3::new(0.0, 0.25, 0.0));
             *self = Self::with_initial_translation(initial);
@@ -185,7 +223,7 @@ impl DiffDriveSim {
         self.observe()
     }
 
-    /// Applies wheel velocities and advances one simulation step.
+    /// Applies wheel velocities to the primary robot and advances one simulation step.
     pub fn step(
         &mut self,
         left_velocity_rad_s: f64,
@@ -194,9 +232,37 @@ impl DiffDriveSim {
         self.step_with_recording(left_velocity_rad_s, right_velocity_rad_s, false, &mut ())
     }
 
-    /// Applies a diff-drive action and advances one simulation step.
+    /// Applies a diff-drive action to the primary robot and advances one simulation step.
     pub fn step_action(&mut self, action: DiffDriveAction) -> DiffDriveObservation {
-        self.step(action.left_velocity_rad_s, action.right_velocity_rad_s)
+        self.step_robot_action(self.robots[0].robot, action, None)
+    }
+
+    /// Applies a diff-drive action to one robot and advances one simulation step.
+    pub fn step_robot_action(
+        &mut self,
+        robot: Entity,
+        action: DiffDriveAction,
+        goal_x_m: Option<f64>,
+    ) -> DiffDriveObservation {
+        self.queue_robot_action(robot, action);
+        self.advance_one_tick(false, &mut ());
+        self.observe_robot_with_goal(robot, goal_x_m)
+    }
+
+    /// Applies actions for multiple robots, then advances the simulation once.
+    pub fn step_robots_actions(
+        &mut self,
+        actions: &[(Entity, DiffDriveAction)],
+    ) -> Vec<(Entity, DiffDriveObservation)> {
+        for (robot, action) in actions {
+            self.queue_robot_action(*robot, *action);
+        }
+        self.advance_one_tick(false, &mut ());
+
+        actions
+            .iter()
+            .map(|(robot, _)| (*robot, self.observe_robot(*robot)))
+            .collect()
     }
 
     /// Applies wheel velocities, optionally recording actuator commands to a log.
@@ -207,21 +273,97 @@ impl DiffDriveSim {
         record_log: bool,
         log: &mut impl StepLogTarget,
     ) -> DiffDriveObservation {
-        self.command_buffer.push(
-            ActuatorCommand::WheelVelocity {
-                wheel: self.robot.left_actuator,
-                velocity_rad_s: left_velocity_rad_s,
+        self.queue_robot_action(
+            self.robots[0].robot,
+            DiffDriveAction {
+                left_velocity_rad_s,
+                right_velocity_rad_s,
             },
-            self.sim_time,
         );
-        self.command_buffer.push(
-            ActuatorCommand::WheelVelocity {
-                wheel: self.robot.right_actuator,
-                velocity_rad_s: right_velocity_rad_s,
-            },
-            self.sim_time,
-        );
+        self.advance_one_tick(record_log, log);
+        self.observe()
+    }
 
+    /// Returns the number of completed simulation steps.
+    pub fn step_count(&self) -> u64 {
+        self.step_count
+    }
+
+    /// Builds an observation from the primary robot state.
+    pub fn observe(&self) -> DiffDriveObservation {
+        self.observe_robot(self.robots[0].robot)
+    }
+
+    /// Builds an observation for a specific diff-drive robot in this world.
+    pub fn observe_robot(&self, robot: Entity) -> DiffDriveObservation {
+        self.observe_robot_with_goal(robot, None)
+    }
+
+    /// Builds an observation for a robot, optionally including goal-relative features.
+    pub fn observe_robot_with_goal(
+        &self,
+        robot: Entity,
+        goal_x_m: Option<f64>,
+    ) -> DiffDriveObservation {
+        let spawned = self
+            .robots
+            .iter()
+            .find(|spawned| spawned.robot == robot)
+            .unwrap_or(&self.robots[0]);
+        let base_link = spawned.base_link;
+        let transform = self
+            .world
+            .get::<Transform3>(base_link)
+            .copied()
+            .unwrap_or_default();
+        let left_wheel_velocity_rad_s = self
+            .world
+            .get::<Actuator>(spawned.left_actuator)
+            .map(|actuator| actuator.target.velocity_rad_s)
+            .unwrap_or(0.0);
+        let right_wheel_velocity_rad_s = self
+            .world
+            .get::<Actuator>(spawned.right_actuator)
+            .map(|actuator| actuator.target.velocity_rad_s)
+            .unwrap_or(0.0);
+        let imu = imu_ay_for_base(&self.world, &self.data_bus, base_link);
+
+        DiffDriveObservation {
+            base_x_m: transform.translation.x,
+            base_y_m: transform.translation.y,
+            base_z_m: transform.translation.z,
+            base_yaw_rad: yaw_rad(transform.rotation),
+            left_wheel_velocity_rad_s,
+            right_wheel_velocity_rad_s,
+            imu_ay_m_s2: imu,
+            lidar_points: 0,
+            goal_delta_x_m: goal_x_m.map(|goal| goal - transform.translation.x),
+        }
+    }
+
+    fn queue_robot_action(&mut self, robot: Entity, action: DiffDriveAction) {
+        let spawned = self
+            .robots
+            .iter()
+            .find(|spawned| spawned.robot == robot)
+            .unwrap_or(&self.robots[0]);
+        self.command_buffer.push(
+            ActuatorCommand::WheelVelocity {
+                wheel: spawned.left_actuator,
+                velocity_rad_s: action.left_velocity_rad_s,
+            },
+            self.sim_time,
+        );
+        self.command_buffer.push(
+            ActuatorCommand::WheelVelocity {
+                wheel: spawned.right_actuator,
+                velocity_rad_s: action.right_velocity_rad_s,
+            },
+            self.sim_time,
+        );
+    }
+
+    fn advance_one_tick(&mut self, record_log: bool, log: &mut impl StepLogTarget) {
         let entries: Vec<_> = if record_log {
             self.command_buffer.pending().cloned().collect()
         } else {
@@ -235,17 +377,14 @@ impl DiffDriveSim {
                 log.record_actuator_command(&entry);
             }
         }
-        let drive = self
-            .world
-            .get::<DiffDriveComponent>(self.robot.robot)
-            .expect("drive component")
-            .0;
+
+        let drives = collect_drives(&mut self.world);
         match self.drive_mode {
             DiffDriveDriveMode::Kinematic => {
-                differential_drive_kinematics(&mut self.world, &[drive], self.dt);
+                differential_drive_kinematics(&mut self.world, &drives, self.dt);
             }
             DiffDriveDriveMode::JointDriven => {
-                sync_joint_motors_from_actuators(&mut self.world, &[drive]);
+                sync_joint_motors_from_actuators(&mut self.world, &drives);
             }
         }
         step_physics(
@@ -269,45 +408,6 @@ impl DiffDriveSim {
 
         self.sim_time = self.sim_time + self.dt;
         self.step_count += 1;
-        self.observe()
-    }
-
-    /// Returns the number of completed simulation steps.
-    pub fn step_count(&self) -> u64 {
-        self.step_count
-    }
-
-    /// Builds an observation from the current world state.
-    pub fn observe(&self) -> DiffDriveObservation {
-        self.observe_robot(self.robot.robot)
-    }
-
-    /// Builds an observation for a specific diff-drive robot in this world.
-    pub fn observe_robot(&self, robot: Entity) -> DiffDriveObservation {
-        let base_link = self
-            .world
-            .get::<DiffDriveComponent>(robot)
-            .map(|drive| drive.0.base_link)
-            .unwrap_or(self.robot.base_link);
-        let pose = self
-            .world
-            .get::<Transform3>(base_link)
-            .copied()
-            .unwrap_or_default()
-            .translation;
-        let imu = self
-            .data_bus
-            .latest::<rne_data::ImuSample>(IMU_STREAM)
-            .map(|frame| frame.payload.linear_acceleration_m_s2.y)
-            .unwrap_or(0.0);
-
-        DiffDriveObservation {
-            base_x_m: pose.x,
-            base_y_m: pose.y,
-            base_z_m: pose.z,
-            imu_ay_m_s2: imu,
-            lidar_points: 0,
-        }
     }
 }
 
@@ -333,6 +433,28 @@ impl StepLogTarget for SimulationLog {
     }
 }
 
+fn imu_stream_for_index(index: usize) -> StreamId {
+    StreamId::new(IMU_STREAM_BASE as u64 + index as u64)
+}
+
+fn collect_drives(world: &mut World) -> Vec<rne_robot::DifferentialDrive> {
+    let mut query = world.query::<&DiffDriveComponent>();
+    query.iter(world).map(|component| component.0).collect()
+}
+
+fn imu_ay_for_base(world: &World, data_bus: &InMemoryDataBus, base_link: Entity) -> f64 {
+    let Some(sensor) = world.get::<Sensor>(base_link) else {
+        return 0.0;
+    };
+    let SensorKind::Imu(_) = sensor.kind else {
+        return 0.0;
+    };
+    data_bus
+        .latest::<rne_data::ImuSample>(sensor.stream_id)
+        .map(|frame| frame.payload.linear_acceleration_m_s2.y)
+        .unwrap_or(0.0)
+}
+
 fn spawn_ground(world: &mut World) {
     let ground = spawn_named(world, "ground");
     world.entity_mut(ground).insert((
@@ -350,7 +472,7 @@ fn spawn_ground(world: &mut World) {
     ));
 }
 
-fn attach_imu(world: &mut World, base_link: rne_ecs::Entity) {
+fn attach_imu(world: &mut World, base_link: rne_ecs::Entity, stream_id: StreamId) {
     world.entity_mut(base_link).insert((
         Sensor {
             kind: SensorKind::Imu(ImuSpec::default()),
@@ -358,7 +480,7 @@ fn attach_imu(world: &mut World, base_link: rne_ecs::Entity) {
             latency_ticks: 0,
             frame_id: 10,
             enabled: true,
-            stream_id: IMU_STREAM,
+            stream_id,
         },
         SensorState::default(),
     ));
@@ -388,6 +510,52 @@ mod tests {
         }
 
         assert!(final_x > 0.5, "expected forward motion, got x={final_x}");
+    }
+
+    #[test]
+    fn observation_includes_yaw_and_wheel_velocities() {
+        let mut sim = DiffDriveSim::new();
+        let obs = sim.step(4.0, 2.0);
+
+        assert!(obs.left_wheel_velocity_rad_s.abs() > 0.0);
+        assert!(obs.right_wheel_velocity_rad_s.abs() > 0.0);
+        assert!(obs.base_yaw_rad.abs() < 0.5);
+    }
+
+    #[test]
+    fn multi_robot_single_tick_applies_distinct_commands() {
+        let mut sim = DiffDriveSim::with_robot_configs(&[
+            DiffDriveConfig {
+                model_name: "robot_a".into(),
+                initial_translation_m: Vec3::new(0.0, 0.25, -1.0),
+                drive_mode: DiffDriveDriveMode::JointDriven,
+                ..DiffDriveConfig::default()
+            },
+            DiffDriveConfig {
+                model_name: "robot_b".into(),
+                initial_translation_m: Vec3::new(0.0, 0.25, 1.0),
+                drive_mode: DiffDriveDriveMode::JointDriven,
+                ..DiffDriveConfig::default()
+            },
+        ]);
+        let robot_a = sim.robots()[0].robot;
+        let robot_b = sim.robots()[1].robot;
+
+        sim.step_robots_actions(&[
+            (robot_a, DiffDriveAction::forward(6.0)),
+            (robot_b, DiffDriveAction::forward(2.0)),
+        ]);
+
+        let obs_a = sim.observe_robot(robot_a);
+        let obs_b = sim.observe_robot(robot_b);
+        assert!(obs_a.left_wheel_velocity_rad_s > obs_b.left_wheel_velocity_rad_s);
+    }
+
+    #[test]
+    fn goal_relative_observation_is_populated() {
+        let sim = DiffDriveSim::new();
+        let obs = sim.observe_robot_with_goal(sim.robot().robot, Some(2.0));
+        assert_eq!(obs.goal_delta_x_m, Some(2.0));
     }
 
     #[test]

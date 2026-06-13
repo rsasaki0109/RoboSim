@@ -38,7 +38,7 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 
 | Area | Idea |
 |------|------|
-| AI | Multi-robot episodes, richer observation spaces |
+| AI | Multi-robot episodes, richer observation spaces | Done (`13_multi_robot_agent`) |
 | Physics | Shared-world agents (agent ECS ↔ sim world) | Done (`12_shared_world_agent`) |
 | Rendering | Interactive viewer / camera teleop |
 | Assets | Hot reload, asset pipeline CLI |

@@ -3,6 +3,11 @@
 use crate::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
+/// Y-axis yaw in radians extracted from a rotation quaternion.
+pub fn yaw_rad(rotation: Quat) -> f64 {
+    rotation.to_euler(glam::EulerRot::YXZ).0
+}
+
 /// Local transform with translation, rotation, and scale.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transform3 {
