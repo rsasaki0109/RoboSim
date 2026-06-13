@@ -8,14 +8,16 @@ use rapier3d::na::{Unit, Vector3};
 use rapier3d::pipeline::{PhysicsPipeline, QueryPipeline};
 use rapier3d::prelude::*;
 use rne_core::SimDuration;
+use rne_ecs::Parent;
 use rne_ecs::{Entity, World};
+use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
     Collider, ContactEvent, JointMotor, PhysicsBackend, PhysicsCapability, PhysicsError,
     PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody,
     RigidBodyType,
 };
-use rne_world::Transform3;
+use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
 
 /// Rapier-backed physics simulation.
@@ -117,9 +119,7 @@ impl PhysicsBackend for RapierBackend {
 
         for entity_ref in world.iter_entities() {
             let entity = entity_ref.id();
-            let Some(transform) = world.get::<Transform3>(entity) else {
-                continue;
-            };
+            let transform = world_transform_of(world, entity);
             let Some(rigid_body) = world.get::<RigidBody>(entity) else {
                 continue;
             };
@@ -127,7 +127,7 @@ impl PhysicsBackend for RapierBackend {
                 continue;
             };
 
-            let isometry = transform_to_isometry(transform);
+            let isometry = transform_to_isometry(&transform);
 
             if let Some(body_handle) = state.entity_to_body.get(&entity).copied() {
                 if let Some(body) = state.bodies.get_mut(body_handle) {
@@ -242,10 +242,16 @@ impl PhysicsBackend for RapierBackend {
                 continue;
             }
 
+            let world_tf = isometry_to_transform(body.position());
+            let parent_entity = world.get::<Parent>(*entity).map(|parent| parent.0);
+            let local_tf = if let Some(parent_entity) = parent_entity {
+                let parent_world = world_transform_of(world, parent_entity);
+                world_to_local_transform(&parent_world, &world_tf)
+            } else {
+                world_tf
+            };
             if let Some(mut transform) = world.get_mut::<Transform3>(*entity) {
-                let updated = isometry_to_transform(body.position());
-                transform.translation = updated.translation;
-                transform.rotation = updated.rotation;
+                *transform = local_tf;
             }
         }
 
@@ -350,6 +356,29 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         joint
             .data
             .set_motor_velocity(JointAxis::AngX, motor.velocity_rad_s as f32, 1.0);
+    }
+}
+
+fn world_to_local_transform(parent_world: &Transform3, world_tf: &Transform3) -> Transform3 {
+    let parent = to_math_transform(parent_world);
+    let world = to_math_transform(world_tf);
+    let local = parent.inverse().mul_transform(&world);
+    from_math_transform(local)
+}
+
+fn to_math_transform(transform: &Transform3) -> MathTransform3 {
+    MathTransform3 {
+        translation: transform.translation,
+        rotation: transform.rotation,
+        scale: transform.scale,
+    }
+}
+
+fn from_math_transform(transform: MathTransform3) -> Transform3 {
+    Transform3 {
+        translation: transform.translation,
+        rotation: transform.rotation,
+        scale: transform.scale,
     }
 }
 

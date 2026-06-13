@@ -37,6 +37,7 @@ members = [
   "examples/17_multi_robot_collision",
   "examples/18_readme_hero",
   "examples/19_lidar_render",
+  "examples/20_mobile_manipulator_arm",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",

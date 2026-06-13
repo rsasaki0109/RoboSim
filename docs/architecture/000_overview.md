@@ -32,3 +32,4 @@ See also:
 
 - [Robot Native model](002_robot_native.md)
 - [DataBus](005_data_bus.md)
+- [Mobile manipulator target](006_mobile_manipulator.md)
