@@ -27,6 +27,15 @@ pub struct RobotAsset {
     pub diff_drive: Option<DiffDriveRobotAsset>,
     /// URDF parameters when [`Self::kind`] is [`RobotKind::Urdf`].
     pub urdf: Option<UrdfRobotAsset>,
+    /// Optional URDF visuals for diff-drive robots.
+    pub visuals: Option<VisualsRobotAsset>,
+}
+
+/// Optional URDF visuals attached to diff-drive link entities.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VisualsRobotAsset {
+    /// Path to a URDF file containing visual geometry, relative to the robot asset directory unless absolute.
+    pub urdf: String,
 }
 
 /// Diff-drive section of a robot asset file.
@@ -74,12 +83,23 @@ impl DiffDriveRobotAsset {
 impl UrdfRobotAsset {
     /// Resolves the URDF path relative to a base directory.
     pub fn resolve_path(&self, base_dir: &Path) -> PathBuf {
-        let path = Path::new(&self.path);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            base_dir.join(path)
-        }
+        resolve_asset_path(&self.path, base_dir)
+    }
+}
+
+impl VisualsRobotAsset {
+    /// Resolves the visuals URDF path relative to a base directory.
+    pub fn resolve_urdf_path(&self, base_dir: &Path) -> PathBuf {
+        resolve_asset_path(&self.urdf, base_dir)
+    }
+}
+
+fn resolve_asset_path(path: &str, base_dir: &Path) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
     }
 }
 
@@ -124,6 +144,12 @@ fn validate_robot_asset(asset: &RobotAsset, path: &Path) -> Result<RobotAsset, A
             return Err(AssetError::invalid(
                 path,
                 "diff_drive section is not allowed when kind = \"urdf\"",
+            ));
+        }
+        RobotKind::Urdf if asset.visuals.is_some() => {
+            return Err(AssetError::invalid(
+                path,
+                "visuals section is not allowed when kind = \"urdf\"",
             ));
         }
         _ => {}

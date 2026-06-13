@@ -1,4 +1,4 @@
-//! Interactive diff-drive viewer with keyboard teleop, scene assets, and hot reload.
+//! Interactive diff-drive viewer with keyboard teleop, scene assets, URDF mesh visuals, and hot reload.
 //!
 //! Controls:
 //! - W / S: drive forward / backward
@@ -9,22 +9,16 @@
 //!
 //! Usage:
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/episode_diff_drive.rne.scene.toml
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/mesh_diff_drive.rne.scene.toml
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
 //!
 //! Edit the scene or referenced robot files while running; the viewer reloads automatically.
 
-use rne_ai::{DiffDriveAction, DiffDriveSim};
+use rne_ai::{build_diff_drive_render_scene, DiffDriveAction, DiffDriveSim};
 use rne_assets::AssetHotReloader;
-use rne_ecs::World;
-use rne_math::{Quat, Vec3};
-use rne_physics::Collider;
-use rne_render::{
-    hash_depth_f32, hash_rgba8, Camera, RenderBackend, RenderScene, Visual, VisualShape,
-};
+use rne_math::Vec3;
+use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
 use rne_render_wgpu::{CameraOrbit, InteractiveViewer, WgpuRenderBackend};
-use rne_robot::DiffDriveSpawned;
-use rne_world::Transform3 as WorldTransform3;
 use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -41,13 +35,13 @@ const TURN_DELTA_RAD_S: f64 = 3.0;
 
 fn main() {
     let smoke = env::args().any(|arg| arg == "--smoke") || env::var("RNE_VIEWER_SMOKE").is_ok();
+    let scene_path = scene_path_from_args();
 
     if smoke || env::var("RNE_SKIP_GPU").is_ok() {
-        run_smoke(smoke, &default_scene_path());
+        run_smoke(smoke, &scene_path);
         return;
     }
 
-    let scene_path = scene_path_from_args();
     let event_loop = EventLoop::new().expect("create event loop");
     let mut app = App::new(scene_path);
     event_loop.run_app(&mut app).expect("run viewer");
@@ -55,7 +49,7 @@ fn main() {
 
 fn default_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/episode_diff_drive.rne.scene.toml")
+        .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
 }
 
 fn scene_path_from_args() -> PathBuf {
@@ -85,7 +79,14 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
         }
     };
 
-    let scene = build_diff_drive_render_scene(sim.world(), sim.robot());
+    let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+    let mesh_items = count_mesh_items(&scene);
+    let mut mesh_cache = MeshRenderCache::new();
+    let mesh_roots = mesh_roots_for_sim(&sim);
+    mesh_cache
+        .resolve_scene(&mut scene, &mesh_roots)
+        .expect("resolve mesh assets");
+
     let orbit = CameraOrbit {
         focus: robot_focus(&sim),
         ..CameraOrbit::default()
@@ -98,11 +99,12 @@ fn run_smoke(explicit: bool, scene_path: &Path) {
         .expect("smoke render");
 
     println!(
-        "interactive viewer smoke{}: scene={} seed={} items={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
+        "interactive viewer smoke{}: scene={} seed={} items={} mesh_items={} color_hash={:#018x} depth_hash={:#018x} base_x={:.2} m",
         if explicit { "" } else { " (RNE_SKIP_GPU fallback)" },
         scene_path.display(),
         sim.world_seed(),
         scene.items.len(),
+        mesh_items,
         hash_rgba8(&output.color.rgba8),
         hash_depth_f32(&output.depth.depth_m),
         sim.observe().base_x_m
@@ -119,6 +121,7 @@ struct App {
     viewer: Option<InteractiveViewer>,
     sim: Option<DiffDriveSim>,
     hot_reloader: Option<AssetHotReloader>,
+    mesh_cache: MeshRenderCache,
     reload_count: u32,
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
@@ -132,6 +135,7 @@ impl App {
             viewer: None,
             sim: None,
             hot_reloader: None,
+            mesh_cache: MeshRenderCache::new(),
             reload_count: 0,
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
@@ -195,11 +199,13 @@ impl ApplicationHandler for App {
         };
 
         self.orbit.focus = robot_focus(&sim);
+        self.mesh_cache.clear();
         println!(
-            "loaded scene {} (seed={}, robots={})",
+            "loaded scene {} (seed={}, robots={}, mesh_roots={})",
             self.scene_path.display(),
             sim.world_seed(),
-            sim.robots().len()
+            sim.robots().len(),
+            sim.mesh_package_roots().len()
         );
 
         self.window = Some(window);
@@ -268,9 +274,13 @@ impl App {
         self.orbit.focus = robot_focus(sim);
         sim.step_action(action);
 
-        let scene = build_diff_drive_render_scene(sim.world(), sim.robot());
-        let view = self.orbit.camera_transform();
+        let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+        let mesh_roots = mesh_roots_for_sim(sim);
+        self.mesh_cache
+            .resolve_scene(&mut scene, &mesh_roots)
+            .map_err(|error| error.to_string())?;
 
+        let view = self.orbit.camera_transform();
         let viewer = self.viewer.as_mut().ok_or("viewer not ready")?;
         viewer
             .render(&view, &scene, CLEAR_COLOR)
@@ -289,12 +299,14 @@ impl App {
         sim.reload_scene()
             .map_err(|error| format!("reload scene: {error}"))?;
         self.reload_count += 1;
+        self.mesh_cache.clear();
         self.orbit.focus = robot_focus(sim);
         println!(
-            "reloaded scene {} (#{}) seed={}",
+            "reloaded scene {} (#{}) seed={} mesh_roots={}",
             self.scene_path.display(),
             self.reload_count,
-            sim.world_seed()
+            sim.world_seed(),
+            sim.mesh_package_roots().len()
         );
         Ok(())
     }
@@ -348,71 +360,19 @@ fn robot_focus(sim: &DiffDriveSim) -> Vec3 {
     Vec3::new(obs.base_x_m, 0.25, obs.base_z_m)
 }
 
-fn build_diff_drive_render_scene(world: &World, robot: &DiffDriveSpawned) -> RenderScene {
-    let drive = robot.drive;
-    let mut scene = RenderScene::new();
+fn mesh_roots_for_sim(sim: &DiffDriveSim) -> Vec<&Path> {
+    sim.mesh_package_roots()
+        .iter()
+        .map(PathBuf::as_path)
+        .collect()
+}
 
-    scene.items.push(render_item(
-        world,
-        robot.base_link,
-        VisualShape::Box {
-            size_m: base_size_m(world, robot.base_link),
-        },
-        [0.35, 0.55, 0.95, 1.0],
-    ));
-
-    for wheel in [robot.left_wheel, robot.right_wheel] {
-        if wheel == robot.base_link {
-            continue;
-        }
-        scene.items.push(render_item(
-            world,
-            wheel,
-            VisualShape::Cylinder {
-                radius_m: drive.wheel_radius_m,
-                length_m: drive.wheel_radius_m * 0.6,
-            },
-            [0.2, 0.2, 0.2, 1.0],
-        ));
-    }
-
-    scene.items.push(RenderScene::item_from_visual(
-        WorldTransform3::from_translation_rotation(Vec3::new(0.0, -0.01, 0.0), Quat::IDENTITY),
-        VisualShape::Box {
-            size_m: Vec3::new(40.0, 0.02, 40.0),
-        },
-        [0.25, 0.28, 0.32, 1.0],
-        WorldTransform3::IDENTITY,
-    ));
-
+fn count_mesh_items(scene: &rne_render::RenderScene) -> usize {
     scene
-}
-
-fn render_item(
-    world: &World,
-    entity: rne_ecs::Entity,
-    shape: VisualShape,
-    color_rgba: [f32; 4],
-) -> rne_render::RenderSceneItem {
-    let world_transform = world
-        .get::<WorldTransform3>(entity)
-        .copied()
-        .unwrap_or_default();
-    let local_offset = world
-        .get::<Visual>(entity)
-        .map(|visual| visual.local_offset)
-        .unwrap_or_default();
-    RenderScene::item_from_visual(world_transform, shape, color_rgba, local_offset)
-}
-
-fn base_size_m(world: &World, base_link: rne_ecs::Entity) -> Vec3 {
-    world
-        .get::<Collider>(base_link)
-        .and_then(|collider| match collider.shape {
-            rne_physics::ColliderShape::Cuboid { half_extents_m } => Some(half_extents_m * 2.0),
-            _ => None,
-        })
-        .unwrap_or_else(|| Vec3::new(0.5, 0.3, 0.4))
+        .items
+        .iter()
+        .filter(|item| matches!(item.shape, VisualShape::Mesh { .. }))
+        .count()
 }
 
 #[cfg(test)]
@@ -422,5 +382,14 @@ mod tests {
     #[test]
     fn default_scene_path_exists() {
         assert!(default_scene_path().is_file());
+    }
+
+    #[test]
+    fn mesh_scene_loads_visuals() {
+        let scene_path = default_scene_path();
+        let sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
+        assert!(!sim.mesh_package_roots().is_empty());
+        let scene = build_diff_drive_render_scene(sim.world(), sim.robots());
+        assert!(count_mesh_items(&scene) >= 1);
     }
 }

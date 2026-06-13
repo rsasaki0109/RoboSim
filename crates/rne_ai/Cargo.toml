@@ -17,6 +17,7 @@ rne_math = { path = "../rne_math" }
 rne_physics = { path = "../rne_physics" }
 rne_physics_rapier = { path = "../rne_physics_rapier" }
 rne_robot = { path = "../rne_robot" }
+rne_render = { path = "../rne_render" }
 rne_sensor = { path = "../rne_sensor" }
 rne_world = { path = "../rne_world" }
 

@@ -12,6 +12,6 @@ pub use schema::{
     UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot,
 };
 pub use spawn::{
-    spawn_urdf_robot, spawn_urdf_robot_with_config, SpawnedUrdfRobot, UrdfSpawnConfig,
-    UrdfSpawnError,
+    attach_urdf_visuals, spawn_urdf_robot, spawn_urdf_robot_with_config, SpawnedUrdfRobot,
+    UrdfSpawnConfig, UrdfSpawnError,
 };
