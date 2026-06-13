@@ -47,3 +47,28 @@ impl Default for DiffDriveObservation {
         }
     }
 }
+
+/// Observation from a mobile manipulator simulation step.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MobileManipulatorObservation {
+    /// Base link X position in meters (zero for fixed-base robots).
+    pub base_x_m: f64,
+    /// Base link Y position in meters.
+    pub base_y_m: f64,
+    /// Base link Z position in meters.
+    pub base_z_m: f64,
+    /// Base link yaw around world Y in radians.
+    pub base_yaw_rad: f64,
+    /// End-effector X position in meters (world frame).
+    pub ee_x_m: f64,
+    /// End-effector Y position in meters (world frame).
+    pub ee_y_m: f64,
+    /// End-effector Z position in meters (world frame).
+    pub ee_z_m: f64,
+    /// Shoulder joint position in radians.
+    pub shoulder_position_rad: f64,
+    /// Elbow joint position in radians.
+    pub elbow_position_rad: f64,
+    /// Number of joints in the latest DataBus joint-state frame.
+    pub joint_state_count: usize,
+}

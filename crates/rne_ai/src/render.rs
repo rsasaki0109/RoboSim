@@ -77,6 +77,18 @@ pub fn build_diff_drive_render_scene(world: &World, robots: &[DiffDriveSpawned])
     scene
 }
 
+/// Builds a render scene from all entities that carry visuals or colliders.
+pub fn build_visual_render_scene(world: &World) -> RenderScene {
+    let mut scene = RenderScene::new();
+    for entity_ref in world.iter_entities() {
+        let entity = entity_ref.id();
+        if world.get::<Visual>(entity).is_some() || world.get::<Collider>(entity).is_some() {
+            append_entity_visual(&mut scene, world, entity, false, None);
+        }
+    }
+    scene
+}
+
 fn append_robot_items(scene: &mut RenderScene, world: &World, robot: &DiffDriveSpawned) {
     for (entity, yaw_only) in [
         (robot.base_link, true),
@@ -87,13 +99,12 @@ fn append_robot_items(scene: &mut RenderScene, world: &World, robot: &DiffDriveS
             continue;
         }
         let (fallback_shape, fallback_color) = fallback_visual_for_link(world, robot, entity);
-        append_link_item(
+        append_entity_visual(
             scene,
             world,
             entity,
             yaw_only,
-            fallback_shape,
-            fallback_color,
+            Some((fallback_shape, fallback_color)),
         );
     }
 }
@@ -130,13 +141,12 @@ fn fallback_visual_for_link(
     )
 }
 
-fn append_link_item(
+fn append_entity_visual(
     scene: &mut RenderScene,
     world: &World,
     entity: Entity,
     yaw_only: bool,
-    fallback_shape: VisualShape,
-    fallback_color: [f32; 4],
+    fallback: Option<(VisualShape, [f32; 4])>,
 ) {
     let world_transform = link_render_transform(world, entity, yaw_only);
 
@@ -150,12 +160,41 @@ fn append_link_item(
         return;
     }
 
+    let Some((fallback_shape, fallback_color)) = fallback else {
+        if let Some(collider) = world.get::<Collider>(entity) {
+            if let Some((shape, color)) = collider_fallback_visual(collider) {
+                scene.items.push(RenderScene::item_from_visual(
+                    world_transform,
+                    shape,
+                    color,
+                    WorldTransform3::IDENTITY,
+                ));
+            }
+        }
+        return;
+    };
+
     scene.items.push(RenderScene::item_from_visual(
         world_transform,
         fallback_shape,
         fallback_color,
         WorldTransform3::IDENTITY,
     ));
+}
+
+fn collider_fallback_visual(collider: &Collider) -> Option<(VisualShape, [f32; 4])> {
+    match collider.shape {
+        rne_physics::ColliderShape::Cuboid { half_extents_m } => Some((
+            VisualShape::Box {
+                size_m: half_extents_m * 2.0,
+            },
+            BASE_COLOR,
+        )),
+        rne_physics::ColliderShape::Sphere { radius_m } => {
+            Some((VisualShape::Sphere { radius_m }, BASE_COLOR))
+        }
+        _ => None,
+    }
 }
 
 /// Resolves a link transform for rendering, composing parent chains when present.

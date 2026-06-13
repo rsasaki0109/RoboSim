@@ -81,3 +81,14 @@ if ! timeout 20 ros2 topic echo /scan --once --field angle_increment --no-lost-m
   echo "failed to receive /scan" >&2
   exit 1
 fi
+
+echo "Checking /joint_states publication..."
+JOINT_COUNT=$(
+  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
+    | grep -c 'left_wheel_joint' \
+    || true
+)
+if [[ "$JOINT_COUNT" -lt 1 ]]; then
+  echo "expected /joint_states to include left_wheel_joint, got count=${JOINT_COUNT}" >&2
+  exit 1
+fi

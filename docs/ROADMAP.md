@@ -11,6 +11,32 @@ Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
 | Sensors | Scene-defined LiDAR mounts and obstacles (`[lidar]`, `[[obstacles]]`) |
 | ROS 2 | Native `/points` and `/scan` from simulation DataBus (`rne_ros2_node`) |
 
+## v0.6 goal: mobile manipulator
+
+Primary development target after v0.5. See [architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md).
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Physics | URDF → Rapier revolute chain, `JointMotor` on arm | Done (`attach_urdf_articulation`, parent-aware sync) |
+| A | Assets | Minimal mobile-manipulator URDF + `.rne.scene.toml` | Done (`assets/robots/mm_minimal/`) |
+| B | AI | `MobileManipulatorSim`, joint/EE observations, reach example | Done (`MobileManipulatorSim`, `21_mobile_manipulator_reach`) |
+| B | Rendering | Arm teleop in interactive viewer | Done (`--manipulator`, `--manipulator-mobile`) |
+| C | Manipulation | Gripper, wrist camera, pick/transport episodes | Planned |
+| D | ROS 2 | `/joint_states`, base + arm command topics | Partial (`/joint_states` for diff-drive wheels; arm commands planned) |
+
+### v0.6 candidates (detail)
+
+| Area | Idea |
+|------|------|
+| Physics | Wire URDF joints to Rapier impulse joints (revolute + prismatic) |
+| Robot | `[mobile_manipulator]` section in `.rne.robot.toml` |
+| AI | `MobileManipulatorSim` with base velocity + arm joint commands |
+| Sensors | `JointState` and end-effector pose on DataBus |
+| Examples | `20_mobile_manipulator_reach` headless smoke |
+| Rendering | Joint sliders + base teleop in `14_interactive_viewer` |
+| Manipulation | Tabletop object spawn, reach/grasp termination (v0.7 stretch) |
+| ROS 2 | Publish `/joint_states`; subscribe to arm trajectory or joint targets |
+
 ## v0.5 candidates
 
 | Area | Idea |

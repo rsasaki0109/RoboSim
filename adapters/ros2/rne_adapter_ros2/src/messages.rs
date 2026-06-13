@@ -134,3 +134,18 @@ pub struct RosLaserScan {
     /// Intensity measurements (optional).
     pub intensities: Vec<f32>,
 }
+
+/// `sensor_msgs/JointState` compatible joint measurement message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosJointState {
+    /// Message header.
+    pub header: RosHeader,
+    /// Joint names.
+    pub names: Vec<String>,
+    /// Joint positions in radians.
+    pub positions: Vec<f64>,
+    /// Joint velocities in radians per second.
+    pub velocities: Vec<f64>,
+    /// Joint efforts in newton-meters (optional).
+    pub efforts: Vec<f64>,
+}

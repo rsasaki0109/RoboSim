@@ -16,7 +16,7 @@ pub mod render;
 pub mod reward;
 pub mod rng;
 
-pub use action::DiffDriveAction;
+pub use action::{DiffDriveAction, MobileManipulatorAction};
 pub use agent::{
     attach_diff_drive_policy, attach_goal_conditioned_policy, attach_shared_diff_drive_policy,
     attach_shared_goal_conditioned_policy, observe_shared_diff_drive_agent, reset_diff_drive_agent,
@@ -27,8 +27,8 @@ pub use agent::{
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, VectorizedDiffDriveConfig,
-    VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim,
+    VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
@@ -40,8 +40,11 @@ pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
-pub use observation::DiffDriveObservation;
+pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{ConstantVelocityPolicy, Policy};
-pub use render::{append_lidar_overlay, build_diff_drive_render_scene, LidarOverlayStats};
+pub use render::{
+    append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
+    LidarOverlayStats,
+};
 pub use reward::DiffDriveRewardConfig;
 pub use rng::DeterministicRng;

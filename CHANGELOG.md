@@ -4,6 +4,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **URDF arm articulation** (`attach_urdf_articulation`): revolute joints + `JointMotor` wired to Rapier
+- **Minimal mobile manipulator asset** (`assets/robots/mm_minimal/`) and example `20_mobile_manipulator_arm`
+- **`MobileManipulatorSim`**: 2-DOF arm environment with EE/joint observations and DataBus `JointState`
+- **Reach example** (`21_mobile_manipulator_reach`): open-loop shoulder motion smoke test
+- **`mm_mobile` URDF**: diff-drive base + 2-DOF arm (`MobileManipulatorSim::new_mm_mobile()`)
+- **Interactive viewer arm teleop** (`14_interactive_viewer --manipulator`): Q/E/Z/X arm keys and EE HUD
+- **ROS 2 `/joint_states`**: wheel joint state published from native `rne_ros2_node` bridge
+
+### Changed
+
+- **Rapier physics sync** uses composed world transforms for parent/child link hierarchies
+
 ## [0.5.0] - 2026-06-12
 
 ### Added

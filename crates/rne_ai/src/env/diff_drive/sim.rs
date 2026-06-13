@@ -6,7 +6,7 @@ use crate::observation::DiffDriveObservation;
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
-use rne_data::{InMemoryDataBus, PointCloud, StreamId};
+use rne_data::{InMemoryDataBus, JointState, PointCloud, StreamId};
 use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
@@ -217,6 +217,18 @@ impl DiffDriveSim {
         match sensor.kind {
             SensorKind::Lidar(spec) => Some(spec),
             _ => None,
+        }
+    }
+
+    /// Returns wheel joint positions and velocities for ROS `/joint_states`.
+    pub fn joint_state(&self) -> JointState {
+        let robot = self.robot();
+        let left = wheel_joint_sample(&self.world, robot.left_wheel, robot.left_actuator);
+        let right = wheel_joint_sample(&self.world, robot.right_wheel, robot.right_actuator);
+        JointState {
+            names: vec!["left_wheel_joint".into(), "right_wheel_joint".into()],
+            positions_rad: vec![left.position_rad, right.position_rad],
+            velocities_rad_s: vec![left.velocity_rad_s, right.velocity_rad_s],
         }
     }
 
@@ -584,6 +596,26 @@ fn find_robot_link(world: &mut World, robot: Entity, link_name: &str) -> Option<
         .iter(world)
         .find(|(_, link)| link.robot == robot && link.name == link_name)
         .map(|(entity, _)| entity)
+}
+
+struct WheelJointSample {
+    position_rad: f64,
+    velocity_rad_s: f64,
+}
+
+fn wheel_joint_sample(world: &World, wheel: Entity, actuator: Entity) -> WheelJointSample {
+    let position_rad = world
+        .get::<Transform3>(wheel)
+        .map(|transform| 2.0 * f64::atan2(transform.rotation.z, transform.rotation.w))
+        .unwrap_or(0.0);
+    let velocity_rad_s = world
+        .get::<Actuator>(actuator)
+        .map(|actuator| actuator.target.velocity_rad_s)
+        .unwrap_or(0.0);
+    WheelJointSample {
+        position_rad,
+        velocity_rad_s,
+    }
 }
 
 fn build_diff_drive_spawned(
