@@ -20,6 +20,7 @@ fn run() -> anyhow::Result<()> {
     match command.as_str() {
         "ci" => ci(),
         "ci-ros2" => ci_ros2(),
+        "ci-ros2-bridge" => ci_ros2_bridge(),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
@@ -41,6 +42,20 @@ fn ci_ros2() -> anyhow::Result<()> {
     }
     if !ros_setup_available() {
         println!("ROS 2 setup.bash not found under /opt/ros; skipping ci-ros2");
+        return Ok(());
+    }
+    run_step(&format!("bash {}", script.display()))?;
+    Ok(())
+}
+
+fn ci_ros2_bridge() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let script = root.join("adapters/ros2/rne_ros2_bridge/smoke_test.sh");
+    if !script.is_file() {
+        anyhow::bail!("missing ROS 2 bridge smoke script at {}", script.display());
+    }
+    if !ros_setup_available() {
+        println!("ROS 2 setup.bash not found under /opt/ros; skipping ci-ros2-bridge");
         return Ok(());
     }
     run_step(&format!("bash {}", script.display()))?;

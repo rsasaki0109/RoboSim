@@ -18,5 +18,8 @@ test:
 ci-ros2:
     cargo run -p xtask -- ci-ros2
 
+ci-ros2-bridge:
+    cargo run -p xtask -- ci-ros2-bridge
+
 check:
     cargo check --workspace

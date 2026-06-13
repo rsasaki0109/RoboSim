@@ -84,6 +84,32 @@ struct GpuMesh {
     index_format: wgpu::IndexFormat,
 }
 
+/// Color and depth views for an on-screen or off-screen render pass.
+pub struct PrimitiveRenderViews<'a> {
+    /// Color attachment view.
+    pub color_view: &'a wgpu::TextureView,
+    /// Depth attachment view.
+    pub depth_view: &'a wgpu::TextureView,
+}
+
+/// Inputs for rendering a scene into existing GPU views.
+pub struct PrimitiveSurfacePass<'a> {
+    /// GPU device.
+    pub device: &'a wgpu::Device,
+    /// GPU queue.
+    pub queue: &'a wgpu::Queue,
+    /// Camera parameters.
+    pub camera: &'a Camera,
+    /// Camera world transform.
+    pub view: &'a Transform3,
+    /// Scene primitives to draw.
+    pub scene: &'a RenderScene,
+    /// Clear color for empty pixels.
+    pub clear_color: [f32; 4],
+    /// Render targets.
+    pub targets: &'a PrimitiveRenderViews<'a>,
+}
+
 /// Inputs for one off-screen primitive render pass.
 pub struct PrimitiveRenderPass<'a> {
     /// GPU device.
@@ -233,49 +259,15 @@ impl PrimitiveRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        pass: PrimitiveRenderPass<'_>,
-    ) -> Result<CameraPassOutput, RenderError> {
-        let target = pass.target;
+    /// Renders a scene into existing color and depth views without CPU readback.
+    pub fn render_to_views(&mut self, pass: PrimitiveSurfacePass<'_>) -> Result<(), RenderError> {
+        let device = pass.device;
+        let queue = pass.queue;
         let camera = pass.camera;
         let view = pass.view;
         let scene = pass.scene;
         let clear_color = pass.clear_color;
-        let device = pass.device;
-        let queue = pass.queue;
-        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("rne_color_target"),
-            size: wgpu::Extent3d {
-                width: target.width.max(1),
-                height: target.height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("rne_depth_target"),
-            size: wgpu::Extent3d {
-                width: target.width.max(1),
-                height: target.height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
+        let targets = pass.targets;
         let view_proj = camera.view_projection(view);
         queue.write_buffer(
             &self.camera_buffer,
@@ -302,7 +294,7 @@ impl PrimitiveRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("rne_scene_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color_view,
+                    view: targets.color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -315,7 +307,7 @@ impl PrimitiveRenderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
+                    view: targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -363,9 +355,72 @@ impl PrimitiveRenderer {
             }
         }
 
+        queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    pub fn render(
+        &mut self,
+        pass: PrimitiveRenderPass<'_>,
+    ) -> Result<CameraPassOutput, RenderError> {
+        let target = pass.target;
+        let camera = pass.camera;
+        let view = pass.view;
+        let scene = pass.scene;
+        let clear_color = pass.clear_color;
+        let device = pass.device;
+        let queue = pass.queue;
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_color_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_depth_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.render_to_views(PrimitiveSurfacePass {
+            device,
+            queue,
+            camera,
+            view,
+            scene,
+            clear_color,
+            targets: &PrimitiveRenderViews {
+                color_view: &color_view,
+                depth_view: &depth_view,
+            },
+        })?;
+
         let color_buffer;
         let depth_buffer;
         {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("rne_scene_readback_encoder"),
+            });
             let bytes_per_row = align_to(target.width * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
             let buffer_size = bytes_per_row as u64 * target.height as u64;
             color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
