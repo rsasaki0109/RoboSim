@@ -21,6 +21,12 @@ pub struct DiffDriveObservation {
     pub lidar_points: usize,
     /// Goal X minus base X when a goal was provided during observation.
     pub goal_delta_x_m: Option<f64>,
+    /// Nearest peer base X minus this base X when multiple robots are present.
+    pub peer_delta_x_m: Option<f64>,
+    /// Nearest peer base Z minus this base Z when multiple robots are present.
+    pub peer_delta_z_m: Option<f64>,
+    /// Euclidean distance to the nearest peer robot base link.
+    pub peer_separation_m: Option<f64>,
 }
 
 impl Default for DiffDriveObservation {
@@ -35,6 +41,9 @@ impl Default for DiffDriveObservation {
             imu_ay_m_s2: 0.0,
             lidar_points: 0,
             goal_delta_x_m: None,
+            peer_delta_x_m: None,
+            peer_delta_z_m: None,
+            peer_separation_m: None,
         }
     }
 }

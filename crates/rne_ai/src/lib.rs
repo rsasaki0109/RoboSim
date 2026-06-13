@@ -8,6 +8,7 @@ pub mod domain_randomization;
 pub mod env;
 pub mod episode;
 pub mod goal;
+pub mod multi_robot;
 pub mod observation;
 pub mod policy;
 pub mod render;
@@ -32,6 +33,10 @@ pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
     GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
+};
+pub use multi_robot::{
+    head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
+    nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
 pub use observation::DiffDriveObservation;
 pub use policy::{ConstantVelocityPolicy, Policy};

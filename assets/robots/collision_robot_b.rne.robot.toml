@@ -1,0 +1,10 @@
+kind = "diff_drive"
+model_name = "robot_b"
+
+[diff_drive]
+wheel_radius_m = 0.1
+track_width_m = 0.45
+base_half_extents_m = [0.25, 0.15, 0.2]
+max_wheel_velocity_rad_s = 10.0
+initial_translation_m = [0.48, 0.25, 0.0]
+drive_mode = "joint_driven"

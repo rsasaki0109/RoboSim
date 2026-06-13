@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// How wheel commands move the diff-drive robot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DiffDriveDriveMode {
     /// Analytic kinematics on the base link (legacy default).
     #[default]

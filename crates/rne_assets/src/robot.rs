@@ -56,6 +56,9 @@ pub struct DiffDriveRobotAsset {
     /// Initial base translation in meters.
     #[serde(default = "default_initial_translation_m")]
     pub initial_translation_m: [f64; 3],
+    /// Wheel actuation model used when spawning the robot.
+    #[serde(default)]
+    pub drive_mode: DiffDriveDriveMode,
 }
 
 /// URDF section of a robot asset file.
@@ -75,7 +78,7 @@ impl DiffDriveRobotAsset {
             base_half_extents_m: vec3_from_array(self.base_half_extents_m),
             max_wheel_velocity_rad_s: self.max_wheel_velocity_rad_s,
             initial_translation_m: vec3_from_array(self.initial_translation_m),
-            drive_mode: DiffDriveDriveMode::Kinematic,
+            drive_mode: self.drive_mode,
         }
     }
 }
