@@ -14,7 +14,8 @@
 | Scene episode | `cargo run -p scene_episode --example 08_scene_episode` | Scene asset → episode → optional render |
 | URDF mesh render | `cargo run -p urdf_mesh_render --example 09_urdf_mesh_render` | URDF mesh STL load + wgpu draw |
 | Vectorized episode | `cargo run -p vectorized_episode --example 10_vectorized_episode` | Parallel envs + domain randomization |
-| Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy |
+| Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
+| Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |
 | ROS 2 native | `cargo run -p xtask -- ci-ros2` | `rclrs` node smoke test (requires ROS 2 Jazzy/Humble) |

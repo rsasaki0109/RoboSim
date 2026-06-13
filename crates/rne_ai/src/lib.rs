@@ -14,9 +14,11 @@ pub mod rng;
 
 pub use action::DiffDriveAction;
 pub use agent::{
-    attach_diff_drive_policy, reset_diff_drive_agent, spawn_diff_drive_agent,
-    step_diff_drive_agent, step_diff_drive_agents, Agent, AgentKind, AgentTarget, AttachedPolicy,
-    DiffDriveAgentState,
+    attach_diff_drive_policy, attach_shared_diff_drive_policy, observe_shared_diff_drive_agent,
+    reset_diff_drive_agent, spawn_diff_drive_agent, spawn_shared_diff_drive_agent,
+    step_diff_drive_agent, step_diff_drive_agents, step_shared_diff_drive_agent,
+    step_shared_diff_drive_agents, Agent, AgentKind, AgentTarget, AttachedPolicy,
+    DiffDriveAgentState, SharedDiffDriveAgentState,
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
