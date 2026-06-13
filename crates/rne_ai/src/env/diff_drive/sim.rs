@@ -1,10 +1,11 @@
 //! Headless differential drive simulation.
 
 use crate::observation::DiffDriveObservation;
+use rne_assets::{load_and_spawn_scene, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
 use rne_data::{InMemoryDataBus, StreamId};
-use rne_ecs::{spawn_named, World};
+use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
@@ -14,14 +15,18 @@ use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, spawn_diff_drive_robot,
     ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, DiffDriveConfig, DiffDriveSpawned,
+    Link,
 };
 use rne_sensor::{sample_sensors, ImuSpec, Sensor, SensorKind, SensorSampleContext, SensorState};
-use rne_world::Transform3;
+use rne_world::{Transform3, WorldEntity};
+use std::path::{Path, PathBuf};
 
 const IMU_STREAM: StreamId = StreamId::new(100);
 
 /// Headless differential drive environment.
 pub struct DiffDriveSim {
+    scene_path: Option<PathBuf>,
+    world_seed: u64,
     world: World,
     backend: RapierBackend,
     physics_world: rne_physics::PhysicsWorldId,
@@ -50,6 +55,87 @@ impl DiffDriveSim {
                 ..DiffDriveConfig::default()
             },
         );
+        Self::from_spawned_world(world, robot, None, 0)
+    }
+
+    /// Loads a `.rne.scene.toml` file and its referenced robot assets.
+    pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
+        let mut world = World::new();
+        let spawned = load_and_spawn_scene(&mut world, scene_path)?;
+        let world_seed = world
+            .get::<WorldEntity>(spawned.world)
+            .map(|world_entity| world_entity.seed)
+            .unwrap_or(0);
+        let (_, robot) = spawned.robots.first().ok_or_else(|| AssetError::Invalid {
+            path: scene_path.display().to_string(),
+            message: "no robots".into(),
+        })?;
+        let drive = world
+            .get::<DiffDriveComponent>(robot.robot)
+            .ok_or_else(|| AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: "first robot is not a diff drive".into(),
+            })?
+            .0;
+        let left_wheel =
+            find_robot_link(&mut world, drive.robot, "left_wheel").ok_or_else(|| {
+                AssetError::Invalid {
+                    path: scene_path.display().to_string(),
+                    message: "missing left_wheel link".into(),
+                }
+            })?;
+        let right_wheel =
+            find_robot_link(&mut world, drive.robot, "right_wheel").ok_or_else(|| {
+                AssetError::Invalid {
+                    path: scene_path.display().to_string(),
+                    message: "missing right_wheel link".into(),
+                }
+            })?;
+
+        let robot_spawned = DiffDriveSpawned {
+            robot: drive.robot,
+            base_link: drive.base_link,
+            left_wheel,
+            right_wheel,
+            left_actuator: drive.left_actuator,
+            right_actuator: drive.right_actuator,
+            drive,
+        };
+
+        Ok(Self::from_spawned_world(
+            world,
+            robot_spawned,
+            Some(scene_path.to_path_buf()),
+            world_seed,
+        ))
+    }
+
+    /// Returns the world seed from a loaded scene, or zero for built-in scenes.
+    pub fn world_seed(&self) -> u64 {
+        self.world_seed
+    }
+
+    /// Returns the loaded scene path when the simulation was created from assets.
+    pub fn scene_path(&self) -> Option<&Path> {
+        self.scene_path.as_deref()
+    }
+
+    /// Provides read access to the ECS world (for rendering or inspection).
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    /// Provides read access to the spawned diff-drive robot handles.
+    pub fn robot(&self) -> &DiffDriveSpawned {
+        &self.robot
+    }
+
+    fn from_spawned_world(
+        mut world: World,
+        robot: DiffDriveSpawned,
+        scene_path: Option<PathBuf>,
+        world_seed: u64,
+    ) -> Self {
         attach_imu(&mut world, robot.base_link);
 
         let mut backend = RapierBackend::new();
@@ -59,6 +145,8 @@ impl DiffDriveSim {
         backend.sync_from_ecs(&mut world, physics_world).unwrap();
 
         Self {
+            scene_path,
+            world_seed,
             world,
             backend,
             physics_world,
@@ -73,12 +161,16 @@ impl DiffDriveSim {
 
     /// Resets the simulation to its initial state.
     pub fn reset(&mut self) -> DiffDriveObservation {
-        let initial = self
-            .world
-            .get::<Transform3>(self.robot.base_link)
-            .map(|tf| tf.translation)
-            .unwrap_or_else(|| Vec3::new(0.0, 0.25, 0.0));
-        *self = Self::with_initial_translation(initial);
+        if let Some(scene_path) = self.scene_path.clone() {
+            *self = Self::from_scene_path(&scene_path).expect("reload scene");
+        } else {
+            let initial = self
+                .world
+                .get::<Transform3>(self.robot.base_link)
+                .map(|tf| tf.translation)
+                .unwrap_or_else(|| Vec3::new(0.0, 0.25, 0.0));
+            *self = Self::with_initial_translation(initial);
+        }
         self.observe()
     }
 
@@ -239,15 +331,40 @@ fn attach_imu(world: &mut World, base_link: rne_ecs::Entity) {
     ));
 }
 
+fn find_robot_link(world: &mut World, robot: Entity, link_name: &str) -> Option<Entity> {
+    let mut query = world.query::<(Entity, &Link)>();
+    query
+        .iter(world)
+        .find(|(_, link)| link.robot == robot && link.name == link_name)
+        .map(|(entity, _)| entity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn diff_drive_moves_forward_under_equal_wheel_speeds() {
         let mut sim = DiffDriveSim::new();
         let mut final_x = 0.0;
 
+        for _ in 0..180 {
+            let obs = sim.step(6.0, 6.0);
+            final_x = obs.base_x_m;
+        }
+
+        assert!(final_x > 1.5, "expected forward motion, got x={final_x}");
+    }
+
+    #[test]
+    fn scene_asset_loads_and_moves_forward() {
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_assets/tests/fixtures/episode_diff_drive.rne.scene.toml");
+        let mut sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
+        assert_eq!(sim.world_seed(), 42);
+
+        let mut final_x = 0.0;
         for _ in 0..180 {
             let obs = sim.step(6.0, 6.0);
             final_x = obs.base_x_m;

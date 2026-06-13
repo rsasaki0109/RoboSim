@@ -25,6 +25,7 @@ members = [
   "examples/05_episode_diff_drive",
   "examples/06_scene_load",
   "examples/07_render_primitives",
+  "examples/08_scene_episode",
   "tests/determinism",
   "xtask",
 ]
