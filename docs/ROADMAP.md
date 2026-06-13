@@ -1,5 +1,16 @@
 # Roadmap
 
+## v0.5.0 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Rendering | LiDAR hit visualization in wgpu and interactive viewer (`19_lidar_render`, `append_lidar_overlay`) |
+| Rendering | Normal-based Lambert lighting in wgpu (`rne_render_wgpu`) |
+| Sensors | Scene-defined LiDAR mounts and obstacles (`[lidar]`, `[[obstacles]]`) |
+| ROS 2 | Native `/points` and `/scan` from simulation DataBus (`rne_ros2_node`) |
+
 ## v0.5 candidates
 
 | Area | Idea |
@@ -7,7 +18,7 @@
 | Rendering | LiDAR hit visualization in wgpu and interactive viewer | Done (`19_lidar_render`, `append_lidar_overlay`, `L` toggle) |
 | Rendering | Simple normal-based lighting in wgpu fragment shader | Done (Lambert + ambient in `rne_render_wgpu`) |
 | Sensors | Scene-defined LiDAR mounts (not demo-only wall spawn) | Done (`[lidar]` robot asset, `[[obstacles]]` scene asset) |
-| ROS 2 | Publish `/scan` from native node when LiDAR is present | Planned |
+| ROS 2 | Publish `/scan` from native node when LiDAR is present | Done (`/points` + `/scan` from DataBus, `RNE_ROS2_SCENE_PATH`) |
 
 ## v0.4.0 (released)
 
@@ -101,9 +112,9 @@ After merging release changes:
 
 ```bash
 cargo run -p xtask -- ci
-git tag -a v0.4.0 -m "Robot Native Engine v0.4.0"
+git tag -a v0.5.0 -m "Robot Native Engine v0.5.0"
 git push origin main --tags
-gh release create v0.4.0 --title "v0.4.0" --notes-file CHANGELOG.md
+gh release create v0.5.0 --title "v0.5.0" --notes-file CHANGELOG.md
 ```
 
-Adjust the `gh release create` notes to the `[0.4.0]` section only if you prefer a shorter GitHub release body.
+Adjust the `gh release create` notes to the `[0.5.0]` section only if you prefer a shorter GitHub release body.

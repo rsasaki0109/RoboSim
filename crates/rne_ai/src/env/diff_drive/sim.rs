@@ -6,7 +6,7 @@ use crate::observation::DiffDriveObservation;
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
-use rne_data::{InMemoryDataBus, StreamId};
+use rne_data::{InMemoryDataBus, PointCloud, StreamId};
 use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
@@ -20,8 +20,10 @@ use rne_robot::{
     sync_joint_motors_from_actuators, Actuator, ActuatorCommand, ActuatorCommandBuffer,
     DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode, DiffDriveSpawned, Link,
 };
-use rne_sensor::{sample_sensors, ImuSpec, Sensor, SensorKind, SensorSampleContext, SensorState};
-use rne_world::{Transform3, WorldEntity};
+use rne_sensor::{
+    sample_sensors, ImuSpec, LidarSpec, Sensor, SensorKind, SensorSampleContext, SensorState,
+};
+use rne_world::{world_transform_of, Transform3, WorldEntity};
 use std::path::{Path, PathBuf};
 
 const IMU_STREAM_BASE: u32 = 100;
@@ -191,6 +193,31 @@ impl DiffDriveSim {
     /// Returns tracked LiDAR mounts loaded from scene robot assets.
     pub fn lidar_mounts(&self) -> &[LidarMount] {
         &self.lidar_mounts
+    }
+
+    /// Returns the latest point cloud from the primary robot's LiDAR sensor.
+    pub fn latest_lidar_cloud(&self) -> Option<PointCloud> {
+        let mount = self.lidar_mounts.first()?;
+        let sensor = self.world.get::<Sensor>(mount.lidar)?;
+        self.data_bus
+            .latest::<PointCloud>(sensor.stream_id)
+            .map(|frame| frame.payload.clone())
+    }
+
+    /// Returns the world-space transform of the primary LiDAR mount.
+    pub fn primary_lidar_world_transform(&self) -> Option<Transform3> {
+        let mount = self.lidar_mounts.first()?;
+        Some(world_transform_of(&self.world, mount.lidar))
+    }
+
+    /// Returns the LiDAR specification for the primary robot sensor.
+    pub fn primary_lidar_spec(&self) -> Option<LidarSpec> {
+        let mount = self.lidar_mounts.first()?;
+        let sensor = self.world.get::<Sensor>(mount.lidar)?;
+        match sensor.kind {
+            SensorKind::Lidar(spec) => Some(spec),
+            _ => None,
+        }
     }
 
     /// Spawns an additional diff-drive robot into the live simulation world.

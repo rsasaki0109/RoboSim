@@ -109,3 +109,28 @@ pub struct RosTfMessage {
     /// Transform list.
     pub transforms: Vec<RosTransformStamped>,
 }
+
+/// `sensor_msgs/LaserScan` compatible 2D range scan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosLaserScan {
+    /// Message header.
+    pub header: RosHeader,
+    /// Start angle of the scan in radians.
+    pub angle_min: f32,
+    /// End angle of the scan in radians.
+    pub angle_max: f32,
+    /// Angular distance between measurements in radians.
+    pub angle_increment: f32,
+    /// Time between measurements in seconds.
+    pub time_increment: f32,
+    /// Time between scans in seconds.
+    pub scan_time: f32,
+    /// Minimum range value in meters.
+    pub range_min: f32,
+    /// Maximum range value in meters.
+    pub range_max: f32,
+    /// Range measurements in meters.
+    pub ranges: Vec<f32>,
+    /// Intensity measurements (optional).
+    pub intensities: Vec<f32>,
+}

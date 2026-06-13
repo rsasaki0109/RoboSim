@@ -1,8 +1,8 @@
 //! Convert `rne_adapter_ros2` message shapes into `rclrs` ROS message types.
 
 use rne_adapter_ros2::{
-    RosClock, RosHeader, RosPointCloud2, RosPointField, RosQuaternion, RosTfMessage, RosTime,
-    RosTransform, RosTransformStamped, RosVector3,
+    RosClock, RosHeader, RosLaserScan, RosPointCloud2, RosPointField, RosQuaternion, RosTfMessage,
+    RosTime, RosTransform, RosTransformStamped, RosVector3,
 };
 
 /// Maps adapter clock to `rosgraph_msgs/Clock`.
@@ -24,6 +24,22 @@ pub fn to_pointcloud2_message(cloud: &RosPointCloud2) -> sensor_msgs::msg::Point
         row_step: cloud.row_step,
         data: cloud.data.clone(),
         is_dense: cloud.is_dense,
+    }
+}
+
+/// Maps adapter laser scan to `sensor_msgs/LaserScan`.
+pub fn to_laserscan_message(scan: &RosLaserScan) -> sensor_msgs::msg::LaserScan {
+    sensor_msgs::msg::LaserScan {
+        header: to_header(&scan.header),
+        angle_min: scan.angle_min,
+        angle_max: scan.angle_max,
+        angle_increment: scan.angle_increment,
+        time_increment: scan.time_increment,
+        scan_time: scan.scan_time,
+        range_min: scan.range_min,
+        range_max: scan.range_max,
+        ranges: scan.ranges.clone(),
+        intensities: scan.intensities.clone(),
     }
 }
 

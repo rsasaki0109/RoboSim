@@ -14,6 +14,7 @@ ros2 = []
 rne_core = { path = "../../../crates/rne_core" }
 rne_data = { path = "../../../crates/rne_data" }
 rne_math = { path = "../../../crates/rne_math" }
+rne_sensor = { path = "../../../crates/rne_sensor" }
 rne_world = { path = "../../../crates/rne_world" }
 
 [dev-dependencies]
