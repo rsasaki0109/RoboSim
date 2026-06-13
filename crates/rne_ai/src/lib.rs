@@ -35,9 +35,7 @@ pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
     GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
 };
-pub use lidar::{
-    attach_lidar_sensor, enable_lidar_demo, lidar_stream_for_index, sync_lidar_mounts,
-};
+pub use lidar::{lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mounts, LidarMount};
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,

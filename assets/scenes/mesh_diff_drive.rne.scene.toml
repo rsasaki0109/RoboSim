@@ -7,3 +7,8 @@ enabled = true
 
 [[robots]]
 path = "../robots/mesh_diff_drive.rne.robot.toml"
+
+[[obstacles]]
+name = "front_wall"
+translation_m = [0.0, 1.0, 8.0]
+half_extents_m = [8.0, 1.0, 0.25]

@@ -7,11 +7,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rne_data = { path = "../rne_data" }
 rne_ecs = { path = "../rne_ecs" }
 rne_math = { path = "../rne_math" }
 rne_physics = { path = "../rne_physics" }
 rne_render = { path = "../rne_render" }
 rne_robot = { path = "../rne_robot" }
+rne_sensor = { path = "../rne_sensor" }
 rne_urdf_import = { path = "../rne_urdf_import" }
 rne_world = { path = "../rne_world" }
 serde = { workspace = true }

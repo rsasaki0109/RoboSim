@@ -10,3 +10,9 @@ initial_translation_m = [0.0, 0.25, 0.0]
 
 [visuals]
 urdf = "mesh_diff_drive/mesh_diff_drive.urdf"
+
+[lidar]
+ray_count = 120
+max_range_m = 15.0
+mount_offset_m = [0.0, 0.2, 0.0]
+update_rate_hz = 10.0

@@ -1,7 +1,7 @@
 //! Headless differential drive simulation.
 
 use crate::action::DiffDriveAction;
-use crate::lidar::{enable_lidar_demo, sync_lidar_mounts};
+use crate::lidar::{lidar_mounts_from_spawned, sync_lidar_mounts, LidarMount};
 use crate::observation::DiffDriveObservation;
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -36,7 +36,7 @@ pub struct DiffDriveSim {
     robots: Vec<DiffDriveSpawned>,
     command_buffer: ActuatorCommandBuffer,
     data_bus: InMemoryDataBus,
-    lidar_mounts: Vec<(Entity, Entity)>,
+    lidar_mounts: Vec<LidarMount>,
     sim_time: SimTime,
     dt: SimDuration,
     step_count: u64,
@@ -69,6 +69,7 @@ impl DiffDriveSim {
             0,
             DiffDriveDriveMode::JointDriven,
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -85,7 +86,7 @@ impl DiffDriveSim {
             .map(|config| spawn_diff_drive_robot(&mut world, config))
             .collect();
         let drive_mode = configs[0].drive_mode;
-        Self::from_spawned_world(world, robots, None, 0, drive_mode, Vec::new())
+        Self::from_spawned_world(world, robots, None, 0, drive_mode, Vec::new(), Vec::new())
     }
 
     /// Loads a `.rne.scene.toml` file and its referenced robot assets.
@@ -115,6 +116,8 @@ impl DiffDriveSim {
         let bundle = load_scene_bundle(scene_path)?;
         let mesh_roots = mesh_package_roots(&bundle);
 
+        let lidar_mounts = lidar_mounts_from_spawned(&spawned.lidar_mounts);
+
         Ok(Self::from_spawned_world(
             world,
             robots,
@@ -122,6 +125,7 @@ impl DiffDriveSim {
             world_seed,
             drive_mode,
             mesh_roots,
+            lidar_mounts,
         ))
     }
 
@@ -184,20 +188,9 @@ impl DiffDriveSim {
         &self.data_bus
     }
 
-    /// Returns tracked LiDAR mount entities when the LiDAR demo is enabled.
-    pub fn lidar_mounts(&self) -> &[(Entity, Entity)] {
+    /// Returns tracked LiDAR mounts loaded from scene robot assets.
+    pub fn lidar_mounts(&self) -> &[LidarMount] {
         &self.lidar_mounts
-    }
-
-    /// Spawns a demo wall and LiDAR sensors for every robot in the scene.
-    pub fn enable_lidar_demo(&mut self) {
-        enable_lidar_demo(
-            &mut self.world,
-            &self.robots,
-            &mut self.backend,
-            self.physics_world,
-            &mut self.lidar_mounts,
-        );
     }
 
     /// Spawns an additional diff-drive robot into the live simulation world.
@@ -222,6 +215,7 @@ impl DiffDriveSim {
         world_seed: u64,
         drive_mode: DiffDriveDriveMode,
         mesh_package_roots: Vec<PathBuf>,
+        lidar_mounts: Vec<LidarMount>,
     ) -> Self {
         for (index, robot) in robots.iter().enumerate() {
             attach_imu(&mut world, robot.base_link, imu_stream_for_index(index));
@@ -242,7 +236,7 @@ impl DiffDriveSim {
             robots,
             command_buffer: ActuatorCommandBuffer::new(),
             data_bus: InMemoryDataBus::new(),
-            lidar_mounts: Vec::new(),
+            lidar_mounts,
             sim_time: SimTime::ZERO,
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             step_count: 0,
@@ -509,15 +503,15 @@ fn lidar_point_count_for_robot(
     world: &World,
     data_bus: &InMemoryDataBus,
     spawned: &DiffDriveSpawned,
-    lidar_mounts: &[(Entity, Entity)],
+    lidar_mounts: &[LidarMount],
 ) -> usize {
-    let Some((_, lidar)) = lidar_mounts
+    let Some(mount) = lidar_mounts
         .iter()
-        .find(|(base_link, _)| *base_link == spawned.base_link)
+        .find(|mount| mount.base_link == spawned.base_link)
     else {
         return 0;
     };
-    let Some(sensor) = world.get::<Sensor>(*lidar) else {
+    let Some(sensor) = world.get::<Sensor>(mount.lidar) else {
         return 0;
     };
     data_bus
@@ -703,18 +697,45 @@ mod tests {
     }
 
     #[test]
-    fn lidar_demo_produces_point_cloud_hits() {
-        let mut sim = DiffDriveSim::new();
-        sim.enable_lidar_demo();
+    fn lidar_scene_produces_point_cloud_hits() {
+        let scene_text = r#"
+[ground]
+enabled = true
+
+[[robots]]
+path = "robot.rne.robot.toml"
+
+[[obstacles]]
+name = "front_wall"
+translation_m = [0.0, 1.0, 8.0]
+half_extents_m = [8.0, 1.0, 0.25]
+"#;
+        let robot_text = r#"
+kind = "diff_drive"
+model_name = "diff_drive"
+
+[diff_drive]
+
+[lidar]
+"#;
+        let dir = std::env::temp_dir().join(format!("rne_ai_lidar_sim_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("robot.rne.robot.toml"), robot_text).unwrap();
+        let scene_path = dir.join("scene.rne.scene.toml");
+        std::fs::write(&scene_path, scene_text).unwrap();
+
+        let mut sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
         for _ in 0..120 {
             sim.step(6.0, 6.0);
         }
         let obs = sim.observe();
         assert!(
             obs.lidar_points >= 8,
-            "expected lidar hits after driving toward demo wall, got {}",
+            "expected lidar hits from scene asset, got {}",
             obs.lidar_points
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

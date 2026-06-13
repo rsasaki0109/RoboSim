@@ -29,6 +29,45 @@ pub struct RobotAsset {
     pub urdf: Option<UrdfRobotAsset>,
     /// Optional URDF visuals for diff-drive robots.
     pub visuals: Option<VisualsRobotAsset>,
+    /// Optional horizontal LiDAR sensor mounted on the base link.
+    pub lidar: Option<LidarRobotAsset>,
+}
+
+/// LiDAR section of a robot asset file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LidarRobotAsset {
+    /// When false, no LiDAR entity is spawned even if this section is present.
+    #[serde(default = "default_lidar_enabled")]
+    pub enabled: bool,
+    /// Number of rays per scan.
+    #[serde(default = "default_lidar_ray_count")]
+    pub ray_count: u32,
+    /// Maximum range in meters.
+    #[serde(default = "default_lidar_max_range_m")]
+    pub max_range_m: f64,
+    /// Sensor mount offset from the base link origin in meters.
+    #[serde(default = "default_lidar_mount_offset_m")]
+    pub mount_offset_m: [f64; 3],
+    /// Sensor publish rate in hertz.
+    #[serde(default = "default_lidar_update_rate_hz")]
+    pub update_rate_hz: f64,
+}
+
+impl LidarRobotAsset {
+    /// Converts this asset section into a [`LidarSpec`].
+    pub fn to_spec(&self) -> rne_sensor::LidarSpec {
+        rne_sensor::LidarSpec {
+            ray_count: self.ray_count,
+            max_range_m: self.max_range_m,
+            height_offset_m: self.mount_offset_m[1],
+            ..rne_sensor::LidarSpec::default()
+        }
+    }
+
+    /// Returns the mount offset as a vector.
+    pub fn mount_offset(&self) -> Vec3 {
+        vec3_from_array(self.mount_offset_m)
+    }
 }
 
 /// Optional URDF visuals attached to diff-drive link entities.
@@ -181,6 +220,26 @@ fn default_initial_translation_m() -> [f64; 3] {
     [0.0, 0.25, 0.0]
 }
 
+fn default_lidar_enabled() -> bool {
+    true
+}
+
+fn default_lidar_ray_count() -> u32 {
+    120
+}
+
+fn default_lidar_max_range_m() -> f64 {
+    15.0
+}
+
+fn default_lidar_mount_offset_m() -> [f64; 3] {
+    [0.0, 0.2, 0.0]
+}
+
+fn default_lidar_update_rate_hz() -> f64 {
+    10.0
+}
+
 fn vec3_from_array(values: [f64; 3]) -> Vec3 {
     Vec3::new(values[0], values[1], values[2])
 }
@@ -198,6 +257,26 @@ mod tests {
         assert_eq!(asset.kind, RobotKind::DiffDrive);
         assert_eq!(asset.model_name, "diff_drive");
         assert!(asset.diff_drive.is_some());
+        assert!(asset.lidar.is_none());
+    }
+
+    #[test]
+    fn parse_robot_asset_with_lidar() {
+        let text = r#"
+kind = "diff_drive"
+model_name = "diff_drive"
+
+[diff_drive]
+
+[lidar]
+ray_count = 90
+mount_offset_m = [0.0, 0.25, 0.0]
+"#;
+        let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
+        let lidar = asset.lidar.expect("lidar section");
+        assert!(lidar.enabled);
+        assert_eq!(lidar.ray_count, 90);
+        assert_eq!(lidar.mount_offset_m, [0.0, 0.25, 0.0]);
     }
 
     #[test]

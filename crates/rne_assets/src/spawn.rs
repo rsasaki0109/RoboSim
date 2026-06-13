@@ -1,16 +1,31 @@
 //! Spawn ECS entities from parsed assets.
 
 use crate::error::AssetError;
-use crate::robot::{RobotAsset, RobotKind};
-use crate::scene::SceneAsset;
+use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
+use crate::scene::{SceneAsset, SceneObstacleAsset};
+use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
+use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{attach_urdf_visuals, parse_urdf_file};
 use rne_world::{spawn_world, Gravity, Transform3, WorldEntity};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+const LIDAR_STREAM_BASE: u32 = 200;
+
+/// LiDAR mount spawned with a robot or scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LidarMountSpawned {
+    /// Robot base link the LiDAR follows.
+    pub base_link: Entity,
+    /// LiDAR sensor entity.
+    pub lidar: Entity,
+    /// Mount offset from the base link origin in meters.
+    pub mount_offset_m: Vec3,
+}
 
 /// Result of spawning a robot asset into the ECS world.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -28,6 +43,8 @@ pub struct SpawnedScene {
     pub world: Entity,
     /// Spawned robots keyed by model name.
     pub robots: Vec<(String, SpawnedRobot)>,
+    /// LiDAR mounts spawned from robot assets.
+    pub lidar_mounts: Vec<LidarMountSpawned>,
 }
 
 /// Spawns entities described by a robot asset.
@@ -35,7 +52,8 @@ pub fn spawn_robot_asset(
     world: &mut World,
     asset_path: &Path,
     asset: &RobotAsset,
-) -> Result<SpawnedRobot, AssetError> {
+    lidar_stream_index: Option<usize>,
+) -> Result<(SpawnedRobot, Option<LidarMountSpawned>), AssetError> {
     match asset.kind {
         RobotKind::DiffDrive => {
             let section = asset
@@ -46,10 +64,23 @@ pub fn spawn_robot_asset(
             if let Some(visuals) = &asset.visuals {
                 attach_diff_drive_visuals(world, asset_path, visuals, &spawned)?;
             }
-            Ok(SpawnedRobot {
-                robot: spawned.robot,
-                base_link: spawned.base_link,
-            })
+            let lidar_mount = asset.lidar.as_ref().and_then(|config| {
+                config.enabled.then(|| {
+                    spawn_robot_lidar(
+                        world,
+                        spawned.base_link,
+                        config,
+                        lidar_stream_index.unwrap_or(0),
+                    )
+                })
+            });
+            Ok((
+                SpawnedRobot {
+                    robot: spawned.robot,
+                    base_link: spawned.base_link,
+                },
+                lidar_mount,
+            ))
         }
         RobotKind::Urdf => Err(AssetError::UnsupportedRobotKind {
             kind: "urdf".into(),
@@ -90,22 +121,31 @@ pub fn spawn_scene(
         spawn_ground_plane(world);
     }
 
+    for obstacle in &scene.obstacles {
+        spawn_scene_obstacle(world, obstacle);
+    }
+
     let mut spawned_robots = Vec::new();
+    let mut lidar_mounts = Vec::new();
     for (index, (robot_path, robot_asset)) in robots.iter().enumerate() {
-        let spawned =
-            spawn_robot_asset(world, robot_path, robot_asset).map_err(|error| match error {
+        let (spawned, lidar_mount) = spawn_robot_asset(world, robot_path, robot_asset, Some(index))
+            .map_err(|error| match error {
                 AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
                     scene.robots[index].path.clone(),
                     format!("robot #{index} kind `{kind}` is not supported by spawn_scene"),
                 ),
                 other => other,
             })?;
+        if let Some(mount) = lidar_mount {
+            lidar_mounts.push(mount);
+        }
         spawned_robots.push((robot_asset.model_name.clone(), spawned));
     }
 
     Ok(SpawnedScene {
         world: world_entity,
         robots: spawned_robots,
+        lidar_mounts,
     })
 }
 
@@ -136,6 +176,65 @@ pub fn spawn_ground_plane(world: &mut World) -> Entity {
         Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
     ));
     ground
+}
+
+fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Entity {
+    let entity = spawn_named(world, &obstacle.name);
+    world.entity_mut(entity).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider {
+            shape: ColliderShape::Cuboid {
+                half_extents_m: vec3_from_array(obstacle.half_extents_m),
+            },
+            ..Collider::default()
+        },
+        Transform3::from_translation_rotation(
+            vec3_from_array(obstacle.translation_m),
+            Quat::IDENTITY,
+        ),
+    ));
+    entity
+}
+
+fn spawn_robot_lidar(
+    world: &mut World,
+    base_link: Entity,
+    config: &LidarRobotAsset,
+    stream_index: usize,
+) -> LidarMountSpawned {
+    let offset_m = config.mount_offset();
+    let lidar = spawn_named(world, "lidar");
+    world.entity_mut(lidar).insert((
+        Sensor {
+            kind: SensorKind::Lidar(config.to_spec()),
+            update_rate_hz: config.update_rate_hz,
+            latency_ticks: 0,
+            frame_id: 11,
+            enabled: true,
+            stream_id: StreamId::new(LIDAR_STREAM_BASE as u64 + stream_index as u64),
+        },
+        SensorState::default(),
+        Transform3::IDENTITY,
+    ));
+    sync_lidar_mount(world, base_link, lidar, offset_m);
+    LidarMountSpawned {
+        base_link,
+        lidar,
+        mount_offset_m: offset_m,
+    }
+}
+
+fn sync_lidar_mount(world: &mut World, base_link: Entity, lidar: Entity, offset_m: Vec3) {
+    let Some(base) = world.get::<Transform3>(base_link).copied() else {
+        return;
+    };
+    if let Some(mut lidar_tf) = world.get_mut::<Transform3>(lidar) {
+        lidar_tf.translation = base.translation + base.rotation * offset_m;
+        lidar_tf.rotation = base.rotation;
+    }
 }
 
 /// Convenience wrapper returning full diff-drive spawn details.
@@ -202,7 +301,12 @@ fn collect_robot_links(world: &mut World, robot: Entity) -> HashMap<String, Enti
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{load_and_spawn_scene, spawn_robot_asset, AssetError};
+    use rne_ecs::World;
+    use rne_physics::RigidBody;
+    use rne_sensor::Sensor;
+    use rne_world::WorldEntity;
+    use std::path::Path;
 
     #[test]
     fn spawn_scene_from_fixture() {
@@ -224,8 +328,51 @@ mod tests {
             .join("tests/fixtures/mesh_diff_drive.rne.robot.toml");
         let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
         let mut world = World::new();
-        let spawned = spawn_robot_asset(&mut world, &robot_path, &asset).unwrap();
+        let (spawned, _) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
         assert!(world.get::<rne_render::Visual>(spawned.base_link).is_some());
+    }
+
+    #[test]
+    fn spawn_scene_with_lidar_and_obstacle() {
+        let scene_text = r#"
+[world]
+seed = 7
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "diff_drive.rne.robot.toml"
+
+[[obstacles]]
+name = "front_wall"
+translation_m = [0.0, 1.0, 8.0]
+half_extents_m = [8.0, 1.0, 0.25]
+"#;
+        let robot_text = r#"
+kind = "diff_drive"
+model_name = "diff_drive"
+
+[diff_drive]
+
+[lidar]
+ray_count = 64
+"#;
+        let dir = std::env::temp_dir().join(format!("rne_assets_lidar_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let robot_path = dir.join("diff_drive.rne.robot.toml");
+        let scene_path = dir.join("scene.rne.scene.toml");
+        std::fs::write(&robot_path, robot_text).unwrap();
+        std::fs::write(&scene_path, scene_text).unwrap();
+
+        let mut world = World::new();
+        let spawned = load_and_spawn_scene(&mut world, &scene_path).unwrap();
+        assert_eq!(spawned.lidar_mounts.len(), 1);
+        assert!(world.get::<Sensor>(spawned.lidar_mounts[0].lidar).is_some());
+        let mut names = world.query::<&rne_ecs::Name>();
+        assert!(names.iter(&world).any(|name| name.0 == "front_wall"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -234,7 +381,7 @@ mod tests {
             .join("tests/fixtures/diff_drive_urdf.rne.robot.toml");
         let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
         let mut world = World::new();
-        let error = spawn_robot_asset(&mut world, &robot_path, &asset).unwrap_err();
+        let error = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap_err();
         assert!(matches!(error, AssetError::UnsupportedRobotKind { .. }));
     }
 }

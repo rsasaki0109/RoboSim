@@ -1,145 +1,136 @@
 //! LiDAR sensor helpers for diff-drive simulation and rendering.
 
+use rne_assets::LidarMountSpawned;
 use rne_data::StreamId;
-use rne_ecs::{spawn_named, Entity, World};
-use rne_math::{Quat, Vec3};
-use rne_physics::{
-    Collider, ColliderShape, PhysicsBackend, PhysicsWorldId, RigidBody, RigidBodyType,
-};
-use rne_robot::DiffDriveSpawned;
-use rne_sensor::{LidarSpec, Sensor, SensorKind, SensorState};
-use rne_world::Transform3;
+use rne_ecs::{Entity, World};
+use rne_math::Vec3;
 
 const LIDAR_STREAM_BASE: u32 = 200;
+
+/// A LiDAR sensor entity tracked relative to a robot base link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LidarMount {
+    /// Robot base link the LiDAR follows.
+    pub base_link: Entity,
+    /// LiDAR sensor entity.
+    pub lidar: Entity,
+    /// Mount offset from the base link origin in meters.
+    pub offset_m: Vec3,
+}
+
+impl From<LidarMountSpawned> for LidarMount {
+    fn from(mount: LidarMountSpawned) -> Self {
+        Self {
+            base_link: mount.base_link,
+            lidar: mount.lidar,
+            offset_m: mount.mount_offset_m,
+        }
+    }
+}
 
 /// Returns the DataBus stream id for a robot's LiDAR sensor.
 pub fn lidar_stream_for_index(index: usize) -> StreamId {
     StreamId::new(LIDAR_STREAM_BASE as u64 + index as u64)
 }
 
-/// Spawns a fixed wall obstacle useful for LiDAR demo scenes.
-pub fn spawn_lidar_demo_wall(world: &mut World) {
-    let wall = spawn_named(world, "lidar_demo_wall");
-    world.entity_mut(wall).insert((
-        RigidBody {
-            body_type: RigidBodyType::Fixed,
-            ..RigidBody::default()
-        },
-        Collider {
-            shape: ColliderShape::Cuboid {
-                half_extents_m: Vec3::new(8.0, 1.0, 0.25),
-            },
-            ..Collider::default()
-        },
-        Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 8.0), Quat::IDENTITY),
-    ));
-}
-
-/// Attaches a horizontal LiDAR sensor for the given robot base link.
-pub fn attach_lidar_sensor(world: &mut World, base_link: Entity, stream_id: StreamId) -> Entity {
-    let lidar = spawn_named(world, "lidar");
-    world.entity_mut(lidar).insert((
-        Sensor {
-            kind: SensorKind::Lidar(LidarSpec {
-                ray_count: 120,
-                max_range_m: 15.0,
-                ..LidarSpec::default()
-            }),
-            update_rate_hz: 10.0,
-            latency_ticks: 0,
-            frame_id: 11,
-            enabled: true,
-            stream_id,
-        },
-        SensorState::default(),
-        Transform3::IDENTITY,
-    ));
-    sync_lidar_mount(world, base_link, lidar);
-    lidar
-}
-
 /// Copies the robot base pose onto a free-floating LiDAR mount entity.
-pub fn sync_lidar_mount(world: &mut World, base_link: Entity, lidar: Entity) {
-    let Some(base) = world.get::<Transform3>(base_link).copied() else {
+pub fn sync_lidar_mount(world: &mut World, base_link: Entity, lidar: Entity, offset_m: Vec3) {
+    let Some(base) = world.get::<rne_world::Transform3>(base_link).copied() else {
         return;
     };
-    if let Some(mut lidar_tf) = world.get_mut::<Transform3>(lidar) {
-        lidar_tf.translation = base.translation + base.rotation * Vec3::new(0.0, 0.2, 0.0);
+    if let Some(mut lidar_tf) = world.get_mut::<rne_world::Transform3>(lidar) {
+        lidar_tf.translation = base.translation + base.rotation * offset_m;
         lidar_tf.rotation = base.rotation;
     }
 }
 
 /// Syncs every tracked LiDAR mount before sensor sampling.
-pub fn sync_lidar_mounts(world: &mut World, mounts: &[(Entity, Entity)]) {
-    for &(base_link, lidar) in mounts {
-        sync_lidar_mount(world, base_link, lidar);
+pub fn sync_lidar_mounts(world: &mut World, mounts: &[LidarMount]) {
+    for mount in mounts {
+        sync_lidar_mount(world, mount.base_link, mount.lidar, mount.offset_m);
     }
 }
 
-/// Registers demo obstacles and LiDAR sensors, then syncs them into physics.
-pub fn enable_lidar_demo<B: PhysicsBackend>(
-    world: &mut World,
-    robots: &[DiffDriveSpawned],
-    backend: &mut B,
-    physics_world: PhysicsWorldId,
-    mounts: &mut Vec<(Entity, Entity)>,
-) {
-    if !mounts.is_empty() {
-        return;
-    }
-
-    spawn_lidar_demo_wall(world);
-    for (index, robot) in robots.iter().enumerate() {
-        let lidar = attach_lidar_sensor(world, robot.base_link, lidar_stream_for_index(index));
-        mounts.push((robot.base_link, lidar));
-    }
-
-    backend
-        .sync_from_ecs(world, physics_world)
-        .expect("sync lidar demo into physics");
+/// Collects LiDAR mounts for the given robots from asset spawn metadata.
+pub fn lidar_mounts_from_spawned(spawned: &[LidarMountSpawned]) -> Vec<LidarMount> {
+    spawned.iter().copied().map(LidarMount::from).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rne_ecs::Name;
-    use rne_physics::PhysicsWorldDesc;
-    use rne_physics_rapier::RapierBackend;
-    use rne_robot::{spawn_diff_drive_robot, DiffDriveConfig, DiffDriveSpawned};
+    use rne_assets::{load_and_spawn_scene, parse_robot_asset, spawn_robot_asset};
+    use rne_ecs::World;
+    use rne_robot::{spawn_diff_drive_robot, DiffDriveConfig};
+    use rne_sensor::Sensor;
+    use std::path::Path;
 
-    fn spawn_robot(world: &mut World) -> DiffDriveSpawned {
-        spawn_diff_drive_robot(
-            world,
-            &DiffDriveConfig {
-                initial_translation_m: Vec3::new(0.0, 0.25, 0.0),
-                ..DiffDriveConfig::default()
-            },
-        )
+    #[test]
+    fn scene_asset_spawns_lidar_mount() {
+        let scene_text = r#"
+[ground]
+enabled = true
+
+[[robots]]
+path = "robot.rne.robot.toml"
+"#;
+        let robot_text = r#"
+kind = "diff_drive"
+model_name = "diff_drive"
+
+[diff_drive]
+
+[lidar]
+"#;
+        let dir = std::env::temp_dir().join(format!("rne_ai_lidar_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("robot.rne.robot.toml"), robot_text).unwrap();
+        let scene_path = dir.join("scene.rne.scene.toml");
+        std::fs::write(&scene_path, scene_text).unwrap();
+
+        let mut world = World::new();
+        let spawned = load_and_spawn_scene(&mut world, &scene_path).unwrap();
+        let mounts = lidar_mounts_from_spawned(&spawned.lidar_mounts);
+        assert_eq!(mounts.len(), 1);
+        assert!(world.get::<Sensor>(mounts[0].lidar).is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn enable_lidar_demo_attaches_sensor_and_wall() {
+    fn sync_lidar_mount_follows_base_motion() {
         let mut world = World::new();
-        let robot = spawn_robot(&mut world);
-        let mut backend = RapierBackend::new();
-        let physics_world = backend
-            .create_world(PhysicsWorldDesc::default())
-            .expect("physics world");
-        backend.sync_from_ecs(&mut world, physics_world).unwrap();
-
-        let mut mounts = Vec::new();
-        enable_lidar_demo(
+        let robot = spawn_diff_drive_robot(
             &mut world,
-            std::slice::from_ref(&robot),
-            &mut backend,
-            physics_world,
-            &mut mounts,
+            &DiffDriveConfig {
+                initial_translation_m: Vec3::new(1.0, 0.25, 0.0),
+                ..DiffDriveConfig::default()
+            },
         );
-
-        assert_eq!(mounts.len(), 1);
-        let (_, lidar) = mounts[0];
-        assert!(world.get::<Sensor>(lidar).is_some());
-        let mut names = world.query::<&Name>();
-        assert!(names.iter(&world).any(|name| name.0 == "lidar_demo_wall"));
+        let (_, mount) = spawn_robot_asset(
+            &mut world,
+            Path::new("robot.toml"),
+            &parse_robot_asset(
+                r#"
+kind = "diff_drive"
+model_name = "diff_drive"
+[diff_drive]
+[lidar]
+"#,
+                Path::new("robot.toml"),
+            )
+            .unwrap(),
+            Some(0),
+        )
+        .unwrap();
+        let mount = mount.expect("lidar mount");
+        let offset = mount.mount_offset_m;
+        sync_lidar_mount(&mut world, robot.base_link, mount.lidar, offset);
+        let lidar_y = world
+            .get::<rne_world::Transform3>(mount.lidar)
+            .unwrap()
+            .translation
+            .y;
+        assert!((lidar_y - 0.45).abs() < 1e-6);
     }
 }
