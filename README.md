@@ -1,7 +1,7 @@
 # Robot Native Engine
 
 [![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
-[![CI](https://img.shields.io/badge/CI-cargo%20xtask-blue)](https://github.com/rsasaki0109/RoboSim)
+[![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
 
 Robots are not plugins.
 
@@ -43,9 +43,14 @@ cargo run -p episode_diff_drive --example 05_episode_diff_drive
 cargo run -p scene_load --example 06_scene_load
 cargo run -p render_primitives --example 07_render_primitives
 cargo run -p scene_episode --example 08_scene_episode
+cargo run -p urdf_mesh_render --example 09_urdf_mesh_render
+cargo run -p vectorized_episode --example 10_vectorized_episode
+cargo run -p agent_policy --example 11_agent_policy
 ```
 
 See [examples/README.md](examples/README.md) for the full list.
+
+**Highlights in v0.2:** episode API, scene assets, wgpu rendering, domain randomization, agent entities, native ROS 2 node.
 
 Architecture docs live under [docs/architecture/](docs/architecture/000_overview.md).
 
@@ -67,12 +72,25 @@ source /opt/ros/jazzy/setup.bash
 
 See [adapters/ros2/rne_ros2_bridge/README.md](adapters/ros2/rne_ros2_bridge/README.md).
 
-Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)
+Native Rust node (`rclrs`): [adapters/ros2/rne_ros2_node/README.md](adapters/ros2/rne_ros2_node/README.md).
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cargo run -p xtask -- ci-ros2
+```
+
+Release notes: [CHANGELOG.md](CHANGELOG.md) · [v0.2.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0) · [v0.1.0](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.1.0)
 
 ## Development
 
 ```bash
 cargo run -p xtask -- ci
+```
+
+With ROS 2 Jazzy or Humble installed:
+
+```bash
+cargo run -p xtask -- ci-ros2
 ```
 
 Or, if [just](https://github.com/casey/just) is installed:

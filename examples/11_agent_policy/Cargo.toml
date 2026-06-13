@@ -1,0 +1,13 @@
+[package]
+name = "agent_policy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+
+[[example]]
+name = "11_agent_policy"
+path = "main.rs"

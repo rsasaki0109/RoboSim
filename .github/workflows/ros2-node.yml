@@ -1,0 +1,59 @@
+name: ROS 2 native node
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ros2-node.yml"
+      - "adapters/ros2/**"
+      - "crates/rne_ai/**"
+      - "crates/rne_assets/**"
+      - "crates/rne_core/**"
+      - "crates/rne_data/**"
+      - "crates/rne_ecs/**"
+      - "crates/rne_log/**"
+      - "crates/rne_math/**"
+      - "crates/rne_physics/**"
+      - "crates/rne_physics_rapier/**"
+      - "crates/rne_robot/**"
+      - "crates/rne_sensor/**"
+      - "crates/rne_world/**"
+  pull_request:
+    paths:
+      - ".github/workflows/ros2-node.yml"
+      - "adapters/ros2/**"
+      - "crates/rne_ai/**"
+      - "crates/rne_assets/**"
+      - "crates/rne_core/**"
+      - "crates/rne_data/**"
+      - "crates/rne_ecs/**"
+      - "crates/rne_log/**"
+      - "crates/rne_math/**"
+      - "crates/rne_physics/**"
+      - "crates/rne_physics_rapier/**"
+      - "crates/rne_robot/**"
+      - "crates/rne_sensor/**"
+      - "crates/rne_world/**"
+  workflow_dispatch:
+
+jobs:
+  rne_ros2_node:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+
+      - name: Install rosidl-generator-rs packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ros-jazzy-rosidl-generator-rs \
+            ros-jazzy-test-msgs
+
+      - name: Smoke test rne_ros2_node
+        run: ./adapters/ros2/rne_ros2_node/smoke_test.sh

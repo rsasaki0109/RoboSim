@@ -2,7 +2,7 @@
 
 use crate::error::AssetError;
 use rne_math::Vec3;
-use rne_robot::DiffDriveConfig;
+use rne_robot::{DiffDriveConfig, DiffDriveDriveMode};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -66,6 +66,7 @@ impl DiffDriveRobotAsset {
             base_half_extents_m: vec3_from_array(self.base_half_extents_m),
             max_wheel_velocity_rad_s: self.max_wheel_velocity_rad_s,
             initial_translation_m: vec3_from_array(self.initial_translation_m),
+            drive_mode: DiffDriveDriveMode::Kinematic,
         }
     }
 }

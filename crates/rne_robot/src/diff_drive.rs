@@ -5,8 +5,22 @@ use crate::components::{Actuator, Joint, JointKind, JointLimits, Link, Robot, Ro
 use bevy_ecs::prelude::Component;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, RigidBody, RigidBodyType};
+use rne_physics::{
+    Collider, ColliderShape, JointMotor, PhysicsMaterial, RevoluteJointDesc, RigidBody,
+    RigidBodyType,
+};
 use rne_world::Transform3;
+use serde::{Deserialize, Serialize};
+
+/// How wheel commands move the diff-drive robot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiffDriveDriveMode {
+    /// Analytic kinematics on the base link (legacy default).
+    #[default]
+    Kinematic,
+    /// Rapier revolute joints with velocity motors on each wheel.
+    JointDriven,
+}
 
 /// Differential drive metadata attached to a robot.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +54,8 @@ pub struct DiffDriveConfig {
     pub base_half_extents_m: Vec3,
     /// Maximum wheel velocity in radians per second.
     pub max_wheel_velocity_rad_s: f64,
+    /// Wheel actuation model.
+    pub drive_mode: DiffDriveDriveMode,
 }
 
 impl Default for DiffDriveConfig {
@@ -51,6 +67,7 @@ impl Default for DiffDriveConfig {
             track_width_m: 0.45,
             base_half_extents_m: Vec3::new(0.25, 0.15, 0.2),
             max_wheel_velocity_rad_s: 10.0,
+            drive_mode: DiffDriveDriveMode::Kinematic,
         }
     }
 }
@@ -83,37 +100,44 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
     let left_actuator = spawn_named(world, "left_motor");
     let right_actuator = spawn_named(world, "right_motor");
 
-    world.entity_mut(robot).insert(Robot {
-        robot_id: RobotId::default(),
-        model_name: config.model_name.clone(),
-        base_link,
-    });
-
-    world.entity_mut(base_link).insert((
-        Link {
-            robot,
-            name: "base_link".into(),
-        },
-        Transform3::from_translation_rotation(config.initial_translation_m, Quat::IDENTITY),
-        RigidBody {
-            body_type: RigidBodyType::Kinematic,
-            mass_kg: 5.0,
-            ..RigidBody::default()
-        },
-        Collider::cuboid(config.base_half_extents_m),
-    ));
-
     let half_track = config.track_width_m * 0.5;
     let wheel_offset = Vec3::new(
         0.0,
         -config.base_half_extents_m.y + config.wheel_radius_m,
         0.0,
     );
+    let base_translation = base_translation_for_mode(config, wheel_offset.y);
+
+    world.entity_mut(robot).insert(Robot {
+        robot_id: RobotId::default(),
+        model_name: config.model_name.clone(),
+        base_link,
+    });
+
+    let base_body_type = match config.drive_mode {
+        DiffDriveDriveMode::Kinematic => RigidBodyType::Kinematic,
+        DiffDriveDriveMode::JointDriven => RigidBodyType::Dynamic,
+    };
+
+    world.entity_mut(base_link).insert((
+        Link {
+            robot,
+            name: "base_link".into(),
+        },
+        Transform3::from_translation_rotation(base_translation, Quat::IDENTITY),
+        RigidBody {
+            body_type: base_body_type,
+            mass_kg: 5.0,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(config.base_half_extents_m),
+    ));
 
     for (wheel, name, x_offset, actuator_entity) in [
         (left_wheel, "left_wheel", -half_track, left_actuator),
         (right_wheel, "right_wheel", half_track, right_actuator),
     ] {
+        let wheel_translation = base_translation + Vec3::new(x_offset, wheel_offset.y, 0.0);
         world.entity_mut(wheel).insert((
             Link {
                 robot,
@@ -129,11 +153,36 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
                 position: 0.0,
                 velocity: 0.0,
             },
-            Transform3::from_translation_rotation(
-                Vec3::new(x_offset, wheel_offset.y, 0.0),
-                Quat::IDENTITY,
-            ),
+            Transform3::from_translation_rotation(wheel_translation, Quat::IDENTITY),
         ));
+
+        if config.drive_mode == DiffDriveDriveMode::JointDriven {
+            world.entity_mut(wheel).insert((
+                RigidBody {
+                    body_type: RigidBodyType::Dynamic,
+                    mass_kg: 0.5,
+                    ..RigidBody::default()
+                },
+                Collider {
+                    shape: ColliderShape::Capsule {
+                        half_height_m: config.wheel_radius_m * 0.25,
+                        radius_m: config.wheel_radius_m,
+                    },
+                    material: PhysicsMaterial {
+                        friction: 1.2,
+                        restitution: 0.0,
+                    },
+                    local_offset: Transform3::IDENTITY,
+                },
+                RevoluteJointDesc {
+                    parent: base_link,
+                    axis: Vec3::Y,
+                    anchor_parent_m: Vec3::new(x_offset, wheel_offset.y, 0.0),
+                    anchor_child_m: Vec3::ZERO,
+                },
+                JointMotor::default(),
+            ));
+        }
 
         world.entity_mut(actuator_entity).insert(Actuator {
             robot,
@@ -175,6 +224,20 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct DiffDriveComponent(pub DifferentialDrive);
 
+fn base_translation_for_mode(config: &DiffDriveConfig, wheel_offset_y: f64) -> Vec3 {
+    match config.drive_mode {
+        DiffDriveDriveMode::Kinematic => config.initial_translation_m,
+        DiffDriveDriveMode::JointDriven => {
+            let base_y = config.wheel_radius_m - wheel_offset_y;
+            Vec3::new(
+                config.initial_translation_m.x,
+                base_y,
+                config.initial_translation_m.z,
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +252,25 @@ mod tests {
         assert!(world.get::<Actuator>(spawned.left_actuator).is_some());
         assert!(world.get::<Actuator>(spawned.right_actuator).is_some());
         assert!(world.get::<DiffDriveComponent>(spawned.robot).is_some());
+    }
+
+    #[test]
+    fn joint_driven_spawn_attaches_physics_joints() {
+        let mut world = World::new();
+        let spawned = spawn_diff_drive_robot(
+            &mut world,
+            &DiffDriveConfig {
+                drive_mode: DiffDriveDriveMode::JointDriven,
+                ..DiffDriveConfig::default()
+            },
+        );
+
+        assert!(world.get::<RevoluteJointDesc>(spawned.left_wheel).is_some());
+        assert!(world.get::<JointMotor>(spawned.left_wheel).is_some());
+        assert!(world.get::<RigidBody>(spawned.left_wheel).is_some());
+        assert_eq!(
+            world.get::<RigidBody>(spawned.base_link).unwrap().body_type,
+            RigidBodyType::Dynamic
+        );
     }
 }

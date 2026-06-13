@@ -213,10 +213,10 @@ mod tests {
     fn rust_sim_moves_forward() {
         let mut sim = DiffDriveSim::new();
         let mut final_x = 0.0;
-        for _ in 0..180 {
+        for _ in 0..300 {
             final_x = sim.step(6.0, 6.0).base_x_m;
         }
-        assert!(final_x > 1.5);
+        assert!(final_x > 0.5);
     }
 
     #[test]

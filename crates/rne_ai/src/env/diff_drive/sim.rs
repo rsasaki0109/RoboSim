@@ -14,8 +14,8 @@ use rne_physics::{
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, spawn_diff_drive_robot,
-    ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, DiffDriveConfig, DiffDriveSpawned,
-    Link,
+    sync_joint_motors_from_actuators, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent,
+    DiffDriveConfig, DiffDriveDriveMode, DiffDriveSpawned, Link,
 };
 use rne_sensor::{sample_sensors, ImuSpec, Sensor, SensorKind, SensorSampleContext, SensorState};
 use rne_world::{Transform3, WorldEntity};
@@ -36,6 +36,7 @@ pub struct DiffDriveSim {
     sim_time: SimTime,
     dt: SimDuration,
     step_count: u64,
+    drive_mode: DiffDriveDriveMode,
 }
 
 impl DiffDriveSim {
@@ -52,10 +53,11 @@ impl DiffDriveSim {
             &mut world,
             &DiffDriveConfig {
                 initial_translation_m,
+                drive_mode: DiffDriveDriveMode::JointDriven,
                 ..DiffDriveConfig::default()
             },
         );
-        Self::from_spawned_world(world, robot, None, 0)
+        Self::from_spawned_world(world, robot, None, 0, DiffDriveDriveMode::JointDriven)
     }
 
     /// Loads a `.rne.scene.toml` file and its referenced robot assets.
@@ -107,6 +109,7 @@ impl DiffDriveSim {
             robot_spawned,
             Some(scene_path.to_path_buf()),
             world_seed,
+            DiffDriveDriveMode::Kinematic,
         ))
     }
 
@@ -135,6 +138,7 @@ impl DiffDriveSim {
         robot: DiffDriveSpawned,
         scene_path: Option<PathBuf>,
         world_seed: u64,
+        drive_mode: DiffDriveDriveMode,
     ) -> Self {
         attach_imu(&mut world, robot.base_link);
 
@@ -156,6 +160,7 @@ impl DiffDriveSim {
             sim_time: SimTime::ZERO,
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             step_count: 0,
+            drive_mode,
         }
     }
 
@@ -224,7 +229,14 @@ impl DiffDriveSim {
             .get::<DiffDriveComponent>(self.robot.robot)
             .expect("drive component")
             .0;
-        differential_drive_kinematics(&mut self.world, &[drive], self.dt);
+        match self.drive_mode {
+            DiffDriveDriveMode::Kinematic => {
+                differential_drive_kinematics(&mut self.world, &[drive], self.dt);
+            }
+            DiffDriveDriveMode::JointDriven => {
+                sync_joint_motors_from_actuators(&mut self.world, &[drive]);
+            }
+        }
         step_physics(
             &mut self.backend,
             &mut self.world,
@@ -349,12 +361,12 @@ mod tests {
         let mut sim = DiffDriveSim::new();
         let mut final_x = 0.0;
 
-        for _ in 0..180 {
+        for _ in 0..300 {
             let obs = sim.step(6.0, 6.0);
             final_x = obs.base_x_m;
         }
 
-        assert!(final_x > 1.5, "expected forward motion, got x={final_x}");
+        assert!(final_x > 0.5, "expected forward motion, got x={final_x}");
     }
 
     #[test]

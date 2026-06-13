@@ -5,6 +5,7 @@ use crate::schema::{
 };
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
+use std::path::Path;
 use thiserror::Error;
 
 /// URDF parse error.
@@ -60,6 +61,14 @@ pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
         links,
         joints,
     })
+}
+
+/// Parses a URDF document from a file path.
+pub fn parse_urdf_file(path: &Path) -> Result<UrdfRobot, UrdfParseError> {
+    let xml = std::fs::read_to_string(path).map_err(|error| {
+        UrdfParseError::InvalidXml(format!("failed to read {}: {error}", path.display()))
+    })?;
+    parse_urdf(&xml)
 }
 
 fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError> {
@@ -301,6 +310,21 @@ mod tests {
         assert!(matches!(
             wheel.collisions[0].geometry,
             UrdfGeometry::Cylinder { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_mesh_diff_drive() {
+        let fixture = include_str!("../tests/fixtures/mesh_diff_drive.urdf");
+        let robot = parse_urdf(fixture).unwrap();
+        let base = robot
+            .links
+            .iter()
+            .find(|link| link.name == "base_link")
+            .expect("base_link");
+        assert!(matches!(
+            base.visuals[0].geometry,
+            UrdfGeometry::Mesh { .. }
         ));
     }
 }

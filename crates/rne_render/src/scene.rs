@@ -1,8 +1,12 @@
 //! Primitive scene description for rendering.
 
+use crate::mesh::{load_stl, MeshLoadError, TriangleMesh};
+use crate::path::resolve_package_uri;
 use crate::visual::VisualShape;
 use rne_math::Transform3 as MathTransform3;
 use rne_world::Transform3;
+use std::path::Path;
+use std::sync::Arc;
 
 /// One renderable primitive in a scene pass.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,6 +17,8 @@ pub struct RenderSceneItem {
     pub shape: VisualShape,
     /// RGBA color in linear space.
     pub color_rgba: [f32; 4],
+    /// Loaded mesh geometry for [`VisualShape::Mesh`] items.
+    pub mesh: Option<Arc<TriangleMesh>>,
 }
 
 /// Collection of primitives rendered in one camera pass.
@@ -42,7 +48,20 @@ impl RenderScene {
             transform: apply_shape_scale(base, &shape),
             shape,
             color_rgba,
+            mesh: None,
         }
+    }
+
+    /// Loads STL files referenced by mesh visuals in this scene.
+    pub fn resolve_mesh_assets(&mut self, package_root: &Path) -> Result<(), MeshLoadError> {
+        for item in &mut self.items {
+            let VisualShape::Mesh { path, .. } = &item.shape else {
+                continue;
+            };
+            let file_path = resolve_package_uri(path, package_root);
+            item.mesh = Some(Arc::new(load_stl(&file_path)?));
+        }
+        Ok(())
     }
 }
 
@@ -79,6 +98,7 @@ mod tests {
     use super::*;
     use rne_math::Vec3;
     use rne_world::Transform3 as WorldTransform3;
+    use std::path::PathBuf;
 
     #[test]
     fn box_visual_applies_size_scale() {
@@ -91,5 +111,26 @@ mod tests {
             WorldTransform3::IDENTITY,
         );
         assert_eq!(item.transform.scale, Vec3::new(2.0, 1.0, 0.5));
+    }
+
+    #[test]
+    fn resolve_mesh_assets_loads_stl() {
+        let package_root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mesh_diff_drive");
+        let mut scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: MathTransform3::IDENTITY,
+                shape: VisualShape::Mesh {
+                    path: "package://mesh_diff_drive/meshes/base_link.stl".into(),
+                    scale: Vec3::ONE,
+                },
+                color_rgba: [1.0, 1.0, 1.0, 1.0],
+                mesh: None,
+            }],
+        };
+        scene
+            .resolve_mesh_assets(&package_root)
+            .expect("resolve mesh");
+        assert!(scene.items[0].mesh.is_some());
     }
 }

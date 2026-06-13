@@ -4,15 +4,16 @@ use crate::convert::{
     body_type_to_rapier, isometry_to_transform, shape_to_shared, transform_to_isometry,
     vec3_from_point, vec3_from_rapier, vec3_to_point, vec3_to_rapier,
 };
-use rapier3d::na::Vector3;
+use rapier3d::na::{Unit, Vector3};
 use rapier3d::pipeline::{PhysicsPipeline, QueryPipeline};
 use rapier3d::prelude::*;
 use rne_core::SimDuration;
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
+    Collider, ContactEvent, JointMotor, PhysicsBackend, PhysicsCapability, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody,
+    RigidBodyType,
 };
 use rne_world::Transform3;
 use std::collections::HashMap;
@@ -40,6 +41,7 @@ struct RapierWorldState {
     entity_to_body: HashMap<Entity, RigidBodyHandle>,
     body_to_entity: HashMap<RigidBodyHandle, Entity>,
     collider_to_entity: HashMap<ColliderHandle, Entity>,
+    entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
     contacts: Vec<ContactEvent>,
 }
 
@@ -51,6 +53,7 @@ impl RapierBackend {
             next_world_id: 0,
             capabilities: vec![
                 PhysicsCapability::RigidBody,
+                PhysicsCapability::Articulation,
                 PhysicsCapability::RaycastBatch,
             ],
         }
@@ -97,6 +100,7 @@ impl PhysicsBackend for RapierBackend {
                 entity_to_body: HashMap::new(),
                 body_to_entity: HashMap::new(),
                 collider_to_entity: HashMap::new(),
+                entity_to_joint: HashMap::new(),
                 contacts: Vec::new(),
             },
         );
@@ -160,6 +164,8 @@ impl PhysicsBackend for RapierBackend {
             state.body_to_entity.insert(body_handle, entity);
             state.collider_to_entity.insert(collider_handle, entity);
         }
+
+        sync_joints_from_ecs(world, state)?;
 
         Ok(())
     }
@@ -292,6 +298,61 @@ impl PhysicsBackend for RapierBackend {
     }
 }
 
+fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
+    for entity_ref in world.iter_entities() {
+        let entity = entity_ref.id();
+        if state.entity_to_joint.contains_key(&entity) {
+            continue;
+        }
+        let Some(joint_desc) = world.get::<RevoluteJointDesc>(entity) else {
+            continue;
+        };
+        let Some(parent_body) = state.entity_to_body.get(&joint_desc.parent).copied() else {
+            continue;
+        };
+        let Some(child_body) = state.entity_to_body.get(&entity).copied() else {
+            continue;
+        };
+
+        let axis = vec3_to_rapier(joint_desc.axis);
+        let axis = if axis.norm_squared() <= f32::EPSILON {
+            Vector3::y_axis()
+        } else {
+            Unit::new_normalize(axis)
+        };
+
+        let joint = RevoluteJointBuilder::new(axis)
+            .local_anchor1(vec3_to_point(joint_desc.anchor_parent_m))
+            .local_anchor2(vec3_to_point(joint_desc.anchor_child_m))
+            .build();
+
+        let handle =
+            state
+                .impulse_joints
+                .insert(parent_body, child_body, GenericJoint::from(joint), true);
+        if let Some(joint) = state.impulse_joints.get_mut(handle) {
+            joint.data.set_motor_max_force(JointAxis::AngX, 50.0);
+        }
+        state.entity_to_joint.insert(entity, handle);
+    }
+
+    Ok(())
+}
+
+fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
+    for (entity, joint_handle) in &state.entity_to_joint {
+        let Some(motor) = world.get::<JointMotor>(*entity) else {
+            continue;
+        };
+        let Some(joint) = state.impulse_joints.get_mut(*joint_handle) else {
+            continue;
+        };
+        joint
+            .data
+            .set_motor_velocity(JointAxis::AngX, motor.velocity_rad_s as f32, 1.0);
+    }
+}
+
 /// Runs one full physics update: sync from ECS, step, sync to ECS.
 pub fn step_physics(
     backend: &mut RapierBackend,
@@ -300,6 +361,10 @@ pub fn step_physics(
     dt: SimDuration,
 ) -> Result<(), PhysicsError> {
     backend.sync_from_ecs(world, physics_world)?;
+    {
+        let state = backend.world_mut(physics_world)?;
+        apply_joint_motors(world, state);
+    }
     backend.step(physics_world, dt)?;
     backend.sync_to_ecs(world, physics_world)
 }

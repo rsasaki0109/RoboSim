@@ -8,10 +8,12 @@ if [[ -f /opt/ros/jazzy/setup.bash ]]; then
   set +u
   # shellcheck disable=SC1091
   source /opt/ros/jazzy/setup.bash
+  export ROS_PREFIX=/opt/ros/jazzy
 elif [[ -f /opt/ros/humble/setup.bash ]]; then
   set +u
   # shellcheck disable=SC1091
   source /opt/ros/humble/setup.bash
+  export ROS_PREFIX=/opt/ros/humble
 else
   echo "ROS 2 setup.bash not found under /opt/ros" >&2
   exit 1

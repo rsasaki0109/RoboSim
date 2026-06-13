@@ -15,5 +15,8 @@ clippy:
 test:
     cargo test --workspace
 
+ci-ros2:
+    cargo run -p xtask -- ci-ros2
+
 check:
     cargo check --workspace

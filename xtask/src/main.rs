@@ -19,6 +19,7 @@ fn run() -> anyhow::Result<()> {
 
     match command.as_str() {
         "ci" => ci(),
+        "ci-ros2" => ci_ros2(),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
@@ -30,6 +31,25 @@ fn ci() -> anyhow::Result<()> {
     run_step("cargo clippy --workspace --all-targets -- -D warnings")?;
     run_step("cargo test --workspace")?;
     Ok(())
+}
+
+fn ci_ros2() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let script = root.join("adapters/ros2/rne_ros2_node/smoke_test.sh");
+    if !script.is_file() {
+        anyhow::bail!("missing ROS 2 smoke script at {}", script.display());
+    }
+    if !ros_setup_available() {
+        println!("ROS 2 setup.bash not found under /opt/ros; skipping ci-ros2");
+        return Ok(());
+    }
+    run_step(&format!("bash {}", script.display()))?;
+    Ok(())
+}
+
+fn ros_setup_available() -> bool {
+    PathBuf::from("/opt/ros/jazzy/setup.bash").is_file()
+        || PathBuf::from("/opt/ros/humble/setup.bash").is_file()
 }
 
 fn lint_boundaries() -> anyhow::Result<()> {
