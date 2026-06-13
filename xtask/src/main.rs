@@ -21,6 +21,7 @@ fn run() -> anyhow::Result<()> {
         "ci" => ci(),
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
+        "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
@@ -31,6 +32,73 @@ fn ci() -> anyhow::Result<()> {
     lint_boundaries()?;
     run_step("cargo clippy --workspace --all-targets -- -D warnings")?;
     run_step("cargo test --workspace")?;
+    validate_repo_assets()?;
+    Ok(())
+}
+
+fn validate_repo_assets() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let scenes = [root.join("assets/scenes/episode_diff_drive.rne.scene.toml")];
+    let robots = [
+        root.join("assets/robots/diff_drive.rne.robot.toml"),
+        root.join("assets/robots/diff_drive_urdf.rne.robot.toml"),
+    ];
+
+    for scene in scenes {
+        rne_assets::validate_asset(&scene).map_err(|error| {
+            anyhow::anyhow!("asset validation failed for {}: {error}", scene.display())
+        })?;
+        let robot_count = rne_assets::smoke_spawn_scene(&scene).map_err(|error| {
+            anyhow::anyhow!("asset spawn smoke failed for {}: {error}", scene.display())
+        })?;
+        println!("validated scene {} (robots={robot_count})", scene.display());
+    }
+
+    for robot in robots {
+        rne_assets::validate_asset(&robot).map_err(|error| {
+            anyhow::anyhow!("asset validation failed for {}: {error}", robot.display())
+        })?;
+        println!("validated robot {}", robot.display());
+    }
+
+    Ok(())
+}
+
+fn asset_command(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let subcommand = args.next().unwrap_or_else(|| "validate".to_string());
+    let path = args.next().map(PathBuf::from).unwrap_or_else(|| {
+        workspace_root()
+            .expect("workspace root")
+            .join("assets/scenes/episode_diff_drive.rne.scene.toml")
+    });
+
+    match subcommand.as_str() {
+        "validate" => {
+            let validated = rne_assets::validate_asset(&path)?;
+            match validated {
+                rne_assets::ValidatedAsset::Scene(bundle) => {
+                    println!(
+                        "valid scene: robots={} seed={}",
+                        bundle.robots.len(),
+                        bundle.scene.world.seed
+                    );
+                    let robot_count = rne_assets::smoke_spawn_scene(&path)?;
+                    println!("spawn ok: robots={robot_count}");
+                }
+                rne_assets::ValidatedAsset::Robot { asset, .. } => {
+                    println!(
+                        "valid robot: kind={:?} model={}",
+                        asset.kind, asset.model_name
+                    );
+                }
+            }
+        }
+        "inspect" => {
+            println!("{}", rne_assets::inspect_asset(&path)?);
+        }
+        other => anyhow::bail!("unknown asset subcommand: {other}"),
+    }
+
     Ok(())
 }
 

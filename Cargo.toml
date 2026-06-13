@@ -32,7 +32,9 @@ members = [
   "examples/12_shared_world_agent",
   "examples/13_multi_robot_agent",
   "examples/14_interactive_viewer",
+  "examples/15_asset_hot_reload",
   "tests/determinism",
+  "tools/rne_asset_cli",
   "xtask",
 ]
 exclude = [
