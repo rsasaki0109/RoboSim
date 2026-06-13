@@ -2,6 +2,28 @@
 
 All notable changes to Robot Native Engine are documented in this file.
 
+## [0.3.0] - 2026-06-12
+
+### Added
+
+- **Shared-world agents** (`12_shared_world_agent`): agent entities live in the simulation ECS world and drive diff-drive robots in-place
+- **Multi-robot simulation** (`13_multi_robot_agent`): multiple robots in one `DiffDriveSim`, batched stepping, per-robot policies
+- **Richer observations** (`DiffDriveObservation`): base yaw, wheel velocities, optional goal-relative `goal_delta_x_m`; `AgentGoal` component
+- **Interactive viewer** (`14_interactive_viewer`, `rne_render_wgpu/viewer`): winit + wgpu window, WASD teleop, orbit camera (`--smoke` for headless CI)
+- **Asset pipeline** (`15_asset_hot_reload`, `rne-asset`): hot reload via dependency mtime tracking, validate / inspect / watch CLI, `xtask asset`
+- **ROS 2 Python bridge CI**: `ros2-bridge.yml`, `xtask ci-ros2-bridge`, enhanced smoke test with `rne_py` build and topic checks
+- **CI**: repo asset validation and spawn smoke in core `xtask ci`
+
+### Changed
+
+- Python ROS 2 bridge smoke aligned with native node (300 steps, `MIN_FORWARD_X_M = 0.8`)
+- `rne_py` bindings expose extended diff-drive observation fields
+
+### Notes
+
+- Interactive viewer requires a display; use `--smoke` or `RNE_SKIP_GPU` in headless environments
+- Asset hot reload tracks scene, robot, and URDF dependency files by modification time
+
 ## [0.2.0] - 2026-06-13
 
 ### Added

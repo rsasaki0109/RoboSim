@@ -1,5 +1,17 @@
 # Roadmap
 
+## v0.3.0 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| AI | Multi-robot episodes, richer observation spaces (`13_multi_robot_agent`) |
+| Physics | Shared-world agents (agent ECS ↔ sim world) (`12_shared_world_agent`) |
+| Rendering | Interactive viewer / camera teleop (`14_interactive_viewer`) |
+| Assets | Hot reload, asset pipeline CLI (`15_asset_hot_reload`, `rne-asset`, `xtask asset`) |
+| ROS 2 | Python bridge CI, topic parity with native node (`ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
+
 ## v0.2.0 (released)
 
 Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
@@ -14,7 +26,7 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 | Rendering | Mesh rendering, depth pass (`07_render_primitives`) |
 | ROS 2 | Native `rclrs` node (`rne_ros2_node`) |
 
-### Also shipped in v0.2.0 (v0.3 scope)
+### Also shipped in v0.2.0
 
 | Area | Feature |
 |------|---------|
@@ -24,7 +36,6 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 | Robot | Rapier joint-driven wheels (`DiffDriveDriveMode::JointDriven`) |
 | Agent | Agent Entity + policy attach (`11_agent_policy`) |
 | ROS 2 | Optional CI for `rne_ros2_node` (`.github/workflows/ros2-node.yml`, `xtask ci-ros2`) |
-| ROS 2 | Optional CI for Python bridge (`.github/workflows/ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
 | CI | GitHub Actions core workspace job (`ci.yml`) |
 
 ## v0.1.0 (initial release)
@@ -35,15 +46,15 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 - Render skeleton + Python bindings
 - URDF import + ROS 2 Python bridge
 
-## v0.3 candidates
+## v0.4 candidates
 
 | Area | Idea |
 |------|------|
-| AI | Multi-robot episodes, richer observation spaces | Done (`13_multi_robot_agent`) |
-| Physics | Shared-world agents (agent ECS ↔ sim world) | Done (`12_shared_world_agent`) |
-| Rendering | Interactive viewer / camera teleop | Done (`14_interactive_viewer`) |
-| Assets | Hot reload, asset pipeline CLI | Done (`15_asset_hot_reload`, `rne-asset`, `xtask asset`) |
-| ROS 2 | Python bridge CI, topic/service parity with native node | Done (`ros2-bridge.yml`, `xtask ci-ros2-bridge`) |
+| AI | Goal-conditioned policies, curriculum / multi-task episodes |
+| Rendering | Viewer + scene assets integration, URDF mesh in interactive mode |
+| Physics | Multi-robot collision and interaction scenarios |
+| ROS 2 | Services, actions, and parameter parity with native node |
+| DevEx | Live asset reload wired into interactive viewer |
 
 ## Native ROS 2 (`rclrs`)
 
@@ -69,9 +80,9 @@ After merging release changes:
 
 ```bash
 cargo run -p xtask -- ci
-git tag -a v0.2.0 -m "Robot Native Engine v0.2.0"
+git tag -a v0.3.0 -m "Robot Native Engine v0.3.0"
 git push origin main --tags
-gh release create v0.2.0 --title "v0.2.0" --notes-file CHANGELOG.md
+gh release create v0.3.0 --title "v0.3.0" --notes-file CHANGELOG.md
 ```
 
-Adjust the `gh release create` notes to the `[0.2.0]` section only if you prefer a shorter GitHub release body.
+Adjust the `gh release create` notes to the `[0.3.0]` section only if you prefer a shorter GitHub release body.
