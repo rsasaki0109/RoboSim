@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-12
+
 ### Added
 
 - **URDF arm articulation** (`attach_urdf_articulation`): revolute joints + `JointMotor` wired to Rapier
