@@ -3,5 +3,6 @@
 pub use rne_ai::{DiffDriveAction, DiffDriveEpisode, DiffDriveObservation, DiffDriveSim};
 pub use rne_ai::{
     MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
-    MobileManipulatorObservation, MobileManipulatorSim,
+    MobileManipulatorObservation, MobileManipulatorSim, VectorizedMobileManipulatorConfig,
+    VectorizedMobileManipulatorEnv,
 };
