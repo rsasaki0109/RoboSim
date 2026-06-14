@@ -54,21 +54,28 @@ evaluates the whole candidate population in lock-step with
   `shoulder`, `elbow`, `gripper` joint positions, `wrist_camera_pixels`,
   `joint_state_count`.
 
-## Training with Stable-Baselines3
+## Training with Stable-Baselines3 (`train_ppo.py`)
 
-`stable-baselines3` is not a project dependency; install it into the venv to train:
+`stable-baselines3` is not a project dependency; install the RL extras into the venv:
 
 ```bash
 .venv/bin/pip install gymnasium numpy stable-baselines3
+.venv/bin/python examples/27_mobile_manipulator_rl/train_ppo.py          # full PPO run
+.venv/bin/python examples/27_mobile_manipulator_rl/train_ppo.py --smoke  # integration check
 ```
+
+`train_ppo.py` plugs the `reach` gym env into SB3 PPO. It is the *integration* example —
+the `--smoke` mode only verifies the training pipeline runs end-to-end (deep RL needs a
+long run and some tuning to beat a random policy on this task). For a deterministic,
+dependency-free demonstration that learning actually works, use `train.py` (CEM) above.
 
 ```python
 from stable_baselines3 import PPO
 from run import MobileManipulatorPlaceEnv
 
-env = MobileManipulatorPlaceEnv("place")
-model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=100_000)
+env = MobileManipulatorPlaceEnv("reach")
+model = PPO("MlpPolicy", env, verbose=1, device="cpu")
+model.learn(total_timesteps=200_000)
 ```
 
 Note: the `mm_minimal` arm is a horizontal SCARA, so `Place` is a horizontal carry and
