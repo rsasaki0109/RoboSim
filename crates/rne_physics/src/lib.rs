@@ -11,8 +11,8 @@ pub use backend::{
     PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
 };
 pub use components::{
-    Collider, ColliderShape, JointMotor, PhysicsMaterial, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    Collider, ColliderShape, FixedJointDesc, JointMotor, PhysicsMaterial, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
 pub use hash::hash_physics_state;

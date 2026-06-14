@@ -4,7 +4,10 @@ mod sim;
 
 use pyo3::prelude::*;
 use rne_ai::{DiffDriveEpisodeConfig, Episode};
-use sim::{DiffDriveObservation, DiffDriveSim};
+use sim::{
+    DiffDriveObservation, DiffDriveSim, MobileManipulatorAction, MobileManipulatorEpisode,
+    MobileManipulatorEpisodeConfig, MobileManipulatorObservation, MobileManipulatorSim,
+};
 
 /// Observation returned after each simulation step.
 #[pyclass(name = "Observation")]
@@ -244,6 +247,288 @@ impl PyDiffDriveEpisode {
     }
 }
 
+/// Observation returned by the mobile manipulator environment.
+#[pyclass(name = "MobileManipulatorObservation")]
+#[derive(Clone, Copy)]
+struct PyMmObservation {
+    inner: MobileManipulatorObservation,
+}
+
+#[pymethods]
+impl PyMmObservation {
+    #[getter]
+    fn base_x(&self) -> f64 {
+        self.inner.base_x_m
+    }
+
+    #[getter]
+    fn base_y(&self) -> f64 {
+        self.inner.base_y_m
+    }
+
+    #[getter]
+    fn base_z(&self) -> f64 {
+        self.inner.base_z_m
+    }
+
+    #[getter]
+    fn base_yaw(&self) -> f64 {
+        self.inner.base_yaw_rad
+    }
+
+    #[getter]
+    fn ee_x(&self) -> f64 {
+        self.inner.ee_x_m
+    }
+
+    #[getter]
+    fn ee_y(&self) -> f64 {
+        self.inner.ee_y_m
+    }
+
+    #[getter]
+    fn ee_z(&self) -> f64 {
+        self.inner.ee_z_m
+    }
+
+    #[getter]
+    fn shoulder_position(&self) -> f64 {
+        self.inner.shoulder_position_rad
+    }
+
+    #[getter]
+    fn elbow_position(&self) -> f64 {
+        self.inner.elbow_position_rad
+    }
+
+    #[getter]
+    fn gripper_position(&self) -> f64 {
+        self.inner.gripper_position_rad
+    }
+
+    #[getter]
+    fn wrist_camera_pixels(&self) -> usize {
+        self.inner.wrist_camera_pixels
+    }
+
+    #[getter]
+    fn joint_state_count(&self) -> usize {
+        self.inner.joint_state_count
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MobileManipulatorObservation(ee=({:.3}, {:.3}, {:.3}), shoulder={:.3}, elbow={:.3}, gripper={:.3})",
+            self.inner.ee_x_m,
+            self.inner.ee_y_m,
+            self.inner.ee_z_m,
+            self.inner.shoulder_position_rad,
+            self.inner.elbow_position_rad,
+            self.inner.gripper_position_rad,
+        )
+    }
+}
+
+impl From<MobileManipulatorObservation> for PyMmObservation {
+    fn from(inner: MobileManipulatorObservation) -> Self {
+        Self { inner }
+    }
+}
+
+/// Result of a mobile manipulator episode reset or step.
+#[pyclass(name = "MobileManipulatorStepResult")]
+#[derive(Clone, Copy)]
+struct PyMmStepResult {
+    observation: PyMmObservation,
+    reward: f64,
+    terminated: bool,
+    truncated: bool,
+}
+
+#[pymethods]
+impl PyMmStepResult {
+    #[getter]
+    fn observation(&self) -> PyMmObservation {
+        self.observation
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.reward
+    }
+
+    #[getter]
+    fn terminated(&self) -> bool {
+        self.terminated
+    }
+
+    #[getter]
+    fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    #[getter]
+    fn done(&self) -> bool {
+        self.terminated || self.truncated
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MobileManipulatorStepResult(reward={:.3}, terminated={}, truncated={})",
+            self.reward, self.terminated, self.truncated
+        )
+    }
+}
+
+impl From<rne_ai::EpisodeStep<MobileManipulatorObservation>> for PyMmStepResult {
+    fn from(value: rne_ai::EpisodeStep<MobileManipulatorObservation>) -> Self {
+        Self {
+            observation: value.observation.into(),
+            reward: value.reward,
+            terminated: value.terminated,
+            truncated: value.truncated,
+        }
+    }
+}
+
+/// Headless mobile manipulator simulation exposed to Python.
+#[pyclass(name = "MobileManipulatorSim")]
+struct PyMobileManipulatorSim {
+    inner: MobileManipulatorSim,
+}
+
+#[pymethods]
+impl PyMobileManipulatorSim {
+    /// Creates a sim for the `"mm_minimal"` (default) or `"mm_mobile"` robot.
+    #[new]
+    #[pyo3(signature = (mode="mm_minimal"))]
+    fn new(mode: &str) -> PyResult<Self> {
+        let inner = match mode {
+            "mm_minimal" => MobileManipulatorSim::new_mm_minimal(),
+            "mm_mobile" => MobileManipulatorSim::new_mm_mobile(),
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown mode '{other}', expected 'mm_minimal' or 'mm_mobile'"
+                )))
+            }
+        };
+        Ok(Self { inner })
+    }
+
+    fn reset(&mut self) -> PyMmObservation {
+        self.inner.reset().into()
+    }
+
+    #[pyo3(signature = (
+        left_wheel_velocity_rad_s=0.0,
+        right_wheel_velocity_rad_s=0.0,
+        shoulder_velocity_rad_s=0.0,
+        elbow_velocity_rad_s=0.0,
+        gripper_velocity_rad_s=0.0,
+    ))]
+    fn step(
+        &mut self,
+        left_wheel_velocity_rad_s: f64,
+        right_wheel_velocity_rad_s: f64,
+        shoulder_velocity_rad_s: f64,
+        elbow_velocity_rad_s: f64,
+        gripper_velocity_rad_s: f64,
+    ) -> PyMmObservation {
+        self.inner
+            .step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s,
+                right_wheel_velocity_rad_s,
+                shoulder_velocity_rad_s,
+                elbow_velocity_rad_s,
+                gripper_velocity_rad_s,
+            })
+            .into()
+    }
+
+    #[getter]
+    fn step_count(&self) -> u64 {
+        self.inner.step_count()
+    }
+
+    #[getter]
+    fn is_grasping(&self) -> bool {
+        self.inner.is_grasping()
+    }
+}
+
+/// Mobile manipulator manipulation episode with reward and termination.
+#[pyclass(name = "MobileManipulatorEpisode")]
+struct PyMobileManipulatorEpisode {
+    inner: MobileManipulatorEpisode,
+}
+
+#[pymethods]
+impl PyMobileManipulatorEpisode {
+    /// Creates an episode for the `"place"` (default), `"transport"`, or `"inspect"` task.
+    #[new]
+    #[pyo3(signature = (task="place"))]
+    fn new(task: &str) -> PyResult<Self> {
+        let config = match task {
+            "place" => MobileManipulatorEpisodeConfig::place(),
+            "transport" => MobileManipulatorEpisodeConfig::transport(),
+            "inspect" => MobileManipulatorEpisodeConfig::inspect(),
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown task '{other}', expected 'place', 'transport', or 'inspect'"
+                )))
+            }
+        };
+        Ok(Self {
+            inner: MobileManipulatorEpisode::new(config),
+        })
+    }
+
+    fn reset(&mut self) -> PyMmStepResult {
+        self.inner.reset().into()
+    }
+
+    #[pyo3(signature = (
+        left_wheel_velocity_rad_s=0.0,
+        right_wheel_velocity_rad_s=0.0,
+        shoulder_velocity_rad_s=0.0,
+        elbow_velocity_rad_s=0.0,
+        gripper_velocity_rad_s=0.0,
+    ))]
+    fn step(
+        &mut self,
+        left_wheel_velocity_rad_s: f64,
+        right_wheel_velocity_rad_s: f64,
+        shoulder_velocity_rad_s: f64,
+        elbow_velocity_rad_s: f64,
+        gripper_velocity_rad_s: f64,
+    ) -> PyMmStepResult {
+        self.inner
+            .step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s,
+                right_wheel_velocity_rad_s,
+                shoulder_velocity_rad_s,
+                elbow_velocity_rad_s,
+                gripper_velocity_rad_s,
+            })
+            .into()
+    }
+
+    #[getter]
+    fn step_in_episode(&self) -> u64 {
+        self.inner.step_in_episode()
+    }
+
+    #[getter]
+    fn total_reward(&self) -> f64 {
+        self.inner.total_reward()
+    }
+
+    #[getter]
+    fn is_grasping(&self) -> bool {
+        self.inner.simulation().is_grasping()
+    }
+}
+
 /// Robot Native Engine Python module.
 #[pymodule]
 fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -251,6 +536,10 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDiffDriveEpisode>()?;
     m.add_class::<PyObservation>()?;
     m.add_class::<PyStepResult>()?;
+    m.add_class::<PyMobileManipulatorSim>()?;
+    m.add_class::<PyMobileManipulatorEpisode>()?;
+    m.add_class::<PyMmObservation>()?;
+    m.add_class::<PyMmStepResult>()?;
     Ok(())
 }
 
@@ -279,5 +568,47 @@ mod tests {
             step = env.step(sim::DiffDriveAction::forward(6.0));
         }
         assert!(step.terminated);
+    }
+
+    #[test]
+    fn mobile_manipulator_place_episode_succeeds() {
+        let mut env = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
+        let _ = env.reset();
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        let carry = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            shoulder_velocity_rad_s: 0.6,
+            ..MobileManipulatorAction::default()
+        };
+        let hold = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            ..MobileManipulatorAction::default()
+        };
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+
+        for _ in 0..30 {
+            env.step(close);
+            if env.simulation().is_grasping() {
+                break;
+            }
+        }
+        for _ in 0..200 {
+            env.step(carry);
+        }
+        for _ in 0..30 {
+            env.step(hold);
+        }
+        for _ in 0..150 {
+            if env.step(open).terminated {
+                return;
+            }
+        }
+        panic!("expected mobile manipulator place episode to terminate");
     }
 }

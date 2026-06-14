@@ -56,6 +56,15 @@ pub enum MobileManipulatorTask {
         /// Fixed drop zone obstacle name.
         drop_zone_name: String,
     },
+    /// Pick up an object, carry it, and release it at a target location.
+    Place {
+        /// Dynamic object name.
+        object_name: String,
+        /// World-frame target location for the placed object.
+        target: ReachTarget,
+        /// Horizontal success tolerance in meters.
+        place_tolerance_m: f64,
+    },
     /// Produce wrist camera frames while moving the arm.
     Inspect {
         /// Minimum RGBA8 byte count for success.

@@ -8,8 +8,11 @@ use rne_assets::{load_and_spawn_scene, load_scene_bundle, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, Frame, ImageRgb8, InMemoryDataBus, JointState, StreamId};
 use rne_ecs::{Entity, World};
-use rne_math::{yaw_rad, Hertz, Quat};
-use rne_physics::{ContactEvent, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
+use rne_math::{yaw_rad, Hertz, Quat, Vec3};
+use rne_physics::{
+    ContactEvent, FixedJointDesc, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody,
+    RigidBodyType,
+};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
 use rne_sensor::{sample_sensors, Sensor, SensorSampleContext};
@@ -57,6 +60,8 @@ pub struct MobileManipulatorSim {
     robot: Entity,
     base_link: Entity,
     ee_link: Entity,
+    finger_links: Vec<Entity>,
+    grasped_object: Option<Entity>,
     actuated: Vec<ActuatedJoint>,
     joint_names: Vec<String>,
     named_entities: HashMap<String, Entity>,
@@ -174,6 +179,7 @@ impl MobileManipulatorSim {
             self.dt,
         )
         .expect("physics step");
+        self.update_grasp(action);
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
             sample_sensors(
@@ -321,6 +327,10 @@ impl MobileManipulatorSim {
             .get("forearm_link")
             .copied()
             .expect("forearm_link missing from URDF robot");
+        let finger_links = ["left_finger_link", "right_finger_link"]
+            .iter()
+            .filter_map(|name| links.get(*name).copied())
+            .collect();
 
         let mut sim = Self {
             scene_path: None,
@@ -330,6 +340,8 @@ impl MobileManipulatorSim {
             robot,
             base_link,
             ee_link,
+            finger_links,
+            grasped_object: None,
             actuated,
             joint_names,
             named_entities,
@@ -371,6 +383,95 @@ impl MobileManipulatorSim {
             (contact.entity_a == entity_a && contact.entity_b == entity_b)
                 || (contact.entity_a == entity_b && contact.entity_b == entity_a)
         })
+    }
+
+    /// Returns true when an object is currently welded into the gripper.
+    pub fn is_grasping(&self) -> bool {
+        self.grasped_object.is_some()
+    }
+
+    /// Returns the entity of the currently grasped object, if any.
+    pub fn grasped_object(&self) -> Option<Entity> {
+        self.grasped_object
+    }
+
+    /// Attaches or releases a grasp based on the gripper command and finger contacts.
+    ///
+    /// Closing the gripper (`gripper_velocity_rad_s` below a small negative threshold)
+    /// onto a graspable body welds it to the end-effector link at its current relative
+    /// pose; opening the gripper releases the weld. This contact-triggered weld is a
+    /// robust stand-in for friction-based grasping.
+    fn update_grasp(&mut self, action: MobileManipulatorAction) {
+        const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
+        const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
+        let command = action.gripper_velocity_rad_s;
+
+        if self.grasped_object.is_none() && command < CLOSE_THRESHOLD_RAD_S {
+            if let Some(object) = self.find_graspable_in_contact() {
+                self.attach_grasp(object);
+            }
+        } else if self.grasped_object.is_some() && command > OPEN_THRESHOLD_RAD_S {
+            self.release_grasp();
+        }
+    }
+
+    /// Finds a graspable body currently contacting a gripper finger.
+    fn find_graspable_in_contact(&self) -> Option<Entity> {
+        for contact in self.last_contacts() {
+            for finger in &self.finger_links {
+                let other = if contact.entity_a == *finger {
+                    Some(contact.entity_b)
+                } else if contact.entity_b == *finger {
+                    Some(contact.entity_a)
+                } else {
+                    None
+                };
+                if let Some(other) = other {
+                    if self.is_graspable(other) {
+                        return Some(other);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// A body is graspable when it is dynamic and not part of the robot articulation.
+    fn is_graspable(&self, entity: Entity) -> bool {
+        let dynamic = self
+            .world
+            .get::<RigidBody>(entity)
+            .map(|body| body.body_type == RigidBodyType::Dynamic)
+            .unwrap_or(false);
+        let is_robot_link = self
+            .world
+            .get::<Link>(entity)
+            .map(|link| link.robot == self.robot)
+            .unwrap_or(false);
+        dynamic && !is_robot_link
+    }
+
+    /// Welds `object` to the end-effector link, preserving its current relative pose.
+    fn attach_grasp(&mut self, object: Entity) {
+        let ee = world_transform_of(&self.world, self.ee_link);
+        let obj = world_transform_of(&self.world, object);
+        let ee_rotation_inverse = ee.rotation.inverse();
+        let relative_translation = ee_rotation_inverse * (obj.translation - ee.translation);
+        let relative_rotation = ee_rotation_inverse * obj.rotation;
+        self.world.entity_mut(object).insert(FixedJointDesc {
+            parent: self.ee_link,
+            anchor_parent_m: relative_translation,
+            anchor_child_m: Vec3::ZERO,
+            relative_rotation,
+        });
+        self.grasped_object = Some(object);
+    }
+
+    /// Releases the current grasp by removing the weld joint.
+    fn release_grasp(&mut self) {
+        if let Some(object) = self.grasped_object.take() {
+            self.world.entity_mut(object).remove::<FixedJointDesc>();
+        }
     }
 
     fn joint_position_rad(&self, joint_name: &str) -> f64 {
@@ -761,6 +862,56 @@ mod tests {
         assert!(
             contacted,
             "expected finger contact with grasp_cube while closing gripper"
+        );
+    }
+
+    #[test]
+    fn grasp_attaches_and_releases_object() {
+        let scene_path = mm_minimal_transport_scene_path();
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load");
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        let carry = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            shoulder_velocity_rad_s: 0.6,
+            ..MobileManipulatorAction::default()
+        };
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+
+        for _ in 0..30 {
+            sim.step(close);
+            if sim.is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            sim.is_grasping(),
+            "gripper should grasp the cube on contact"
+        );
+
+        // The grasped cube is carried by the arm instead of falling to the ground.
+        for _ in 0..120 {
+            sim.step(carry);
+        }
+        let carried = sim.named_translation_m("grasp_cube").unwrap();
+        assert!(
+            carried.1 > 0.3,
+            "grasped cube should be held off the ground, y={}",
+            carried.1
+        );
+
+        // Opening the gripper releases the weld.
+        for _ in 0..30 {
+            sim.step(open);
+        }
+        assert!(
+            !sim.is_grasping(),
+            "opening the gripper should release the grasp"
         );
     }
 }

@@ -4,6 +4,45 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Prismatic joints**: `rne_physics::PrismaticJointDesc` + Rapier linear motor; URDF
+  `type="prismatic"` joints now wire into the articulation (`UrdfArticulationAttached.prismatic_joints`)
+- **Fixed (weld) joints**: `rne_physics::FixedJointDesc` welds a child to a parent at a
+  relative pose; the Rapier backend creates and *removes* the joint as the component is
+  inserted/dropped (release)
+- **Contact-triggered grasping**: `MobileManipulatorSim` welds a graspable body to the
+  end-effector when the gripper closes on it and releases it on open
+  (`is_grasping`, `grasped_object`)
+- **`MobileManipulatorTask::Place`** and **`MobileManipulatorEpisodeConfig::place()`**:
+  pick up a cube, carry it, and set it down at a target location
+- **Example 26 pick-and-place smoke**: full grasp → carry → release → settle cycle
+- **`rne_py` mobile manipulator bindings**: `MobileManipulatorSim` / `MobileManipulatorEpisode`
+  (place / transport / inspect) exposed to Python with `is_grasping`
+- **Example 27 RL env**: gymnasium-style `MobileManipulatorPlaceEnv` wrapper + scripted
+  smoke (degrades gracefully without `gymnasium` / `numpy`)
+- **ROS 2 `/gripper_command`** (`std_msgs/Float64`): drives the gripper in
+  `mobile_manipulator` mode (negative closes/grasps, positive opens/releases)
+- **ROS 2 `ee_link` TF frame**: end-effector pose published on `/tf` relative to `base_link`
+
+### Fixed
+
+- **ROS 2 node build**: `sensor_msgs/Image.is_bigendian` type mismatch (`bool` → `u8`)
+  that broke `rne_ros2_node` compilation
+- **`mm_mobile` drive wheels**: wheel joints were stacked vertically (`xyz="0 ±0.225 0"`)
+  so only one wheel touched the ground and the base spun in place; relocated to a proper
+  left/right diff-drive layout (`xyz="0 -0.15 ±0.225"`) so the base drives forward
+- **URDF fixed joints**: were not wired to a physics joint, so a fixed-joint child link
+  silently became a free-falling body; now wired as a rigid `FixedJointDesc` weld
+  (recalibrated the affected `mm_minimal` reach/place demo targets)
+
+### Changed
+
+- **Deterministic physics backend iteration**: the Rapier backend now syncs bodies and
+  joints (and writes transforms back) in a stable entity order, fixing run-to-run
+  nondeterminism (previously flaky `shoulder_motor_moves_forearm`)
+- **`xtask ci`**: example 26 pick-and-place smoke
+
 ## [0.7.0] - 2026-06-12
 
 ### Added
