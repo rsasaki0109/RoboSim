@@ -7,6 +7,8 @@ pub mod camera;
 mod primitive;
 
 #[cfg(feature = "viewer")]
+mod overlay;
+#[cfg(feature = "viewer")]
 pub mod viewer;
 
 pub use backend::WgpuRenderBackend;

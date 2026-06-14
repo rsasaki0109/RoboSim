@@ -6,3 +6,10 @@ path = "mm_mobile/mm_mobile.urdf"
 base_body_type = "dynamic"
 initial_translation_m = [0.0, 0.25, 0.0]
 articulation = true
+
+[wrist_camera]
+mount_link = "forearm_link"
+mount_offset_m = [0.05, 0.0, 0.0]
+width = 64
+height = 48
+update_rate_hz = 10.0

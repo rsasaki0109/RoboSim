@@ -703,6 +703,7 @@ mod tests {
         let sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load mm_mobile scene");
         assert!(sim.mobile_base());
         assert_eq!(sim.joint_names().len(), 4);
+        assert!(sim.wrist_camera_enabled());
         assert_eq!(sim.scene_path(), Some(scene_path.as_path()));
     }
 

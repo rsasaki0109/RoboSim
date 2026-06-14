@@ -149,3 +149,22 @@ pub struct RosJointState {
     /// Joint efforts in newton-meters (optional).
     pub efforts: Vec<f64>,
 }
+
+/// `sensor_msgs/Image` compatible camera frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RosImage {
+    /// Message header.
+    pub header: RosHeader,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Image width in pixels.
+    pub width: u32,
+    /// Pixel encoding string.
+    pub encoding: String,
+    /// Whether data is big-endian.
+    pub is_bigendian: bool,
+    /// Full row length in bytes.
+    pub step: u32,
+    /// Raw image bytes.
+    pub data: Vec<u8>,
+}

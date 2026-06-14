@@ -14,6 +14,7 @@
 //! - Left / Right: orbit camera
 //! - Up / Down: zoom camera
 //! - L: toggle LiDAR hit overlay (diff-drive scenes only)
+//! - P: toggle wrist camera PiP (manipulator profiles only)
 //! - Escape: quit
 //!
 //! Usage:
@@ -108,6 +109,19 @@ impl ViewerSim {
                 )
             }
         }
+    }
+
+    fn wrist_camera_pip(&self) -> Option<(Vec<u8>, u32, u32)> {
+        match self {
+            Self::Manipulator(sim) => sim
+                .latest_wrist_camera()
+                .map(|image| (image.rgba8, image.width, image.height)),
+            Self::DiffDrive(_) => None,
+        }
+    }
+
+    fn wrist_camera_enabled(&self) -> bool {
+        matches!(self, Self::Manipulator(sim) if sim.wrist_camera_enabled())
     }
 
     fn build_scene(&self, show_lidar: bool) -> rne_render::RenderScene {
@@ -306,6 +320,13 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
             if obs.joint_state_count < 4 {
                 std::process::exit(1);
             }
+            if !sim.wrist_camera_enabled() || obs.wrist_camera_pixels < 64 * 48 * 4 {
+                eprintln!(
+                    "interactive viewer smoke expected wrist camera pixels, got {}",
+                    obs.wrist_camera_pixels
+                );
+                std::process::exit(1);
+            }
         }
         ViewerProfile::ManipulatorMobile(_) => {
             let obs = match &sim {
@@ -350,6 +371,7 @@ struct App {
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
     show_lidar: bool,
+    show_wrist_camera: bool,
     last_hud: String,
 }
 
@@ -366,6 +388,7 @@ impl App {
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
             show_lidar: true,
+            show_wrist_camera: true,
             last_hud: String::new(),
         }
     }
@@ -490,6 +513,22 @@ impl App {
                         }
                     );
                 }
+                if physical == KeyCode::KeyP
+                    && matches!(
+                        self.profile,
+                        ViewerProfile::ManipulatorFixed(_) | ViewerProfile::ManipulatorMobile(_)
+                    )
+                {
+                    self.show_wrist_camera = !self.show_wrist_camera;
+                    println!(
+                        "wrist camera pip {}",
+                        if self.show_wrist_camera {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
                 self.pressed.insert(physical);
             }
             ElementState::Released => {
@@ -527,8 +566,13 @@ impl App {
 
         let view = self.orbit.camera_transform();
         let viewer = self.viewer.as_mut().ok_or("viewer not ready")?;
+        let pip = if self.show_wrist_camera {
+            sim.wrist_camera_pip()
+        } else {
+            None
+        };
         viewer
-            .render(&view, &scene, CLEAR_COLOR)
+            .render_with_pip(&view, &scene, CLEAR_COLOR, pip)
             .map_err(|error| error.to_string())
     }
 

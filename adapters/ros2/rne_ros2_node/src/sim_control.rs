@@ -6,7 +6,7 @@ use rne_ai::{
     DiffDriveObservation, DiffDriveSim, MobileManipulatorAction, MobileManipulatorObservation,
     MobileManipulatorSim,
 };
-use rne_data::{JointState, PointCloud};
+use rne_data::{ImageRgb8, JointState, PointCloud};
 use rne_sensor::LidarSpec;
 use rne_world::Transform3;
 use simulation_interfaces::{
@@ -61,6 +61,8 @@ pub struct BridgeFrame {
     pub lidar_spec: Option<LidarSpec>,
     /// Latest joint state for `/joint_states`.
     pub joint_state: JointState,
+    /// Latest wrist camera frame when configured.
+    pub wrist_camera: Option<ImageRgb8>,
 }
 
 /// Lightweight observation for smoke checks.
@@ -74,6 +76,8 @@ pub struct BridgeSnapshot {
     pub joint_count: usize,
     /// Whether `shoulder_joint` is present in joint names.
     pub has_shoulder_joint: bool,
+    /// RGBA8 byte count in the latest wrist camera frame.
+    pub wrist_camera_pixels: usize,
 }
 
 enum SimBackend {
@@ -156,6 +160,11 @@ impl BridgeSim {
                 .names
                 .iter()
                 .any(|name| name == "shoulder_joint"),
+            wrist_camera_pixels: frame
+                .wrist_camera
+                .as_ref()
+                .map(|image| image.rgba8.len())
+                .unwrap_or(0),
         }
     }
 
@@ -183,6 +192,7 @@ impl BridgeSim {
                 lidar_world: sim.primary_lidar_world_transform(),
                 lidar_spec: sim.primary_lidar_spec(),
                 joint_state: sim.joint_state(),
+                wrist_camera: None,
             },
             SimBackend::MobileManipulator { sim, obs, .. } => BridgeFrame {
                 sim_ticks: self.sim_ticks,
@@ -195,6 +205,7 @@ impl BridgeSim {
                 lidar_world: None,
                 lidar_spec: None,
                 joint_state: sim.latest_joint_state(),
+                wrist_camera: sim.latest_wrist_camera(),
             },
         }
     }
