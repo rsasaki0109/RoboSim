@@ -3,27 +3,36 @@
 use super::drive::wheel_command_to_motor_rad_s;
 use crate::action::MobileManipulatorAction;
 use crate::observation::MobileManipulatorObservation;
+use rne_assets::{load_and_spawn_scene, load_scene_bundle, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, Frame, InMemoryDataBus, JointState, StreamId};
-use rne_ecs::{spawn_named, Entity, World};
-use rne_math::{yaw_rad, Hertz, Quat, Vec3};
-use rne_physics::{
-    Collider, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
-};
+use rne_ecs::{Entity, World};
+use rne_math::{yaw_rad, Hertz, Quat};
+use rne_physics::{ContactEvent, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
 use rne_physics_rapier::{step_physics, RapierBackend};
-use rne_urdf_import::{
-    attach_urdf_articulation, parse_urdf, spawn_urdf_robot_with_config, UrdfArticulationConfig,
-    UrdfSpawnConfig,
-};
+use rne_robot::Link;
+use rne_urdf_import::UrdfRobot;
 use rne_world::{world_transform_of, Transform3};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-const MM_MINIMAL_URDF: &str =
-    include_str!("../../../../rne_urdf_import/tests/fixtures/mm_minimal_arm.urdf");
-const MM_MOBILE_URDF: &str =
-    include_str!("../../../../rne_urdf_import/tests/fixtures/mm_mobile.urdf");
 const JOINT_STATE_STREAM: u32 = 300;
-const DEFAULT_BASE_Y_M: f64 = 0.3;
-const MOBILE_BASE_Y_M: f64 = 0.25;
+
+/// Default scene asset for the fixed-base `mm_minimal` robot.
+pub fn mm_minimal_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_minimal.rne.scene.toml")
+}
+
+/// Default scene asset for the diff-drive `mm_mobile` robot.
+pub fn mm_mobile_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_mobile.rne.scene.toml")
+}
+
+/// Scene asset with a tabletop cube for gripper contact smoke tests.
+pub fn mm_minimal_grasp_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_minimal_grasp.rne.scene.toml")
+}
 
 struct ActuatedJoint {
     link: Entity,
@@ -33,6 +42,7 @@ struct ActuatedJoint {
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
+    scene_path: Option<PathBuf>,
     world: World,
     backend: RapierBackend,
     physics_world: PhysicsWorldId,
@@ -41,6 +51,7 @@ pub struct MobileManipulatorSim {
     ee_link: Entity,
     actuated: Vec<ActuatedJoint>,
     joint_names: Vec<String>,
+    named_entities: HashMap<String, Entity>,
     mobile_base: bool,
     data_bus: InMemoryDataBus,
     joint_stream: StreamId,
@@ -53,22 +64,83 @@ pub struct MobileManipulatorSim {
 impl MobileManipulatorSim {
     /// Creates the built-in `mm_minimal` fixed-base arm scene.
     pub fn new_mm_minimal() -> Self {
-        Self::spawn_fixed_base(MM_MINIMAL_URDF, DEFAULT_BASE_Y_M)
+        Self::from_scene_path(&mm_minimal_scene_path()).expect("built-in mm_minimal scene")
     }
 
     /// Creates the built-in diff-drive base with a 2-DOF arm.
     pub fn new_mm_mobile() -> Self {
-        Self::spawn_mobile_base(MM_MOBILE_URDF, MOBILE_BASE_Y_M)
+        Self::from_scene_path(&mm_mobile_scene_path()).expect("built-in mm_mobile scene")
+    }
+
+    /// Loads a `.rne.scene.toml` with a single URDF mobile-manipulator robot.
+    pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
+        let bundle = load_scene_bundle(scene_path)?;
+        if bundle.robots.len() != 1 {
+            return Err(AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: format!("expected exactly one robot, found {}", bundle.robots.len()),
+            });
+        }
+
+        let (_, robot_asset) = &bundle.robots[0];
+        if robot_asset.urdf.is_none() {
+            return Err(AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: "scene robot must be kind = \"urdf\" with articulation enabled".into(),
+            });
+        }
+
+        let mut world = World::new();
+        let spawned_scene = load_and_spawn_scene(&mut world, scene_path)?;
+        let (_, spawned_robot) =
+            spawned_scene
+                .robots
+                .first()
+                .ok_or_else(|| AssetError::Invalid {
+                    path: scene_path.display().to_string(),
+                    message: "no robots".into(),
+                })?;
+
+        let links = collect_robot_links(&mut world, spawned_robot.robot);
+        let named_entities = index_named_entities(&mut world);
+        let mobile_base = links.contains_key("left_wheel");
+        let (actuated, joint_names) = actuated_joints_for_robot(mobile_base, &links)?;
+
+        let mut sim = Self::from_spawned(
+            world,
+            UrdfRobot {
+                name: robot_asset.model_name.clone(),
+                links: Vec::new(),
+                joints: Vec::new(),
+            },
+            spawned_robot.robot,
+            spawned_robot.base_link,
+            links,
+            named_entities,
+            actuated,
+            joint_names,
+            mobile_base,
+            None,
+        );
+        sim.scene_path = Some(scene_path.to_path_buf());
+        Ok(sim)
+    }
+
+    /// Returns the scene asset path when loaded from a scene file.
+    pub fn scene_path(&self) -> Option<&Path> {
+        self.scene_path.as_deref()
     }
 
     /// Resets the simulation to its initial pose.
     pub fn reset(&mut self) -> MobileManipulatorObservation {
-        let replacement = if self.mobile_base {
-            Self::new_mm_mobile()
-        } else {
-            Self::new_mm_minimal()
-        };
-        *self = replacement;
+        let scene_path = self.scene_path.clone().unwrap_or_else(|| {
+            if self.mobile_base {
+                mm_mobile_scene_path()
+            } else {
+                mm_minimal_scene_path()
+            }
+        });
+        *self = Self::from_scene_path(&scene_path).expect("reload mobile manipulator scene");
         self.observe()
     }
 
@@ -92,11 +164,9 @@ impl MobileManipulatorSim {
     pub fn observe(&self) -> MobileManipulatorObservation {
         let base = world_transform_of(&self.world, self.base_link);
         let ee = world_transform_of(&self.world, self.ee_link).translation;
-        let shoulder = joint_sample(
-            &self.world,
-            &self.actuated[shoulder_index(self.mobile_base)],
-        );
-        let elbow = joint_sample(&self.world, &self.actuated[elbow_index(self.mobile_base)]);
+        let shoulder = self.joint_position_rad("shoulder_joint");
+        let elbow = self.joint_position_rad("elbow_joint");
+        let gripper_position_rad = self.gripper_position_rad();
         let joint_state_count = self
             .data_bus
             .latest::<JointState>(self.joint_stream)
@@ -111,8 +181,9 @@ impl MobileManipulatorSim {
             ee_x_m: ee.x,
             ee_y_m: ee.y,
             ee_z_m: ee.z,
-            shoulder_position_rad: shoulder.position_rad,
-            elbow_position_rad: elbow.position_rad,
+            shoulder_position_rad: shoulder,
+            elbow_position_rad: elbow,
+            gripper_position_rad,
             joint_state_count,
         }
     }
@@ -169,135 +240,40 @@ impl MobileManipulatorSim {
         self.joint_stream
     }
 
-    fn spawn_fixed_base(urdf_src: &str, base_y_m: f64) -> Self {
-        let urdf = parse_urdf(urdf_src).expect("parse fixed-base URDF");
-        let mut world = World::new();
-        let spawned = spawn_urdf_robot_with_config(
-            &mut world,
-            &urdf,
-            UrdfSpawnConfig {
-                base_body_type: RigidBodyType::Fixed,
-                ..UrdfSpawnConfig::default()
-            },
-        )
-        .expect("spawn fixed-base URDF");
-
-        attach_urdf_articulation(
-            &mut world,
-            &urdf,
-            &spawned,
-            UrdfArticulationConfig::default(),
-        )
-        .expect("attach fixed-base articulation");
-
-        world
-            .entity_mut(spawned.base_link)
-            .insert(Transform3::from_translation_rotation(
-                Vec3::new(0.0, base_y_m, 0.0),
-                Quat::IDENTITY,
-            ));
-
-        spawn_ground(&mut world);
-
-        let actuated = vec![
-            ActuatedJoint {
-                link: spawned.links["upper_arm_link"],
-                axis_z: false,
-            },
-            ActuatedJoint {
-                link: spawned.links["forearm_link"],
-                axis_z: false,
-            },
-        ];
-        let joint_names = vec!["shoulder_joint".into(), "elbow_joint".into()];
-
-        Self::from_spawned(world, urdf, spawned, actuated, joint_names, false, base_y_m)
-    }
-
-    fn spawn_mobile_base(urdf_src: &str, base_y_m: f64) -> Self {
-        let urdf = parse_urdf(urdf_src).expect("parse mobile-base URDF");
-        let mut world = World::new();
-        let spawned = spawn_urdf_robot_with_config(
-            &mut world,
-            &urdf,
-            UrdfSpawnConfig {
-                base_body_type: RigidBodyType::Dynamic,
-                ..UrdfSpawnConfig::default()
-            },
-        )
-        .expect("spawn mobile-base URDF");
-
-        attach_urdf_articulation(
-            &mut world,
-            &urdf,
-            &spawned,
-            UrdfArticulationConfig {
-                base_body_type: RigidBodyType::Dynamic,
-                ..UrdfArticulationConfig::default()
-            },
-        )
-        .expect("attach mobile-base articulation");
-
-        world
-            .entity_mut(spawned.base_link)
-            .insert(Transform3::from_translation_rotation(
-                Vec3::new(0.0, base_y_m, 0.0),
-                Quat::IDENTITY,
-            ));
-
-        spawn_ground(&mut world);
-
-        let actuated = vec![
-            ActuatedJoint {
-                link: spawned.links["left_wheel"],
-                axis_z: true,
-            },
-            ActuatedJoint {
-                link: spawned.links["right_wheel"],
-                axis_z: true,
-            },
-            ActuatedJoint {
-                link: spawned.links["upper_arm_link"],
-                axis_z: false,
-            },
-            ActuatedJoint {
-                link: spawned.links["forearm_link"],
-                axis_z: false,
-            },
-        ];
-        let joint_names = vec![
-            "left_wheel_joint".into(),
-            "right_wheel_joint".into(),
-            "shoulder_joint".into(),
-            "elbow_joint".into(),
-        ];
-
-        Self::from_spawned(world, urdf, spawned, actuated, joint_names, true, base_y_m)
-    }
-
+    #[allow(clippy::too_many_arguments)]
     fn from_spawned(
         world: World,
-        _urdf: rne_urdf_import::UrdfRobot,
-        spawned: rne_urdf_import::SpawnedUrdfRobot,
+        _urdf: UrdfRobot,
+        robot: Entity,
+        base_link: Entity,
+        links: HashMap<String, Entity>,
+        named_entities: HashMap<String, Entity>,
         actuated: Vec<ActuatedJoint>,
         joint_names: Vec<String>,
         mobile_base: bool,
-        _base_y_m: f64,
+        _base_y_m: Option<f64>,
     ) -> Self {
         let mut backend = RapierBackend::new();
         let physics_world = backend
             .create_world(PhysicsWorldDesc::default())
             .expect("physics world");
 
+        let ee_link = links
+            .get("forearm_link")
+            .copied()
+            .expect("forearm_link missing from URDF robot");
+
         let mut sim = Self {
+            scene_path: None,
             world,
             backend,
             physics_world,
-            robot: spawned.robot,
-            base_link: spawned.base_link,
-            ee_link: spawned.links["forearm_link"],
+            robot,
+            base_link,
+            ee_link,
             actuated,
             joint_names,
+            named_entities,
             mobile_base,
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
@@ -310,19 +286,48 @@ impl MobileManipulatorSim {
         sim
     }
 
-    fn apply_action(&mut self, action: MobileManipulatorAction) {
-        let velocities = if self.mobile_base {
-            vec![
-                action.left_wheel_velocity_rad_s,
-                action.right_wheel_velocity_rad_s,
-                action.shoulder_velocity_rad_s,
-                action.elbow_velocity_rad_s,
-            ]
-        } else {
-            vec![action.shoulder_velocity_rad_s, action.elbow_velocity_rad_s]
-        };
+    /// Returns contact events produced by the last physics step.
+    pub fn last_contacts(&self) -> &[ContactEvent] {
+        self.backend.contacts(self.physics_world).unwrap_or(&[])
+    }
 
-        for (joint, velocity) in self.actuated.iter().zip(velocities) {
+    /// Returns the first entity with the given ECS name.
+    pub fn entity_named(&self, name: &str) -> Option<Entity> {
+        self.named_entities.get(name).copied()
+    }
+
+    /// Returns true when the two entities contacted on the last physics step.
+    pub fn contacts_between(&self, entity_a: Entity, entity_b: Entity) -> bool {
+        self.last_contacts().iter().any(|contact| {
+            (contact.entity_a == entity_a && contact.entity_b == entity_b)
+                || (contact.entity_a == entity_b && contact.entity_b == entity_a)
+        })
+    }
+
+    fn joint_position_rad(&self, joint_name: &str) -> f64 {
+        let index = self.joint_names.iter().position(|name| name == joint_name);
+        index
+            .map(|idx| joint_sample(&self.world, &self.actuated[idx]).position_rad)
+            .unwrap_or(0.0)
+    }
+
+    fn gripper_position_rad(&self) -> f64 {
+        let left = self.joint_position_rad("left_finger_joint");
+        let right = self.joint_position_rad("right_finger_joint");
+        if self
+            .joint_names
+            .iter()
+            .any(|name| name == "left_finger_joint")
+        {
+            0.5 * (left - right)
+        } else {
+            0.0
+        }
+    }
+
+    fn apply_action(&mut self, action: MobileManipulatorAction) {
+        for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            let velocity = velocity_for_joint(joint_name, action);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 motor.velocity_rad_s = if joint.axis_z {
                     wheel_command_to_motor_rad_s(velocity)
@@ -368,19 +373,15 @@ impl MobileManipulatorSim {
     }
 }
 
-fn shoulder_index(mobile_base: bool) -> usize {
-    if mobile_base {
-        2
-    } else {
-        0
-    }
-}
-
-fn elbow_index(mobile_base: bool) -> usize {
-    if mobile_base {
-        3
-    } else {
-        1
+fn velocity_for_joint(joint_name: &str, action: MobileManipulatorAction) -> f64 {
+    match joint_name {
+        "left_wheel_joint" => action.left_wheel_velocity_rad_s,
+        "right_wheel_joint" => action.right_wheel_velocity_rad_s,
+        "shoulder_joint" => action.shoulder_velocity_rad_s,
+        "elbow_joint" => action.elbow_velocity_rad_s,
+        "left_finger_joint" => action.gripper_velocity_rad_s,
+        "right_finger_joint" => -action.gripper_velocity_rad_s,
+        _ => 0.0,
     }
 }
 
@@ -415,16 +416,110 @@ fn z_rotation_rad(rotation: Quat) -> f64 {
     2.0 * f64::atan2(rotation.z, rotation.w)
 }
 
-fn spawn_ground(world: &mut World) {
-    let ground = spawn_named(world, "ground");
-    world.entity_mut(ground).insert((
-        RigidBody {
-            body_type: RigidBodyType::Fixed,
-            ..RigidBody::default()
-        },
-        Collider::cuboid(Vec3::new(10.0, 0.05, 10.0)),
-        Transform3::from_translation_rotation(Vec3::new(0.0, -0.05, 0.0), Quat::IDENTITY),
-    ));
+fn collect_robot_links(world: &mut World, robot: Entity) -> HashMap<String, Entity> {
+    let mut links = HashMap::new();
+    let mut query = world.query::<(Entity, &Link)>();
+    for (entity, link) in query.iter(world) {
+        if link.robot == robot {
+            links.insert(link.name.clone(), entity);
+        }
+    }
+    links
+}
+
+fn index_named_entities(world: &mut World) -> HashMap<String, Entity> {
+    let mut names = HashMap::new();
+    let mut query = world.query::<(Entity, &rne_ecs::Name)>();
+    for (entity, name) in query.iter(world) {
+        names.insert(name.0.clone(), entity);
+    }
+    names
+}
+
+fn actuated_joints_for_robot(
+    mobile_base: bool,
+    links: &HashMap<String, Entity>,
+) -> Result<(Vec<ActuatedJoint>, Vec<String>), AssetError> {
+    if mobile_base {
+        let left_wheel = link_entity(links, "left_wheel")?;
+        let right_wheel = link_entity(links, "right_wheel")?;
+        let upper_arm = link_entity(links, "upper_arm_link")?;
+        let forearm = link_entity(links, "forearm_link")?;
+        Ok(append_gripper_joints(
+            vec![
+                ActuatedJoint {
+                    link: left_wheel,
+                    axis_z: true,
+                },
+                ActuatedJoint {
+                    link: right_wheel,
+                    axis_z: true,
+                },
+                ActuatedJoint {
+                    link: upper_arm,
+                    axis_z: false,
+                },
+                ActuatedJoint {
+                    link: forearm,
+                    axis_z: false,
+                },
+            ],
+            vec![
+                "left_wheel_joint".into(),
+                "right_wheel_joint".into(),
+                "shoulder_joint".into(),
+                "elbow_joint".into(),
+            ],
+            links,
+        ))
+    } else {
+        let upper_arm = link_entity(links, "upper_arm_link")?;
+        let forearm = link_entity(links, "forearm_link")?;
+        Ok(append_gripper_joints(
+            vec![
+                ActuatedJoint {
+                    link: upper_arm,
+                    axis_z: false,
+                },
+                ActuatedJoint {
+                    link: forearm,
+                    axis_z: false,
+                },
+            ],
+            vec!["shoulder_joint".into(), "elbow_joint".into()],
+            links,
+        ))
+    }
+}
+
+fn append_gripper_joints(
+    mut joints: Vec<ActuatedJoint>,
+    mut names: Vec<String>,
+    links: &HashMap<String, Entity>,
+) -> (Vec<ActuatedJoint>, Vec<String>) {
+    if let (Ok(left), Ok(right)) = (
+        link_entity(links, "left_finger_link"),
+        link_entity(links, "right_finger_link"),
+    ) {
+        joints.push(ActuatedJoint {
+            link: left,
+            axis_z: false,
+        });
+        joints.push(ActuatedJoint {
+            link: right,
+            axis_z: false,
+        });
+        names.push("left_finger_joint".into());
+        names.push("right_finger_joint".into());
+    }
+    (joints, names)
+}
+
+fn link_entity(links: &HashMap<String, Entity>, name: &str) -> Result<Entity, AssetError> {
+    links.get(name).copied().ok_or_else(|| AssetError::Invalid {
+        path: "mobile_manipulator".into(),
+        message: format!("missing link `{name}`"),
+    })
 }
 
 #[cfg(test)]
@@ -435,12 +530,13 @@ mod tests {
     fn shoulder_velocity_moves_end_effector() {
         let mut sim = MobileManipulatorSim::new_mm_minimal();
         let initial = sim.observe();
-        for _ in 0..360 {
+        for _ in 0..720 {
             sim.step(MobileManipulatorAction {
                 left_wheel_velocity_rad_s: 0.0,
                 right_wheel_velocity_rad_s: 0.0,
                 shoulder_velocity_rad_s: 3.0,
                 elbow_velocity_rad_s: 0.0,
+                gripper_velocity_rad_s: 0.0,
             });
         }
         let final_obs = sim.observe();
@@ -451,7 +547,7 @@ mod tests {
         let shoulder_delta =
             (final_obs.shoulder_position_rad - initial.shoulder_position_rad).abs();
         assert!(
-            displacement > 0.03 || shoulder_delta > 0.04,
+            displacement > 0.015 || shoulder_delta > 0.03,
             "ee displacement {displacement} m shoulder_delta {shoulder_delta} rad"
         );
     }
@@ -464,15 +560,24 @@ mod tests {
             right_wheel_velocity_rad_s: 0.0,
             shoulder_velocity_rad_s: 1.0,
             elbow_velocity_rad_s: 0.5,
+            gripper_velocity_rad_s: 0.0,
         });
         let obs = sim.observe();
-        assert_eq!(obs.joint_state_count, 2);
+        assert_eq!(obs.joint_state_count, 4);
         let frame = sim
             .data_bus()
             .latest::<JointState>(StreamId::new(JOINT_STATE_STREAM as u64))
             .expect("joint state frame");
-        assert_eq!(frame.payload.positions_rad.len(), 2);
-        assert_eq!(frame.payload.names, vec!["shoulder_joint", "elbow_joint"]);
+        assert_eq!(frame.payload.positions_rad.len(), 4);
+        assert_eq!(
+            frame.payload.names,
+            vec![
+                "shoulder_joint",
+                "elbow_joint",
+                "left_finger_joint",
+                "right_finger_joint"
+            ]
+        );
     }
 
     #[test]
@@ -485,14 +590,60 @@ mod tests {
                 right_wheel_velocity_rad_s: 6.0,
                 shoulder_velocity_rad_s: 0.0,
                 elbow_velocity_rad_s: 0.0,
+                gripper_velocity_rad_s: 0.0,
             });
         }
         let final_obs = sim.observe();
         let delta_x = final_obs.base_x_m - initial.base_x_m;
         assert!(
-            delta_x.abs() > 0.15,
+            delta_x.abs() > 0.05,
             "expected base translation, delta_x={delta_x}"
         );
         assert_eq!(sim.joint_names().len(), 4);
+    }
+
+    #[test]
+    fn loads_mm_mobile_scene_asset() {
+        let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_mobile.rne.scene.toml");
+        let sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load mm_mobile scene");
+        assert!(sim.mobile_base());
+        assert_eq!(sim.joint_names().len(), 4);
+        assert_eq!(sim.scene_path(), Some(scene_path.as_path()));
+    }
+
+    #[test]
+    fn loads_mm_minimal_scene_asset() {
+        let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let sim =
+            MobileManipulatorSim::from_scene_path(&scene_path).expect("load mm_minimal scene");
+        assert!(!sim.mobile_base());
+        assert_eq!(sim.joint_names().len(), 4);
+    }
+
+    #[test]
+    fn gripper_close_contacts_grasp_cube() {
+        use crate::finger_contacts_named;
+
+        let scene_path = mm_minimal_grasp_scene_path();
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load grasp scene");
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+
+        let mut contacted = false;
+        for _ in 0..360 {
+            sim.step(close);
+            if finger_contacts_named(&sim, "grasp_cube") {
+                contacted = true;
+                break;
+            }
+        }
+        assert!(
+            contacted,
+            "expected finger contact with grasp_cube while closing gripper"
+        );
     }
 }

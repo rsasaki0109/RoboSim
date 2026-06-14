@@ -30,4 +30,6 @@ pub struct MobileManipulatorAction {
     pub shoulder_velocity_rad_s: f64,
     /// Elbow joint angular velocity in radians per second.
     pub elbow_velocity_rad_s: f64,
+    /// Parallel gripper open/close velocity in radians per second (both fingers).
+    pub gripper_velocity_rad_s: f64,
 }

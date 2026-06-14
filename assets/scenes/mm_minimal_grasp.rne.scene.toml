@@ -1,0 +1,14 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 45
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_minimal.rne.robot.toml"
+
+[[obstacles]]
+name = "grasp_cube"
+translation_m = [0.895, 0.585, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]

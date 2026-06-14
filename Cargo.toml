@@ -39,6 +39,7 @@ members = [
   "examples/19_lidar_render",
   "examples/20_mobile_manipulator_arm",
   "examples/21_mobile_manipulator_reach",
+  "examples/22_mobile_manipulator_grasp",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",
@@ -52,7 +53,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
-version = "0.6.0"
+version = "0.6.1"
 
 [workspace.dependencies]
 anyhow = "1"

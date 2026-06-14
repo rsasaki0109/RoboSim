@@ -1,0 +1,9 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 44
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_minimal.rne.robot.toml"

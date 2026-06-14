@@ -114,7 +114,14 @@ impl BridgeSim {
                 SimBackend::DiffDrive { sim, obs }
             }
             BridgeMode::MobileManipulator => {
-                let mut sim = MobileManipulatorSim::new_mm_mobile();
+                let scene_path = default_mobile_manipulator_scene_path();
+                let mut sim = MobileManipulatorSim::from_scene_path(&scene_path)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "load ROS 2 mobile manipulator scene {}: {err}",
+                            scene_path.display()
+                        )
+                    });
                 let obs = sim.reset();
                 SimBackend::MobileManipulator {
                     sim,
@@ -343,6 +350,14 @@ fn default_ros2_scene_path() -> PathBuf {
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../assets/scenes/mesh_diff_drive.rne.scene.toml")
+}
+
+fn default_mobile_manipulator_scene_path() -> PathBuf {
+    if let Ok(path) = std::env::var("RNE_ROS2_SCENE_PATH") {
+        return PathBuf::from(path);
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../assets/scenes/mm_mobile.rne.scene.toml")
 }
 
 fn normalize_reset_scope(scope: u8) -> u8 {

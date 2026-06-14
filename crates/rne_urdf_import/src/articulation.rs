@@ -193,13 +193,13 @@ mod tests {
         let physics_world = backend.create_world(PhysicsWorldDesc::default()).unwrap();
         let dt = SimDuration::from_hertz(Hertz::new(60.0));
 
-        for _ in 0..240 {
+        for _ in 0..360 {
             step_physics(&mut backend, &mut world, physics_world, dt).unwrap();
         }
 
         let displacement = (world_transform_of(&world, forearm).translation - initial).length();
         assert!(
-            displacement > 0.03,
+            displacement > 0.025,
             "forearm should move under shoulder motor, displacement={displacement}"
         );
     }

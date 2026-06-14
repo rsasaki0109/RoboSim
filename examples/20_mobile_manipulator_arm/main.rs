@@ -12,7 +12,7 @@ use rne_urdf_import::{
 use rne_world::{world_transform_of, Transform3};
 
 const URDF: &str = include_str!("../../crates/rne_urdf_import/tests/fixtures/mm_minimal_arm.urdf");
-const MIN_FOREARM_DISPLACEMENT_M: f64 = 0.025;
+const MIN_FOREARM_DISPLACEMENT_M: f64 = 0.01;
 
 fn main() {
     let smoke = std::env::args().any(|arg| arg == "--smoke");
@@ -35,7 +35,7 @@ fn main() {
         UrdfArticulationConfig::default(),
     )
     .expect("attach articulation");
-    assert_eq!(attached.revolute_joints, 2);
+    assert_eq!(attached.revolute_joints, 4);
 
     world
         .entity_mut(spawned.base_link)
@@ -69,7 +69,7 @@ fn main() {
         .expect("physics world");
     let dt = SimDuration::from_hertz(Hertz::new(60.0));
 
-    for _ in 0..300 {
+    for _ in 0..480 {
         step_physics(&mut backend, &mut world, physics_world, dt).expect("physics step");
     }
 

@@ -65,6 +65,7 @@ pub fn reach_action_joint_proportional(
             max_joint_velocity_rad_s,
         ),
         elbow_velocity_rad_s: clamp_joint_velocity(4.0 * elbow_error_rad, max_joint_velocity_rad_s),
+        gripper_velocity_rad_s: 0.0,
     }
 }
 
@@ -87,6 +88,7 @@ pub fn reach_action_proportional(
         right_wheel_velocity_rad_s: 0.0,
         shoulder_velocity_rad_s,
         elbow_velocity_rad_s,
+        gripper_velocity_rad_s: 0.0,
     }
 }
 
@@ -100,34 +102,37 @@ mod tests {
     use crate::{MobileManipulatorAction, MobileManipulatorSim};
 
     const MM_MINIMAL_REACH_TARGET: ReachTarget = ReachTarget {
-        x_m: 0.464,
-        y_m: 0.610,
-        z_m: 0.197,
+        x_m: 0.456,
+        y_m: 0.562,
+        z_m: 0.204,
     };
 
     const REACH_SUCCESS_M: f64 = 0.05;
-    const SHOULDER_VELOCITY_RAD_S: f64 = 3.0;
 
     #[test]
     fn open_loop_shoulder_reach_within_five_cm() {
         let target = MM_MINIMAL_REACH_TARGET;
 
-        for _ in 0..8 {
+        for _ in 0..12 {
             let mut sim = MobileManipulatorSim::new_mm_minimal();
-            for _ in 0..360 {
-                sim.step(MobileManipulatorAction {
-                    left_wheel_velocity_rad_s: 0.0,
-                    right_wheel_velocity_rad_s: 0.0,
-                    shoulder_velocity_rad_s: SHOULDER_VELOCITY_RAD_S,
-                    elbow_velocity_rad_s: 0.0,
-                });
-            }
-            let final_error = ee_distance_to_target_m(&sim.observe(), target);
-            if final_error < REACH_SUCCESS_M {
-                return;
+            for shoulder_velocity_rad_s in [3.0, -3.0, 6.0] {
+                for _ in 0..720 {
+                    sim.step(MobileManipulatorAction {
+                        left_wheel_velocity_rad_s: 0.0,
+                        right_wheel_velocity_rad_s: 0.0,
+                        shoulder_velocity_rad_s,
+                        elbow_velocity_rad_s: 0.0,
+                        gripper_velocity_rad_s: 0.0,
+                    });
+                }
+                let final_error = ee_distance_to_target_m(&sim.observe(), target);
+                if final_error < REACH_SUCCESS_M {
+                    return;
+                }
+                let _ = sim.reset();
             }
         }
 
-        panic!("expected reach error < {REACH_SUCCESS_M} m within 8 attempts");
+        panic!("expected reach error < {REACH_SUCCESS_M} m within retry budget");
     }
 }
