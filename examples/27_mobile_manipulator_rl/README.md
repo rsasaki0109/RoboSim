@@ -12,16 +12,36 @@ from Python here.
 .venv/bin/maturin develop -m crates/rne_py/Cargo.toml
 ```
 
-## Run the smoke
+## Run the smokes
 
 ```bash
+# gym-style env wrapper + scripted pick-and-place rollout
 .venv/bin/python examples/27_mobile_manipulator_rl/run.py --smoke
+
+# self-contained training loop that LEARNS the reach task (no external deps)
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --smoke
 ```
 
-The smoke runs a scripted pick-and-place rollout (close → carry → release) and checks the
-episode terminates with the cube placed at the target. `gymnasium` and `numpy` are
-optional: with them installed the env subclasses `gymnasium.Env` and exposes
-`action_space` / `observation_space`; without them it returns plain Python lists.
+`run.py` wraps the episode as a gymnasium-style env (scripted pick-and-place rollout).
+`gymnasium` and `numpy` are optional: with them installed the env subclasses
+`gymnasium.Env` and exposes `action_space` / `observation_space`; without them it returns
+plain Python lists.
+
+## Training loop (`train.py`)
+
+`train.py` optimizes a small linear state-feedback policy on the dense-reward **reach**
+task (`MobileManipulatorEpisode("reach")`) with the Cross-Entropy Method (CEM) — a
+derivative-free RL algorithm needing only `rne_py` and the standard library. The mean
+episode reward climbs from a failing policy (~2) to a solved reach (~12) over a handful of
+iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium`:
+
+```bash
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py          # 20 iterations
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --smoke  # short, asserts learning
+```
+
+The reach target is placed where the arm only reaches it under active control (passive
+settling fails), so the reward signal is meaningful for learning.
 
 ## Spaces
 
