@@ -71,6 +71,8 @@ pub struct MobileManipulatorObservation {
     pub elbow_position_rad: f64,
     /// Average parallel finger joint position in radians (zero when no gripper).
     pub gripper_position_rad: f64,
+    /// RGBA8 byte count in the latest wrist camera frame (zero when absent).
+    pub wrist_camera_pixels: usize,
     /// Number of joints in the latest DataBus joint-state frame.
     pub joint_state_count: usize,
 }

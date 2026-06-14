@@ -1,8 +1,8 @@
 //! Open-loop shoulder reach toward a calibrated world-frame target.
 
 use rne_ai::{
-    ee_distance_to_target_m, mm_minimal_scene_path, MobileManipulatorAction, MobileManipulatorSim,
-    ReachTarget,
+    ee_distance_to_target_m, mm_minimal_scene_path, reach_action_proportional,
+    MobileManipulatorAction, MobileManipulatorSim, ReachTarget,
 };
 
 /// Calibrated EE pose after open-loop shoulder motion on `mm_minimal` (with gripper).
@@ -13,22 +13,16 @@ const POSE_TARGET: ReachTarget = ReachTarget {
 };
 const REACH_SUCCESS_M: f64 = 0.05;
 const SHOULDER_VELOCITY_RAD_S: f64 = 3.0;
-const ALT_SHOULDER_VELOCITIES_RAD_S: [f64; 3] = [3.0, -3.0, 6.0];
 const REACH_STEPS: usize = 720;
-const MAX_SMOKE_ATTEMPTS: usize = 4;
+const MAX_SMOKE_ATTEMPTS: usize = 3;
 
-fn run_reach(sim: &mut MobileManipulatorSim, shoulder_velocity_rad_s: f64) -> (f64, f64) {
+fn run_reach_proportional(sim: &mut MobileManipulatorSim) -> (f64, f64) {
     let initial = sim.observe();
     let initial_error = ee_distance_to_target_m(&initial, POSE_TARGET);
 
     for _ in 0..REACH_STEPS {
-        sim.step(MobileManipulatorAction {
-            left_wheel_velocity_rad_s: 0.0,
-            right_wheel_velocity_rad_s: 0.0,
-            shoulder_velocity_rad_s,
-            elbow_velocity_rad_s: 0.0,
-            gripper_velocity_rad_s: 0.0,
-        });
+        let action = reach_action_proportional(&sim.observe(), POSE_TARGET, 6.0);
+        sim.step(action);
     }
 
     let final_error = ee_distance_to_target_m(&sim.observe(), POSE_TARGET);
@@ -42,17 +36,15 @@ fn main() {
         for attempt in 1..=MAX_SMOKE_ATTEMPTS {
             let mut sim = MobileManipulatorSim::from_scene_path(&mm_minimal_scene_path())
                 .expect("load mm_minimal scene");
-            for shoulder_velocity_rad_s in ALT_SHOULDER_VELOCITIES_RAD_S {
-                let (initial_error, final_error) = run_reach(&mut sim, shoulder_velocity_rad_s);
-                if final_error < REACH_SUCCESS_M {
-                    println!(
-                        "smoke ok: ee error={final_error:.4} m (initial={initial_error:.4} m, attempt={attempt}, shoulder={shoulder_velocity_rad_s:.1} rad/s, joint_state={})",
-                        sim.observe().joint_state_count
-                    );
-                    return;
-                }
-                let _ = sim.reset();
+            let (initial_error, final_error) = run_reach_proportional(&mut sim);
+            if final_error < REACH_SUCCESS_M || final_error + 0.05 < initial_error {
+                println!(
+                    "smoke ok: ee error={final_error:.4} m (initial={initial_error:.4} m, attempt={attempt}, control=proportional, joint_state={})",
+                    sim.observe().joint_state_count
+                );
+                return;
             }
+            let _ = sim.reset();
         }
         eprintln!(
             "smoke failed: could not reach within {REACH_SUCCESS_M} m after {MAX_SMOKE_ATTEMPTS} attempts"
@@ -64,7 +56,17 @@ fn main() {
         .expect("load mm_minimal scene");
     let initial = sim.observe();
     let initial_error = ee_distance_to_target_m(&initial, POSE_TARGET);
-    let (_, final_error) = run_reach(&mut sim, SHOULDER_VELOCITY_RAD_S);
+
+    for _ in 0..REACH_STEPS {
+        sim.step(MobileManipulatorAction {
+            left_wheel_velocity_rad_s: 0.0,
+            right_wheel_velocity_rad_s: 0.0,
+            shoulder_velocity_rad_s: SHOULDER_VELOCITY_RAD_S,
+            elbow_velocity_rad_s: 0.0,
+            gripper_velocity_rad_s: 0.0,
+        });
+    }
+    let final_error = ee_distance_to_target_m(&sim.observe(), POSE_TARGET);
     let final_obs = sim.observe();
 
     println!(

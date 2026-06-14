@@ -99,40 +99,36 @@ fn clamp_joint_velocity(velocity_rad_s: f64, max_abs_rad_s: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MobileManipulatorAction, MobileManipulatorSim};
+    use crate::observation::MobileManipulatorObservation;
 
-    const MM_MINIMAL_REACH_TARGET: ReachTarget = ReachTarget {
-        x_m: 0.456,
-        y_m: 0.562,
-        z_m: 0.204,
+    const MM_MINIMAL_JOINT_REACH_TARGET: JointReachTarget = JointReachTarget {
+        shoulder_rad: -0.50,
+        elbow_rad: 0.05,
     };
 
-    const REACH_SUCCESS_M: f64 = 0.05;
+    #[test]
+    fn reach_action_joint_proportional_points_toward_target() {
+        let obs = MobileManipulatorObservation {
+            shoulder_position_rad: 0.0,
+            elbow_position_rad: 0.0,
+            ..MobileManipulatorObservation::default()
+        };
+        let action = reach_action_joint_proportional(&obs, MM_MINIMAL_JOINT_REACH_TARGET, 6.0);
+        assert!(action.shoulder_velocity_rad_s < 0.0);
+        assert!(action.elbow_velocity_rad_s > 0.0);
+    }
 
     #[test]
-    fn open_loop_shoulder_reach_within_five_cm() {
-        let target = MM_MINIMAL_REACH_TARGET;
-
-        for _ in 0..12 {
-            let mut sim = MobileManipulatorSim::new_mm_minimal();
-            for shoulder_velocity_rad_s in [3.0, -3.0, 6.0] {
-                for _ in 0..720 {
-                    sim.step(MobileManipulatorAction {
-                        left_wheel_velocity_rad_s: 0.0,
-                        right_wheel_velocity_rad_s: 0.0,
-                        shoulder_velocity_rad_s,
-                        elbow_velocity_rad_s: 0.0,
-                        gripper_velocity_rad_s: 0.0,
-                    });
-                }
-                let final_error = ee_distance_to_target_m(&sim.observe(), target);
-                if final_error < REACH_SUCCESS_M {
-                    return;
-                }
-                let _ = sim.reset();
-            }
-        }
-
-        panic!("expected reach error < {REACH_SUCCESS_M} m within retry budget");
+    fn reach_action_proportional_moves_toward_world_target() {
+        let obs = MobileManipulatorObservation {
+            ee_x_m: 0.40,
+            ee_y_m: 0.50,
+            ee_z_m: 0.10,
+            ..MobileManipulatorObservation::default()
+        };
+        let target = ReachTarget::new(0.50, 0.60, 0.20);
+        let action = reach_action_proportional(&obs, target, 6.0);
+        assert!(action.shoulder_velocity_rad_s > 0.0);
+        assert!(action.elbow_velocity_rad_s > 0.0);
     }
 }

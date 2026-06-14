@@ -46,6 +46,12 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p mobile_manipulator_grasp --example 22_mobile_manipulator_grasp -- --smoke",
     )?;
     run_step(
+        "cargo run -p mobile_manipulator_transport --example 23_mobile_manipulator_transport -- --smoke",
+    )?;
+    run_step(
+        "cargo run -p mobile_manipulator_wrist_cam --example 24_mobile_manipulator_wrist_cam -- --smoke",
+    )?;
+    run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-mobile",
     )?;
     Ok(())
@@ -58,6 +64,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_mobile.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal_grasp.rne.scene.toml"),
+        root.join("assets/scenes/mm_minimal_transport.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),

@@ -44,7 +44,7 @@ Primary development target for v0.6 (shipped in v0.6.0). See [architecture/006_m
 | A | Assets | Minimal mobile-manipulator URDF + `.rne.scene.toml` | Done (`mm_minimal`, `mm_mobile` scene) |
 | B | AI | `MobileManipulatorSim`, joint/EE observations, reach example | Done (`MobileManipulatorSim`, `21_mobile_manipulator_reach`) |
 | B | Rendering | Arm teleop in interactive viewer | Done (`--manipulator`, `--manipulator-mobile`) |
-| C | Manipulation | Gripper, wrist camera, pick/transport episodes | In progress (gripper + grasp smoke in v0.6.1) |
+| C | Manipulation | Gripper, wrist camera, pick/transport episodes | In progress (grasp + transport + wrist cam smoke) |
 | D | ROS 2 | `/joint_states`, base + arm command topics | Done (`mm_mobile` mode: 4 joints, `/cmd_vel`, `/arm_joint_velocity`) |
 
 ### v0.6 candidates (detail)

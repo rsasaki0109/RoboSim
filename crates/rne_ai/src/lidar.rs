@@ -123,7 +123,7 @@ model_name = "diff_drive"
             Some(0),
         )
         .unwrap();
-        let mount = mount.expect("lidar mount");
+        let mount = mount.lidar.expect("lidar mount");
         let offset = mount.mount_offset_m;
         sync_lidar_mount(&mut world, robot.base_link, mount.lidar, offset);
         let lidar_y = world

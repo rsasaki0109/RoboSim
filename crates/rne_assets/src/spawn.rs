@@ -2,7 +2,7 @@
 
 use crate::error::AssetError;
 use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
-use crate::scene::{SceneAsset, SceneObstacleAsset};
+use crate::scene::{ObstacleBodyType, SceneAsset, SceneObstacleAsset};
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
@@ -12,11 +12,12 @@ use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
     attach_urdf_articulation, attach_urdf_visuals, parse_urdf_file, spawn_urdf_robot_with_config,
 };
-use rne_world::{spawn_world, Gravity, Transform3, WorldEntity};
+use rne_world::{spawn_world, world_transform_of, Gravity, Transform3, WorldEntity};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const LIDAR_STREAM_BASE: u32 = 200;
+const WRIST_CAMERA_STREAM_BASE: u32 = 400;
 
 /// LiDAR mount spawned with a robot or scene.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,6 +28,26 @@ pub struct LidarMountSpawned {
     pub lidar: Entity,
     /// Mount offset from the base link origin in meters.
     pub mount_offset_m: Vec3,
+}
+
+/// Wrist camera mount spawned with a URDF robot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WristCameraMountSpawned {
+    /// Parent link the camera follows.
+    pub parent_link: Entity,
+    /// Camera sensor entity.
+    pub camera: Entity,
+    /// Mount offset from the parent link origin in meters.
+    pub mount_offset_m: Vec3,
+}
+
+/// Optional sensors spawned alongside a robot asset.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RobotSensorMounts {
+    /// LiDAR mount when configured.
+    pub lidar: Option<LidarMountSpawned>,
+    /// Wrist camera mount when configured.
+    pub wrist_camera: Option<WristCameraMountSpawned>,
 }
 
 /// Result of spawning a robot asset into the ECS world.
@@ -47,6 +68,8 @@ pub struct SpawnedScene {
     pub robots: Vec<(String, SpawnedRobot)>,
     /// LiDAR mounts spawned from robot assets.
     pub lidar_mounts: Vec<LidarMountSpawned>,
+    /// Wrist camera mounts spawned from robot assets.
+    pub wrist_camera_mounts: Vec<WristCameraMountSpawned>,
 }
 
 /// Spawns entities described by a robot asset.
@@ -55,7 +78,7 @@ pub fn spawn_robot_asset(
     asset_path: &Path,
     asset: &RobotAsset,
     lidar_stream_index: Option<usize>,
-) -> Result<(SpawnedRobot, Option<LidarMountSpawned>), AssetError> {
+) -> Result<(SpawnedRobot, RobotSensorMounts), AssetError> {
     match asset.kind {
         RobotKind::DiffDrive => {
             let section = asset
@@ -81,7 +104,10 @@ pub fn spawn_robot_asset(
                     robot: spawned.robot,
                     base_link: spawned.base_link,
                 },
-                lidar_mount,
+                RobotSensorMounts {
+                    lidar: lidar_mount,
+                    wrist_camera: None,
+                },
             ))
         }
         RobotKind::Urdf => {
@@ -123,12 +149,26 @@ pub fn spawn_robot_asset(
                     Quat::IDENTITY,
                 ));
 
+            let wrist_camera = asset.wrist_camera.as_ref().and_then(|config| {
+                config.enabled.then(|| {
+                    spawn_wrist_camera(
+                        world,
+                        &spawned.links,
+                        config,
+                        lidar_stream_index.unwrap_or(0),
+                    )
+                })
+            });
+
             Ok((
                 SpawnedRobot {
                     robot: spawned.robot,
                     base_link: spawned.base_link,
                 },
-                None,
+                RobotSensorMounts {
+                    lidar: None,
+                    wrist_camera,
+                },
             ))
         }
     }
@@ -173,8 +213,9 @@ pub fn spawn_scene(
 
     let mut spawned_robots = Vec::new();
     let mut lidar_mounts = Vec::new();
+    let mut wrist_camera_mounts = Vec::new();
     for (index, (robot_path, robot_asset)) in robots.iter().enumerate() {
-        let (spawned, lidar_mount) = spawn_robot_asset(world, robot_path, robot_asset, Some(index))
+        let (spawned, mounts) = spawn_robot_asset(world, robot_path, robot_asset, Some(index))
             .map_err(|error| match error {
                 AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
                     scene.robots[index].path.clone(),
@@ -182,8 +223,11 @@ pub fn spawn_scene(
                 ),
                 other => other,
             })?;
-        if let Some(mount) = lidar_mount {
+        if let Some(mount) = mounts.lidar {
             lidar_mounts.push(mount);
+        }
+        if let Some(mount) = mounts.wrist_camera {
+            wrist_camera_mounts.push(mount);
         }
         spawned_robots.push((robot_asset.model_name.clone(), spawned));
     }
@@ -192,6 +236,7 @@ pub fn spawn_scene(
         world: world_entity,
         robots: spawned_robots,
         lidar_mounts,
+        wrist_camera_mounts,
     })
 }
 
@@ -226,9 +271,14 @@ pub fn spawn_ground_plane(world: &mut World) -> Entity {
 
 fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Entity {
     let entity = spawn_named(world, &obstacle.name);
+    let body_type = match obstacle.body_type {
+        ObstacleBodyType::Fixed => RigidBodyType::Fixed,
+        ObstacleBodyType::Dynamic => RigidBodyType::Dynamic,
+    };
     world.entity_mut(entity).insert((
         RigidBody {
-            body_type: RigidBodyType::Fixed,
+            body_type,
+            mass_kg: obstacle.mass_kg,
             ..RigidBody::default()
         },
         Collider {
@@ -243,6 +293,49 @@ fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Ent
         ),
     ));
     entity
+}
+
+fn sync_sensor_mount(world: &mut World, parent_link: Entity, sensor: Entity, offset_m: Vec3) {
+    let parent = world_transform_of(world, parent_link);
+    if let Some(mut sensor_tf) = world.get_mut::<Transform3>(sensor) {
+        sensor_tf.translation = parent.translation + parent.rotation * offset_m;
+        sensor_tf.rotation = parent.rotation;
+    }
+}
+
+fn sync_lidar_mount(world: &mut World, base_link: Entity, lidar: Entity, offset_m: Vec3) {
+    sync_sensor_mount(world, base_link, lidar, offset_m);
+}
+
+fn spawn_wrist_camera(
+    world: &mut World,
+    links: &HashMap<String, Entity>,
+    config: &crate::robot::WristCameraRobotAsset,
+    stream_index: usize,
+) -> WristCameraMountSpawned {
+    let parent_link = *links
+        .get(&config.mount_link)
+        .unwrap_or_else(|| panic!("missing wrist camera mount link `{}`", config.mount_link));
+    let offset_m = config.mount_offset();
+    let camera = spawn_named(world, "wrist_camera");
+    world.entity_mut(camera).insert((
+        Sensor {
+            kind: SensorKind::Camera(config.to_spec()),
+            update_rate_hz: config.update_rate_hz,
+            latency_ticks: 0,
+            frame_id: 12,
+            enabled: true,
+            stream_id: StreamId::new(WRIST_CAMERA_STREAM_BASE as u64 + stream_index as u64),
+        },
+        SensorState::default(),
+        Transform3::IDENTITY,
+    ));
+    sync_sensor_mount(world, parent_link, camera, offset_m);
+    WristCameraMountSpawned {
+        parent_link,
+        camera,
+        mount_offset_m: offset_m,
+    }
 }
 
 fn spawn_robot_lidar(
@@ -270,16 +363,6 @@ fn spawn_robot_lidar(
         base_link,
         lidar,
         mount_offset_m: offset_m,
-    }
-}
-
-fn sync_lidar_mount(world: &mut World, base_link: Entity, lidar: Entity, offset_m: Vec3) {
-    let Some(base) = world.get::<Transform3>(base_link).copied() else {
-        return;
-    };
-    if let Some(mut lidar_tf) = world.get_mut::<Transform3>(lidar) {
-        lidar_tf.translation = base.translation + base.rotation * offset_m;
-        lidar_tf.rotation = base.rotation;
     }
 }
 
@@ -429,8 +512,9 @@ ray_count = 64
             .join("tests/fixtures/diff_drive_urdf.rne.robot.toml");
         let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
         let mut world = World::new();
-        let (spawned, lidar) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
-        assert!(lidar.is_none());
+        let (spawned, mounts) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
+        assert!(mounts.lidar.is_none());
+        assert!(mounts.wrist_camera.is_none());
         assert!(world.get::<RigidBody>(spawned.base_link).is_some());
         assert!(world.get::<Link>(spawned.base_link).is_some());
     }
