@@ -12,6 +12,7 @@ pub mod lidar;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
+pub mod reach;
 pub mod render;
 pub mod reward;
 pub mod rng;
@@ -43,6 +44,10 @@ pub use multi_robot::{
 };
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{ConstantVelocityPolicy, Policy};
+pub use reach::{
+    ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
+    JointReachTarget, ReachTarget,
+};
 pub use render::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
     LidarOverlayStats,
