@@ -70,6 +70,7 @@ struct BridgeHandles {
     _cmd_vel: Option<Subscription<geometry_msgs::msg::Twist>>,
     _arm_joint_velocity: Option<Subscription<sensor_msgs::msg::JointState>>,
     _gripper_command: Option<Subscription<std_msgs::msg::Float64>>,
+    _arm_joint_position: Option<Subscription<sensor_msgs::msg::JointState>>,
 }
 
 impl BridgeLoop {
@@ -382,11 +383,11 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         })
         .context("create simulate_steps action server")?;
 
-    let (_cmd_vel, _arm_joint_velocity, _gripper_command) =
+    let (_cmd_vel, _arm_joint_velocity, _gripper_command, _arm_joint_position) =
         if bridge.mode() == BridgeMode::MobileManipulator {
             register_mobile_subscribers(node, Arc::clone(&bridge))?
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
 
     Ok(BridgeHandles {
@@ -398,6 +399,7 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _cmd_vel,
         _arm_joint_velocity,
         _gripper_command,
+        _arm_joint_position,
     })
 }
 
@@ -409,6 +411,7 @@ fn register_mobile_subscribers(
     Option<Subscription<geometry_msgs::msg::Twist>>,
     Option<Subscription<sensor_msgs::msg::JointState>>,
     Option<Subscription<std_msgs::msg::Float64>>,
+    Option<Subscription<sensor_msgs::msg::JointState>>,
 )> {
     let cmd_bridge = Arc::clone(&bridge);
     let cmd_vel = node
@@ -437,10 +440,23 @@ fn register_mobile_subscribers(
         })
         .context("create /gripper_command subscription")?;
 
+    let position_bridge = Arc::clone(&bridge);
+    let arm_joint_position = node
+        .create_subscription(
+            "/arm_joint_position",
+            move |msg: sensor_msgs::msg::JointState| {
+                if let Some((shoulder, elbow)) = arm_positions_from_joint_state(&msg) {
+                    position_bridge.with_sim(|sim| sim.set_arm_joint_positions(shoulder, elbow));
+                }
+            },
+        )
+        .context("create /arm_joint_position subscription")?;
+
     Ok((
         Some(cmd_vel),
         Some(arm_joint_velocity),
         Some(gripper_command),
+        Some(arm_joint_position),
     ))
 }
 
@@ -455,6 +471,20 @@ fn arm_velocities_from_joint_state(msg: &sensor_msgs::msg::JointState) -> (f64, 
         }
     }
     (shoulder, elbow)
+}
+
+/// Extracts (shoulder, elbow) position targets, if both are present in the message.
+fn arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<(f64, f64)> {
+    let mut shoulder = None;
+    let mut elbow = None;
+    for (name, position) in msg.name.iter().zip(msg.position.iter()) {
+        match name.as_str() {
+            "shoulder_joint" => shoulder = Some(*position),
+            "elbow_joint" => elbow = Some(*position),
+            _ => {}
+        }
+    }
+    Some((shoulder?, elbow?))
 }
 
 async fn simulate_steps_action(
