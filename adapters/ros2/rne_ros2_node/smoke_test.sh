@@ -180,5 +180,20 @@ if [[ "$MM_JOINT_WIDTH" -lt 4 ]]; then
   exit 1
 fi
 
+echo "Checking /gripper_command subscription exists..."
+GRIPPER_SUBS=$(
+  ros2 topic info /gripper_command 2>/dev/null | awk '/Subscription count/ {print $3}' || true
+)
+if [[ -z "$GRIPPER_SUBS" || "$GRIPPER_SUBS" -lt 1 ]]; then
+  echo "expected /gripper_command subscription on mobile bridge, got count=${GRIPPER_SUBS:-0}" >&2
+  exit 1
+fi
+
+echo "Checking ee_link TF frame is published..."
+if ! timeout 20 ros2 topic echo /tf --once --no-lost-messages 2>/dev/null | grep -q "ee_link"; then
+  echo "expected /tf to include the ee_link frame in mobile manipulator mode" >&2
+  exit 1
+fi
+
 rm -f "$SMOKE_LOG"
 echo "ROS 2 smoke tests passed."

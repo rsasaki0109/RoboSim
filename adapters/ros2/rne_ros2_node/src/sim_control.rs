@@ -7,6 +7,7 @@ use rne_ai::{
     MobileManipulatorSim,
 };
 use rne_data::{ImageRgb8, JointState, PointCloud};
+use rne_math::Vec3;
 use rne_sensor::LidarSpec;
 use rne_world::Transform3;
 use simulation_interfaces::{
@@ -63,6 +64,8 @@ pub struct BridgeFrame {
     pub joint_state: JointState,
     /// Latest wrist camera frame when configured.
     pub wrist_camera: Option<ImageRgb8>,
+    /// World-frame end-effector position for the arm TF frame (manipulator only).
+    pub ee_world_m: Option<Vec3>,
 }
 
 /// Lightweight observation for smoke checks.
@@ -119,8 +122,8 @@ impl BridgeSim {
             }
             BridgeMode::MobileManipulator => {
                 let scene_path = default_mobile_manipulator_scene_path();
-                let mut sim = MobileManipulatorSim::from_scene_path(&scene_path)
-                    .unwrap_or_else(|err| {
+                let mut sim =
+                    MobileManipulatorSim::from_scene_path(&scene_path).unwrap_or_else(|err| {
                         panic!(
                             "load ROS 2 mobile manipulator scene {}: {err}",
                             scene_path.display()
@@ -191,6 +194,7 @@ impl BridgeSim {
                 lidar_cloud: sim.latest_lidar_cloud().unwrap_or_else(PointCloud::new),
                 lidar_world: sim.primary_lidar_world_transform(),
                 lidar_spec: sim.primary_lidar_spec(),
+                ee_world_m: None,
                 joint_state: sim.joint_state(),
                 wrist_camera: None,
             },
@@ -204,6 +208,7 @@ impl BridgeSim {
                 lidar_cloud: PointCloud::new(),
                 lidar_world: None,
                 lidar_spec: None,
+                ee_world_m: Some(Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m)),
                 joint_state: sim.latest_joint_state(),
                 wrist_camera: sim.latest_wrist_camera(),
             },
@@ -217,7 +222,20 @@ impl BridgeSim {
         };
         let shoulder = command.shoulder_velocity_rad_s;
         let elbow = command.elbow_velocity_rad_s;
+        let gripper = command.gripper_velocity_rad_s;
         *command = mobile_action_from_twist_and_arm(linear_x_m_s, angular_z_rad_s, shoulder, elbow);
+        command.gripper_velocity_rad_s = gripper;
+    }
+
+    /// Applies a gripper velocity command (mobile manipulator mode only).
+    ///
+    /// Negative closes the gripper (and triggers a contact weld grasp); positive opens
+    /// it and releases any grasped object.
+    pub fn set_gripper_velocity(&mut self, gripper_velocity_rad_s: f64) {
+        let SimBackend::MobileManipulator { command, .. } = &mut self.backend else {
+            return;
+        };
+        command.gripper_velocity_rad_s = gripper_velocity_rad_s;
     }
 
     /// Applies arm joint velocity targets by joint name (mobile manipulator mode only).

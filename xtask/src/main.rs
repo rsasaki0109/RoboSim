@@ -55,6 +55,9 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p mobile_manipulator_episode --example 25_mobile_manipulator_episode -- --smoke",
     )?;
     run_step(
+        "cargo run -p mobile_manipulator_place --example 26_mobile_manipulator_place -- --smoke",
+    )?;
+    run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
     )?;
     run_step(

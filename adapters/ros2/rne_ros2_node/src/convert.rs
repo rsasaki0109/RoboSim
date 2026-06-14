@@ -68,7 +68,7 @@ pub fn to_image_message(image: &RosImage) -> sensor_msgs::msg::Image {
         height: image.height,
         width: image.width,
         encoding: image.encoding.clone(),
-        is_bigendian: image.is_bigendian,
+        is_bigendian: image.is_bigendian as u8,
         step: image.step,
         data: image.data.clone(),
     }

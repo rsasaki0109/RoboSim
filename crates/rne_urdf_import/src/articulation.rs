@@ -4,7 +4,7 @@ use crate::schema::{UrdfJointType, UrdfRobot};
 use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
-use rne_physics::{JointMotor, RevoluteJointDesc, RigidBody, RigidBodyType};
+use rne_physics::{JointMotor, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType};
 
 /// Configuration for [`attach_urdf_articulation`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -29,6 +29,8 @@ impl Default for UrdfArticulationConfig {
 pub struct UrdfArticulationAttached {
     /// Number of revolute / continuous joints wired with motors.
     pub revolute_joints: usize,
+    /// Number of prismatic joints wired with linear motors.
+    pub prismatic_joints: usize,
 }
 
 /// Attaches Rapier revolute joints and velocity motors for movable URDF joints.
@@ -46,6 +48,7 @@ pub fn attach_urdf_articulation(
     }
 
     let mut revolute_joints = 0_usize;
+    let mut prismatic_joints = 0_usize;
     for joint in &urdf.joints {
         let parent = *spawned
             .links
@@ -72,15 +75,25 @@ pub fn attach_urdf_articulation(
                 revolute_joints += 1;
             }
             UrdfJointType::Prismatic => {
-                return Err(UrdfSpawnError::InvalidGraph(format!(
-                    "prismatic joint `{}` is not supported yet",
-                    joint.name
-                )));
+                ensure_dynamic_link(world, child);
+                world.entity_mut(child).insert((
+                    PrismaticJointDesc {
+                        parent,
+                        axis: normalize_axis(joint.axis),
+                        anchor_parent_m: joint.origin_xyz,
+                        anchor_child_m: Vec3::ZERO,
+                    },
+                    JointMotor::default(),
+                ));
+                prismatic_joints += 1;
             }
         }
     }
 
-    Ok(UrdfArticulationAttached { revolute_joints })
+    Ok(UrdfArticulationAttached {
+        revolute_joints,
+        prismatic_joints,
+    })
 }
 
 fn ensure_dynamic_link(world: &mut World, entity: Entity) {
@@ -109,7 +122,7 @@ mod tests {
     use crate::spawn::{spawn_urdf_robot_with_config, UrdfSpawnConfig};
     use rne_core::SimDuration;
     use rne_math::Hertz;
-    use rne_physics::{Collider, PhysicsBackend, PhysicsWorldDesc};
+    use rne_physics::{Collider, PhysicsBackend, PhysicsWorldDesc, PrismaticJointDesc};
     use rne_physics_rapier::{step_physics, RapierBackend};
     use rne_robot::JointKind;
     use rne_world::{world_transform_of, Transform3};
@@ -142,6 +155,90 @@ mod tests {
                 rne_math::Quat::IDENTITY,
             ));
         (world, spawned)
+    }
+
+    const PRISMATIC_FIXTURE: &str = include_str!("../tests/fixtures/prismatic_slider.urdf");
+
+    #[test]
+    fn attach_articulation_wires_prismatic_motor() {
+        let urdf = parse_urdf(PRISMATIC_FIXTURE).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot_with_config(
+            &mut world,
+            &urdf,
+            UrdfSpawnConfig {
+                base_body_type: RigidBodyType::Fixed,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        let attached = attach_urdf_articulation(
+            &mut world,
+            &urdf,
+            &spawned,
+            UrdfArticulationConfig::default(),
+        )
+        .unwrap();
+
+        assert_eq!(attached.revolute_joints, 0);
+        assert_eq!(attached.prismatic_joints, 1);
+        let slider = spawned.links["slider_link"];
+        assert!(world.get::<PrismaticJointDesc>(slider).is_some());
+        assert!(world.get::<JointMotor>(slider).is_some());
+    }
+
+    #[test]
+    fn prismatic_motor_slides_child_along_axis() {
+        let urdf = parse_urdf(PRISMATIC_FIXTURE).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot_with_config(
+            &mut world,
+            &urdf,
+            UrdfSpawnConfig {
+                base_body_type: RigidBodyType::Fixed,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        attach_urdf_articulation(
+            &mut world,
+            &urdf,
+            &spawned,
+            UrdfArticulationConfig::default(),
+        )
+        .unwrap();
+        world
+            .entity_mut(spawned.base_link)
+            .insert(Transform3::from_translation_rotation(
+                rne_math::Vec3::new(0.0, 0.5, 0.0),
+                rne_math::Quat::IDENTITY,
+            ));
+
+        let slider = spawned.links["slider_link"];
+        let initial = world_transform_of(&world, slider).translation;
+
+        // Linear motor command: 0.5 m/s along the joint's +X sliding axis.
+        world.get_mut::<JointMotor>(slider).unwrap().velocity_rad_s = 0.5;
+
+        let mut backend = RapierBackend::new();
+        let physics_world = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let dt = SimDuration::from_hertz(Hertz::new(60.0));
+        for _ in 0..120 {
+            step_physics(&mut backend, &mut world, physics_world, dt).unwrap();
+        }
+
+        let moved = world_transform_of(&world, slider).translation - initial;
+        // The prismatic joint locks all but the sliding axis, so the child must
+        // translate along +X and stay put on the other axes despite gravity.
+        assert!(
+            moved.x > 0.1,
+            "slider should advance along +X under the linear motor, moved.x={}",
+            moved.x
+        );
+        assert!(
+            moved.y.abs() < 1e-3 && moved.z.abs() < 1e-3,
+            "slider should not drift off the locked axes, moved={moved:?}"
+        );
     }
 
     #[test]

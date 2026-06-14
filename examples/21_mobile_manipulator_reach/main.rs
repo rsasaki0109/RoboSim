@@ -7,9 +7,9 @@ use rne_ai::{
 
 /// Calibrated EE pose after open-loop shoulder motion on `mm_minimal` (with gripper).
 const POSE_TARGET: ReachTarget = ReachTarget {
-    x_m: 0.456,
-    y_m: 0.562,
-    z_m: 0.204,
+    x_m: 0.500,
+    y_m: 0.564,
+    z_m: 0.023,
 };
 const REACH_SUCCESS_M: f64 = 0.05;
 const SHOULDER_VELOCITY_RAD_S: f64 = 3.0;
