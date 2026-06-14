@@ -92,7 +92,21 @@ enum SimBackend {
         sim: MobileManipulatorSim,
         obs: MobileManipulatorObservation,
         command: MobileManipulatorAction,
+        /// Optional (shoulder, elbow) position targets driven by P-control.
+        arm_target: Option<(f64, f64)>,
     },
+}
+
+/// Proportional gain and velocity clamp for arm joint position control.
+const ARM_POSITION_GAIN: f64 = 8.0;
+const ARM_POSITION_MAX_VELOCITY_RAD_S: f64 = 4.0;
+
+/// Returns the P-control velocity (rad/s) driving `current` toward `target`.
+fn arm_velocity_toward(target: f64, current: f64) -> f64 {
+    (ARM_POSITION_GAIN * (target - current)).clamp(
+        -ARM_POSITION_MAX_VELOCITY_RAD_S,
+        ARM_POSITION_MAX_VELOCITY_RAD_S,
+    )
 }
 
 /// Shared simulation playback and reset state for the ROS bridge loop.
@@ -134,6 +148,7 @@ impl BridgeSim {
                     sim,
                     obs,
                     command: MobileManipulatorAction::default(),
+                    arm_target: None,
                 }
             }
         };
@@ -239,16 +254,33 @@ impl BridgeSim {
     }
 
     /// Applies arm joint velocity targets by joint name (mobile manipulator mode only).
+    ///
+    /// A velocity command cancels any active position target.
     pub fn set_arm_joint_velocities(
         &mut self,
         shoulder_velocity_rad_s: f64,
         elbow_velocity_rad_s: f64,
     ) {
-        let SimBackend::MobileManipulator { command, .. } = &mut self.backend else {
+        let SimBackend::MobileManipulator {
+            command,
+            arm_target,
+            ..
+        } = &mut self.backend
+        else {
             return;
         };
         command.shoulder_velocity_rad_s = shoulder_velocity_rad_s;
         command.elbow_velocity_rad_s = elbow_velocity_rad_s;
+        *arm_target = None;
+    }
+
+    /// Sets (shoulder, elbow) joint position targets driven by P-control until reached
+    /// (mobile manipulator mode only).
+    pub fn set_arm_joint_positions(&mut self, shoulder_position_rad: f64, elbow_position_rad: f64) {
+        let SimBackend::MobileManipulator { arm_target, .. } = &mut self.backend else {
+            return;
+        };
+        *arm_target = Some((shoulder_position_rad, elbow_position_rad));
     }
 
     /// Resets simulation scope per `simulation_interfaces/ResetSimulation`.
@@ -260,9 +292,15 @@ impl BridgeSim {
         if scope & ResetSimulation_Request::SCOPE_STATE != 0 {
             match &mut self.backend {
                 SimBackend::DiffDrive { sim, obs } => *obs = sim.reset(),
-                SimBackend::MobileManipulator { sim, obs, command } => {
+                SimBackend::MobileManipulator {
+                    sim,
+                    obs,
+                    command,
+                    arm_target,
+                } => {
                     *obs = sim.reset();
                     *command = MobileManipulatorAction::default();
+                    *arm_target = None;
                 }
             }
         }
@@ -340,7 +378,12 @@ impl BridgeSim {
             SimBackend::DiffDrive { sim, obs } => {
                 *obs = sim.step(fallback.wheel_velocity_rad_s, fallback.wheel_velocity_rad_s);
             }
-            SimBackend::MobileManipulator { sim, obs, command } => {
+            SimBackend::MobileManipulator {
+                sim,
+                obs,
+                command,
+                arm_target,
+            } => {
                 let mut action = *command;
                 if action.left_wheel_velocity_rad_s.abs() < f64::EPSILON
                     && action.right_wheel_velocity_rad_s.abs() < f64::EPSILON
@@ -348,7 +391,13 @@ impl BridgeSim {
                     action.left_wheel_velocity_rad_s = fallback.wheel_velocity_rad_s;
                     action.right_wheel_velocity_rad_s = fallback.wheel_velocity_rad_s;
                 }
-                if action.shoulder_velocity_rad_s.abs() < f64::EPSILON
+                if let Some((shoulder_target, elbow_target)) = *arm_target {
+                    // Position control: drive the arm joints toward their targets.
+                    action.shoulder_velocity_rad_s =
+                        arm_velocity_toward(shoulder_target, obs.shoulder_position_rad);
+                    action.elbow_velocity_rad_s =
+                        arm_velocity_toward(elbow_target, obs.elbow_position_rad);
+                } else if action.shoulder_velocity_rad_s.abs() < f64::EPSILON
                     && action.elbow_velocity_rad_s.abs() < f64::EPSILON
                 {
                     action.shoulder_velocity_rad_s = fallback.shoulder_velocity_rad_s;
@@ -419,6 +468,24 @@ fn result_code(code: u8, message: String) -> SimResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arm_velocity_toward_drives_to_target_and_clamps() {
+        // Drives in the correct direction.
+        assert!(arm_velocity_toward(1.0, 0.0) > 0.0);
+        assert!(arm_velocity_toward(-1.0, 0.0) < 0.0);
+        // Near the target the command shrinks toward zero.
+        assert!(arm_velocity_toward(0.01, 0.0).abs() < ARM_POSITION_MAX_VELOCITY_RAD_S);
+        // Large errors clamp to the velocity limit.
+        assert_eq!(
+            arm_velocity_toward(100.0, 0.0),
+            ARM_POSITION_MAX_VELOCITY_RAD_S
+        );
+        assert_eq!(
+            arm_velocity_toward(-100.0, 0.0),
+            -ARM_POSITION_MAX_VELOCITY_RAD_S
+        );
+    }
 
     #[test]
     fn reset_scope_all_restarts_pose_and_time() {
