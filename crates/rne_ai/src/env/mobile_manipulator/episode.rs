@@ -47,7 +47,7 @@ impl MobileManipulatorEpisodeConfig {
             scene_path: crate::mm_minimal_transport_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: "grasp_cube".into(),
-                target: crate::reach::ReachTarget::new(1.02, 0.0, -0.13),
+                target: crate::reach::ReachTarget::new(0.35, 0.0, 1.0),
                 place_tolerance_m: 0.12,
             },
             reward: MobileManipulatorRewardConfig::default(),

@@ -32,6 +32,9 @@ All notable changes to Robot Native Engine are documented in this file.
 - **`mm_mobile` drive wheels**: wheel joints were stacked vertically (`xyz="0 ±0.225 0"`)
   so only one wheel touched the ground and the base spun in place; relocated to a proper
   left/right diff-drive layout (`xyz="0 -0.15 ±0.225"`) so the base drives forward
+- **URDF fixed joints**: were not wired to a physics joint, so a fixed-joint child link
+  silently became a free-falling body; now wired as a rigid `FixedJointDesc` weld
+  (recalibrated the affected `mm_minimal` reach/place demo targets)
 
 ### Changed
 

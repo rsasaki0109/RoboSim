@@ -1,10 +1,13 @@
 //! URDF joint wiring for Rapier impulse articulations.
 
+use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfJointType, UrdfRobot};
 use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
-use rne_physics::{JointMotor, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType};
+use rne_physics::{
+    FixedJointDesc, JointMotor, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+};
 
 /// Configuration for [`attach_urdf_articulation`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +34,8 @@ pub struct UrdfArticulationAttached {
     pub revolute_joints: usize,
     /// Number of prismatic joints wired with linear motors.
     pub prismatic_joints: usize,
+    /// Number of fixed joints wired as rigid welds.
+    pub fixed_joints: usize,
 }
 
 /// Attaches Rapier revolute joints and velocity motors for movable URDF joints.
@@ -49,6 +54,7 @@ pub fn attach_urdf_articulation(
 
     let mut revolute_joints = 0_usize;
     let mut prismatic_joints = 0_usize;
+    let mut fixed_joints = 0_usize;
     for joint in &urdf.joints {
         let parent = *spawned
             .links
@@ -60,7 +66,16 @@ pub fn attach_urdf_articulation(
             .ok_or_else(|| UrdfSpawnError::UnknownLink(joint.child.clone()))?;
 
         match joint.joint_type {
-            UrdfJointType::Fixed => {}
+            UrdfJointType::Fixed => {
+                ensure_dynamic_link(world, child);
+                world.entity_mut(child).insert(FixedJointDesc {
+                    parent,
+                    anchor_parent_m: joint.origin_xyz,
+                    anchor_child_m: Vec3::ZERO,
+                    relative_rotation: rpy_to_quat(joint.origin_rpy),
+                });
+                fixed_joints += 1;
+            }
             UrdfJointType::Revolute | UrdfJointType::Continuous => {
                 ensure_dynamic_link(world, child);
                 world.entity_mut(child).insert((
@@ -93,6 +108,7 @@ pub fn attach_urdf_articulation(
     Ok(UrdfArticulationAttached {
         revolute_joints,
         prismatic_joints,
+        fixed_joints,
     })
 }
 
@@ -122,7 +138,9 @@ mod tests {
     use crate::spawn::{spawn_urdf_robot_with_config, UrdfSpawnConfig};
     use rne_core::SimDuration;
     use rne_math::Hertz;
-    use rne_physics::{Collider, PhysicsBackend, PhysicsWorldDesc, PrismaticJointDesc};
+    use rne_physics::{
+        Collider, FixedJointDesc, PhysicsBackend, PhysicsWorldDesc, PrismaticJointDesc,
+    };
     use rne_physics_rapier::{step_physics, RapierBackend};
     use rne_robot::JointKind;
     use rne_world::{world_transform_of, Transform3};
@@ -239,6 +257,15 @@ mod tests {
             moved.y.abs() < 1e-3 && moved.z.abs() < 1e-3,
             "slider should not drift off the locked axes, moved={moved:?}"
         );
+    }
+
+    #[test]
+    fn attach_articulation_wires_fixed_joint_as_weld() {
+        let (world, spawned) = spawn_arm_world();
+        // mm_minimal_arm.urdf attaches gripper_base_link via a fixed joint; it must be
+        // wired as a rigid weld (FixedJointDesc) instead of left as a free body.
+        let gripper_base = spawned.links["gripper_base_link"];
+        assert!(world.get::<FixedJointDesc>(gripper_base).is_some());
     }
 
     #[test]
