@@ -464,17 +464,19 @@ struct PyMobileManipulatorEpisode {
 
 #[pymethods]
 impl PyMobileManipulatorEpisode {
-    /// Creates an episode for the `"place"` (default), `"transport"`, or `"inspect"` task.
+    /// Creates an episode for the `"reach"`, `"place"` (default), `"transport"`, or
+    /// `"inspect"` task.
     #[new]
     #[pyo3(signature = (task="place"))]
     fn new(task: &str) -> PyResult<Self> {
         let config = match task {
+            "reach" => MobileManipulatorEpisodeConfig::reach(),
             "place" => MobileManipulatorEpisodeConfig::place(),
             "transport" => MobileManipulatorEpisodeConfig::transport(),
             "inspect" => MobileManipulatorEpisodeConfig::inspect(),
             other => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown task '{other}', expected 'place', 'transport', or 'inspect'"
+                    "unknown task '{other}', expected 'reach', 'place', 'transport', or 'inspect'"
                 )))
             }
         };
