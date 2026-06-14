@@ -40,7 +40,8 @@ pub use env::{
     mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s,
     DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorSim, VectorizedDiffDriveConfig,
-    VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
+    VectorizedDiffDriveEnv, VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig,
+    VectorizedMobileManipulatorEnv, VectorizedMobileManipulatorStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
