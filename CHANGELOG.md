@@ -10,6 +10,9 @@ All notable changes to Robot Native Engine are documented in this file.
   as `MobileManipulatorEpisode("reach")`); target placed so it needs active control
 - **Example 27 training loop** (`train.py`): Cross-Entropy-Method policy optimization that
   learns the reach task end-to-end with no external deps (mean reward ~2 → ~12)
+- **`VectorizedMobileManipulatorEnv`**: batched mobile-manipulator episodes for
+  population-based / parallel RL rollouts (parity with `VectorizedDiffDriveEnv`), with
+  example 28 evaluating a policy population in lock-step
 - **Prismatic joints**: `rne_physics::PrismaticJointDesc` + Rapier linear motor; URDF
   `type="prismatic"` joints now wire into the articulation (`UrdfArticulationAttached.prismatic_joints`)
 - **Fixed (weld) joints**: `rne_physics::FixedJointDesc` welds a child to a parent at a

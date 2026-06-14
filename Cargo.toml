@@ -44,6 +44,7 @@ members = [
   "examples/24_mobile_manipulator_wrist_cam",
   "examples/25_mobile_manipulator_episode",
   "examples/26_mobile_manipulator_place",
+  "examples/28_mobile_manipulator_vectorized",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",
