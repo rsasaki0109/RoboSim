@@ -2,7 +2,9 @@
 
 use crate::error::AssetError;
 use rne_math::Vec3;
+use rne_physics::RigidBodyType;
 use rne_robot::{DiffDriveConfig, DiffDriveDriveMode};
+use rne_urdf_import::{UrdfArticulationConfig, UrdfSpawnConfig};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -105,6 +107,28 @@ pub struct DiffDriveRobotAsset {
 pub struct UrdfRobotAsset {
     /// Path to the URDF file, relative to the robot asset directory unless absolute.
     pub path: String,
+    /// Initial base translation in meters.
+    #[serde(default = "default_initial_translation_m")]
+    pub initial_translation_m: [f64; 3],
+    /// Rigid-body type applied to the URDF base link.
+    #[serde(default)]
+    pub base_body_type: UrdfBaseBodyType,
+    /// When true, Rapier revolute joints and velocity motors are attached.
+    #[serde(default)]
+    pub articulation: bool,
+}
+
+/// Base rigid-body type for URDF robot assets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UrdfBaseBodyType {
+    /// Kinematic base (default URDF spawn).
+    #[default]
+    Kinematic,
+    /// Fixed base.
+    Fixed,
+    /// Dynamic base (mobile platforms).
+    Dynamic,
 }
 
 impl DiffDriveRobotAsset {
@@ -126,6 +150,32 @@ impl UrdfRobotAsset {
     /// Resolves the URDF path relative to a base directory.
     pub fn resolve_path(&self, base_dir: &Path) -> PathBuf {
         resolve_asset_path(&self.path, base_dir)
+    }
+
+    /// Builds a URDF spawn configuration from this asset section.
+    pub fn to_spawn_config(&self) -> UrdfSpawnConfig {
+        UrdfSpawnConfig {
+            base_body_type: self.base_body_type.into(),
+            ..UrdfSpawnConfig::default()
+        }
+    }
+
+    /// Builds an articulation configuration from this asset section.
+    pub fn to_articulation_config(&self) -> UrdfArticulationConfig {
+        UrdfArticulationConfig {
+            base_body_type: self.base_body_type.into(),
+            ..UrdfArticulationConfig::default()
+        }
+    }
+}
+
+impl From<UrdfBaseBodyType> for RigidBodyType {
+    fn from(value: UrdfBaseBodyType) -> Self {
+        match value {
+            UrdfBaseBodyType::Kinematic => RigidBodyType::Kinematic,
+            UrdfBaseBodyType::Fixed => RigidBodyType::Fixed,
+            UrdfBaseBodyType::Dynamic => RigidBodyType::Dynamic,
+        }
     }
 }
 
@@ -280,10 +330,32 @@ mount_offset_m = [0.0, 0.25, 0.0]
     }
 
     #[test]
+    fn parse_urdf_robot_asset_with_spawn_options() {
+        let text = r#"
+kind = "urdf"
+model_name = "mm_mobile"
+
+[urdf]
+path = "mm_mobile.urdf"
+base_body_type = "dynamic"
+initial_translation_m = [0.0, 0.25, 0.0]
+articulation = true
+"#;
+        let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
+        let urdf = asset.urdf.expect("urdf section");
+        assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Dynamic);
+        assert!(urdf.articulation);
+        assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
+    }
+
+    #[test]
     fn parse_urdf_robot_asset() {
         let asset = parse_robot_asset(URDF, Path::new("test.toml")).unwrap();
         assert_eq!(asset.kind, RobotKind::Urdf);
-        assert_eq!(asset.urdf.unwrap().path, "minimal_diff_drive.urdf");
+        let urdf = asset.urdf.unwrap();
+        assert_eq!(urdf.path, "minimal_diff_drive.urdf");
+        assert!(!urdf.articulation);
+        assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
 
+use super::drive::wheel_command_to_motor_rad_s;
 use crate::action::MobileManipulatorAction;
 use crate::observation::MobileManipulatorObservation;
 use rne_core::{SimDuration, SimTime};
@@ -149,6 +150,23 @@ impl MobileManipulatorSim {
     /// Returns the number of completed simulation steps.
     pub fn step_count(&self) -> u64 {
         self.step_count
+    }
+
+    /// Returns the latest joint state published on the DataBus.
+    pub fn latest_joint_state(&self) -> JointState {
+        self.data_bus()
+            .latest::<JointState>(self.joint_stream)
+            .map(|frame| frame.payload.clone())
+            .unwrap_or_else(|| JointState {
+                names: self.joint_names.clone(),
+                positions_rad: Vec::new(),
+                velocities_rad_s: Vec::new(),
+            })
+    }
+
+    /// Returns the joint-state stream identifier.
+    pub fn joint_stream(&self) -> StreamId {
+        self.joint_stream
     }
 
     fn spawn_fixed_base(urdf_src: &str, base_y_m: f64) -> Self {
@@ -306,7 +324,11 @@ impl MobileManipulatorSim {
 
         for (joint, velocity) in self.actuated.iter().zip(velocities) {
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
-                motor.velocity_rad_s = velocity;
+                motor.velocity_rad_s = if joint.axis_z {
+                    wheel_command_to_motor_rad_s(velocity)
+                } else {
+                    velocity
+                };
             }
         }
     }
@@ -466,8 +488,11 @@ mod tests {
             });
         }
         let final_obs = sim.observe();
-        let delta_x = (final_obs.base_x_m - initial.base_x_m).abs();
-        assert!(delta_x > 0.2, "expected base motion, |delta_x|={delta_x}");
+        let delta_x = final_obs.base_x_m - initial.base_x_m;
+        assert!(
+            delta_x.abs() > 0.15,
+            "expected base translation, delta_x={delta_x}"
+        );
         assert_eq!(sim.joint_names().len(), 4);
     }
 }

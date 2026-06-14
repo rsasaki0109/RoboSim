@@ -18,11 +18,11 @@ Primary development target after v0.5. See [architecture/006_mobile_manipulator.
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
 | A | Physics | URDF → Rapier revolute chain, `JointMotor` on arm | Done (`attach_urdf_articulation`, parent-aware sync) |
-| A | Assets | Minimal mobile-manipulator URDF + `.rne.scene.toml` | Done (`assets/robots/mm_minimal/`) |
+| A | Assets | Minimal mobile-manipulator URDF + `.rne.scene.toml` | Done (`mm_minimal`, `mm_mobile` scene) |
 | B | AI | `MobileManipulatorSim`, joint/EE observations, reach example | Done (`MobileManipulatorSim`, `21_mobile_manipulator_reach`) |
 | B | Rendering | Arm teleop in interactive viewer | Done (`--manipulator`, `--manipulator-mobile`) |
 | C | Manipulation | Gripper, wrist camera, pick/transport episodes | Planned |
-| D | ROS 2 | `/joint_states`, base + arm command topics | Partial (`/joint_states` for diff-drive wheels; arm commands planned) |
+| D | ROS 2 | `/joint_states`, base + arm command topics | Done (`mm_mobile` mode: 4 joints, `/cmd_vel`, `/arm_joint_velocity`) |
 
 ### v0.6 candidates (detail)
 

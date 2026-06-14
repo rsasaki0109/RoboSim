@@ -27,8 +27,9 @@ pub use agent::{
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim,
-    VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
+    mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
+    DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim, VectorizedDiffDriveConfig,
+    VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{

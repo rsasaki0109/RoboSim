@@ -2,7 +2,7 @@ kind = "urdf"
 model_name = "mm_mobile"
 
 [urdf]
-path = "mm_mobile/mm_mobile.urdf"
+path = "../../../rne_urdf_import/tests/fixtures/mm_mobile.urdf"
 base_body_type = "dynamic"
 initial_translation_m = [0.0, 0.25, 0.0]
 articulation = true

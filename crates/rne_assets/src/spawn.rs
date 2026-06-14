@@ -9,7 +9,9 @@ use rne_math::{Quat, Vec3};
 use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
-use rne_urdf_import::{attach_urdf_visuals, parse_urdf_file};
+use rne_urdf_import::{
+    attach_urdf_articulation, attach_urdf_visuals, parse_urdf_file, spawn_urdf_robot_with_config,
+};
 use rne_world::{spawn_world, Gravity, Transform3, WorldEntity};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -82,9 +84,53 @@ pub fn spawn_robot_asset(
                 lidar_mount,
             ))
         }
-        RobotKind::Urdf => Err(AssetError::UnsupportedRobotKind {
-            kind: "urdf".into(),
-        }),
+        RobotKind::Urdf => {
+            let section = asset
+                .urdf
+                .as_ref()
+                .ok_or_else(|| AssetError::invalid("robot", "missing urdf section"))?;
+            let base_dir = asset_path.parent().unwrap_or_else(|| Path::new("."));
+            let urdf_path = section.resolve_path(base_dir);
+            let urdf = parse_urdf_file(&urdf_path).map_err(|error| {
+                AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!("urdf parse failed ({}): {error}", urdf_path.display()),
+                )
+            })?;
+
+            let spawned = spawn_urdf_robot_with_config(world, &urdf, section.to_spawn_config())
+                .map_err(|error| {
+                    AssetError::invalid(
+                        asset_path.display().to_string(),
+                        format!("urdf spawn failed: {error}"),
+                    )
+                })?;
+
+            if section.articulation {
+                attach_urdf_articulation(world, &urdf, &spawned, section.to_articulation_config())
+                    .map_err(|error| {
+                        AssetError::invalid(
+                            asset_path.display().to_string(),
+                            format!("urdf articulation failed: {error}"),
+                        )
+                    })?;
+            }
+
+            world
+                .entity_mut(spawned.base_link)
+                .insert(Transform3::from_translation_rotation(
+                    vec3_from_array(section.initial_translation_m),
+                    Quat::IDENTITY,
+                ));
+
+            Ok((
+                SpawnedRobot {
+                    robot: spawned.robot,
+                    base_link: spawned.base_link,
+                },
+                None,
+            ))
+        }
     }
 }
 
@@ -301,9 +347,11 @@ fn collect_robot_links(world: &mut World, robot: Entity) -> HashMap<String, Enti
 
 #[cfg(test)]
 mod tests {
-    use crate::{load_and_spawn_scene, spawn_robot_asset, AssetError};
+    use super::collect_robot_links;
+    use crate::{load_and_spawn_scene, spawn_robot_asset};
     use rne_ecs::World;
     use rne_physics::RigidBody;
+    use rne_robot::Link;
     use rne_sensor::Sensor;
     use rne_world::WorldEntity;
     use std::path::Path;
@@ -376,12 +424,26 @@ ray_count = 64
     }
 
     #[test]
-    fn urdf_robot_asset_cannot_spawn_in_core_loader() {
+    fn urdf_robot_asset_spawns_without_articulation() {
         let robot_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/diff_drive_urdf.rne.robot.toml");
         let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
         let mut world = World::new();
-        let error = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap_err();
-        assert!(matches!(error, AssetError::UnsupportedRobotKind { .. }));
+        let (spawned, lidar) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
+        assert!(lidar.is_none());
+        assert!(world.get::<RigidBody>(spawned.base_link).is_some());
+        assert!(world.get::<Link>(spawned.base_link).is_some());
+    }
+
+    #[test]
+    fn urdf_robot_asset_spawns_with_articulation() {
+        let robot_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mm_mobile.rne.robot.toml");
+        let asset = crate::robot::load_robot_asset(&robot_path).unwrap();
+        let mut world = World::new();
+        let (spawned, _) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
+        let links = collect_robot_links(&mut world, spawned.robot);
+        let left_wheel = links["left_wheel"];
+        assert!(world.get::<rne_physics::JointMotor>(left_wheel).is_some());
     }
 }
