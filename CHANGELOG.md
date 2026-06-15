@@ -15,6 +15,8 @@ All notable changes to Robot Native Engine are documented in this file.
   example 28 evaluating a policy population in lock-step
 - **`rne_py.VectorizedMobileManipulatorEnv`**: Python binding for the batched env; the
   example 27 CEM training loop now evaluates each candidate population through it
+- **Example 27 `train_ppo.py`**: Stable-Baselines3 PPO integration on the reach gym env
+  (the `train.py` CEM loop remains the dependency-free deterministic learning demo)
 - **Prismatic joints**: `rne_physics::PrismaticJointDesc` + Rapier linear motor; URDF
   `type="prismatic"` joints now wire into the articulation (`UrdfArticulationAttached.prismatic_joints`)
 - **Fixed (weld) joints**: `rne_physics::FixedJointDesc` welds a child to a parent at a
