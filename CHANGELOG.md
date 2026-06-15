@@ -13,10 +13,15 @@ All notable changes to Robot Native Engine are documented in this file.
 - **`mm_mobile` URDF**: diff-drive base + 2-DOF arm (`MobileManipulatorSim::new_mm_mobile()`)
 - **Interactive viewer arm teleop** (`14_interactive_viewer --manipulator`): Q/E/Z/X arm keys and EE HUD
 - **ROS 2 `/joint_states`**: wheel joint state published from native `rne_ros2_node` bridge
+- **ROS 2 mobile manipulator mode** (`RNE_ROS2_MODE=mobile_manipulator`): 4-joint `/joint_states`, `/cmd_vel`, `/arm_joint_velocity`
+- **`mm_mobile` scene asset** (`assets/scenes/mm_mobile.rne.scene.toml`) with URDF robot spawn from `.rne.robot.toml`
+- **URDF robot asset spawn** (`rne_assets`): `base_body_type`, `articulation`, and initial pose for `kind = "urdf"`
+- **Mobile base drive helpers** (`mm_mobile_twist_to_wheel_velocities`, unified wheel sign in `MobileManipulatorSim`)
 
 ### Changed
 
 - **Rapier physics sync** uses composed world transforms for parent/child link hierarchies
+- **`xtask ci`**: validates `mm_mobile` / `mm_minimal` assets; smokes examples 20, 21, and viewer `--manipulator-mobile`
 
 ## [0.5.0] - 2026-06-12
 

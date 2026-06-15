@@ -92,3 +92,51 @@ if [[ "$JOINT_COUNT" -lt 1 ]]; then
   echo "expected /joint_states to include left_wheel_joint, got count=${JOINT_COUNT}" >&2
   exit 1
 fi
+
+echo "Running mobile manipulator bridge smoke..."
+kill "$NODE_PID" 2>/dev/null || true
+wait "$NODE_PID" 2>/dev/null || true
+NODE_PID=""
+
+export RNE_ROS2_MODE=mobile_manipulator
+export RNE_ROS2_HOLD_SECS=0
+"$NODE_DIR/target/release/rne_ros2_node" &
+NODE_PID=$!
+
+for _ in $(seq 1 150); do
+  if ros2 service list 2>/dev/null | grep -q '/get_simulation_state'; then
+    break
+  fi
+  if ! kill -0 "$NODE_PID" 2>/dev/null; then
+    echo "mobile rne_ros2_node exited before services became available" >&2
+    wait "$NODE_PID" || true
+    exit 1
+  fi
+  sleep 0.1
+done
+
+MM_JOINTS=$(
+  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
+    | grep -c 'shoulder_joint' \
+    || true
+)
+if [[ "$MM_JOINTS" -lt 1 ]]; then
+  echo "expected mobile /joint_states to include shoulder_joint, got count=${MM_JOINTS}" >&2
+  exit 1
+fi
+
+MM_JOINT_WIDTH=$(
+  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
+    | grep -c '_joint' \
+    || true
+)
+if [[ "$MM_JOINT_WIDTH" -lt 4 ]]; then
+  echo "expected mobile /joint_states to include 4 joints, got count=${MM_JOINT_WIDTH}" >&2
+  exit 1
+fi
+
+echo "Checking /cmd_vel subscription exists..."
+if ! ros2 topic info /cmd_vel 2>/dev/null | grep -q 'Subscription count: 1'; then
+  echo "expected /cmd_vel subscription on mobile bridge" >&2
+  exit 1
+fi

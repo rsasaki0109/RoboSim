@@ -38,6 +38,7 @@ members = [
   "examples/18_readme_hero",
   "examples/19_lidar_render",
   "examples/20_mobile_manipulator_arm",
+  "examples/21_mobile_manipulator_reach",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",

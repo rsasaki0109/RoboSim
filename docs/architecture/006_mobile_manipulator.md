@@ -30,14 +30,14 @@ Initial reference robot: **minimal URDF mobile manipulator** (diff base + 2–3 
 |-------|--------|
 | ECS `Robot` / `Link` / `Joint` / `Actuator` | Ready |
 | URDF parse + spawn (revolute, prismatic, fixed) | Ready (ECS graph + visuals/colliders) |
-| Rapier revolute joints + `JointMotor` | Ready (used by joint-driven diff-drive) |
+| Rapier revolute joints + `JointMotor` | Ready (`attach_urdf_articulation`, joint-driven diff-drive) |
 | Rapier prismatic joints | **Not wired** from URDF |
-| URDF → Rapier articulated chain | **Not wired** (joints are ECS-only today) |
+| URDF → Rapier articulated chain | Ready (`attach_urdf_articulation`, URDF robot assets with `articulation = true`) |
 | Diff-drive kinematics + `DiffDriveSim` | Ready |
-| Combined base + arm environment | **Partial** (`MobileManipulatorSim::new_mm_mobile`, `mm_mobile.urdf`) |
+| Combined base + arm environment | Ready (`MobileManipulatorSim::new_mm_mobile`, `mm_mobile` scene asset) |
 | Gripper / contact-rich manipulation | **Missing** |
 | Arm trajectory / IK | **Missing** |
-| ROS `/joint_states`, arm commands | **Partial** (`/joint_states` for diff-drive wheels; arm commands planned) |
+| ROS `/joint_states`, arm commands | Ready (`RNE_ROS2_MODE=mobile_manipulator`: 4 joints, `/cmd_vel`, `/arm_joint_velocity`) |
 
 ## Architecture (robot-native)
 

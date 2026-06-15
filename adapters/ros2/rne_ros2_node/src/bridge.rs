@@ -1,4 +1,4 @@
-//! ROS 2 bridge loop: headless diff-drive sim → topics + simulation_interfaces control.
+//! ROS 2 bridge loop: headless sim → topics + simulation_interfaces control.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context as _, Result};
 use rclrs::{
     Context, CreateBasicExecutor, Executor, MandatoryParameter, Publisher, RclReturnCode,
-    RclrsError, RequestedGoal, SpinOptions, TerminatedGoal,
+    RclrsError, RequestedGoal, SpinOptions, Subscription, TerminatedGoal,
 };
 use rne_adapter_ros2::{
     pointcloud_to_laserscan, to_ros_clock, to_ros_joint_state, to_ros_pointcloud2,
@@ -30,11 +30,13 @@ use crate::convert::{
     to_clock_message, to_joint_state_message, to_laserscan_message, to_pointcloud2_message,
     to_tf_message,
 };
-use crate::sim_control::{BridgeFrame, BridgeSim};
+use crate::sim_control::{BridgeFrame, BridgeMode, BridgeSim, BridgeSnapshot, StepFallback};
 
 const SIM_STEPS: usize = 300;
 const MIN_FORWARD_X_M: f64 = 0.8;
 const MIN_LIDAR_HITS: usize = 8;
+const MIN_MOBILE_BASE_MOTION_M: f64 = 0.15;
+const MIN_MOBILE_JOINTS: usize = 4;
 
 type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
@@ -50,6 +52,18 @@ struct BridgeLoop {
     tf_pub: TfPublisher,
     joint_state_pub: JointStatePublisher,
     wheel_velocity: MandatoryParameter<f64>,
+    shoulder_velocity: MandatoryParameter<f64>,
+    elbow_velocity: MandatoryParameter<f64>,
+}
+
+struct BridgeHandles {
+    _reset: rclrs::Service<ResetSimulation>,
+    _get_state: rclrs::Service<GetSimulationState>,
+    _set_state: rclrs::Service<SetSimulationState>,
+    _step: rclrs::Service<StepSimulation>,
+    _simulate_steps: rclrs::ActionServer<SimulateSteps>,
+    _cmd_vel: Option<Subscription<geometry_msgs::msg::Twist>>,
+    _arm_joint_velocity: Option<Subscription<sensor_msgs::msg::JointState>>,
 }
 
 impl BridgeLoop {
@@ -61,6 +75,8 @@ impl BridgeLoop {
         tf_pub: TfPublisher,
         joint_state_pub: JointStatePublisher,
         wheel_velocity: MandatoryParameter<f64>,
+        shoulder_velocity: MandatoryParameter<f64>,
+        elbow_velocity: MandatoryParameter<f64>,
     ) -> Self {
         Self {
             sim: Mutex::new(sim),
@@ -70,11 +86,21 @@ impl BridgeLoop {
             tf_pub,
             joint_state_pub,
             wheel_velocity,
+            shoulder_velocity,
+            elbow_velocity,
         }
     }
 
-    fn wheel_velocity(&self) -> f64 {
-        self.wheel_velocity.get()
+    fn mode(&self) -> BridgeMode {
+        self.sim.lock().expect("bridge sim lock").mode()
+    }
+
+    fn fallback(&self) -> StepFallback {
+        StepFallback {
+            wheel_velocity_rad_s: self.wheel_velocity.get(),
+            shoulder_velocity_rad_s: self.shoulder_velocity.get(),
+            elbow_velocity_rad_s: self.elbow_velocity.get(),
+        }
     }
 
     fn publish_current(&self) -> Result<()> {
@@ -91,7 +117,7 @@ impl BridgeLoop {
 
     fn tick_playing(&self) -> Result<bool> {
         let mut sim = self.sim.lock().expect("bridge sim lock");
-        if !sim.step_if_playing(self.wheel_velocity()) {
+        if !sim.step_if_playing(self.fallback()) {
             return Ok(false);
         }
         let frame = sim.frame();
@@ -126,6 +152,16 @@ pub fn run() -> Result<()> {
         .default(6.0)
         .mandatory()
         .context("declare wheel_velocity_rad_s parameter")?;
+    let shoulder_velocity = node
+        .declare_parameter("shoulder_velocity_rad_s")
+        .default(0.0)
+        .mandatory()
+        .context("declare shoulder_velocity_rad_s parameter")?;
+    let elbow_velocity = node
+        .declare_parameter("elbow_velocity_rad_s")
+        .default(0.0)
+        .mandatory()
+        .context("declare elbow_velocity_rad_s parameter")?;
 
     let clock_pub = node
         .create_publisher::<rosgraph_msgs::msg::Clock>("/clock")
@@ -151,39 +187,83 @@ pub fn run() -> Result<()> {
         tf_pub,
         joint_state_pub,
         wheel_velocity,
+        shoulder_velocity,
+        elbow_velocity,
     ));
 
+    let mode = bridge.mode();
     let _handles = register_services(&node, Arc::clone(&bridge))?;
 
-    eprintln!("Driving headless diff-drive via rne_ai");
+    match mode {
+        BridgeMode::DiffDrive => eprintln!("Driving headless diff-drive via rne_ai"),
+        BridgeMode::MobileManipulator => {
+            eprintln!("Driving headless mm_mobile via rne_ai (RNE_ROS2_MODE=mobile_manipulator)")
+        }
+    }
 
     let mut steps = 0_usize;
-    let mut last_obs = bridge.with_sim(|sim| *sim.observation());
+    let mut last_snapshot = bridge.with_sim(|sim| sim.snapshot());
 
     while steps < SIM_STEPS {
         if bridge.tick_playing()? {
             steps += 1;
-            last_obs = bridge.with_sim(|sim| *sim.observation());
+            last_snapshot = bridge.with_sim(|sim| sim.snapshot());
             if steps % 60 == 0 {
-                eprintln!("step {steps}: base_x={:.2} m", last_obs.base_x_m);
+                eprintln!("step {steps}: base_x={:.2} m", last_snapshot.base_x_m);
             }
         }
         spin_once(&mut executor)?;
     }
 
-    eprintln!("final base_x={:.2} m", last_obs.base_x_m);
-    if last_obs.base_x_m < MIN_FORWARD_X_M {
-        bail!("expected forward motion from diff-drive policy");
-    }
-    if last_obs.lidar_points < MIN_LIDAR_HITS {
-        bail!(
-            "expected lidar hits from scene sim, got {}",
-            last_obs.lidar_points
-        );
-    }
+    eprintln!(
+        "final base_x={:.2} m joints={}",
+        last_snapshot.base_x_m, last_snapshot.joint_count
+    );
+    verify_smoke(mode, &last_snapshot)?;
 
     hold_ros_graph_for_smoke(&bridge, &mut executor)?;
 
+    Ok(())
+}
+
+fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot) -> Result<()> {
+    match mode {
+        BridgeMode::DiffDrive => {
+            if snapshot.base_x_m < MIN_FORWARD_X_M {
+                bail!("expected forward motion from diff-drive policy");
+            }
+            if snapshot.lidar_points < MIN_LIDAR_HITS {
+                bail!(
+                    "expected lidar hits from scene sim, got {}",
+                    snapshot.lidar_points
+                );
+            }
+            if snapshot.joint_count < 2 {
+                bail!(
+                    "expected wheel joints in /joint_states, got {}",
+                    snapshot.joint_count
+                );
+            }
+        }
+        BridgeMode::MobileManipulator => {
+            if snapshot.base_x_m.abs() < MIN_MOBILE_BASE_MOTION_M {
+                bail!(
+                    "expected mobile base motion, |base_x|={:.3} m",
+                    snapshot.base_x_m
+                );
+            }
+            if snapshot.joint_count < MIN_MOBILE_JOINTS {
+                bail!(
+                    "expected {} joints in /joint_states, got {}",
+                    MIN_MOBILE_JOINTS,
+                    snapshot.joint_count
+                );
+            }
+            if !snapshot.has_shoulder_joint {
+                bail!("expected shoulder_joint in /joint_states");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -203,14 +283,6 @@ fn hold_ros_graph_for_smoke(bridge: &Arc<BridgeLoop>, executor: &mut Executor) -
         spin_once(executor)?;
     }
     Ok(())
-}
-
-struct BridgeHandles {
-    _reset: rclrs::Service<ResetSimulation>,
-    _get_state: rclrs::Service<GetSimulationState>,
-    _set_state: rclrs::Service<SetSimulationState>,
-    _step: rclrs::Service<StepSimulation>,
-    _simulate_steps: rclrs::ActionServer<SimulateSteps>,
 }
 
 fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<BridgeHandles> {
@@ -252,9 +324,8 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         .create_service::<StepSimulation, _>(
             "/step_simulation",
             move |request: StepSimulation_Request| {
-                let wheel_velocity = step_bridge.wheel_velocity();
                 let step_result = step_bridge
-                    .with_sim(|sim| sim.step_while_paused(request.steps, wheel_velocity));
+                    .with_sim(|sim| sim.step_while_paused(request.steps, step_bridge.fallback()));
                 let publish_result = match step_result {
                     Ok(()) => step_bridge.publish_current(),
                     Err(result) => return StepSimulation_Response { result },
@@ -269,11 +340,18 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         )
         .context("create step_simulation service")?;
 
+    let action_bridge = Arc::clone(&bridge);
     let action = node
         .create_action_server("/simulate_steps", move |handle| {
-            simulate_steps_action(handle, Arc::clone(&bridge))
+            simulate_steps_action(handle, Arc::clone(&action_bridge))
         })
         .context("create simulate_steps action server")?;
+
+    let (_cmd_vel, _arm_joint_velocity) = if bridge.mode() == BridgeMode::MobileManipulator {
+        register_mobile_subscribers(node, Arc::clone(&bridge))?
+    } else {
+        (None, None)
+    };
 
     Ok(BridgeHandles {
         _reset,
@@ -281,7 +359,52 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _set_state,
         _step,
         _simulate_steps: action,
+        _cmd_vel,
+        _arm_joint_velocity,
     })
+}
+
+fn register_mobile_subscribers(
+    node: &rclrs::Node,
+    bridge: Arc<BridgeLoop>,
+) -> Result<(
+    Option<Subscription<geometry_msgs::msg::Twist>>,
+    Option<Subscription<sensor_msgs::msg::JointState>>,
+)> {
+    let cmd_bridge = Arc::clone(&bridge);
+    let cmd_vel = node
+        .create_subscription("/cmd_vel", move |msg: geometry_msgs::msg::Twist| {
+            cmd_bridge.with_sim(|sim| {
+                sim.set_cmd_vel(msg.linear.x, msg.angular.z);
+            });
+        })
+        .context("create /cmd_vel subscription")?;
+
+    let arm_bridge = Arc::clone(&bridge);
+    let arm_joint_velocity = node
+        .create_subscription(
+            "/arm_joint_velocity",
+            move |msg: sensor_msgs::msg::JointState| {
+                let (shoulder, elbow) = arm_velocities_from_joint_state(&msg);
+                arm_bridge.with_sim(|sim| sim.set_arm_joint_velocities(shoulder, elbow));
+            },
+        )
+        .context("create /arm_joint_velocity subscription")?;
+
+    Ok((Some(cmd_vel), Some(arm_joint_velocity)))
+}
+
+fn arm_velocities_from_joint_state(msg: &sensor_msgs::msg::JointState) -> (f64, f64) {
+    let mut shoulder = 0.0;
+    let mut elbow = 0.0;
+    for (name, velocity) in msg.name.iter().zip(msg.velocity.iter()) {
+        match name.as_str() {
+            "shoulder_joint" => shoulder = *velocity,
+            "elbow_joint" => elbow = *velocity,
+            _ => {}
+        }
+    }
+    (shoulder, elbow)
 }
 
 async fn simulate_steps_action(
@@ -304,8 +427,8 @@ async fn simulate_steps_action(
     };
 
     for completed in 1..=steps {
-        let wheel_velocity = bridge.wheel_velocity();
-        let step_result = bridge.with_sim(|sim| sim.step_while_paused(1, wheel_velocity));
+        let fallback = bridge.fallback();
+        let step_result = bridge.with_sim(|sim| sim.step_while_paused(1, fallback));
         if let Err(result) = step_result {
             return executing.aborted_with(SimulateSteps_Result { result });
         }
@@ -335,10 +458,9 @@ fn publish_frame(
     frame: &BridgeFrame,
 ) -> Result<()> {
     let sim_time = rne_core::SimTime::from_ticks(frame.sim_ticks);
-    let obs = &frame.obs;
     let base = Transform3::from_translation_rotation(
-        Vec3::new(obs.base_x_m, obs.base_y_m, obs.base_z_m),
-        Quat::from_rotation_y(obs.base_yaw_rad),
+        Vec3::new(frame.base_x_m, frame.base_y_m, frame.base_z_m),
+        Quat::from_rotation_y(frame.base_yaw_rad),
     );
 
     let clock = to_ros_clock(sim_time);
@@ -353,7 +475,8 @@ fn publish_frame(
         .context("publish /points")?;
 
     if let (Some(lidar_world), Some(spec)) = (&frame.lidar_world, frame.lidar_spec) {
-        let scan = pointcloud_to_laserscan(&frame.lidar_cloud, lidar_world, &spec, sim_time, "lidar");
+        let scan =
+            pointcloud_to_laserscan(&frame.lidar_cloud, lidar_world, &spec, sim_time, "lidar");
         scan_pub
             .publish(to_laserscan_message(&scan))
             .context("publish /scan")?;
@@ -450,5 +573,22 @@ fn spin_once(executor: &mut Executor) -> Result<()> {
             ..
         }] => Ok(()),
         [error, ..] => Err(anyhow::anyhow!("executor spin_once failed: {error:?}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arm_velocities_map_by_joint_name() {
+        let msg = sensor_msgs::msg::JointState {
+            name: vec!["elbow_joint".into(), "shoulder_joint".into()],
+            velocity: vec![0.5, 1.5],
+            ..Default::default()
+        };
+        let (shoulder, elbow) = arm_velocities_from_joint_state(&msg);
+        assert!((shoulder - 1.5).abs() < f64::EPSILON);
+        assert!((elbow - 0.5).abs() < f64::EPSILON);
     }
 }

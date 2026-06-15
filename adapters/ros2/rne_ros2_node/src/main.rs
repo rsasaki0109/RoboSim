@@ -1,4 +1,5 @@
 mod bridge;
+mod cmd_vel;
 mod convert;
 mod sim_control;
 

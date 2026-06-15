@@ -33,15 +33,32 @@ fn ci() -> anyhow::Result<()> {
     run_step("cargo clippy --workspace --all-targets -- -D warnings")?;
     run_step("cargo test --workspace")?;
     validate_repo_assets()?;
+    run_example_smokes()?;
+    Ok(())
+}
+
+fn run_example_smokes() -> anyhow::Result<()> {
+    run_step("cargo run -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke")?;
+    run_step(
+        "cargo run -p mobile_manipulator_reach --example 21_mobile_manipulator_reach -- --smoke",
+    )?;
+    run_step(
+        "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-mobile",
+    )?;
     Ok(())
 }
 
 fn validate_repo_assets() -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let scenes = [root.join("assets/scenes/episode_diff_drive.rne.scene.toml")];
+    let scenes = [
+        root.join("assets/scenes/episode_diff_drive.rne.scene.toml"),
+        root.join("assets/scenes/mm_mobile.rne.scene.toml"),
+    ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),
         root.join("assets/robots/diff_drive_urdf.rne.robot.toml"),
+        root.join("assets/robots/mm_minimal.rne.robot.toml"),
+        root.join("assets/robots/mm_mobile.rne.robot.toml"),
     ];
 
     for scene in scenes {
