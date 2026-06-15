@@ -64,6 +64,9 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p mobile_manipulator_curriculum --example 29_mobile_manipulator_curriculum -- --smoke",
     )?;
     run_step(
+        "cargo run -p mobile_manipulator_lift --example 30_mobile_manipulator_lift -- --smoke",
+    )?;
+    run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
     )?;
     run_step(
@@ -80,12 +83,14 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_minimal.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal_grasp.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal_transport.rne.scene.toml"),
+        root.join("assets/scenes/mm_lift.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),
         root.join("assets/robots/diff_drive_urdf.rne.robot.toml"),
         root.join("assets/robots/mm_minimal.rne.robot.toml"),
         root.join("assets/robots/mm_mobile.rne.robot.toml"),
+        root.join("assets/robots/mm_lift.rne.robot.toml"),
     ];
 
     for scene in scenes {
