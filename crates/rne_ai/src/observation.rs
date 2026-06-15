@@ -75,4 +75,10 @@ pub struct MobileManipulatorObservation {
     pub wrist_camera_pixels: usize,
     /// Number of joints in the latest DataBus joint-state frame.
     pub joint_state_count: usize,
+    /// Goal-relative end-effector X offset (target_x - ee_x), zero when no goal.
+    pub target_dx_m: f64,
+    /// Goal-relative end-effector Y offset (target_y - ee_y), zero when no goal.
+    pub target_dy_m: f64,
+    /// Goal-relative end-effector Z offset (target_z - ee_z), zero when no goal.
+    pub target_dz_m: f64,
 }

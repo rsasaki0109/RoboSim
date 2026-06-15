@@ -14,11 +14,12 @@ use sim::{
 fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
     match task {
         "reach" => Ok(MobileManipulatorEpisodeConfig::reach()),
+        "reach_random" => Ok(MobileManipulatorEpisodeConfig::reach_randomized(0)),
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'place', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'place', 'transport', or 'inspect'"
         ))),
     }
 }
@@ -328,6 +329,21 @@ impl PyMmObservation {
     #[getter]
     fn joint_state_count(&self) -> usize {
         self.inner.joint_state_count
+    }
+
+    #[getter]
+    fn target_dx(&self) -> f64 {
+        self.inner.target_dx_m
+    }
+
+    #[getter]
+    fn target_dy(&self) -> f64 {
+        self.inner.target_dy_m
+    }
+
+    #[getter]
+    fn target_dz(&self) -> f64 {
+        self.inner.target_dz_m
     }
 
     fn __repr__(&self) -> String {
