@@ -38,6 +38,13 @@ pub fn mm_lift_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_lift.rne.scene.toml")
 }
 
+/// Scene asset with a cube on the ground under the lift robot's top-down gripper,
+/// for vertical pick-and-lift tests.
+pub fn mm_lift_pick_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_lift_pick.rne.scene.toml")
+}
+
 /// Scene asset with a tabletop cube for gripper contact smoke tests.
 pub fn mm_minimal_grasp_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1030,6 +1037,59 @@ mod tests {
         assert!(
             max_drift < 0.06,
             "the commanded arm pose should hold steady, max drift={max_drift:.3} m"
+        );
+    }
+
+    #[test]
+    fn lift_picks_cube_off_ground_and_raises_it() {
+        // Phase 3 of the manipulator redesign: the top-down claw lowers over a cube on
+        // the ground, grasps it (contact-triggered weld), and the lift raises it — a real
+        // 3D pick that the previous side-grip geometry could not perform.
+        let scene = mm_lift_pick_scene_path();
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load mm_lift_pick");
+
+        // Settle, then lower the gripper down around the cube.
+        for _ in 0..150 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..200 {
+            sim.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        // Close the claw to grasp the cube.
+        for _ in 0..150 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+            if sim.is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            sim.is_grasping(),
+            "claw should grasp the cube on the ground"
+        );
+        let grasped_y = sim.named_translation_m("lift_cube").expect("cube").1;
+
+        // Raise the lift; the grasped cube must come up off the ground with it.
+        for _ in 0..200 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.0,
+                lift_velocity_m_s: 0.3,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let lifted_y = sim.named_translation_m("lift_cube").expect("cube").1;
+        assert!(
+            lifted_y > grasped_y + 0.4,
+            "grasped cube should be lifted off the ground: grasped_y={grasped_y:.3}, lifted_y={lifted_y:.3}"
+        );
+        assert!(
+            lifted_y > 0.5,
+            "lifted cube should be well off the ground, y={lifted_y:.3}"
         );
     }
 
