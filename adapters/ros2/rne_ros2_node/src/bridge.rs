@@ -72,6 +72,7 @@ struct BridgeHandles {
     _gripper_command: Option<Subscription<std_msgs::msg::Float64>>,
     _arm_joint_position: Option<Subscription<sensor_msgs::msg::JointState>>,
     _arm_joint_trajectory: Option<Subscription<trajectory_msgs::msg::JointTrajectory>>,
+    _lift_command: Option<Subscription<std_msgs::msg::Float64>>,
 }
 
 impl BridgeLoop {
@@ -390,10 +391,11 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _gripper_command,
         _arm_joint_position,
         _arm_joint_trajectory,
+        _lift_command,
     ) = if bridge.mode() == BridgeMode::MobileManipulator {
         register_mobile_subscribers(node, Arc::clone(&bridge))?
     } else {
-        (None, None, None, None, None)
+        (None, None, None, None, None, None)
     };
 
     Ok(BridgeHandles {
@@ -407,6 +409,7 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _gripper_command,
         _arm_joint_position,
         _arm_joint_trajectory,
+        _lift_command,
     })
 }
 
@@ -420,6 +423,7 @@ fn register_mobile_subscribers(
     Option<Subscription<std_msgs::msg::Float64>>,
     Option<Subscription<sensor_msgs::msg::JointState>>,
     Option<Subscription<trajectory_msgs::msg::JointTrajectory>>,
+    Option<Subscription<std_msgs::msg::Float64>>,
 )> {
     let cmd_bridge = Arc::clone(&bridge);
     let cmd_vel = node
@@ -447,6 +451,13 @@ fn register_mobile_subscribers(
             gripper_bridge.with_sim(|sim| sim.set_gripper_velocity(msg.data));
         })
         .context("create /gripper_command subscription")?;
+
+    let lift_bridge = Arc::clone(&bridge);
+    let lift_command = node
+        .create_subscription("/lift_command", move |msg: std_msgs::msg::Float64| {
+            lift_bridge.with_sim(|sim| sim.set_lift_velocity(msg.data));
+        })
+        .context("create /lift_command subscription")?;
 
     let position_bridge = Arc::clone(&bridge);
     let arm_joint_position = node
@@ -479,6 +490,7 @@ fn register_mobile_subscribers(
         Some(gripper_command),
         Some(arm_joint_position),
         Some(arm_joint_trajectory),
+        Some(lift_command),
     ))
 }
 
