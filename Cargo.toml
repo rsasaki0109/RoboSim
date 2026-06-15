@@ -48,6 +48,7 @@ members = [
   "examples/29_mobile_manipulator_curriculum",
   "examples/30_mobile_manipulator_lift",
   "examples/31_mobile_manipulator_lift_pick_place",
+  "examples/32_lift_pick_place_hero",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",
