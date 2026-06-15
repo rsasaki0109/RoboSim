@@ -181,3 +181,28 @@ fn falling_cube_hash_is_repeatable() {
     assert_eq!(first, second);
     assert_ne!(first, 0);
 }
+
+fn run_mobile_manipulator_reach(steps: u32) -> u64 {
+    use rne_ai::{
+        Episode, MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    };
+
+    let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach());
+    let _ = episode.reset();
+    let action = MobileManipulatorAction {
+        shoulder_velocity_rad_s: -3.0,
+        ..MobileManipulatorAction::default()
+    };
+    for _ in 0..steps {
+        episode.step(action);
+    }
+    hash_physics_state(episode.simulation().world())
+}
+
+#[test]
+fn mobile_manipulator_reach_hash_is_repeatable() {
+    let first = run_mobile_manipulator_reach(150);
+    let second = run_mobile_manipulator_reach(150);
+    assert_eq!(first, second);
+    assert_ne!(first, 0);
+}
