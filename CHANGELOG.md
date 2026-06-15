@@ -4,6 +4,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Goal-conditioned reach** (`MobileManipulatorEpisodeConfig::reach_randomized`): a fresh
+  reachable target is sampled each episode and exposed in the observation as
+  `target_d{x,y,z}_m`, so a policy must generalize. Exposed to Python as
+  `MobileManipulatorEpisode("reach_random")`; example 27 `train.py` now learns a
+  goal-conditioned policy across varied targets, and the gym env includes the goal offset.
+
 ## [0.8.0] - 2026-06-16
 
 ### Added
