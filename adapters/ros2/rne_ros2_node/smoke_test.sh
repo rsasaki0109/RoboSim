@@ -195,5 +195,14 @@ if ! timeout 20 ros2 topic echo /tf --once --no-lost-messages 2>/dev/null | grep
   exit 1
 fi
 
+echo "Checking /arm_joint_position subscription exists..."
+ARM_POS_SUBS=$(
+  ros2 topic info /arm_joint_position 2>/dev/null | awk '/Subscription count/ {print $3}' || true
+)
+if [[ -z "$ARM_POS_SUBS" || "$ARM_POS_SUBS" -lt 1 ]]; then
+  echo "expected /arm_joint_position subscription on mobile bridge, got count=${ARM_POS_SUBS:-0}" >&2
+  exit 1
+fi
+
 rm -f "$SMOKE_LOG"
 echo "ROS 2 smoke tests passed."

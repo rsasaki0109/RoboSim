@@ -33,6 +33,9 @@ All notable changes to Robot Native Engine are documented in this file.
 - **ROS 2 `/gripper_command`** (`std_msgs/Float64`): drives the gripper in
   `mobile_manipulator` mode (negative closes/grasps, positive opens/releases)
 - **ROS 2 `ee_link` TF frame**: end-effector pose published on `/tf` relative to `base_link`
+- **ROS 2 `/arm_joint_position`** (`sensor_msgs/JointState`): position-control the arm —
+  the node drives `shoulder_joint` / `elbow_joint` toward the commanded positions with a
+  clamped P-controller (a velocity command cancels the target)
 
 ### Fixed
 
