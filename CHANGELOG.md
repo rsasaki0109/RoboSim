@@ -4,6 +4,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Reach helpers** (`ReachTarget`, `ee_distance_to_target_m`, joint/world proportional actions) in `rne_ai`
+- **Example 21 reach smoke**: EE within 5 cm of calibrated target (`--smoke`)
+
 ## [0.6.0] - 2026-06-12
 
 ### Added
