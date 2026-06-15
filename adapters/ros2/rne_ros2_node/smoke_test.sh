@@ -190,7 +190,14 @@ if [[ -z "$GRIPPER_SUBS" || "$GRIPPER_SUBS" -lt 1 ]]; then
 fi
 
 echo "Checking ee_link TF frame is published..."
-if ! timeout 20 ros2 topic echo /tf --once --no-lost-messages 2>/dev/null | grep -q "ee_link"; then
+EE_TF_FOUND=0
+for _ in $(seq 1 10); do
+  if timeout 10 ros2 topic echo /tf --once --no-lost-messages 2>/dev/null | grep -q "ee_link"; then
+    EE_TF_FOUND=1
+    break
+  fi
+done
+if [[ "$EE_TF_FOUND" -ne 1 ]]; then
   echo "expected /tf to include the ee_link frame in mobile manipulator mode" >&2
   exit 1
 fi
@@ -201,6 +208,15 @@ ARM_POS_SUBS=$(
 )
 if [[ -z "$ARM_POS_SUBS" || "$ARM_POS_SUBS" -lt 1 ]]; then
   echo "expected /arm_joint_position subscription on mobile bridge, got count=${ARM_POS_SUBS:-0}" >&2
+  exit 1
+fi
+
+echo "Checking /arm_joint_trajectory subscription exists..."
+ARM_TRAJ_SUBS=$(
+  ros2 topic info /arm_joint_trajectory 2>/dev/null | awk '/Subscription count/ {print $3}' || true
+)
+if [[ -z "$ARM_TRAJ_SUBS" || "$ARM_TRAJ_SUBS" -lt 1 ]]; then
+  echo "expected /arm_joint_trajectory subscription on mobile bridge, got count=${ARM_TRAJ_SUBS:-0}" >&2
   exit 1
 fi
 

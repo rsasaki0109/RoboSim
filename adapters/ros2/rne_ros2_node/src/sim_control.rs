@@ -92,14 +92,18 @@ enum SimBackend {
         sim: MobileManipulatorSim,
         obs: MobileManipulatorObservation,
         command: MobileManipulatorAction,
-        /// Optional (shoulder, elbow) position targets driven by P-control.
+        /// Active (shoulder, elbow) position target driven by P-control.
         arm_target: Option<(f64, f64)>,
+        /// Remaining (shoulder, elbow) trajectory waypoints to visit after `arm_target`.
+        arm_trajectory: std::collections::VecDeque<(f64, f64)>,
     },
 }
 
 /// Proportional gain and velocity clamp for arm joint position control.
 const ARM_POSITION_GAIN: f64 = 8.0;
 const ARM_POSITION_MAX_VELOCITY_RAD_S: f64 = 4.0;
+/// Joint-angle tolerance (rad) for considering a trajectory waypoint reached.
+const ARM_WAYPOINT_TOLERANCE_RAD: f64 = 0.05;
 
 /// Returns the P-control velocity (rad/s) driving `current` toward `target`.
 fn arm_velocity_toward(target: f64, current: f64) -> f64 {
@@ -149,6 +153,7 @@ impl BridgeSim {
                     obs,
                     command: MobileManipulatorAction::default(),
                     arm_target: None,
+                    arm_trajectory: std::collections::VecDeque::new(),
                 }
             }
         };
@@ -264,6 +269,7 @@ impl BridgeSim {
         let SimBackend::MobileManipulator {
             command,
             arm_target,
+            arm_trajectory,
             ..
         } = &mut self.backend
         else {
@@ -272,15 +278,38 @@ impl BridgeSim {
         command.shoulder_velocity_rad_s = shoulder_velocity_rad_s;
         command.elbow_velocity_rad_s = elbow_velocity_rad_s;
         *arm_target = None;
+        arm_trajectory.clear();
     }
 
     /// Sets (shoulder, elbow) joint position targets driven by P-control until reached
     /// (mobile manipulator mode only).
     pub fn set_arm_joint_positions(&mut self, shoulder_position_rad: f64, elbow_position_rad: f64) {
-        let SimBackend::MobileManipulator { arm_target, .. } = &mut self.backend else {
+        let SimBackend::MobileManipulator {
+            arm_target,
+            arm_trajectory,
+            ..
+        } = &mut self.backend
+        else {
             return;
         };
         *arm_target = Some((shoulder_position_rad, elbow_position_rad));
+        arm_trajectory.clear();
+    }
+
+    /// Queues a sequence of (shoulder, elbow) waypoints, visited in order via P-control
+    /// (mobile manipulator mode only).
+    pub fn set_arm_trajectory(&mut self, waypoints: Vec<(f64, f64)>) {
+        let SimBackend::MobileManipulator {
+            arm_target,
+            arm_trajectory,
+            ..
+        } = &mut self.backend
+        else {
+            return;
+        };
+        let mut queue: std::collections::VecDeque<(f64, f64)> = waypoints.into();
+        *arm_target = queue.pop_front();
+        *arm_trajectory = queue;
     }
 
     /// Resets simulation scope per `simulation_interfaces/ResetSimulation`.
@@ -297,10 +326,12 @@ impl BridgeSim {
                     obs,
                     command,
                     arm_target,
+                    arm_trajectory,
                 } => {
                     *obs = sim.reset();
                     *command = MobileManipulatorAction::default();
                     *arm_target = None;
+                    arm_trajectory.clear();
                 }
             }
         }
@@ -383,6 +414,7 @@ impl BridgeSim {
                 obs,
                 command,
                 arm_target,
+                arm_trajectory,
             } => {
                 let mut action = *command;
                 if action.left_wheel_velocity_rad_s.abs() < f64::EPSILON
@@ -404,6 +436,19 @@ impl BridgeSim {
                     action.elbow_velocity_rad_s = fallback.elbow_velocity_rad_s;
                 }
                 *obs = sim.step(action);
+
+                // Advance to the next trajectory waypoint once the current one is reached.
+                if let Some((shoulder_target, elbow_target)) = *arm_target {
+                    let reached = (shoulder_target - obs.shoulder_position_rad).abs()
+                        < ARM_WAYPOINT_TOLERANCE_RAD
+                        && (elbow_target - obs.elbow_position_rad).abs()
+                            < ARM_WAYPOINT_TOLERANCE_RAD;
+                    if reached {
+                        if let Some(next) = arm_trajectory.pop_front() {
+                            *arm_target = Some(next);
+                        }
+                    }
+                }
             }
         }
         self.sim_ticks = self.sim_ticks.saturating_add(SIM_DT_NS);

@@ -71,6 +71,7 @@ struct BridgeHandles {
     _arm_joint_velocity: Option<Subscription<sensor_msgs::msg::JointState>>,
     _gripper_command: Option<Subscription<std_msgs::msg::Float64>>,
     _arm_joint_position: Option<Subscription<sensor_msgs::msg::JointState>>,
+    _arm_joint_trajectory: Option<Subscription<trajectory_msgs::msg::JointTrajectory>>,
 }
 
 impl BridgeLoop {
@@ -383,12 +384,17 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         })
         .context("create simulate_steps action server")?;
 
-    let (_cmd_vel, _arm_joint_velocity, _gripper_command, _arm_joint_position) =
-        if bridge.mode() == BridgeMode::MobileManipulator {
-            register_mobile_subscribers(node, Arc::clone(&bridge))?
-        } else {
-            (None, None, None, None)
-        };
+    let (
+        _cmd_vel,
+        _arm_joint_velocity,
+        _gripper_command,
+        _arm_joint_position,
+        _arm_joint_trajectory,
+    ) = if bridge.mode() == BridgeMode::MobileManipulator {
+        register_mobile_subscribers(node, Arc::clone(&bridge))?
+    } else {
+        (None, None, None, None, None)
+    };
 
     Ok(BridgeHandles {
         _reset,
@@ -400,6 +406,7 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _arm_joint_velocity,
         _gripper_command,
         _arm_joint_position,
+        _arm_joint_trajectory,
     })
 }
 
@@ -412,6 +419,7 @@ fn register_mobile_subscribers(
     Option<Subscription<sensor_msgs::msg::JointState>>,
     Option<Subscription<std_msgs::msg::Float64>>,
     Option<Subscription<sensor_msgs::msg::JointState>>,
+    Option<Subscription<trajectory_msgs::msg::JointTrajectory>>,
 )> {
     let cmd_bridge = Arc::clone(&bridge);
     let cmd_vel = node
@@ -452,11 +460,25 @@ fn register_mobile_subscribers(
         )
         .context("create /arm_joint_position subscription")?;
 
+    let trajectory_bridge = Arc::clone(&bridge);
+    let arm_joint_trajectory = node
+        .create_subscription(
+            "/arm_joint_trajectory",
+            move |msg: trajectory_msgs::msg::JointTrajectory| {
+                let waypoints = arm_trajectory_from_msg(&msg);
+                if !waypoints.is_empty() {
+                    trajectory_bridge.with_sim(|sim| sim.set_arm_trajectory(waypoints));
+                }
+            },
+        )
+        .context("create /arm_joint_trajectory subscription")?;
+
     Ok((
         Some(cmd_vel),
         Some(arm_joint_velocity),
         Some(gripper_command),
         Some(arm_joint_position),
+        Some(arm_joint_trajectory),
     ))
 }
 
@@ -485,6 +507,24 @@ fn arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<
         }
     }
     Some((shoulder?, elbow?))
+}
+
+/// Extracts ordered (shoulder, elbow) waypoints from a joint trajectory message.
+fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> Vec<(f64, f64)> {
+    let shoulder_idx = msg.joint_names.iter().position(|n| n == "shoulder_joint");
+    let elbow_idx = msg.joint_names.iter().position(|n| n == "elbow_joint");
+    let (Some(shoulder_idx), Some(elbow_idx)) = (shoulder_idx, elbow_idx) else {
+        return Vec::new();
+    };
+    msg.points
+        .iter()
+        .filter_map(|point| {
+            Some((
+                *point.positions.get(shoulder_idx)?,
+                *point.positions.get(elbow_idx)?,
+            ))
+        })
+        .collect()
 }
 
 async fn simulate_steps_action(

@@ -20,6 +20,7 @@ sensor_msgs = "*"
 simulation_interfaces = "*"
 std_msgs = "*"
 tf2_msgs = "*"
+trajectory_msgs = "*"
 
 rne_adapter_ros2 = { path = "../rne_adapter_ros2" }
 rne_ai = { path = "../../../crates/rne_ai" }
