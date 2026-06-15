@@ -17,10 +17,11 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
         "reach_random" => Ok(MobileManipulatorEpisodeConfig::reach_randomized(0)),
         "reach_curriculum" => Ok(MobileManipulatorEpisodeConfig::reach_curriculum(0)),
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
+        "lift_place" => Ok(MobileManipulatorEpisodeConfig::lift_pick_place()),
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'transport', or 'inspect'"
         ))),
     }
 }
@@ -456,7 +457,9 @@ impl PyMobileManipulatorSim {
         shoulder_velocity_rad_s=0.0,
         elbow_velocity_rad_s=0.0,
         gripper_velocity_rad_s=0.0,
+        lift_velocity_m_s=0.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn step(
         &mut self,
         left_wheel_velocity_rad_s: f64,
@@ -464,6 +467,7 @@ impl PyMobileManipulatorSim {
         shoulder_velocity_rad_s: f64,
         elbow_velocity_rad_s: f64,
         gripper_velocity_rad_s: f64,
+        lift_velocity_m_s: f64,
     ) -> PyMmObservation {
         self.inner
             .step(MobileManipulatorAction {
@@ -472,7 +476,7 @@ impl PyMobileManipulatorSim {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
-                lift_velocity_m_s: 0.0,
+                lift_velocity_m_s,
             })
             .into()
     }
@@ -496,8 +500,9 @@ struct PyMobileManipulatorEpisode {
 
 #[pymethods]
 impl PyMobileManipulatorEpisode {
-    /// Creates an episode for the `"reach"`, `"place"` (default), `"transport"`, or
-    /// `"inspect"` task.
+    /// Creates an episode for the `"reach"`, `"place"` (default), `"lift_place"`,
+    /// `"transport"`, or `"inspect"` task. `"lift_place"` needs the `lift_velocity_m_s`
+    /// step argument to drive the vertical lift.
     #[new]
     #[pyo3(signature = (task="place"))]
     fn new(task: &str) -> PyResult<Self> {
@@ -516,7 +521,9 @@ impl PyMobileManipulatorEpisode {
         shoulder_velocity_rad_s=0.0,
         elbow_velocity_rad_s=0.0,
         gripper_velocity_rad_s=0.0,
+        lift_velocity_m_s=0.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn step(
         &mut self,
         left_wheel_velocity_rad_s: f64,
@@ -524,6 +531,7 @@ impl PyMobileManipulatorEpisode {
         shoulder_velocity_rad_s: f64,
         elbow_velocity_rad_s: f64,
         gripper_velocity_rad_s: f64,
+        lift_velocity_m_s: f64,
     ) -> PyMmStepResult {
         self.inner
             .step(MobileManipulatorAction {
@@ -532,7 +540,7 @@ impl PyMobileManipulatorEpisode {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
-                lift_velocity_m_s: 0.0,
+                lift_velocity_m_s,
             })
             .into()
     }

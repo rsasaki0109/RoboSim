@@ -123,6 +123,29 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
+    /// Vertical pick-and-place on the `mm_lift` robot: lower the top-down claw over a
+    /// cube on the ground, grasp it, lift it, carry it to a target, and set it down.
+    ///
+    /// Unlike [`Self::place`] (a horizontal carry on the SCARA arm), this uses the
+    /// lift robot's full 3D motion: the cube is picked off the ground and placed at a
+    /// different spot. The target matches where the scripted pick-place trajectory
+    /// lands the cube (see example 31).
+    pub fn lift_pick_place() -> Self {
+        Self {
+            max_steps: 1200,
+            scene_path: crate::mm_lift_pick_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "lift_cube".into(),
+                target: crate::reach::ReachTarget::new(0.55, 0.03, -0.87),
+                place_tolerance_m: 0.2,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            rng_seed: 0,
+        }
+    }
+
     /// Default inspect episode on the built-in minimal scene.
     pub fn inspect() -> Self {
         Self {
@@ -657,6 +680,73 @@ mod tests {
             }
         }
         panic!("expected place episode to grasp, carry, release, and settle at the target");
+    }
+
+    #[test]
+    fn lift_pick_place_episode_picks_carries_and_places() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::lift_pick_place());
+        let _ = episode.reset();
+
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            ..MobileManipulatorAction::default()
+        };
+
+        // Lower the claw over the cube and grasp it.
+        for _ in 0..200 {
+            episode.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        for _ in 0..120 {
+            episode.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+            if episode.simulation().is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            episode.simulation().is_grasping(),
+            "episode should grasp the cube"
+        );
+
+        // Lift, swing to the target, lower, and release.
+        for _ in 0..150 {
+            episode.step(MobileManipulatorAction {
+                lift_velocity_m_s: 0.3,
+                ..close
+            });
+        }
+        for _ in 0..90 {
+            episode.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.8,
+                ..close
+            });
+        }
+        for _ in 0..150 {
+            episode.step(close);
+        }
+        for _ in 0..200 {
+            episode.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                ..close
+            });
+        }
+        for _ in 0..150 {
+            let step = episode.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: 3.0,
+                ..MobileManipulatorAction::default()
+            });
+            if step.terminated {
+                return;
+            }
+        }
+        panic!("expected lift pick-place episode to place the cube at the target and terminate");
     }
 
     #[test]
