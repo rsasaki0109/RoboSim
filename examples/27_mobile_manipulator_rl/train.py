@@ -40,20 +40,34 @@ def policy_action(params, obs):
     return shoulder, elbow
 
 
-def rollout(params):
-    """Runs one reach episode under the policy and returns the total reward."""
-    episode = rne_py.MobileManipulatorEpisode("reach")
-    step = episode.reset()
-    obs = step.observation
+def evaluate_population(population):
+    """Evaluates a whole policy population in lock-step on the batched env.
+
+    Each environment runs the same reach task but a different policy, so one
+    `VectorizedMobileManipulatorEnv.step` advances every candidate at once. A
+    candidate's reward is frozen the moment its episode ends (so later lock-step
+    iterations cannot inflate it with repeated success bonuses).
+    """
+    env = rne_py.VectorizedMobileManipulatorEnv("reach", len(population))
+    observations = env.reset()
+    rewards = [None] * len(population)
+
     for _ in range(EPISODE_STEPS):
-        shoulder, elbow = policy_action(params, obs)
-        step = episode.step(
-            shoulder_velocity_rad_s=shoulder, elbow_velocity_rad_s=elbow
-        )
-        obs = step.observation
-        if step.terminated:
+        batch = []
+        for params, obs in zip(population, observations):
+            shoulder, elbow = policy_action(params, obs)
+            batch.append((0.0, 0.0, shoulder, elbow, 0.0))
+        observations, done = env.step(batch)
+        for i, finished in enumerate(done):
+            if finished and rewards[i] is None:
+                rewards[i] = env.episode_reward(i)
+        if all(r is not None for r in rewards):
             break
-    return episode.total_reward
+
+    return [
+        env.episode_reward(i) if rewards[i] is None else rewards[i]
+        for i in range(len(population))
+    ]
 
 
 def cem_train(iterations, population, elite, seed):
@@ -69,8 +83,9 @@ def cem_train(iterations, population, elite, seed):
             [rng.gauss(mean[d], std[d]) for d in range(PARAM_DIM)]
             for _ in range(population)
         ]
+        rewards = evaluate_population(samples)
         scored = sorted(
-            ((rollout(p), p) for p in samples), key=lambda sr: sr[0], reverse=True
+            zip(rewards, samples), key=lambda sr: sr[0], reverse=True
         )
         elites = [p for _, p in scored[:elite]]
         if scored[0][0] > best_reward:
