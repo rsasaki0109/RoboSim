@@ -1,0 +1,12 @@
+[package]
+name = "mobile_manipulator_transport"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "23_mobile_manipulator_transport"
+path = "main.rs"

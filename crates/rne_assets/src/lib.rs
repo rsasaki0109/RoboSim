@@ -16,10 +16,10 @@ pub use pipeline::{
 };
 pub use robot::{
     load_robot_asset, parse_robot_asset, LidarRobotAsset, RobotAsset, RobotKind, UrdfRobotAsset,
-    VisualsRobotAsset,
+    VisualsRobotAsset, WristCameraRobotAsset,
 };
 pub use scene::{load_scene_asset, SceneAsset, SceneObstacleAsset};
 pub use spawn::{
-    load_and_spawn_scene, spawn_robot_asset, spawn_scene, LidarMountSpawned, SpawnedRobot,
-    SpawnedScene,
+    load_and_spawn_scene, spawn_robot_asset, spawn_scene, LidarMountSpawned, RobotSensorMounts,
+    SpawnedRobot, SpawnedScene, WristCameraMountSpawned,
 };

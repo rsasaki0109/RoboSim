@@ -4,6 +4,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-12
+
+### Added
+
+- **Dynamic scene obstacles** (`body_type = "dynamic"`) for graspable objects
+- **`mm_minimal_transport` scene** and transport helpers (`displacement_m`, `body_moved_at_least_m`)
+- **Example 23 transport smoke**: finger contact + cube displacement ≥ 2 cm
+- **`[wrist_camera]` robot asset section** mounted on URDF arm links
+- **Wrist camera DataBus** (`ImageRgb8`) in `MobileManipulatorSim`
+- **Example 24 wrist cam smoke**: publishes 64×48 RGBA8 frames
+
+### Changed
+
+- **Physics init**: zero-velocity ECS→Rapier sync on spawn for repeatable initial EE pose
+- **Example 21 smoke**: proportional reach with error-reduction criterion (no multi-attempt retry loop)
+- **`xtask ci`**: smokes examples 23 and 24
+
 ## [0.6.1] - 2026-06-12
 
 ### Added

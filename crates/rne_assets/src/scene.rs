@@ -32,6 +32,27 @@ pub struct SceneObstacleAsset {
     pub translation_m: [f64; 3],
     /// Cuboid half extents in meters.
     pub half_extents_m: [f64; 3],
+    /// Physics body type (`fixed` or `dynamic`).
+    #[serde(default)]
+    pub body_type: ObstacleBodyType,
+    /// Mass in kilograms when `body_type = "dynamic"`.
+    #[serde(default = "default_obstacle_mass_kg")]
+    pub mass_kg: f64,
+}
+
+/// Obstacle rigid-body type for scene spawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObstacleBodyType {
+    /// Immovable scene geometry.
+    #[default]
+    Fixed,
+    /// Simulated graspable / pushable object.
+    Dynamic,
+}
+
+fn default_obstacle_mass_kg() -> f64 {
+    0.08
 }
 
 /// World configuration stored in a scene asset.
@@ -156,6 +177,22 @@ half_extents_m = [8.0, 1.0, 0.25]
         let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
         assert_eq!(scene.obstacles.len(), 1);
         assert_eq!(scene.obstacles[0].name, "wall");
+        assert_eq!(scene.obstacles[0].body_type, ObstacleBodyType::Fixed);
+    }
+
+    #[test]
+    fn parses_dynamic_obstacle() {
+        let text = r#"
+[[obstacles]]
+name = "cube"
+translation_m = [0.5, 0.4, 0.0]
+half_extents_m = [0.03, 0.03, 0.03]
+body_type = "dynamic"
+mass_kg = 0.05
+"#;
+        let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
+        assert_eq!(scene.obstacles[0].body_type, ObstacleBodyType::Dynamic);
+        assert!((scene.obstacles[0].mass_kg - 0.05).abs() < f64::EPSILON);
     }
 
     #[test]

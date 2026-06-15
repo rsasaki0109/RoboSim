@@ -18,7 +18,7 @@ Diff-drive remains supported; mobile manipulator work **extends** the existing r
 | Scenario | Description | Success signal |
 |----------|-------------|----------------|
 | **Reach** | Move base + arm so EE touches a tabletop target | EE error &lt; 5 cm in headless CI |
-| **Transport** | Grasp or push an object, drive to a drop zone | Object pose delta + contact events |
+| **Transport** | Grasp or push an object, drive to a drop zone | Object pose delta + contact events (ex. 23 smoke) |
 | **Inspect** | Navigate to waypoint, pan wrist camera on fixture | Camera frame + base pose logged |
 | **Teleop** | Keyboard/gamepad base + arm in interactive viewer | Live joint commands, stable physics |
 
@@ -35,7 +35,8 @@ Initial reference robot: **minimal URDF mobile manipulator** (diff base + 2–3 
 | URDF → Rapier articulated chain | Ready (`attach_urdf_articulation`, URDF robot assets with `articulation = true`) |
 | Diff-drive kinematics + `DiffDriveSim` | Ready |
 | Combined base + arm environment | Ready (`MobileManipulatorSim::new_mm_mobile`, `mm_mobile` scene asset) |
-| Gripper / contact-rich manipulation | **Partial** (parallel jaw + grasp smoke) |
+| Gripper / contact-rich manipulation | **Partial** (parallel jaw + grasp/transport smoke) |
+| Wrist / head camera from scene assets | **Partial** (`[wrist_camera]` on `mm_minimal`, DataBus `ImageRgb8`) |
 | Arm trajectory / IK | **Missing** |
 | ROS `/joint_states`, arm commands | Ready (`RNE_ROS2_MODE=mobile_manipulator`: 4 joints, `/cmd_vel`, `/arm_joint_velocity`) |
 

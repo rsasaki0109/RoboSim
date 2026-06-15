@@ -29,7 +29,7 @@ pub enum ValidatedAsset {
         /// Robot asset path.
         path: PathBuf,
         /// Parsed robot asset.
-        asset: RobotAsset,
+        asset: Box<RobotAsset>,
     },
 }
 
@@ -135,7 +135,7 @@ pub fn validate_asset(path: &Path) -> Result<ValidatedAsset, AssetError> {
         validate_robot_references(path, &asset)?;
         return Ok(ValidatedAsset::Robot {
             path: path.to_path_buf(),
-            asset,
+            asset: Box::new(asset),
         });
     }
 

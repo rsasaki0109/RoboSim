@@ -2,15 +2,17 @@
 
 use super::drive::wheel_command_to_motor_rad_s;
 use crate::action::MobileManipulatorAction;
+use crate::camera::{sync_wrist_camera_mounts, wrist_camera_mounts_from_spawned, WristCameraMount};
 use crate::observation::MobileManipulatorObservation;
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, AssetError};
 use rne_core::{SimDuration, SimTime};
-use rne_data::{DataBus, Frame, InMemoryDataBus, JointState, StreamId};
+use rne_data::{DataBus, Frame, ImageRgb8, InMemoryDataBus, JointState, StreamId};
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat};
 use rne_physics::{ContactEvent, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
+use rne_sensor::{sample_sensors, Sensor, SensorSampleContext};
 use rne_urdf_import::UrdfRobot;
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -34,6 +36,12 @@ pub fn mm_minimal_grasp_scene_path() -> PathBuf {
         .join("../../assets/scenes/mm_minimal_grasp.rne.scene.toml")
 }
 
+/// Scene asset with a dynamic cube for grasp-and-transport smoke tests.
+pub fn mm_minimal_transport_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_minimal_transport.rne.scene.toml")
+}
+
 struct ActuatedJoint {
     link: Entity,
     /// When true, joint angle is read from local Z rotation (wheel joints).
@@ -52,6 +60,8 @@ pub struct MobileManipulatorSim {
     actuated: Vec<ActuatedJoint>,
     joint_names: Vec<String>,
     named_entities: HashMap<String, Entity>,
+    wrist_camera: Option<WristCameraMount>,
+    wrist_camera_stream: Option<StreamId>,
     mobile_base: bool,
     data_bus: InMemoryDataBus,
     joint_stream: StreamId,
@@ -105,6 +115,14 @@ impl MobileManipulatorSim {
         let named_entities = index_named_entities(&mut world);
         let mobile_base = links.contains_key("left_wheel");
         let (actuated, joint_names) = actuated_joints_for_robot(mobile_base, &links)?;
+        let wrist_camera_mounts =
+            wrist_camera_mounts_from_spawned(&spawned_scene.wrist_camera_mounts);
+        let wrist_camera = wrist_camera_mounts.into_iter().next();
+        let wrist_camera_stream = wrist_camera.as_ref().and_then(|mount| {
+            world
+                .get::<Sensor>(mount.camera)
+                .map(|sensor| sensor.stream_id)
+        });
 
         let mut sim = Self::from_spawned(
             world,
@@ -119,6 +137,8 @@ impl MobileManipulatorSim {
             named_entities,
             actuated,
             joint_names,
+            wrist_camera,
+            wrist_camera_stream,
             mobile_base,
             None,
         );
@@ -154,6 +174,19 @@ impl MobileManipulatorSim {
             self.dt,
         )
         .expect("physics step");
+        if let Some(mount) = self.wrist_camera {
+            sync_wrist_camera_mounts(&mut self.world, &[mount]);
+            sample_sensors(
+                &mut SensorSampleContext {
+                    world: &mut self.world,
+                    sim_time: self.sim_time,
+                    physics: &self.backend,
+                    physics_world: self.physics_world,
+                    render: None,
+                },
+                &mut self.data_bus,
+            );
+        }
         self.publish_joint_state();
         self.sim_time = self.sim_time + self.dt;
         self.step_count += 1;
@@ -173,6 +206,15 @@ impl MobileManipulatorSim {
             .map(|frame| frame.payload.positions_rad.len())
             .unwrap_or(0);
 
+        let wrist_camera_pixels = self
+            .wrist_camera_stream
+            .and_then(|stream| {
+                self.data_bus
+                    .latest::<ImageRgb8>(stream)
+                    .map(|frame| frame.payload.rgba8.len())
+            })
+            .unwrap_or(0);
+
         MobileManipulatorObservation {
             base_x_m: base.translation.x,
             base_y_m: base.translation.y,
@@ -184,6 +226,7 @@ impl MobileManipulatorSim {
             shoulder_position_rad: shoulder,
             elbow_position_rad: elbow,
             gripper_position_rad,
+            wrist_camera_pixels,
             joint_state_count,
         }
     }
@@ -235,6 +278,20 @@ impl MobileManipulatorSim {
             })
     }
 
+    /// Returns true when a wrist camera is configured on this robot.
+    pub fn wrist_camera_enabled(&self) -> bool {
+        self.wrist_camera.is_some()
+    }
+
+    /// Returns the latest wrist camera image when configured.
+    pub fn latest_wrist_camera(&self) -> Option<ImageRgb8> {
+        self.wrist_camera_stream.and_then(|stream| {
+            self.data_bus
+                .latest::<ImageRgb8>(stream)
+                .map(|frame| frame.payload.clone())
+        })
+    }
+
     /// Returns the joint-state stream identifier.
     pub fn joint_stream(&self) -> StreamId {
         self.joint_stream
@@ -250,6 +307,8 @@ impl MobileManipulatorSim {
         named_entities: HashMap<String, Entity>,
         actuated: Vec<ActuatedJoint>,
         joint_names: Vec<String>,
+        wrist_camera: Option<WristCameraMount>,
+        wrist_camera_stream: Option<StreamId>,
         mobile_base: bool,
         _base_y_m: Option<f64>,
     ) -> Self {
@@ -274,6 +333,8 @@ impl MobileManipulatorSim {
             actuated,
             joint_names,
             named_entities,
+            wrist_camera,
+            wrist_camera_stream,
             mobile_base,
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
@@ -294,6 +355,14 @@ impl MobileManipulatorSim {
     /// Returns the first entity with the given ECS name.
     pub fn entity_named(&self, name: &str) -> Option<Entity> {
         self.named_entities.get(name).copied()
+    }
+
+    /// Returns the world-frame translation of a named entity.
+    pub fn named_translation_m(&self, name: &str) -> Option<(f64, f64, f64)> {
+        self.entity_named(name).map(|entity| {
+            let translation = world_transform_of(&self.world, entity).translation;
+            (translation.x, translation.y, translation.z)
+        })
     }
 
     /// Returns true when the two entities contacted on the last physics step.
@@ -339,13 +408,18 @@ impl MobileManipulatorSim {
     }
 
     fn warmup_physics(&mut self) {
-        step_physics(
-            &mut self.backend,
-            &mut self.world,
-            self.physics_world,
-            self.dt,
-        )
-        .expect("warmup physics step");
+        self.zero_joint_motors();
+        self.backend
+            .sync_from_ecs(&mut self.world, self.physics_world)
+            .expect("physics sync from ECS");
+    }
+
+    fn zero_joint_motors(&mut self) {
+        for joint in &self.actuated {
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
+                motor.velocity_rad_s = 0.0;
+            }
+        }
     }
 
     fn publish_joint_state(&mut self) {
@@ -527,6 +601,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn physics_init_produces_repeatable_pose() {
+        let reference = {
+            let sim = MobileManipulatorSim::new_mm_minimal();
+            sim.observe()
+        };
+
+        for attempt in 1..5 {
+            let sim = MobileManipulatorSim::new_mm_minimal();
+            let obs = sim.observe();
+            let dx = (obs.ee_x_m - reference.ee_x_m).abs();
+            let dy = (obs.ee_y_m - reference.ee_y_m).abs();
+            let dz = (obs.ee_z_m - reference.ee_z_m).abs();
+            assert!(
+                dx < 1e-4 && dy < 1e-4 && dz < 1e-4,
+                "attempt {attempt}: ee drift ({dx}, {dy}, {dz}) m"
+            );
+        }
+    }
+
+    #[test]
     fn shoulder_velocity_moves_end_effector() {
         let mut sim = MobileManipulatorSim::new_mm_minimal();
         let initial = sim.observe();
@@ -620,6 +714,28 @@ mod tests {
             MobileManipulatorSim::from_scene_path(&scene_path).expect("load mm_minimal scene");
         assert!(!sim.mobile_base());
         assert_eq!(sim.joint_names().len(), 4);
+        assert!(sim.wrist_camera_enabled());
+    }
+
+    #[test]
+    fn wrist_camera_publishes_image_on_data_bus() {
+        use crate::wrist_camera_image_valid;
+
+        let mut sim = MobileManipulatorSim::new_mm_minimal();
+        for _ in 0..12 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: 0.0,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let obs = sim.observe();
+        assert!(
+            obs.wrist_camera_pixels >= 64 * 48 * 4,
+            "expected wrist camera pixels, got {}",
+            obs.wrist_camera_pixels
+        );
+        let image = sim.latest_wrist_camera().expect("wrist camera frame");
+        assert!(wrist_camera_image_valid(&image, 64 * 48 * 4));
     }
 
     #[test]

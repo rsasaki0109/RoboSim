@@ -33,6 +33,8 @@ pub struct RobotAsset {
     pub visuals: Option<VisualsRobotAsset>,
     /// Optional horizontal LiDAR sensor mounted on the base link.
     pub lidar: Option<LidarRobotAsset>,
+    /// Optional RGB camera mounted on an arm link.
+    pub wrist_camera: Option<WristCameraRobotAsset>,
 }
 
 /// LiDAR section of a robot asset file.
@@ -70,6 +72,77 @@ impl LidarRobotAsset {
     pub fn mount_offset(&self) -> Vec3 {
         vec3_from_array(self.mount_offset_m)
     }
+}
+
+/// Wrist / end-effector camera section of a robot asset file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WristCameraRobotAsset {
+    /// When false, no camera entity is spawned even if this section is present.
+    #[serde(default = "default_wrist_camera_enabled")]
+    pub enabled: bool,
+    /// URDF link name used as the camera mount parent.
+    #[serde(default = "default_wrist_camera_mount_link")]
+    pub mount_link: String,
+    /// Sensor mount offset from the parent link origin in meters.
+    #[serde(default = "default_wrist_camera_mount_offset_m")]
+    pub mount_offset_m: [f64; 3],
+    /// Output width in pixels.
+    #[serde(default = "default_wrist_camera_width")]
+    pub width: u32,
+    /// Output height in pixels.
+    #[serde(default = "default_wrist_camera_height")]
+    pub height: u32,
+    /// Vertical field of view in radians.
+    #[serde(default = "default_wrist_camera_fov_y_rad")]
+    pub fov_y_rad: f64,
+    /// Sensor publish rate in hertz.
+    #[serde(default = "default_wrist_camera_update_rate_hz")]
+    pub update_rate_hz: f64,
+}
+
+impl WristCameraRobotAsset {
+    /// Converts this asset section into a [`CameraSpec`].
+    pub fn to_spec(&self) -> rne_sensor::CameraSpec {
+        rne_sensor::CameraSpec {
+            width: self.width,
+            height: self.height,
+            fov_y_rad: self.fov_y_rad,
+            seed: 0,
+        }
+    }
+
+    /// Returns the mount offset as a vector.
+    pub fn mount_offset(&self) -> Vec3 {
+        vec3_from_array(self.mount_offset_m)
+    }
+}
+
+fn default_wrist_camera_enabled() -> bool {
+    true
+}
+
+fn default_wrist_camera_mount_link() -> String {
+    "gripper_base_link".into()
+}
+
+fn default_wrist_camera_mount_offset_m() -> [f64; 3] {
+    [0.05, 0.0, 0.0]
+}
+
+fn default_wrist_camera_width() -> u32 {
+    64
+}
+
+fn default_wrist_camera_height() -> u32 {
+    48
+}
+
+fn default_wrist_camera_fov_y_rad() -> f64 {
+    std::f64::consts::FRAC_PI_4
+}
+
+fn default_wrist_camera_update_rate_hz() -> f64 {
+    10.0
 }
 
 /// Optional URDF visuals attached to diff-drive link entities.

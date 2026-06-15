@@ -4,6 +4,7 @@
 
 pub mod action;
 pub mod agent;
+pub mod camera;
 pub mod domain_randomization;
 pub mod env;
 pub mod episode;
@@ -17,6 +18,7 @@ pub mod reach;
 pub mod render;
 pub mod reward;
 pub mod rng;
+pub mod transport;
 
 pub use action::{DiffDriveAction, MobileManipulatorAction};
 pub use agent::{
@@ -27,12 +29,17 @@ pub use agent::{
     step_shared_diff_drive_agents, Agent, AgentGoal, AgentKind, AgentTarget, AttachedPolicy,
     DiffDriveAgentState, SharedDiffDriveAgentState,
 };
+pub use camera::{
+    sync_wrist_camera_mount, sync_wrist_camera_mounts, wrist_camera_image_valid,
+    wrist_camera_mounts_from_spawned, wrist_camera_pixel_count, wrist_camera_stream_for_index,
+    WristCameraMount,
+};
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_mobile_scene_path,
-    mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
-    DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim, VectorizedDiffDriveConfig,
-    VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
+    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
+    mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim,
+    VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
@@ -57,3 +64,7 @@ pub use render::{
 };
 pub use reward::DiffDriveRewardConfig;
 pub use rng::DeterministicRng;
+pub use transport::{
+    body_moved_at_least_m, displacement_m, had_finger_contact, named_translation_m,
+    TRANSPORT_SUCCESS_M,
+};
