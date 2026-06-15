@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Reach curriculum** (`MobileManipulatorEpisodeConfig::reach_curriculum` + `ReachCurriculum`):
+  an easy→hard curriculum that widens the goal-conditioned reach target region as the
+  policy accumulates successes; exposed to Python as `MobileManipulatorEpisode("reach_curriculum")`
+  with a `curriculum_stage` getter
 - **Goal-conditioned reach** (`MobileManipulatorEpisodeConfig::reach_randomized`): a fresh
   reachable target is sampled each episode and exposed in the observation as
   `target_d{x,y,z}_m`, so a policy must generalize. Exposed to Python as
