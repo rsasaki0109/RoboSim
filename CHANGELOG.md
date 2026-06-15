@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Interactive viewer `--manipulator-lift` profile**: the redesigned `mm_lift` robot is now
+  viewable/teleoperable in example 14, with `R` / `F` driving the vertical lift. Wired into
+  `xtask ci` as a render smoke.
+
 - **Lift pick-and-place episode** (`MobileManipulatorEpisodeConfig::lift_pick_place`): the
   full 3D pick-and-place as a first-class `Episode` (reward + success), on the `mm_lift_pick`
   scene with a place target. Exposed to Python as `MobileManipulatorEpisode("lift_place")`.
