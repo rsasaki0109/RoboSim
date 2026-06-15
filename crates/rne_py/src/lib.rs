@@ -7,7 +7,21 @@ use rne_ai::{DiffDriveEpisodeConfig, Episode};
 use sim::{
     DiffDriveObservation, DiffDriveSim, MobileManipulatorAction, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorObservation, MobileManipulatorSim,
+    VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
 };
+
+/// Resolves a task name to a mobile manipulator episode configuration.
+fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
+    match task {
+        "reach" => Ok(MobileManipulatorEpisodeConfig::reach()),
+        "place" => Ok(MobileManipulatorEpisodeConfig::place()),
+        "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
+        "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown task '{other}', expected 'reach', 'place', 'transport', or 'inspect'"
+        ))),
+    }
+}
 
 /// Observation returned after each simulation step.
 #[pyclass(name = "Observation")]
@@ -469,19 +483,8 @@ impl PyMobileManipulatorEpisode {
     #[new]
     #[pyo3(signature = (task="place"))]
     fn new(task: &str) -> PyResult<Self> {
-        let config = match task {
-            "reach" => MobileManipulatorEpisodeConfig::reach(),
-            "place" => MobileManipulatorEpisodeConfig::place(),
-            "transport" => MobileManipulatorEpisodeConfig::transport(),
-            "inspect" => MobileManipulatorEpisodeConfig::inspect(),
-            other => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown task '{other}', expected 'reach', 'place', 'transport', or 'inspect'"
-                )))
-            }
-        };
         Ok(Self {
-            inner: MobileManipulatorEpisode::new(config),
+            inner: MobileManipulatorEpisode::new(mm_episode_config(task)?),
         })
     }
 
@@ -531,6 +534,97 @@ impl PyMobileManipulatorEpisode {
     }
 }
 
+/// Batched mobile manipulator environment for population-based / parallel RL.
+#[pyclass(name = "VectorizedMobileManipulatorEnv")]
+struct PyVectorizedMobileManipulatorEnv {
+    inner: VectorizedMobileManipulatorEnv,
+}
+
+#[pymethods]
+impl PyVectorizedMobileManipulatorEnv {
+    /// Creates `num_envs` environments for the given task (default `"reach"`).
+    #[new]
+    #[pyo3(signature = (task="reach", num_envs=16))]
+    fn new(task: &str, num_envs: usize) -> PyResult<Self> {
+        if num_envs == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "num_envs must be positive",
+            ));
+        }
+        let config = VectorizedMobileManipulatorConfig::new(mm_episode_config(task)?, num_envs);
+        Ok(Self {
+            inner: VectorizedMobileManipulatorEnv::new(config),
+        })
+    }
+
+    #[getter]
+    fn num_envs(&self) -> usize {
+        self.inner.num_envs()
+    }
+
+    /// Resets every environment and returns the initial observation batch.
+    fn reset(&mut self) -> Vec<PyMmObservation> {
+        self.inner
+            .reset()
+            .observations
+            .into_iter()
+            .map(PyMmObservation::from)
+            .collect()
+    }
+
+    /// Steps all environments; returns per-env `(observations, done)`.
+    ///
+    /// Each action is `(left_wheel, right_wheel, shoulder, elbow, gripper)` in rad/s.
+    fn step(
+        &mut self,
+        actions: Vec<(f64, f64, f64, f64, f64)>,
+    ) -> PyResult<(Vec<PyMmObservation>, Vec<bool>)> {
+        if actions.len() != self.inner.num_envs() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected {} actions, got {}",
+                self.inner.num_envs(),
+                actions.len()
+            )));
+        }
+        let actions: Vec<MobileManipulatorAction> = actions
+            .into_iter()
+            .map(
+                |(left, right, shoulder, elbow, gripper)| MobileManipulatorAction {
+                    left_wheel_velocity_rad_s: left,
+                    right_wheel_velocity_rad_s: right,
+                    shoulder_velocity_rad_s: shoulder,
+                    elbow_velocity_rad_s: elbow,
+                    gripper_velocity_rad_s: gripper,
+                },
+            )
+            .collect();
+        let step = self.inner.step(&actions);
+        let done = step
+            .terminated
+            .iter()
+            .zip(&step.truncated)
+            .map(|(terminated, truncated)| *terminated || *truncated)
+            .collect();
+        let observations = step
+            .observations
+            .into_iter()
+            .map(PyMmObservation::from)
+            .collect();
+        Ok((observations, done))
+    }
+
+    /// Cumulative reward of one environment's current episode.
+    fn episode_reward(&self, index: usize) -> PyResult<f64> {
+        if index >= self.inner.num_envs() {
+            return Err(pyo3::exceptions::PyIndexError::new_err(format!(
+                "env index {index} out of range (num_envs={})",
+                self.inner.num_envs()
+            )));
+        }
+        Ok(self.inner.episode(index).total_reward())
+    }
+}
+
 /// Robot Native Engine Python module.
 #[pymodule]
 fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -540,6 +634,7 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStepResult>()?;
     m.add_class::<PyMobileManipulatorSim>()?;
     m.add_class::<PyMobileManipulatorEpisode>()?;
+    m.add_class::<PyVectorizedMobileManipulatorEnv>()?;
     m.add_class::<PyMmObservation>()?;
     m.add_class::<PyMmStepResult>()?;
     Ok(())

@@ -41,7 +41,10 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 ```
 
 The reach target is placed where the arm only reaches it under active control (passive
-settling fails), so the reward signal is meaningful for learning.
+settling fails), so the reward signal is meaningful for learning. Each CEM iteration
+evaluates the whole candidate population in lock-step with
+`rne_py.VectorizedMobileManipulatorEnv`, advancing every policy with a single batched
+`step` call (each policy's reward is frozen the moment its episode ends).
 
 ## Spaces
 
