@@ -451,7 +451,7 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         };
         joint
             .data
-            .set_motor_velocity(axis, motor.velocity_rad_s as f32, 1.0);
+            .set_motor_velocity(axis, motor.velocity_rad_s as f32, motor.gain as f32);
     }
 }
 
@@ -660,6 +660,72 @@ mod tests {
         assert!(
             released_y < welded_y - 0.5,
             "released cube should fall once the weld is removed, y={released_y}"
+        );
+    }
+
+    /// Runs a 1 kg mass suspended from a fixed anchor by a vertical prismatic
+    /// joint whose motor commands an upward velocity, and returns the mass's
+    /// final height. Higher `gain` lets the motor track that target more
+    /// stiffly against gravity, up to the backend force cap.
+    fn lift_displacement(gain: f64) -> f64 {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .expect("physics world");
+
+        let mut world = World::new();
+        let anchor = spawn_named(&mut world, "anchor");
+        world.entity_mut(anchor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 3.0, 0.0), Quat::IDENTITY),
+        ));
+
+        let mass = spawn_named(&mut world, "mass");
+        world.entity_mut(mass).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.1)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.5, 0.0), Quat::IDENTITY),
+            PrismaticJointDesc {
+                parent: anchor,
+                axis: Vec3::new(0.0, 1.0, 0.0),
+                anchor_parent_m: Vec3::new(0.0, -2.5, 0.0),
+                anchor_child_m: Vec3::ZERO,
+            },
+            JointMotor {
+                velocity_rad_s: 1.0,
+                gain,
+            },
+        ));
+
+        let dt = fixed_step();
+        for _ in 0..120 {
+            step_physics(&mut backend, &mut world, physics_world, dt).unwrap();
+        }
+
+        world.get::<Transform3>(mass).unwrap().translation.y - 0.5
+    }
+
+    #[test]
+    fn motor_gain_lifts_mass_against_gravity() {
+        // A unit gain produces a force too weak to hold ~9.81 N of weight, so the
+        // mass sags below where a strong gain (force-capped above gravity) lifts it.
+        let weak = lift_displacement(1.0);
+        let strong = lift_displacement(40.0);
+
+        assert!(
+            strong > weak + 0.2,
+            "higher gain should lift the mass higher: weak={weak}, strong={strong}"
+        );
+        assert!(
+            strong > 0.5,
+            "high-gain motor should raise the mass against gravity, displacement={strong}"
         );
     }
 }

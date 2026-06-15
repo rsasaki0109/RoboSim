@@ -188,8 +188,26 @@ pub struct FixedJointDesc {
 ///
 /// The value is interpreted as an angular velocity (rad/s) for revolute joints
 /// and as a linear velocity (m/s) for prismatic joints.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JointMotor {
     /// Target velocity: radians per second (revolute) or meters per second (prismatic).
     pub velocity_rad_s: f64,
+    /// Velocity-tracking gain (motor damping factor). Higher values track the target
+    /// velocity more stiffly under load — e.g. a joint holding weight against gravity —
+    /// up to the backend's motor force cap. Defaults to `1.0`.
+    #[serde(default = "default_motor_gain")]
+    pub gain: f64,
+}
+
+fn default_motor_gain() -> f64 {
+    1.0
+}
+
+impl Default for JointMotor {
+    fn default() -> Self {
+        Self {
+            velocity_rad_s: 0.0,
+            gain: default_motor_gain(),
+        }
+    }
 }
