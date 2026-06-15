@@ -24,6 +24,10 @@ pub struct MobileManipulatorEpisodeConfig {
     pub task: MobileManipulatorTask,
     /// Reward weights applied each step.
     pub reward: MobileManipulatorRewardConfig,
+    /// When set (Reach task only), a fresh target is sampled from this region each reset.
+    pub reach_randomization: Option<crate::reach::ReachRandomization>,
+    /// Seed for per-episode randomization.
+    pub rng_seed: u64,
 }
 
 impl MobileManipulatorEpisodeConfig {
@@ -37,6 +41,8 @@ impl MobileManipulatorEpisodeConfig {
                 drop_zone_name: "drop_zone".into(),
             },
             reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            rng_seed: 0,
         }
     }
 
@@ -53,6 +59,34 @@ impl MobileManipulatorEpisodeConfig {
                 success_m: 0.1,
             },
             reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            rng_seed: 0,
+        }
+    }
+
+    /// Goal-conditioned reach: a fresh reachable target is sampled each episode and
+    /// exposed in the observation (`target_d{x,y,z}_m`), so a policy must generalize
+    /// rather than memorize one pose.
+    pub fn reach_randomized(rng_seed: u64) -> Self {
+        // The arm is a horizontal SCARA: it controls the end-effector in X/Z (via the
+        // shoulder/elbow) but barely in Y, so the target Y stays near the natural EE
+        // height and only X/Z are randomized.
+        let randomization = crate::reach::ReachRandomization {
+            min: crate::reach::ReachTarget::new(0.34, 0.585, 0.18),
+            max: crate::reach::ReachTarget::new(0.46, 0.595, 0.36),
+            success_m: 0.12,
+        };
+        Self {
+            max_steps: 500,
+            scene_path: crate::mm_minimal_scene_path(),
+            task: MobileManipulatorTask::Reach {
+                // Placeholder; replaced by a sampled target on every reset.
+                target: crate::reach::ReachTarget::new(0.40, 0.59, 0.27),
+                success_m: randomization.success_m,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: Some(randomization),
+            rng_seed,
         }
     }
 
@@ -67,6 +101,8 @@ impl MobileManipulatorEpisodeConfig {
                 place_tolerance_m: 0.12,
             },
             reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            rng_seed: 0,
         }
     }
 
@@ -79,6 +115,8 @@ impl MobileManipulatorEpisodeConfig {
                 min_wrist_pixels: 64 * 48 * 4,
             },
             reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            rng_seed: 0,
         }
     }
 }
@@ -87,6 +125,10 @@ impl MobileManipulatorEpisodeConfig {
 pub struct MobileManipulatorEpisode {
     sim: MobileManipulatorSim,
     config: MobileManipulatorEpisodeConfig,
+    /// Task actually used this episode (the config task, but with a sampled Reach target
+    /// when randomization is enabled).
+    effective_task: MobileManipulatorTask,
+    rng: crate::rng::DeterministicRng,
     episode_index: u32,
     step_in_episode: u64,
     total_reward: f64,
@@ -109,14 +151,27 @@ impl MobileManipulatorEpisode {
     pub fn new(config: MobileManipulatorEpisodeConfig) -> Self {
         let sim =
             MobileManipulatorSim::from_scene_path(&config.scene_path).expect("episode simulation");
-        let progress_state = initial_progress_state(&sim, &config.task);
+        let effective_task = config.task.clone();
+        let rng = crate::rng::DeterministicRng::new(config.rng_seed);
+        let progress_state = initial_progress_state(&sim, &effective_task);
         Self {
             sim,
             config,
+            effective_task,
+            rng,
             episode_index: 0,
             step_in_episode: 0,
             total_reward: 0.0,
             progress_state,
+        }
+    }
+
+    /// Fills the goal-relative end-effector offset in the observation for Reach tasks.
+    fn fill_goal_delta(&self, observation: &mut MobileManipulatorObservation) {
+        if let MobileManipulatorTask::Reach { target, .. } = &self.effective_task {
+            observation.target_dx_m = target.x_m - observation.ee_x_m;
+            observation.target_dy_m = target.y_m - observation.ee_y_m;
+            observation.target_dz_m = target.z_m - observation.ee_z_m;
         }
     }
 
@@ -132,16 +187,16 @@ impl MobileManipulatorEpisode {
 
     fn make_step(
         &mut self,
-        observation: MobileManipulatorObservation,
+        mut observation: MobileManipulatorObservation,
     ) -> EpisodeStep<MobileManipulatorObservation> {
         let progress = task_progress(
-            &self.config.task,
+            &self.effective_task,
             &observation,
             &mut self.progress_state,
             &self.sim,
         );
         let success = task_success(
-            &self.config.task,
+            &self.effective_task,
             &observation,
             &self.progress_state,
             &self.sim,
@@ -149,6 +204,8 @@ impl MobileManipulatorEpisode {
         let truncated = !success && self.step_in_episode >= self.config.max_steps;
         let reward = self.config.reward.compute(progress, success);
         self.total_reward += reward;
+
+        self.fill_goal_delta(&mut observation);
 
         EpisodeStep {
             observation,
@@ -169,10 +226,21 @@ impl Episode for MobileManipulatorEpisode {
         self.episode_index += 1;
         self.step_in_episode = 0;
         self.total_reward = 0.0;
-        self.progress_state = initial_progress_state(&self.sim, &self.config.task);
 
-        let observation = self.sim.observe();
-        self.progress_state.ee_error_m = initial_ee_error(&self.config.task, &observation);
+        // Sample a fresh reach target when goal-conditioned randomization is enabled.
+        self.effective_task = self.config.task.clone();
+        if let Some(randomization) = self.config.reach_randomization {
+            if let MobileManipulatorTask::Reach { target, success_m } = &mut self.effective_task {
+                *target = randomization.sample(&mut self.rng);
+                *success_m = randomization.success_m;
+            }
+        }
+
+        self.progress_state = initial_progress_state(&self.sim, &self.effective_task);
+
+        let mut observation = self.sim.observe();
+        self.progress_state.ee_error_m = initial_ee_error(&self.effective_task, &observation);
+        self.fill_goal_delta(&mut observation);
 
         EpisodeStep {
             observation,
@@ -432,6 +500,49 @@ mod tests {
     }
 
     #[test]
+    fn goal_conditioned_reach_generalizes_across_sampled_targets() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach_randomized(11));
+
+        // A goal-conditioned proportional policy uses only the observation's goal delta.
+        let policy = |obs: &MobileManipulatorObservation| MobileManipulatorAction {
+            shoulder_velocity_rad_s: (2.5 * obs.target_dx_m - 0.5 * obs.target_dy_m)
+                .clamp(-6.0, 6.0),
+            elbow_velocity_rad_s: (1.5 * obs.target_dx_m + 3.0 * obs.target_dz_m).clamp(-6.0, 6.0),
+            ..MobileManipulatorAction::default()
+        };
+
+        let mut goal_deltas = Vec::new();
+        for _ in 0..3 {
+            let reset = episode.reset();
+            goal_deltas.push((reset.observation.target_dx_m, reset.observation.target_dz_m));
+            let mut obs = reset.observation;
+            let mut reached = false;
+            for _ in 0..500 {
+                let step = episode.step(policy(&obs));
+                obs = step.observation;
+                if step.terminated {
+                    reached = true;
+                    break;
+                }
+            }
+            assert!(
+                reached,
+                "goal-conditioned policy should reach the sampled target"
+            );
+        }
+
+        // Targets must actually vary between episodes (otherwise it is not generalizing).
+        assert!(
+            goal_deltas
+                .windows(2)
+                .any(|pair| (pair[0].0 - pair[1].0).abs() > 1e-6
+                    || (pair[0].1 - pair[1].1).abs() > 1e-6),
+            "expected sampled reach targets to differ across resets"
+        );
+    }
+
+    #[test]
     fn place_episode_picks_carries_and_sets_down() {
         let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
         let _ = episode.reset();
@@ -486,6 +597,8 @@ mod tests {
                 success_m: 0.12,
             },
             reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            rng_seed: 0,
         };
         let mut episode = MobileManipulatorEpisode::new(config);
         let _ = episode.reset();
