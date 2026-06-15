@@ -277,9 +277,11 @@ fn hold_ros_graph_for_smoke(bridge: &Arc<BridgeLoop>, executor: &mut Executor) -
     }
 
     eprintln!("holding ROS graph for {hold_secs}s (RNE_ROS2_HOLD_SECS)");
+    bridge.publish_current()?;
     let deadline = std::time::Instant::now() + Duration::from_secs(hold_secs);
     while std::time::Instant::now() < deadline {
         let _ = bridge.tick_playing()?;
+        bridge.publish_current()?;
         spin_once(executor)?;
     }
     Ok(())

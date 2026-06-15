@@ -1,5 +1,17 @@
 # Roadmap
 
+## v0.6.0 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Physics | URDF → Rapier articulation (`attach_urdf_articulation`) |
+| Assets | `mm_minimal` / `mm_mobile` URDF + scene assets |
+| AI | `MobileManipulatorSim`, reach example, DataBus `JointState` |
+| Rendering | Arm teleop in interactive viewer (`--manipulator`, `--manipulator-mobile`) |
+| ROS 2 | `mobile_manipulator` mode: `/joint_states`, `/cmd_vel`, `/arm_joint_velocity` |
+
 ## v0.5.0 (released)
 
 Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
@@ -13,7 +25,7 @@ Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
 
 ## v0.6 goal: mobile manipulator
 
-Primary development target after v0.5. See [architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md).
+Primary development target for v0.6 (shipped in v0.6.0). See [architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md).
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
@@ -138,9 +150,9 @@ After merging release changes:
 
 ```bash
 cargo run -p xtask -- ci
-git tag -a v0.5.0 -m "Robot Native Engine v0.5.0"
+git tag -a v0.6.0 -m "Robot Native Engine v0.6.0"
 git push origin main --tags
-gh release create v0.5.0 --title "v0.5.0" --notes-file CHANGELOG.md
+gh release create v0.6.0 --title "v0.6.0" --notes-file CHANGELOG.md
 ```
 
-Adjust the `gh release create` notes to the `[0.5.0]` section only if you prefer a shorter GitHub release body.
+Adjust the `gh release create` notes to the `[0.6.0]` section only if you prefer a shorter GitHub release body.

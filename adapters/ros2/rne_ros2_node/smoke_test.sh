@@ -38,9 +38,50 @@ echo "Building native ROS 2 node..."
 cargo build --release --manifest-path "$NODE_DIR/Cargo.toml"
 
 echo "Running bridge smoke test..."
+unset RNE_ROS2_MODE
 export RNE_ROS2_HOLD_SECS="${RNE_ROS2_HOLD_SECS:-60}"
-"$NODE_DIR/target/release/rne_ros2_node" &
+pkill -f "target/release/rne_ros2_node" 2>/dev/null || true
+sleep 0.5
+SMOKE_LOG="$(mktemp "${TMPDIR:-/tmp}/rne_ros2_smoke.XXXXXX")"
+"$NODE_DIR/target/release/rne_ros2_node" >"$SMOKE_LOG" 2>&1 &
 NODE_PID=$!
+
+wait_for_log_line() {
+  local pattern="$1"
+  local timeout_tenths="$2"
+  for _ in $(seq 1 "$timeout_tenths"); do
+    if grep -q "$pattern" "$SMOKE_LOG" 2>/dev/null; then
+      return 0
+    fi
+    if ! kill -0 "$NODE_PID" 2>/dev/null; then
+      echo "rne_ros2_node exited before log matched: $pattern" >&2
+      tail -20 "$SMOKE_LOG" >&2 || true
+      return 1
+    fi
+    sleep 0.1
+  done
+  echo "timed out waiting for log line: $pattern" >&2
+  tail -20 "$SMOKE_LOG" >&2 || true
+  return 1
+}
+
+wait_for_joint_state() {
+  local needle="$1"
+  local timeout_secs="$2"
+  local out=""
+  for _ in $(seq 1 "$((timeout_secs * 2))"); do
+    out="$(timeout 2 ros2 topic echo /joint_states --once 2>/dev/null || true)"
+    if echo "$out" | grep -q "$needle"; then
+      return 0
+    fi
+    if ! kill -0 "$NODE_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.5
+  done
+  echo "expected /joint_states to include ${needle}, last message:${out:+ (no match)}" >&2
+  return 1
+}
 
 SERVICE_READY=0
 for _ in $(seq 1 150); do
@@ -60,6 +101,10 @@ if [[ "$SERVICE_READY" -ne 1 ]]; then
   echo "timed out waiting for /get_simulation_state (15s)" >&2
   exit 1
 fi
+
+wait_for_log_line "final base_x=" 600 || exit 1
+wait_for_log_line "holding ROS graph" 600 || exit 1
+tail -5 "$SMOKE_LOG" || true
 
 echo "Checking get_simulation_state service..."
 timeout 20 ros2 service call /get_simulation_state simulation_interfaces/srv/GetSimulationState "{}"
@@ -83,24 +128,18 @@ if ! timeout 20 ros2 topic echo /scan --once --field angle_increment --no-lost-m
 fi
 
 echo "Checking /joint_states publication..."
-JOINT_COUNT=$(
-  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
-    | grep -c 'left_wheel_joint' \
-    || true
-)
-if [[ "$JOINT_COUNT" -lt 1 ]]; then
-  echo "expected /joint_states to include left_wheel_joint, got count=${JOINT_COUNT}" >&2
-  exit 1
-fi
+wait_for_joint_state "left_wheel_joint" 30 || exit 1
 
 echo "Running mobile manipulator bridge smoke..."
 kill "$NODE_PID" 2>/dev/null || true
 wait "$NODE_PID" 2>/dev/null || true
 NODE_PID=""
+rm -f "$SMOKE_LOG"
+SMOKE_LOG="$(mktemp "${TMPDIR:-/tmp}/rne_ros2_smoke.XXXXXX")"
 
 export RNE_ROS2_MODE=mobile_manipulator
-export RNE_ROS2_HOLD_SECS=0
-"$NODE_DIR/target/release/rne_ros2_node" &
+export RNE_ROS2_HOLD_SECS=30
+"$NODE_DIR/target/release/rne_ros2_node" >"$SMOKE_LOG" 2>&1 &
 NODE_PID=$!
 
 for _ in $(seq 1 150); do
@@ -115,18 +154,24 @@ for _ in $(seq 1 150); do
   sleep 0.1
 done
 
-MM_JOINTS=$(
-  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
-    | grep -c 'shoulder_joint' \
-    || true
+wait_for_log_line "final base_x=" 600 || exit 1
+wait_for_log_line "holding ROS graph" 600 || exit 1
+tail -5 "$SMOKE_LOG" || true
+
+echo "Checking /cmd_vel subscription exists..."
+CMD_VEL_SUBS=$(
+  ros2 topic info /cmd_vel 2>/dev/null | awk '/Subscription count/ {print $3}' || true
 )
-if [[ "$MM_JOINTS" -lt 1 ]]; then
-  echo "expected mobile /joint_states to include shoulder_joint, got count=${MM_JOINTS}" >&2
+if [[ -z "$CMD_VEL_SUBS" || "$CMD_VEL_SUBS" -lt 1 ]]; then
+  echo "expected /cmd_vel subscription on mobile bridge, got count=${CMD_VEL_SUBS:-0}" >&2
   exit 1
 fi
 
+echo "Checking mobile /joint_states publication..."
+wait_for_joint_state "shoulder_joint" 30 || exit 1
+
 MM_JOINT_WIDTH=$(
-  timeout 20 ros2 topic echo /joint_states --once --field name --no-lost-messages 2>/dev/null \
+  timeout 20 ros2 topic echo /joint_states --once 2>/dev/null \
     | grep -c '_joint' \
     || true
 )
@@ -135,8 +180,5 @@ if [[ "$MM_JOINT_WIDTH" -lt 4 ]]; then
   exit 1
 fi
 
-echo "Checking /cmd_vel subscription exists..."
-if ! ros2 topic info /cmd_vel 2>/dev/null | grep -q 'Subscription count: 1'; then
-  echo "expected /cmd_vel subscription on mobile bridge" >&2
-  exit 1
-fi
+rm -f "$SMOKE_LOG"
+echo "ROS 2 smoke tests passed."
