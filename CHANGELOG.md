@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Per-world solver iterations** (`PhysicsWorldDesc.solver_iterations`, default `0` =
+  Rapier's default): a higher count stabilizes stiff articulated chains. The `mm_lift`
+  robot's world uses 16 iterations so its tall lift+arm chain holds its pose instead of
+  swinging chaotically (it was unstable at the default); other robots are unchanged.
+  Covered by a new idle-pose-hold test.
+
 - **Vertical lift (`mm_lift` robot)**: a fixed-base arm with a prismatic "torso" lift
   between the base and shoulder, so the whole SCARA arm can be raised and lowered.
   `MobileManipulatorSim::new_mm_lift()` loads it; `MobileManipulatorAction.lift_velocity_m_s`
