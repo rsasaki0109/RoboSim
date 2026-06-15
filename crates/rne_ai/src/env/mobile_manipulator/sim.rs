@@ -33,6 +33,11 @@ pub fn mm_mobile_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_mobile.rne.scene.toml")
 }
 
+/// Default scene asset for the lift-equipped `mm_lift` robot.
+pub fn mm_lift_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_lift.rne.scene.toml")
+}
+
 /// Scene asset with a tabletop cube for gripper contact smoke tests.
 pub fn mm_minimal_grasp_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -45,11 +50,33 @@ pub fn mm_minimal_transport_scene_path() -> PathBuf {
         .join("../../assets/scenes/mm_minimal_transport.rne.scene.toml")
 }
 
+/// How an actuated joint's position is read back and how its command maps to a motor.
+#[derive(Clone, Copy, PartialEq)]
+enum JointReadAxis {
+    /// Revolute about Y (arm joints): position from local yaw.
+    YawY,
+    /// Revolute about Z (wheel joints): position from local Z rotation; command
+    /// is scaled to a wheel motor velocity.
+    RotZ,
+    /// Prismatic along Y (vertical lift): position from local Y translation.
+    LiftY,
+}
+
 struct ActuatedJoint {
     link: Entity,
-    /// When true, joint angle is read from local Z rotation (wheel joints).
-    axis_z: bool,
+    axis: JointReadAxis,
 }
+
+/// Position-tracking stiffness for the vertical lift motor. The lift is a position
+/// (spring-damper) motor, not a velocity motor, so it holds the arm's weight at a
+/// commanded height without drift; the command integrates into the height target.
+const LIFT_MOTOR_STIFFNESS: f64 = 600.0;
+/// Damping for the vertical lift motor (≈ critical for the ~6 kg arm), so the lift
+/// settles to its target height without oscillating.
+const LIFT_MOTOR_DAMPING: f64 = 120.0;
+/// Travel limits of the lift height target, in meters about its rest position.
+const LIFT_TARGET_MIN_M: f64 = -0.25;
+const LIFT_TARGET_MAX_M: f64 = 0.6;
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -63,6 +90,8 @@ pub struct MobileManipulatorSim {
     finger_links: Vec<Entity>,
     grasped_object: Option<Entity>,
     actuated: Vec<ActuatedJoint>,
+    /// Commanded height target of the vertical lift, integrated from lift velocity.
+    lift_target_m: f64,
     joint_names: Vec<String>,
     named_entities: HashMap<String, Entity>,
     wrist_camera: Option<WristCameraMount>,
@@ -85,6 +114,11 @@ impl MobileManipulatorSim {
     /// Creates the built-in diff-drive base with a 2-DOF arm.
     pub fn new_mm_mobile() -> Self {
         Self::from_scene_path(&mm_mobile_scene_path()).expect("built-in mm_mobile scene")
+    }
+
+    /// Creates the built-in fixed-base arm with a vertical lift column.
+    pub fn new_mm_lift() -> Self {
+        Self::from_scene_path(&mm_lift_scene_path()).expect("built-in mm_lift scene")
     }
 
     /// Loads a `.rne.scene.toml` with a single URDF mobile-manipulator robot.
@@ -346,6 +380,7 @@ impl MobileManipulatorSim {
             finger_links,
             grasped_object: None,
             actuated,
+            lift_target_m: 0.0,
             joint_names,
             named_entities,
             wrist_camera,
@@ -358,6 +393,7 @@ impl MobileManipulatorSim {
             step_count: 0,
             joint_sequence: 0,
         };
+        sim.configure_lift_motor();
         sim.warmup_physics();
         sim
     }
@@ -499,14 +535,40 @@ impl MobileManipulatorSim {
     }
 
     fn apply_action(&mut self, action: MobileManipulatorAction) {
+        // Integrate the lift command into a height target so the position motor
+        // holds the commanded height instead of drifting under the arm's weight.
+        let dt_s = self.dt.as_seconds().value();
+        self.lift_target_m = (self.lift_target_m + action.lift_velocity_m_s * dt_s)
+            .clamp(LIFT_TARGET_MIN_M, LIFT_TARGET_MAX_M);
+
         for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
             let velocity = velocity_for_joint(joint_name, action);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
-                motor.velocity_rad_s = if joint.axis_z {
-                    wheel_command_to_motor_rad_s(velocity)
+                if joint.axis == JointReadAxis::LiftY {
+                    // Position (spring-damper) control with the velocity as feedforward.
+                    motor.velocity_rad_s = velocity;
+                    motor.target_position = self.lift_target_m;
                 } else {
-                    velocity
-                };
+                    motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
+                        wheel_command_to_motor_rad_s(velocity)
+                    } else {
+                        velocity
+                    };
+                }
+            }
+        }
+    }
+
+    /// Configures the vertical lift as a position (spring-damper) motor so it holds
+    /// the arm's weight against gravity at its commanded height without drift.
+    fn configure_lift_motor(&mut self) {
+        for joint in &self.actuated {
+            if joint.axis == JointReadAxis::LiftY {
+                if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
+                    motor.stiffness = LIFT_MOTOR_STIFFNESS;
+                    motor.gain = LIFT_MOTOR_DAMPING;
+                    motor.target_position = 0.0;
+                }
             }
         }
     }
@@ -555,6 +617,7 @@ fn velocity_for_joint(joint_name: &str, action: MobileManipulatorAction) -> f64 
     match joint_name {
         "left_wheel_joint" => action.left_wheel_velocity_rad_s,
         "right_wheel_joint" => action.right_wheel_velocity_rad_s,
+        "lift_joint" => action.lift_velocity_m_s,
         "shoulder_joint" => action.shoulder_velocity_rad_s,
         "elbow_joint" => action.elbow_velocity_rad_s,
         "left_finger_joint" => action.gripper_velocity_rad_s,
@@ -571,12 +634,10 @@ struct JointSample {
 fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
     let position_rad = world
         .get::<Transform3>(joint.link)
-        .map(|transform| {
-            if joint.axis_z {
-                z_rotation_rad(transform.rotation)
-            } else {
-                yaw_rad(transform.rotation)
-            }
+        .map(|transform| match joint.axis {
+            JointReadAxis::RotZ => z_rotation_rad(transform.rotation),
+            JointReadAxis::LiftY => transform.translation.y,
+            JointReadAxis::YawY => yaw_rad(transform.rotation),
         })
         .unwrap_or(0.0);
     let velocity_rad_s = world
@@ -618,56 +679,43 @@ fn actuated_joints_for_robot(
     mobile_base: bool,
     links: &HashMap<String, Entity>,
 ) -> Result<(Vec<ActuatedJoint>, Vec<String>), AssetError> {
+    let mut joints: Vec<ActuatedJoint> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+
     if mobile_base {
-        let left_wheel = link_entity(links, "left_wheel")?;
-        let right_wheel = link_entity(links, "right_wheel")?;
-        let upper_arm = link_entity(links, "upper_arm_link")?;
-        let forearm = link_entity(links, "forearm_link")?;
-        Ok(append_gripper_joints(
-            vec![
-                ActuatedJoint {
-                    link: left_wheel,
-                    axis_z: true,
-                },
-                ActuatedJoint {
-                    link: right_wheel,
-                    axis_z: true,
-                },
-                ActuatedJoint {
-                    link: upper_arm,
-                    axis_z: false,
-                },
-                ActuatedJoint {
-                    link: forearm,
-                    axis_z: false,
-                },
-            ],
-            vec![
-                "left_wheel_joint".into(),
-                "right_wheel_joint".into(),
-                "shoulder_joint".into(),
-                "elbow_joint".into(),
-            ],
-            links,
-        ))
-    } else {
-        let upper_arm = link_entity(links, "upper_arm_link")?;
-        let forearm = link_entity(links, "forearm_link")?;
-        Ok(append_gripper_joints(
-            vec![
-                ActuatedJoint {
-                    link: upper_arm,
-                    axis_z: false,
-                },
-                ActuatedJoint {
-                    link: forearm,
-                    axis_z: false,
-                },
-            ],
-            vec!["shoulder_joint".into(), "elbow_joint".into()],
-            links,
-        ))
+        joints.push(ActuatedJoint {
+            link: link_entity(links, "left_wheel")?,
+            axis: JointReadAxis::RotZ,
+        });
+        joints.push(ActuatedJoint {
+            link: link_entity(links, "right_wheel")?,
+            axis: JointReadAxis::RotZ,
+        });
+        names.push("left_wheel_joint".into());
+        names.push("right_wheel_joint".into());
     }
+
+    // Optional vertical lift carriage between the base and the shoulder.
+    if let Ok(torso) = link_entity(links, "torso_link") {
+        joints.push(ActuatedJoint {
+            link: torso,
+            axis: JointReadAxis::LiftY,
+        });
+        names.push("lift_joint".into());
+    }
+
+    joints.push(ActuatedJoint {
+        link: link_entity(links, "upper_arm_link")?,
+        axis: JointReadAxis::YawY,
+    });
+    joints.push(ActuatedJoint {
+        link: link_entity(links, "forearm_link")?,
+        axis: JointReadAxis::YawY,
+    });
+    names.push("shoulder_joint".into());
+    names.push("elbow_joint".into());
+
+    Ok(append_gripper_joints(joints, names, links))
 }
 
 fn append_gripper_joints(
@@ -681,11 +729,11 @@ fn append_gripper_joints(
     ) {
         joints.push(ActuatedJoint {
             link: left,
-            axis_z: false,
+            axis: JointReadAxis::YawY,
         });
         joints.push(ActuatedJoint {
             link: right,
-            axis_z: false,
+            axis: JointReadAxis::YawY,
         });
         names.push("left_finger_joint".into());
         names.push("right_finger_joint".into());
@@ -735,6 +783,8 @@ mod tests {
                 shoulder_velocity_rad_s: 3.0,
                 elbow_velocity_rad_s: 0.0,
                 gripper_velocity_rad_s: 0.0,
+
+                lift_velocity_m_s: 0.0,
             });
         }
         let final_obs = sim.observe();
@@ -759,6 +809,8 @@ mod tests {
             shoulder_velocity_rad_s: 1.0,
             elbow_velocity_rad_s: 0.5,
             gripper_velocity_rad_s: 0.0,
+
+            lift_velocity_m_s: 0.0,
         });
         let obs = sim.observe();
         assert_eq!(obs.joint_state_count, 4);
@@ -789,6 +841,8 @@ mod tests {
                 shoulder_velocity_rad_s: 0.0,
                 elbow_velocity_rad_s: 0.0,
                 gripper_velocity_rad_s: 0.0,
+
+                lift_velocity_m_s: 0.0,
             });
         }
         let final_obs = sim.observe();
@@ -865,6 +919,72 @@ mod tests {
         assert!(
             contacted,
             "expected finger contact with grasp_cube while closing gripper"
+        );
+    }
+
+    #[test]
+    fn loads_mm_lift_scene_asset() {
+        let sim = MobileManipulatorSim::new_mm_lift();
+        assert!(!sim.mobile_base());
+        assert_eq!(
+            sim.joint_names(),
+            &[
+                "lift_joint",
+                "shoulder_joint",
+                "elbow_joint",
+                "left_finger_joint",
+                "right_finger_joint",
+            ]
+        );
+    }
+
+    /// Steps `count` times with `action`, returning the mean end-effector height
+    /// over the final `avg` steps (smooths the arm's settling transient).
+    fn mean_ee_height(
+        sim: &mut MobileManipulatorSim,
+        action: MobileManipulatorAction,
+        count: usize,
+        avg: usize,
+    ) -> f64 {
+        let mut sum = 0.0;
+        for step in 0..count {
+            let obs = sim.step(action);
+            if step >= count - avg {
+                sum += obs.ee_y_m;
+            }
+        }
+        sum / avg as f64
+    }
+
+    #[test]
+    fn lift_provides_controllable_vertical_motion() {
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        let up = MobileManipulatorAction {
+            lift_velocity_m_s: 0.3,
+            ..MobileManipulatorAction::default()
+        };
+        let down = MobileManipulatorAction {
+            lift_velocity_m_s: -0.3,
+            ..MobileManipulatorAction::default()
+        };
+
+        // Let the arm settle on the lift, then record its resting height. The lift
+        // is a position motor, so it holds the ~6 kg arm against gravity here — a
+        // plain velocity motor sagged or oscillated instead.
+        let baseline = mean_ee_height(&mut sim, MobileManipulatorAction::default(), 120, 30);
+
+        // Raising the lift carries the whole arm well above the resting height.
+        let raised = mean_ee_height(&mut sim, up, 180, 30);
+        assert!(
+            raised > baseline + 0.15,
+            "lift up should raise the arm against gravity: baseline={baseline:.3}, raised={raised:.3}"
+        );
+
+        // Lowering the lift brings it back down — the motion is reversible.
+        let lowered = mean_ee_height(&mut sim, down, 240, 30);
+        assert!(
+            lowered < raised - 0.15,
+            "lift down should lower the arm: raised={raised:.3}, lowered={lowered:.3}"
         );
     }
 

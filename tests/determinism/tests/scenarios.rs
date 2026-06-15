@@ -206,3 +206,25 @@ fn mobile_manipulator_reach_hash_is_repeatable() {
     assert_eq!(first, second);
     assert_ne!(first, 0);
 }
+
+fn run_mobile_manipulator_lift(steps: u32) -> u64 {
+    use rne_ai::{MobileManipulatorAction, MobileManipulatorSim};
+
+    let mut sim = MobileManipulatorSim::new_mm_lift();
+    let action = MobileManipulatorAction {
+        lift_velocity_m_s: 0.3,
+        ..MobileManipulatorAction::default()
+    };
+    for _ in 0..steps {
+        sim.step(action);
+    }
+    hash_physics_state(sim.world())
+}
+
+#[test]
+fn mobile_manipulator_lift_hash_is_repeatable() {
+    let first = run_mobile_manipulator_lift(150);
+    let second = run_mobile_manipulator_lift(150);
+    assert_eq!(first, second);
+    assert_ne!(first, 0);
+}

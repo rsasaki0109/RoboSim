@@ -32,4 +32,8 @@ pub struct MobileManipulatorAction {
     pub elbow_velocity_rad_s: f64,
     /// Parallel gripper open/close velocity in radians per second (both fingers).
     pub gripper_velocity_rad_s: f64,
+    /// Vertical lift (prismatic column) velocity in meters per second. Positive
+    /// raises the arm. Only the lift-equipped robot acts on this; other robots
+    /// ignore it.
+    pub lift_velocity_m_s: f64,
 }

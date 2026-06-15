@@ -64,6 +64,7 @@ fn main() {
             shoulder_velocity_rad_s: SHOULDER_VELOCITY_RAD_S,
             elbow_velocity_rad_s: 0.0,
             gripper_velocity_rad_s: 0.0,
+            lift_velocity_m_s: 0.0,
         });
     }
     let final_error = ee_distance_to_target_m(&sim.observe(), POSE_TARGET);
