@@ -15,11 +15,12 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
     match task {
         "reach" => Ok(MobileManipulatorEpisodeConfig::reach()),
         "reach_random" => Ok(MobileManipulatorEpisodeConfig::reach_randomized(0)),
+        "reach_curriculum" => Ok(MobileManipulatorEpisodeConfig::reach_curriculum(0)),
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'reach_random', 'place', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'transport', or 'inspect'"
         ))),
     }
 }
@@ -547,6 +548,12 @@ impl PyMobileManipulatorEpisode {
     #[getter]
     fn is_grasping(&self) -> bool {
         self.inner.simulation().is_grasping()
+    }
+
+    /// Active reach-curriculum stage index (None when no curriculum is configured).
+    #[getter]
+    fn curriculum_stage(&self) -> Option<usize> {
+        self.inner.curriculum_stage()
     }
 }
 

@@ -47,6 +47,114 @@ impl ReachRandomization {
     }
 }
 
+/// One reach curriculum stage: a sampling region and the successes needed to advance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReachCurriculumStage {
+    /// Target sampling region for this stage.
+    pub randomization: ReachRandomization,
+    /// Successful episodes required before advancing to the next stage.
+    pub successes_to_advance: u32,
+}
+
+/// Static reach curriculum definition (ordered easy → hard).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachCurriculumConfig {
+    /// Ordered stages.
+    pub stages: Vec<ReachCurriculumStage>,
+}
+
+impl ReachCurriculumConfig {
+    /// Three-stage curriculum that widens the X/Z target region as the policy succeeds.
+    pub fn easy_to_hard() -> Self {
+        let stage = |min: ReachTarget, max: ReachTarget, advance: u32| ReachCurriculumStage {
+            randomization: ReachRandomization {
+                min,
+                max,
+                success_m: 0.12,
+            },
+            successes_to_advance: advance,
+        };
+        Self {
+            stages: vec![
+                stage(
+                    ReachTarget::new(0.39, 0.585, 0.25),
+                    ReachTarget::new(0.41, 0.595, 0.29),
+                    3,
+                ),
+                stage(
+                    ReachTarget::new(0.37, 0.585, 0.22),
+                    ReachTarget::new(0.43, 0.595, 0.33),
+                    3,
+                ),
+                stage(
+                    ReachTarget::new(0.34, 0.585, 0.18),
+                    ReachTarget::new(0.46, 0.595, 0.36),
+                    u32::MAX,
+                ),
+            ],
+        }
+    }
+}
+
+/// Runtime reach curriculum tracking stage progress.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachCurriculum {
+    config: ReachCurriculumConfig,
+    stage_index: usize,
+    successes_in_stage: u32,
+}
+
+impl ReachCurriculum {
+    /// Creates runtime curriculum state from a static config.
+    pub fn new(config: ReachCurriculumConfig) -> Self {
+        Self {
+            config,
+            stage_index: 0,
+            successes_in_stage: 0,
+        }
+    }
+
+    /// Active stage index.
+    pub fn stage_index(&self) -> usize {
+        self.stage_index
+    }
+
+    /// Number of configured stages.
+    pub fn stage_count(&self) -> usize {
+        self.config.stages.len()
+    }
+
+    fn current_stage(&self) -> ReachCurriculumStage {
+        self.config.stages[self.stage_index.min(self.config.stages.len() - 1)]
+    }
+
+    /// Samples a target from the active stage's region.
+    pub fn sample(&self, rng: &mut crate::rng::DeterministicRng) -> (ReachTarget, f64) {
+        let stage = self.current_stage();
+        (
+            stage.randomization.sample(rng),
+            stage.randomization.success_m,
+        )
+    }
+
+    /// Records an episode outcome, advancing the stage after enough successes.
+    pub fn record_episode_end(&mut self, terminated: bool) -> bool {
+        if !terminated {
+            return false;
+        }
+        let stage = self.current_stage();
+        self.successes_in_stage += 1;
+        if self.successes_in_stage < stage.successes_to_advance
+            || self.stage_index + 1 >= self.config.stages.len()
+        {
+            return false;
+        }
+        self.stage_index += 1;
+        self.successes_in_stage = 0;
+        true
+    }
+}
+
 /// Euclidean distance from the observation EE pose to a reach target.
 pub fn ee_distance_to_target_m(obs: &MobileManipulatorObservation, target: ReachTarget) -> f64 {
     let dx = obs.ee_x_m - target.x_m;
