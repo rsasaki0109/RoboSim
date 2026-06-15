@@ -4,7 +4,7 @@ model_name = "mm_lift"
 [urdf]
 path = "mm_lift/mm_lift.urdf"
 base_body_type = "fixed"
-initial_translation_m = [0.0, 0.3, 0.0]
+initial_translation_m = [0.0, 0.75, 0.0]
 articulation = true
 
 [wrist_camera]
