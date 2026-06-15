@@ -1,5 +1,17 @@
 # Roadmap
 
+## v0.8.0 (released)
+
+Shipped 2026-06-16. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Physics | Prismatic + fixed (weld) joints; deterministic backend iteration |
+| Manipulation | Contact-triggered weld grasp, `Place` task, example 26 pick-and-place |
+| AI / RL | `reach` task, CEM training loop (example 27), vectorized env (example 28), `rne_py` bindings + SB3 PPO integration |
+| ROS 2 | Arm velocity / position / trajectory control + gripper command + `ee_link` TF |
+| Assets | `mm_mobile` drive-wheel fix (was spinning in place) |
+
 ## v0.6.1 (released)
 
 Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).

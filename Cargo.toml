@@ -58,7 +58,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
-version = "0.7.0"
+version = "0.8.0"
 
 [workspace.dependencies]
 anyhow = "1"
