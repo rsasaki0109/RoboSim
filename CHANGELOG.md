@@ -13,6 +13,8 @@ All notable changes to Robot Native Engine are documented in this file.
   so it holds the ~6 kg arm against gravity at a commanded height without drift — vertical
   lifting was previously blocked by the velocity-only motor. Covered by a unit test
   (controllable, reversible vertical motion) and a replay-determinism test.
+- **Example 30 lift smoke**: `30_mobile_manipulator_lift` raises the `mm_lift` arm with
+  the vertical lift and checks the end-effector rises (wired into `xtask ci`)
 - **Joint position motors**: `JointMotor` gains `stiffness` + `target_position` fields
   (both default `0.0`, so existing velocity motors are unchanged). A positive stiffness
   turns a joint into a spring-damper that holds a position target under load.
