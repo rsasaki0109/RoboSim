@@ -4,6 +4,22 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-12
+
+### Added
+
+- **Viewer wrist camera PiP** (`P` toggle) on `--manipulator` profiles in example 14
+- **ROS `/camera/image_raw`** from wrist camera DataBus in `mobile_manipulator` mode
+- **`MobileManipulatorEpisode`** with reach / grasp / transport / inspect tasks and rewards
+- **`MobileManipulatorTask`** and **`MobileManipulatorRewardConfig`**
+- **Example 25 episode smoke**: inspect + transport termination
+- **`body_within_zone_m`** transport helper for drop-zone checks
+- **`[wrist_camera]`** on `mm_mobile` robot asset (forearm mount)
+
+### Changed
+
+- **`xtask ci`**: example 25 smoke; viewer smokes for `--manipulator` and `--manipulator-mobile`
+
 ## [0.6.2] - 2026-06-12
 
 ### Added

@@ -38,8 +38,9 @@ pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
     mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
     mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s,
-    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim,
-    VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorEpisode,
+    MobileManipulatorEpisodeConfig, MobileManipulatorSim, VectorizedDiffDriveConfig,
+    VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
@@ -62,9 +63,9 @@ pub use render::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
     LidarOverlayStats,
 };
-pub use reward::DiffDriveRewardConfig;
+pub use reward::{DiffDriveRewardConfig, MobileManipulatorRewardConfig, MobileManipulatorTask};
 pub use rng::DeterministicRng;
 pub use transport::{
-    body_moved_at_least_m, displacement_m, had_finger_contact, named_translation_m,
-    TRANSPORT_SUCCESS_M,
+    body_moved_at_least_m, body_within_zone_m, displacement_m, had_finger_contact,
+    named_translation_m, TRANSPORT_SUCCESS_M,
 };

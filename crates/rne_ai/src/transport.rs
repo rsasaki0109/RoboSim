@@ -36,6 +36,26 @@ pub fn had_finger_contact(sim: &MobileManipulatorSim, body_name: &str, contacted
     contacted || finger_contacts_named(sim, body_name)
 }
 
+/// Returns true when a named body is within a zone obstacle's horizontal footprint.
+pub fn body_within_zone_m(
+    sim: &MobileManipulatorSim,
+    body_name: &str,
+    zone_name: &str,
+    half_extent_m: f64,
+) -> bool {
+    match (
+        named_translation_m(sim, body_name),
+        named_translation_m(sim, zone_name),
+    ) {
+        (Some(body), Some(zone)) => {
+            let dx = (body.0 - zone.0).abs();
+            let dz = (body.2 - zone.2).abs();
+            dx <= half_extent_m && dz <= half_extent_m
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

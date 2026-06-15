@@ -9,7 +9,7 @@ use rclrs::{
     RclrsError, RequestedGoal, SpinOptions, Subscription, TerminatedGoal,
 };
 use rne_adapter_ros2::{
-    pointcloud_to_laserscan, to_ros_clock, to_ros_joint_state, to_ros_pointcloud2,
+    pointcloud_to_laserscan, to_ros_clock, to_ros_image, to_ros_joint_state, to_ros_pointcloud2,
     to_ros_transform_stamped, RosTfMessage,
 };
 use rne_data::PointCloud;
@@ -27,22 +27,24 @@ use simulation_interfaces::{
 };
 
 use crate::convert::{
-    to_clock_message, to_joint_state_message, to_laserscan_message, to_pointcloud2_message,
-    to_tf_message,
+    to_clock_message, to_image_message, to_joint_state_message, to_laserscan_message,
+    to_pointcloud2_message, to_tf_message,
 };
-use crate::sim_control::{BridgeFrame, BridgeMode, BridgeSim, BridgeSnapshot, StepFallback};
+use crate::sim_control::{BridgeFrame, BridgeMode, BridgeSim, BridgeSnapshot, StepFallback, bridge_mode_from_env};
 
 const SIM_STEPS: usize = 300;
 const MIN_FORWARD_X_M: f64 = 0.8;
 const MIN_LIDAR_HITS: usize = 8;
 const MIN_MOBILE_BASE_MOTION_M: f64 = 0.15;
 const MIN_MOBILE_JOINTS: usize = 4;
+const MIN_WRIST_CAMERA_PIXELS: usize = 64 * 48 * 4;
 
 type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
 type ScanPublisher = Publisher<sensor_msgs::msg::LaserScan>;
 type TfPublisher = Publisher<tf2_msgs::msg::TFMessage>;
 type JointStatePublisher = Publisher<sensor_msgs::msg::JointState>;
+type ImagePublisher = Publisher<sensor_msgs::msg::Image>;
 
 struct BridgeLoop {
     sim: Mutex<BridgeSim>,
@@ -51,6 +53,7 @@ struct BridgeLoop {
     scan_pub: ScanPublisher,
     tf_pub: TfPublisher,
     joint_state_pub: JointStatePublisher,
+    image_pub: Option<ImagePublisher>,
     wheel_velocity: MandatoryParameter<f64>,
     shoulder_velocity: MandatoryParameter<f64>,
     elbow_velocity: MandatoryParameter<f64>,
@@ -74,6 +77,7 @@ impl BridgeLoop {
         scan_pub: ScanPublisher,
         tf_pub: TfPublisher,
         joint_state_pub: JointStatePublisher,
+        image_pub: Option<ImagePublisher>,
         wheel_velocity: MandatoryParameter<f64>,
         shoulder_velocity: MandatoryParameter<f64>,
         elbow_velocity: MandatoryParameter<f64>,
@@ -85,6 +89,7 @@ impl BridgeLoop {
             scan_pub,
             tf_pub,
             joint_state_pub,
+            image_pub,
             wheel_velocity,
             shoulder_velocity,
             elbow_velocity,
@@ -111,6 +116,7 @@ impl BridgeLoop {
             &self.scan_pub,
             &self.tf_pub,
             &self.joint_state_pub,
+            self.image_pub.as_ref(),
             &sim.frame(),
         )
     }
@@ -128,6 +134,7 @@ impl BridgeLoop {
             &self.scan_pub,
             &self.tf_pub,
             &self.joint_state_pub,
+            self.image_pub.as_ref(),
             &frame,
         )?;
         Ok(true)
@@ -179,19 +186,30 @@ pub fn run() -> Result<()> {
         .create_publisher::<sensor_msgs::msg::JointState>("/joint_states")
         .context("failed to create /joint_states publisher")?;
 
+    let mode = bridge_mode_from_env();
+    let image_pub = if mode == BridgeMode::MobileManipulator {
+        Some(
+            node.create_publisher::<sensor_msgs::msg::Image>("/camera/image_raw")
+                .context("failed to create /camera/image_raw publisher")?,
+        )
+    } else {
+        None
+    };
+
     let bridge = Arc::new(BridgeLoop::new(
-        BridgeSim::new(),
+        BridgeSim::with_mode(mode),
         clock_pub,
         cloud_pub,
         scan_pub,
         tf_pub,
         joint_state_pub,
+        image_pub,
         wheel_velocity,
         shoulder_velocity,
         elbow_velocity,
     ));
 
-    let mode = bridge.mode();
+    let bridge_mode = bridge.mode();
     let _handles = register_services(&node, Arc::clone(&bridge))?;
 
     match mode {
@@ -219,7 +237,7 @@ pub fn run() -> Result<()> {
         "final base_x={:.2} m joints={}",
         last_snapshot.base_x_m, last_snapshot.joint_count
     );
-    verify_smoke(mode, &last_snapshot)?;
+    verify_smoke(bridge_mode, &last_snapshot)?;
 
     hold_ros_graph_for_smoke(&bridge, &mut executor)?;
 
@@ -261,6 +279,12 @@ fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot) -> Result<()> {
             }
             if !snapshot.has_shoulder_joint {
                 bail!("expected shoulder_joint in /joint_states");
+            }
+            if snapshot.wrist_camera_pixels < MIN_WRIST_CAMERA_PIXELS {
+                bail!(
+                    "expected wrist camera image on /camera/image_raw, got {} bytes",
+                    snapshot.wrist_camera_pixels
+                );
             }
         }
     }
@@ -457,6 +481,7 @@ fn publish_frame(
     scan_pub: &ScanPublisher,
     tf_pub: &TfPublisher,
     joint_state_pub: &JointStatePublisher,
+    image_pub: Option<&ImagePublisher>,
     frame: &BridgeFrame,
 ) -> Result<()> {
     let sim_time = rne_core::SimTime::from_ticks(frame.sim_ticks);
@@ -491,6 +516,13 @@ fn publish_frame(
     joint_state_pub
         .publish(to_joint_state_message(&joint_state))
         .context("publish /joint_states")?;
+
+    if let (Some(image_pub), Some(image)) = (image_pub, &frame.wrist_camera) {
+        let ros_image = to_ros_image(image, sim_time, "wrist_camera");
+        image_pub
+            .publish(to_image_message(&ros_image))
+            .context("publish /camera/image_raw")?;
+    }
 
     Ok(())
 }
