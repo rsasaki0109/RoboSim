@@ -38,6 +38,9 @@ All notable changes to Robot Native Engine are documented in this file.
 - **ROS 2 `/arm_joint_position`** (`sensor_msgs/JointState`): position-control the arm —
   the node drives `shoulder_joint` / `elbow_joint` toward the commanded positions with a
   clamped P-controller (a velocity command cancels the target)
+- **ROS 2 `/arm_joint_trajectory`** (`trajectory_msgs/JointTrajectory`): follow a sequence
+  of `shoulder_joint` / `elbow_joint` waypoints, advancing to the next when the current one
+  is reached
 
 ### Fixed
 
