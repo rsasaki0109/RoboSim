@@ -234,6 +234,9 @@ impl MobileManipulatorSim {
             gripper_position_rad,
             wrist_camera_pixels,
             joint_state_count,
+            target_dx_m: 0.0,
+            target_dy_m: 0.0,
+            target_dz_m: 0.0,
         }
     }
 

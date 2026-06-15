@@ -38,7 +38,8 @@ except ImportError:
 
 
 def make_env():
-    return MobileManipulatorPlaceEnv("reach")
+    # Goal-conditioned reach: the goal offset is part of the observation.
+    return MobileManipulatorPlaceEnv("reach_random")
 
 
 def evaluate(model, episodes=5):

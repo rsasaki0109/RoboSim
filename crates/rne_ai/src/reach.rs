@@ -21,6 +21,32 @@ impl ReachTarget {
     }
 }
 
+/// Axis-aligned region from which a reach target is sampled each episode.
+///
+/// Used for goal-conditioned reach: the per-episode target is drawn uniformly from this
+/// box so the policy must generalize across targets (the goal is exposed in the
+/// observation as `target_d{x,y,z}_m`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReachRandomization {
+    /// Minimum-corner target.
+    pub min: ReachTarget,
+    /// Maximum-corner target.
+    pub max: ReachTarget,
+    /// Success distance threshold in meters.
+    pub success_m: f64,
+}
+
+impl ReachRandomization {
+    /// Samples a uniform reach target within the region.
+    pub fn sample(&self, rng: &mut crate::rng::DeterministicRng) -> ReachTarget {
+        ReachTarget::new(
+            rng.uniform_f64(self.min.x_m, self.max.x_m),
+            rng.uniform_f64(self.min.y_m, self.max.y_m),
+            rng.uniform_f64(self.min.z_m, self.max.z_m),
+        )
+    }
+}
+
 /// Euclidean distance from the observation EE pose to a reach target.
 pub fn ee_distance_to_target_m(obs: &MobileManipulatorObservation, target: ReachTarget) -> f64 {
     let dx = obs.ee_x_m - target.x_m;
