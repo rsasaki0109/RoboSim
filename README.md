@@ -21,6 +21,28 @@ embodied AI, synthetic sensor data, and policy evaluation.
 - Run headless in CI or render interactively with wgpu.
 - Build robots from Robot/Sensor/Actuator entities.
 - Record and replay deterministic simulation episodes.
+- Manipulate: a lift-equipped arm does real 3D pick-and-place.
+
+## 3D pick-and-place
+
+<p align="center">
+  <img src="docs/media/mm-lift-pickplace.png" alt="The mm_lift robot lifting a grasped cube with its top-down claw" width="760">
+  <br>
+  <sub>The <code>mm_lift</code> robot grasps a cube off the ground and hoists it on its vertical lift.</sub>
+</p>
+
+The `mm_lift` manipulator performs a full vertical pick-and-place: a column-mounted lift
+lowers a top-down claw over a cube on the ground, grasps it (contact-triggered weld), raises
+it, swings the arm to a new spot, and opens to release it. Position-controlled joints hold the
+commanded arm pose and a higher constraint-solver iteration count keeps the tall jointed chain
+stable — all deterministic and headless-testable.
+
+```bash
+# Scripted pick → lift → carry → place (headless)
+cargo run -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place
+# Teleoperate it with wgpu — R / F drive the lift, Q/E/Z/X the arm, C/V the claw
+cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
+```
 
 ## Demo (60 seconds)
 
@@ -64,7 +86,9 @@ cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scen
 
 See [examples/README.md](examples/README.md) for the full list.
 
-**Highlights in v0.4:** goal-conditioned agents, multi-robot collision, ROS 2 sim-control parity, URDF render fixes, sim-captured README hero.
+**Highlights:** 3D pick-and-place on a lift-equipped arm (top-down claw + vertical lift),
+position-controlled joints, goal-conditioned RL agents, reach curricula, multi-robot
+collision, ROS 2 sim-control parity (incl. `/lift_command`), and sim-captured README media.
 
 Architecture docs live under [docs/architecture/](docs/architecture/000_overview.md).
 
