@@ -1041,6 +1041,94 @@ mod tests {
     }
 
     #[test]
+    fn lift_picks_carries_and_places_cube() {
+        // Phase 4 of the manipulator redesign: the full pick-and-place — lower the claw
+        // over a ground cube, grasp it, lift it, swing the arm to a new location, lower it
+        // back down, and open to release. The cube ends resting at a different spot.
+        let scene = mm_lift_pick_scene_path();
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load mm_lift_pick");
+        let start = sim.named_translation_m("lift_cube").expect("cube");
+
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            ..MobileManipulatorAction::default()
+        };
+
+        // Settle, lower over the cube, and grasp it.
+        for _ in 0..150 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..200 {
+            sim.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+            if sim.is_grasping() {
+                break;
+            }
+        }
+        assert!(sim.is_grasping(), "claw should grasp the cube");
+
+        // Lift, swing to a new spot, and let the arm settle there (holding the grasp).
+        for _ in 0..150 {
+            sim.step(MobileManipulatorAction {
+                lift_velocity_m_s: 0.3,
+                ..close
+            });
+        }
+        for _ in 0..90 {
+            sim.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.8,
+                ..close
+            });
+        }
+        for _ in 0..150 {
+            sim.step(close);
+        }
+
+        // Lower at the new spot and open to release.
+        for _ in 0..200 {
+            sim.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                ..close
+            });
+        }
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: 3.0,
+                ..MobileManipulatorAction::default()
+            });
+        }
+
+        assert!(
+            !sim.is_grasping(),
+            "opening the claw should release the cube"
+        );
+        let placed = sim.named_translation_m("lift_cube").expect("cube");
+        let moved = ((placed.0 - start.0).powi(2) + (placed.2 - start.2).powi(2)).sqrt();
+        assert!(
+            moved > 0.5,
+            "cube should be carried to a new location: start=({:.2},{:.2}), placed=({:.2},{:.2}), moved={moved:.2} m",
+            start.0,
+            start.2,
+            placed.0,
+            placed.2
+        );
+        assert!(
+            placed.1 < 0.1,
+            "placed cube should rest on the ground, y={:.3}",
+            placed.1
+        );
+    }
+
+    #[test]
     fn lift_picks_cube_off_ground_and_raises_it() {
         // Phase 3 of the manipulator redesign: the top-down claw lowers over a cube on
         // the ground, grasps it (contact-triggered weld), and the lift raises it — a real
