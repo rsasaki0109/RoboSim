@@ -4,6 +4,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`LiftPickPlacePolicy`**: a reusable scripted pick-and-place policy (state machine) for
+  the `mm_lift` robot — lower → grasp → lift → swing → settle → lower → release. It implements
+  `Policy<MobileManipulatorEpisode>` and is now the single source for the pick-and-place
+  trajectory used by example 31 and the episode test (previously duplicated inline).
+
 ### Changed
 
 - **Place tasks now expose a goal offset in the observation** (`target_d{x,y,z}_m`): before
