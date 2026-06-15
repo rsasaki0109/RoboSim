@@ -6,6 +6,7 @@ publish = false
 
 [dev-dependencies]
 approx = "0.5"
+rne_ai = { path = "../../crates/rne_ai" }
 rne_core = { path = "../../crates/rne_core" }
 rne_ecs = { path = "../../crates/rne_ecs" }
 rne_math = { path = "../../crates/rne_math" }

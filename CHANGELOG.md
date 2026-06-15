@@ -12,6 +12,7 @@ All notable changes to Robot Native Engine are documented in this file.
   with a `curriculum_stage` getter
 - **Example 29 curriculum smoke**: a goal-conditioned policy advances the reach curriculum
   to its final stage (wired into `xtask ci`)
+- **Determinism test** for the mobile manipulator reach episode (replay world-state hash)
 - **Goal-conditioned reach** (`MobileManipulatorEpisodeConfig::reach_randomized`): a fresh
   reachable target is sampled each episode and exposed in the observation as
   `target_d{x,y,z}_m`, so a policy must generalize. Exposed to Python as
