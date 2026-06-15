@@ -472,6 +472,7 @@ impl PyMobileManipulatorSim {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
+                lift_velocity_m_s: 0.0,
             })
             .into()
     }
@@ -531,6 +532,7 @@ impl PyMobileManipulatorEpisode {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
+                lift_velocity_m_s: 0.0,
             })
             .into()
     }
@@ -618,6 +620,7 @@ impl PyVectorizedMobileManipulatorEnv {
                     shoulder_velocity_rad_s: shoulder,
                     elbow_velocity_rad_s: elbow,
                     gripper_velocity_rad_s: gripper,
+                    lift_velocity_m_s: 0.0,
                 },
             )
             .collect();

@@ -317,8 +317,20 @@ impl PhysicsBackend for RapierBackend {
     }
 }
 
-/// Maximum motor force (revolute) or impulse (prismatic) applied per joint.
-const JOINT_MOTOR_MAX_FORCE: f32 = 50.0;
+/// Maximum torque a revolute joint motor may apply.
+const REVOLUTE_MOTOR_MAX_FORCE: f32 = 50.0;
+/// Maximum force a prismatic joint motor may apply. Higher than the revolute cap
+/// so a vertical lift can hold a multi-link arm against gravity (~60 N) with the
+/// motor gain still in a stable range.
+const PRISMATIC_MOTOR_MAX_FORCE: f32 = 150.0;
+
+/// Maximum motor force for a wired joint, selected by its driven axis.
+fn motor_max_force(axis: JointAxis) -> f32 {
+    match axis {
+        JointAxis::LinX | JointAxis::LinY | JointAxis::LinZ => PRISMATIC_MOTOR_MAX_FORCE,
+        _ => REVOLUTE_MOTOR_MAX_FORCE,
+    }
+}
 
 /// Driven axis of a wired joint, selecting the motor degree of freedom.
 fn motor_axis_for_entity(world: &World, entity: Entity) -> Option<JointAxis> {
@@ -430,7 +442,7 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
         {
             joint
                 .data
-                .set_motor_max_force(motor_axis, JOINT_MOTOR_MAX_FORCE);
+                .set_motor_max_force(motor_axis, motor_max_force(motor_axis));
         }
         state.entity_to_joint.insert(entity, handle);
     }
@@ -449,9 +461,15 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         let Some(joint) = state.impulse_joints.get_mut(*joint_handle) else {
             continue;
         };
-        joint
-            .data
-            .set_motor_velocity(axis, motor.velocity_rad_s as f32, motor.gain as f32);
+        // With zero stiffness this is exactly a velocity motor (set_motor_velocity);
+        // a positive stiffness adds a position spring that holds a load without drift.
+        joint.data.set_motor(
+            axis,
+            motor.target_position as f32,
+            motor.velocity_rad_s as f32,
+            motor.stiffness as f32,
+            motor.gain as f32,
+        );
     }
 }
 
@@ -701,6 +719,7 @@ mod tests {
             JointMotor {
                 velocity_rad_s: 1.0,
                 gain,
+                ..JointMotor::default()
             },
         ));
 

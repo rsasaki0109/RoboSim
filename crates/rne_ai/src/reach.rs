@@ -200,6 +200,7 @@ pub fn reach_action_joint_proportional(
         ),
         elbow_velocity_rad_s: clamp_joint_velocity(4.0 * elbow_error_rad, max_joint_velocity_rad_s),
         gripper_velocity_rad_s: 0.0,
+        ..MobileManipulatorAction::default()
     }
 }
 
@@ -223,6 +224,7 @@ pub fn reach_action_proportional(
         shoulder_velocity_rad_s,
         elbow_velocity_rad_s,
         gripper_velocity_rad_s: 0.0,
+        ..MobileManipulatorAction::default()
     }
 }
 

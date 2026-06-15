@@ -6,6 +6,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Vertical lift (`mm_lift` robot)**: a fixed-base arm with a prismatic "torso" lift
+  between the base and shoulder, so the whole SCARA arm can be raised and lowered.
+  `MobileManipulatorSim::new_mm_lift()` loads it; `MobileManipulatorAction.lift_velocity_m_s`
+  drives the lift (other robots ignore it). The lift is a **position (spring-damper) motor**,
+  so it holds the ~6 kg arm against gravity at a commanded height without drift — vertical
+  lifting was previously blocked by the velocity-only motor. Covered by a unit test
+  (controllable, reversible vertical motion) and a replay-determinism test.
+- **Joint position motors**: `JointMotor` gains `stiffness` + `target_position` fields
+  (both default `0.0`, so existing velocity motors are unchanged). A positive stiffness
+  turns a joint into a spring-damper that holds a position target under load.
+- **Tunable motor gain**: `JointMotor.gain` (default `1.0`) scales the velocity-tracking
+  damping factor instead of the previously hardcoded `1.0`, letting a joint track its target
+  more stiffly under load. Prismatic motors also get a higher force cap (150 N vs the 50 N
+  revolute cap) so a lift can hold a multi-link arm.
 - **Reach curriculum** (`MobileManipulatorEpisodeConfig::reach_curriculum` + `ReachCurriculum`):
   an easy→hard curriculum that widens the goal-conditioned reach target region as the
   policy accumulates successes; exposed to Python as `MobileManipulatorEpisode("reach_curriculum")`
