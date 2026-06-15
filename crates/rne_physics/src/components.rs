@@ -208,6 +208,11 @@ pub struct JointMotor {
     /// radians (revolute) or meters along the slide axis (prismatic).
     #[serde(default)]
     pub target_position: f64,
+    /// Maximum force/torque the motor may apply. `0.0` (the default) uses the backend's
+    /// per-joint-type cap; a positive value overrides it (e.g. a heavier arm joint that
+    /// needs more torque to track its target quickly).
+    #[serde(default)]
+    pub max_force: f64,
 }
 
 fn default_motor_gain() -> f64 {
@@ -221,6 +226,7 @@ impl Default for JointMotor {
             gain: default_motor_gain(),
             stiffness: 0.0,
             target_position: 0.0,
+            max_force: 0.0,
         }
     }
 }

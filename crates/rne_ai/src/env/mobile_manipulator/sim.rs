@@ -82,6 +82,17 @@ const LIFT_TARGET_MAX_M: f64 = 0.5;
 /// Constraint solver iterations for the lift robot's world. Its tall jointed chain
 /// swings chaotically at Rapier's default (4); 16 holds the arm stable.
 const LIFT_SOLVER_ITERATIONS: usize = 16;
+/// Position stiffness/damping for the lift robot's arm revolute joints. A plain
+/// velocity motor (gain 1.0) is too weak to move or hold the heavy arm, so the arm
+/// joints are position (spring-damper) motors that drive to a commanded angle and
+/// hold it. Stable now that the column geometry settles the arm straight.
+const ARM_MOTOR_STIFFNESS: f64 = 400.0;
+const ARM_MOTOR_DAMPING: f64 = 60.0;
+/// Torque cap for the lift robot's arm joints (overrides the 50 N·m revolute default),
+/// so the position motor can move and settle the heavy arm reasonably quickly.
+const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
+/// Clamp on a position-holding arm joint's integrated angle target (radians).
+const ARM_TARGET_LIMIT_RAD: f64 = std::f64::consts::PI;
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -559,6 +570,13 @@ impl MobileManipulatorSim {
                     // Position (spring-damper) control with the velocity as feedforward.
                     motor.velocity_rad_s = velocity;
                     motor.target_position = self.lift_target_m;
+                } else if motor.stiffness > 0.0 {
+                    // Position-holding revolute arm joint: integrate the velocity command
+                    // into a held angle so the heavy arm moves to and holds the commanded
+                    // pose (a plain velocity motor is too weak to move or hold it).
+                    motor.target_position = (motor.target_position + velocity * dt_s)
+                        .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
+                    motor.velocity_rad_s = velocity;
                 } else {
                     motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
                         wheel_command_to_motor_rad_s(velocity)
@@ -573,13 +591,23 @@ impl MobileManipulatorSim {
     /// Configures the vertical lift as a position (spring-damper) motor so it holds
     /// the arm's weight against gravity at its commanded height without drift.
     fn configure_lift_motor(&mut self) {
-        for joint in &self.actuated {
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        if !has_lift {
+            return;
+        }
+        for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) else {
+                continue;
+            };
             if joint.axis == JointReadAxis::LiftY {
-                if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
-                    motor.stiffness = LIFT_MOTOR_STIFFNESS;
-                    motor.gain = LIFT_MOTOR_DAMPING;
-                    motor.target_position = 0.0;
-                }
+                motor.stiffness = LIFT_MOTOR_STIFFNESS;
+                motor.gain = LIFT_MOTOR_DAMPING;
+                motor.target_position = 0.0;
+            } else if name == "shoulder_joint" || name == "elbow_joint" {
+                motor.stiffness = ARM_MOTOR_STIFFNESS;
+                motor.gain = ARM_MOTOR_DAMPING;
+                motor.target_position = 0.0;
+                motor.max_force = ARM_MOTOR_MAX_FORCE;
             }
         }
     }
@@ -956,6 +984,52 @@ mod tests {
         assert!(
             lowered_y < 0.35,
             "lowered gripper should reach near ground height, ee_y={lowered_y:.3}"
+        );
+    }
+
+    #[test]
+    fn lift_arm_tracks_and_holds_commanded_pose() {
+        // Phase 2 of the manipulator redesign: the arm joints are position motors, so
+        // the heavy arm moves to a commanded angle and holds it. A plain velocity motor
+        // could neither move nor hold the arm (it stayed put under a velocity command).
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let rest = sim.observe();
+
+        // Swing the shoulder to aim the gripper sideways, then release and let it settle
+        // (the position motor keeps driving to the integrated target after the command).
+        for _ in 0..60 {
+            sim.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: 1.0,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        for _ in 0..360 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let reached = sim.observe();
+        assert!(
+            (reached.ee_z_m - rest.ee_z_m).abs() > 0.3,
+            "shoulder command should swing the gripper sideways: rest_z={:.3}, reached_z={:.3}",
+            rest.ee_z_m,
+            reached.ee_z_m
+        );
+
+        // The commanded pose holds: with no command the gripper stays put.
+        let mut max_drift = 0.0_f64;
+        for _ in 0..90 {
+            let o = sim.step(MobileManipulatorAction::default());
+            let drift = ((o.ee_x_m - reached.ee_x_m).powi(2)
+                + (o.ee_y_m - reached.ee_y_m).powi(2)
+                + (o.ee_z_m - reached.ee_z_m).powi(2))
+            .sqrt();
+            max_drift = max_drift.max(drift);
+        }
+        assert!(
+            max_drift < 0.06,
+            "the commanded arm pose should hold steady, max drift={max_drift:.3} m"
         );
     }
 
