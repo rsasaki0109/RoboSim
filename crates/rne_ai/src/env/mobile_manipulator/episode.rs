@@ -26,6 +26,9 @@ pub struct MobileManipulatorEpisodeConfig {
     pub reward: MobileManipulatorRewardConfig,
     /// When set (Reach task only), a fresh target is sampled from this region each reset.
     pub reach_randomization: Option<crate::reach::ReachRandomization>,
+    /// When set (Reach task only), targets are sampled from a curriculum that widens as
+    /// the policy succeeds (takes precedence over `reach_randomization`).
+    pub reach_curriculum: Option<crate::reach::ReachCurriculumConfig>,
     /// Seed for per-episode randomization.
     pub rng_seed: u64,
 }
@@ -42,6 +45,7 @@ impl MobileManipulatorEpisodeConfig {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
+            reach_curriculum: None,
             rng_seed: 0,
         }
     }
@@ -60,6 +64,7 @@ impl MobileManipulatorEpisodeConfig {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
+            reach_curriculum: None,
             rng_seed: 0,
         }
     }
@@ -86,7 +91,18 @@ impl MobileManipulatorEpisodeConfig {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: Some(randomization),
+            reach_curriculum: None,
             rng_seed,
+        }
+    }
+
+    /// Goal-conditioned reach with an easy→hard curriculum that widens the target region
+    /// as the policy accumulates successes.
+    pub fn reach_curriculum(rng_seed: u64) -> Self {
+        Self {
+            reach_randomization: None,
+            reach_curriculum: Some(crate::reach::ReachCurriculumConfig::easy_to_hard()),
+            ..Self::reach_randomized(rng_seed)
         }
     }
 
@@ -102,6 +118,7 @@ impl MobileManipulatorEpisodeConfig {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
+            reach_curriculum: None,
             rng_seed: 0,
         }
     }
@@ -116,6 +133,7 @@ impl MobileManipulatorEpisodeConfig {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
+            reach_curriculum: None,
             rng_seed: 0,
         }
     }
@@ -129,6 +147,7 @@ pub struct MobileManipulatorEpisode {
     /// when randomization is enabled).
     effective_task: MobileManipulatorTask,
     rng: crate::rng::DeterministicRng,
+    reach_curriculum: Option<crate::reach::ReachCurriculum>,
     episode_index: u32,
     step_in_episode: u64,
     total_reward: f64,
@@ -153,12 +172,17 @@ impl MobileManipulatorEpisode {
             MobileManipulatorSim::from_scene_path(&config.scene_path).expect("episode simulation");
         let effective_task = config.task.clone();
         let rng = crate::rng::DeterministicRng::new(config.rng_seed);
+        let reach_curriculum = config
+            .reach_curriculum
+            .clone()
+            .map(crate::reach::ReachCurriculum::new);
         let progress_state = initial_progress_state(&sim, &effective_task);
         Self {
             sim,
             config,
             effective_task,
             rng,
+            reach_curriculum,
             episode_index: 0,
             step_in_episode: 0,
             total_reward: 0.0,
@@ -183,6 +207,13 @@ impl MobileManipulatorEpisode {
     /// Returns cumulative reward for the current episode.
     pub fn total_reward(&self) -> f64 {
         self.total_reward
+    }
+
+    /// Returns the active reach-curriculum stage index, if a curriculum is configured.
+    pub fn curriculum_stage(&self) -> Option<usize> {
+        self.reach_curriculum
+            .as_ref()
+            .map(|curriculum| curriculum.stage_index())
     }
 
     fn make_step(
@@ -227,10 +258,14 @@ impl Episode for MobileManipulatorEpisode {
         self.step_in_episode = 0;
         self.total_reward = 0.0;
 
-        // Sample a fresh reach target when goal-conditioned randomization is enabled.
+        // Sample a fresh reach target when goal-conditioned randomization/curriculum is on.
         self.effective_task = self.config.task.clone();
-        if let Some(randomization) = self.config.reach_randomization {
-            if let MobileManipulatorTask::Reach { target, success_m } = &mut self.effective_task {
+        if let MobileManipulatorTask::Reach { target, success_m } = &mut self.effective_task {
+            if let Some(curriculum) = &self.reach_curriculum {
+                let (sampled, sampled_success_m) = curriculum.sample(&mut self.rng);
+                *target = sampled;
+                *success_m = sampled_success_m;
+            } else if let Some(randomization) = self.config.reach_randomization {
                 *target = randomization.sample(&mut self.rng);
                 *success_m = randomization.success_m;
             }
@@ -254,7 +289,13 @@ impl Episode for MobileManipulatorEpisode {
         self.step_in_episode += 1;
         self.sim.step(action);
         let observation = self.sim.observe();
-        self.make_step(observation)
+        let result = self.make_step(observation);
+        if result.terminated {
+            if let Some(curriculum) = self.reach_curriculum.as_mut() {
+                curriculum.record_episode_end(true);
+            }
+        }
+        result
     }
 
     fn episode_index(&self) -> u32 {
@@ -543,6 +584,38 @@ mod tests {
     }
 
     #[test]
+    fn reach_curriculum_advances_through_stages() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach_curriculum(5));
+        let policy = |obs: &MobileManipulatorObservation| MobileManipulatorAction {
+            shoulder_velocity_rad_s: (2.5 * obs.target_dx_m - 0.5 * obs.target_dy_m)
+                .clamp(-6.0, 6.0),
+            elbow_velocity_rad_s: (1.5 * obs.target_dx_m + 3.0 * obs.target_dz_m).clamp(-6.0, 6.0),
+            ..MobileManipulatorAction::default()
+        };
+
+        assert_eq!(episode.curriculum_stage(), Some(0));
+        let mut reset = episode.reset();
+        // Two stages of 3 successes each need only a handful of solved episodes.
+        for _ in 0..15 {
+            let mut obs = reset.observation;
+            for _ in 0..500 {
+                let step = episode.step(policy(&obs));
+                obs = step.observation;
+                if step.terminated || step.truncated {
+                    break;
+                }
+            }
+            reset = episode.reset();
+        }
+        assert_eq!(
+            episode.curriculum_stage(),
+            Some(2),
+            "a reliable policy should advance the curriculum to the final stage"
+        );
+    }
+
+    #[test]
     fn place_episode_picks_carries_and_sets_down() {
         let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
         let _ = episode.reset();
@@ -598,6 +671,7 @@ mod tests {
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
+            reach_curriculum: None,
             rng_seed: 0,
         };
         let mut episode = MobileManipulatorEpisode::new(config);
