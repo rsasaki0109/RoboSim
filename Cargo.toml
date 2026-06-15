@@ -43,6 +43,7 @@ members = [
   "examples/23_mobile_manipulator_transport",
   "examples/24_mobile_manipulator_wrist_cam",
   "examples/25_mobile_manipulator_episode",
+  "examples/26_mobile_manipulator_place",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",

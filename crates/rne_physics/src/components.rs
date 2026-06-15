@@ -2,7 +2,7 @@
 
 use bevy_ecs::prelude::Component;
 use rne_ecs::Entity;
-use rne_math::Vec3;
+use rne_math::{Quat, Vec3};
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 
@@ -149,9 +149,47 @@ pub struct RevoluteJointDesc {
     pub anchor_child_m: Vec3,
 }
 
-/// Velocity motor command applied to a revolute joint before each physics step.
+/// Prismatic (linear sliding) joint description for physics backends.
+///
+/// The single free degree of freedom translates the child body along `axis`,
+/// expressed in the parent body's local frame.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct PrismaticJointDesc {
+    /// Parent rigid body entity.
+    pub parent: Entity,
+    /// Sliding axis in parent-local coordinates.
+    pub axis: Vec3,
+    /// Anchor point in the parent body's local frame.
+    pub anchor_parent_m: Vec3,
+    /// Anchor point in the child body's local frame.
+    pub anchor_child_m: Vec3,
+}
+
+/// Fixed (weld) joint description for physics backends.
+///
+/// Rigidly locks the child body to the parent at the relative pose implied by the
+/// anchors and `relative_rotation`, removing all six relative degrees of freedom.
+/// Inserting this component attaches the weld on the next sync; removing it releases
+/// the weld. Intended for attach-on-contact grasping (weld a grasped object to the
+/// gripper at its current relative pose so it neither snaps nor drifts).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FixedJointDesc {
+    /// Parent rigid body entity (e.g. the gripper link).
+    pub parent: Entity,
+    /// Anchor point in the parent body's local frame.
+    pub anchor_parent_m: Vec3,
+    /// Anchor point in the child body's local frame.
+    pub anchor_child_m: Vec3,
+    /// Orientation of the child frame relative to the parent frame.
+    pub relative_rotation: Quat,
+}
+
+/// Velocity motor command applied to a joint before each physics step.
+///
+/// The value is interpreted as an angular velocity (rad/s) for revolute joints
+/// and as a linear velocity (m/s) for prismatic joints.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointMotor {
-    /// Target angular velocity in radians per second.
+    /// Target velocity: radians per second (revolute) or meters per second (prismatic).
     pub velocity_rad_s: f64,
 }
