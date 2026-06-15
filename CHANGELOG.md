@@ -4,6 +4,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Place tasks now expose a goal offset in the observation** (`target_d{x,y,z}_m`): before
+  grasping it points from the gripper to the object (where to pick), and once grasped it
+  points from the object to the place target (where to carry). Previously these were always
+  zero for Place tasks, leaving a policy blind; this makes the pick-and-place observation-
+  driven. Test `place_observation_points_at_object_then_target`.
+
 ### Added
 
 - **Interactive viewer `--manipulator-lift` profile**: the redesigned `mm_lift` robot is now
