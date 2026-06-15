@@ -768,65 +768,24 @@ mod tests {
 
     #[test]
     fn lift_pick_place_episode_picks_carries_and_places() {
+        use crate::LiftPickPlacePolicy;
+
         let mut episode =
             MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::lift_pick_place());
         let _ = episode.reset();
 
-        let close = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            ..MobileManipulatorAction::default()
-        };
-
-        // Lower the claw over the cube and grasp it.
-        for _ in 0..200 {
-            episode.step(MobileManipulatorAction {
-                lift_velocity_m_s: -0.3,
-                gripper_velocity_rad_s: -2.5,
-                ..MobileManipulatorAction::default()
-            });
-        }
-        for _ in 0..120 {
-            episode.step(MobileManipulatorAction {
-                gripper_velocity_rad_s: -2.5,
-                ..MobileManipulatorAction::default()
-            });
-            if episode.simulation().is_grasping() {
-                break;
-            }
-        }
-        assert!(
-            episode.simulation().is_grasping(),
-            "episode should grasp the cube"
-        );
-
-        // Lift, swing to the target, lower, and release.
+        // Settle the arm, then drive the shared scripted pick-and-place policy; it should
+        // grasp the cube, carry it to the target, release it, and terminate with success.
         for _ in 0..150 {
-            episode.step(MobileManipulatorAction {
-                lift_velocity_m_s: 0.3,
-                ..close
-            });
+            episode.step(MobileManipulatorAction::default());
         }
-        for _ in 0..90 {
-            episode.step(MobileManipulatorAction {
-                shoulder_velocity_rad_s: 0.8,
-                ..close
-            });
-        }
-        for _ in 0..150 {
-            episode.step(close);
-        }
-        for _ in 0..200 {
-            episode.step(MobileManipulatorAction {
-                lift_velocity_m_s: -0.3,
-                ..close
-            });
-        }
-        for _ in 0..150 {
-            let step = episode.step(MobileManipulatorAction {
-                gripper_velocity_rad_s: 3.0,
-                ..MobileManipulatorAction::default()
-            });
+        let mut grasped = false;
+        let mut policy = LiftPickPlacePolicy::new();
+        for _ in 0..1030 {
+            let step = episode.step(policy.next_action());
+            grasped |= episode.simulation().is_grasping();
             if step.terminated {
+                assert!(grasped, "episode should have grasped before placing");
                 return;
             }
         }
