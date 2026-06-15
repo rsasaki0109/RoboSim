@@ -36,12 +36,13 @@ pub use camera::{
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
-    mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s,
-    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorEpisode,
-    MobileManipulatorEpisodeConfig, MobileManipulatorSim, VectorizedDiffDriveConfig,
-    VectorizedDiffDriveEnv, VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig,
-    VectorizedMobileManipulatorEnv, VectorizedMobileManipulatorStep,
+    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_grasp_scene_path,
+    mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_scene_path,
+    mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
+    DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    MobileManipulatorSim, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
+    VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
+    VectorizedMobileManipulatorStep,
 };
 pub use episode::{Episode, EpisodeStep, TerminationReason};
 pub use goal::{
