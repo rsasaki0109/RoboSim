@@ -21,6 +21,7 @@ pub fn mobile_action_from_twist_and_arm(
         shoulder_velocity_rad_s,
         elbow_velocity_rad_s,
         gripper_velocity_rad_s: 0.0,
+        lift_velocity_m_s: 0.0,
     }
 }
 

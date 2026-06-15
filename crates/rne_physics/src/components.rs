@@ -197,6 +197,17 @@ pub struct JointMotor {
     /// up to the backend's motor force cap. Defaults to `1.0`.
     #[serde(default = "default_motor_gain")]
     pub gain: f64,
+    /// Position-tracking stiffness. When `0.0` (the default) the motor is a pure
+    /// velocity motor. When positive, the motor also pulls the joint toward
+    /// [`Self::target_position`] like a spring (with `gain` acting as its damping),
+    /// which lets a joint *hold* a load against gravity without drift — required
+    /// for a stable vertical lift carrying a multi-link arm.
+    #[serde(default)]
+    pub stiffness: f64,
+    /// Position target the motor pulls toward when [`Self::stiffness`] is positive:
+    /// radians (revolute) or meters along the slide axis (prismatic).
+    #[serde(default)]
+    pub target_position: f64,
 }
 
 fn default_motor_gain() -> f64 {
@@ -208,6 +219,8 @@ impl Default for JointMotor {
         Self {
             velocity_rad_s: 0.0,
             gain: default_motor_gain(),
+            stiffness: 0.0,
+            target_position: 0.0,
         }
     }
 }

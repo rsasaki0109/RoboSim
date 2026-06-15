@@ -1,0 +1,152 @@
+<?xml version="1.0"?>
+<!-- Fixed-base arm with a vertical prismatic "torso" lift between the base and
+     the shoulder, so the whole SCARA arm can be raised and lowered. The lift
+     motor must hold the arm's weight against gravity, which needs a high motor
+     gain (see JointMotor.gain). -->
+<robot name="mm_lift">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.6 0.4"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.6 0.4"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="torso_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.16 0.16 0.16"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.16 0.16 0.16"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.5 0.08 0.08"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.5 0.08 0.08"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="forearm_link">
+    <visual>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.06 0.06"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.06 0.06"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="gripper_base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.06 0.04 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.06 0.04 0.04"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="left_finger_link">
+    <visual>
+      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="right_finger_link">
+    <visual>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="lift_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="torso_link"/>
+    <origin xyz="0 0.38 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="shoulder_joint" type="revolute">
+    <parent link="torso_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="elbow_joint" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0.5 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="gripper_base_joint" type="fixed">
+    <parent link="forearm_link"/>
+    <child link="gripper_base_link"/>
+    <origin xyz="0.4 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="left_finger_joint" type="revolute">
+    <parent link="gripper_base_link"/>
+    <child link="left_finger_link"/>
+    <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="right_finger_joint" type="revolute">
+    <parent link="gripper_base_link"/>
+    <child link="right_finger_link"/>
+    <origin xyz="0 0 0.04" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+</robot>
