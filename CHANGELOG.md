@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-16
+
 ### Added
 
 - **`MobileManipulatorEpisodeConfig::reach()`** dense-reward reach task (exposed to Python
