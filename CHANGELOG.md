@@ -10,6 +10,8 @@ All notable changes to Robot Native Engine are documented in this file.
   an easy→hard curriculum that widens the goal-conditioned reach target region as the
   policy accumulates successes; exposed to Python as `MobileManipulatorEpisode("reach_curriculum")`
   with a `curriculum_stage` getter
+- **Example 29 curriculum smoke**: a goal-conditioned policy advances the reach curriculum
+  to its final stage (wired into `xtask ci`)
 - **Goal-conditioned reach** (`MobileManipulatorEpisodeConfig::reach_randomized`): a fresh
   reachable target is sampled each episode and exposed in the observation as
   `target_d{x,y,z}_m`, so a policy must generalize. Exposed to Python as
