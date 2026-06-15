@@ -40,6 +40,20 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
+    /// Default pick-and-place episode: grasp the cube and set it down at a target.
+    pub fn place() -> Self {
+        Self {
+            max_steps: 600,
+            scene_path: crate::mm_minimal_transport_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "grasp_cube".into(),
+                target: crate::reach::ReachTarget::new(0.35, 0.0, 1.0),
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+        }
+    }
+
     /// Default inspect episode on the built-in minimal scene.
     pub fn inspect() -> Self {
         Self {
@@ -68,6 +82,10 @@ struct EpisodeProgressState {
     ee_error_m: f64,
     object_initial: Option<(f64, f64, f64)>,
     contacted_object: bool,
+    /// Horizontal object-to-target distance from the previous step (Place shaping).
+    place_error_m: f64,
+    /// True once the object has been grasped at least once this episode (Place).
+    was_grasped: bool,
 }
 
 impl MobileManipulatorEpisode {
@@ -169,13 +187,21 @@ fn initial_progress_state(
     task: &MobileManipulatorTask,
 ) -> EpisodeProgressState {
     let object_initial = match task {
-        MobileManipulatorTask::Transport { object_name, .. } => {
-            named_translation_m(sim, object_name)
-        }
+        MobileManipulatorTask::Transport { object_name, .. }
+        | MobileManipulatorTask::Place { object_name, .. } => named_translation_m(sim, object_name),
         _ => None,
+    };
+    let place_error_m = match task {
+        MobileManipulatorTask::Place {
+            object_name,
+            target,
+            ..
+        } => object_horizontal_distance_to_target_m(sim, object_name, *target).unwrap_or(0.0),
+        _ => 0.0,
     };
     EpisodeProgressState {
         object_initial,
+        place_error_m,
         ..EpisodeProgressState::default()
     }
 }
@@ -185,6 +211,19 @@ fn initial_ee_error(task: &MobileManipulatorTask, obs: &MobileManipulatorObserva
         MobileManipulatorTask::Reach { target, .. } => ee_distance_to_target_m(obs, *target),
         _ => 0.0,
     }
+}
+
+/// Horizontal (XZ-plane) distance from a named body to a world-frame target.
+fn object_horizontal_distance_to_target_m(
+    sim: &MobileManipulatorSim,
+    object_name: &str,
+    target: crate::reach::ReachTarget,
+) -> Option<f64> {
+    named_translation_m(sim, object_name).map(|(x, _, z)| {
+        let dx = x - target.x_m;
+        let dz = z - target.z_m;
+        (dx * dx + dz * dz).sqrt()
+    })
 }
 
 fn task_progress(
@@ -215,6 +254,21 @@ fn task_progress(
                 let dx = current.0 - initial.0;
                 let dz = current.2 - initial.2;
                 (dx * dx + dz * dz).sqrt()
+            } else {
+                0.0
+            }
+        }
+        MobileManipulatorTask::Place {
+            object_name,
+            target,
+            ..
+        } => {
+            state.was_grasped |= sim.is_grasping();
+            if let Some(current) = object_horizontal_distance_to_target_m(sim, object_name, *target)
+            {
+                let progress = (state.place_error_m - current).max(0.0);
+                state.place_error_m = current;
+                progress
             } else {
                 0.0
             }
@@ -250,12 +304,28 @@ fn task_success(
                         || body_moved_at_least_m(sim, object_name, initial, TRANSPORT_SUCCESS_M)
                 })
         }
+        MobileManipulatorTask::Place {
+            object_name,
+            target,
+            place_tolerance_m,
+        } => {
+            // Picked up, carried, released, and now resting near the target.
+            state.was_grasped
+                && !sim.is_grasping()
+                && object_horizontal_distance_to_target_m(sim, object_name, *target)
+                    .is_some_and(|distance| distance < *place_tolerance_m)
+                && named_translation_m(sim, object_name)
+                    .is_some_and(|(_, y, _)| y < PLACE_RESTING_Y_M)
+        }
         MobileManipulatorTask::Inspect { min_wrist_pixels } => {
             observation.wrist_camera_pixels >= *min_wrist_pixels
                 && observation.shoulder_position_rad.abs() > 0.05
         }
     }
 }
+
+/// Maximum object height to count as "set down" for a Place task success.
+const PLACE_RESTING_Y_M: f64 = 0.1;
 
 #[cfg(test)]
 mod tests {
@@ -306,6 +376,50 @@ mod tests {
         }
 
         panic!("expected transport episode success within retry budget");
+    }
+
+    #[test]
+    fn place_episode_picks_carries_and_sets_down() {
+        let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
+        let _ = episode.reset();
+
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        let carry = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            shoulder_velocity_rad_s: 0.6,
+            ..MobileManipulatorAction::default()
+        };
+        let hold = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.0,
+            ..MobileManipulatorAction::default()
+        };
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+
+        for _ in 0..30 {
+            episode.step(close);
+            if episode.simulation().is_grasping() {
+                break;
+            }
+        }
+        for _ in 0..200 {
+            episode.step(carry);
+        }
+        for _ in 0..30 {
+            episode.step(hold);
+        }
+        for _ in 0..150 {
+            let step = episode.step(open);
+            if step.terminated {
+                return;
+            }
+        }
+        panic!("expected place episode to grasp, carry, release, and settle at the target");
     }
 
     #[test]

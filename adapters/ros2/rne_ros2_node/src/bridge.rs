@@ -30,7 +30,9 @@ use crate::convert::{
     to_clock_message, to_image_message, to_joint_state_message, to_laserscan_message,
     to_pointcloud2_message, to_tf_message,
 };
-use crate::sim_control::{BridgeFrame, BridgeMode, BridgeSim, BridgeSnapshot, StepFallback, bridge_mode_from_env};
+use crate::sim_control::{
+    bridge_mode_from_env, BridgeFrame, BridgeMode, BridgeSim, BridgeSnapshot, StepFallback,
+};
 
 const SIM_STEPS: usize = 300;
 const MIN_FORWARD_X_M: f64 = 0.8;
@@ -67,6 +69,7 @@ struct BridgeHandles {
     _simulate_steps: rclrs::ActionServer<SimulateSteps>,
     _cmd_vel: Option<Subscription<geometry_msgs::msg::Twist>>,
     _arm_joint_velocity: Option<Subscription<sensor_msgs::msg::JointState>>,
+    _gripper_command: Option<Subscription<std_msgs::msg::Float64>>,
 }
 
 impl BridgeLoop {
@@ -221,11 +224,15 @@ pub fn run() -> Result<()> {
 
     let mut steps = 0_usize;
     let mut last_snapshot = bridge.with_sim(|sim| sim.snapshot());
+    // Peak |base_x| over the drive: the mm_mobile base path curves, so the final
+    // snapshot understates how far the command actually moved the base.
+    let mut peak_abs_base_x_m = last_snapshot.base_x_m.abs();
 
     while steps < SIM_STEPS {
         if bridge.tick_playing()? {
             steps += 1;
             last_snapshot = bridge.with_sim(|sim| sim.snapshot());
+            peak_abs_base_x_m = peak_abs_base_x_m.max(last_snapshot.base_x_m.abs());
             if steps % 60 == 0 {
                 eprintln!("step {steps}: base_x={:.2} m", last_snapshot.base_x_m);
             }
@@ -234,17 +241,17 @@ pub fn run() -> Result<()> {
     }
 
     eprintln!(
-        "final base_x={:.2} m joints={}",
-        last_snapshot.base_x_m, last_snapshot.joint_count
+        "final base_x={:.2} m (peak |base_x|={:.2} m) joints={}",
+        last_snapshot.base_x_m, peak_abs_base_x_m, last_snapshot.joint_count
     );
-    verify_smoke(bridge_mode, &last_snapshot)?;
+    verify_smoke(bridge_mode, &last_snapshot, peak_abs_base_x_m)?;
 
     hold_ros_graph_for_smoke(&bridge, &mut executor)?;
 
     Ok(())
 }
 
-fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot) -> Result<()> {
+fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot, peak_abs_base_x_m: f64) -> Result<()> {
     match mode {
         BridgeMode::DiffDrive => {
             if snapshot.base_x_m < MIN_FORWARD_X_M {
@@ -264,10 +271,12 @@ fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot) -> Result<()> {
             }
         }
         BridgeMode::MobileManipulator => {
-            if snapshot.base_x_m.abs() < MIN_MOBILE_BASE_MOTION_M {
+            // The mm_mobile base path curves, so verify it moved at any point in the
+            // drive (peak displacement) rather than from the final snapshot alone.
+            if peak_abs_base_x_m < MIN_MOBILE_BASE_MOTION_M {
                 bail!(
-                    "expected mobile base motion, |base_x|={:.3} m",
-                    snapshot.base_x_m
+                    "expected mobile base motion, peak |base_x|={:.3} m",
+                    peak_abs_base_x_m
                 );
             }
             if snapshot.joint_count < MIN_MOBILE_JOINTS {
@@ -373,11 +382,12 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         })
         .context("create simulate_steps action server")?;
 
-    let (_cmd_vel, _arm_joint_velocity) = if bridge.mode() == BridgeMode::MobileManipulator {
-        register_mobile_subscribers(node, Arc::clone(&bridge))?
-    } else {
-        (None, None)
-    };
+    let (_cmd_vel, _arm_joint_velocity, _gripper_command) =
+        if bridge.mode() == BridgeMode::MobileManipulator {
+            register_mobile_subscribers(node, Arc::clone(&bridge))?
+        } else {
+            (None, None, None)
+        };
 
     Ok(BridgeHandles {
         _reset,
@@ -387,15 +397,18 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _simulate_steps: action,
         _cmd_vel,
         _arm_joint_velocity,
+        _gripper_command,
     })
 }
 
+#[allow(clippy::type_complexity)]
 fn register_mobile_subscribers(
     node: &rclrs::Node,
     bridge: Arc<BridgeLoop>,
 ) -> Result<(
     Option<Subscription<geometry_msgs::msg::Twist>>,
     Option<Subscription<sensor_msgs::msg::JointState>>,
+    Option<Subscription<std_msgs::msg::Float64>>,
 )> {
     let cmd_bridge = Arc::clone(&bridge);
     let cmd_vel = node
@@ -417,7 +430,18 @@ fn register_mobile_subscribers(
         )
         .context("create /arm_joint_velocity subscription")?;
 
-    Ok((Some(cmd_vel), Some(arm_joint_velocity)))
+    let gripper_bridge = Arc::clone(&bridge);
+    let gripper_command = node
+        .create_subscription("/gripper_command", move |msg: std_msgs::msg::Float64| {
+            gripper_bridge.with_sim(|sim| sim.set_gripper_velocity(msg.data));
+        })
+        .context("create /gripper_command subscription")?;
+
+    Ok((
+        Some(cmd_vel),
+        Some(arm_joint_velocity),
+        Some(gripper_command),
+    ))
 }
 
 fn arm_velocities_from_joint_state(msg: &sensor_msgs::msg::JointState) -> (f64, f64) {
@@ -509,7 +533,7 @@ fn publish_frame(
             .context("publish /scan")?;
     }
 
-    let tf = make_tf_message(base, frame.lidar_world, sim_time);
+    let tf = make_tf_message(base, frame.lidar_world, frame.ee_world_m, sim_time);
     tf_pub.publish(to_tf_message(&tf)).context("publish /tf")?;
 
     let joint_state = to_ros_joint_state(&frame.joint_state, sim_time, "base_link");
@@ -544,6 +568,7 @@ fn cloud_in_lidar_frame(cloud: &PointCloud, lidar_world: Option<&Transform3>) ->
 fn make_tf_message(
     base: Transform3,
     lidar_world: Option<Transform3>,
+    ee_world_m: Option<Vec3>,
     sim_time: rne_core::SimTime,
 ) -> RosTfMessage {
     let lidar_relative = lidar_world
@@ -558,12 +583,26 @@ fn make_tf_message(
             Transform3::from_translation_rotation(Vec3::new(0.0, 0.2, 0.0), Quat::IDENTITY)
         });
 
-    RosTfMessage {
-        transforms: vec![
-            to_ros_transform_stamped("world", "base_link", base, sim_time),
-            to_ros_transform_stamped("base_link", "lidar", lidar_relative, sim_time),
-        ],
+    let mut transforms = vec![
+        to_ros_transform_stamped("world", "base_link", base, sim_time),
+        to_ros_transform_stamped("base_link", "lidar", lidar_relative, sim_time),
+    ];
+
+    // End-effector frame for manipulator modes, expressed relative to base_link.
+    if let Some(ee_world_m) = ee_world_m {
+        let ee_in_base = to_math_transform(&base)
+            .inverse()
+            .transform_point(ee_world_m);
+        let ee_relative = Transform3::from_translation_rotation(ee_in_base, Quat::IDENTITY);
+        transforms.push(to_ros_transform_stamped(
+            "base_link",
+            "ee_link",
+            ee_relative,
+            sim_time,
+        ));
     }
+
+    RosTfMessage { transforms }
 }
 
 fn to_math_transform(transform: &Transform3) -> MathTransform3 {

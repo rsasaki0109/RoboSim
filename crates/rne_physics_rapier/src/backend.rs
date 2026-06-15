@@ -1,10 +1,10 @@
 //! Rapier backend implementation.
 
 use crate::convert::{
-    body_type_to_rapier, isometry_to_transform, shape_to_shared, transform_to_isometry,
-    vec3_from_point, vec3_from_rapier, vec3_to_point, vec3_to_rapier,
+    body_type_to_rapier, isometry_to_transform, quat_to_rapier, shape_to_shared,
+    transform_to_isometry, vec3_from_point, vec3_from_rapier, vec3_to_point, vec3_to_rapier,
 };
-use rapier3d::na::{Unit, Vector3};
+use rapier3d::na::{Translation3, Unit, UnitQuaternion, Vector3};
 use rapier3d::pipeline::{PhysicsPipeline, QueryPipeline};
 use rapier3d::prelude::*;
 use rne_core::SimDuration;
@@ -13,9 +13,9 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, JointMotor, PhysicsBackend, PhysicsCapability, PhysicsError,
-    PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    Collider, ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsCapability,
+    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -117,8 +117,10 @@ impl PhysicsBackend for RapierBackend {
     ) -> Result<(), PhysicsError> {
         let state = self.world_mut(physics_world)?;
 
-        for entity_ref in world.iter_entities() {
-            let entity = entity_ref.id();
+        // Iterate in a stable entity order so Rapier handle assignment and the
+        // resulting solver order are deterministic regardless of ECS archetype
+        // layout (see AGENTS.md determinism requirements).
+        for entity in sorted_entities(world) {
             let transform = world_transform_of(world, entity);
             let Some(rigid_body) = world.get::<RigidBody>(entity) else {
                 continue;
@@ -234,8 +236,19 @@ impl PhysicsBackend for RapierBackend {
     ) -> Result<(), PhysicsError> {
         let state = self.world(physics_world)?;
 
-        for (entity, body_handle) in &state.entity_to_body {
-            let Some(body) = state.bodies.get(*body_handle) else {
+        // Write back in a stable parent-before-child order (entities are created
+        // root-first, so ascending id keeps a parent's transform fresh before a
+        // child reads it for its local-frame conversion). This avoids the
+        // order-dependent drift that HashMap iteration would introduce.
+        let mut bodies: Vec<(Entity, RigidBodyHandle)> = state
+            .entity_to_body
+            .iter()
+            .map(|(entity, handle)| (*entity, *handle))
+            .collect();
+        bodies.sort_unstable_by_key(|(entity, _)| *entity);
+
+        for (entity, body_handle) in bodies {
+            let Some(body) = state.bodies.get(body_handle) else {
                 continue;
             };
             if body.body_type() != rapier3d::prelude::RigidBodyType::Dynamic {
@@ -243,14 +256,14 @@ impl PhysicsBackend for RapierBackend {
             }
 
             let world_tf = isometry_to_transform(body.position());
-            let parent_entity = world.get::<Parent>(*entity).map(|parent| parent.0);
+            let parent_entity = world.get::<Parent>(entity).map(|parent| parent.0);
             let local_tf = if let Some(parent_entity) = parent_entity {
                 let parent_world = world_transform_of(world, parent_entity);
                 world_to_local_transform(&parent_world, &world_tf)
             } else {
                 world_tf
             };
-            if let Some(mut transform) = world.get_mut::<Transform3>(*entity) {
+            if let Some(mut transform) = world.get_mut::<Transform3>(entity) {
                 *transform = local_tf;
             }
         }
@@ -304,40 +317,120 @@ impl PhysicsBackend for RapierBackend {
     }
 }
 
+/// Maximum motor force (revolute) or impulse (prismatic) applied per joint.
+const JOINT_MOTOR_MAX_FORCE: f32 = 50.0;
+
+/// Driven axis of a wired joint, selecting the motor degree of freedom.
+fn motor_axis_for_entity(world: &World, entity: Entity) -> Option<JointAxis> {
+    if world.get::<RevoluteJointDesc>(entity).is_some() {
+        Some(JointAxis::AngX)
+    } else if world.get::<PrismaticJointDesc>(entity).is_some() {
+        Some(JointAxis::LinX)
+    } else {
+        None
+    }
+}
+
+/// Returns true when the entity still carries any joint description component.
+fn has_joint_desc(world: &World, entity: Entity) -> bool {
+    world.get::<RevoluteJointDesc>(entity).is_some()
+        || world.get::<PrismaticJointDesc>(entity).is_some()
+        || world.get::<FixedJointDesc>(entity).is_some()
+}
+
+fn normalized_axis(axis: Vec3) -> Unit<Vector3<f32>> {
+    let axis = vec3_to_rapier(axis);
+    if axis.norm_squared() <= f32::EPSILON {
+        Vector3::y_axis()
+    } else {
+        Unit::new_normalize(axis)
+    }
+}
+
+/// Returns all live entities sorted by id for deterministic backend iteration.
+fn sorted_entities(world: &World) -> Vec<Entity> {
+    let mut entities: Vec<Entity> = world.iter_entities().map(|entity| entity.id()).collect();
+    entities.sort_unstable();
+    entities
+}
+
 fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
-    for entity_ref in world.iter_entities() {
-        let entity = entity_ref.id();
+    // Release wired joints whose description component was removed (e.g. a grasp
+    // weld dropped when the gripper opens). Drop in a stable order for determinism.
+    let mut detached: Vec<Entity> = state
+        .entity_to_joint
+        .keys()
+        .copied()
+        .filter(|entity| !has_joint_desc(world, *entity))
+        .collect();
+    detached.sort_unstable();
+    for entity in detached {
+        if let Some(handle) = state.entity_to_joint.remove(&entity) {
+            state.impulse_joints.remove(handle, true);
+        }
+    }
+
+    for entity in sorted_entities(world) {
         if state.entity_to_joint.contains_key(&entity) {
             continue;
         }
-        let Some(joint_desc) = world.get::<RevoluteJointDesc>(entity) else {
+
+        let (parent, joint, motor_axis) = if let Some(desc) = world.get::<RevoluteJointDesc>(entity)
+        {
+            let joint = RevoluteJointBuilder::new(normalized_axis(desc.axis))
+                .local_anchor1(vec3_to_point(desc.anchor_parent_m))
+                .local_anchor2(vec3_to_point(desc.anchor_child_m))
+                .build();
+            (
+                desc.parent,
+                GenericJoint::from(joint),
+                Some(JointAxis::AngX),
+            )
+        } else if let Some(desc) = world.get::<PrismaticJointDesc>(entity) {
+            let joint = PrismaticJointBuilder::new(normalized_axis(desc.axis))
+                .local_anchor1(vec3_to_point(desc.anchor_parent_m))
+                .local_anchor2(vec3_to_point(desc.anchor_child_m))
+                .build();
+            (
+                desc.parent,
+                GenericJoint::from(joint),
+                Some(JointAxis::LinX),
+            )
+        } else if let Some(desc) = world.get::<FixedJointDesc>(entity) {
+            // Lock the child at its current relative pose: parent frame carries the
+            // relative rotation, child frame is the identity at its anchor.
+            let frame1 = Isometry::from_parts(
+                Translation3::from(vec3_to_rapier(desc.anchor_parent_m)),
+                quat_to_rapier(desc.relative_rotation),
+            );
+            let frame2 = Isometry::from_parts(
+                Translation3::from(vec3_to_rapier(desc.anchor_child_m)),
+                UnitQuaternion::identity(),
+            );
+            let joint = FixedJointBuilder::new()
+                .local_frame1(frame1)
+                .local_frame2(frame2)
+                .build();
+            (desc.parent, GenericJoint::from(joint), None)
+        } else {
             continue;
         };
-        let Some(parent_body) = state.entity_to_body.get(&joint_desc.parent).copied() else {
+
+        let Some(parent_body) = state.entity_to_body.get(&parent).copied() else {
             continue;
         };
         let Some(child_body) = state.entity_to_body.get(&entity).copied() else {
             continue;
         };
 
-        let axis = vec3_to_rapier(joint_desc.axis);
-        let axis = if axis.norm_squared() <= f32::EPSILON {
-            Vector3::y_axis()
-        } else {
-            Unit::new_normalize(axis)
-        };
-
-        let joint = RevoluteJointBuilder::new(axis)
-            .local_anchor1(vec3_to_point(joint_desc.anchor_parent_m))
-            .local_anchor2(vec3_to_point(joint_desc.anchor_child_m))
-            .build();
-
-        let handle =
-            state
-                .impulse_joints
-                .insert(parent_body, child_body, GenericJoint::from(joint), true);
-        if let Some(joint) = state.impulse_joints.get_mut(handle) {
-            joint.data.set_motor_max_force(JointAxis::AngX, 50.0);
+        let handle = state
+            .impulse_joints
+            .insert(parent_body, child_body, joint, true);
+        if let (Some(motor_axis), Some(joint)) = (motor_axis, state.impulse_joints.get_mut(handle))
+        {
+            joint
+                .data
+                .set_motor_max_force(motor_axis, JOINT_MOTOR_MAX_FORCE);
         }
         state.entity_to_joint.insert(entity, handle);
     }
@@ -350,12 +443,15 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         let Some(motor) = world.get::<JointMotor>(*entity) else {
             continue;
         };
+        let Some(axis) = motor_axis_for_entity(world, *entity) else {
+            continue;
+        };
         let Some(joint) = state.impulse_joints.get_mut(*joint_handle) else {
             continue;
         };
         joint
             .data
-            .set_motor_velocity(JointAxis::AngX, motor.velocity_rad_s as f32, 1.0);
+            .set_motor_velocity(axis, motor.velocity_rad_s as f32, 1.0);
     }
 }
 
@@ -503,5 +599,67 @@ mod tests {
         let hash_b = hash_physics_state(&world);
         assert_eq!(hash_a, hash_b, "physics replay should be deterministic");
         assert_ne!(hash_a, 0, "hash should reflect simulated state");
+    }
+
+    #[test]
+    fn fixed_joint_welds_then_releases_body() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .expect("physics world");
+
+        let mut world = World::new();
+        // Fixed anchor in mid-air with a small collider away from the cube.
+        let anchor = spawn_named(&mut world, "anchor");
+        world.entity_mut(anchor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 5.0, 0.0), Quat::IDENTITY),
+        ));
+
+        // Dynamic cube beside the anchor, welded so it cannot fall.
+        let cube = spawn_named(&mut world, "cube");
+        world.entity_mut(cube).insert((
+            RigidBody::default(),
+            Collider::cuboid(Vec3::splat(0.1)),
+            Transform3::from_translation_rotation(Vec3::new(0.5, 5.0, 0.0), Quat::IDENTITY),
+            FixedJointDesc {
+                parent: anchor,
+                anchor_parent_m: Vec3::new(0.5, 0.0, 0.0),
+                anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
+            },
+        ));
+
+        let dt = fixed_step();
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        for _ in 0..120 {
+            backend.sync_from_ecs(&mut world, physics_world).unwrap();
+            backend.step(physics_world, dt).unwrap();
+            backend.sync_to_ecs(&mut world, physics_world).unwrap();
+        }
+
+        let welded_y = world.get::<Transform3>(cube).unwrap().translation.y;
+        assert!(
+            welded_y > 4.9,
+            "welded cube should hang from the anchor, y={welded_y}"
+        );
+
+        // Release the weld and let it fall.
+        world.entity_mut(cube).remove::<FixedJointDesc>();
+        for _ in 0..120 {
+            backend.sync_from_ecs(&mut world, physics_world).unwrap();
+            backend.step(physics_world, dt).unwrap();
+            backend.sync_to_ecs(&mut world, physics_world).unwrap();
+        }
+
+        let released_y = world.get::<Transform3>(cube).unwrap().translation.y;
+        assert!(
+            released_y < welded_y - 0.5,
+            "released cube should fall once the weld is removed, y={released_y}"
+        );
     }
 }
