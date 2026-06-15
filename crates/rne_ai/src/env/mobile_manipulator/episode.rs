@@ -40,6 +40,22 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
+    /// End-effector reach episode toward a reachable world-frame target (dense reward).
+    ///
+    /// Suited to reinforcement learning: the per-step reward is the reduction in
+    /// end-effector distance to the target, with a bonus on success.
+    pub fn reach() -> Self {
+        Self {
+            max_steps: 300,
+            scene_path: crate::mm_minimal_scene_path(),
+            task: MobileManipulatorTask::Reach {
+                target: crate::reach::ReachTarget::new(0.32, 0.64, 0.40),
+                success_m: 0.1,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+        }
+    }
+
     /// Default pick-and-place episode: grasp the cube and set it down at a target.
     pub fn place() -> Self {
         Self {
@@ -376,6 +392,43 @@ mod tests {
         }
 
         panic!("expected transport episode success within retry budget");
+    }
+
+    #[test]
+    fn reach_preset_episode_is_solvable_and_needs_control() {
+        // A solving control reaches the target...
+        let mut solved = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach());
+        let _ = solved.reset();
+        let drive = MobileManipulatorAction {
+            shoulder_velocity_rad_s: -3.0,
+            ..MobileManipulatorAction::default()
+        };
+        let mut terminated = false;
+        for _ in 0..300 {
+            if solved.step(drive).terminated {
+                terminated = true;
+                break;
+            }
+        }
+        assert!(
+            terminated,
+            "expected reach preset to be solvable under control"
+        );
+
+        // ...while doing nothing does not (the target needs active control).
+        let mut idle = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach());
+        let _ = idle.reset();
+        let mut idle_terminated = false;
+        for _ in 0..300 {
+            if idle.step(MobileManipulatorAction::default()).terminated {
+                idle_terminated = true;
+                break;
+            }
+        }
+        assert!(
+            !idle_terminated,
+            "reach preset should not be solved by a zero-action policy"
+        );
     }
 
     #[test]
