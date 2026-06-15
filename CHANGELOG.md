@@ -10,6 +10,9 @@ All notable changes to Robot Native Engine are documented in this file.
   the `mm_lift` robot — lower → grasp → lift → swing → settle → lower → release. It implements
   `Policy<MobileManipulatorEpisode>` and is now the single source for the pick-and-place
   trajectory used by example 31 and the episode test (previously duplicated inline).
+- **Configurable place location**: `LiftPickPlacePolicy::with_swing_steps` sets how far the
+  carry swing rotates the arm, so the cube can be placed at different spots around the column
+  (`total_steps()` reports the sequence length). Test `lift_place_swing_controls_drop_location`.
 
 ### Changed
 
