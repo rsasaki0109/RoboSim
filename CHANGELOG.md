@@ -4,10 +4,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-12
+
 ### Added
 
-- **Reach helpers** (`ReachTarget`, `ee_distance_to_target_m`, joint/world proportional actions) in `rne_ai`
-- **Example 21 reach smoke**: EE within 5 cm of calibrated target (`--smoke`)
+- **`MobileManipulatorSim::from_scene_path`**: load `mm_minimal` / `mm_mobile` from `.rne.scene.toml`
+- **Scene path helpers**: `mm_minimal_scene_path`, `mm_mobile_scene_path`, `mm_minimal_grasp_scene_path`
+- **`mm_minimal` scene asset** (`assets/scenes/mm_minimal.rne.scene.toml`)
+- **Parallel-jaw gripper** on `mm_minimal` URDF (`left_finger_joint`, `right_finger_joint`)
+- **`MobileManipulatorAction::gripper_velocity_rad_s`** and grasp contact helpers (`finger_contacts_named`)
+- **`mm_minimal_grasp` scene** with tabletop cube obstacle
+- **Example 22 grasp smoke**: finger contact with `grasp_cube` (`--smoke`)
+
+### Changed
+
+- **`new_mm_minimal` / `new_mm_mobile`** delegate to default scene assets
+- **Interactive viewer**, **example 21**, and **ROS `mobile_manipulator` mode** load robots via scene paths
+- **Viewer teleop**: `C` / `V` gripper close / open on manipulator profiles
 
 ## [0.6.0] - 2026-06-12
 

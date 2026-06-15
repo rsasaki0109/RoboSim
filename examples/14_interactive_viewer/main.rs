@@ -7,6 +7,7 @@
 //! Controls (`--manipulator` / `--manipulator-mobile`):
 //! - Q / E: shoulder down / up
 //! - Z / X: elbow down / up
+//! - C / V: gripper close / open
 //! - W / S / A / D: base drive (mobile variant only)
 //!
 //! Shared:
@@ -24,7 +25,8 @@
 
 use rne_ai::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    DiffDriveAction, DiffDriveSim, MobileManipulatorAction, MobileManipulatorSim,
+    mm_minimal_scene_path, mm_mobile_scene_path, DiffDriveAction, DiffDriveSim,
+    MobileManipulatorAction, MobileManipulatorSim,
 };
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
@@ -44,12 +46,13 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.08, 0.12, 1.0];
 const DRIVE_SPEED_RAD_S: f64 = 5.0;
 const TURN_DELTA_RAD_S: f64 = 3.0;
 const ARM_SPEED_RAD_S: f64 = 2.5;
+const GRIPPER_SPEED_RAD_S: f64 = 2.0;
 
 #[derive(Clone, Debug)]
 enum ViewerProfile {
     DiffDriveScene(PathBuf),
-    ManipulatorFixed,
-    ManipulatorMobile,
+    ManipulatorFixed(PathBuf),
+    ManipulatorMobile(PathBuf),
 }
 
 enum ViewerSim {
@@ -189,17 +192,17 @@ fn default_scene_path() -> PathBuf {
 
 fn viewer_profile_from_args() -> ViewerProfile {
     let args: Vec<String> = env::args().skip(1).collect();
+    let scene_arg = args
+        .iter()
+        .find(|arg| !arg.starts_with('-') && arg.ends_with(".scene.toml"))
+        .map(PathBuf::from);
     if args.iter().any(|arg| arg == "--manipulator-mobile") {
-        return ViewerProfile::ManipulatorMobile;
+        return ViewerProfile::ManipulatorMobile(scene_arg.unwrap_or_else(mm_mobile_scene_path));
     }
     if args.iter().any(|arg| arg == "--manipulator") {
-        return ViewerProfile::ManipulatorFixed;
+        return ViewerProfile::ManipulatorFixed(scene_arg.unwrap_or_else(mm_minimal_scene_path));
     }
-    let scene_path = args
-        .iter()
-        .find(|arg| !arg.starts_with('-'))
-        .map(PathBuf::from)
-        .unwrap_or_else(default_scene_path);
+    let scene_path = scene_arg.unwrap_or_else(default_scene_path);
     ViewerProfile::DiffDriveScene(scene_path)
 }
 
@@ -208,20 +211,20 @@ fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
         ViewerProfile::DiffDriveScene(path) => DiffDriveSim::from_scene_path(path)
             .map(ViewerSim::DiffDrive)
             .map_err(|error| error.to_string()),
-        ViewerProfile::ManipulatorFixed => Ok(ViewerSim::Manipulator(
-            MobileManipulatorSim::new_mm_minimal(),
-        )),
-        ViewerProfile::ManipulatorMobile => {
-            Ok(ViewerSim::Manipulator(MobileManipulatorSim::new_mm_mobile()))
-        }
+        ViewerProfile::ManipulatorFixed(path) => MobileManipulatorSim::from_scene_path(path)
+            .map(ViewerSim::Manipulator)
+            .map_err(|error| error.to_string()),
+        ViewerProfile::ManipulatorMobile(path) => MobileManipulatorSim::from_scene_path(path)
+            .map(ViewerSim::Manipulator)
+            .map_err(|error| error.to_string()),
     }
 }
 
 fn profile_label(profile: &ViewerProfile) -> String {
     match profile {
         ViewerProfile::DiffDriveScene(path) => path.display().to_string(),
-        ViewerProfile::ManipulatorFixed => "mm_minimal (fixed base)".into(),
-        ViewerProfile::ManipulatorMobile => "mm_mobile (diff-drive + arm)".into(),
+        ViewerProfile::ManipulatorFixed(path) => format!("mm_minimal ({})", path.display()),
+        ViewerProfile::ManipulatorMobile(path) => format!("mm_mobile ({})", path.display()),
     }
 }
 
@@ -295,16 +298,16 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 std::process::exit(1);
             }
         }
-        ViewerProfile::ManipulatorFixed => {
+        ViewerProfile::ManipulatorFixed(_) => {
             let obs = match &sim {
                 ViewerSim::Manipulator(sim) => sim.observe(),
                 _ => unreachable!(),
             };
-            if obs.joint_state_count < 2 {
+            if obs.joint_state_count < 4 {
                 std::process::exit(1);
             }
         }
-        ViewerProfile::ManipulatorMobile => {
+        ViewerProfile::ManipulatorMobile(_) => {
             let obs = match &sim {
                 ViewerSim::Manipulator(sim) => sim.observe(),
                 _ => unreachable!(),
@@ -326,10 +329,10 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
 fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
     let mut keys = HashSet::new();
     match profile {
-        ViewerProfile::DiffDriveScene(_) | ViewerProfile::ManipulatorMobile => {
+        ViewerProfile::DiffDriveScene(_) | ViewerProfile::ManipulatorMobile(_) => {
             keys.insert(KeyCode::KeyW);
         }
-        ViewerProfile::ManipulatorFixed => {
+        ViewerProfile::ManipulatorFixed(_) => {
             keys.insert(KeyCode::KeyQ);
         }
     }
@@ -614,6 +617,12 @@ fn teleop_manipulator(keys: &HashSet<KeyCode>, mobile_base: bool) -> MobileManip
     if keys.contains(&KeyCode::KeyX) {
         action.elbow_velocity_rad_s -= ARM_SPEED_RAD_S;
     }
+    if keys.contains(&KeyCode::KeyC) {
+        action.gripper_velocity_rad_s -= GRIPPER_SPEED_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyV) {
+        action.gripper_velocity_rad_s += GRIPPER_SPEED_RAD_S;
+    }
 
     if mobile_base {
         let drive = teleop_diff_drive(keys);
@@ -665,11 +674,12 @@ mod tests {
 
     #[test]
     fn manipulator_visual_scene_has_links() {
-        let sim = MobileManipulatorSim::new_mm_minimal();
+        let sim = MobileManipulatorSim::from_scene_path(&mm_minimal_scene_path())
+            .expect("load mm_minimal scene");
         let scene = build_visual_render_scene(sim.world());
         assert!(
-            scene.items.len() >= 4,
-            "expected base + arm links + ground, got {}",
+            scene.items.len() >= 6,
+            "expected base + arm + gripper links + ground, got {}",
             scene.items.len()
         );
     }

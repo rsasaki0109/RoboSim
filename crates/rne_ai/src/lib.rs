@@ -8,6 +8,7 @@ pub mod domain_randomization;
 pub mod env;
 pub mod episode;
 pub mod goal;
+pub mod grasp;
 pub mod lidar;
 pub mod multi_robot;
 pub mod observation;
@@ -28,6 +29,7 @@ pub use agent::{
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
+    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_mobile_scene_path,
     mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
     DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorSim, VectorizedDiffDriveConfig,
     VectorizedDiffDriveEnv, VectorizedDiffDriveStep,
@@ -37,6 +39,7 @@ pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
     GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
 };
+pub use grasp::{finger_contacts_named, sim_contacts_named, FINGER_LINK_NAMES};
 pub use lidar::{lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mounts, LidarMount};
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
