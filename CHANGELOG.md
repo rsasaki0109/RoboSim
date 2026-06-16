@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Lift pick-and-place episode** (`MobileManipulatorEpisodeConfig::lift_pick_place`): the
+  full 3D pick-and-place as a first-class `Episode` (reward + success), on the `mm_lift_pick`
+  scene with a place target. Exposed to Python as `MobileManipulatorEpisode("lift_place")`.
+  The Python episode `step` now accepts a `lift_velocity_m_s` argument (default `0.0`, so
+  existing 5-argument calls are unchanged) to drive the vertical lift. Test
+  `lift_pick_place_episode_picks_carries_and_places`.
+
 - **Full 3D pick-and-place** (manipulator-redesign phase 4, final): the `mm_lift` robot now
   performs an end-to-end pick→lift→carry→place — lower the top-down claw over a ground cube,
   grasp it, lift it, swing the arm to a new spot, lower it, and open to release. Test
