@@ -6,70 +6,24 @@
 //! lift reach the ground, position-controlled arm joints hold the commanded pose, and
 //! the top-down claw grasps a ground object the side-grip could not.
 
-use rne_ai::{mm_lift_pick_scene_path, MobileManipulatorAction, MobileManipulatorSim};
+use rne_ai::{
+    mm_lift_pick_scene_path, LiftPickPlacePolicy, MobileManipulatorAction, MobileManipulatorSim,
+};
 
 /// Minimum horizontal distance the cube must be carried for the place to count.
 const MIN_CARRY_M: f64 = 0.5;
-
-fn close() -> MobileManipulatorAction {
-    MobileManipulatorAction {
-        gripper_velocity_rad_s: -2.0,
-        ..MobileManipulatorAction::default()
-    }
-}
+/// Steps the scripted pick-and-place policy runs through (lower → grasp → lift → swing
+/// → settle → lower → release).
+const PICK_PLACE_STEPS: usize = 1030;
 
 fn run_pick_place(sim: &mut MobileManipulatorSim) -> bool {
-    // Settle, lower the claw over the cube, and grasp it.
+    // Settle the arm, then drive the shared scripted pick-and-place policy.
     for _ in 0..150 {
         sim.step(MobileManipulatorAction::default());
     }
-    for _ in 0..200 {
-        sim.step(MobileManipulatorAction {
-            lift_velocity_m_s: -0.3,
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        });
-    }
-    for _ in 0..120 {
-        sim.step(MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        });
-        if sim.is_grasping() {
-            break;
-        }
-    }
-    if !sim.is_grasping() {
-        return false;
-    }
-
-    // Lift, swing to a new spot, settle, lower, and release.
-    for _ in 0..150 {
-        sim.step(MobileManipulatorAction {
-            lift_velocity_m_s: 0.3,
-            ..close()
-        });
-    }
-    for _ in 0..90 {
-        sim.step(MobileManipulatorAction {
-            shoulder_velocity_rad_s: 0.8,
-            ..close()
-        });
-    }
-    for _ in 0..150 {
-        sim.step(close());
-    }
-    for _ in 0..200 {
-        sim.step(MobileManipulatorAction {
-            lift_velocity_m_s: -0.3,
-            ..close()
-        });
-    }
-    for _ in 0..120 {
-        sim.step(MobileManipulatorAction {
-            gripper_velocity_rad_s: 3.0,
-            ..MobileManipulatorAction::default()
-        });
+    let mut policy = LiftPickPlacePolicy::new();
+    for _ in 0..PICK_PLACE_STEPS {
+        sim.step(policy.next_action());
     }
     !sim.is_grasping()
 }
