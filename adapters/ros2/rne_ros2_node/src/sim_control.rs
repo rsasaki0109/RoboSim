@@ -258,6 +258,17 @@ impl BridgeSim {
         command.gripper_velocity_rad_s = gripper_velocity_rad_s;
     }
 
+    /// Applies a vertical lift velocity command (mobile manipulator mode only).
+    ///
+    /// Positive raises the lift, negative lowers it. Only the lift-equipped robot acts on
+    /// this; robots without a lift joint ignore it.
+    pub fn set_lift_velocity(&mut self, lift_velocity_m_s: f64) {
+        let SimBackend::MobileManipulator { command, .. } = &mut self.backend else {
+            return;
+        };
+        command.lift_velocity_m_s = lift_velocity_m_s;
+    }
+
     /// Applies arm joint velocity targets by joint name (mobile manipulator mode only).
     ///
     /// A velocity command cancels any active position target.
