@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Real 3D pick** (manipulator-redesign phase 3): the `mm_lift` gripper is redesigned as a
+  **top-down claw** (two fingers hang down to straddle an object) so it can lower over a cube
+  on the ground, grasp it (contact-triggered weld), and the lift raises it off the ground —
+  the previous side-grip could not pick a ground object because its body collided with it.
+  New `mm_lift_pick` scene + `mm_lift_pick_scene_path()` and test
+  `lift_picks_cube_off_ground_and_raises_it`.
+
 - **Per-motor force override** (`JointMotor.max_force`, default `0.0` = use the
   per-joint-type cap): a positive value overrides the cap for that motor, e.g. a heavy
   arm joint that needs more torque to track its target.

@@ -1,0 +1,17 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 49
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_lift.rne.robot.toml"
+
+# Small cube on the ground directly under the top-down gripper, to be picked up.
+[[obstacles]]
+name = "lift_cube"
+translation_m = [1.211, 0.03, 0.0]
+half_extents_m = [0.03, 0.03, 0.03]
+body_type = "dynamic"
+mass_kg = 0.05
