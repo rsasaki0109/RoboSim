@@ -4,10 +4,11 @@
 //! - W / S: drive forward / backward
 //! - A / D: turn left / right
 //!
-//! Controls (`--manipulator` / `--manipulator-mobile`):
+//! Controls (`--manipulator` / `--manipulator-mobile` / `--manipulator-lift`):
 //! - Q / E: shoulder down / up
 //! - Z / X: elbow down / up
 //! - C / V: gripper close / open
+//! - R / F: lift up / down (lift variant only)
 //! - W / S / A / D: base drive (mobile variant only)
 //!
 //! Shared:
@@ -22,11 +23,12 @@
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/mesh_diff_drive.rne.scene.toml
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-mobile
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
 
 use rne_ai::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    mm_minimal_scene_path, mm_mobile_scene_path, DiffDriveAction, DiffDriveSim,
+    mm_lift_scene_path, mm_minimal_scene_path, mm_mobile_scene_path, DiffDriveAction, DiffDriveSim,
     MobileManipulatorAction, MobileManipulatorSim,
 };
 use rne_assets::AssetHotReloader;
@@ -48,12 +50,14 @@ const DRIVE_SPEED_RAD_S: f64 = 5.0;
 const TURN_DELTA_RAD_S: f64 = 3.0;
 const ARM_SPEED_RAD_S: f64 = 2.5;
 const GRIPPER_SPEED_RAD_S: f64 = 2.0;
+const LIFT_SPEED_M_S: f64 = 0.3;
 
 #[derive(Clone, Debug)]
 enum ViewerProfile {
     DiffDriveScene(PathBuf),
     ManipulatorFixed(PathBuf),
     ManipulatorMobile(PathBuf),
+    ManipulatorLift(PathBuf),
 }
 
 enum ViewerSim {
@@ -213,6 +217,9 @@ fn viewer_profile_from_args() -> ViewerProfile {
     if args.iter().any(|arg| arg == "--manipulator-mobile") {
         return ViewerProfile::ManipulatorMobile(scene_arg.unwrap_or_else(mm_mobile_scene_path));
     }
+    if args.iter().any(|arg| arg == "--manipulator-lift") {
+        return ViewerProfile::ManipulatorLift(scene_arg.unwrap_or_else(mm_lift_scene_path));
+    }
     if args.iter().any(|arg| arg == "--manipulator") {
         return ViewerProfile::ManipulatorFixed(scene_arg.unwrap_or_else(mm_minimal_scene_path));
     }
@@ -231,6 +238,9 @@ fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
         ViewerProfile::ManipulatorMobile(path) => MobileManipulatorSim::from_scene_path(path)
             .map(ViewerSim::Manipulator)
             .map_err(|error| error.to_string()),
+        ViewerProfile::ManipulatorLift(path) => MobileManipulatorSim::from_scene_path(path)
+            .map(ViewerSim::Manipulator)
+            .map_err(|error| error.to_string()),
     }
 }
 
@@ -239,6 +249,7 @@ fn profile_label(profile: &ViewerProfile) -> String {
         ViewerProfile::DiffDriveScene(path) => path.display().to_string(),
         ViewerProfile::ManipulatorFixed(path) => format!("mm_minimal ({})", path.display()),
         ViewerProfile::ManipulatorMobile(path) => format!("mm_mobile ({})", path.display()),
+        ViewerProfile::ManipulatorLift(path) => format!("mm_lift ({})", path.display()),
     }
 }
 
@@ -337,6 +348,20 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 std::process::exit(1);
             }
         }
+        ViewerProfile::ManipulatorLift(_) => {
+            let obs = match &sim {
+                ViewerSim::Manipulator(sim) => sim.observe(),
+                _ => unreachable!(),
+            };
+            // The lift robot has 5 actuated joints (lift + shoulder + elbow + 2 fingers).
+            if obs.joint_state_count < 5 {
+                eprintln!(
+                    "interactive viewer smoke expected 5 lift joints, got {}",
+                    obs.joint_state_count
+                );
+                std::process::exit(1);
+            }
+        }
     }
 
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -355,6 +380,9 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
         }
         ViewerProfile::ManipulatorFixed(_) => {
             keys.insert(KeyCode::KeyQ);
+        }
+        ViewerProfile::ManipulatorLift(_) => {
+            keys.insert(KeyCode::KeyR);
         }
     }
     keys
@@ -516,7 +544,9 @@ impl App {
                 if physical == KeyCode::KeyP
                     && matches!(
                         self.profile,
-                        ViewerProfile::ManipulatorFixed(_) | ViewerProfile::ManipulatorMobile(_)
+                        ViewerProfile::ManipulatorFixed(_)
+                            | ViewerProfile::ManipulatorMobile(_)
+                            | ViewerProfile::ManipulatorLift(_)
                     )
                 {
                     self.show_wrist_camera = !self.show_wrist_camera;
@@ -666,6 +696,13 @@ fn teleop_manipulator(keys: &HashSet<KeyCode>, mobile_base: bool) -> MobileManip
     }
     if keys.contains(&KeyCode::KeyV) {
         action.gripper_velocity_rad_s += GRIPPER_SPEED_RAD_S;
+    }
+    // Vertical lift (lift robot only; ignored by robots without a lift joint).
+    if keys.contains(&KeyCode::KeyR) {
+        action.lift_velocity_m_s += LIFT_SPEED_M_S;
+    }
+    if keys.contains(&KeyCode::KeyF) {
+        action.lift_velocity_m_s -= LIFT_SPEED_M_S;
     }
 
     if mobile_base {
