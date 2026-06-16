@@ -4,7 +4,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Per-motor force override** (`JointMotor.max_force`, default `0.0` = use the
+  per-joint-type cap): a positive value overrides the cap for that motor, e.g. a heavy
+  arm joint that needs more torque to track its target.
+
 ### Changed
+
+- **Lift robot arm is now controllable** (manipulator-redesign phase 2): the arm revolute
+  joints are position (spring-damper) motors with a raised torque cap, so the heavy arm
+  moves to a commanded angle and *holds* it — a plain velocity motor was too weak to move
+  or hold it. Fixed a geometry bug where the upper arm overlapped the carriage and jammed
+  the shoulder; the arm now also settles perfectly straight. New test
+  `lift_arm_tracks_and_holds_commanded_pose`.
 
 - **Lift robot can now lower its gripper to the ground** (manipulator-redesign phase 1):
   `mm_lift` is rebuilt on a tall fixed **column** with the arm hanging from a sliding

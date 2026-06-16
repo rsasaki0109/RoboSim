@@ -479,6 +479,10 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
             motor.stiffness as f32,
             motor.gain as f32,
         );
+        // A per-motor force override takes precedence over the per-joint-type cap.
+        if motor.max_force > 0.0 {
+            joint.data.set_motor_max_force(axis, motor.max_force as f32);
+        }
     }
 }
 
