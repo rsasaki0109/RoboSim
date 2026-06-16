@@ -84,6 +84,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_minimal_grasp.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal_transport.rne.scene.toml"),
         root.join("assets/scenes/mm_lift.rne.scene.toml"),
+        root.join("assets/scenes/mm_lift_pick.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),

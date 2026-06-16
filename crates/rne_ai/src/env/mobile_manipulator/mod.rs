@@ -11,8 +11,9 @@ pub use drive::{
 };
 pub use episode::{MobileManipulatorEpisode, MobileManipulatorEpisodeConfig};
 pub use sim::{
-    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
-    mm_mobile_scene_path, MobileManipulatorSim,
+    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_grasp_scene_path,
+    mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_scene_path,
+    MobileManipulatorSim,
 };
 pub use vectorized::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
