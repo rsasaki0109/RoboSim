@@ -20,12 +20,16 @@ impl PhysicsWorldId {
 pub struct PhysicsWorldDesc {
     /// Gravity vector in meters per second squared.
     pub gravity_m_s2: Vec3,
+    /// Constraint solver iterations per step. `0` uses the backend default; a higher
+    /// value stabilizes stiff articulated chains (several jointed links) at extra cost.
+    pub solver_iterations: usize,
 }
 
 impl Default for PhysicsWorldDesc {
     fn default() -> Self {
         Self {
             gravity_m_s2: Vec3::new(0.0, -9.81, 0.0),
+            solver_iterations: 0,
         }
     }
 }

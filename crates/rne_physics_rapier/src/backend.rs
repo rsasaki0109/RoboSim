@@ -88,7 +88,16 @@ impl PhysicsBackend for RapierBackend {
             id,
             RapierWorldState {
                 gravity: vec3_to_rapier(desc.gravity_m_s2),
-                integration_parameters: IntegrationParameters::default(),
+                // A higher solver-iteration count (set per world) keeps stiff articulated
+                // chains — e.g. the lift robot's multi-link arm — stable instead of swinging
+                // chaotically; `0` keeps Rapier's default so existing robots are unchanged.
+                integration_parameters: match std::num::NonZeroUsize::new(desc.solver_iterations) {
+                    Some(iterations) => IntegrationParameters {
+                        num_solver_iterations: iterations,
+                        ..IntegrationParameters::default()
+                    },
+                    None => IntegrationParameters::default(),
+                },
                 physics_pipeline: PhysicsPipeline::new(),
                 island_manager: IslandManager::new(),
                 broad_phase: BroadPhaseMultiSap::new(),

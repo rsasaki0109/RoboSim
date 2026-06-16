@@ -77,6 +77,9 @@ const LIFT_MOTOR_DAMPING: f64 = 120.0;
 /// Travel limits of the lift height target, in meters about its rest position.
 const LIFT_TARGET_MIN_M: f64 = -0.25;
 const LIFT_TARGET_MAX_M: f64 = 0.6;
+/// Constraint solver iterations for the lift robot's world. Its tall jointed chain
+/// swings chaotically at Rapier's default (4); 16 holds the arm stable.
+const LIFT_SOLVER_ITERATIONS: usize = 16;
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -356,8 +359,14 @@ impl MobileManipulatorSim {
         _base_y_m: Option<f64>,
     ) -> Self {
         let mut backend = RapierBackend::new();
+        // The lift robot's tall jointed chain (lift + shoulder + elbow + gripper) needs
+        // more constraint-solver iterations to stay stable; other robots keep the default.
+        let has_lift = actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         let physics_world = backend
-            .create_world(PhysicsWorldDesc::default())
+            .create_world(PhysicsWorldDesc {
+                solver_iterations: if has_lift { LIFT_SOLVER_ITERATIONS } else { 0 },
+                ..PhysicsWorldDesc::default()
+            })
             .expect("physics world");
 
         let ee_link = links
@@ -954,6 +963,31 @@ mod tests {
             }
         }
         sum / avg as f64
+    }
+
+    #[test]
+    fn mm_lift_arm_holds_pose_at_idle() {
+        // The lift robot's tall jointed chain only stays still with enough constraint
+        // solver iterations (see LIFT_SOLVER_ITERATIONS); at Rapier's default the arm
+        // swings chaotically. Verify the settled arm holds its pose with no command.
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        for _ in 0..200 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let settled = sim.observe();
+        let mut max_drift = 0.0_f64;
+        for _ in 0..90 {
+            let o = sim.step(MobileManipulatorAction::default());
+            let drift = ((o.ee_x_m - settled.ee_x_m).powi(2)
+                + (o.ee_y_m - settled.ee_y_m).powi(2)
+                + (o.ee_z_m - settled.ee_z_m).powi(2))
+            .sqrt();
+            max_drift = max_drift.max(drift);
+        }
+        assert!(
+            max_drift < 0.05,
+            "settled lift arm should hold its pose at idle, max ee drift={max_drift:.3} m"
+        );
     }
 
     #[test]
