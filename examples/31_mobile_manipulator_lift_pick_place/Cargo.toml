@@ -1,0 +1,12 @@
+[package]
+name = "mobile_manipulator_lift_pick_place"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "31_mobile_manipulator_lift_pick_place"
+path = "main.rs"

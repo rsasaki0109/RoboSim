@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Full 3D pick-and-place** (manipulator-redesign phase 4, final): the `mm_lift` robot now
+  performs an end-to-end pick→lift→carry→place — lower the top-down claw over a ground cube,
+  grasp it, lift it, swing the arm to a new spot, lower it, and open to release. Test
+  `lift_picks_carries_and_places_cube` and example
+  `31_mobile_manipulator_lift_pick_place` (carries the cube ~1.1 m and releases it; wired
+  into `xtask ci`). This completes the four-phase manipulator redesign (column base →
+  controllable arm → top-down claw → pick-and-place).
+
 - **Real 3D pick** (manipulator-redesign phase 3): the `mm_lift` gripper is redesigned as a
   **top-down claw** (two fingers hang down to straddle an object) so it can lower over a cube
   on the ground, grasp it (contact-triggered weld), and the lift raises it off the ground —
