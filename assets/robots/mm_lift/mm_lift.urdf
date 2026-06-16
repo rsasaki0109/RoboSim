@@ -1,20 +1,21 @@
 <?xml version="1.0"?>
-<!-- Fixed-base arm with a vertical prismatic "torso" lift between the base and
-     the shoulder, so the whole SCARA arm can be raised and lowered. The lift
-     motor must hold the arm's weight against gravity, which needs a high motor
-     gain (see JointMotor.gain). -->
+<!-- Column-base arm with a vertical prismatic "torso" lift. The arm hangs from a
+     carriage that slides up and down a tall fixed column, so the gripper can be
+     lowered to the ground to pick an object and raised to carry it. The lift is a
+     position (spring-damper) motor that holds the arm's weight against gravity; the
+     tall jointed chain needs extra solver iterations to stay stable (see the sim). -->
 <robot name="mm_lift">
   <link name="base_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.6 0.4"/>
+        <box size="0.16 1.5 0.16"/>
       </geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.6 0.4"/>
+        <box size="0.16 1.5 0.16"/>
       </geometry>
     </collision>
   </link>
@@ -23,13 +24,13 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.16 0.16 0.16"/>
+        <box size="0.14 0.14 0.14"/>
       </geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.16 0.16 0.16"/>
+        <box size="0.14 0.14 0.14"/>
       </geometry>
     </collision>
   </link>
@@ -112,7 +113,7 @@
   <joint name="lift_joint" type="prismatic">
     <parent link="base_link"/>
     <child link="torso_link"/>
-    <origin xyz="0 0.38 0" rpy="0 0 0"/>
+    <origin xyz="0.15 0.15 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
   </joint>
 

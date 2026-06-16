@@ -4,6 +4,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Lift robot can now lower its gripper to the ground** (manipulator-redesign phase 1):
+  `mm_lift` is rebuilt on a tall fixed **column** with the arm hanging from a sliding
+  carriage, so the lift lowers the gripper from rest (~0.81 m) down to near ground
+  (~0.26 m) and raises it to carry — the previous box base let the lift only go up. The
+  arm also settles much straighter. New test `lift_lowers_gripper_toward_ground`; existing
+  lift tests/smoke unchanged in intent.
+
 ### Added
 
 - **Per-world solver iterations** (`PhysicsWorldDesc.solver_iterations`, default `0` =

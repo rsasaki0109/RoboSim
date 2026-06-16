@@ -75,8 +75,10 @@ const LIFT_MOTOR_STIFFNESS: f64 = 600.0;
 /// settles to its target height without oscillating.
 const LIFT_MOTOR_DAMPING: f64 = 120.0;
 /// Travel limits of the lift height target, in meters about its rest position.
-const LIFT_TARGET_MIN_M: f64 = -0.25;
-const LIFT_TARGET_MAX_M: f64 = 0.6;
+/// The carriage rests partway up the column so the gripper can be lowered toward
+/// the ground (negative) to pick and raised (positive) to carry.
+const LIFT_TARGET_MIN_M: f64 = -0.5;
+const LIFT_TARGET_MAX_M: f64 = 0.5;
 /// Constraint solver iterations for the lift robot's world. Its tall jointed chain
 /// swings chaotically at Rapier's default (4); 16 holds the arm stable.
 const LIFT_SOLVER_ITERATIONS: usize = 16;
@@ -928,6 +930,32 @@ mod tests {
         assert!(
             contacted,
             "expected finger contact with grasp_cube while closing gripper"
+        );
+    }
+
+    #[test]
+    fn lift_lowers_gripper_toward_ground() {
+        // Phase 1 of the manipulator redesign: the column base lets the carriage slide
+        // the gripper down to near ground level so it can reach a low object.
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        for _ in 0..150 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let settled_y = sim.observe().ee_y_m;
+        for _ in 0..240 {
+            sim.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let lowered_y = sim.observe().ee_y_m;
+        assert!(
+            lowered_y < settled_y - 0.3,
+            "lift should lower the gripper toward the ground: settled_y={settled_y:.3}, lowered_y={lowered_y:.3}"
+        );
+        assert!(
+            lowered_y < 0.35,
+            "lowered gripper should reach near ground height, ee_y={lowered_y:.3}"
         );
     }
 
