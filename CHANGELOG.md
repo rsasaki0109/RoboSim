@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **ROS 2 `/lift_command` topic**: the ROS 2 node now subscribes to `std_msgs/Float64` on
+  `/lift_command` to drive the vertical lift (positive raises, negative lowers), alongside
+  the existing `/cmd_vel`, `/gripper_command`, and arm topics. Verified by the ci-ros2 smoke.
+
 - **`LiftPickPlacePolicy`**: a reusable scripted pick-and-place policy (state machine) for
   the `mm_lift` robot — lower → grasp → lift → swing → settle → lower → release. It implements
   `Policy<MobileManipulatorEpisode>` and is now the single source for the pick-and-place

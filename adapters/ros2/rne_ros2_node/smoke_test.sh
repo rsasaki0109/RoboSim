@@ -220,5 +220,14 @@ if [[ -z "$ARM_TRAJ_SUBS" || "$ARM_TRAJ_SUBS" -lt 1 ]]; then
   exit 1
 fi
 
+echo "Checking /lift_command subscription exists..."
+LIFT_SUBS=$(
+  ros2 topic info /lift_command 2>/dev/null | awk '/Subscription count/ {print $3}' || true
+)
+if [[ -z "$LIFT_SUBS" || "$LIFT_SUBS" -lt 1 ]]; then
+  echo "expected /lift_command subscription on mobile bridge, got count=${LIFT_SUBS:-0}" >&2
+  exit 1
+fi
+
 rm -f "$SMOKE_LOG"
 echo "ROS 2 smoke tests passed."
