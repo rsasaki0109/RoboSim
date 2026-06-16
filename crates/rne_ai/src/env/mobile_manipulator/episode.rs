@@ -213,12 +213,36 @@ impl MobileManipulatorEpisode {
         }
     }
 
-    /// Fills the goal-relative end-effector offset in the observation for Reach tasks.
+    /// Fills the goal-relative offset (`target_d{x,y,z}_m`) in the observation so a
+    /// policy can see where to go:
+    /// - Reach: the target relative to the end-effector.
+    /// - Place: before grasping, the object relative to the end-effector (where to reach
+    ///   to pick); once grasped, the place target relative to the object (where to carry).
     fn fill_goal_delta(&self, observation: &mut MobileManipulatorObservation) {
-        if let MobileManipulatorTask::Reach { target, .. } = &self.effective_task {
-            observation.target_dx_m = target.x_m - observation.ee_x_m;
-            observation.target_dy_m = target.y_m - observation.ee_y_m;
-            observation.target_dz_m = target.z_m - observation.ee_z_m;
+        match &self.effective_task {
+            MobileManipulatorTask::Reach { target, .. } => {
+                observation.target_dx_m = target.x_m - observation.ee_x_m;
+                observation.target_dy_m = target.y_m - observation.ee_y_m;
+                observation.target_dz_m = target.z_m - observation.ee_z_m;
+            }
+            MobileManipulatorTask::Place {
+                object_name,
+                target,
+                ..
+            } => {
+                if self.sim.is_grasping() {
+                    if let Some((ox, oy, oz)) = self.sim.named_translation_m(object_name) {
+                        observation.target_dx_m = target.x_m - ox;
+                        observation.target_dy_m = target.y_m - oy;
+                        observation.target_dz_m = target.z_m - oz;
+                    }
+                } else if let Some((ox, oy, oz)) = self.sim.named_translation_m(object_name) {
+                    observation.target_dx_m = ox - observation.ee_x_m;
+                    observation.target_dy_m = oy - observation.ee_y_m;
+                    observation.target_dz_m = oz - observation.ee_z_m;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -680,6 +704,66 @@ mod tests {
             }
         }
         panic!("expected place episode to grasp, carry, release, and settle at the target");
+    }
+
+    #[test]
+    fn place_observation_points_at_object_then_target() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::lift_pick_place());
+        let obs = episode.reset().observation;
+
+        // Before grasping, the goal offset points from the gripper toward the cube on the
+        // ground — it must be non-zero (it was always zero for Place tasks before) and
+        // point downward (the cube sits below the raised gripper).
+        let approach_mag =
+            (obs.target_dx_m.powi(2) + obs.target_dy_m.powi(2) + obs.target_dz_m.powi(2)).sqrt();
+        assert!(
+            approach_mag > 0.1,
+            "approach goal offset should be informative, got {approach_mag:.3}"
+        );
+        assert!(
+            obs.target_dy_m < 0.0,
+            "the cube is below the gripper, so target_dy should be negative, got {:.3}",
+            obs.target_dy_m
+        );
+
+        // Lower and grasp; the goal offset should then point from the object toward the
+        // place target instead.
+        for _ in 0..200 {
+            episode.step(MobileManipulatorAction {
+                lift_velocity_m_s: -0.3,
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let mut carry = MobileManipulatorObservation::default();
+        for _ in 0..120 {
+            carry = episode
+                .step(MobileManipulatorAction {
+                    gripper_velocity_rad_s: -2.5,
+                    ..MobileManipulatorAction::default()
+                })
+                .observation;
+            if episode.simulation().is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            episode.simulation().is_grasping(),
+            "episode should grasp the cube"
+        );
+        let (cx, _, cz) = episode
+            .simulation()
+            .named_translation_m("lift_cube")
+            .expect("cube");
+        // target (0.55, 0.03, -0.87) relative to the grasped cube.
+        assert!(
+            (carry.target_dx_m - (0.55 - cx)).abs() < 0.05
+                && (carry.target_dz_m - (-0.87 - cz)).abs() < 0.05,
+            "carry goal offset should point object->target, got ({:.2},{:.2})",
+            carry.target_dx_m,
+            carry.target_dz_m
+        );
     }
 
     #[test]
