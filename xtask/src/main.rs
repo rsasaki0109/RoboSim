@@ -1,7 +1,7 @@
 //! Workspace automation tasks for Robot Native Engine.
 
 use std::process::{Command, ExitCode, Stdio};
-use std::{env, path::PathBuf};
+use std::{env, fs, path::PathBuf};
 
 fn main() -> ExitCode {
     match run() {
@@ -22,6 +22,7 @@ fn run() -> anyhow::Result<()> {
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
         "house-gif-demo" => house_gif_demo(),
+        "hero-media-check" => hero_media_check(),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -36,6 +37,7 @@ fn ci() -> anyhow::Result<()> {
     validate_repo_assets()?;
     run_example_smokes()?;
     house_gif_demo()?;
+    hero_media_check()?;
     Ok(())
 }
 
@@ -88,9 +90,41 @@ fn house_gif_demo() -> anyhow::Result<()> {
     run_step(&format!(
         "{python} examples/27_mobile_manipulator_rl/house_gif_demo.py --check"
     ))?;
-    run_step(&format!(
-        "{python} examples/27_mobile_manipulator_rl/render_house_gif.py --verify-metadata docs/media/rne-hero.json"
-    ))?;
+    Ok(())
+}
+
+fn hero_media_check() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let gif_path = root.join("docs/media/rne-hero.gif");
+    let png_path = root.join("docs/media/rne-hero.png");
+    let metadata_path = root.join("docs/media/rne-hero.json");
+    let gif = fs::read(&gif_path)?;
+    anyhow::ensure!(gif.starts_with(b"GIF8"), "README hero GIF header mismatch");
+    anyhow::ensure!(gif.ends_with(b";"), "README hero GIF trailer missing");
+    anyhow::ensure!(
+        gif.len() > 100_000,
+        "README hero GIF is unexpectedly small: {} bytes",
+        gif.len()
+    );
+    anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
+    let metadata = fs::read_to_string(&metadata_path)?;
+    anyhow::ensure!(
+        metadata.contains("\"artifact\": \"rne_3d_mobile_manipulator_pick_place_hero\""),
+        "README hero metadata does not describe the 3D pick-place hero"
+    );
+    anyhow::ensure!(
+        metadata.contains("\"kind\": \"wgpu_simulation\""),
+        "README hero metadata source is not wgpu_simulation"
+    );
+    anyhow::ensure!(
+        metadata.contains(&format!("\"byte_size\": {}", gif.len())),
+        "README hero metadata byte_size does not match GIF bytes"
+    );
+    println!(
+        "README 3D hero media ok: gif={} bytes metadata={}",
+        gif.len(),
+        metadata_path.display()
+    );
     Ok(())
 }
 

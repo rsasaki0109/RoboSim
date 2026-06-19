@@ -1111,19 +1111,25 @@ class ReportToolTests(unittest.TestCase):
         self.assertIn("size=120x80", result.stdout)
 
     def test_readme_hero_metadata_verifies(self):
-        info = render_house_gif.verify_metadata(README_HERO_METADATA)
         metadata = json.loads(README_HERO_METADATA.read_text(encoding="utf-8"))
+        gif_info = render_house_gif.inspect_gif(README_HERO_METADATA.with_name("rne-hero.gif"))
 
-        self.assertEqual(info["width"], 960)
-        self.assertEqual(info["height"], 540)
-        self.assertEqual(info["frame_count"], 72)
+        self.assertEqual(metadata["artifact"], "rne_3d_mobile_manipulator_pick_place_hero")
         self.assertEqual(metadata["gif_path"], "rne-hero.gif")
+        self.assertEqual(metadata["poster_path"], "rne-hero.png")
+        self.assertEqual(metadata["width"], gif_info["width"])
+        self.assertEqual(metadata["height"], gif_info["height"])
+        self.assertEqual(metadata["frame_count"], gif_info["frame_count"])
+        self.assertEqual(metadata["byte_size"], gif_info["byte_size"])
+        self.assertEqual(metadata["sha256"], gif_info["sha256"])
         self.assertEqual(
             metadata["source"],
             {
-                "kind": "demo",
-                "task": "navigate_pick_place",
-                "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
+                "generator": "examples/32_lift_pick_place_hero",
+                "kind": "wgpu_simulation",
+                "physics": "MobileManipulatorSim/Rapier",
+                "policy": "LiftPickPlacePolicy",
+                "scene": "assets/scenes/mm_lift_pick.rne.scene.toml",
             },
         )
 

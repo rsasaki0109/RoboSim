@@ -2,53 +2,57 @@
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUT_DIR="$(mktemp -d)"
-trap 'rm -rf "$OUT_DIR"' EXIT
+
+if [[ "${RNE_SKIP_GPU:-}" == "1" ]]; then
+  echo "RNE_SKIP_GPU set; keeping existing README hero media"
+  exit 0
+fi
 
 if ! command -v ffmpeg >/dev/null; then
-  echo "ffmpeg is required to extract docs/media/rne-hero.png" >&2
+  echo "ffmpeg is required to encode docs/media/rne-hero.gif" >&2
   exit 1
 fi
 
-python "$ROOT/examples/27_mobile_manipulator_rl/house_gif_demo.py" \
-  --out-dir "$OUT_DIR" \
-  --width 960 \
-  --height 540 \
-  --max-frames 72 \
-  --fps 12
+cargo run \
+  --manifest-path "$ROOT/examples/32_lift_pick_place_hero/Cargo.toml" \
+  --example 32_lift_pick_place_hero
 
-cp "$OUT_DIR/house_mobile_manipulator.gif" "$ROOT/docs/media/rne-hero.gif"
-ffmpeg -y -v error -i "$ROOT/docs/media/rne-hero.gif" -frames:v 1 "$ROOT/docs/media/rne-hero.png"
 PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT" <<'PY'
+import json
 import os
 import sys
 
-from render_house_gif import write_metadata
+from render_house_gif import inspect_gif
 
 root = sys.argv[1]
-write_metadata(
-    os.path.join(root, "docs/media/rne-hero.json"),
-    gif_path=os.path.join(root, "docs/media/rne-hero.gif"),
-    metadata_gif_path="rne-hero.gif",
-    source={
-        "kind": "demo",
-        "task": "navigate_pick_place",
-        "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
+metadata_path = os.path.join(root, "docs/media/rne-hero.json")
+gif_path = os.path.join(root, "docs/media/rne-hero.gif")
+gif = inspect_gif(gif_path)
+payload = {
+    "schema_version": 1,
+    "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
+    "gif_path": "rne-hero.gif",
+    "poster_path": "rne-hero.png",
+    "source": {
+        "kind": "wgpu_simulation",
+        "generator": "examples/32_lift_pick_place_hero",
+        "scene": "assets/scenes/mm_lift_pick.rne.scene.toml",
+        "policy": "LiftPickPlacePolicy",
+        "physics": "MobileManipulatorSim/Rapier",
     },
-    sample_count=90,
-    frame_count=72,
-    max_frames=72,
-    width=960,
-    height=540,
-    fps=12.0,
-)
+    "fps": 12.0,
+    "frame_count": gif["frame_count"],
+    "width": gif["width"],
+    "height": gif["height"],
+    "byte_size": gif["byte_size"],
+    "sha256": gif["sha256"],
+    "settle_steps": 150,
+    "policy_steps": 1030,
+}
+with open(metadata_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+print(f"updated {metadata_path} sha256={gif['sha256']}")
 PY
-PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT/docs/media/rne-hero.json" <<'PY'
-import sys
 
-from render_house_gif import verify_metadata
-
-verify_metadata(sys.argv[1])
-PY
-
-echo "updated $ROOT/docs/media/rne-hero.png, rne-hero.gif, and rne-hero.json"
+echo "updated $ROOT/docs/media/rne-hero.png, rne-hero.gif, rne-hero.json, and mm-lift-pickplace.png"

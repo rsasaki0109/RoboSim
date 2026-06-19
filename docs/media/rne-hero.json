@@ -1,18 +1,21 @@
 {
-  "artifact": "rne_mobile_manipulator_house_gif",
-  "byte_size": 433139,
+  "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
+  "byte_size": 264138,
   "fps": 12.0,
-  "frame_count": 72,
+  "frame_count": 48,
   "gif_path": "rne-hero.gif",
   "height": 540,
-  "max_frames": 72,
-  "sample_count": 90,
+  "policy_steps": 1030,
+  "poster_path": "rne-hero.png",
   "schema_version": 1,
-  "sha256": "sha256:237e113a592e866291b16fe914143048361ffa0a032c5540741b87b38a614172",
+  "settle_steps": 150,
+  "sha256": "sha256:066495e8fe1fc2a59775e07ad29327348145b15f749afdbcef8ea6d69b2eed1c",
   "source": {
-    "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
-    "kind": "demo",
-    "task": "navigate_pick_place"
+    "generator": "examples/32_lift_pick_place_hero",
+    "kind": "wgpu_simulation",
+    "physics": "MobileManipulatorSim/Rapier",
+    "policy": "LiftPickPlacePolicy",
+    "scene": "assets/scenes/mm_lift_pick.rne.scene.toml"
   },
   "width": 960
 }
