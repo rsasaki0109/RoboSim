@@ -1,8 +1,8 @@
-//! Renders README hero media from the real 3D `mm_lift_pick` simulation.
+//! Renders README hero media from the real 3D `mm_mobile` simulation.
 //!
 //! This is not a synthetic 2D preview: each GIF frame is produced by stepping
-//! [`MobileManipulatorSim`] through the same scripted pick-and-place policy as
-//! example 31, then rendering the resulting world with the wgpu backend.
+//! [`MobileManipulatorSim`] as the differential-drive base navigates and the arm
+//! reaches, then rendering the resulting world with the wgpu backend.
 //!
 //! Run (needs a GPU and ffmpeg; set `RNE_SKIP_GPU=1` to skip):
 //!   cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero
@@ -14,8 +14,7 @@ use std::process::Command;
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, mm_lift_pick_scene_path, LiftPickPlacePolicy,
-    MobileManipulatorAction, MobileManipulatorSim,
+    build_visual_render_scene, mm_mobile_scene_path, MobileManipulatorAction, MobileManipulatorSim,
 };
 use rne_math::{Quat, Vec3};
 use rne_render::{Camera, RenderBackend, RenderScene, VisualShape};
@@ -29,13 +28,15 @@ const POSTER_WIDTH: u32 = 960;
 const POSTER_HEIGHT: u32 = 540;
 const FRAME_COUNT: usize = 48;
 const FPS: usize = 12;
-const SETTLE_STEPS: usize = 150;
-const MIN_CARRY_M: f64 = 0.5;
+const SETTLE_STEPS: usize = 120;
+const POLICY_STEPS: usize = 520;
+const MIN_BASE_TRAVEL_M: f64 = 0.20;
+const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
 
 fn main() {
     if std::env::var("RNE_SKIP_GPU").is_ok() {
-        eprintln!("RNE_SKIP_GPU set; skipping 3D lift pick-place hero render");
+        eprintln!("RNE_SKIP_GPU set; skipping 3D mobile manipulator hero render");
         return;
     }
 
@@ -43,17 +44,15 @@ fn main() {
     let media_dir = repo_root.join("docs/media");
     fs::create_dir_all(&media_dir).expect("create media directory");
 
-    let mut sim = MobileManipulatorSim::from_scene_path(&mm_lift_pick_scene_path())
-        .expect("load mm_lift_pick scene");
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
+        .expect("load mm_mobile scene");
     for _ in 0..SETTLE_STEPS {
         sim.step(MobileManipulatorAction::default());
     }
 
-    let start_cube = sim.named_translation_m("lift_cube").expect("cube");
-    let mut policy = LiftPickPlacePolicy::new();
-    let policy_steps = policy.total_steps() as usize;
+    let start = sim.observe();
+    let mut policy = MobileReachHeroPolicy::new();
     let mut policy_step = 0usize;
-    let mut grasped_frames = 0usize;
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu backend");
     let camera = Camera::new(RENDER_WIDTH, RENDER_HEIGHT, std::f64::consts::FRAC_PI_4);
@@ -63,22 +62,20 @@ fn main() {
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
     for frame in 0..FRAME_COUNT {
-        let target_step = frame * policy_steps / (FRAME_COUNT - 1);
+        let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
         while policy_step < target_step {
             sim.step(policy.next_action());
             policy_step += 1;
         }
-        if sim.is_grasping() {
-            grasped_frames += 1;
-        }
 
+        let obs = sim.observe();
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(&mut scene);
+        append_hero_context(&mut scene, obs.base_x_m, obs.base_z_m, obs.ee_y_m);
         let orbit = CameraOrbit {
-            focus: Vec3::new(0.58, 0.50, -0.36),
-            yaw_rad: -1.02,
-            pitch_rad: 0.24,
-            distance_m: 2.25,
+            focus: Vec3::new(obs.base_x_m + 0.28, 0.34, obs.base_z_m),
+            yaw_rad: -0.88,
+            pitch_rad: 0.30,
+            distance_m: 2.35,
         };
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -106,46 +103,80 @@ fn main() {
         frame_paths.push(frame_path);
     }
 
-    let final_cube = sim.named_translation_m("lift_cube").expect("cube");
-    let carried_m =
-        ((final_cube.0 - start_cube.0).powi(2) + (final_cube.2 - start_cube.2).powi(2)).sqrt();
+    let final_obs = sim.observe();
+    let base_travel_m = ((final_obs.base_x_m - start.base_x_m).powi(2)
+        + (final_obs.base_z_m - start.base_z_m).powi(2))
+    .sqrt();
+    let ee_travel_m = ((final_obs.ee_x_m - start.ee_x_m).powi(2)
+        + (final_obs.ee_y_m - start.ee_y_m).powi(2)
+        + (final_obs.ee_z_m - start.ee_z_m).powi(2))
+    .sqrt();
     assert!(
-        !sim.is_grasping() && carried_m > MIN_CARRY_M && final_cube.1 < 0.1,
-        "expected complete 3D pick-place: grasping={} carried={carried_m:.2} final_y={:.2}",
-        sim.is_grasping(),
-        final_cube.1
+        base_travel_m > MIN_BASE_TRAVEL_M,
+        "expected mobile base navigation: base_travel={base_travel_m:.2} m"
     );
     assert!(
-        grasped_frames > 0,
-        "expected at least one GIF frame while cube is grasped"
+        ee_travel_m > MIN_EE_TRAVEL_M,
+        "expected manipulator reach: ee_travel={ee_travel_m:.2} m"
     );
 
     let poster_src = &frame_paths[FRAME_COUNT / 2];
     let poster_path = media_dir.join("rne-hero.png");
     upscale_png(poster_src, &poster_path, POSTER_WIDTH, POSTER_HEIGHT).expect("upscale poster");
 
-    let still_path = media_dir.join("mm-lift-pickplace.png");
-    upscale_png(poster_src, &still_path, POSTER_WIDTH, POSTER_HEIGHT).expect("write still poster");
-
     let gif_path = media_dir.join("rne-hero.gif");
     build_gif(&frames_dir, FRAME_COUNT, &gif_path).expect("build hero gif");
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
-        "rendered 3D README hero to {} and {} (frames={FRAME_COUNT}, grasped_frames={grasped_frames}, carried={carried_m:.2} m, final=({:.2}, {:.2}, {:.2}))",
+        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, base_travel={base_travel_m:.2} m, ee_travel={ee_travel_m:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
         poster_path.display(),
         gif_path.display(),
-        final_cube.0,
-        final_cube.1,
-        final_cube.2
+        final_obs.base_x_m,
+        final_obs.base_y_m,
+        final_obs.base_z_m,
+        final_obs.ee_x_m,
+        final_obs.ee_y_m,
+        final_obs.ee_z_m
     );
 }
 
-fn append_hero_context(scene: &mut RenderScene) {
-    // Floor and target marker are visual context for the rendered scene; the robot
-    // and cube state still come from the physics simulation.
+struct MobileReachHeroPolicy {
+    step: usize,
+}
+
+impl MobileReachHeroPolicy {
+    fn new() -> Self {
+        Self { step: 0 }
+    }
+
+    fn next_action(&mut self) -> MobileManipulatorAction {
+        self.step += 1;
+        match self.step {
+            0..=90 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 1.2,
+                right_wheel_velocity_rad_s: 1.2,
+                ..MobileManipulatorAction::default()
+            },
+            91..=170 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 0.35,
+                right_wheel_velocity_rad_s: 1.0,
+                shoulder_velocity_rad_s: 0.8,
+                ..MobileManipulatorAction::default()
+            },
+            171..=420 => MobileManipulatorAction {
+                shoulder_velocity_rad_s: 1.2,
+                elbow_velocity_rad_s: -0.8,
+                ..MobileManipulatorAction::default()
+            },
+            _ => MobileManipulatorAction::default(),
+        }
+    }
+}
+
+fn append_hero_context(scene: &mut RenderScene, base_x_m: f64, base_z_m: f64, ee_y_m: f64) {
     scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(Vec3::new(0.55, -0.05, -0.25), Quat::IDENTITY),
+        Transform3::from_translation_rotation(Vec3::new(base_x_m, -0.05, base_z_m), Quat::IDENTITY),
         VisualShape::Box {
             size_m: Vec3::new(4.2, 0.1, 3.2),
         },
@@ -153,19 +184,12 @@ fn append_hero_context(scene: &mut RenderScene) {
         Transform3::IDENTITY,
     ));
     scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(Vec3::new(0.55, 0.01, -0.87), Quat::IDENTITY),
-        VisualShape::Box {
-            size_m: Vec3::new(0.28, 0.02, 0.28),
-        },
-        [0.08, 0.58, 0.46, 1.0],
-        Transform3::IDENTITY,
-    ));
-    scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(Vec3::new(1.21, 0.01, 0.0), Quat::IDENTITY),
-        VisualShape::Box {
-            size_m: Vec3::new(0.20, 0.015, 0.20),
-        },
-        [0.70, 0.45, 0.12, 1.0],
+        Transform3::from_translation_rotation(
+            Vec3::new(base_x_m + 0.90, ee_y_m, base_z_m + 0.24),
+            Quat::IDENTITY,
+        ),
+        VisualShape::Sphere { radius_m: 0.08 },
+        [0.08, 0.78, 0.62, 1.0],
         Transform3::IDENTITY,
     ));
 }

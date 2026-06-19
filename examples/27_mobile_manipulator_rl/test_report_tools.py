@@ -1114,7 +1114,9 @@ class ReportToolTests(unittest.TestCase):
         metadata = json.loads(README_HERO_METADATA.read_text(encoding="utf-8"))
         gif_info = render_house_gif.inspect_gif(README_HERO_METADATA.with_name("rne-hero.gif"))
 
-        self.assertEqual(metadata["artifact"], "rne_3d_mobile_manipulator_pick_place_hero")
+        self.assertEqual(
+            metadata["artifact"], "rne_3d_mobile_manipulator_navigation_reach_hero"
+        )
         self.assertEqual(metadata["gif_path"], "rne-hero.gif")
         self.assertEqual(metadata["poster_path"], "rne-hero.png")
         self.assertEqual(metadata["width"], gif_info["width"])
@@ -1128,8 +1130,8 @@ class ReportToolTests(unittest.TestCase):
                 "generator": "examples/32_lift_pick_place_hero",
                 "kind": "wgpu_simulation",
                 "physics": "MobileManipulatorSim/Rapier",
-                "policy": "LiftPickPlacePolicy",
-                "scene": "assets/scenes/mm_lift_pick.rne.scene.toml",
+                "policy": "MobileReachHeroPolicy",
+                "scene": "assets/scenes/mm_mobile.rne.scene.toml",
             },
         )
 

@@ -30,14 +30,14 @@ gif_path = os.path.join(root, "docs/media/rne-hero.gif")
 gif = inspect_gif(gif_path)
 payload = {
     "schema_version": 1,
-    "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
+    "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
     "gif_path": "rne-hero.gif",
     "poster_path": "rne-hero.png",
     "source": {
         "kind": "wgpu_simulation",
         "generator": "examples/32_lift_pick_place_hero",
-        "scene": "assets/scenes/mm_lift_pick.rne.scene.toml",
-        "policy": "LiftPickPlacePolicy",
+        "scene": "assets/scenes/mm_mobile.rne.scene.toml",
+        "policy": "MobileReachHeroPolicy",
         "physics": "MobileManipulatorSim/Rapier",
     },
     "fps": 12.0,
@@ -46,8 +46,8 @@ payload = {
     "height": gif["height"],
     "byte_size": gif["byte_size"],
     "sha256": gif["sha256"],
-    "settle_steps": 150,
-    "policy_steps": 1030,
+    "settle_steps": 120,
+    "policy_steps": 520,
 }
 with open(metadata_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
@@ -55,4 +55,4 @@ with open(metadata_path, "w", encoding="utf-8") as handle:
 print(f"updated {metadata_path} sha256={gif['sha256']}")
 PY
 
-echo "updated $ROOT/docs/media/rne-hero.png, rne-hero.gif, rne-hero.json, and mm-lift-pickplace.png"
+echo "updated $ROOT/docs/media/rne-hero.png, rne-hero.gif, and rne-hero.json"

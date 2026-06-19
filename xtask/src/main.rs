@@ -109,8 +109,8 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
     let metadata = fs::read_to_string(&metadata_path)?;
     anyhow::ensure!(
-        metadata.contains("\"artifact\": \"rne_3d_mobile_manipulator_pick_place_hero\""),
-        "README hero metadata does not describe the 3D pick-place hero"
+        metadata.contains("\"artifact\": \"rne_3d_mobile_manipulator_navigation_reach_hero\""),
+        "README hero metadata does not describe the 3D navigation/reach hero"
     );
     anyhow::ensure!(
         metadata.contains("\"kind\": \"wgpu_simulation\""),
