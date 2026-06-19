@@ -46,10 +46,12 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 .venv/bin/python examples/27_mobile_manipulator_rl/plot_rollout.py rollout.csv --out rollout.svg
 .venv/bin/python examples/27_mobile_manipulator_rl/animate_rollout.py rollout.csv --out rollout.html
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-in best_policy.json --eval-only --report-dir reports/reach
-.venv/bin/python examples/27_mobile_manipulator_rl/compare_reports.py reports --html reports/leaderboard.html --csv reports/leaderboard.csv
+.venv/bin/python examples/27_mobile_manipulator_rl/compare_reports.py reports --html reports/leaderboard.html --csv reports/leaderboard.csv --json reports/leaderboard.json --best-policy-out reports/best_policy.json --best-report-out reports/best_report.json
 .venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 4 --iterations 12 --jobs 2
+.venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 4 --require-final-error-at-most 0.15
 .venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 4 --iterations 20 --resume
 .venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 8 --skip-complete
+python -m unittest examples/27_mobile_manipulator_rl/test_report_tools.py
 ```
 
 The reach target is placed where the arm only reaches it under active control (passive
@@ -88,13 +90,24 @@ error, reward, and actions. `animate_rollout.py` turns the same CSV into a stand
 HTML replay with play/pause and scrubbing controls.
 `--report-dir` writes `index.html`, `manifest.json`, `policy.json`, `rollout.csv`,
 `rollout.svg`, and `rollout.html` as one bundle.
-`compare_reports.py` scans those manifests and builds Markdown, HTML, and CSV
+`compare_reports.py` scans those manifests and builds Markdown, HTML, CSV, and JSON
 leaderboards ranked by final target error, with links back to each report's `index.html`.
+It validates required report artifacts and checks each `policy.json` schema,
+algorithm, and parameter shape before ranking. It can also copy the top-ranked report's
+`policy.json` to a stable `best_policy.json` path for evaluation or deployment, and
+write `best_report.json` with the winning report's metrics and source artifact paths.
 `sweep.py` automates multiple CEM seeds, writes one report bundle per seed, then builds
-HTML and CSV leaderboards for the whole sweep. Add `--jobs N` to train seeds in parallel,
-and `--resume` to continue seeds that already have a `checkpoint.json`. Use
-`--skip-complete` to leave seeds with an existing `manifest.json` untouched while still
-rebuilding the leaderboard.
+HTML, CSV, and JSON leaderboards plus `best_policy.json` and `best_report.json` for the
+whole sweep, then records the run configuration in `sweep_manifest.json`. Add `--jobs N`
+to train seeds in parallel, and `--resume` to continue seeds that already have a
+`checkpoint.json`. Use `--skip-complete` to leave seeds with an existing `manifest.json`
+untouched while still rebuilding the leaderboard. The sweep compares only the expected
+`seed_XXXX/manifest.json` files for that run, so stale reports elsewhere under the
+output directory do not affect ranking or gates. Use
+`--require-final-error-at-most` or `--require-final-reward-at-least` when a sweep should
+act as a regression gate.
+The JSON/CSV artifact contracts are documented in
+[`SCHEMA.md`](SCHEMA.md).
 
 ## Spaces
 
