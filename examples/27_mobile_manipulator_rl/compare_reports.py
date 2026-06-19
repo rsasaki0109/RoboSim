@@ -16,11 +16,19 @@ import json
 import os
 import sys
 
+from policy_schema import (
+    POLICY_ARTIFACT_REQUIRED_FIELDS,
+    POLICY_ARTIFACT_VERSION,
+    stable_hash,
+)
+
 
 REQUIRED_MANIFEST_FIELDS = (
     "schema_version",
     "policy_algorithm",
     "policy_schema_version",
+    "observation_schema_hash",
+    "action_schema_hash",
     "best_reward",
     "training_iterations",
     "rollout_rows",
@@ -29,18 +37,10 @@ REQUIRED_MANIFEST_FIELDS = (
     "artifacts",
 )
 REQUIRED_ARTIFACT_KEYS = ("index", "policy", "rollout_csv")
-REQUIRED_POLICY_FIELDS = (
-    "schema_version",
-    "algorithm",
-    "param_dim",
-    "action_limit_rad_s",
-    "params",
-    "best_reward",
-    "training_iterations",
-)
+REQUIRED_POLICY_FIELDS = POLICY_ARTIFACT_REQUIRED_FIELDS
 
 REPORT_MANIFEST_SCHEMA_VERSION = 1
-POLICY_ARTIFACT_SCHEMA_VERSION = 1
+POLICY_ARTIFACT_SCHEMA_VERSION = POLICY_ARTIFACT_VERSION
 LEADERBOARD_SCHEMA_VERSION = 1
 BEST_REPORT_SCHEMA_VERSION = 1
 
@@ -104,6 +104,8 @@ def _load_manifest(path):
         "policy_path": resolved_artifacts["policy"],
         "policy_algorithm": manifest["policy_algorithm"],
         "policy_schema_version": int(manifest["policy_schema_version"]),
+        "observation_schema_hash": manifest["observation_schema_hash"],
+        "action_schema_hash": manifest["action_schema_hash"],
         "best_reward": float(manifest["best_reward"]),
         "training_iterations": int(manifest["training_iterations"]),
         "rollout_rows": int(manifest["rollout_rows"]),
@@ -172,6 +174,25 @@ def _validate_policy_artifact(manifest_path, policy_path, manifest):
             f"{manifest_path}: policy algorithm mismatch: "
             f"{policy.get('algorithm')!r} != {manifest['policy_algorithm']!r}"
         )
+    if policy.get("observation_schema_hash") != manifest["observation_schema_hash"]:
+        raise ValueError(
+            f"{manifest_path}: policy observation schema hash mismatch: "
+            f"{policy.get('observation_schema_hash')!r} != "
+            f"{manifest['observation_schema_hash']!r}"
+        )
+    if policy.get("action_schema_hash") != manifest["action_schema_hash"]:
+        raise ValueError(
+            f"{manifest_path}: policy action schema hash mismatch: "
+            f"{policy.get('action_schema_hash')!r} != {manifest['action_schema_hash']!r}"
+        )
+    if stable_hash(policy["observation_schema"]) != policy["observation_schema_hash"]:
+        raise ValueError(
+            f"{manifest_path}: policy embedded observation schema does not match its hash"
+        )
+    if stable_hash(policy["action_schema"]) != policy["action_schema_hash"]:
+        raise ValueError(
+            f"{manifest_path}: policy embedded action schema does not match its hash"
+        )
 
     try:
         param_dim = int(policy["param_dim"])
@@ -190,6 +211,18 @@ def _validate_policy_artifact(manifest_path, policy_path, manifest):
             f"{manifest_path}: policy params length mismatch: "
             f"{len(params)} != {param_dim}"
         )
+    if not isinstance(policy["policy_features"], list) or not policy["policy_features"]:
+        raise ValueError(f"{manifest_path}: policy_features must be a non-empty array")
+    if not isinstance(policy["policy_outputs"], list) or not policy["policy_outputs"]:
+        raise ValueError(f"{manifest_path}: policy_outputs must be a non-empty array")
+    for field in (
+        "normalization",
+        "action_scaling",
+        "task_compatibility",
+        "engine_compatibility",
+    ):
+        if not isinstance(policy[field], dict):
+            raise ValueError(f"{manifest_path}: policy {field} must be an object")
     try:
         [float(value) for value in params]
         float(policy["action_limit_rad_s"])
@@ -269,6 +302,8 @@ def _report_payload(index, report, output_dir):
         "report": report["name"],
         "policy_algorithm": report["policy_algorithm"],
         "policy_schema_version": report["policy_schema_version"],
+        "observation_schema_hash": report["observation_schema_hash"],
+        "action_schema_hash": report["action_schema_hash"],
         "final_target_error": report["final_target_error"],
         "final_total_reward": report["final_total_reward"],
         "best_reward": report["best_reward"],
@@ -292,6 +327,8 @@ def write_csv(reports, output_path):
         "rollout_rows",
         "policy_algorithm",
         "policy_schema_version",
+        "observation_schema_hash",
+        "action_schema_hash",
         "index_path",
         "policy_path",
         "manifest_path",
@@ -311,6 +348,8 @@ def write_csv(reports, output_path):
                     "rollout_rows": report["rollout_rows"],
                     "policy_algorithm": report["policy_algorithm"],
                     "policy_schema_version": report["policy_schema_version"],
+                    "observation_schema_hash": report["observation_schema_hash"],
+                    "action_schema_hash": report["action_schema_hash"],
                     "index_path": _relative_path(report["index_path"], output_dir),
                     "policy_path": _relative_path(report["policy_path"], output_dir),
                     "manifest_path": _relative_path(

@@ -4,19 +4,34 @@ These tests use only the Python standard library and synthetic report bundles,
 so they can run without rne_py or training a policy.
 """
 
+import copy
+import importlib.util
 import json
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_DIR = Path(__file__).resolve().parent
+if str(EXAMPLE_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLE_DIR))
+
+from policy_schema import (
+    POLICY_ACTION_LIMIT_RAD_S,
+    POLICY_ACTION_SCHEMA_HASH,
+    POLICY_ARTIFACT_ALGORITHM,
+    POLICY_ARTIFACT_VERSION,
+    POLICY_OBSERVATION_SCHEMA_HASH,
+    POLICY_PARAM_DIM,
+    policy_metadata_payload,
+)
+
 COMPARE = EXAMPLE_DIR / "compare_reports.py"
 SWEEP = EXAMPLE_DIR / "sweep.py"
-POLICY_ALGORITHM = "rne_mobile_manipulator_linear_reach_policy_v1"
 
 
 def _write_json(path, payload):
@@ -40,10 +55,9 @@ def _write_report(
     )
 
     policy = {
-        "schema_version": 1,
-        "algorithm": POLICY_ALGORITHM,
-        "param_dim": 4,
-        "action_limit_rad_s": 6.0,
+        **policy_metadata_payload(),
+        "param_dim": POLICY_PARAM_DIM,
+        "action_limit_rad_s": POLICY_ACTION_LIMIT_RAD_S,
         "params": [0.0, 1.0, 0.0, 1.0],
         "best_reward": reward,
         "training_iterations": 3,
@@ -54,8 +68,10 @@ def _write_report(
 
     manifest = {
         "schema_version": 1,
-        "policy_algorithm": POLICY_ALGORITHM,
-        "policy_schema_version": 1,
+        "policy_algorithm": POLICY_ARTIFACT_ALGORITHM,
+        "policy_schema_version": POLICY_ARTIFACT_VERSION,
+        "observation_schema_hash": POLICY_OBSERVATION_SCHEMA_HASH,
+        "action_schema_hash": POLICY_ACTION_SCHEMA_HASH,
         "best_reward": reward,
         "training_iterations": 3,
         "rollout_rows": 1,
@@ -88,7 +104,54 @@ def _run(args, *, expect_success=True):
     return result
 
 
+def _load_train_module():
+    module_name = "_rne_mobile_manipulator_train_test"
+    previous_rne_py = sys.modules.get("rne_py")
+    sys.modules["rne_py"] = types.SimpleNamespace()
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, EXAMPLE_DIR / "train.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if previous_rne_py is None:
+            sys.modules.pop("rne_py", None)
+        else:
+            sys.modules["rne_py"] = previous_rne_py
+
+
 class ReportToolTests(unittest.TestCase):
+    def test_train_policy_payload_loader_enforces_schema_envelope(self):
+        train = _load_train_module()
+        payload = train._policy_payload(
+            [0.0, 1.0, 0.0, 1.0],
+            best_reward=7.0,
+            training_iterations=3,
+        )
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["observation_schema_hash"], train.POLICY_OBSERVATION_SCHEMA_HASH)
+        self.assertEqual(payload["action_schema_hash"], train.POLICY_ACTION_SCHEMA_HASH)
+
+        with tempfile.TemporaryDirectory(prefix="rne_train_policy_test_") as temp:
+            path = Path(temp) / "policy.json"
+            _write_json(path, payload)
+            loaded = train._load_policy(path)
+            self.assertEqual(loaded["params"], [0.0, 1.0, 0.0, 1.0])
+
+            broken_hash = copy.deepcopy(payload)
+            broken_hash["observation_schema_hash"] = "sha256:wrong"
+            _write_json(path, broken_hash)
+            with self.assertRaisesRegex(ValueError, "observation schema hash mismatch"):
+                train._load_policy(path)
+
+            broken_embedded_schema = copy.deepcopy(payload)
+            broken_embedded_schema["observation_schema"]["id"] = "changed"
+            _write_json(path, broken_embedded_schema)
+            with self.assertRaisesRegex(
+                ValueError, "embedded observation schema does not match"
+            ):
+                train._load_policy(path)
+
     def test_compare_reports_writes_ranked_outputs_and_copies_best_policy(self):
         with tempfile.TemporaryDirectory(prefix="rne_compare_test_") as temp:
             root = Path(temp)
@@ -128,7 +191,7 @@ class ReportToolTests(unittest.TestCase):
             self.assertTrue(leaderboard_csv.is_file())
 
             copied_policy = json.loads(best_policy.read_text(encoding="utf-8"))
-            self.assertEqual(copied_policy["algorithm"], POLICY_ALGORITHM)
+            self.assertEqual(copied_policy["algorithm"], POLICY_ARTIFACT_ALGORITHM)
 
             summary = json.loads(best_report.read_text(encoding="utf-8"))
             self.assertEqual(summary["schema_version"], 1)
@@ -143,13 +206,27 @@ class ReportToolTests(unittest.TestCase):
             ),
             (
                 "schema mismatch",
-                lambda policy: policy.__setitem__("schema_version", 2),
+                lambda policy: policy.__setitem__("schema_version", 1),
                 "policy schema_version mismatch",
             ),
             (
                 "algorithm mismatch",
                 lambda policy: policy.__setitem__("algorithm", "other"),
                 "policy algorithm mismatch",
+            ),
+            (
+                "observation schema hash mismatch",
+                lambda policy: policy.__setitem__(
+                    "observation_schema_hash", "sha256:wrong"
+                ),
+                "policy observation schema hash mismatch",
+            ),
+            (
+                "embedded schema hash mismatch",
+                lambda policy: policy["observation_schema"].__setitem__(
+                    "id", "changed"
+                ),
+                "policy embedded observation schema does not match its hash",
             ),
             (
                 "params length mismatch",

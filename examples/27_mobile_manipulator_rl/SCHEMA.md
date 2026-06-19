@@ -4,7 +4,9 @@ This directory uses small, versioned artifacts so training runs can be resumed,
 compared, and used as regression gates without depending on external packages.
 The schemas below are example-level contracts for
 `examples/27_mobile_manipulator_rl`; they are not yet global RNE benchmark
-formats.
+formats. The policy artifact schema descriptors and hashes are defined in
+`policy_schema.py` and consumed by `train.py`, `compare_reports.py`, and the
+regression tests.
 
 All JSON files are UTF-8, pretty-printed, newline-terminated, and written through
 a temporary file followed by atomic replace where the current tool owns the
@@ -13,9 +15,11 @@ them.
 
 ## Versioning
 
-Each machine-readable artifact has `schema_version: 1`. Readers reject unknown
-schema or algorithm IDs when the artifact is consumed as executable state, such
-as policy loading or CEM checkpoint resume.
+Each machine-readable artifact carries an explicit `schema_version`. Readers
+reject unknown schema or algorithm IDs when the artifact is consumed as
+executable state, such as policy loading or CEM checkpoint resume. The policy
+artifact is currently `schema_version: 2`; the other artifacts in this directory
+are currently `schema_version: 1`.
 
 Derived artifacts such as `rollout.svg`, `rollout.html`, and `index.html` are
 not canonical. They can be regenerated from the JSON/CSV artifacts.
@@ -76,8 +80,18 @@ Required fields:
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | integer | `1` |
+| `schema_version` | integer | `2` |
 | `algorithm` | string | `rne_mobile_manipulator_linear_reach_policy_v1` |
+| `observation_schema_hash` | string | SHA-256 hash of `observation_schema` |
+| `action_schema_hash` | string | SHA-256 hash of `action_schema` |
+| `observation_schema` | object | full observation descriptor expected by the policy |
+| `action_schema` | object | full action descriptor expected by the policy |
+| `policy_features` | array[string] | observation fields read by the linear policy |
+| `policy_outputs` | array[string] | action fields written by the linear policy |
+| `normalization` | object | input normalization contract, currently identity |
+| `action_scaling` | object | output scaling/clipping contract |
+| `task_compatibility` | object | compatible RNE task family and task names |
+| `engine_compatibility` | object | Python/RNE API expected by the artifact |
 | `param_dim` | integer | policy parameter count, currently `4` |
 | `action_limit_rad_s` | number | shoulder/elbow action clipping limit |
 | `params` | array[number] | linear policy parameters |
@@ -87,10 +101,13 @@ Required fields:
 Compatibility notes:
 
 - `train.py --policy-in` rejects unknown schema, algorithm, `param_dim`, or
-  `action_limit_rad_s`.
+  `action_limit_rad_s`; it also rejects observation/action schema hash,
+  feature/output, normalization, scaling, task, or engine compatibility
+  mismatches.
 - `compare_reports.py` validates that a report's `policy.json` exists, contains
-  the required fields, matches the manifest's policy schema and algorithm, and
-  has `params` length equal to `param_dim`.
+  the required fields, matches the manifest's policy schema, algorithm, and
+  schema hashes, has embedded observation/action descriptors matching those
+  hashes, and has `params` length equal to `param_dim`.
 - The policy format is intentionally narrow. It is not a generic neural-network
   weight container.
 
@@ -138,6 +155,8 @@ Required fields:
 | `schema_version` | integer | `1` |
 | `policy_algorithm` | string | policy algorithm ID |
 | `policy_schema_version` | integer | policy schema version used by `policy.json` |
+| `observation_schema_hash` | string | hash of the policy observation schema |
+| `action_schema_hash` | string | hash of the policy action schema |
 | `best_reward` | number | best training reward |
 | `training_iterations` | integer | CEM iterations behind the policy |
 | `rollout_rows` | integer | number of rows in `rollout.csv` |
@@ -195,6 +214,8 @@ Each `reports` row contains:
 | `report` | string | report directory name |
 | `policy_algorithm` | string | policy algorithm ID |
 | `policy_schema_version` | integer | policy artifact schema version |
+| `observation_schema_hash` | string | hash of the policy observation schema |
+| `action_schema_hash` | string | hash of the policy action schema |
 | `final_target_error` | number | ranking primary metric |
 | `final_total_reward` | number | ranking secondary metric |
 | `best_reward` | number | training best reward |

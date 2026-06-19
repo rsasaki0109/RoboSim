@@ -24,6 +24,24 @@ import os
 import random
 import sys
 
+from policy_schema import (
+    POLICY_ACTION_LIMIT_RAD_S,
+    POLICY_ACTION_SCHEMA_HASH,
+    POLICY_ACTION_SCALING,
+    POLICY_ARTIFACT_ALGORITHM,
+    POLICY_ARTIFACT_REQUIRED_FIELDS,
+    POLICY_ARTIFACT_VERSION,
+    POLICY_ENGINE_COMPATIBILITY,
+    POLICY_FEATURES,
+    POLICY_NORMALIZATION,
+    POLICY_OBSERVATION_SCHEMA_HASH,
+    POLICY_OUTPUTS,
+    POLICY_PARAM_DIM,
+    POLICY_TASK_COMPATIBILITY,
+    policy_metadata_payload,
+    stable_hash,
+)
+
 try:
     import rne_py
 except ImportError:
@@ -33,14 +51,12 @@ except ImportError:
         "  .venv/bin/maturin develop -m crates/rne_py/Cargo.toml"
     )
 
-ACTION_LIMIT_RAD_S = 6.0
+ACTION_LIMIT_RAD_S = POLICY_ACTION_LIMIT_RAD_S
 EPISODE_STEPS = 300
 # Policy: [shoulder_bias, shoulder_gain_ee_z, elbow_bias, elbow_gain_ee_y].
-PARAM_DIM = 4
+PARAM_DIM = POLICY_PARAM_DIM
 TRAINING_CHECKPOINT_VERSION = 1
 TRAINING_CHECKPOINT_ALGORITHM = "rne_mobile_manipulator_cem_reach_v1"
-POLICY_ARTIFACT_VERSION = 1
-POLICY_ARTIFACT_ALGORITHM = "rne_mobile_manipulator_linear_reach_policy_v1"
 REPORT_MANIFEST_VERSION = 1
 TRAINING_CHECKPOINT_REQUIRED_FIELDS = (
     "schema_version",
@@ -59,15 +75,6 @@ TRAINING_CHECKPOINT_REQUIRED_FIELDS = (
     "best_reward",
     "history",
     "rng_state",
-)
-POLICY_ARTIFACT_REQUIRED_FIELDS = (
-    "schema_version",
-    "algorithm",
-    "param_dim",
-    "action_limit_rad_s",
-    "params",
-    "best_reward",
-    "training_iterations",
 )
 ROLLOUT_CSV_FIELDS = (
     "step",
@@ -176,8 +183,7 @@ def _validate_policy_params(params):
 
 def _policy_payload(params, *, best_reward, training_iterations):
     return {
-        "schema_version": POLICY_ARTIFACT_VERSION,
-        "algorithm": POLICY_ARTIFACT_ALGORITHM,
+        **policy_metadata_payload(),
         "param_dim": PARAM_DIM,
         "action_limit_rad_s": ACTION_LIMIT_RAD_S,
         "params": _validate_policy_params(params),
@@ -207,6 +213,37 @@ def _load_policy(path):
         raise ValueError(f"unsupported policy schema: {payload.get('schema_version')!r}")
     if payload.get("algorithm") != POLICY_ARTIFACT_ALGORITHM:
         raise ValueError(f"unsupported policy algorithm: {payload.get('algorithm')!r}")
+    if payload.get("observation_schema_hash") != POLICY_OBSERVATION_SCHEMA_HASH:
+        raise ValueError(
+            "policy observation schema hash mismatch: "
+            f"{payload.get('observation_schema_hash')!r}"
+        )
+    if payload.get("action_schema_hash") != POLICY_ACTION_SCHEMA_HASH:
+        raise ValueError(
+            "policy action schema hash mismatch: "
+            f"{payload.get('action_schema_hash')!r}"
+        )
+    if stable_hash(payload.get("observation_schema")) != payload["observation_schema_hash"]:
+        raise ValueError("policy embedded observation schema does not match its hash")
+    if stable_hash(payload.get("action_schema")) != payload["action_schema_hash"]:
+        raise ValueError("policy embedded action schema does not match its hash")
+    if payload.get("policy_features") != list(POLICY_FEATURES):
+        raise ValueError(f"policy feature mismatch: {payload.get('policy_features')!r}")
+    if payload.get("policy_outputs") != list(POLICY_OUTPUTS):
+        raise ValueError(f"policy output mismatch: {payload.get('policy_outputs')!r}")
+    if payload.get("normalization") != POLICY_NORMALIZATION:
+        raise ValueError(f"policy normalization mismatch: {payload.get('normalization')!r}")
+    if payload.get("action_scaling") != POLICY_ACTION_SCALING:
+        raise ValueError(f"policy action scaling mismatch: {payload.get('action_scaling')!r}")
+    if payload.get("task_compatibility") != POLICY_TASK_COMPATIBILITY:
+        raise ValueError(
+            f"policy task compatibility mismatch: {payload.get('task_compatibility')!r}"
+        )
+    if payload.get("engine_compatibility") != POLICY_ENGINE_COMPATIBILITY:
+        raise ValueError(
+            "policy engine compatibility mismatch: "
+            f"{payload.get('engine_compatibility')!r}"
+        )
     if payload.get("param_dim") != PARAM_DIM:
         raise ValueError(f"policy param_dim mismatch: {payload.get('param_dim')!r}")
     if payload.get("action_limit_rad_s") != ACTION_LIMIT_RAD_S:
@@ -516,6 +553,8 @@ def _write_report_dir(report_dir, params, *, best_reward, training_iterations, r
             "schema_version": REPORT_MANIFEST_VERSION,
             "policy_algorithm": POLICY_ARTIFACT_ALGORITHM,
             "policy_schema_version": POLICY_ARTIFACT_VERSION,
+            "observation_schema_hash": POLICY_OBSERVATION_SCHEMA_HASH,
+            "action_schema_hash": POLICY_ACTION_SCHEMA_HASH,
             "best_reward": best_reward,
             "training_iterations": training_iterations,
             "rollout_rows": len(rows),
