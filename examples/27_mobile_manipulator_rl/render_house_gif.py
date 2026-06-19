@@ -478,20 +478,90 @@ def load_samples(csv_path):
     return samples
 
 
+def _clamp01(value):
+    return max(0.0, min(1.0, value))
+
+
+def _lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def _smoothstep(t):
+    t = _clamp01(t)
+    return t * t * (3.0 - 2.0 * t)
+
+
 def demo_samples(count=90):
     samples = []
     total_reward = 0.0
     for step in range(count):
         phase = step / max(1, count - 1)
-        base_x = -0.75 + 1.35 * phase
-        ee_x = base_x + 0.28 + math.sin(phase * math.pi * 2.0) * 0.12
-        ee_z = 0.45 + math.sin(phase * math.pi) * 0.38
-        target_x = 0.72
-        target_z = 0.82
+        pick_x = -0.08
+        pick_z = 0.62
+        place_x = 0.76
+        place_z = 0.78
+        gripper_closed = 0.0
+        carrying = 0.0
+
+        if phase < 0.28:
+            local = _smoothstep(phase / 0.28)
+            base_x = _lerp(-0.82, -0.32, local)
+            ee_x = base_x + _lerp(0.18, 0.27, local)
+            ee_z = _lerp(0.52, 0.62, local)
+            target_x = pick_x
+            target_z = pick_z
+            object_x = pick_x
+            object_z = pick_z
+        elif phase < 0.46:
+            local = _smoothstep((phase - 0.28) / 0.18)
+            base_x = -0.32
+            ee_x = _lerp(base_x + 0.26, pick_x, local)
+            ee_z = _lerp(0.62, pick_z, local)
+            target_x = pick_x
+            target_z = pick_z
+            object_x = pick_x
+            object_z = pick_z
+            gripper_closed = 1.0 if local > 0.62 else 0.0
+            carrying = 1.0 if local > 0.72 else 0.0
+        elif phase < 0.72:
+            local = _smoothstep((phase - 0.46) / 0.26)
+            base_x = _lerp(-0.32, 0.48, local)
+            ee_x = base_x + 0.25
+            ee_z = 0.74 + math.sin(local * math.pi) * 0.06
+            target_x = place_x
+            target_z = place_z
+            object_x = ee_x
+            object_z = ee_z
+            gripper_closed = 1.0
+            carrying = 1.0
+        elif phase < 0.9:
+            local = _smoothstep((phase - 0.72) / 0.18)
+            base_x = 0.48
+            ee_x = _lerp(base_x + 0.25, place_x, local)
+            ee_z = _lerp(0.74, place_z, local)
+            target_x = place_x
+            target_z = place_z
+            object_x = ee_x
+            object_z = ee_z
+            gripper_closed = 1.0 if local < 0.78 else 0.0
+            carrying = 1.0 if local < 0.86 else 0.0
+            if not carrying:
+                object_x = place_x
+                object_z = place_z
+        else:
+            local = _smoothstep((phase - 0.9) / 0.1)
+            base_x = _lerp(0.48, 0.36, local)
+            ee_x = _lerp(place_x, base_x + 0.16, local)
+            ee_z = _lerp(place_z, 0.56, local)
+            target_x = place_x
+            target_z = place_z
+            object_x = place_x
+            object_z = place_z
+
         target_dx = target_x - ee_x
         target_dz = target_z - ee_z
         target_error = math.sqrt(target_dx * target_dx + target_dz * target_dz)
-        reward = max(0.0, 0.2 - target_error * 0.08)
+        reward = max(0.0, 0.35 - target_error * 0.12)
         total_reward += reward
         samples.append(
             {
@@ -506,8 +576,12 @@ def demo_samples(count=90):
                 "target_y": 0.0,
                 "target_z": target_z,
                 "target_error": target_error,
-                "shoulder_action": math.sin(phase * math.pi * 2.0) * 2.0,
-                "elbow_action": math.cos(phase * math.pi * 2.0) * 2.0,
+                "object_x": object_x,
+                "object_z": object_z,
+                "gripper_closed": gripper_closed,
+                "carrying": carrying,
+                "shoulder_action": math.sin(phase * math.pi * 1.5) * 1.4,
+                "elbow_action": math.cos(phase * math.pi * 2.0) * 1.2,
                 "reward": reward,
                 "total_reward": total_reward,
                 "done": step == count - 1,
@@ -564,6 +638,10 @@ def _scene_bounds(samples):
     for sample in samples:
         xs.extend([sample["base_x"], sample["ee_x"], sample["target_x"]])
         zs.extend([sample["ee_z"], sample["target_z"]])
+        if "object_x" in sample:
+            xs.append(sample["object_x"])
+        if "object_z" in sample:
+            zs.append(sample["object_z"])
     x0 = min(xs)
     x1 = max(xs)
     z0 = 0.0
@@ -616,6 +694,9 @@ def _draw_house(canvas, floor_y):
 
     canvas.rect(width * 0.36, floor_y - 15, width * 0.61, floor_y - 5, WOOD_LIGHT)
     canvas.outline_rect(width * 0.36, floor_y - 15, width * 0.61, floor_y - 5, WOOD, 1)
+    canvas.rect(width * 0.38, floor_y - 70, width * 0.55, floor_y - 60, WOOD)
+    canvas.rect(width * 0.39, floor_y - 60, width * 0.41, floor_y - 15, WOOD_DARK)
+    canvas.rect(width * 0.52, floor_y - 60, width * 0.54, floor_y - 15, WOOD_DARK)
 
 
 def _draw_robot(canvas, sample, map_x, map_z, floor_y):
@@ -640,14 +721,52 @@ def _draw_robot(canvas, sample, map_x, map_z, floor_y):
     canvas.disk(shoulder_x, shoulder_y, 8, DARK)
     canvas.disk(elbow_x, elbow_y, 7, DARK)
     canvas.disk(ee_x, ee_y, 7, ORANGE)
-    canvas.line(ee_x, ee_y, ee_x + 12, ee_y - 5, DARK, 2)
-    canvas.line(ee_x, ee_y, ee_x + 12, ee_y + 5, DARK, 2)
+    jaw = 3 if sample.get("gripper_closed", 0.0) >= 0.5 else 9
+    canvas.line(ee_x, ee_y, ee_x + 14, ee_y - jaw, DARK, 2)
+    canvas.line(ee_x, ee_y, ee_x + 14, ee_y + jaw, DARK, 2)
+
+
+def _inferred_phase(sample, final_step):
+    return _clamp01(sample["step"] / max(1, final_step))
+
+
+def _object_pose(sample, final_step):
+    if "object_x" in sample and "object_z" in sample:
+        return sample["object_x"], sample["object_z"]
+
+    phase = _inferred_phase(sample, final_step)
+    if 0.46 <= phase < 0.9:
+        return sample["ee_x"], sample["ee_z"]
+    return sample["target_x"], sample["target_z"]
+
+
+def _draw_task_object(canvas, sample, map_x, map_z, final_step):
+    object_x, object_z = _object_pose(sample, final_step)
+    x = map_x(object_x)
+    y = map_z(object_z)
+    canvas.rect(x - 9, y - 9, x + 9, y + 9, YELLOW)
+    canvas.outline_rect(x - 9, y - 9, x + 9, y + 9, ORANGE, 2)
+    canvas.line(x - 7, y - 10, x + 7, y - 10, WOOD_DARK, 2)
 
 
 def _draw_frame(sample, history, bounds, width, height, final_step):
     canvas = Canvas(width, height, WALL)
     map_x, map_z, floor_y = _mapper(width, height, bounds)
     _draw_house(canvas, floor_y)
+
+    nav_y = floor_y - 31
+    for previous, current in zip(history, history[1:]):
+        canvas.line(
+            map_x(previous["base_x"]),
+            nav_y,
+            map_x(current["base_x"]),
+            nav_y,
+            SKY,
+            3,
+        )
+    if history:
+        canvas.disk(map_x(history[0]["base_x"]), nav_y, 5, BLUE)
+        canvas.disk(map_x(history[-1]["base_x"]), nav_y, 5, TEAL)
 
     for previous, current in zip(history, history[1:]):
         canvas.line(
@@ -666,7 +785,11 @@ def _draw_frame(sample, history, bounds, width, height, final_step):
     canvas.line(target_x - 8, target_y, target_x + 8, target_y, RED, 2)
     canvas.line(target_x, target_y - 8, target_x, target_y + 8, RED, 2)
 
+    if sample.get("carrying", 0.0) < 0.5:
+        _draw_task_object(canvas, sample, map_x, map_z, final_step)
     _draw_robot(canvas, sample, map_x, map_z, floor_y)
+    if sample.get("carrying", 0.0) >= 0.5:
+        _draw_task_object(canvas, sample, map_x, map_z, final_step)
 
     progress_width = int((width - 40) * (sample["step"] / final_step))
     canvas.rect(20, height - 18, width - 20, height - 12, WALL_SHADOW)
@@ -759,7 +882,7 @@ def main():
     )
     if args.metadata_out is not None:
         if args.demo:
-            source = {"kind": "demo"}
+            source = {"kind": "demo", "task": "navigate_pick_place"}
             if args.demo_rollout_csv is not None:
                 source["rollout_csv_path"] = args.demo_rollout_csv
         else:

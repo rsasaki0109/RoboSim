@@ -100,10 +100,11 @@ and `--rollout-house-gif-metadata` to write the checksum JSON at the same time.
 turns that CSV into a standalone SVG report showing the end-effector X-Z path, target
 error, reward, and actions. `animate_rollout.py` turns the same CSV into a standalone
 HTML replay with play/pause and scrubbing controls. `render_house_gif.py` turns the
-same CSV into a dependency-free animated GIF of the mobile manipulator moving through a
-small house scene and can write a checksum metadata JSON with `--metadata-out`.
+same CSV into a dependency-free animated GIF of the mobile manipulator navigating a
+small house scene, grasping a block, carrying it, and placing it on a shelf; it can
+write a checksum metadata JSON with `--metadata-out`.
 `house_gif_demo.py` is the shortest no-`rne_py` entry point: it writes a synthetic
-CSV, GIF, metadata JSON, and `index.html` preview in one command.
+navigation/pick/place CSV, GIF, metadata JSON, and `index.html` preview in one command.
 `render_house_gif.py --demo` renders the same synthetic scene directly, and
 `--demo-rollout-csv` saves that
 same synthetic trajectory as canonical rollout CSV for re-rendering or debugging. Use

@@ -140,7 +140,7 @@ metadata JSON containing:
 | `schema_version` | integer | `1` |
 | `artifact` | string | `rne_mobile_manipulator_house_gif` |
 | `gif_path` | string | GIF path passed to `--out` or the default output path |
-| `source` | object | `{kind: "demo"}`, `{kind: "demo", rollout_csv_path: ...}`, or `{kind: "rollout_csv", path: ...}` |
+| `source` | object | `{kind: "demo", task: "navigate_pick_place"}`, `{kind: "demo", task: "navigate_pick_place", rollout_csv_path: ...}`, or `{kind: "rollout_csv", path: ...}` |
 | `sample_count` | integer | samples read before frame selection |
 | `frame_count` | integer | encoded image frames |
 | `max_frames` | integer | requested maximum encoded frames |

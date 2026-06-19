@@ -45,7 +45,7 @@ def _render_index(*, metadata, csv_name, gif_name, metadata_name):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RNE mobile manipulator house GIF</title>
+  <title>RNE mobile manipulator navigate-pick-place GIF</title>
   <style>
     :root {{
       color-scheme: light;
@@ -103,8 +103,8 @@ def _render_index(*, metadata, csv_name, gif_name, metadata_name):
 </head>
 <body>
   <main>
-    <h1>RNE mobile manipulator house GIF</h1>
-    <p>Dependency-free synthetic rollout preview.</p>
+    <h1>RNE mobile manipulator navigate-pick-place GIF</h1>
+    <p>Dependency-free synthetic navigation, grasp, carry, and place preview.</p>
     <a href="{html.escape(gif_name)}"><img src="{html.escape(gif_name)}" alt="Mobile manipulator moving through a house scene"></a>
     <dl>
       <dt>frames</dt><dd>{metadata["frame_count"]}</dd>
@@ -170,7 +170,11 @@ def write_demo_bundle(*, out_dir, width, height, max_frames, fps):
         metadata_path,
         gif_path=gif_path,
         metadata_gif_path=GIF_NAME,
-        source={"kind": "demo", "rollout_csv_path": CSV_NAME},
+        source={
+            "kind": "demo",
+            "task": "navigate_pick_place",
+            "rollout_csv_path": CSV_NAME,
+        },
         sample_count=len(samples),
         frame_count=len(frames),
         max_frames=max_frames,

@@ -1,6 +1,6 @@
 {
   "artifact": "rne_mobile_manipulator_house_gif",
-  "byte_size": 415585,
+  "byte_size": 433139,
   "fps": 12.0,
   "frame_count": 72,
   "gif_path": "rne-hero.gif",
@@ -8,10 +8,11 @@
   "max_frames": 72,
   "sample_count": 90,
   "schema_version": 1,
-  "sha256": "sha256:233b03e7f5e6f22d90b6af7abe9ad9ba8da794287233f84c5873115e3483d5b8",
+  "sha256": "sha256:237e113a592e866291b16fe914143048361ffa0a032c5540741b87b38a614172",
   "source": {
     "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
-    "kind": "demo"
+    "kind": "demo",
+    "task": "navigate_pick_place"
   },
   "width": 960
 }

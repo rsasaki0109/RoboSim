@@ -32,6 +32,7 @@ write_metadata(
     metadata_gif_path="rne-hero.gif",
     source={
         "kind": "demo",
+        "task": "navigate_pick_place",
         "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
     },
     sample_count=90,

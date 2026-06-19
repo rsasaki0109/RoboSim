@@ -45,13 +45,13 @@ README_HERO_METADATA = ROOT / "docs" / "media" / "rne-hero.json"
 RENDER_HOUSE_GIF = EXAMPLE_DIR / "render_house_gif.py"
 SWEEP = EXAMPLE_DIR / "sweep.py"
 HOUSE_GIF_DEMO_SMALL_GIF_SHA256 = (
-    "sha256:1908f586099b5e9a63cb0b6bf336fc55f7e60f6075fc7127a6866f1093699f56"
+    "sha256:4658e5ec1b30ff3e6f453c62363aa3330be3949e8b8386da51d848beddb5c639"
 )
 HOUSE_GIF_DEMO_SMALL_CSV_SHA256 = (
-    "sha256:9d3b157674d484d373cd067430bdb36ee93587e7cb739587eb5caa712236e6b0"
+    "sha256:17df3644c1e76746b974d3e3b438504495443605da4ba13ce4d48c58ee9d369f"
 )
 HOUSE_GIF_DEMO_SMALL_METADATA_SHA256 = (
-    "sha256:bcc773ba3c4562a4b6a2cbd4b9e31e9f5c0aa71bbcfc6ff13e49c9b4d9a3f21b"
+    "sha256:b084836e35e662248e759150de5bca73b531553a6abbcfb820223225ad767e4d"
 )
 
 
@@ -1017,7 +1017,11 @@ class ReportToolTests(unittest.TestCase):
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 metadata["source"],
-                {"kind": "demo", "rollout_csv_path": str(rollout)},
+                {
+                    "kind": "demo",
+                    "task": "navigate_pick_place",
+                    "rollout_csv_path": str(rollout),
+                },
             )
             self.assertEqual(metadata["sample_count"], 90)
             self.assertEqual(metadata["frame_count"], 5)
@@ -1061,12 +1065,16 @@ class ReportToolTests(unittest.TestCase):
             self.assertEqual(metadata["gif_path"], "house_mobile_manipulator.gif")
             self.assertEqual(
                 metadata["source"],
-                {"kind": "demo", "rollout_csv_path": "house_mobile_manipulator.csv"},
+                {
+                    "kind": "demo",
+                    "task": "navigate_pick_place",
+                    "rollout_csv_path": "house_mobile_manipulator.csv",
+                },
             )
             self.assertEqual(metadata["frame_count"], 5)
             self.assertEqual(metadata["width"], 120)
             self.assertEqual(metadata["height"], 80)
-            self.assertEqual(metadata["byte_size"], 5314)
+            self.assertEqual(metadata["byte_size"], 5653)
             self.assertEqual(metadata["sha256"], HOUSE_GIF_DEMO_SMALL_GIF_SHA256)
             self.assertEqual(_file_sha256(gif_path), HOUSE_GIF_DEMO_SMALL_GIF_SHA256)
             self.assertEqual(_file_sha256(rollout), HOUSE_GIF_DEMO_SMALL_CSV_SHA256)
@@ -1114,6 +1122,7 @@ class ReportToolTests(unittest.TestCase):
             metadata["source"],
             {
                 "kind": "demo",
+                "task": "navigate_pick_place",
                 "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
             },
         )
