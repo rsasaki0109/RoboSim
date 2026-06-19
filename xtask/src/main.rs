@@ -1,6 +1,6 @@
 //! Workspace automation tasks for Robot Native Engine.
 
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::{env, path::PathBuf};
 
 fn main() -> ExitCode {
@@ -21,6 +21,7 @@ fn run() -> anyhow::Result<()> {
         "ci" => ci(),
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
+        "house-gif-demo" => house_gif_demo(),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -34,6 +35,7 @@ fn ci() -> anyhow::Result<()> {
     run_step("cargo test --workspace")?;
     validate_repo_assets()?;
     run_example_smokes()?;
+    house_gif_demo()?;
     Ok(())
 }
 
@@ -79,6 +81,33 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
     )?;
     Ok(())
+}
+
+fn house_gif_demo() -> anyhow::Result<()> {
+    let python = python_command()?;
+    run_step(&format!(
+        "{python} examples/27_mobile_manipulator_rl/house_gif_demo.py --check"
+    ))?;
+    run_step(&format!(
+        "{python} examples/27_mobile_manipulator_rl/render_house_gif.py --verify-metadata docs/media/rne-hero.json"
+    ))?;
+    Ok(())
+}
+
+fn python_command() -> anyhow::Result<&'static str> {
+    for candidate in ["python", "python3"] {
+        if let Ok(status) = Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            if status.success() {
+                return Ok(candidate);
+            }
+        }
+    }
+    anyhow::bail!("python or python3 is required for house-gif-demo")
 }
 
 fn validate_repo_assets() -> anyhow::Result<()> {

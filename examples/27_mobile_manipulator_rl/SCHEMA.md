@@ -155,6 +155,14 @@ schema, resolves `gif_path` relative to the metadata JSON when needed, checks th
 the GIF is structurally well-formed, and verifies `width`, `height`,
 `frame_count`, `byte_size`, and `sha256` against the GIF bytes.
 
+`house_gif_demo.py --out-dir house_mobile_manipulator_demo` writes the same
+metadata shape plus a synthetic rollout CSV, GIF, and `index.html` preview. The
+metadata uses relative `gif_path` and `source.rollout_csv_path` values so the
+demo directory can be moved as a small bundle.
+`house_gif_demo.py --check` writes the same bundle in a temporary directory,
+verifies the metadata, prints a short success line, and removes the artifacts.
+The same smoke is exposed through `cargo run -p xtask -- house-gif-demo`.
+
 Header fields:
 
 ```text

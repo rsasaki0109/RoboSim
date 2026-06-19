@@ -47,6 +47,9 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 .venv/bin/python examples/27_mobile_manipulator_rl/plot_rollout.py rollout.csv --out rollout.svg
 .venv/bin/python examples/27_mobile_manipulator_rl/animate_rollout.py rollout.csv --out rollout.html
 .venv/bin/python examples/27_mobile_manipulator_rl/render_house_gif.py rollout.csv --out rollout_house.gif --metadata-out rollout_house.json
+cargo run -p xtask -- house-gif-demo
+python examples/27_mobile_manipulator_rl/house_gif_demo.py --check
+python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo
 python examples/27_mobile_manipulator_rl/render_house_gif.py --demo --demo-rollout-csv house_mobile_manipulator.csv --out house_mobile_manipulator.gif --metadata-out house_mobile_manipulator.json
 python examples/27_mobile_manipulator_rl/render_house_gif.py --verify-metadata house_mobile_manipulator.json
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-in best_policy.json --eval-only --report-dir reports/reach
@@ -98,10 +101,15 @@ turns that CSV into a standalone SVG report showing the end-effector X-Z path, t
 error, reward, and actions. `animate_rollout.py` turns the same CSV into a standalone
 HTML replay with play/pause and scrubbing controls. `render_house_gif.py` turns the
 same CSV into a dependency-free animated GIF of the mobile manipulator moving through a
-small house scene and can write a checksum metadata JSON with `--metadata-out`; `--demo`
-renders a synthetic scene without `rne_py`, and `--demo-rollout-csv` saves that same
-synthetic trajectory as canonical rollout CSV for re-rendering or debugging. Use
-`--verify-metadata` to validate an existing GIF metadata JSON against its referenced GIF.
+small house scene and can write a checksum metadata JSON with `--metadata-out`.
+`house_gif_demo.py` is the shortest no-`rne_py` entry point: it writes a synthetic
+CSV, GIF, metadata JSON, and `index.html` preview in one command.
+`render_house_gif.py --demo` renders the same synthetic scene directly, and
+`--demo-rollout-csv` saves that
+same synthetic trajectory as canonical rollout CSV for re-rendering or debugging. Use
+`cargo run -p xtask -- house-gif-demo` or `house_gif_demo.py --check` for a temporary
+smoke run, and `--verify-metadata` to validate an existing GIF metadata JSON against
+its referenced GIF.
 `--report-dir` writes `index.html`, `manifest.json`, `policy.json`, `rollout.csv`,
 `rollout.svg`, and `rollout.html` as one bundle. Add `--report-house-gif` to include
 `rollout_house.gif` and `rollout_house.json` in that bundle and embed the GIF in

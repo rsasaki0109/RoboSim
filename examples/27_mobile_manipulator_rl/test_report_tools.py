@@ -40,8 +40,19 @@ from rollout_schema import (
 import render_house_gif
 
 COMPARE = EXAMPLE_DIR / "compare_reports.py"
+HOUSE_GIF_DEMO = EXAMPLE_DIR / "house_gif_demo.py"
+README_HERO_METADATA = ROOT / "docs" / "media" / "rne-hero.json"
 RENDER_HOUSE_GIF = EXAMPLE_DIR / "render_house_gif.py"
 SWEEP = EXAMPLE_DIR / "sweep.py"
+HOUSE_GIF_DEMO_SMALL_GIF_SHA256 = (
+    "sha256:1908f586099b5e9a63cb0b6bf336fc55f7e60f6075fc7127a6866f1093699f56"
+)
+HOUSE_GIF_DEMO_SMALL_CSV_SHA256 = (
+    "sha256:9d3b157674d484d373cd067430bdb36ee93587e7cb739587eb5caa712236e6b0"
+)
+HOUSE_GIF_DEMO_SMALL_METADATA_SHA256 = (
+    "sha256:bcc773ba3c4562a4b6a2cbd4b9e31e9f5c0aa71bbcfc6ff13e49c9b4d9a3f21b"
+)
 
 
 def _write_json(path, payload):
@@ -1014,6 +1025,98 @@ class ReportToolTests(unittest.TestCase):
             self.assertEqual(
                 metadata["sha256"], f"sha256:{hashlib.sha256(data).hexdigest()}"
             )
+
+    def test_house_gif_demo_writes_preview_bundle(self):
+        with tempfile.TemporaryDirectory(prefix="rne_house_gif_bundle_test_") as temp:
+            out_dir = Path(temp) / "house_demo"
+
+            result = _run(
+                [
+                    sys.executable,
+                    str(HOUSE_GIF_DEMO),
+                    "--out-dir",
+                    str(out_dir),
+                    "--width",
+                    "120",
+                    "--height",
+                    "80",
+                    "--max-frames",
+                    "5",
+                    "--fps",
+                    "8",
+                ]
+            )
+
+            self.assertIn("house gif demo written", result.stdout)
+            rollout = out_dir / "house_mobile_manipulator.csv"
+            gif_path = out_dir / "house_mobile_manipulator.gif"
+            metadata_path = out_dir / "house_mobile_manipulator.json"
+            index_path = out_dir / "index.html"
+            for path in (rollout, gif_path, metadata_path, index_path):
+                self.assertTrue(path.is_file(), path)
+
+            loaded = render_house_gif.load_samples(rollout)
+            self.assertEqual(len(loaded), 90)
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["gif_path"], "house_mobile_manipulator.gif")
+            self.assertEqual(
+                metadata["source"],
+                {"kind": "demo", "rollout_csv_path": "house_mobile_manipulator.csv"},
+            )
+            self.assertEqual(metadata["frame_count"], 5)
+            self.assertEqual(metadata["width"], 120)
+            self.assertEqual(metadata["height"], 80)
+            self.assertEqual(metadata["byte_size"], 5314)
+            self.assertEqual(metadata["sha256"], HOUSE_GIF_DEMO_SMALL_GIF_SHA256)
+            self.assertEqual(_file_sha256(gif_path), HOUSE_GIF_DEMO_SMALL_GIF_SHA256)
+            self.assertEqual(_file_sha256(rollout), HOUSE_GIF_DEMO_SMALL_CSV_SHA256)
+            self.assertEqual(
+                _file_sha256(metadata_path), HOUSE_GIF_DEMO_SMALL_METADATA_SHA256
+            )
+            verified = render_house_gif.verify_metadata(metadata_path)
+            self.assertEqual(verified["sha256"], metadata["sha256"])
+
+            html = index_path.read_text(encoding="utf-8")
+            self.assertIn('src="house_mobile_manipulator.gif"', html)
+            self.assertIn('href="house_mobile_manipulator.csv"', html)
+            self.assertIn('href="house_mobile_manipulator.json"', html)
+
+    def test_house_gif_demo_check_mode_uses_temporary_bundle(self):
+        result = _run(
+            [
+                sys.executable,
+                str(HOUSE_GIF_DEMO),
+                "--check",
+                "--width",
+                "120",
+                "--height",
+                "80",
+                "--max-frames",
+                "5",
+                "--fps",
+                "8",
+            ]
+        )
+
+        self.assertIn("house gif demo check ok", result.stdout)
+        self.assertIn("frames=5", result.stdout)
+        self.assertIn("size=120x80", result.stdout)
+
+    def test_readme_hero_metadata_verifies(self):
+        info = render_house_gif.verify_metadata(README_HERO_METADATA)
+        metadata = json.loads(README_HERO_METADATA.read_text(encoding="utf-8"))
+
+        self.assertEqual(info["width"], 960)
+        self.assertEqual(info["height"], 540)
+        self.assertEqual(info["frame_count"], 72)
+        self.assertEqual(metadata["gif_path"], "rne-hero.gif")
+        self.assertEqual(
+            metadata["source"],
+            {
+                "kind": "demo",
+                "generator": "examples/27_mobile_manipulator_rl/house_gif_demo.py",
+            },
+        )
 
     def test_render_house_gif_verify_metadata_rejects_mismatch(self):
         with tempfile.TemporaryDirectory(prefix="rne_house_gif_verify_test_") as temp:

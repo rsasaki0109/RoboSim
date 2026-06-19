@@ -18,6 +18,7 @@ adapters/ros2/rne_ros2_node/target/
 /house_mobile_manipulator.gif
 /house_mobile_manipulator.csv
 /house_mobile_manipulator.json
+/house_mobile_manipulator_demo/
 /leaderboard.csv
 /leaderboard.html
 /leaderboard.json
@@ -37,6 +38,7 @@ adapters/ros2/rne_ros2_node/target/
 /examples/27_mobile_manipulator_rl/house_mobile_manipulator.gif
 /examples/27_mobile_manipulator_rl/house_mobile_manipulator.csv
 /examples/27_mobile_manipulator_rl/house_mobile_manipulator.json
+/examples/27_mobile_manipulator_rl/house_mobile_manipulator_demo/
 /examples/27_mobile_manipulator_rl/leaderboard.csv
 /examples/27_mobile_manipulator_rl/leaderboard.html
 /examples/27_mobile_manipulator_rl/leaderboard.json
