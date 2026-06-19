@@ -136,6 +136,20 @@ impl ActuatorCommandBuffer {
         self.commands.len()
     }
 
+    /// Returns the next command sequence number that will be assigned.
+    pub fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
+    /// Clears pending commands and restores the next sequence number.
+    ///
+    /// This is intended for snapshots taken at completed simulation tick
+    /// boundaries where no deferred commands should remain in flight.
+    pub fn restore_empty(&mut self, next_sequence: u64) {
+        self.commands.clear();
+        self.next_sequence = next_sequence;
+    }
+
     /// Returns whether the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
@@ -167,5 +181,32 @@ mod tests {
         );
         assert_eq!(seq_a, 0);
         assert_eq!(seq_b, 1);
+        assert_eq!(buffer.next_sequence(), 2);
+    }
+
+    #[test]
+    fn restore_empty_clears_pending_commands_and_sequence() {
+        let mut buffer = ActuatorCommandBuffer::new();
+        let t0 = SimTime::from_seconds(Seconds::new(0.0));
+        buffer.push(
+            ActuatorCommand::Ackermann {
+                speed_m_s: 1.0,
+                steering_rad: 0.0,
+            },
+            t0,
+        );
+
+        buffer.restore_empty(9);
+
+        assert!(buffer.is_empty());
+        assert_eq!(buffer.next_sequence(), 9);
+        let seq = buffer.push(
+            ActuatorCommand::Ackermann {
+                speed_m_s: 2.0,
+                steering_rad: 0.0,
+            },
+            t0,
+        );
+        assert_eq!(seq, 9);
     }
 }

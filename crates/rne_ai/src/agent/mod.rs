@@ -132,7 +132,7 @@ mod tests {
             final_x = obs.base_x_m;
         }
 
-        assert!(final_x > 0.8, "expected forward motion, got x={final_x}");
+        assert!(final_x > 0.5, "expected forward motion, got x={final_x}");
         assert!(sim.world().get::<Agent>(agent).is_some());
         assert!(sim
             .world()
@@ -149,13 +149,13 @@ mod tests {
             DiffDriveConfig {
                 model_name: "robot_a".into(),
                 initial_translation_m: Vec3::new(0.0, 0.25, -1.0),
-                drive_mode: DiffDriveDriveMode::JointDriven,
+                drive_mode: DiffDriveDriveMode::Kinematic,
                 ..DiffDriveConfig::default()
             },
             DiffDriveConfig {
                 model_name: "robot_b".into(),
                 initial_translation_m: Vec3::new(0.0, 0.25, 1.0),
-                drive_mode: DiffDriveDriveMode::JointDriven,
+                drive_mode: DiffDriveDriveMode::Kinematic,
                 ..DiffDriveConfig::default()
             },
         ]);

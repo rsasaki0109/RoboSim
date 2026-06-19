@@ -143,8 +143,9 @@ impl PhysicsBackend for RapierBackend {
             if let Some(body_handle) = state.entity_to_body.get(&entity).copied() {
                 if let Some(body) = state.bodies.get_mut(body_handle) {
                     body.set_position(isometry, true);
-                    if rigid_body.body_type == RigidBodyType::Kinematic {
+                    if rigid_body.body_type != RigidBodyType::Fixed {
                         body.set_linvel(vec3_to_rapier(rigid_body.linear_velocity_m_s), true);
+                        body.set_angvel(vec3_to_rapier(rigid_body.angular_velocity_rad_s), true);
                     }
                 }
                 continue;
@@ -274,6 +275,10 @@ impl PhysicsBackend for RapierBackend {
             };
             if let Some(mut transform) = world.get_mut::<Transform3>(entity) {
                 *transform = local_tf;
+            }
+            if let Some(mut rigid_body) = world.get_mut::<RigidBody>(entity) {
+                rigid_body.linear_velocity_m_s = vec3_from_rapier(*body.linvel());
+                rigid_body.angular_velocity_rad_s = vec3_from_rapier(*body.angvel());
             }
         }
 
@@ -587,6 +592,22 @@ mod tests {
             .y;
         assert!(y < 5.0, "cube should fall from initial height, y={y}");
         assert!(y > 0.0, "cube should rest above ground, y={y}");
+    }
+
+    #[test]
+    fn sync_to_ecs_writes_dynamic_body_velocity() {
+        let (mut backend, physics_world, mut world, _, cube) = setup_world();
+
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        backend.sync_to_ecs(&mut world, physics_world).unwrap();
+
+        let body = world.get::<RigidBody>(cube).expect("cube body");
+        assert!(
+            body.linear_velocity_m_s.y < 0.0,
+            "falling cube should have downward velocity, got {:?}",
+            body.linear_velocity_m_s
+        );
     }
 
     #[test]

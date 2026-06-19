@@ -1,6 +1,7 @@
 //! Reward helpers for built-in environments.
 
 use crate::reach::ReachTarget;
+use serde::{Deserialize, Serialize};
 
 /// Tunable reward weights for [`crate::env::DiffDriveEpisode`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,7 +36,7 @@ impl DiffDriveRewardConfig {
 }
 
 /// Episode task variants for mobile manipulator environments.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MobileManipulatorTask {
     /// Reach the end effector toward a world-frame target.
     Reach {

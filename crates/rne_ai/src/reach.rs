@@ -2,9 +2,10 @@
 
 use crate::action::MobileManipulatorAction;
 use crate::observation::MobileManipulatorObservation;
+use serde::{Deserialize, Serialize};
 
 /// World-frame reach target for the end effector.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReachTarget {
     /// Target X in meters.
     pub x_m: f64,
@@ -26,7 +27,7 @@ impl ReachTarget {
 /// Used for goal-conditioned reach: the per-episode target is drawn uniformly from this
 /// box so the policy must generalize across targets (the goal is exposed in the
 /// observation as `target_d{x,y,z}_m`).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReachRandomization {
     /// Minimum-corner target.
     pub min: ReachTarget,
@@ -48,7 +49,7 @@ impl ReachRandomization {
 }
 
 /// One reach curriculum stage: a sampling region and the successes needed to advance.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReachCurriculumStage {
     /// Target sampling region for this stage.
     pub randomization: ReachRandomization,
@@ -57,7 +58,7 @@ pub struct ReachCurriculumStage {
 }
 
 /// Static reach curriculum definition (ordered easy → hard).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReachCurriculumConfig {
     /// Ordered stages.
     pub stages: Vec<ReachCurriculumStage>,
@@ -96,6 +97,27 @@ impl ReachCurriculumConfig {
     }
 }
 
+/// Snapshot of runtime reach-curriculum progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReachCurriculumSnapshot {
+    /// Active curriculum stage index.
+    pub stage_index: usize,
+    /// Number of successful episodes accumulated in the active stage.
+    pub successes_in_stage: u32,
+}
+
+/// Error restoring reach-curriculum progress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReachCurriculumSnapshotError {
+    /// The snapshot points beyond the configured stage list.
+    StageOutOfRange {
+        /// Invalid stage index from the snapshot.
+        stage_index: usize,
+        /// Number of stages configured for this curriculum.
+        stage_count: usize,
+    },
+}
+
 /// Runtime reach curriculum tracking stage progress.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReachCurriculum {
@@ -122,6 +144,41 @@ impl ReachCurriculum {
     /// Number of configured stages.
     pub fn stage_count(&self) -> usize {
         self.config.stages.len()
+    }
+
+    /// Returns the number of successes accumulated in the active stage.
+    pub fn successes_in_stage(&self) -> u32 {
+        self.successes_in_stage
+    }
+
+    /// Returns a snapshot of runtime curriculum progress.
+    pub fn snapshot(&self) -> ReachCurriculumSnapshot {
+        ReachCurriculumSnapshot {
+            stage_index: self.stage_index,
+            successes_in_stage: self.successes_in_stage,
+        }
+    }
+
+    /// Restores runtime curriculum progress from a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReachCurriculumSnapshotError::StageOutOfRange`] if the
+    /// snapshot was produced for a curriculum with more stages than this
+    /// instance.
+    pub fn restore_snapshot(
+        &mut self,
+        snapshot: ReachCurriculumSnapshot,
+    ) -> Result<(), ReachCurriculumSnapshotError> {
+        if snapshot.stage_index >= self.stage_count() {
+            return Err(ReachCurriculumSnapshotError::StageOutOfRange {
+                stage_index: snapshot.stage_index,
+                stage_count: self.stage_count(),
+            });
+        }
+        self.stage_index = snapshot.stage_index;
+        self.successes_in_stage = snapshot.successes_in_stage;
+        Ok(())
     }
 
     fn current_stage(&self) -> ReachCurriculumStage {
@@ -266,5 +323,26 @@ mod tests {
         let action = reach_action_proportional(&obs, target, 6.0);
         assert!(action.shoulder_velocity_rad_s > 0.0);
         assert!(action.elbow_velocity_rad_s > 0.0);
+    }
+
+    #[test]
+    fn reach_curriculum_snapshot_restores_stage_progress() {
+        let mut curriculum = ReachCurriculum::new(ReachCurriculumConfig::easy_to_hard());
+        assert!(!curriculum.record_episode_end(true));
+        assert!(!curriculum.record_episode_end(true));
+        assert!(curriculum.record_episode_end(true));
+        curriculum.record_episode_end(true);
+        let snapshot = curriculum.snapshot();
+
+        assert_eq!(snapshot.stage_index, 1);
+        assert_eq!(snapshot.successes_in_stage, 1);
+
+        assert!(!curriculum.record_episode_end(true));
+        assert!(curriculum.record_episode_end(true));
+        assert_eq!(curriculum.stage_index(), 2);
+
+        curriculum.restore_snapshot(snapshot).unwrap();
+        assert_eq!(curriculum.stage_index(), 1);
+        assert_eq!(curriculum.successes_in_stage(), 1);
     }
 }

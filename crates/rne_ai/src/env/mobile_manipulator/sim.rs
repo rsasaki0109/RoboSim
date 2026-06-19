@@ -4,24 +4,194 @@ use super::drive::wheel_command_to_motor_rad_s;
 use crate::action::MobileManipulatorAction;
 use crate::camera::{sync_wrist_camera_mounts, wrist_camera_mounts_from_spawned, WristCameraMount};
 use crate::observation::MobileManipulatorObservation;
+use bevy_ecs::prelude::{Component, Mut};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, AssetError};
 use rne_core::{SimDuration, SimTime};
-use rne_data::{DataBus, Frame, ImageRgb8, InMemoryDataBus, JointState, StreamId};
+use rne_data::{DataBus, Frame, FramePayload, ImageRgb8, InMemoryDataBus, JointState, StreamId};
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    ContactEvent, FixedJointDesc, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody,
-    RigidBodyType,
+    ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
+    PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
-use rne_sensor::{sample_sensors, Sensor, SensorSampleContext};
+use rne_sensor::{sample_sensors, Sensor, SensorSampleContext, SensorState};
 use rne_urdf_import::UrdfRobot;
-use rne_world::{world_transform_of, Transform3};
+use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldRandomSnapshot};
+use serde::{Deserialize, Serialize};
+use std::any::type_name;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const JOINT_STATE_STREAM: u32 = 300;
+const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 1;
+
+/// Error restoring or creating a mobile-manipulator simulation snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MobileManipulatorSimSnapshotError {
+    /// Snapshot payload schema is not supported by this engine.
+    UnsupportedSchemaVersion {
+        /// Expected snapshot schema version.
+        expected: u32,
+        /// Actual snapshot schema version.
+        actual: u32,
+    },
+    /// Snapshot references an entity that is not alive in this simulation world.
+    MissingEntity {
+        /// Missing entity index.
+        entity_index: u32,
+    },
+    /// Snapshot references a component missing from an entity.
+    MissingComponent {
+        /// Entity index missing the component.
+        entity_index: u32,
+        /// Component type name.
+        component: &'static str,
+    },
+    /// Physics backend failed while rebuilding from restored ECS state.
+    Physics(PhysicsError),
+}
+
+/// Local transform snapshot for one mobile-manipulator entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorTransformSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Local transform component value.
+    pub transform: Transform3,
+}
+
+/// Rigid-body velocity snapshot for one mobile-manipulator entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorRigidBodySnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Linear velocity in meters per second.
+    pub linear_velocity_m_s: Vec3,
+    /// Angular velocity in radians per second.
+    pub angular_velocity_rad_s: Vec3,
+}
+
+/// Joint motor runtime state snapshot for one mobile-manipulator entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorJointMotorSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Physics joint motor command state.
+    pub motor: JointMotor,
+}
+
+/// Fixed joint runtime state snapshot for one mobile-manipulator entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorFixedJointSnapshot {
+    /// Child entity index carrying the fixed joint component.
+    pub entity_index: u32,
+    /// Parent rigid-body entity index.
+    pub parent_index: u32,
+    /// Anchor point in the parent body's local frame.
+    pub anchor_parent_m: Vec3,
+    /// Anchor point in the child body's local frame.
+    pub anchor_child_m: Vec3,
+    /// Orientation of the child frame relative to the parent frame.
+    pub relative_rotation: Quat,
+}
+
+/// Sensor sampling state snapshot for one mobile-manipulator entity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileManipulatorSensorStateSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Last published sequence number.
+    pub last_sequence: u64,
+    /// Simulation ticks of the last sample.
+    pub last_sample_ticks: u64,
+    /// Total emitted frames.
+    pub frame_count: u64,
+}
+
+/// Latest typed DataBus frame snapshot for one stream.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorFrameSnapshot<T> {
+    /// Stream identifier.
+    pub stream_id: StreamId,
+    /// Source entity index.
+    pub entity_index: u32,
+    /// Monotonic sequence number within the stream.
+    pub sequence: u64,
+    /// Simulation time ticks.
+    pub sim_ticks: u64,
+    /// Capture time ticks.
+    pub capture_ticks: u64,
+    /// Available time ticks.
+    pub available_ticks: u64,
+    /// Typed payload.
+    pub payload: T,
+}
+
+impl<T: FramePayload> MobileManipulatorFrameSnapshot<T> {
+    fn from_frame(frame: Frame<T>) -> Self {
+        Self {
+            stream_id: frame.stream_id,
+            entity_index: frame.entity.index(),
+            sequence: frame.sequence,
+            sim_ticks: frame.sim_time.ticks(),
+            capture_ticks: frame.capture_time.ticks(),
+            available_ticks: frame.available_time.ticks(),
+            payload: frame.payload,
+        }
+    }
+
+    fn to_frame(&self) -> Frame<T> {
+        Frame {
+            stream_id: self.stream_id,
+            entity: Entity::from_raw(self.entity_index),
+            sequence: self.sequence,
+            sim_time: SimTime::from_ticks(self.sim_ticks),
+            capture_time: SimTime::from_ticks(self.capture_ticks),
+            available_time: SimTime::from_ticks(self.available_ticks),
+            payload: self.payload.clone(),
+        }
+    }
+}
+
+/// Completed-tick snapshot of a [`MobileManipulatorSim`].
+///
+/// This is intended for restoring a simulation with the same scene topology and
+/// stable entity indices. It captures ECS motion state, joint motor targets,
+/// grasp welds, latest DataBus frames, world random state, simulation time, and
+/// stream sequence state. It does not capture arbitrary user-added resources.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorSimSnapshot {
+    /// Snapshot payload schema version.
+    pub schema_version: u32,
+    /// Current simulation time in nanosecond ticks.
+    pub sim_ticks: u64,
+    /// Number of completed simulation steps.
+    pub step_count: u64,
+    /// Next joint-state sequence number.
+    pub joint_sequence: u64,
+    /// Integrated target height for vertical lift joints.
+    pub lift_target_m: f64,
+    /// Currently grasped object entity index, if any.
+    pub grasped_object_index: Option<u32>,
+    /// World-level deterministic random state.
+    pub world_random: WorldRandomSnapshot,
+    /// Local transform components.
+    pub transforms: Vec<MobileManipulatorTransformSnapshot>,
+    /// Rigid-body velocity components.
+    pub rigid_bodies: Vec<MobileManipulatorRigidBodySnapshot>,
+    /// Physics joint motor state.
+    pub joint_motors: Vec<MobileManipulatorJointMotorSnapshot>,
+    /// Fixed joint components, including runtime grasp welds.
+    pub fixed_joints: Vec<MobileManipulatorFixedJointSnapshot>,
+    /// Sensor runtime sequence state.
+    pub sensor_states: Vec<MobileManipulatorSensorStateSnapshot>,
+    /// Latest joint-state DataBus frame.
+    pub joint_state_frame: Option<MobileManipulatorFrameSnapshot<JointState>>,
+    /// Latest wrist camera DataBus frame.
+    pub wrist_camera_frame: Option<MobileManipulatorFrameSnapshot<ImageRgb8>>,
+}
 
 /// Default scene asset for the fixed-base `mm_minimal` robot.
 pub fn mm_minimal_scene_path() -> PathBuf {
@@ -104,6 +274,7 @@ const ARM_TARGET_LIMIT_RAD: f64 = std::f64::consts::PI;
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
     scene_path: Option<PathBuf>,
+    world_seed: u64,
     world: World,
     backend: RapierBackend,
     physics_world: PhysicsWorldId,
@@ -164,6 +335,10 @@ impl MobileManipulatorSim {
 
         let mut world = World::new();
         let spawned_scene = load_and_spawn_scene(&mut world, scene_path)?;
+        let world_seed = world
+            .get::<WorldEntity>(spawned_scene.world)
+            .map(|world_entity| world_entity.seed)
+            .unwrap_or(0);
         let (_, spawned_robot) =
             spawned_scene
                 .robots
@@ -202,6 +377,7 @@ impl MobileManipulatorSim {
             wrist_camera,
             wrist_camera_stream,
             mobile_base,
+            world_seed,
             None,
         );
         sim.scene_path = Some(scene_path.to_path_buf());
@@ -363,6 +539,208 @@ impl MobileManipulatorSim {
         self.joint_stream
     }
 
+    /// Returns the world seed from a loaded scene, or zero when unspecified.
+    pub fn world_seed(&self) -> u64 {
+        self.world_seed
+    }
+
+    /// Returns the fixed simulation timestep.
+    pub fn fixed_delta(&self) -> SimDuration {
+        self.dt
+    }
+
+    /// Returns the current simulation time.
+    pub fn sim_time(&self) -> SimTime {
+        self.sim_time
+    }
+
+    /// Returns the world-level deterministic random state.
+    pub fn world_random_snapshot(&self) -> WorldRandomSnapshot {
+        self.world
+            .get_resource::<WorldRandom>()
+            .map(WorldRandom::snapshot)
+            .unwrap_or(WorldRandomSnapshot {
+                seed: self.world_seed,
+                main_rng_state: self.world_seed,
+            })
+    }
+
+    /// Restores the world-level deterministic random state.
+    pub fn restore_world_random_snapshot(&mut self, snapshot: WorldRandomSnapshot) {
+        self.world_seed = snapshot.seed;
+        if let Some(mut world_random) = self.world.get_resource_mut::<WorldRandom>() {
+            world_random.restore(snapshot);
+        } else {
+            self.world
+                .insert_resource(WorldRandom::from_snapshot(snapshot));
+        }
+    }
+
+    /// Captures a completed-tick simulation snapshot.
+    pub fn snapshot(&self) -> MobileManipulatorSimSnapshot {
+        let mut snapshot = MobileManipulatorSimSnapshot {
+            schema_version: MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+            sim_ticks: self.sim_time.ticks(),
+            step_count: self.step_count,
+            joint_sequence: self.joint_sequence,
+            lift_target_m: self.lift_target_m,
+            grasped_object_index: self.grasped_object.map(Entity::index),
+            world_random: self.world_random_snapshot(),
+            transforms: Vec::new(),
+            rigid_bodies: Vec::new(),
+            joint_motors: Vec::new(),
+            fixed_joints: Vec::new(),
+            sensor_states: Vec::new(),
+            joint_state_frame: self
+                .data_bus
+                .latest::<JointState>(self.joint_stream)
+                .map(MobileManipulatorFrameSnapshot::from_frame),
+            wrist_camera_frame: self.wrist_camera_stream.and_then(|stream| {
+                self.data_bus
+                    .latest::<ImageRgb8>(stream)
+                    .map(MobileManipulatorFrameSnapshot::from_frame)
+            }),
+        };
+
+        for entity in sorted_world_entities(&self.world) {
+            let entity_index = entity.index();
+            if let Some(transform) = self.world.get::<Transform3>(entity) {
+                snapshot
+                    .transforms
+                    .push(MobileManipulatorTransformSnapshot {
+                        entity_index,
+                        transform: *transform,
+                    });
+            }
+            if let Some(body) = self.world.get::<RigidBody>(entity) {
+                snapshot
+                    .rigid_bodies
+                    .push(MobileManipulatorRigidBodySnapshot {
+                        entity_index,
+                        linear_velocity_m_s: body.linear_velocity_m_s,
+                        angular_velocity_rad_s: body.angular_velocity_rad_s,
+                    });
+            }
+            if let Some(motor) = self.world.get::<JointMotor>(entity) {
+                snapshot
+                    .joint_motors
+                    .push(MobileManipulatorJointMotorSnapshot {
+                        entity_index,
+                        motor: *motor,
+                    });
+            }
+            if let Some(desc) = self.world.get::<FixedJointDesc>(entity) {
+                snapshot
+                    .fixed_joints
+                    .push(MobileManipulatorFixedJointSnapshot {
+                        entity_index,
+                        parent_index: desc.parent.index(),
+                        anchor_parent_m: desc.anchor_parent_m,
+                        anchor_child_m: desc.anchor_child_m,
+                        relative_rotation: desc.relative_rotation,
+                    });
+            }
+            if let Some(state) = self.world.get::<SensorState>(entity) {
+                snapshot
+                    .sensor_states
+                    .push(MobileManipulatorSensorStateSnapshot {
+                        entity_index,
+                        last_sequence: state.last_sequence,
+                        last_sample_ticks: state.last_sample_ticks,
+                        frame_count: state.frame_count,
+                    });
+            }
+        }
+
+        snapshot
+    }
+
+    /// Restores this simulation from a completed-tick snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot schema is unsupported, if it references
+    /// missing entities/components, or if the physics backend cannot be rebuilt.
+    pub fn restore_snapshot(
+        &mut self,
+        snapshot: &MobileManipulatorSimSnapshot,
+    ) -> Result<(), MobileManipulatorSimSnapshotError> {
+        if snapshot.schema_version != MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION {
+            return Err(
+                MobileManipulatorSimSnapshotError::UnsupportedSchemaVersion {
+                    expected: MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+                    actual: snapshot.schema_version,
+                },
+            );
+        }
+
+        for item in &snapshot.transforms {
+            *component_mut::<Transform3>(&mut self.world, item.entity_index)? = item.transform;
+        }
+        for item in &snapshot.rigid_bodies {
+            let mut body = component_mut::<RigidBody>(&mut self.world, item.entity_index)?;
+            body.linear_velocity_m_s = item.linear_velocity_m_s;
+            body.angular_velocity_rad_s = item.angular_velocity_rad_s;
+        }
+        for item in &snapshot.joint_motors {
+            *component_mut::<JointMotor>(&mut self.world, item.entity_index)? = item.motor;
+        }
+
+        for entity in sorted_world_entities(&self.world) {
+            self.world.entity_mut(entity).remove::<FixedJointDesc>();
+        }
+        for item in &snapshot.fixed_joints {
+            if !entity_exists(&self.world, item.parent_index) {
+                return Err(MobileManipulatorSimSnapshotError::MissingEntity {
+                    entity_index: item.parent_index,
+                });
+            }
+            let entity = Entity::from_raw(item.entity_index);
+            if !entity_exists(&self.world, item.entity_index) {
+                return Err(MobileManipulatorSimSnapshotError::MissingEntity {
+                    entity_index: item.entity_index,
+                });
+            }
+            self.world.entity_mut(entity).insert(FixedJointDesc {
+                parent: Entity::from_raw(item.parent_index),
+                anchor_parent_m: item.anchor_parent_m,
+                anchor_child_m: item.anchor_child_m,
+                relative_rotation: item.relative_rotation,
+            });
+        }
+
+        for item in &snapshot.sensor_states {
+            let mut state = component_mut::<SensorState>(&mut self.world, item.entity_index)?;
+            state.last_sequence = item.last_sequence;
+            state.last_sample_ticks = item.last_sample_ticks;
+            state.frame_count = item.frame_count;
+        }
+
+        if let Some(entity_index) = snapshot.grasped_object_index {
+            if !entity_exists(&self.world, entity_index) {
+                return Err(MobileManipulatorSimSnapshotError::MissingEntity { entity_index });
+            }
+            self.grasped_object = Some(Entity::from_raw(entity_index));
+        } else {
+            self.grasped_object = None;
+        }
+
+        self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);
+        self.step_count = snapshot.step_count;
+        self.joint_sequence = snapshot.joint_sequence;
+        self.lift_target_m = snapshot.lift_target_m;
+        self.restore_world_random_snapshot(snapshot.world_random);
+        self.data_bus = InMemoryDataBus::new();
+        if let Some(frame) = &snapshot.joint_state_frame {
+            self.data_bus.publish(frame.to_frame());
+        }
+        if let Some(frame) = &snapshot.wrist_camera_frame {
+            self.data_bus.publish(frame.to_frame());
+        }
+        self.rebuild_physics_from_ecs()?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn from_spawned(
         world: World,
@@ -376,6 +754,7 @@ impl MobileManipulatorSim {
         wrist_camera: Option<WristCameraMount>,
         wrist_camera_stream: Option<StreamId>,
         mobile_base: bool,
+        world_seed: u64,
         _base_y_m: Option<f64>,
     ) -> Self {
         let mut backend = RapierBackend::new();
@@ -400,6 +779,7 @@ impl MobileManipulatorSim {
 
         let mut sim = Self {
             scene_path: None,
+            world_seed,
             world,
             backend,
             physics_world,
@@ -626,6 +1006,19 @@ impl MobileManipulatorSim {
             .expect("physics sync from ECS");
     }
 
+    fn rebuild_physics_from_ecs(&mut self) -> Result<(), PhysicsError> {
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        let mut backend = RapierBackend::new();
+        let physics_world = backend.create_world(PhysicsWorldDesc {
+            solver_iterations: if has_lift { LIFT_SOLVER_ITERATIONS } else { 0 },
+            ..PhysicsWorldDesc::default()
+        })?;
+        backend.sync_from_ecs(&mut self.world, physics_world)?;
+        self.backend = backend;
+        self.physics_world = physics_world;
+        Ok(())
+    }
+
     fn zero_joint_motors(&mut self) {
         for joint in &self.actuated {
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
@@ -657,6 +1050,40 @@ impl MobileManipulatorSim {
         self.data_bus.publish(frame);
         self.joint_sequence += 1;
     }
+}
+
+impl From<PhysicsError> for MobileManipulatorSimSnapshotError {
+    fn from(error: PhysicsError) -> Self {
+        Self::Physics(error)
+    }
+}
+
+fn sorted_world_entities(world: &World) -> Vec<Entity> {
+    let mut entities: Vec<Entity> = world.iter_entities().map(|entity| entity.id()).collect();
+    entities.sort_unstable();
+    entities
+}
+
+fn entity_exists(world: &World, entity_index: u32) -> bool {
+    let entity = Entity::from_raw(entity_index);
+    world
+        .iter_entities()
+        .any(|entity_ref| entity_ref.id() == entity)
+}
+
+fn component_mut<T: Component>(
+    world: &mut World,
+    entity_index: u32,
+) -> Result<Mut<'_, T>, MobileManipulatorSimSnapshotError> {
+    if !entity_exists(world, entity_index) {
+        return Err(MobileManipulatorSimSnapshotError::MissingEntity { entity_index });
+    }
+    world.get_mut::<T>(Entity::from_raw(entity_index)).ok_or(
+        MobileManipulatorSimSnapshotError::MissingComponent {
+            entity_index,
+            component: type_name::<T>(),
+        },
+    )
 }
 
 fn velocity_for_joint(joint_name: &str, action: MobileManipulatorAction) -> f64 {
@@ -874,6 +1301,38 @@ mod tests {
                 "right_finger_joint"
             ]
         );
+    }
+
+    #[test]
+    fn snapshot_restores_observation_and_data_bus_frames() {
+        let mut sim = MobileManipulatorSim::new_mm_minimal();
+        sim.step(MobileManipulatorAction {
+            shoulder_velocity_rad_s: 1.0,
+            elbow_velocity_rad_s: 0.5,
+            gripper_velocity_rad_s: -0.25,
+            ..MobileManipulatorAction::default()
+        });
+
+        let snapshot = sim.snapshot();
+        let observation_at_snapshot = sim.observe();
+        let joint_state_at_snapshot = sim.latest_joint_state();
+        let wrist_camera_at_snapshot = sim.latest_wrist_camera();
+
+        sim.step(MobileManipulatorAction {
+            shoulder_velocity_rad_s: -2.0,
+            elbow_velocity_rad_s: 1.0,
+            gripper_velocity_rad_s: 1.5,
+            ..MobileManipulatorAction::default()
+        });
+        sim.step(MobileManipulatorAction::default());
+
+        sim.restore_snapshot(&snapshot).unwrap();
+
+        assert_eq!(sim.observe(), observation_at_snapshot);
+        assert_eq!(sim.latest_joint_state(), joint_state_at_snapshot);
+        assert_eq!(sim.latest_wrist_camera(), wrist_camera_at_snapshot);
+        assert_eq!(sim.step_count(), snapshot.step_count);
+        assert_eq!(sim.snapshot(), snapshot);
     }
 
     #[test]

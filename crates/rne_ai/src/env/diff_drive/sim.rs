@@ -3,30 +3,204 @@
 use crate::action::DiffDriveAction;
 use crate::lidar::{lidar_mounts_from_spawned, sync_lidar_mounts, LidarMount};
 use crate::observation::DiffDriveObservation;
+use bevy_ecs::prelude::{Component, Mut};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
-use rne_data::{InMemoryDataBus, JointState, PointCloud, StreamId};
+use rne_data::{
+    Frame, FramePayload, ImuSample, InMemoryDataBus, JointState, PointCloud, StreamId,
+    WheelEncoderSample,
+};
 use rne_ecs::{spawn_named, Entity, World};
 use rne_log::SimulationLog;
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, ContactEvent, PhysicsBackend, PhysicsWorldDesc, RigidBody,
-    RigidBodyType,
+    Collider, ColliderShape, ContactEvent, JointMotor, PhysicsBackend, PhysicsError,
+    PhysicsWorldDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, spawn_diff_drive_robot,
     sync_joint_motors_from_actuators, Actuator, ActuatorCommand, ActuatorCommandBuffer,
-    DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode, DiffDriveSpawned, Link,
+    ActuatorTarget, ControlMode, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,
+    DiffDriveSpawned, Link,
 };
 use rne_sensor::{
     sample_sensors, ImuSpec, LidarSpec, Sensor, SensorKind, SensorSampleContext, SensorState,
 };
-use rne_world::{world_transform_of, Transform3, WorldEntity};
+use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldRandomSnapshot};
+use serde::{Deserialize, Serialize};
+use std::any::type_name;
 use std::path::{Path, PathBuf};
 
 const IMU_STREAM_BASE: u32 = 100;
+const DIFF_DRIVE_SIM_SNAPSHOT_VERSION: u32 = 1;
+
+/// Error restoring or creating a differential-drive simulation snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DiffDriveSimSnapshotError {
+    /// Snapshot was requested while deferred commands are still pending.
+    PendingCommands {
+        /// Number of pending commands that were not captured.
+        pending: usize,
+    },
+    /// Snapshot payload schema is not supported by this engine.
+    UnsupportedSchemaVersion {
+        /// Expected snapshot schema version.
+        expected: u32,
+        /// Actual snapshot schema version.
+        actual: u32,
+    },
+    /// Snapshot references an entity that is not alive in this simulation world.
+    MissingEntity {
+        /// Missing entity index.
+        entity_index: u32,
+    },
+    /// Snapshot references a component missing from an entity.
+    MissingComponent {
+        /// Entity index missing the component.
+        entity_index: u32,
+        /// Component type name.
+        component: &'static str,
+    },
+    /// Physics backend failed while rebuilding from restored ECS state.
+    Physics(PhysicsError),
+}
+
+/// Local transform snapshot for one entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveTransformSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Local transform component value.
+    pub transform: Transform3,
+}
+
+/// Rigid-body velocity snapshot for one entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveRigidBodySnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Linear velocity in meters per second.
+    pub linear_velocity_m_s: Vec3,
+    /// Angular velocity in radians per second.
+    pub angular_velocity_rad_s: Vec3,
+}
+
+/// Actuator runtime state snapshot for one entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveActuatorSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Current actuator control mode.
+    pub mode: ControlMode,
+    /// Current actuator command target.
+    pub target: ActuatorTarget,
+}
+
+/// Joint motor runtime state snapshot for one entity.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveJointMotorSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Physics joint motor command state.
+    pub motor: JointMotor,
+}
+
+/// Sensor sampling state snapshot for one entity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffDriveSensorStateSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// Last published sequence number.
+    pub last_sequence: u64,
+    /// Simulation ticks of the last sample.
+    pub last_sample_ticks: u64,
+    /// Total emitted frames.
+    pub frame_count: u64,
+}
+
+/// Latest typed DataBus frame snapshot for one stream.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveFrameSnapshot<T> {
+    /// Stream identifier.
+    pub stream_id: StreamId,
+    /// Source entity index.
+    pub entity_index: u32,
+    /// Monotonic sequence number within the stream.
+    pub sequence: u64,
+    /// Simulation time ticks.
+    pub sim_ticks: u64,
+    /// Capture time ticks.
+    pub capture_ticks: u64,
+    /// Available time ticks.
+    pub available_ticks: u64,
+    /// Typed payload.
+    pub payload: T,
+}
+
+impl<T: FramePayload> DiffDriveFrameSnapshot<T> {
+    fn from_frame(frame: Frame<T>) -> Self {
+        Self {
+            stream_id: frame.stream_id,
+            entity_index: frame.entity.index(),
+            sequence: frame.sequence,
+            sim_ticks: frame.sim_time.ticks(),
+            capture_ticks: frame.capture_time.ticks(),
+            available_ticks: frame.available_time.ticks(),
+            payload: frame.payload,
+        }
+    }
+
+    fn to_frame(&self) -> Frame<T> {
+        Frame {
+            stream_id: self.stream_id,
+            entity: Entity::from_raw(self.entity_index),
+            sequence: self.sequence,
+            sim_time: SimTime::from_ticks(self.sim_ticks),
+            capture_time: SimTime::from_ticks(self.capture_ticks),
+            available_time: SimTime::from_ticks(self.available_ticks),
+            payload: self.payload.clone(),
+        }
+    }
+}
+
+/// Completed-tick snapshot of a [`DiffDriveSim`].
+///
+/// This is intended for restoring a simulation with the same scene topology and
+/// stable entity indices. It captures ECS motion state, actuator and motor
+/// targets, sensor sequence state, latest DataBus sensor frames, world random
+/// state, simulation time, and command sequence. It does not capture arbitrary
+/// user-added resources.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveSimSnapshot {
+    /// Snapshot payload schema version.
+    pub schema_version: u32,
+    /// Current simulation time in nanosecond ticks.
+    pub sim_ticks: u64,
+    /// Number of completed simulation steps.
+    pub step_count: u64,
+    /// Next actuator command sequence number.
+    pub command_sequence: u64,
+    /// World-level deterministic random state.
+    pub world_random: WorldRandomSnapshot,
+    /// Local transform components.
+    pub transforms: Vec<DiffDriveTransformSnapshot>,
+    /// Rigid-body velocity components.
+    pub rigid_bodies: Vec<DiffDriveRigidBodySnapshot>,
+    /// Actuator command target state.
+    pub actuators: Vec<DiffDriveActuatorSnapshot>,
+    /// Physics joint motor state.
+    pub joint_motors: Vec<DiffDriveJointMotorSnapshot>,
+    /// Sensor runtime sequence state.
+    pub sensor_states: Vec<DiffDriveSensorStateSnapshot>,
+    /// Latest IMU frames by stream.
+    pub imu_frames: Vec<DiffDriveFrameSnapshot<ImuSample>>,
+    /// Latest LiDAR frames by stream.
+    pub lidar_frames: Vec<DiffDriveFrameSnapshot<PointCloud>>,
+    /// Latest wheel encoder frames by stream.
+    pub wheel_encoder_frames: Vec<DiffDriveFrameSnapshot<WheelEncoderSample>>,
+}
 
 /// Headless differential drive environment.
 pub struct DiffDriveSim {
@@ -146,9 +320,198 @@ impl DiffDriveSim {
         self.world_seed
     }
 
+    /// Returns the fixed simulation timestep.
+    pub fn fixed_delta(&self) -> SimDuration {
+        self.dt
+    }
+
+    /// Returns the current simulation time.
+    pub fn sim_time(&self) -> SimTime {
+        self.sim_time
+    }
+
+    /// Returns the world-level deterministic random state.
+    pub fn world_random_snapshot(&self) -> WorldRandomSnapshot {
+        self.world
+            .get_resource::<WorldRandom>()
+            .map(WorldRandom::snapshot)
+            .unwrap_or(WorldRandomSnapshot {
+                seed: self.world_seed,
+                main_rng_state: self.world_seed,
+            })
+    }
+
+    /// Restores the world-level deterministic random state.
+    pub fn restore_world_random_snapshot(&mut self, snapshot: WorldRandomSnapshot) {
+        self.world_seed = snapshot.seed;
+        if let Some(mut world_random) = self.world.get_resource_mut::<WorldRandom>() {
+            world_random.restore(snapshot);
+        } else {
+            self.world
+                .insert_resource(WorldRandom::from_snapshot(snapshot));
+        }
+    }
+
     /// Returns the loaded scene path when the simulation was created from assets.
     pub fn scene_path(&self) -> Option<&Path> {
         self.scene_path.as_deref()
+    }
+
+    /// Captures a completed-tick simulation snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiffDriveSimSnapshotError::PendingCommands`] if commands have
+    /// been queued but not yet applied. Capture snapshots after a completed
+    /// simulation tick, before queuing the next action.
+    pub fn snapshot(&self) -> Result<DiffDriveSimSnapshot, DiffDriveSimSnapshotError> {
+        if !self.command_buffer.is_empty() {
+            return Err(DiffDriveSimSnapshotError::PendingCommands {
+                pending: self.command_buffer.len(),
+            });
+        }
+
+        let mut snapshot = DiffDriveSimSnapshot {
+            schema_version: DIFF_DRIVE_SIM_SNAPSHOT_VERSION,
+            sim_ticks: self.sim_time.ticks(),
+            step_count: self.step_count,
+            command_sequence: self.command_buffer.next_sequence(),
+            world_random: self.world_random_snapshot(),
+            transforms: Vec::new(),
+            rigid_bodies: Vec::new(),
+            actuators: Vec::new(),
+            joint_motors: Vec::new(),
+            sensor_states: Vec::new(),
+            imu_frames: Vec::new(),
+            lidar_frames: Vec::new(),
+            wheel_encoder_frames: Vec::new(),
+        };
+
+        for entity in sorted_world_entities(&self.world) {
+            let entity_index = entity.index();
+            if let Some(transform) = self.world.get::<Transform3>(entity) {
+                snapshot.transforms.push(DiffDriveTransformSnapshot {
+                    entity_index,
+                    transform: *transform,
+                });
+            }
+            if let Some(body) = self.world.get::<RigidBody>(entity) {
+                snapshot.rigid_bodies.push(DiffDriveRigidBodySnapshot {
+                    entity_index,
+                    linear_velocity_m_s: body.linear_velocity_m_s,
+                    angular_velocity_rad_s: body.angular_velocity_rad_s,
+                });
+            }
+            if let Some(actuator) = self.world.get::<Actuator>(entity) {
+                snapshot.actuators.push(DiffDriveActuatorSnapshot {
+                    entity_index,
+                    mode: actuator.mode,
+                    target: actuator.target,
+                });
+            }
+            if let Some(motor) = self.world.get::<JointMotor>(entity) {
+                snapshot.joint_motors.push(DiffDriveJointMotorSnapshot {
+                    entity_index,
+                    motor: *motor,
+                });
+            }
+            if let Some(state) = self.world.get::<SensorState>(entity) {
+                snapshot.sensor_states.push(DiffDriveSensorStateSnapshot {
+                    entity_index,
+                    last_sequence: state.last_sequence,
+                    last_sample_ticks: state.last_sample_ticks,
+                    frame_count: state.frame_count,
+                });
+            }
+            if let Some(sensor) = self.world.get::<Sensor>(entity) {
+                match sensor.kind {
+                    SensorKind::Imu(_) => {
+                        if let Some(frame) = self.data_bus.latest::<ImuSample>(sensor.stream_id) {
+                            snapshot
+                                .imu_frames
+                                .push(DiffDriveFrameSnapshot::from_frame(frame));
+                        }
+                    }
+                    SensorKind::Lidar(_) => {
+                        if let Some(frame) = self.data_bus.latest::<PointCloud>(sensor.stream_id) {
+                            snapshot
+                                .lidar_frames
+                                .push(DiffDriveFrameSnapshot::from_frame(frame));
+                        }
+                    }
+                    SensorKind::WheelEncoder(_) => {
+                        if let Some(frame) =
+                            self.data_bus.latest::<WheelEncoderSample>(sensor.stream_id)
+                        {
+                            snapshot
+                                .wheel_encoder_frames
+                                .push(DiffDriveFrameSnapshot::from_frame(frame));
+                        }
+                    }
+                    SensorKind::Camera(_) => {}
+                }
+            }
+        }
+
+        Ok(snapshot)
+    }
+
+    /// Restores this simulation from a completed-tick snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot schema is unsupported, if it references
+    /// missing entities/components, or if the physics backend cannot be rebuilt.
+    pub fn restore_snapshot(
+        &mut self,
+        snapshot: &DiffDriveSimSnapshot,
+    ) -> Result<(), DiffDriveSimSnapshotError> {
+        if snapshot.schema_version != DIFF_DRIVE_SIM_SNAPSHOT_VERSION {
+            return Err(DiffDriveSimSnapshotError::UnsupportedSchemaVersion {
+                expected: DIFF_DRIVE_SIM_SNAPSHOT_VERSION,
+                actual: snapshot.schema_version,
+            });
+        }
+
+        for item in &snapshot.transforms {
+            *component_mut::<Transform3>(&mut self.world, item.entity_index)? = item.transform;
+        }
+        for item in &snapshot.rigid_bodies {
+            let mut body = component_mut::<RigidBody>(&mut self.world, item.entity_index)?;
+            body.linear_velocity_m_s = item.linear_velocity_m_s;
+            body.angular_velocity_rad_s = item.angular_velocity_rad_s;
+        }
+        for item in &snapshot.actuators {
+            let mut actuator = component_mut::<Actuator>(&mut self.world, item.entity_index)?;
+            actuator.mode = item.mode;
+            actuator.target = item.target;
+        }
+        for item in &snapshot.joint_motors {
+            *component_mut::<JointMotor>(&mut self.world, item.entity_index)? = item.motor;
+        }
+        for item in &snapshot.sensor_states {
+            let mut state = component_mut::<SensorState>(&mut self.world, item.entity_index)?;
+            state.last_sequence = item.last_sequence;
+            state.last_sample_ticks = item.last_sample_ticks;
+            state.frame_count = item.frame_count;
+        }
+
+        self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);
+        self.step_count = snapshot.step_count;
+        self.restore_world_random_snapshot(snapshot.world_random);
+        self.command_buffer.restore_empty(snapshot.command_sequence);
+        self.data_bus = InMemoryDataBus::new();
+        for frame in &snapshot.imu_frames {
+            self.data_bus.publish(frame.to_frame());
+        }
+        for frame in &snapshot.lidar_frames {
+            self.data_bus.publish(frame.to_frame());
+        }
+        for frame in &snapshot.wheel_encoder_frames {
+            self.data_bus.publish(frame.to_frame());
+        }
+        self.rebuild_physics_from_ecs()?;
+        Ok(())
     }
 
     /// Reloads the simulation from its scene asset when one was used to create it.
@@ -492,6 +855,46 @@ impl DiffDriveSim {
         self.sim_time = self.sim_time + self.dt;
         self.step_count += 1;
     }
+
+    fn rebuild_physics_from_ecs(&mut self) -> Result<(), PhysicsError> {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend.create_world(PhysicsWorldDesc::default())?;
+        backend.sync_from_ecs(&mut self.world, physics_world)?;
+        self.backend = backend;
+        self.physics_world = physics_world;
+        Ok(())
+    }
+}
+
+impl From<PhysicsError> for DiffDriveSimSnapshotError {
+    fn from(error: PhysicsError) -> Self {
+        Self::Physics(error)
+    }
+}
+
+fn sorted_world_entities(world: &World) -> Vec<Entity> {
+    let mut entities: Vec<Entity> = world.iter_entities().map(|entity| entity.id()).collect();
+    entities.sort_unstable();
+    entities
+}
+
+fn component_mut<T: Component>(
+    world: &mut World,
+    entity_index: u32,
+) -> Result<Mut<'_, T>, DiffDriveSimSnapshotError> {
+    let entity = Entity::from_raw(entity_index);
+    if !world
+        .iter_entities()
+        .any(|entity_ref| entity_ref.id() == entity)
+    {
+        return Err(DiffDriveSimSnapshotError::MissingEntity { entity_index });
+    }
+    world
+        .get_mut::<T>(entity)
+        .ok_or(DiffDriveSimSnapshotError::MissingComponent {
+            entity_index,
+            component: type_name::<T>(),
+        })
 }
 
 impl Default for DiffDriveSim {
@@ -735,6 +1138,7 @@ mod tests {
             .join("../rne_assets/tests/fixtures/episode_diff_drive.rne.scene.toml");
         let mut sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
         assert_eq!(sim.world_seed(), 42);
+        assert_eq!(sim.world_random_snapshot().seed, 42);
 
         let mut final_x = 0.0;
         for _ in 0..180 {
@@ -743,6 +1147,61 @@ mod tests {
         }
 
         assert!(final_x > 1.5, "expected forward motion, got x={final_x}");
+    }
+
+    #[test]
+    fn world_random_snapshot_restores_main_stream_position() {
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rne_assets/tests/fixtures/episode_diff_drive.rne.scene.toml");
+        let mut sim = DiffDriveSim::from_scene_path(&scene_path).expect("load scene");
+        sim.world_mut().resource_mut::<WorldRandom>().next_u64();
+        let snapshot = sim.world_random_snapshot();
+        let expected = sim.world_mut().resource_mut::<WorldRandom>().next_u64();
+
+        sim.world_mut().resource_mut::<WorldRandom>().next_u64();
+        sim.restore_world_random_snapshot(snapshot);
+
+        assert_eq!(sim.world_seed(), 42);
+        assert_eq!(
+            sim.world_mut().resource_mut::<WorldRandom>().next_u64(),
+            expected
+        );
+    }
+
+    #[test]
+    fn snapshot_rejects_pending_commands() {
+        let mut sim = DiffDriveSim::new();
+
+        sim.queue_robot_action(sim.robot().robot, DiffDriveAction::forward(1.0));
+
+        assert_eq!(
+            sim.snapshot(),
+            Err(DiffDriveSimSnapshotError::PendingCommands { pending: 2 })
+        );
+    }
+
+    #[test]
+    fn snapshot_restores_kinematic_state_and_sensor_frame() {
+        let mut sim = DiffDriveSim::with_robot_configs(&[DiffDriveConfig {
+            drive_mode: DiffDriveDriveMode::Kinematic,
+            ..DiffDriveConfig::default()
+        }]);
+        sim.step(3.0, 3.0);
+        let snapshot = sim.snapshot().unwrap();
+        let observation_at_snapshot = sim.observe();
+        let expected_next = sim.step(1.0, 2.0);
+        let expected_after_next = sim.snapshot().unwrap();
+
+        sim.step(-2.0, 5.0);
+        sim.step(4.0, -1.0);
+
+        sim.restore_snapshot(&snapshot).unwrap();
+        assert_eq!(sim.observe(), observation_at_snapshot);
+        let restored_next = sim.step(1.0, 2.0);
+        let restored_after_next = sim.snapshot().unwrap();
+
+        assert_eq!(restored_next, expected_next);
+        assert_eq!(restored_after_next, expected_after_next);
     }
 
     #[test]

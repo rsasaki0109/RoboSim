@@ -1,9 +1,52 @@
 //! Batched mobile manipulator episodes for population-based / parallel RL rollouts.
 
-use super::{MobileManipulatorEpisode, MobileManipulatorEpisodeConfig};
+use super::{
+    MobileManipulatorEpisode, MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeSnapshot,
+    MobileManipulatorEpisodeSnapshotError,
+};
 use crate::action::MobileManipulatorAction;
 use crate::episode::Episode;
 use crate::observation::MobileManipulatorObservation;
+use serde::{Deserialize, Serialize};
+
+const VECTORIZED_MOBILE_MANIPULATOR_SNAPSHOT_VERSION: u32 = 1;
+
+/// Error restoring a vectorized mobile-manipulator checkpoint.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VectorizedMobileManipulatorSnapshotError {
+    /// Snapshot payload schema is not supported by this engine.
+    UnsupportedSchemaVersion {
+        /// Expected snapshot schema version.
+        expected: u32,
+        /// Actual snapshot schema version.
+        actual: u32,
+    },
+    /// Snapshot contains a different number of environments.
+    EnvCountMismatch {
+        /// Expected number of environments.
+        expected: usize,
+        /// Actual number of checkpoint entries.
+        actual: usize,
+    },
+    /// One episode checkpoint failed.
+    Episode {
+        /// Environment index that failed.
+        index: usize,
+        /// Underlying episode checkpoint error.
+        error: MobileManipulatorEpisodeSnapshotError,
+    },
+}
+
+/// Completed-tick checkpoint of a [`VectorizedMobileManipulatorEnv`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VectorizedMobileManipulatorSnapshot {
+    /// Snapshot payload schema version.
+    pub schema_version: u32,
+    /// Whether finished environments auto-reset after a step.
+    pub auto_reset: bool,
+    /// Per-environment episode checkpoints in environment index order.
+    pub episodes: Vec<MobileManipulatorEpisodeSnapshot>,
+}
 
 /// Configuration for a vectorized mobile manipulator environment.
 #[derive(Clone, Debug, PartialEq)]
@@ -118,6 +161,56 @@ impl VectorizedMobileManipulatorEnv {
         step
     }
 
+    /// Returns a completed-tick checkpoint for every environment.
+    pub fn checkpoint(&self) -> VectorizedMobileManipulatorSnapshot {
+        VectorizedMobileManipulatorSnapshot {
+            schema_version: VECTORIZED_MOBILE_MANIPULATOR_SNAPSHOT_VERSION,
+            auto_reset: self.auto_reset,
+            episodes: self
+                .episodes
+                .iter()
+                .map(MobileManipulatorEpisode::checkpoint)
+                .collect(),
+        }
+    }
+
+    /// Restores every environment from a completed-tick checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot schema is unsupported, if the number of
+    /// environments differs, or if any underlying episode checkpoint is
+    /// incompatible with its environment.
+    pub fn restore_checkpoint(
+        &mut self,
+        snapshot: &VectorizedMobileManipulatorSnapshot,
+    ) -> Result<(), VectorizedMobileManipulatorSnapshotError> {
+        if snapshot.schema_version != VECTORIZED_MOBILE_MANIPULATOR_SNAPSHOT_VERSION {
+            return Err(
+                VectorizedMobileManipulatorSnapshotError::UnsupportedSchemaVersion {
+                    expected: VECTORIZED_MOBILE_MANIPULATOR_SNAPSHOT_VERSION,
+                    actual: snapshot.schema_version,
+                },
+            );
+        }
+        if snapshot.episodes.len() != self.episodes.len() {
+            return Err(VectorizedMobileManipulatorSnapshotError::EnvCountMismatch {
+                expected: self.episodes.len(),
+                actual: snapshot.episodes.len(),
+            });
+        }
+
+        for (index, (episode, checkpoint)) in
+            self.episodes.iter_mut().zip(&snapshot.episodes).enumerate()
+        {
+            episode.restore_checkpoint(checkpoint).map_err(|error| {
+                VectorizedMobileManipulatorSnapshotError::Episode { index, error }
+            })?;
+        }
+        self.auto_reset = snapshot.auto_reset;
+        Ok(())
+    }
+
     /// Returns read access to one underlying episode (e.g. for its total reward).
     pub fn episode(&self, index: usize) -> &MobileManipulatorEpisode {
         &self.episodes[index]
@@ -159,6 +252,60 @@ mod tests {
         assert!(
             env.episode(0).total_reward() > env.episode(1).total_reward(),
             "the driven environment should out-reward the idle one"
+        );
+    }
+
+    #[test]
+    fn checkpoint_restores_vectorized_episode_state() {
+        let mut env = VectorizedMobileManipulatorEnv::new(VectorizedMobileManipulatorConfig::new(
+            MobileManipulatorEpisodeConfig::reach_randomized(5),
+            2,
+        ));
+        env.reset();
+        env.step(&[
+            MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.5,
+                ..MobileManipulatorAction::default()
+            },
+            MobileManipulatorAction {
+                elbow_velocity_rad_s: -0.25,
+                ..MobileManipulatorAction::default()
+            },
+        ]);
+
+        let checkpoint = env.checkpoint();
+
+        env.step(&[
+            MobileManipulatorAction {
+                shoulder_velocity_rad_s: -1.0,
+                ..MobileManipulatorAction::default()
+            },
+            MobileManipulatorAction {
+                elbow_velocity_rad_s: 1.0,
+                ..MobileManipulatorAction::default()
+            },
+        ]);
+        env.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(env.checkpoint(), checkpoint);
+    }
+
+    #[test]
+    fn checkpoint_rejects_env_count_mismatch() {
+        let mut env = VectorizedMobileManipulatorEnv::new(VectorizedMobileManipulatorConfig::new(
+            MobileManipulatorEpisodeConfig::reach(),
+            2,
+        ));
+        env.reset();
+        let mut checkpoint = env.checkpoint();
+        checkpoint.episodes.pop();
+
+        assert_eq!(
+            env.restore_checkpoint(&checkpoint),
+            Err(VectorizedMobileManipulatorSnapshotError::EnvCountMismatch {
+                expected: 2,
+                actual: 1
+            })
         );
     }
 }

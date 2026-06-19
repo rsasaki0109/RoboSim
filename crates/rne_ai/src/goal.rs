@@ -5,6 +5,28 @@ use crate::env::DiffDriveEpisode;
 use crate::observation::DiffDriveObservation;
 use crate::policy::Policy;
 use crate::rng::DeterministicRng;
+use serde::{Deserialize, Serialize};
+
+/// Snapshot of runtime goal-curriculum progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalCurriculumSnapshot {
+    /// Active curriculum stage index.
+    pub stage_index: usize,
+    /// Number of successful episodes accumulated in the active stage.
+    pub successes_in_stage: u32,
+}
+
+/// Error restoring goal-curriculum progress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GoalCurriculumSnapshotError {
+    /// The snapshot points beyond the configured stage list.
+    StageOutOfRange {
+        /// Invalid stage index from the snapshot.
+        stage_index: usize,
+        /// Number of stages configured for this curriculum.
+        stage_count: usize,
+    },
+}
 
 /// Resolves the goal X coordinate from an observation.
 pub fn goal_x_from_observation(observation: &DiffDriveObservation) -> f64 {
@@ -176,6 +198,40 @@ impl GoalCurriculum {
         self.config.stages.len()
     }
 
+    /// Returns the number of successes accumulated in the active stage.
+    pub fn successes_in_stage(&self) -> u32 {
+        self.successes_in_stage
+    }
+
+    /// Returns a snapshot of runtime curriculum progress.
+    pub fn snapshot(&self) -> GoalCurriculumSnapshot {
+        GoalCurriculumSnapshot {
+            stage_index: self.stage_index,
+            successes_in_stage: self.successes_in_stage,
+        }
+    }
+
+    /// Restores runtime curriculum progress from a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GoalCurriculumSnapshotError::StageOutOfRange`] if the snapshot
+    /// was produced for a curriculum with more stages than this instance.
+    pub fn restore_snapshot(
+        &mut self,
+        snapshot: GoalCurriculumSnapshot,
+    ) -> Result<(), GoalCurriculumSnapshotError> {
+        if snapshot.stage_index >= self.stage_count() {
+            return Err(GoalCurriculumSnapshotError::StageOutOfRange {
+                stage_index: snapshot.stage_index,
+                stage_count: self.stage_count(),
+            });
+        }
+        self.stage_index = snapshot.stage_index;
+        self.successes_in_stage = snapshot.successes_in_stage;
+        Ok(())
+    }
+
     /// Samples a goal from the active stage range.
     pub fn sample_goal(&mut self, rng: &mut DeterministicRng) -> f64 {
         let stage = self
@@ -263,5 +319,18 @@ mod tests {
         assert!(!curriculum.record_episode_end(true));
         assert!(curriculum.record_episode_end(true));
         assert_eq!(curriculum.stage_index(), 1);
+    }
+
+    #[test]
+    fn curriculum_snapshot_restores_progress() {
+        let mut curriculum = GoalCurriculum::new(GoalCurriculumConfig::easy_to_hard());
+        assert!(!curriculum.record_episode_end(true));
+        let snapshot = curriculum.snapshot();
+        assert!(curriculum.record_episode_end(true));
+
+        curriculum.restore_snapshot(snapshot).unwrap();
+
+        assert_eq!(curriculum.stage_index(), 0);
+        assert_eq!(curriculum.successes_in_stage(), 1);
     }
 }

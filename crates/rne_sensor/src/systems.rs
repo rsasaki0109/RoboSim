@@ -2,15 +2,16 @@
 
 use crate::camera::sample_camera;
 use crate::components::{Sensor, SensorKind, SensorState};
-use crate::imu::sample_imu;
+use crate::imu::sample_imu_keyed;
 use crate::lidar::sample_lidar_at_entity;
+use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, Frame, FramePayload};
 use rne_ecs::World;
 use rne_physics::{PhysicsBackend, PhysicsWorldId};
 use rne_render::{HeadlessRenderBackend, RenderBackend};
-use rne_world::Transform3;
+use rne_world::{Transform3, WorldRandom};
 
 /// Context required to sample sensors in the simulation loop.
 pub struct SensorSampleContext<'a, B: PhysicsBackend> {
@@ -34,6 +35,11 @@ pub fn sample_sensors<B: PhysicsBackend>(
     let mut published = 0_usize;
     let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
+    let world_seed = ctx
+        .world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
 
     for entity_ref in ctx.world.iter_entities() {
         let entity = entity_ref.id();
@@ -67,7 +73,17 @@ pub fn sample_sensors<B: PhysicsBackend>(
                         entity,
                         state.last_sequence,
                         ctx.sim_time,
-                        sample_imu(ctx.world, entity, spec),
+                        sample_imu_keyed(
+                            ctx.world,
+                            entity,
+                            spec,
+                            SensorNoiseKey::new(
+                                world_seed,
+                                spec.seed,
+                                sensor.stream_id.0,
+                                state.last_sequence,
+                            ),
+                        ),
                     )
                     .with_latency(sensor.latency()),
                 );
@@ -310,5 +326,66 @@ mod tests {
         let image = bus.latest::<rne_data::ImageRgb8>(StreamId::new(2)).unwrap();
         assert_eq!(image.payload.width, 8);
         assert_eq!(image.payload.rgba8.len(), 8 * 8 * 4);
+    }
+
+    #[test]
+    fn imu_noise_changes_by_sample_sequence() {
+        let mut world = World::new();
+        world.insert_resource(WorldRandom::new(123));
+        let sensor_entity = spawn_named(&mut world, "imu");
+        world.entity_mut(sensor_entity).insert((
+            Sensor {
+                kind: SensorKind::Imu(ImuSpec {
+                    noise: NoiseModel {
+                        angular_stddev_rad_s: 0.1,
+                        linear_stddev_m_s2: 0.2,
+                        linear_bias_m_s2: rne_math::Vec3::ZERO,
+                    },
+                    seed: 9,
+                }),
+                update_rate_hz: 60.0,
+                latency_ticks: 0,
+                frame_id: 1,
+                enabled: true,
+                stream_id: StreamId::new(77),
+            },
+            SensorState::default(),
+            Transform3::default(),
+        ));
+
+        let mut bus = InMemoryDataBus::new();
+        let physics = NullPhysics;
+        sample_sensors(
+            &mut SensorSampleContext {
+                world: &mut world,
+                sim_time: SimTime::from_ticks(0),
+                physics: &physics,
+                physics_world: PhysicsWorldId::DEFAULT,
+                render: None,
+            },
+            &mut bus,
+        );
+        let first = bus
+            .latest::<rne_data::ImuSample>(StreamId::new(77))
+            .unwrap();
+
+        sample_sensors(
+            &mut SensorSampleContext {
+                world: &mut world,
+                sim_time: SimTime::from_ticks(16_666_666),
+                physics: &physics,
+                physics_world: PhysicsWorldId::DEFAULT,
+                render: None,
+            },
+            &mut bus,
+        );
+        let second = bus
+            .latest::<rne_data::ImuSample>(StreamId::new(77))
+            .unwrap();
+
+        assert_ne!(
+            first.payload.linear_acceleration_m_s2,
+            second.payload.linear_acceleration_m_s2
+        );
     }
 }

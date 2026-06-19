@@ -21,6 +21,7 @@ rne_render = { path = "../rne_render" }
 rne_sensor = { path = "../rne_sensor" }
 rne_urdf_import = { path = "../rne_urdf_import" }
 rne_world = { path = "../rne_world" }
+serde = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"

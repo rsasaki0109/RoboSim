@@ -13,9 +13,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pyo3 = { version = "0.23", features = ["abi3-py39"] }
 rne_ai = { path = "../rne_ai" }
+serde_json = "1"
 
 [dev-dependencies]
 approx = "0.5"
+tempfile = "3"
 
 [features]
 default = []

@@ -1,9 +1,52 @@
 //! Batched differential-drive episodes for parallel RL rollouts.
 
-use super::{DiffDriveEpisode, DiffDriveEpisodeConfig};
+use super::{
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
+    DiffDriveEpisodeSnapshotError,
+};
 use crate::action::DiffDriveAction;
 use crate::episode::Episode;
 use crate::observation::DiffDriveObservation;
+use serde::{Deserialize, Serialize};
+
+const VECTORIZED_DIFF_DRIVE_SNAPSHOT_VERSION: u32 = 1;
+
+/// Error restoring or creating a vectorized diff-drive checkpoint.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VectorizedDiffDriveSnapshotError {
+    /// Snapshot payload schema is not supported by this engine.
+    UnsupportedSchemaVersion {
+        /// Expected snapshot schema version.
+        expected: u32,
+        /// Actual snapshot schema version.
+        actual: u32,
+    },
+    /// Snapshot contains a different number of environments.
+    EnvCountMismatch {
+        /// Expected number of environments.
+        expected: usize,
+        /// Actual number of checkpoint entries.
+        actual: usize,
+    },
+    /// One episode checkpoint failed.
+    Episode {
+        /// Environment index that failed.
+        index: usize,
+        /// Underlying episode checkpoint error.
+        error: DiffDriveEpisodeSnapshotError,
+    },
+}
+
+/// Completed-tick checkpoint of a [`VectorizedDiffDriveEnv`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VectorizedDiffDriveSnapshot {
+    /// Snapshot payload schema version.
+    pub schema_version: u32,
+    /// Whether finished environments auto-reset after a step.
+    pub auto_reset: bool,
+    /// Per-environment episode checkpoints in environment index order.
+    pub episodes: Vec<DiffDriveEpisodeSnapshot>,
+}
 
 /// Configuration for a vectorized diff-drive environment.
 #[derive(Clone, Debug, PartialEq)]
@@ -132,6 +175,65 @@ impl VectorizedDiffDriveEnv {
         step
     }
 
+    /// Returns a completed-tick checkpoint for every environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VectorizedDiffDriveSnapshotError::Episode`] if any underlying
+    /// episode cannot be snapshotted.
+    pub fn checkpoint(
+        &self,
+    ) -> Result<VectorizedDiffDriveSnapshot, VectorizedDiffDriveSnapshotError> {
+        let mut episodes = Vec::with_capacity(self.episodes.len());
+        for (index, episode) in self.episodes.iter().enumerate() {
+            episodes.push(
+                episode
+                    .checkpoint()
+                    .map_err(|error| VectorizedDiffDriveSnapshotError::Episode { index, error })?,
+            );
+        }
+        Ok(VectorizedDiffDriveSnapshot {
+            schema_version: VECTORIZED_DIFF_DRIVE_SNAPSHOT_VERSION,
+            auto_reset: self.auto_reset,
+            episodes,
+        })
+    }
+
+    /// Restores every environment from a completed-tick checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot schema is unsupported, if the number of
+    /// environments differs, or if any underlying episode checkpoint is
+    /// incompatible with its environment.
+    pub fn restore_checkpoint(
+        &mut self,
+        snapshot: &VectorizedDiffDriveSnapshot,
+    ) -> Result<(), VectorizedDiffDriveSnapshotError> {
+        if snapshot.schema_version != VECTORIZED_DIFF_DRIVE_SNAPSHOT_VERSION {
+            return Err(VectorizedDiffDriveSnapshotError::UnsupportedSchemaVersion {
+                expected: VECTORIZED_DIFF_DRIVE_SNAPSHOT_VERSION,
+                actual: snapshot.schema_version,
+            });
+        }
+        if snapshot.episodes.len() != self.episodes.len() {
+            return Err(VectorizedDiffDriveSnapshotError::EnvCountMismatch {
+                expected: self.episodes.len(),
+                actual: snapshot.episodes.len(),
+            });
+        }
+
+        for (index, (episode, checkpoint)) in
+            self.episodes.iter_mut().zip(&snapshot.episodes).enumerate()
+        {
+            episode
+                .restore_checkpoint(checkpoint)
+                .map_err(|error| VectorizedDiffDriveSnapshotError::Episode { index, error })?;
+        }
+        self.auto_reset = snapshot.auto_reset;
+        Ok(())
+    }
+
     /// Returns read access to one underlying episode.
     pub fn episode(&self, index: usize) -> &DiffDriveEpisode {
         &self.episodes[index]
@@ -188,5 +290,50 @@ mod tests {
             .map(|index| env.episode(index).goal_x_m())
             .collect();
         assert!(goals.windows(2).any(|pair| pair[0] != pair[1]));
+    }
+
+    #[test]
+    fn checkpoint_restores_vectorized_episode_state() {
+        let mut env = VectorizedDiffDriveEnv::new(VectorizedDiffDriveConfig {
+            episode: DiffDriveEpisodeConfig {
+                max_steps: 120,
+                goal_x_m: 0.75,
+                ..DiffDriveEpisodeConfig::default()
+            },
+            num_envs: 2,
+            auto_reset: false,
+        });
+        env.reset();
+        env.step(&[DiffDriveAction::forward(2.0), DiffDriveAction::forward(4.0)]);
+
+        let checkpoint = env.checkpoint().unwrap();
+
+        env.step(&[
+            DiffDriveAction::forward(-1.0),
+            DiffDriveAction::forward(1.0),
+        ]);
+        env.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(env.checkpoint().unwrap(), checkpoint);
+    }
+
+    #[test]
+    fn checkpoint_rejects_env_count_mismatch() {
+        let mut env = VectorizedDiffDriveEnv::new(VectorizedDiffDriveConfig {
+            num_envs: 2,
+            auto_reset: false,
+            ..VectorizedDiffDriveConfig::default()
+        });
+        env.reset();
+        let mut checkpoint = env.checkpoint().unwrap();
+        checkpoint.episodes.pop();
+
+        assert_eq!(
+            env.restore_checkpoint(&checkpoint),
+            Err(VectorizedDiffDriveSnapshotError::EnvCountMismatch {
+                expected: 2,
+                actual: 1
+            })
+        );
     }
 }

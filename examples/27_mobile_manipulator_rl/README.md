@@ -38,6 +38,18 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 ```bash
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py          # 20 iterations
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --smoke  # short, asserts learning
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json --resume --iterations 30
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-out best_policy.json
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-in best_policy.json --eval-only --eval-episodes 12
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-in best_policy.json --eval-only --rollout-csv rollout.csv
+.venv/bin/python examples/27_mobile_manipulator_rl/plot_rollout.py rollout.csv --out rollout.svg
+.venv/bin/python examples/27_mobile_manipulator_rl/animate_rollout.py rollout.csv --out rollout.html
+.venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-in best_policy.json --eval-only --report-dir reports/reach
+.venv/bin/python examples/27_mobile_manipulator_rl/compare_reports.py reports --html reports/leaderboard.html --csv reports/leaderboard.csv
+.venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 4 --iterations 12 --jobs 2
+.venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 4 --iterations 20 --resume
+.venv/bin/python examples/27_mobile_manipulator_rl/sweep.py --out reports/sweep --runs 8 --skip-complete
 ```
 
 The reach target is placed where the arm only reaches it under active control (passive
@@ -45,6 +57,44 @@ settling fails), so the reward signal is meaningful for learning. Each CEM itera
 evaluates the whole candidate population in lock-step with
 `rne_py.VectorizedMobileManipulatorEnv`, advancing every policy with a single batched
 `step` call (each policy's reward is frozen the moment its episode ends).
+
+Vectorized environments can be checkpointed and restored from Python as JSON, which is
+intended for long training jobs that need deterministic resume:
+
+```python
+env = rne_py.VectorizedMobileManipulatorEnv("reach_random", 32)
+env.reset()
+env.save_checkpoint("rne_checkpoint.json")
+
+# ... more rollout / training work ...
+
+env.load_checkpoint("rne_checkpoint.json")
+checkpoint_json = env.checkpoint_json()
+env.restore_checkpoint_json(checkpoint_json)
+```
+
+The dependency-free CEM trainer also writes optimizer state with `--checkpoint`, including
+the sampling distribution, best policy, reward history, and Python RNG state. Use
+`--resume` with the same path to continue from the next unfinished iteration. The
+`--iterations` value is the total target count, not an additional count.
+
+For a portable learned artifact, use `--policy-out` to save only the best linear policy.
+`--policy-in ... --eval-only` evaluates a saved policy without rerunning CEM, and
+`--policy-in` without `--eval-only` uses that policy as the initial CEM mean.
+`--rollout-csv` records one randomized reach rollout with observations, actions, per-step
+reward, cumulative reward, and done flags for plotting or debugging. `plot_rollout.py`
+turns that CSV into a standalone SVG report showing the end-effector X-Z path, target
+error, reward, and actions. `animate_rollout.py` turns the same CSV into a standalone
+HTML replay with play/pause and scrubbing controls.
+`--report-dir` writes `index.html`, `manifest.json`, `policy.json`, `rollout.csv`,
+`rollout.svg`, and `rollout.html` as one bundle.
+`compare_reports.py` scans those manifests and builds Markdown, HTML, and CSV
+leaderboards ranked by final target error, with links back to each report's `index.html`.
+`sweep.py` automates multiple CEM seeds, writes one report bundle per seed, then builds
+HTML and CSV leaderboards for the whole sweep. Add `--jobs N` to train seeds in parallel,
+and `--resume` to continue seeds that already have a `checkpoint.json`. Use
+`--skip-complete` to leave seeds with an existing `manifest.json` untouched while still
+rebuilding the leaderboard.
 
 ## Spaces
 

@@ -49,6 +49,20 @@ impl<O> EpisodeStep<O> {
     }
 }
 
+/// Snapshot of an episode-owned deterministic RNG position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EpisodeRandomSnapshot {
+    /// Internal state of the episode RNG.
+    pub rng_state: u64,
+}
+
+impl EpisodeRandomSnapshot {
+    /// Creates an RNG snapshot from an internal state value.
+    pub const fn new(rng_state: u64) -> Self {
+        Self { rng_state }
+    }
+}
+
 /// Reset/step interface for reinforcement learning episodes.
 pub trait Episode {
     /// Observation type returned after each step.

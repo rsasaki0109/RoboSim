@@ -12,7 +12,7 @@ use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
     attach_urdf_articulation, attach_urdf_visuals, parse_urdf_file, spawn_urdf_robot_with_config,
 };
-use rne_world::{spawn_world, world_transform_of, Gravity, Transform3, WorldEntity};
+use rne_world::{spawn_world, world_transform_of, Gravity, Transform3, WorldEntity, WorldRandom};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -202,6 +202,7 @@ pub fn spawn_scene(
             vector_m_s2: vec3_from_array(scene.world.gravity_m_s2),
         },
     ));
+    world.resource_mut::<WorldRandom>().reset(scene.world.seed);
 
     if scene.ground.enabled {
         spawn_ground_plane(world);
@@ -436,7 +437,7 @@ mod tests {
     use rne_physics::RigidBody;
     use rne_robot::Link;
     use rne_sensor::Sensor;
-    use rne_world::WorldEntity;
+    use rne_world::{WorldEntity, WorldRandom};
     use std::path::Path;
 
     #[test]
@@ -447,6 +448,7 @@ mod tests {
         let spawned = load_and_spawn_scene(&mut world, &scene_path).unwrap();
 
         assert!(world.get::<WorldEntity>(spawned.world).is_some());
+        assert_eq!(world.resource::<WorldRandom>().seed(), 42);
         assert_eq!(spawned.robots.len(), 1);
         assert!(world
             .get::<RigidBody>(spawned.robots[0].1.base_link)

@@ -9,6 +9,11 @@ use sim::{
     MobileManipulatorEpisodeConfig, MobileManipulatorObservation, MobileManipulatorSim,
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
 };
+use std::fs::{File, OpenOptions};
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
+
+const CHECKPOINT_TEMP_CREATE_ATTEMPTS: u32 = 64;
 
 /// Resolves a task name to a mobile manipulator episode configuration.
 fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
@@ -24,6 +29,87 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
             "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'transport', or 'inspect'"
         ))),
     }
+}
+
+fn checkpoint_temp_path(path: &Path, attempt: u32) -> PyResult<PathBuf> {
+    let file_name = path.file_name().ok_or_else(|| {
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "checkpoint path '{}' has no file name",
+            path.display()
+        ))
+    })?;
+    let mut tmp_file_name = file_name.to_os_string();
+    tmp_file_name.push(format!(".{}.{attempt}.tmp", std::process::id()));
+    Ok(path.with_file_name(tmp_file_name))
+}
+
+fn create_checkpoint_temp_file(path: &Path) -> PyResult<(PathBuf, File)> {
+    for attempt in 0..CHECKPOINT_TEMP_CREATE_ATTEMPTS {
+        let tmp_path = checkpoint_temp_path(path, attempt)?;
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(pyo3::exceptions::PyOSError::new_err(format!(
+                    "failed to create checkpoint temp file '{}': {error}",
+                    tmp_path.display()
+                )));
+            }
+        }
+    }
+
+    Err(pyo3::exceptions::PyOSError::new_err(format!(
+        "failed to create a unique checkpoint temp file for '{}' after {} attempts",
+        path.display(),
+        CHECKPOINT_TEMP_CREATE_ATTEMPTS
+    )))
+}
+
+fn atomic_write_checkpoint(path: &Path, content: &str) -> PyResult<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                pyo3::exceptions::PyOSError::new_err(format!(
+                    "failed to create checkpoint directory '{}': {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+
+    let (tmp_path, mut file) = create_checkpoint_temp_file(path)?;
+    file.write_all(content.as_bytes()).map_err(|error| {
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "failed to write checkpoint temp file '{}': {error}",
+            tmp_path.display()
+        ))
+    })?;
+    file.write_all(b"\n").map_err(|error| {
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "failed to finish checkpoint temp file '{}': {error}",
+            tmp_path.display()
+        ))
+    })?;
+    file.sync_all().map_err(|error| {
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "failed to sync checkpoint temp file '{}': {error}",
+            tmp_path.display()
+        ))
+    })?;
+    drop(file);
+
+    std::fs::rename(&tmp_path, path).map_err(|error| {
+        let _ = std::fs::remove_file(&tmp_path);
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "failed to move checkpoint temp file '{}' to '{}': {error}",
+            tmp_path.display(),
+            path.display()
+        ))
+    })
 }
 
 /// Observation returned after each simulation step.
@@ -657,6 +743,44 @@ impl PyVectorizedMobileManipulatorEnv {
         }
         Ok(self.inner.episode(index).total_reward())
     }
+
+    /// Returns a JSON checkpoint for deterministic resume.
+    fn checkpoint_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner.checkpoint()).map_err(|error| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "failed to serialize checkpoint: {error}"
+            ))
+        })
+    }
+
+    /// Restores this environment from a JSON checkpoint.
+    fn restore_checkpoint_json(&mut self, checkpoint_json: &str) -> PyResult<()> {
+        let checkpoint: rne_ai::VectorizedMobileManipulatorSnapshot =
+            serde_json::from_str(checkpoint_json).map_err(|error| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "failed to parse checkpoint: {error}"
+                ))
+            })?;
+        self.inner
+            .restore_checkpoint(&checkpoint)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(format!("{error:?}")))
+    }
+
+    /// Writes a JSON checkpoint to `path`.
+    fn save_checkpoint(&self, path: &str) -> PyResult<()> {
+        let json = self.checkpoint_json()?;
+        atomic_write_checkpoint(Path::new(path), &json)
+    }
+
+    /// Restores this environment from a JSON checkpoint file.
+    fn load_checkpoint(&mut self, path: &str) -> PyResult<()> {
+        let json = std::fs::read_to_string(Path::new(path)).map_err(|error| {
+            pyo3::exceptions::PyOSError::new_err(format!(
+                "failed to read checkpoint '{path}': {error}"
+            ))
+        })?;
+        self.restore_checkpoint_json(&json)
+    }
 }
 
 /// Robot Native Engine Python module.
@@ -677,6 +801,63 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_py_error<T>(error: PyErr, expected_message: &str)
+    where
+        T: pyo3::type_object::PyTypeInfo,
+    {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            assert!(error.is_instance_of::<T>(py));
+            assert!(
+                error.value(py).to_string().contains(expected_message),
+                "expected error message to contain {expected_message:?}, got {:?}",
+                error.value(py).to_string()
+            );
+        });
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct VectorizedCheckpointSummary {
+        schema_version: u32,
+        auto_reset: bool,
+        episodes: Vec<EpisodeCheckpointSummary>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct EpisodeCheckpointSummary {
+        schema_version: u32,
+        episode_index: u32,
+        step_in_episode: u64,
+        total_reward: f64,
+        sim_ticks: u64,
+        sim_step_count: u64,
+        random_sequence: u64,
+        random_ticks: u64,
+    }
+
+    fn vectorized_checkpoint_summary(json: &str) -> VectorizedCheckpointSummary {
+        let snapshot: rne_ai::VectorizedMobileManipulatorSnapshot =
+            serde_json::from_str(json).unwrap();
+        VectorizedCheckpointSummary {
+            schema_version: snapshot.schema_version,
+            auto_reset: snapshot.auto_reset,
+            episodes: snapshot
+                .episodes
+                .iter()
+                .map(|episode| EpisodeCheckpointSummary {
+                    schema_version: episode.schema_version,
+                    episode_index: episode.episode_index,
+                    step_in_episode: episode.step_in_episode,
+                    total_reward: episode.total_reward,
+                    sim_ticks: episode.simulation.sim_ticks,
+                    sim_step_count: episode.simulation.step_count,
+                    random_sequence: episode.random.sequence,
+                    random_ticks: episode.random.sim_ticks,
+                })
+                .collect(),
+        }
+    }
 
     #[test]
     fn rust_sim_moves_forward() {
@@ -741,5 +922,137 @@ mod tests {
             }
         }
         panic!("expected mobile manipulator place episode to terminate");
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_json_restores_state() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach_random", 2).unwrap();
+        env.reset();
+        env.step(vec![(0.0, 0.0, 0.5, 0.0, 0.0), (0.0, 0.0, 0.0, -0.25, 0.0)])
+            .unwrap();
+        let checkpoint = env.checkpoint_json().unwrap();
+        let summary = vectorized_checkpoint_summary(&checkpoint);
+        let reward_0 = env.episode_reward(0).unwrap();
+        let reward_1 = env.episode_reward(1).unwrap();
+
+        env.step(vec![(0.0, 0.0, -1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0, 0.0)])
+            .unwrap();
+        env.restore_checkpoint_json(&checkpoint).unwrap();
+
+        assert_eq!(
+            vectorized_checkpoint_summary(&env.checkpoint_json().unwrap()),
+            summary
+        );
+        assert_eq!(env.episode_reward(0).unwrap(), reward_0);
+        assert_eq!(env.episode_reward(1).unwrap(), reward_1);
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_file_restores_state() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach", 2).unwrap();
+        env.reset();
+        env.step(vec![(0.0, 0.0, 0.25, 0.0, 0.0), (0.0, 0.0, 0.0, 0.25, 0.0)])
+            .unwrap();
+        let checkpoint = env.checkpoint_json().unwrap();
+        let summary = vectorized_checkpoint_summary(&checkpoint);
+        let reward_0 = env.episode_reward(0).unwrap();
+        let reward_1 = env.episode_reward(1).unwrap();
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_string_lossy().to_string();
+        env.save_checkpoint(&path).unwrap();
+
+        env.step(vec![(0.0, 0.0, -0.5, 0.0, 0.0), (0.0, 0.0, 0.0, -0.5, 0.0)])
+            .unwrap();
+        env.load_checkpoint(&path).unwrap();
+
+        assert_eq!(
+            vectorized_checkpoint_summary(&env.checkpoint_json().unwrap()),
+            summary
+        );
+        assert_eq!(env.episode_reward(0).unwrap(), reward_0);
+        assert_eq!(env.episode_reward(1).unwrap(), reward_1);
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_save_creates_parent_directory() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        env.reset();
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory
+            .path()
+            .join("nested")
+            .join("mobile_manipulator_checkpoint.json");
+        env.save_checkpoint(path.to_str().unwrap()).unwrap();
+
+        assert!(path.is_file());
+        assert!(std::fs::read_to_string(&path).unwrap().ends_with('\n'));
+        let mut restored = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        restored.load_checkpoint(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            vectorized_checkpoint_summary(&restored.checkpoint_json().unwrap()),
+            vectorized_checkpoint_summary(&env.checkpoint_json().unwrap())
+        );
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_save_retries_stale_temp_file() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        env.reset();
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mobile_manipulator_checkpoint.json");
+        let stale_temp = checkpoint_temp_path(&path, 0).unwrap();
+        std::fs::write(&stale_temp, "stale checkpoint temp").unwrap();
+
+        env.save_checkpoint(path.to_str().unwrap()).unwrap();
+
+        assert!(path.is_file());
+        assert_eq!(
+            std::fs::read_to_string(&stale_temp).unwrap(),
+            "stale checkpoint temp"
+        );
+        let mut restored = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        restored.load_checkpoint(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            vectorized_checkpoint_summary(&restored.checkpoint_json().unwrap()),
+            vectorized_checkpoint_summary(&env.checkpoint_json().unwrap())
+        );
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_rejects_invalid_json() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        let error = env
+            .restore_checkpoint_json("{not valid json")
+            .expect_err("invalid checkpoint JSON should fail");
+
+        assert_py_error::<pyo3::exceptions::PyValueError>(error, "failed to parse checkpoint");
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_rejects_wrong_env_count() {
+        let mut source = PyVectorizedMobileManipulatorEnv::new("reach", 2).unwrap();
+        source.reset();
+        let checkpoint = source.checkpoint_json().unwrap();
+        let mut target = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        let error = target
+            .restore_checkpoint_json(&checkpoint)
+            .expect_err("checkpoint env count mismatch should fail");
+
+        assert_py_error::<pyo3::exceptions::PyValueError>(error, "EnvCountMismatch");
+    }
+
+    #[test]
+    fn vectorized_mobile_manipulator_checkpoint_load_reports_missing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing_checkpoint.json");
+        let mut env = PyVectorizedMobileManipulatorEnv::new("reach", 1).unwrap();
+        let error = env
+            .load_checkpoint(path.to_str().unwrap())
+            .expect_err("missing checkpoint file should fail");
+
+        assert_py_error::<pyo3::exceptions::PyOSError>(error, "failed to read checkpoint");
     }
 }

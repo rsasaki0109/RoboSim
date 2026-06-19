@@ -2,7 +2,9 @@
 
 use crate::error::AssetError;
 use crate::robot::RobotAsset;
+use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// Parsed `.rne.scene.toml` asset.
@@ -62,7 +64,10 @@ pub struct SceneWorldAsset {
     #[serde(default = "default_gravity")]
     pub gravity_m_s2: [f64; 3],
     /// Deterministic random seed.
-    #[serde(default)]
+    ///
+    /// Bare integer seeds are supported for the signed 64-bit TOML portable
+    /// range. Full `u64` values should be written as decimal or `0x` strings.
+    #[serde(default, deserialize_with = "deserialize_scene_seed")]
     pub seed: u64,
 }
 
@@ -150,6 +155,70 @@ fn default_enabled() -> bool {
     true
 }
 
+fn deserialize_scene_seed<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct SceneSeedVisitor;
+
+    impl Visitor<'_> for SceneSeedVisitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a non-negative u64 seed or a decimal/0x string")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            u64::try_from(value).map_err(|_| E::custom("scene seed must be non-negative"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            parse_scene_seed_string(value).map_err(E::custom)
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(SceneSeedVisitor)
+}
+
+fn parse_scene_seed_string(value: &str) -> Result<u64, String> {
+    let compact = value.trim().replace('_', "");
+    if compact.is_empty() {
+        return Err("scene seed string must not be empty".to_string());
+    }
+
+    if let Some(hex) = compact
+        .strip_prefix("0x")
+        .or_else(|| compact.strip_prefix("0X"))
+    {
+        return u64::from_str_radix(hex, 16)
+            .map_err(|_| "scene seed hex string must fit in u64".to_string());
+    }
+
+    compact
+        .parse::<u64>()
+        .map_err(|_| "scene seed decimal string must fit in u64".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +233,54 @@ mod tests {
         assert!(scene.ground.enabled);
         assert_eq!(scene.robots.len(), 1);
         assert!(scene.obstacles.is_empty());
+    }
+
+    #[test]
+    fn parses_missing_world_seed_as_zero() {
+        let scene = parse_scene_asset("", Path::new("scene.toml")).unwrap();
+
+        assert_eq!(scene.world.seed, 0);
+    }
+
+    #[test]
+    fn parses_world_seed_from_decimal_string() {
+        let scene = parse_scene_asset(
+            r#"
+[world]
+seed = "18446744073709551615"
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(scene.world.seed, u64::MAX);
+    }
+
+    #[test]
+    fn parses_world_seed_from_hex_string() {
+        let scene = parse_scene_asset(
+            r#"
+[world]
+seed = "0xffff_ffff_ffff_ffff"
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(scene.world.seed, u64::MAX);
+    }
+
+    #[test]
+    fn rejects_negative_world_seed() {
+        let result = parse_scene_asset(
+            r#"
+[world]
+seed = -1
+"#,
+            Path::new("scene.toml"),
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

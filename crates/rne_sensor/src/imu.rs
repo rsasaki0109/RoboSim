@@ -1,6 +1,6 @@
 //! IMU sensor specification and sampling.
 
-use crate::noise::NoiseModel;
+use crate::noise::{NoiseModel, SensorNoiseKey};
 use rne_data::ImuSample;
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
@@ -19,16 +19,7 @@ pub struct ImuSpec {
 
 /// Samples an IMU attached to the given entity.
 pub fn sample_imu(world: &World, entity: Entity, spec: &ImuSpec) -> ImuSample {
-    let gravity = Vec3::new(0.0, -9.81, 0.0);
-    let (angular, mut linear) = world
-        .get::<RigidBody>(entity)
-        .map(|body| (body.angular_velocity_rad_s, body.linear_velocity_m_s))
-        .unwrap_or((Vec3::ZERO, Vec3::ZERO));
-
-    if world.get::<Transform3>(entity).is_some() {
-        linear += gravity;
-    }
-
+    let (angular, linear) = sample_imu_raw(world, entity);
     let (angular, linear) = spec.noise.apply_imu(
         angular,
         linear,
@@ -39,6 +30,36 @@ pub fn sample_imu(world: &World, entity: Entity, spec: &ImuSpec) -> ImuSample {
         angular_velocity_rad_s: angular,
         linear_acceleration_m_s2: linear,
     }
+}
+
+/// Samples an IMU attached to the given entity using a stateless noise key.
+pub fn sample_imu_keyed(
+    world: &World,
+    entity: Entity,
+    spec: &ImuSpec,
+    noise_key: SensorNoiseKey,
+) -> ImuSample {
+    let (angular, linear) = sample_imu_raw(world, entity);
+    let (angular, linear) = spec.noise.apply_imu_keyed(angular, linear, noise_key);
+
+    ImuSample {
+        angular_velocity_rad_s: angular,
+        linear_acceleration_m_s2: linear,
+    }
+}
+
+fn sample_imu_raw(world: &World, entity: Entity) -> (Vec3, Vec3) {
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let (angular, mut linear) = world
+        .get::<RigidBody>(entity)
+        .map(|body| (body.angular_velocity_rad_s, body.linear_velocity_m_s))
+        .unwrap_or((Vec3::ZERO, Vec3::ZERO));
+
+    if world.get::<Transform3>(entity).is_some() {
+        linear += gravity;
+    }
+
+    (angular, linear)
 }
 
 #[cfg(test)]

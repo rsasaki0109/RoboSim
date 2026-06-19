@@ -1,5 +1,6 @@
 //! World-level ECS components.
 
+use crate::WorldRandom;
 use bevy_ecs::prelude::Component;
 use rne_ecs::EntityUuid;
 use rne_math::{Mat4, Quat, Transform3 as MathTransform3, Vec3};
@@ -115,6 +116,9 @@ pub struct GlobalTransform3 {
 
 /// Spawns a world root entity with default configuration.
 pub fn spawn_world(world: &mut bevy_ecs::world::World) -> bevy_ecs::entity::Entity {
+    if !world.contains_resource::<WorldRandom>() {
+        world.insert_resource(WorldRandom::default());
+    }
     world
         .spawn((
             EntityUuid::default(),
@@ -122,4 +126,33 @@ pub fn spawn_world(world: &mut bevy_ecs::world::World) -> bevy_ecs::entity::Enti
             Gravity::default(),
         ))
         .id()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_ecs::world::World;
+
+    #[test]
+    fn spawn_world_inserts_default_random_when_missing() {
+        let mut world = World::new();
+
+        spawn_world(&mut world);
+
+        assert_eq!(world.resource::<WorldRandom>().seed(), 0);
+    }
+
+    #[test]
+    fn spawn_world_preserves_existing_random_state() {
+        let mut world = World::new();
+        world.insert_resource(WorldRandom::new(7));
+        let consumed = world.resource_mut::<WorldRandom>().next_u64();
+
+        spawn_world(&mut world);
+
+        let next_after_spawn = world.resource_mut::<WorldRandom>().next_u64();
+        let mut expected = WorldRandom::new(7);
+        assert_eq!(expected.next_u64(), consumed);
+        assert_eq!(expected.next_u64(), next_after_spawn);
+    }
 }

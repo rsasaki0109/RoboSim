@@ -39,15 +39,24 @@ pub use env::{
     mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_grasp_scene_path,
     mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_scene_path,
     mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
-    DiffDriveEpisodeConfig, DiffDriveSim, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
-    MobileManipulatorSim, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
-    VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
+    DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot, DiffDriveEpisodeSnapshotError, DiffDriveSim,
+    MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    MobileManipulatorEpisodeProgressSnapshot, MobileManipulatorEpisodeSnapshot,
+    MobileManipulatorEpisodeSnapshotError, MobileManipulatorFixedJointSnapshot,
+    MobileManipulatorFrameSnapshot, MobileManipulatorJointMotorSnapshot,
+    MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
+    MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
+    MobileManipulatorTransformSnapshot, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
+    VectorizedDiffDriveSnapshot, VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep,
+    VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
+    VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
     VectorizedMobileManipulatorStep,
 };
-pub use episode::{Episode, EpisodeStep, TerminationReason};
+pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
-    GoalCurriculumConfig, GoalCurriculumStage, GoalSeekingPolicy, GoalTaskSet,
+    GoalCurriculumConfig, GoalCurriculumSnapshot, GoalCurriculumSnapshotError, GoalCurriculumStage,
+    GoalSeekingPolicy, GoalTaskSet,
 };
 pub use grasp::{finger_contacts_named, sim_contacts_named, FINGER_LINK_NAMES};
 pub use lidar::{lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mounts, LidarMount};
@@ -59,8 +68,8 @@ pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{ConstantVelocityPolicy, LiftPickPlacePolicy, Policy};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
-    JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumStage,
-    ReachRandomization, ReachTarget,
+    JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,
+    ReachCurriculumSnapshotError, ReachCurriculumStage, ReachRandomization, ReachTarget,
 };
 pub use render::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,

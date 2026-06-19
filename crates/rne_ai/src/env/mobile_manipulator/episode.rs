@@ -1,17 +1,118 @@
 //! Mobile manipulator episode environment.
 
+use super::sim::{
+    MobileManipulatorSim, MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
+};
 use crate::action::MobileManipulatorAction;
-use crate::episode::{Episode, EpisodeStep};
+use crate::episode::{Episode, EpisodeRandomSnapshot, EpisodeStep};
 use crate::grasp::finger_contacts_named;
 use crate::observation::MobileManipulatorObservation;
-use crate::reach::ee_distance_to_target_m;
+use crate::reach::{
+    ee_distance_to_target_m, ReachCurriculumSnapshot, ReachCurriculumSnapshotError,
+};
 use crate::reward::{MobileManipulatorRewardConfig, MobileManipulatorTask};
 use crate::transport::{
     body_moved_at_least_m, body_within_zone_m, had_finger_contact, named_translation_m,
     TRANSPORT_SUCCESS_M,
 };
-use crate::MobileManipulatorSim;
+use rne_log::{ReplayRandomSnapshot, ReplayRandomSnapshotError, ReplayRngState};
+use rne_world::WorldRandomSnapshot;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+const MOBILE_MANIPULATOR_EPISODE_RNG_STATE: &str = "mobile_manipulator_episode";
+const MOBILE_MANIPULATOR_EPISODE_SNAPSHOT_VERSION: u32 = 1;
+
+/// Error restoring or creating a mobile-manipulator episode snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MobileManipulatorEpisodeSnapshotError {
+    /// Snapshot payload schema is not supported by this engine.
+    UnsupportedSchemaVersion {
+        /// Expected snapshot schema version.
+        expected: u32,
+        /// Actual snapshot schema version.
+        actual: u32,
+    },
+    /// A deterministic checkpoint field is internally inconsistent.
+    Mismatch {
+        /// Field name that did not match.
+        field: &'static str,
+        /// Expected value.
+        expected: String,
+        /// Actual value from the snapshot.
+        actual: String,
+    },
+    /// The embedded simulation snapshot failed.
+    Simulation(MobileManipulatorSimSnapshotError),
+    /// The embedded random checkpoint failed.
+    Random(ReplayRandomSnapshotError),
+    /// Snapshot does not contain curriculum state required by this episode.
+    MissingCurriculum,
+    /// Snapshot contains curriculum state but this episode has no curriculum.
+    UnexpectedCurriculum,
+    /// The embedded curriculum state failed.
+    Curriculum(ReachCurriculumSnapshotError),
+}
+
+impl From<MobileManipulatorSimSnapshotError> for MobileManipulatorEpisodeSnapshotError {
+    fn from(error: MobileManipulatorSimSnapshotError) -> Self {
+        Self::Simulation(error)
+    }
+}
+
+impl From<ReplayRandomSnapshotError> for MobileManipulatorEpisodeSnapshotError {
+    fn from(error: ReplayRandomSnapshotError) -> Self {
+        Self::Random(error)
+    }
+}
+
+impl From<ReachCurriculumSnapshotError> for MobileManipulatorEpisodeSnapshotError {
+    fn from(error: ReachCurriculumSnapshotError) -> Self {
+        Self::Curriculum(error)
+    }
+}
+
+/// Reward-progress checkpoint for a mobile-manipulator episode.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorEpisodeProgressSnapshot {
+    /// Previous end-effector error used for Reach reward shaping.
+    pub ee_error_m: f64,
+    /// Initial object position used for Transport reward shaping.
+    pub object_initial: Option<(f64, f64, f64)>,
+    /// Whether the gripper has contacted the task object.
+    pub contacted_object: bool,
+    /// Previous object-to-target distance used for Place reward shaping.
+    pub place_error_m: f64,
+    /// Whether the object has been grasped at least once this episode.
+    pub was_grasped: bool,
+}
+
+/// Completed-tick checkpoint of a [`MobileManipulatorEpisode`].
+///
+/// This snapshot is intended to restore an episode created with compatible
+/// configuration and the same scene topology. It does not persist an external
+/// recording log.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorEpisodeSnapshot {
+    /// Snapshot payload schema version.
+    pub schema_version: u32,
+    /// Underlying simulation state snapshot.
+    pub simulation: MobileManipulatorSimSnapshot,
+    /// Replay random checkpoint for world and episode RNG state.
+    pub random: ReplayRandomSnapshot,
+    /// Zero-based episode index.
+    pub episode_index: u32,
+    /// Completed steps in the current episode.
+    pub step_in_episode: u64,
+    /// Cumulative reward in the current episode.
+    pub total_reward: f64,
+    /// Task currently active in this episode, including sampled Reach targets.
+    pub effective_task: MobileManipulatorTask,
+    /// Runtime reward-progress state.
+    pub progress_state: MobileManipulatorEpisodeProgressSnapshot,
+    /// Runtime reach-curriculum progress when curriculum training is enabled.
+    pub reach_curriculum: Option<ReachCurriculumSnapshot>,
+}
 
 /// Configuration for a mobile manipulator manipulation episode.
 #[derive(Clone, Debug, PartialEq)]
@@ -113,7 +214,7 @@ impl MobileManipulatorEpisodeConfig {
             scene_path: crate::mm_minimal_transport_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: "grasp_cube".into(),
-                target: crate::reach::ReachTarget::new(0.35, 0.0, 1.0),
+                target: crate::reach::ReachTarget::new(1.23, 0.03, -0.53),
                 place_tolerance_m: 0.12,
             },
             reward: MobileManipulatorRewardConfig::default(),
@@ -186,6 +287,28 @@ struct EpisodeProgressState {
     place_error_m: f64,
     /// True once the object has been grasped at least once this episode (Place).
     was_grasped: bool,
+}
+
+impl EpisodeProgressState {
+    fn snapshot(&self) -> MobileManipulatorEpisodeProgressSnapshot {
+        MobileManipulatorEpisodeProgressSnapshot {
+            ee_error_m: self.ee_error_m,
+            object_initial: self.object_initial,
+            contacted_object: self.contacted_object,
+            place_error_m: self.place_error_m,
+            was_grasped: self.was_grasped,
+        }
+    }
+
+    fn restore(snapshot: MobileManipulatorEpisodeProgressSnapshot) -> Self {
+        Self {
+            ee_error_m: snapshot.ee_error_m,
+            object_initial: snapshot.object_initial,
+            contacted_object: snapshot.contacted_object,
+            place_error_m: snapshot.place_error_m,
+            was_grasped: snapshot.was_grasped,
+        }
+    }
 }
 
 impl MobileManipulatorEpisode {
@@ -261,6 +384,124 @@ impl MobileManipulatorEpisode {
         self.reach_curriculum
             .as_ref()
             .map(|curriculum| curriculum.stage_index())
+    }
+
+    /// Returns a snapshot of the episode-owned randomization stream.
+    pub fn random_snapshot(&self) -> EpisodeRandomSnapshot {
+        EpisodeRandomSnapshot::new(self.rng.state())
+    }
+
+    /// Restores the episode-owned randomization stream from a snapshot.
+    pub fn restore_random_snapshot(&mut self, snapshot: EpisodeRandomSnapshot) {
+        self.rng = crate::rng::DeterministicRng::from_state(snapshot.rng_state);
+    }
+
+    /// Returns a replay checkpoint for deterministic random state.
+    pub fn replay_random_snapshot(&self) -> ReplayRandomSnapshot {
+        let world_random = self.sim.world_random_snapshot();
+        ReplayRandomSnapshot::new(
+            self.sim.sim_time(),
+            self.sim.step_count(),
+            world_random.seed,
+            world_random.main_rng_state,
+        )
+        .with_rng_state(ReplayRngState::new(
+            MOBILE_MANIPULATOR_EPISODE_RNG_STATE,
+            self.rng.state(),
+        ))
+    }
+
+    /// Restores deterministic random state from a replay checkpoint.
+    ///
+    /// This restores the world-level random stream and this episode's owned RNG.
+    /// It does not restore ECS transforms, physics state, or reward counters;
+    /// callers must pair it with a matching simulation snapshot for true
+    /// mid-run resume.
+    pub fn restore_replay_random_snapshot(
+        &mut self,
+        snapshot: &ReplayRandomSnapshot,
+    ) -> Result<(), ReplayRandomSnapshotError> {
+        snapshot.validate_current_schema()?;
+        snapshot.validate_world_seed(self.sim.world_seed())?;
+        self.sim.restore_world_random_snapshot(WorldRandomSnapshot {
+            seed: snapshot.world_seed,
+            main_rng_state: snapshot.world_main_rng_state,
+        });
+        let rng_state = snapshot.require_rng_state(MOBILE_MANIPULATOR_EPISODE_RNG_STATE)?;
+        self.rng = crate::rng::DeterministicRng::from_state(rng_state);
+        Ok(())
+    }
+
+    /// Returns a completed-tick checkpoint for this episode.
+    pub fn checkpoint(&self) -> MobileManipulatorEpisodeSnapshot {
+        MobileManipulatorEpisodeSnapshot {
+            schema_version: MOBILE_MANIPULATOR_EPISODE_SNAPSHOT_VERSION,
+            simulation: self.sim.snapshot(),
+            random: self.replay_random_snapshot(),
+            episode_index: self.episode_index,
+            step_in_episode: self.step_in_episode,
+            total_reward: self.total_reward,
+            effective_task: self.effective_task.clone(),
+            progress_state: self.progress_state.snapshot(),
+            reach_curriculum: self
+                .reach_curriculum
+                .as_ref()
+                .map(|curriculum| curriculum.snapshot()),
+        }
+    }
+
+    /// Restores this episode from a completed-tick checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot schema is unsupported, if embedded
+    /// simulation/random/curriculum state is incompatible, or if the snapshot's
+    /// random checkpoint does not correspond to the embedded simulation tick.
+    pub fn restore_checkpoint(
+        &mut self,
+        snapshot: &MobileManipulatorEpisodeSnapshot,
+    ) -> Result<(), MobileManipulatorEpisodeSnapshotError> {
+        if snapshot.schema_version != MOBILE_MANIPULATOR_EPISODE_SNAPSHOT_VERSION {
+            return Err(
+                MobileManipulatorEpisodeSnapshotError::UnsupportedSchemaVersion {
+                    expected: MOBILE_MANIPULATOR_EPISODE_SNAPSHOT_VERSION,
+                    actual: snapshot.schema_version,
+                },
+            );
+        }
+        check_snapshot_match(
+            "random.sim_ticks",
+            snapshot.simulation.sim_ticks,
+            snapshot.random.sim_ticks,
+        )?;
+        check_snapshot_match(
+            "random.sequence",
+            snapshot.simulation.step_count,
+            snapshot.random.sequence,
+        )?;
+
+        self.sim.restore_snapshot(&snapshot.simulation)?;
+        self.restore_replay_random_snapshot(&snapshot.random)?;
+        self.episode_index = snapshot.episode_index;
+        self.step_in_episode = snapshot.step_in_episode;
+        self.total_reward = snapshot.total_reward;
+        self.effective_task = snapshot.effective_task.clone();
+        self.progress_state = EpisodeProgressState::restore(snapshot.progress_state.clone());
+
+        match (&mut self.reach_curriculum, snapshot.reach_curriculum) {
+            (Some(curriculum), Some(curriculum_snapshot)) => {
+                curriculum.restore_snapshot(curriculum_snapshot)?;
+            }
+            (Some(_), None) => {
+                return Err(MobileManipulatorEpisodeSnapshotError::MissingCurriculum)
+            }
+            (None, Some(_)) => {
+                return Err(MobileManipulatorEpisodeSnapshotError::UnexpectedCurriculum);
+            }
+            (None, None) => {}
+        }
+
+        Ok(())
     }
 
     fn make_step(
@@ -351,6 +592,25 @@ impl Episode for MobileManipulatorEpisode {
 
     fn step_in_episode(&self) -> u64 {
         self.step_in_episode
+    }
+}
+
+fn check_snapshot_match<T>(
+    field: &'static str,
+    expected: T,
+    actual: T,
+) -> Result<(), MobileManipulatorEpisodeSnapshotError>
+where
+    T: Eq + ToString,
+{
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(MobileManipulatorEpisodeSnapshotError::Mismatch {
+            field,
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+        })
     }
 }
 
@@ -627,6 +887,78 @@ mod tests {
                 .any(|pair| (pair[0].0 - pair[1].0).abs() > 1e-6
                     || (pair[0].1 - pair[1].1).abs() > 1e-6),
             "expected sampled reach targets to differ across resets"
+        );
+    }
+
+    #[test]
+    fn random_snapshot_restores_reach_target_sampling_position() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach_randomized(11));
+
+        let snapshot = episode.random_snapshot();
+        let _ = episode.reset();
+        let first_target = match episode.effective_task {
+            MobileManipulatorTask::Reach { target, .. } => target,
+            _ => panic!("expected reach task"),
+        };
+        let _ = episode.reset();
+        episode.restore_random_snapshot(snapshot);
+        let _ = episode.reset();
+        let restored_target = match episode.effective_task {
+            MobileManipulatorTask::Reach { target, .. } => target,
+            _ => panic!("expected reach task"),
+        };
+
+        assert_eq!(restored_target, first_target);
+    }
+
+    #[test]
+    fn checkpoint_restores_episode_state() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach_randomized(11));
+        let _ = episode.reset();
+        episode.step(MobileManipulatorAction {
+            shoulder_velocity_rad_s: 0.5,
+            elbow_velocity_rad_s: -0.25,
+            ..MobileManipulatorAction::default()
+        });
+
+        let checkpoint = episode.checkpoint();
+        let observation_at_checkpoint = episode.simulation().observe();
+        let total_at_checkpoint = episode.total_reward();
+
+        let _ = episode.reset();
+        episode.step(MobileManipulatorAction {
+            shoulder_velocity_rad_s: -1.0,
+            elbow_velocity_rad_s: 0.75,
+            ..MobileManipulatorAction::default()
+        });
+
+        episode.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(episode.simulation().observe(), observation_at_checkpoint);
+        assert_eq!(episode.total_reward(), total_at_checkpoint);
+        assert_eq!(episode.step_in_episode(), checkpoint.step_in_episode);
+        assert_eq!(episode.checkpoint(), checkpoint);
+    }
+
+    #[test]
+    fn checkpoint_rejects_mismatched_random_tick() {
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::reach_randomized(11));
+        let _ = episode.reset();
+        let mut checkpoint = episode.checkpoint();
+        checkpoint.random.sim_ticks += 1;
+
+        let error = episode.restore_checkpoint(&checkpoint).unwrap_err();
+
+        assert_eq!(
+            error,
+            MobileManipulatorEpisodeSnapshotError::Mismatch {
+                field: "random.sim_ticks",
+                expected: checkpoint.simulation.sim_ticks.to_string(),
+                actual: checkpoint.random.sim_ticks.to_string()
+            }
         );
     }
 
