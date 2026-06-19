@@ -19,6 +19,7 @@ library (no gymnasium / numpy / torch); the mean reward climbs from a failing po
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import random
@@ -41,6 +42,11 @@ from policy_schema import (
     policy_metadata_payload,
     stable_hash,
 )
+from rollout_schema import (
+    ROLLOUT_CSV_FIELDS,
+    ROLLOUT_CSV_SCHEMA_HASH,
+    ROLLOUT_CSV_SCHEMA_VERSION,
+)
 
 try:
     import rne_py
@@ -57,7 +63,11 @@ EPISODE_STEPS = 300
 PARAM_DIM = POLICY_PARAM_DIM
 TRAINING_CHECKPOINT_VERSION = 1
 TRAINING_CHECKPOINT_ALGORITHM = "rne_mobile_manipulator_cem_reach_v1"
-REPORT_MANIFEST_VERSION = 1
+REPORT_MANIFEST_VERSION = 2
+HOUSE_GIF_WIDTH = 360
+HOUSE_GIF_HEIGHT = 240
+HOUSE_GIF_MAX_FRAMES = 72
+HOUSE_GIF_FPS = 12.0
 TRAINING_CHECKPOINT_REQUIRED_FIELDS = (
     "schema_version",
     "algorithm",
@@ -76,25 +86,6 @@ TRAINING_CHECKPOINT_REQUIRED_FIELDS = (
     "history",
     "rng_state",
 )
-ROLLOUT_CSV_FIELDS = (
-    "step",
-    "base_x",
-    "base_y",
-    "base_yaw",
-    "ee_x",
-    "ee_y",
-    "ee_z",
-    "target_dx",
-    "target_dy",
-    "target_dz",
-    "shoulder_action",
-    "elbow_action",
-    "reward",
-    "total_reward",
-    "done",
-)
-
-
 def _clamp(value, limit):
     return max(-limit, min(limit, value))
 
@@ -137,6 +128,80 @@ def _write_rollout_csv(path, rows):
         writer.writeheader()
         writer.writerows(rows)
     os.replace(tmp_path, path)
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _write_house_gif_from_csv(
+    csv_path,
+    gif_path,
+    *,
+    width,
+    height,
+    max_frames,
+    fps,
+):
+    from render_house_gif import load_samples, render_house_frames, write_gif
+
+    directory = os.path.dirname(os.path.abspath(gif_path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    house_samples = load_samples(csv_path)
+    frames = render_house_frames(
+        house_samples,
+        width=width,
+        height=height,
+        max_frames=max_frames,
+    )
+    write_gif(gif_path, frames, width=width, height=height, fps=fps)
+    return {
+        "sample_count": len(house_samples),
+        "width": width,
+        "height": height,
+        "max_frames": max_frames,
+        "frame_count": len(frames),
+        "fps": fps,
+        "byte_size": os.path.getsize(gif_path),
+        "sha256": _file_sha256(gif_path),
+    }
+
+
+def _write_rollout_house_gif_metadata(
+    path,
+    gif_path,
+    csv_path,
+    gif,
+    *,
+    metadata_gif_path=None,
+    metadata_csv_path=None,
+    quiet=False,
+):
+    from render_house_gif import write_metadata
+
+    metadata = write_metadata(
+        path,
+        gif_path=gif_path,
+        metadata_gif_path=metadata_gif_path,
+        source={"kind": "rollout_csv", "path": metadata_csv_path or csv_path},
+        sample_count=gif["sample_count"],
+        frame_count=gif["frame_count"],
+        max_frames=gif["max_frames"],
+        width=gif["width"],
+        height=gif["height"],
+        fps=gif["fps"],
+    )
+    if not quiet:
+        print(
+            f"rollout house gif metadata saved: {path} "
+            f"bytes={metadata['byte_size']} sha256={metadata['sha256']}"
+        )
+    return metadata
 
 
 def _save_training_checkpoint(
@@ -405,10 +470,25 @@ def rollout_policy(params, max_steps=EPISODE_STEPS):
     return rows
 
 
-def _render_report_index(params, *, best_reward, training_iterations, rows):
+def _render_report_index(params, *, best_reward, training_iterations, rows, house_gif):
     param_items = "\n".join(
         f"<li><code>p{index}</code>: {value:.6f}</li>"
         for index, value in enumerate(_validate_policy_params(params))
+    )
+    gif_link = (
+        '<div class="card"><a href="rollout_house.gif">Open house GIF</a>'
+        '<p>Watch the mobile manipulator move through a small house scene. '
+        '<a href="rollout_house.json">Metadata JSON</a></p></div>'
+        if house_gif
+        else ""
+    )
+    gif_preview = (
+        '<section class="preview">'
+        '<a href="rollout_house.gif"><img src="rollout_house.gif" '
+        'alt="Mobile manipulator moving through a house scene"></a>'
+        "</section>"
+        if house_gif
+        else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -468,6 +548,17 @@ def _render_report_index(params, *, best_reward, training_iterations, rows):
       gap: 12px;
       margin-bottom: 20px;
     }}
+    .preview {{
+      margin-bottom: 20px;
+    }}
+    .preview img {{
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+    }}
     a {{
       color: #0f766e;
       font-weight: 700;
@@ -490,9 +581,11 @@ def _render_report_index(params, *, best_reward, training_iterations, rows):
       <div class="card"><span class="label">training iterations</span><strong class="value">{training_iterations}</strong></div>
       <div class="card"><span class="label">rollout rows</span><strong class="value">{rows}</strong></div>
     </section>
+    {gif_preview}
     <section class="links">
       <div class="card"><a href="rollout.html">Open interactive replay</a><p>Play or scrub the end-effector path.</p></div>
       <div class="card"><a href="rollout.svg">Open static SVG report</a><p>Inspect path, error, reward, and actions.</p></div>
+      {gif_link}
       <div class="card"><a href="rollout.csv">Download rollout CSV</a><p>Use this for plots or offline analysis.</p></div>
       <div class="card"><a href="policy.json">Download policy JSON</a><p>Use this with <code>--policy-in</code>.</p></div>
       <div class="card"><a href="manifest.json">Download manifest JSON</a><p>Machine-readable report metadata.</p></div>
@@ -509,7 +602,19 @@ def _render_report_index(params, *, best_reward, training_iterations, rows):
 """
 
 
-def _write_report_dir(report_dir, params, *, best_reward, training_iterations, rollout_steps):
+def _write_report_dir(
+    report_dir,
+    params,
+    *,
+    best_reward,
+    training_iterations,
+    rollout_steps,
+    house_gif=False,
+    house_gif_width=HOUSE_GIF_WIDTH,
+    house_gif_height=HOUSE_GIF_HEIGHT,
+    house_gif_max_frames=HOUSE_GIF_MAX_FRAMES,
+    house_gif_fps=HOUSE_GIF_FPS,
+):
     from animate_rollout import render_html
     from plot_rollout import load_rollout, render_svg
 
@@ -518,6 +623,8 @@ def _write_report_dir(report_dir, params, *, best_reward, training_iterations, r
     csv_path = os.path.join(report_dir, "rollout.csv")
     svg_path = os.path.join(report_dir, "rollout.svg")
     html_path = os.path.join(report_dir, "rollout.html")
+    gif_path = os.path.join(report_dir, "rollout_house.gif")
+    gif_metadata_path = os.path.join(report_dir, "rollout_house.json")
     index_path = os.path.join(report_dir, "index.html")
     manifest_path = os.path.join(report_dir, "manifest.json")
 
@@ -538,6 +645,24 @@ def _write_report_dir(report_dir, params, *, best_reward, training_iterations, r
         handle.write(render_svg(samples, os.path.basename(csv_path)))
     with open(html_path, "w", encoding="utf-8") as handle:
         handle.write(render_html(samples, os.path.basename(csv_path)))
+    if house_gif:
+        house_gif_manifest = _write_house_gif_from_csv(
+            csv_path,
+            gif_path,
+            width=house_gif_width,
+            height=house_gif_height,
+            max_frames=house_gif_max_frames,
+            fps=house_gif_fps,
+        )
+        _write_rollout_house_gif_metadata(
+            gif_metadata_path,
+            gif_path,
+            csv_path,
+            house_gif_manifest,
+            metadata_gif_path="rollout_house.gif",
+            metadata_csv_path="rollout.csv",
+            quiet=True,
+        )
     with open(index_path, "w", encoding="utf-8") as handle:
         handle.write(
             _render_report_index(
@@ -545,36 +670,48 @@ def _write_report_dir(report_dir, params, *, best_reward, training_iterations, r
                 best_reward=best_reward,
                 training_iterations=training_iterations,
                 rows=len(rows),
+                house_gif=house_gif,
             )
         )
-    _write_json_atomic(
-        manifest_path,
-        {
-            "schema_version": REPORT_MANIFEST_VERSION,
-            "policy_algorithm": POLICY_ARTIFACT_ALGORITHM,
-            "policy_schema_version": POLICY_ARTIFACT_VERSION,
-            "observation_schema_hash": POLICY_OBSERVATION_SCHEMA_HASH,
-            "action_schema_hash": POLICY_ACTION_SCHEMA_HASH,
-            "best_reward": best_reward,
-            "training_iterations": training_iterations,
-            "rollout_rows": len(rows),
-            "final_total_reward": final_sample["total_reward"],
-            "final_target_error": final_sample["target_error"],
-            "artifacts": {
-                "index": "index.html",
-                "policy": "policy.json",
-                "rollout_csv": "rollout.csv",
-                "rollout_svg": "rollout.svg",
-                "rollout_html": "rollout.html",
-            },
-        },
-    )
+    artifacts = {
+        "index": "index.html",
+        "policy": "policy.json",
+        "rollout_csv": "rollout.csv",
+        "rollout_svg": "rollout.svg",
+        "rollout_html": "rollout.html",
+    }
+    if house_gif:
+        artifacts["rollout_house_gif"] = "rollout_house.gif"
+        artifacts["rollout_house_gif_metadata"] = "rollout_house.json"
+    else:
+        house_gif_manifest = None
+
+    manifest = {
+        "schema_version": REPORT_MANIFEST_VERSION,
+        "policy_algorithm": POLICY_ARTIFACT_ALGORITHM,
+        "policy_schema_version": POLICY_ARTIFACT_VERSION,
+        "observation_schema_hash": POLICY_OBSERVATION_SCHEMA_HASH,
+        "action_schema_hash": POLICY_ACTION_SCHEMA_HASH,
+        "rollout_schema_version": ROLLOUT_CSV_SCHEMA_VERSION,
+        "rollout_schema_hash": ROLLOUT_CSV_SCHEMA_HASH,
+        "best_reward": best_reward,
+        "training_iterations": training_iterations,
+        "rollout_rows": len(rows),
+        "final_total_reward": final_sample["total_reward"],
+        "final_target_error": final_sample["target_error"],
+        "artifacts": artifacts,
+    }
+    if house_gif_manifest is not None:
+        manifest["rollout_house_gif"] = house_gif_manifest
+    _write_json_atomic(manifest_path, manifest)
 
     return {
         "policy": policy_path,
         "csv": csv_path,
         "svg": svg_path,
         "html": html_path,
+        "gif": gif_path if house_gif else None,
+        "gif_metadata": gif_metadata_path if house_gif else None,
         "index": index_path,
         "manifest": manifest_path,
         "rows": len(rows),
@@ -698,6 +835,14 @@ def parse_args():
         help="write one policy rollout trajectory as CSV after training or evaluation",
     )
     parser.add_argument(
+        "--rollout-house-gif",
+        help="write an animated house-scene GIF from the --rollout-csv trajectory",
+    )
+    parser.add_argument(
+        "--rollout-house-gif-metadata",
+        help="write metadata JSON for --rollout-house-gif",
+    )
+    parser.add_argument(
         "--rollout-steps",
         type=int,
         default=EPISODE_STEPS,
@@ -706,6 +851,35 @@ def parse_args():
     parser.add_argument(
         "--report-dir",
         help="write policy.json, rollout.csv, rollout.svg, and rollout.html into this directory",
+    )
+    parser.add_argument(
+        "--report-house-gif",
+        action="store_true",
+        help="also write rollout_house.gif into --report-dir",
+    )
+    parser.add_argument(
+        "--report-house-gif-width",
+        type=int,
+        default=HOUSE_GIF_WIDTH,
+        help="width in pixels for --report-house-gif or --rollout-house-gif",
+    )
+    parser.add_argument(
+        "--report-house-gif-height",
+        type=int,
+        default=HOUSE_GIF_HEIGHT,
+        help="height in pixels for --report-house-gif or --rollout-house-gif",
+    )
+    parser.add_argument(
+        "--report-house-gif-max-frames",
+        type=int,
+        default=HOUSE_GIF_MAX_FRAMES,
+        help="maximum frames for --report-house-gif or --rollout-house-gif",
+    )
+    parser.add_argument(
+        "--report-house-gif-fps",
+        type=float,
+        default=HOUSE_GIF_FPS,
+        help="playback frames per second for --report-house-gif or --rollout-house-gif",
     )
     args = parser.parse_args()
 
@@ -721,10 +895,20 @@ def parse_args():
         parser.error("--resume cannot be combined with --policy-in")
     if args.eval_only and args.policy_in is None:
         parser.error("--eval-only requires --policy-in")
+    if args.rollout_house_gif is not None and args.rollout_csv is None:
+        parser.error("--rollout-house-gif requires --rollout-csv")
+    if args.rollout_house_gif_metadata is not None and args.rollout_house_gif is None:
+        parser.error("--rollout-house-gif-metadata requires --rollout-house-gif")
     if args.eval_episodes <= 0:
         parser.error("--eval-episodes must be positive")
     if args.rollout_steps <= 0:
         parser.error("--rollout-steps must be positive")
+    if args.report_house_gif_width <= 0 or args.report_house_gif_height <= 0:
+        parser.error("--report-house-gif-width and --report-house-gif-height must be positive")
+    if args.report_house_gif_max_frames <= 1:
+        parser.error("--report-house-gif-max-frames must be greater than 1")
+    if args.report_house_gif_fps <= 0.0:
+        parser.error("--report-house-gif-fps must be positive")
     return args
 
 
@@ -742,6 +926,27 @@ def main():
             rows = rollout_policy(policy["params"], max_steps=args.rollout_steps)
             _write_rollout_csv(args.rollout_csv, rows)
             print(f"rollout csv saved: {args.rollout_csv} rows={len(rows)}")
+            if args.rollout_house_gif is not None:
+                gif = _write_house_gif_from_csv(
+                    args.rollout_csv,
+                    args.rollout_house_gif,
+                    width=args.report_house_gif_width,
+                    height=args.report_house_gif_height,
+                    max_frames=args.report_house_gif_max_frames,
+                    fps=args.report_house_gif_fps,
+                )
+                print(
+                    f"rollout house gif saved: {args.rollout_house_gif} "
+                    f"frames={gif['frame_count']} size={gif['width']}x{gif['height']} "
+                    f"bytes={gif['byte_size']}"
+                )
+                if args.rollout_house_gif_metadata is not None:
+                    _write_rollout_house_gif_metadata(
+                        args.rollout_house_gif_metadata,
+                        args.rollout_house_gif,
+                        args.rollout_csv,
+                        gif,
+                    )
         if args.report_dir is not None:
             report = _write_report_dir(
                 args.report_dir,
@@ -749,11 +954,19 @@ def main():
                 best_reward=policy["best_reward"],
                 training_iterations=policy["training_iterations"],
                 rollout_steps=args.rollout_steps,
+                house_gif=args.report_house_gif,
+                house_gif_width=args.report_house_gif_width,
+                house_gif_height=args.report_house_gif_height,
+                house_gif_max_frames=args.report_house_gif_max_frames,
+                house_gif_fps=args.report_house_gif_fps,
             )
-            print(
+            message = (
                 f"report saved: {args.report_dir} rows={report['rows']} "
                 f"policy={report['policy']} html={report['html']}"
             )
+            if report["gif"] is not None:
+                message += f" gif={report['gif']}"
+            print(message)
         return
 
     initial_mean = None
@@ -791,6 +1004,27 @@ def main():
         rows = rollout_policy(best_params, max_steps=args.rollout_steps)
         _write_rollout_csv(args.rollout_csv, rows)
         print(f"rollout csv saved: {args.rollout_csv} rows={len(rows)}")
+        if args.rollout_house_gif is not None:
+            gif = _write_house_gif_from_csv(
+                args.rollout_csv,
+                args.rollout_house_gif,
+                width=args.report_house_gif_width,
+                height=args.report_house_gif_height,
+                max_frames=args.report_house_gif_max_frames,
+                fps=args.report_house_gif_fps,
+            )
+            print(
+                f"rollout house gif saved: {args.rollout_house_gif} "
+                f"frames={gif['frame_count']} size={gif['width']}x{gif['height']} "
+                f"bytes={gif['byte_size']}"
+            )
+            if args.rollout_house_gif_metadata is not None:
+                _write_rollout_house_gif_metadata(
+                    args.rollout_house_gif_metadata,
+                    args.rollout_house_gif,
+                    args.rollout_csv,
+                    gif,
+                )
     if args.report_dir is not None:
         report = _write_report_dir(
             args.report_dir,
@@ -798,11 +1032,19 @@ def main():
             best_reward=best_reward,
             training_iterations=len(history),
             rollout_steps=args.rollout_steps,
+            house_gif=args.report_house_gif,
+            house_gif_width=args.report_house_gif_width,
+            house_gif_height=args.report_house_gif_height,
+            house_gif_max_frames=args.report_house_gif_max_frames,
+            house_gif_fps=args.report_house_gif_fps,
         )
-        print(
+        message = (
             f"report saved: {args.report_dir} rows={report['rows']} "
             f"policy={report['policy']} html={report['html']}"
         )
+        if report["gif"] is not None:
+            message += f" gif={report['gif']}"
+        print(message)
 
     if args.smoke:
         # CEM must find a goal-conditioned policy that reaches the varied targets: a

@@ -100,6 +100,35 @@ def parse_args():
         help="maximum rollout rows recorded per report",
     )
     parser.add_argument(
+        "--report-house-gif",
+        action="store_true",
+        help="include rollout_house.gif in each generated report bundle",
+    )
+    parser.add_argument(
+        "--report-house-gif-width",
+        type=int,
+        default=360,
+        help="width in pixels for each generated house GIF",
+    )
+    parser.add_argument(
+        "--report-house-gif-height",
+        type=int,
+        default=240,
+        help="height in pixels for each generated house GIF",
+    )
+    parser.add_argument(
+        "--report-house-gif-max-frames",
+        type=int,
+        default=72,
+        help="maximum frames for each generated house GIF",
+    )
+    parser.add_argument(
+        "--report-house-gif-fps",
+        type=float,
+        default=12.0,
+        help="playback frames per second for each generated house GIF",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="resume any seed with an existing checkpoint.json",
@@ -133,6 +162,12 @@ def parse_args():
         parser.error("--elite must be in 1..population")
     if args.rollout_steps <= 0:
         parser.error("--rollout-steps must be positive")
+    if args.report_house_gif_width <= 0 or args.report_house_gif_height <= 0:
+        parser.error("--report-house-gif-width and --report-house-gif-height must be positive")
+    if args.report_house_gif_max_frames <= 1:
+        parser.error("--report-house-gif-max-frames must be greater than 1")
+    if args.report_house_gif_fps <= 0.0:
+        parser.error("--report-house-gif-fps must be positive")
     if args.jobs <= 0:
         parser.error("--jobs must be positive")
     return args
@@ -175,6 +210,20 @@ def main():
         ]
         if args.resume and os.path.isfile(checkpoint):
             command.append("--resume")
+        if args.report_house_gif:
+            command.extend(
+                [
+                    "--report-house-gif",
+                    "--report-house-gif-width",
+                    str(args.report_house_gif_width),
+                    "--report-house-gif-height",
+                    str(args.report_house_gif_height),
+                    "--report-house-gif-max-frames",
+                    str(args.report_house_gif_max_frames),
+                    "--report-house-gif-fps",
+                    str(args.report_house_gif_fps),
+                ]
+            )
         commands.append(command)
 
     _run_parallel(commands, args.jobs, args.dry_run)
@@ -184,6 +233,8 @@ def main():
     leaderboard_json = os.path.join(args.out, "leaderboard.json")
     best_policy = os.path.join(args.out, "best_policy.json")
     best_report = os.path.join(args.out, "best_report.json")
+    best_house_gif = os.path.join(args.out, "best_rollout_house.gif")
+    best_house_gif_metadata = os.path.join(args.out, "best_rollout_house.json")
     sweep_manifest = os.path.join(args.out, "sweep_manifest.json")
     compare_command = [
         sys.executable,
@@ -202,6 +253,15 @@ def main():
         "--require-reports-at-least",
         str(args.runs),
     ]
+    if args.report_house_gif:
+        compare_command.extend(
+            [
+                "--best-house-gif-out",
+                best_house_gif,
+                "--best-house-gif-metadata-out",
+                best_house_gif_metadata,
+            ]
+        )
     if args.require_final_error_at_most is not None:
         compare_command.extend(
             ["--require-final-error-at-most", str(args.require_final_error_at_most)]
@@ -224,6 +284,11 @@ def main():
                     "population": args.population,
                     "elite": args.elite,
                     "rollout_steps": args.rollout_steps,
+                    "report_house_gif": args.report_house_gif,
+                    "report_house_gif_width": args.report_house_gif_width,
+                    "report_house_gif_height": args.report_house_gif_height,
+                    "report_house_gif_max_frames": args.report_house_gif_max_frames,
+                    "report_house_gif_fps": args.report_house_gif_fps,
                     "jobs": args.jobs,
                     "resume": args.resume,
                     "skip_complete": args.skip_complete,
@@ -245,6 +310,16 @@ def main():
                     "leaderboard_json": _relative_path(leaderboard_json, args.out),
                     "best_policy": _relative_path(best_policy, args.out),
                     "best_report": _relative_path(best_report, args.out),
+                    "best_house_gif": (
+                        _relative_path(best_house_gif, args.out)
+                        if args.report_house_gif
+                        else None
+                    ),
+                    "best_house_gif_metadata": (
+                        _relative_path(best_house_gif_metadata, args.out)
+                        if args.report_house_gif
+                        else None
+                    ),
                     "sweep_manifest": _relative_path(sweep_manifest, args.out),
                 },
                 "commands": {
