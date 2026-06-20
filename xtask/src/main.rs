@@ -96,9 +96,31 @@ fn house_gif_demo() -> anyhow::Result<()> {
 
 fn hero_media_check() -> anyhow::Result<()> {
     let root = workspace_root()?;
+    let readme_path = root.join("README.md");
     let gif_path = root.join("docs/media/rne-hero.gif");
     let png_path = root.join("docs/media/rne-hero.png");
     let metadata_path = root.join("docs/media/rne-hero.json");
+    let readme = fs::read_to_string(&readme_path)?;
+    anyhow::ensure!(
+        readme.contains("srcset=\"docs/media/rne-hero.png\""),
+        "README hero reduced-motion poster does not point at docs/media/rne-hero.png"
+    );
+    anyhow::ensure!(
+        readme.contains("<img src=\"docs/media/rne-hero.gif\""),
+        "README first hero image does not point at docs/media/rne-hero.gif"
+    );
+    anyhow::ensure!(
+        readme.contains(
+            "3D RNE mobile manipulator simulation navigating while reaching with its arm"
+        ),
+        "README hero alt text does not describe the 3D mobile manipulator simulation"
+    );
+    anyhow::ensure!(
+        readme.contains("examples/32_lift_pick_place_hero")
+            && readme.contains("docs/media/rne-hero.json"),
+        "README hero caption does not link the 3D generator and metadata"
+    );
+
     let gif = fs::read(&gif_path)?;
     anyhow::ensure!(gif.starts_with(b"GIF8"), "README hero GIF header mismatch");
     anyhow::ensure!(gif.ends_with(b";"), "README hero GIF trailer missing");
@@ -108,25 +130,57 @@ fn hero_media_check() -> anyhow::Result<()> {
         gif.len()
     );
     anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
-    let metadata = fs::read_to_string(&metadata_path)?;
+    let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     anyhow::ensure!(
-        metadata.contains("\"artifact\": \"rne_3d_mobile_manipulator_navigation_reach_hero\""),
+        metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_navigation_reach_hero"),
         "README hero metadata does not describe the 3D navigation/reach hero"
     );
     anyhow::ensure!(
-        metadata.contains("\"kind\": \"wgpu_simulation\""),
+        metadata["source"]["kind"].as_str() == Some("wgpu_simulation")
+            && metadata["source"]["generator"].as_str() == Some("examples/32_lift_pick_place_hero")
+            && metadata["source"]["scene"].as_str()
+                == Some("assets/scenes/mm_mobile.rne.scene.toml")
+            && metadata["source"]["policy"].as_str() == Some("MobileReachHeroPolicy")
+            && metadata["source"]["physics"].as_str() == Some("MobileManipulatorSim/Rapier"),
         "README hero metadata source is not wgpu_simulation"
     );
+    let overlays = metadata["overlays"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata overlays must be an array"))?;
     anyhow::ensure!(
-        metadata.contains("\"base_path\"") && metadata.contains("\"reach_target\""),
+        overlays
+            .iter()
+            .any(|overlay| overlay.as_str() == Some("base_path"))
+            && overlays
+                .iter()
+                .any(|overlay| overlay.as_str() == Some("reach_target")),
         "README hero metadata is missing expected 3D overlays"
     );
+    let base_travel_m = metadata["simulation"]["base_travel_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing base_travel_m"))?;
+    let ee_travel_m = metadata["simulation"]["ee_travel_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing ee_travel_m"))?;
     anyhow::ensure!(
-        metadata.contains("\"base_travel_m\"") && metadata.contains("\"ee_travel_m\""),
-        "README hero metadata is missing simulation travel metrics"
+        base_travel_m > 0.20,
+        "README hero simulation base travel is too small: {base_travel_m:.2} m"
     );
     anyhow::ensure!(
-        metadata.contains(&format!("\"byte_size\": {}", gif.len())),
+        ee_travel_m > 0.15,
+        "README hero simulation end-effector travel is too small: {ee_travel_m:.2} m"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["final_base_m"]
+            .as_array()
+            .is_some_and(|items| items.len() == 3)
+            && metadata["simulation"]["final_ee_m"]
+                .as_array()
+                .is_some_and(|items| items.len() == 3),
+        "README hero metadata final simulation positions must be 3D vectors"
+    );
+    anyhow::ensure!(
+        metadata["byte_size"].as_u64() == Some(u64::try_from(gif.len())?),
         "README hero metadata byte_size does not match GIF bytes"
     );
     println!(
