@@ -2,6 +2,8 @@
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SIM_METADATA="$ROOT/docs/media/rne-hero-sim.tmp.json"
+trap 'rm -f "$SIM_METADATA"' EXIT
 
 if [[ "${RNE_SKIP_GPU:-}" == "1" ]]; then
   echo "RNE_SKIP_GPU set; keeping existing README hero media"
@@ -13,11 +15,16 @@ if ! command -v ffmpeg >/dev/null; then
   exit 1
 fi
 
-cargo run \
+SIM_METADATA_FOR_RUST="$SIM_METADATA"
+if command -v cygpath >/dev/null; then
+  SIM_METADATA_FOR_RUST="$(cygpath -w "$SIM_METADATA")"
+fi
+
+RNE_HERO_SIM_METADATA="$SIM_METADATA_FOR_RUST" cargo run \
   --manifest-path "$ROOT/examples/32_lift_pick_place_hero/Cargo.toml" \
   --example 32_lift_pick_place_hero
 
-PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT" <<'PY'
+PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT" "$SIM_METADATA" <<'PY'
 import json
 import os
 import sys
@@ -25,9 +32,12 @@ import sys
 from render_house_gif import inspect_gif
 
 root = sys.argv[1]
+sim_metadata_path = sys.argv[2]
 metadata_path = os.path.join(root, "docs/media/rne-hero.json")
 gif_path = os.path.join(root, "docs/media/rne-hero.gif")
 gif = inspect_gif(gif_path)
+with open(sim_metadata_path, "r", encoding="utf-8") as handle:
+    simulation = json.load(handle)
 payload = {
     "schema_version": 1,
     "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
@@ -49,6 +59,7 @@ payload = {
     "settle_steps": 120,
     "policy_steps": 520,
     "overlays": ["base_path", "reach_target"],
+    "simulation": simulation,
 }
 with open(metadata_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)

@@ -8,6 +8,7 @@
 //!   cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero
 
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -127,6 +128,13 @@ fn main() {
         ee_travel_m > MIN_EE_TRAVEL_M,
         "expected manipulator reach: ee_travel={ee_travel_m:.2} m"
     );
+    write_sim_metadata_if_requested(
+        base_travel_m,
+        ee_travel_m,
+        [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
+        [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
+    )
+    .expect("write hero simulation metadata");
 
     let poster_src = &frame_paths[FRAME_COUNT / 2];
     let poster_path = media_dir.join("rne-hero.png");
@@ -219,6 +227,44 @@ fn append_hero_context(
             Transform3::IDENTITY,
         ));
     }
+}
+
+fn write_sim_metadata_if_requested(
+    base_travel_m: f64,
+    ee_travel_m: f64,
+    final_base_m: [f64; 3],
+    final_ee_m: [f64; 3],
+) -> std::io::Result<()> {
+    let Some(path) = env::var_os("RNE_HERO_SIM_METADATA") else {
+        return Ok(());
+    };
+    let path = PathBuf::from(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let payload = format!(
+        concat!(
+            "{{\n",
+            "  \"base_travel_m\": {:.6},\n",
+            "  \"ee_travel_m\": {:.6},\n",
+            "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
+            "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
+            "  \"min_base_travel_m\": {:.6},\n",
+            "  \"min_ee_travel_m\": {:.6}\n",
+            "}}\n"
+        ),
+        base_travel_m,
+        ee_travel_m,
+        final_base_m[0],
+        final_base_m[1],
+        final_base_m[2],
+        final_ee_m[0],
+        final_ee_m[1],
+        final_ee_m[2],
+        MIN_BASE_TRAVEL_M,
+        MIN_EE_TRAVEL_M
+    );
+    fs::write(path, payload)
 }
 
 fn unique_colors(rgba8: &[u8]) -> usize {

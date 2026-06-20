@@ -121,6 +121,10 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero metadata is missing expected 3D overlays"
     );
     anyhow::ensure!(
+        metadata.contains("\"base_travel_m\"") && metadata.contains("\"ee_travel_m\""),
+        "README hero metadata is missing simulation travel metrics"
+    );
+    anyhow::ensure!(
         metadata.contains(&format!("\"byte_size\": {}", gif.len())),
         "README hero metadata byte_size does not match GIF bytes"
     );

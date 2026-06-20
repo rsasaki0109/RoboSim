@@ -14,6 +14,22 @@
   "schema_version": 1,
   "settle_steps": 120,
   "sha256": "sha256:390abcec33831db259b0a29daf6b1a7d8727f0adf74c80a533565e1729c4acb9",
+  "simulation": {
+    "base_travel_m": 4.510966,
+    "ee_travel_m": 3.973032,
+    "final_base_m": [
+      -4.351431,
+      0.354398,
+      -2.564433
+    ],
+    "final_ee_m": [
+      -4.064286,
+      0.207733,
+      -2.153403
+    ],
+    "min_base_travel_m": 0.2,
+    "min_ee_travel_m": 0.15
+  },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
     "kind": "wgpu_simulation",
