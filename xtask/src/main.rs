@@ -111,7 +111,7 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains(
-            "3D RNE mobile manipulator simulation navigating while reaching with its arm"
+            "3D RNE mobile manipulator simulation navigating a house-like room while reaching with its arm"
         ),
         "README hero alt text does not describe the 3D mobile manipulator simulation"
     );
@@ -150,7 +150,10 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(
         overlays
             .iter()
-            .any(|overlay| overlay.as_str() == Some("base_path"))
+            .any(|overlay| overlay.as_str() == Some("house_context"))
+            && overlays
+                .iter()
+                .any(|overlay| overlay.as_str() == Some("base_path"))
             && overlays
                 .iter()
                 .any(|overlay| overlay.as_str() == Some("reach_target")),

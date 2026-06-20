@@ -1,10 +1,10 @@
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
-    <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating while reaching with its arm" width="960">
+    <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while reaching with its arm" width="960">
   </picture>
   <br>
-  <sub>Captured from the real <code>mm_mobile</code> 3D simulation via <code>examples/32_lift_pick_place_hero</code> (<a href="docs/media/rne-hero.json">metadata</a>)</sub>
+  <sub>Captured from the real <code>mm_mobile</code> 3D simulation in a procedural house context via <code>examples/32_lift_pick_place_hero</code> (<a href="docs/media/rne-hero.json">metadata</a>)</sub>
 </p>
 
 # Robot Native Engine

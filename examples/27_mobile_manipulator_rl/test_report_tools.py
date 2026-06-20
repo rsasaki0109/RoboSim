@@ -1124,7 +1124,9 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(metadata["frame_count"], gif_info["frame_count"])
         self.assertEqual(metadata["byte_size"], gif_info["byte_size"])
         self.assertEqual(metadata["sha256"], gif_info["sha256"])
-        self.assertEqual(metadata["overlays"], ["base_path", "reach_target"])
+        self.assertEqual(
+            metadata["overlays"], ["house_context", "base_path", "reach_target"]
+        )
         self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
         self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)
         self.assertRegex(

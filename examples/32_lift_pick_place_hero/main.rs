@@ -23,7 +23,7 @@ use rne_render::{Camera, RenderBackend, RenderScene, VisualShape};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_world::Transform3;
 
-const CLEAR_COLOR: [f32; 4] = [0.58, 0.66, 0.78, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.06, 0.07, 0.07, 1.0];
 const RENDER_WIDTH: u32 = 640;
 const RENDER_HEIGHT: u32 = 360;
 const POSTER_WIDTH: u32 = 960;
@@ -37,6 +37,8 @@ const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
 const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
+const HOUSE_CENTER_M: Vec3 = Vec3::new(-2.2, 0.0, -1.2);
+const REACH_TARGET_M: Vec3 = Vec3::new(-4.04, 0.22, -2.15);
 
 fn main() {
     if env::args().any(|arg| arg == "--smoke") {
@@ -98,18 +100,16 @@ fn main() {
         let obs = sim.observe();
         base_path.push(Vec3::new(obs.base_x_m, 0.0, obs.base_z_m));
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(
-            &mut scene,
-            obs.base_x_m,
-            obs.base_z_m,
-            obs.ee_y_m,
-            &base_path,
-        );
+        append_hero_context(&mut scene, &base_path);
         let orbit = CameraOrbit {
-            focus: Vec3::new(obs.base_x_m + 0.28, 0.34, obs.base_z_m),
-            yaw_rad: -0.88,
-            pitch_rad: 0.30,
-            distance_m: 2.35,
+            focus: Vec3::new(
+                obs.base_x_m * 0.55 + HOUSE_CENTER_M.x * 0.45,
+                0.44,
+                obs.base_z_m * 0.55 + HOUSE_CENTER_M.z * 0.45,
+            ),
+            yaw_rad: -0.74,
+            pitch_rad: 1.02,
+            distance_m: 4.6,
         };
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -155,7 +155,7 @@ fn main() {
     )
     .expect("write hero simulation metadata");
 
-    let poster_src = &frame_paths[FRAME_COUNT / 2];
+    let poster_src = &frame_paths[FRAME_COUNT - 1];
     let poster_path = media_dir.join("rne-hero.png");
     upscale_png(poster_src, &poster_path, POSTER_WIDTH, POSTER_HEIGHT).expect("upscale poster");
 
@@ -343,27 +343,64 @@ impl MobileReachHeroPolicy {
     }
 }
 
-fn append_hero_context(
-    scene: &mut RenderScene,
-    base_x_m: f64,
-    base_z_m: f64,
-    ee_y_m: f64,
-    base_path: &[Vec3],
-) {
+fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x, -0.055, HOUSE_CENTER_M.z),
+        Vec3::new(8.0, 0.10, 5.8),
+        [0.27, 0.29, 0.29, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x, 0.22, HOUSE_CENTER_M.z - 2.82),
+        Vec3::new(8.0, 0.48, 0.08),
+        [0.62, 0.64, 0.60, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x - 3.95, 0.22, HOUSE_CENTER_M.z),
+        Vec3::new(0.08, 0.48, 5.8),
+        [0.58, 0.61, 0.62, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x + 3.95, 0.22, HOUSE_CENTER_M.z),
+        Vec3::new(0.08, 0.48, 5.8),
+        [0.58, 0.61, 0.62, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x - 0.35, 0.16, HOUSE_CENTER_M.z - 0.25),
+        Vec3::new(0.10, 0.34, 1.80),
+        [0.70, 0.70, 0.64, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(HOUSE_CENTER_M.x - 1.65, 0.16, HOUSE_CENTER_M.z - 1.35),
+        Vec3::new(2.20, 0.34, 0.10),
+        [0.70, 0.70, 0.64, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(-3.95, 0.12, -2.15),
+        Vec3::new(0.72, 0.24, 0.56),
+        [0.39, 0.33, 0.25, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(-0.82, 0.14, 0.20),
+        Vec3::new(0.82, 0.28, 0.54),
+        [0.44, 0.42, 0.35, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(-4.85, 0.20, -0.75),
+        Vec3::new(0.56, 0.40, 0.80),
+        [0.25, 0.40, 0.44, 1.0],
+    );
     scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(Vec3::new(base_x_m, -0.05, base_z_m), Quat::IDENTITY),
-        VisualShape::Box {
-            size_m: Vec3::new(4.2, 0.1, 3.2),
-        },
-        [0.28, 0.30, 0.32, 1.0],
-        Transform3::IDENTITY,
-    ));
-    scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(
-            Vec3::new(base_x_m + 0.90, ee_y_m, base_z_m + 0.24),
-            Quat::IDENTITY,
-        ),
-        VisualShape::Sphere { radius_m: 0.08 },
+        Transform3::from_translation_rotation(REACH_TARGET_M, Quat::IDENTITY),
+        VisualShape::Sphere { radius_m: 0.09 },
         [0.08, 0.78, 0.62, 1.0],
         Transform3::IDENTITY,
     ));
@@ -380,6 +417,15 @@ fn append_hero_context(
             Transform3::IDENTITY,
         ));
     }
+}
+
+fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {
+    scene.items.push(RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(translation_m, Quat::IDENTITY),
+        VisualShape::Box { size_m },
+        color_rgba,
+        Transform3::IDENTITY,
+    ));
 }
 
 fn write_sim_metadata_if_requested(

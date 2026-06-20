@@ -1,11 +1,12 @@
 {
   "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
-  "byte_size": 811483,
+  "byte_size": 1942121,
   "fps": 12.0,
   "frame_count": 48,
   "gif_path": "rne-hero.gif",
   "height": 540,
   "overlays": [
+    "house_context",
     "base_path",
     "reach_target"
   ],
@@ -13,11 +14,10 @@
   "poster_path": "rne-hero.png",
   "schema_version": 1,
   "settle_steps": 120,
-  "sha256": "sha256:390abcec33831db259b0a29daf6b1a7d8727f0adf74c80a533565e1729c4acb9",
+  "sha256": "sha256:3f9e28bc8bf3a314ad4ce6bf84f9503377c797762a3ace736144da95bdfe0580",
   "simulation": {
     "base_travel_m": 4.510966,
     "ee_travel_m": 3.973032,
-    "trajectory_digest": "0xd85cd8fbdbce1cb9",
     "final_base_m": [
       -4.351431,
       0.354398,
@@ -29,7 +29,8 @@
       -2.153403
     ],
     "min_base_travel_m": 0.2,
-    "min_ee_travel_m": 0.15
+    "min_ee_travel_m": 0.15,
+    "trajectory_digest": "0xd85cd8fbdbce1cb9"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
