@@ -9,6 +9,7 @@ image = "0.25"
 png = "0.17"
 rne_ai = { path = "../../crates/rne_ai" }
 rne_math = { path = "../../crates/rne_math" }
+rne_robot = { path = "../../crates/rne_robot" }
 rne_world = { path = "../../crates/rne_world" }
 rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }

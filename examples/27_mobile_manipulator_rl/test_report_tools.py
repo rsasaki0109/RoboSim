@@ -1129,6 +1129,8 @@ class ReportToolTests(unittest.TestCase):
         )
         self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
         self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)
+        self.assertLessEqual(metadata["simulation"]["max_base_height_error_m"], 0.01)
+        self.assertGreaterEqual(metadata["simulation"]["min_base_yaw_only_dot"], 0.999_999)
         self.assertRegex(
             metadata["simulation"]["trajectory_digest"], r"^0x[0-9a-f]{16}$"
         )

@@ -28,7 +28,9 @@
       0.399285,
       -2.477108
     ],
+    "max_base_height_error_m": 0.0,
     "min_base_travel_m": 0.2,
+    "min_base_yaw_only_dot": 1.0,
     "min_ee_travel_m": 0.15,
     "trajectory_digest": "0x06e1687ee28eade2"
   },

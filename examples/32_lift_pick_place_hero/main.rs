@@ -18,10 +18,11 @@ use rne_ai::{
     build_visual_render_scene, mm_mobile_scene_path, MobileManipulatorAction,
     MobileManipulatorObservation, MobileManipulatorSim,
 };
-use rne_math::{Quat, Vec3};
+use rne_math::{yaw_rad, Quat, Vec3};
 use rne_render::{Camera, RenderBackend, RenderScene, VisualShape};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
-use rne_world::Transform3;
+use rne_robot::Link;
+use rne_world::{world_transform_of, Transform3};
 
 const CLEAR_COLOR: [f32; 4] = [0.06, 0.07, 0.07, 1.0];
 const RENDER_WIDTH: u32 = 640;
@@ -35,6 +36,9 @@ const POLICY_STEPS: usize = 520;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
+const EXPECTED_BASE_Y_M: f64 = 0.25;
+const MAX_BASE_HEIGHT_ERROR_M: f64 = 0.01;
+const MIN_BASE_YAW_ONLY_DOT: f64 = 0.999_999;
 const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
@@ -46,10 +50,12 @@ fn main() {
         let repeat = run_hero_smoke();
         metrics.assert_deterministic_match(&repeat);
         println!(
-            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
             metrics.trajectory_digest,
             metrics.base_travel_m,
             metrics.ee_travel_m,
+            metrics.max_base_height_error_m,
+            metrics.min_base_yaw_only_dot,
             metrics.final_base_m[0],
             metrics.final_base_m[1],
             metrics.final_base_m[2],
@@ -78,6 +84,8 @@ fn main() {
     let start = sim.observe();
     let mut trajectory_digest = HERO_DIGEST_OFFSET;
     mix_observation_digest(&mut trajectory_digest, &start);
+    let mut planarity = HeroBasePlanarity::new();
+    planarity.observe(&sim);
     let mut policy = MobileReachHeroPolicy::new();
     let mut policy_step = 0usize;
 
@@ -94,6 +102,7 @@ fn main() {
         while policy_step < target_step {
             let obs = sim.step(policy.next_action());
             mix_observation_digest(&mut trajectory_digest, &obs);
+            planarity.observe(&sim);
             policy_step += 1;
         }
 
@@ -144,12 +153,15 @@ fn main() {
         [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
         trajectory_digest,
+        planarity,
     );
     metrics.assert_navigation_and_reach();
     write_sim_metadata_if_requested(
         metrics.base_travel_m,
         metrics.ee_travel_m,
         metrics.trajectory_digest,
+        metrics.max_base_height_error_m,
+        metrics.min_base_yaw_only_dot,
         metrics.final_base_m,
         metrics.final_ee_m,
     )
@@ -184,6 +196,8 @@ struct HeroSimMetrics {
     base_travel_m: f64,
     ee_travel_m: f64,
     trajectory_digest: u64,
+    max_base_height_error_m: f64,
+    min_base_yaw_only_dot: f64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
 }
@@ -195,6 +209,7 @@ impl HeroSimMetrics {
         final_base_m: [f64; 3],
         final_ee_m: [f64; 3],
         trajectory_digest: u64,
+        planarity: HeroBasePlanarity,
     ) -> Self {
         let base_travel_m = ((final_base_m[0] - start_base_m[0]).powi(2)
             + (final_base_m[2] - start_base_m[2]).powi(2))
@@ -207,6 +222,8 @@ impl HeroSimMetrics {
             base_travel_m,
             ee_travel_m,
             trajectory_digest,
+            max_base_height_error_m: planarity.max_base_height_error_m,
+            min_base_yaw_only_dot: planarity.min_base_yaw_only_dot,
             final_base_m,
             final_ee_m,
         }
@@ -222,6 +239,16 @@ impl HeroSimMetrics {
             self.ee_travel_m > MIN_EE_TRAVEL_M,
             "expected manipulator reach: ee_travel={:.2} m",
             self.ee_travel_m
+        );
+        assert!(
+            self.max_base_height_error_m <= MAX_BASE_HEIGHT_ERROR_M,
+            "expected planar mobile base height: max_error={:.4} m",
+            self.max_base_height_error_m
+        );
+        assert!(
+            self.min_base_yaw_only_dot >= MIN_BASE_YAW_ONLY_DOT,
+            "expected upright mobile base orientation: min_yaw_only_dot={:.9}",
+            self.min_base_yaw_only_dot
         );
     }
 
@@ -239,6 +266,16 @@ impl HeroSimMetrics {
             self.ee_travel_m.to_bits(),
             repeat.ee_travel_m.to_bits(),
             "hero simulation end-effector travel changed between identical runs"
+        );
+        assert_eq!(
+            self.max_base_height_error_m.to_bits(),
+            repeat.max_base_height_error_m.to_bits(),
+            "hero simulation base height error changed between identical runs"
+        );
+        assert_eq!(
+            self.min_base_yaw_only_dot.to_bits(),
+            repeat.min_base_yaw_only_dot.to_bits(),
+            "hero simulation base upright metric changed between identical runs"
         );
         assert_eq!(
             self.final_base_m.map(f64::to_bits),
@@ -263,10 +300,13 @@ fn run_hero_smoke() -> HeroSimMetrics {
     let start = sim.observe();
     let mut trajectory_digest = HERO_DIGEST_OFFSET;
     mix_observation_digest(&mut trajectory_digest, &start);
+    let mut planarity = HeroBasePlanarity::new();
+    planarity.observe(&sim);
     let mut policy = MobileReachHeroPolicy::new();
     for _ in 0..POLICY_STEPS {
         let obs = sim.step(policy.next_action());
         mix_observation_digest(&mut trajectory_digest, &obs);
+        planarity.observe(&sim);
     }
 
     let final_obs = sim.observe();
@@ -276,9 +316,47 @@ fn run_hero_smoke() -> HeroSimMetrics {
         [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
         trajectory_digest,
+        planarity,
     );
     metrics.assert_navigation_and_reach();
     metrics
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeroBasePlanarity {
+    max_base_height_error_m: f64,
+    min_base_yaw_only_dot: f64,
+}
+
+impl HeroBasePlanarity {
+    fn new() -> Self {
+        Self {
+            max_base_height_error_m: 0.0,
+            min_base_yaw_only_dot: 1.0,
+        }
+    }
+
+    fn observe(&mut self, sim: &MobileManipulatorSim) {
+        let transform = base_link_transform(sim);
+        let yaw_only = Quat::from_rotation_y(yaw_rad(transform.rotation));
+        let height_error_m = (transform.translation.y - EXPECTED_BASE_Y_M).abs();
+        self.max_base_height_error_m = self.max_base_height_error_m.max(height_error_m);
+        self.min_base_yaw_only_dot = self
+            .min_base_yaw_only_dot
+            .min(transform.rotation.dot(yaw_only).abs());
+    }
+}
+
+fn base_link_transform(sim: &MobileManipulatorSim) -> Transform3 {
+    let base_link = sim
+        .world()
+        .iter_entities()
+        .find_map(|entity| {
+            let link = entity.get::<Link>()?;
+            (link.name == "base_link").then_some(entity.id())
+        })
+        .expect("hero simulation should contain a base_link");
+    world_transform_of(sim.world(), base_link)
 }
 
 fn mix_observation_digest(digest: &mut u64, obs: &MobileManipulatorObservation) {
@@ -434,6 +512,8 @@ fn write_sim_metadata_if_requested(
     base_travel_m: f64,
     ee_travel_m: f64,
     trajectory_digest: u64,
+    max_base_height_error_m: f64,
+    min_base_yaw_only_dot: f64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
 ) -> std::io::Result<()> {
@@ -450,6 +530,8 @@ fn write_sim_metadata_if_requested(
             "  \"base_travel_m\": {:.6},\n",
             "  \"ee_travel_m\": {:.6},\n",
             "  \"trajectory_digest\": \"0x{:016x}\",\n",
+            "  \"max_base_height_error_m\": {:.6},\n",
+            "  \"min_base_yaw_only_dot\": {:.9},\n",
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"min_base_travel_m\": {:.6},\n",
@@ -459,6 +541,8 @@ fn write_sim_metadata_if_requested(
         base_travel_m,
         ee_travel_m,
         trajectory_digest,
+        max_base_height_error_m,
+        min_base_yaw_only_dot,
         final_base_m[0],
         final_base_m[1],
         final_base_m[2],

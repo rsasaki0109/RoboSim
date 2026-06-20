@@ -165,6 +165,12 @@ fn hero_media_check() -> anyhow::Result<()> {
     let ee_travel_m = metadata["simulation"]["ee_travel_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing ee_travel_m"))?;
+    let max_base_height_error_m = metadata["simulation"]["max_base_height_error_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_base_height_error_m"))?;
+    let min_base_yaw_only_dot = metadata["simulation"]["min_base_yaw_only_dot"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing min_base_yaw_only_dot"))?;
     let trajectory_digest = metadata["simulation"]["trajectory_digest"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing trajectory_digest"))?;
@@ -175,6 +181,14 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(
         ee_travel_m > 0.15,
         "README hero simulation end-effector travel is too small: {ee_travel_m:.2} m"
+    );
+    anyhow::ensure!(
+        max_base_height_error_m <= 0.01,
+        "README hero mobile base leaves the ground plane: max_base_height_error={max_base_height_error_m:.4} m"
+    );
+    anyhow::ensure!(
+        min_base_yaw_only_dot >= 0.999_999,
+        "README hero mobile base is not upright: min_base_yaw_only_dot={min_base_yaw_only_dot:.9}"
     );
     anyhow::ensure!(
         trajectory_digest.len() == 18
