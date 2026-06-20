@@ -176,6 +176,33 @@ fn hero_media_check() -> anyhow::Result<()> {
         .ok_or_else(|| {
             anyhow::anyhow!("README hero metadata missing max_final_ee_target_error_m")
         })?;
+    let min_consecutive_frame_delta_ratio = metadata["simulation"]
+        ["min_consecutive_frame_delta_ratio"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing min_consecutive_frame_delta_ratio")
+        })?;
+    let first_last_frame_delta_ratio = metadata["simulation"]["first_last_frame_delta_ratio"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing first_last_frame_delta_ratio")
+        })?;
+    let min_consecutive_frame_delta_ratio_threshold = metadata["simulation"]
+        ["min_consecutive_frame_delta_ratio_threshold"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "README hero metadata missing min_consecutive_frame_delta_ratio_threshold"
+            )
+        })?;
+    let min_first_last_frame_delta_ratio_threshold = metadata["simulation"]
+        ["min_first_last_frame_delta_ratio_threshold"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "README hero metadata missing min_first_last_frame_delta_ratio_threshold"
+            )
+        })?;
     let max_base_height_error_m = metadata["simulation"]["max_base_height_error_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_base_height_error_m"))?;
@@ -200,6 +227,22 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(
         final_ee_target_error_m <= max_final_ee_target_error_m,
         "README hero manipulator does not reach the target: final_ee_target_error={final_ee_target_error_m:.3} m"
+    );
+    anyhow::ensure!(
+        min_consecutive_frame_delta_ratio_threshold >= 0.01,
+        "README hero frame-delta threshold is too loose: {min_consecutive_frame_delta_ratio_threshold:.4}"
+    );
+    anyhow::ensure!(
+        min_first_last_frame_delta_ratio_threshold >= 0.08,
+        "README hero first/last frame-delta threshold is too loose: {min_first_last_frame_delta_ratio_threshold:.4}"
+    );
+    anyhow::ensure!(
+        min_consecutive_frame_delta_ratio >= min_consecutive_frame_delta_ratio_threshold,
+        "README hero GIF has nearly frozen adjacent frames: min_consecutive_frame_delta_ratio={min_consecutive_frame_delta_ratio:.4}"
+    );
+    anyhow::ensure!(
+        first_last_frame_delta_ratio >= min_first_last_frame_delta_ratio_threshold,
+        "README hero GIF lacks visible progression: first_last_frame_delta_ratio={first_last_frame_delta_ratio:.4}"
     );
     anyhow::ensure!(
         max_base_height_error_m <= 0.01,

@@ -29,11 +29,15 @@
       -2.477108
     ],
     "final_ee_target_error_m": 0.004757,
+    "first_last_frame_delta_ratio": 0.398416,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
+    "min_consecutive_frame_delta_ratio": 0.020022,
+    "min_consecutive_frame_delta_ratio_threshold": 0.01,
     "min_ee_travel_m": 0.15,
+    "min_first_last_frame_delta_ratio_threshold": 0.08,
     "trajectory_digest": "0x06e1687ee28eade2"
   },
   "source": {

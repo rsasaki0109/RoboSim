@@ -36,6 +36,8 @@ const POLICY_STEPS: usize = 520;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
+const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.01;
+const MIN_FIRST_LAST_FRAME_DELTA_RATIO: f64 = 0.08;
 const MIN_UNIQUE_COLORS: usize = 8;
 const EXPECTED_BASE_Y_M: f64 = 0.25;
 const MAX_BASE_HEIGHT_ERROR_M: f64 = 0.01;
@@ -99,6 +101,7 @@ fn main() {
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
     let mut base_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
+    let mut render_metrics = HeroRenderMetrics::new();
     for frame in 0..FRAME_COUNT {
         let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
         while policy_step < target_step {
@@ -136,6 +139,7 @@ fn main() {
                 "3D hero frame invalid (unique_colors={unique}, center_depth={center_depth:.2} m)"
             );
         }
+        render_metrics.observe(&output.color.rgba8);
 
         let frame_path = frames_dir.join(format!("frame-{frame:03}.png"));
         write_png(
@@ -158,7 +162,9 @@ fn main() {
         planarity,
     );
     metrics.assert_navigation_and_reach();
-    write_sim_metadata_if_requested(&metrics).expect("write hero simulation metadata");
+    render_metrics.assert_dynamic();
+    write_sim_metadata_if_requested(&metrics, &render_metrics)
+        .expect("write hero simulation metadata");
 
     let poster_src = &frame_paths[FRAME_COUNT - 1];
     let poster_path = media_dir.join("rne-hero.png");
@@ -195,6 +201,57 @@ struct HeroSimMetrics {
     final_ee_target_error_m: f64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
+}
+
+#[derive(Clone, Debug)]
+struct HeroRenderMetrics {
+    frame_count: usize,
+    first_frame_rgba8: Vec<u8>,
+    previous_frame_rgba8: Vec<u8>,
+    min_consecutive_frame_delta_ratio: f64,
+    first_last_frame_delta_ratio: f64,
+}
+
+impl HeroRenderMetrics {
+    fn new() -> Self {
+        Self {
+            frame_count: 0,
+            first_frame_rgba8: Vec::new(),
+            previous_frame_rgba8: Vec::new(),
+            min_consecutive_frame_delta_ratio: 1.0,
+            first_last_frame_delta_ratio: 0.0,
+        }
+    }
+
+    fn observe(&mut self, rgba8: &[u8]) {
+        if self.frame_count == 0 {
+            self.first_frame_rgba8 = rgba8.to_vec();
+        } else {
+            let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
+            self.min_consecutive_frame_delta_ratio =
+                self.min_consecutive_frame_delta_ratio.min(delta_ratio);
+            self.first_last_frame_delta_ratio = frame_delta_ratio(&self.first_frame_rgba8, rgba8);
+        }
+        self.previous_frame_rgba8 = rgba8.to_vec();
+        self.frame_count += 1;
+    }
+
+    fn assert_dynamic(&self) {
+        assert_eq!(
+            self.frame_count, FRAME_COUNT,
+            "expected render metrics for every hero frame"
+        );
+        assert!(
+            self.min_consecutive_frame_delta_ratio >= MIN_CONSECUTIVE_FRAME_DELTA_RATIO,
+            "expected animated hero frames: min_consecutive_frame_delta_ratio={:.4}",
+            self.min_consecutive_frame_delta_ratio
+        );
+        assert!(
+            self.first_last_frame_delta_ratio >= MIN_FIRST_LAST_FRAME_DELTA_RATIO,
+            "expected visible hero progression: first_last_frame_delta_ratio={:.4}",
+            self.first_last_frame_delta_ratio
+        );
+    }
 }
 
 impl HeroSimMetrics {
@@ -518,7 +575,10 @@ fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rg
     ));
 }
 
-fn write_sim_metadata_if_requested(metrics: &HeroSimMetrics) -> std::io::Result<()> {
+fn write_sim_metadata_if_requested(
+    metrics: &HeroSimMetrics,
+    render_metrics: &HeroRenderMetrics,
+) -> std::io::Result<()> {
     let Some(path) = env::var_os("RNE_HERO_SIM_METADATA") else {
         return Ok(());
     };
@@ -539,7 +599,11 @@ fn write_sim_metadata_if_requested(metrics: &HeroSimMetrics) -> std::io::Result<
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"min_base_travel_m\": {:.6},\n",
             "  \"min_ee_travel_m\": {:.6},\n",
-            "  \"max_final_ee_target_error_m\": {:.6}\n",
+            "  \"max_final_ee_target_error_m\": {:.6},\n",
+            "  \"min_consecutive_frame_delta_ratio\": {:.6},\n",
+            "  \"first_last_frame_delta_ratio\": {:.6},\n",
+            "  \"min_consecutive_frame_delta_ratio_threshold\": {:.6},\n",
+            "  \"min_first_last_frame_delta_ratio_threshold\": {:.6}\n",
             "}}\n"
         ),
         metrics.base_travel_m,
@@ -556,7 +620,11 @@ fn write_sim_metadata_if_requested(metrics: &HeroSimMetrics) -> std::io::Result<
         metrics.final_ee_m[2],
         MIN_BASE_TRAVEL_M,
         MIN_EE_TRAVEL_M,
-        MAX_FINAL_EE_TARGET_ERROR_M
+        MAX_FINAL_EE_TARGET_ERROR_M,
+        render_metrics.min_consecutive_frame_delta_ratio,
+        render_metrics.first_last_frame_delta_ratio,
+        MIN_CONSECUTIVE_FRAME_DELTA_RATIO,
+        MIN_FIRST_LAST_FRAME_DELTA_RATIO
     );
     fs::write(path, payload)
 }
@@ -567,6 +635,24 @@ fn unique_colors(rgba8: &[u8]) -> usize {
         .map(|px| (px[0], px[1], px[2], px[3]))
         .collect::<HashSet<_>>()
         .len()
+}
+
+fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> f64 {
+    assert_eq!(
+        previous_rgba8.len(),
+        current_rgba8.len(),
+        "hero frame buffers must have identical dimensions"
+    );
+    let pixel_count = previous_rgba8.len() / 4;
+    if pixel_count == 0 {
+        return 0.0;
+    }
+    let changed_pixels = previous_rgba8
+        .chunks_exact(4)
+        .zip(current_rgba8.chunks_exact(4))
+        .filter(|(previous, current)| previous != current)
+        .count();
+    changed_pixels as f64 / pixel_count as f64
 }
 
 fn build_gif(frames_dir: &Path, frame_count: usize, gif_path: &Path) -> std::io::Result<()> {
