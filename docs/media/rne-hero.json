@@ -1,15 +1,19 @@
 {
   "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
-  "byte_size": 673463,
+  "byte_size": 811483,
   "fps": 12.0,
   "frame_count": 48,
   "gif_path": "rne-hero.gif",
   "height": 540,
+  "overlays": [
+    "base_path",
+    "reach_target"
+  ],
   "policy_steps": 520,
   "poster_path": "rne-hero.png",
   "schema_version": 1,
   "settle_steps": 120,
-  "sha256": "sha256:fc4ef79fdc7016221d46e711447b95385b13090e2f3dd42e2348e73aa8f7003b",
+  "sha256": "sha256:390abcec33831db259b0a29daf6b1a7d8727f0adf74c80a533565e1729c4acb9",
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
     "kind": "wgpu_simulation",

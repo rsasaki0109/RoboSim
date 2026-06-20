@@ -48,6 +48,7 @@ payload = {
     "sha256": gif["sha256"],
     "settle_steps": 120,
     "policy_steps": 520,
+    "overlays": ["base_path", "reach_target"],
 }
 with open(metadata_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)

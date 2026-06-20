@@ -1124,6 +1124,7 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(metadata["frame_count"], gif_info["frame_count"])
         self.assertEqual(metadata["byte_size"], gif_info["byte_size"])
         self.assertEqual(metadata["sha256"], gif_info["sha256"])
+        self.assertEqual(metadata["overlays"], ["base_path", "reach_target"])
         self.assertEqual(
             metadata["source"],
             {

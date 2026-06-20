@@ -61,6 +61,7 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create hero frame directory");
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
+    let mut base_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
     for frame in 0..FRAME_COUNT {
         let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
         while policy_step < target_step {
@@ -69,8 +70,15 @@ fn main() {
         }
 
         let obs = sim.observe();
+        base_path.push(Vec3::new(obs.base_x_m, 0.0, obs.base_z_m));
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(&mut scene, obs.base_x_m, obs.base_z_m, obs.ee_y_m);
+        append_hero_context(
+            &mut scene,
+            obs.base_x_m,
+            obs.base_z_m,
+            obs.ee_y_m,
+            &base_path,
+        );
         let orbit = CameraOrbit {
             focus: Vec3::new(obs.base_x_m + 0.28, 0.34, obs.base_z_m),
             yaw_rad: -0.88,
@@ -174,7 +182,13 @@ impl MobileReachHeroPolicy {
     }
 }
 
-fn append_hero_context(scene: &mut RenderScene, base_x_m: f64, base_z_m: f64, ee_y_m: f64) {
+fn append_hero_context(
+    scene: &mut RenderScene,
+    base_x_m: f64,
+    base_z_m: f64,
+    ee_y_m: f64,
+    base_path: &[Vec3],
+) {
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(Vec3::new(base_x_m, -0.05, base_z_m), Quat::IDENTITY),
         VisualShape::Box {
@@ -192,6 +206,19 @@ fn append_hero_context(scene: &mut RenderScene, base_x_m: f64, base_z_m: f64, ee
         [0.08, 0.78, 0.62, 1.0],
         Transform3::IDENTITY,
     ));
+    for point in base_path.iter().step_by(3) {
+        scene.items.push(RenderScene::item_from_visual(
+            Transform3::from_translation_rotation(
+                Vec3::new(point.x, 0.012, point.z),
+                Quat::IDENTITY,
+            ),
+            VisualShape::Box {
+                size_m: Vec3::new(0.10, 0.018, 0.10),
+            },
+            [0.10, 0.55, 0.92, 1.0],
+            Transform3::IDENTITY,
+        ));
+    }
 }
 
 fn unique_colors(rgba8: &[u8]) -> usize {

@@ -117,6 +117,10 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero metadata source is not wgpu_simulation"
     );
     anyhow::ensure!(
+        metadata.contains("\"base_path\"") && metadata.contains("\"reach_target\""),
+        "README hero metadata is missing expected 3D overlays"
+    );
+    anyhow::ensure!(
         metadata.contains(&format!("\"byte_size\": {}", gif.len())),
         "README hero metadata byte_size does not match GIF bytes"
     );
