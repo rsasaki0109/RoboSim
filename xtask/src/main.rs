@@ -162,6 +162,9 @@ fn hero_media_check() -> anyhow::Result<()> {
     let ee_travel_m = metadata["simulation"]["ee_travel_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing ee_travel_m"))?;
+    let trajectory_digest = metadata["simulation"]["trajectory_digest"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing trajectory_digest"))?;
     anyhow::ensure!(
         base_travel_m > 0.20,
         "README hero simulation base travel is too small: {base_travel_m:.2} m"
@@ -169,6 +172,14 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(
         ee_travel_m > 0.15,
         "README hero simulation end-effector travel is too small: {ee_travel_m:.2} m"
+    );
+    anyhow::ensure!(
+        trajectory_digest.len() == 18
+            && trajectory_digest.starts_with("0x")
+            && trajectory_digest[2..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit()),
+        "README hero trajectory_digest must be a 64-bit hex string"
     );
     anyhow::ensure!(
         metadata["simulation"]["final_base_m"]

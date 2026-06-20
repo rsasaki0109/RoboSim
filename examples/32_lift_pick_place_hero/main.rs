@@ -15,7 +15,8 @@ use std::process::Command;
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, mm_mobile_scene_path, MobileManipulatorAction, MobileManipulatorSim,
+    build_visual_render_scene, mm_mobile_scene_path, MobileManipulatorAction,
+    MobileManipulatorObservation, MobileManipulatorSim,
 };
 use rne_math::{Quat, Vec3};
 use rne_render::{Camera, RenderBackend, RenderScene, VisualShape};
@@ -34,12 +35,17 @@ const POLICY_STEPS: usize = 520;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
+const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 fn main() {
     if env::args().any(|arg| arg == "--smoke") {
         let metrics = run_hero_smoke();
+        let repeat = run_hero_smoke();
+        metrics.assert_deterministic_match(&repeat);
         println!(
-            "3D hero simulation smoke ok: base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            metrics.trajectory_digest,
             metrics.base_travel_m,
             metrics.ee_travel_m,
             metrics.final_base_m[0],
@@ -68,6 +74,8 @@ fn main() {
     }
 
     let start = sim.observe();
+    let mut trajectory_digest = HERO_DIGEST_OFFSET;
+    mix_observation_digest(&mut trajectory_digest, &start);
     let mut policy = MobileReachHeroPolicy::new();
     let mut policy_step = 0usize;
 
@@ -82,7 +90,8 @@ fn main() {
     for frame in 0..FRAME_COUNT {
         let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
         while policy_step < target_step {
-            sim.step(policy.next_action());
+            let obs = sim.step(policy.next_action());
+            mix_observation_digest(&mut trajectory_digest, &obs);
             policy_step += 1;
         }
 
@@ -134,11 +143,13 @@ fn main() {
         [start.ee_x_m, start.ee_y_m, start.ee_z_m],
         [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
+        trajectory_digest,
     );
     metrics.assert_navigation_and_reach();
     write_sim_metadata_if_requested(
         metrics.base_travel_m,
         metrics.ee_travel_m,
+        metrics.trajectory_digest,
         metrics.final_base_m,
         metrics.final_ee_m,
     )
@@ -153,9 +164,10 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
-        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
+        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
         poster_path.display(),
         gif_path.display(),
+        metrics.trajectory_digest,
         metrics.base_travel_m,
         metrics.ee_travel_m,
         metrics.final_base_m[0],
@@ -171,6 +183,7 @@ fn main() {
 struct HeroSimMetrics {
     base_travel_m: f64,
     ee_travel_m: f64,
+    trajectory_digest: u64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
 }
@@ -181,6 +194,7 @@ impl HeroSimMetrics {
         start_ee_m: [f64; 3],
         final_base_m: [f64; 3],
         final_ee_m: [f64; 3],
+        trajectory_digest: u64,
     ) -> Self {
         let base_travel_m = ((final_base_m[0] - start_base_m[0]).powi(2)
             + (final_base_m[2] - start_base_m[2]).powi(2))
@@ -192,6 +206,7 @@ impl HeroSimMetrics {
         Self {
             base_travel_m,
             ee_travel_m,
+            trajectory_digest,
             final_base_m,
             final_ee_m,
         }
@@ -209,6 +224,33 @@ impl HeroSimMetrics {
             self.ee_travel_m
         );
     }
+
+    fn assert_deterministic_match(&self, repeat: &Self) {
+        assert_eq!(
+            self.trajectory_digest, repeat.trajectory_digest,
+            "hero simulation trajectory digest changed between identical runs"
+        );
+        assert_eq!(
+            self.base_travel_m.to_bits(),
+            repeat.base_travel_m.to_bits(),
+            "hero simulation base travel changed between identical runs"
+        );
+        assert_eq!(
+            self.ee_travel_m.to_bits(),
+            repeat.ee_travel_m.to_bits(),
+            "hero simulation end-effector travel changed between identical runs"
+        );
+        assert_eq!(
+            self.final_base_m.map(f64::to_bits),
+            repeat.final_base_m.map(f64::to_bits),
+            "hero simulation final base pose changed between identical runs"
+        );
+        assert_eq!(
+            self.final_ee_m.map(f64::to_bits),
+            repeat.final_ee_m.map(f64::to_bits),
+            "hero simulation final end-effector pose changed between identical runs"
+        );
+    }
 }
 
 fn run_hero_smoke() -> HeroSimMetrics {
@@ -219,9 +261,12 @@ fn run_hero_smoke() -> HeroSimMetrics {
     }
 
     let start = sim.observe();
+    let mut trajectory_digest = HERO_DIGEST_OFFSET;
+    mix_observation_digest(&mut trajectory_digest, &start);
     let mut policy = MobileReachHeroPolicy::new();
     for _ in 0..POLICY_STEPS {
-        sim.step(policy.next_action());
+        let obs = sim.step(policy.next_action());
+        mix_observation_digest(&mut trajectory_digest, &obs);
     }
 
     let final_obs = sim.observe();
@@ -230,9 +275,39 @@ fn run_hero_smoke() -> HeroSimMetrics {
         [start.ee_x_m, start.ee_y_m, start.ee_z_m],
         [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
+        trajectory_digest,
     );
     metrics.assert_navigation_and_reach();
     metrics
+}
+
+fn mix_observation_digest(digest: &mut u64, obs: &MobileManipulatorObservation) {
+    for value in [
+        obs.base_x_m,
+        obs.base_y_m,
+        obs.base_z_m,
+        obs.base_yaw_rad,
+        obs.ee_x_m,
+        obs.ee_y_m,
+        obs.ee_z_m,
+        obs.shoulder_position_rad,
+        obs.elbow_position_rad,
+        obs.gripper_position_rad,
+        obs.target_dx_m,
+        obs.target_dy_m,
+        obs.target_dz_m,
+    ] {
+        mix_digest_u64(digest, value.to_bits());
+    }
+    mix_digest_u64(digest, obs.wrist_camera_pixels as u64);
+    mix_digest_u64(digest, obs.joint_state_count as u64);
+}
+
+fn mix_digest_u64(digest: &mut u64, value: u64) {
+    for byte in value.to_le_bytes() {
+        *digest ^= u64::from(byte);
+        *digest = digest.wrapping_mul(HERO_DIGEST_PRIME);
+    }
 }
 
 struct MobileReachHeroPolicy {
@@ -310,6 +385,7 @@ fn append_hero_context(
 fn write_sim_metadata_if_requested(
     base_travel_m: f64,
     ee_travel_m: f64,
+    trajectory_digest: u64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
 ) -> std::io::Result<()> {
@@ -325,6 +401,7 @@ fn write_sim_metadata_if_requested(
             "{{\n",
             "  \"base_travel_m\": {:.6},\n",
             "  \"ee_travel_m\": {:.6},\n",
+            "  \"trajectory_digest\": \"0x{:016x}\",\n",
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"min_base_travel_m\": {:.6},\n",
@@ -333,6 +410,7 @@ fn write_sim_metadata_if_requested(
         ),
         base_travel_m,
         ee_travel_m,
+        trajectory_digest,
         final_base_m[0],
         final_base_m[1],
         final_base_m[2],

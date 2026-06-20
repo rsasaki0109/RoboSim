@@ -1127,6 +1127,9 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(metadata["overlays"], ["base_path", "reach_target"])
         self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
         self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)
+        self.assertRegex(
+            metadata["simulation"]["trajectory_digest"], r"^0x[0-9a-f]{16}$"
+        )
         self.assertEqual(len(metadata["simulation"]["final_base_m"]), 3)
         self.assertEqual(len(metadata["simulation"]["final_ee_m"]), 3)
         self.assertEqual(

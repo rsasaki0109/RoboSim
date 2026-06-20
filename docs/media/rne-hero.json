@@ -17,6 +17,7 @@
   "simulation": {
     "base_travel_m": 4.510966,
     "ee_travel_m": 3.973032,
+    "trajectory_digest": "0xd85cd8fbdbce1cb9",
     "final_base_m": [
       -4.351431,
       0.354398,
