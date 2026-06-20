@@ -3,6 +3,8 @@
 use std::process::{Command, ExitCode, Stdio};
 use std::{env, fs, path::PathBuf};
 
+const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -23,6 +25,7 @@ fn run() -> anyhow::Result<()> {
         "ci-ros2-bridge" => ci_ros2_bridge(),
         "house-gif-demo" => house_gif_demo(),
         "hero-media-check" => hero_media_check(),
+        "hero-contact-sheet" => hero_contact_sheet(),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -229,6 +232,52 @@ fn hero_simulation_smoke_digest() -> anyhow::Result<String> {
     let output = run_step_output(command)?;
     extract_hero_digest(&output)
         .ok_or_else(|| anyhow::anyhow!("hero smoke output did not include trajectory digest"))
+}
+
+fn hero_contact_sheet() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let gif_path = root.join("docs/media/rne-hero.gif");
+    anyhow::ensure!(
+        gif_path.is_file(),
+        "README hero GIF is missing at {}",
+        gif_path.display()
+    );
+
+    let output_dir = root.join("target/hero-debug");
+    fs::create_dir_all(&output_dir)?;
+    let output_path = output_dir.join("contact.png");
+
+    let filter = hero_contact_sheet_filter();
+    let status = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-v")
+        .arg("error")
+        .arg("-i")
+        .arg(&gif_path)
+        .arg("-vf")
+        .arg(filter)
+        .arg(&output_path)
+        .status()
+        .map_err(|error| anyhow::anyhow!("ffmpeg is required for hero-contact-sheet: {error}"))?;
+
+    if !status.success() {
+        anyhow::bail!("ffmpeg failed while generating {}", output_path.display());
+    }
+
+    println!(
+        "wrote README hero contact sheet to {}",
+        output_path.display()
+    );
+    Ok(())
+}
+
+fn hero_contact_sheet_filter() -> String {
+    let select_frames = HERO_CONTACT_SHEET_FRAMES
+        .iter()
+        .map(|frame| format!("eq(n,{frame})"))
+        .collect::<Vec<_>>()
+        .join("+");
+    format!("select='{select_frames}',scale=320:-1,tile=3x3")
 }
 
 fn extract_hero_digest(output: &str) -> Option<String> {
@@ -475,7 +524,7 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_hero_digest;
+    use super::{extract_hero_digest, hero_contact_sheet_filter};
 
     #[test]
     fn extracts_hero_digest_from_smoke_output() {
@@ -491,5 +540,13 @@ mod tests {
         assert_eq!(extract_hero_digest("3D hero simulation smoke ok"), None);
         assert_eq!(extract_hero_digest("digest=d85cd8fbdbce1cb9"), None);
         assert_eq!(extract_hero_digest("digest=0xd85cd8fbdbce1cb"), None);
+    }
+
+    #[test]
+    fn builds_hero_contact_sheet_filter() {
+        assert_eq!(
+            hero_contact_sheet_filter(),
+            "select='eq(n,0)+eq(n,6)+eq(n,12)+eq(n,18)+eq(n,24)+eq(n,30)+eq(n,36)+eq(n,42)+eq(n,47)',scale=320:-1,tile=3x3"
+        );
     }
 }
