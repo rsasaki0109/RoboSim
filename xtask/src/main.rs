@@ -1,7 +1,12 @@
 //! Workspace automation tasks for Robot Native Engine.
 
+use image::AnimationDecoder;
+use std::io::BufReader;
 use std::process::{Command, ExitCode, Stdio};
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 
@@ -134,9 +139,34 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
+    let gif_progression = inspect_gif_frame_progression(&gif_path)?;
     anyhow::ensure!(
         metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_navigation_reach_hero"),
         "README hero metadata does not describe the 3D navigation/reach hero"
+    );
+    let metadata_width = metadata["width"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing width"))?;
+    let metadata_height = metadata["height"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing height"))?;
+    let metadata_frame_count = metadata["frame_count"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing frame_count"))?;
+    anyhow::ensure!(
+        gif_progression.width == u32::try_from(metadata_width)?,
+        "README hero metadata width does not match GIF: metadata={metadata_width}, gif={}",
+        gif_progression.width
+    );
+    anyhow::ensure!(
+        gif_progression.height == u32::try_from(metadata_height)?,
+        "README hero metadata height does not match GIF: metadata={metadata_height}, gif={}",
+        gif_progression.height
+    );
+    anyhow::ensure!(
+        u64::try_from(gif_progression.frame_count)? == metadata_frame_count,
+        "README hero metadata frame_count does not match GIF: metadata={metadata_frame_count}, gif={}",
+        gif_progression.frame_count
     );
     anyhow::ensure!(
         metadata["source"]["kind"].as_str() == Some("wgpu_simulation")
@@ -245,6 +275,17 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero GIF lacks visible progression: first_last_frame_delta_ratio={first_last_frame_delta_ratio:.4}"
     );
     anyhow::ensure!(
+        gif_progression.min_consecutive_frame_delta_ratio
+            >= min_consecutive_frame_delta_ratio_threshold,
+        "README hero GIF bytes have nearly frozen adjacent frames: min_consecutive_frame_delta_ratio={:.4}",
+        gif_progression.min_consecutive_frame_delta_ratio
+    );
+    anyhow::ensure!(
+        gif_progression.first_last_frame_delta_ratio >= min_first_last_frame_delta_ratio_threshold,
+        "README hero GIF bytes lack visible progression: first_last_frame_delta_ratio={:.4}",
+        gif_progression.first_last_frame_delta_ratio
+    );
+    anyhow::ensure!(
         max_base_height_error_m <= 0.01,
         "README hero mobile base leaves the ground plane: max_base_height_error={max_base_height_error_m:.4} m"
     );
@@ -337,6 +378,91 @@ fn hero_contact_sheet_filter() -> String {
         .collect::<Vec<_>>()
         .join("+");
     format!("select='{select_frames}',scale=320:-1,tile=3x3")
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GifFrameProgression {
+    width: u32,
+    height: u32,
+    frame_count: usize,
+    min_consecutive_frame_delta_ratio: f64,
+    first_last_frame_delta_ratio: f64,
+}
+
+fn inspect_gif_frame_progression(path: &Path) -> anyhow::Result<GifFrameProgression> {
+    let file = fs::File::open(path)?;
+    let decoder = image::codecs::gif::GifDecoder::new(BufReader::new(file))?;
+    let frames = decoder.into_frames();
+
+    let mut width = 0;
+    let mut height = 0;
+    let mut frame_count = 0usize;
+    let mut first_frame_rgba8 = Vec::new();
+    let mut previous_frame_rgba8 = Vec::new();
+    let mut min_consecutive_frame_delta_ratio = 1.0_f64;
+    let mut first_last_frame_delta_ratio = 0.0_f64;
+
+    for frame in frames {
+        let frame = frame?;
+        let buffer = frame.into_buffer();
+        let (frame_width, frame_height) = buffer.dimensions();
+        let rgba8 = buffer.into_raw();
+
+        if frame_count == 0 {
+            width = frame_width;
+            height = frame_height;
+            first_frame_rgba8.clone_from(&rgba8);
+        } else {
+            anyhow::ensure!(
+                frame_width == width && frame_height == height,
+                "README hero GIF frame dimensions changed at frame {frame_count}: expected {}x{}, got {}x{}",
+                width,
+                height,
+                frame_width,
+                frame_height
+            );
+            let delta_ratio = frame_delta_ratio(&previous_frame_rgba8, &rgba8)?;
+            min_consecutive_frame_delta_ratio = min_consecutive_frame_delta_ratio.min(delta_ratio);
+            first_last_frame_delta_ratio = frame_delta_ratio(&first_frame_rgba8, &rgba8)?;
+        }
+
+        previous_frame_rgba8 = rgba8;
+        frame_count += 1;
+    }
+
+    anyhow::ensure!(frame_count > 0, "README hero GIF has no decoded frames");
+    if frame_count == 1 {
+        min_consecutive_frame_delta_ratio = 0.0;
+    }
+
+    Ok(GifFrameProgression {
+        width,
+        height,
+        frame_count,
+        min_consecutive_frame_delta_ratio,
+        first_last_frame_delta_ratio,
+    })
+}
+
+fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> anyhow::Result<f64> {
+    anyhow::ensure!(
+        previous_rgba8.len() == current_rgba8.len(),
+        "hero frame buffers must have identical byte lengths"
+    );
+    anyhow::ensure!(
+        previous_rgba8.len().is_multiple_of(4),
+        "hero frame buffer length must be RGBA8-aligned"
+    );
+    let pixel_count = previous_rgba8.len() / 4;
+    if pixel_count == 0 {
+        return Ok(0.0);
+    }
+    let changed_pixels = previous_rgba8
+        .chunks_exact(4)
+        .zip(current_rgba8.chunks_exact(4))
+        .filter(|(previous, current)| previous != current)
+        .count();
+    Ok(changed_pixels as f64 / pixel_count as f64)
 }
 
 fn extract_hero_digest(output: &str) -> Option<String> {
@@ -583,7 +709,7 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_hero_digest, hero_contact_sheet_filter};
+    use super::{extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter};
 
     #[test]
     fn extracts_hero_digest_from_smoke_output() {
@@ -607,5 +733,19 @@ mod tests {
             hero_contact_sheet_filter(),
             "select='eq(n,0)+eq(n,6)+eq(n,12)+eq(n,18)+eq(n,24)+eq(n,30)+eq(n,36)+eq(n,42)+eq(n,47)',scale=320:-1,tile=3x3"
         );
+    }
+
+    #[test]
+    fn computes_frame_delta_ratio_per_pixel() {
+        let previous = [0, 0, 0, 255, 10, 10, 10, 255];
+        let current = [0, 0, 0, 255, 11, 10, 10, 255];
+
+        assert_eq!(frame_delta_ratio(&previous, &current).unwrap(), 0.5);
+        assert_eq!(frame_delta_ratio(&previous, &previous).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn rejects_frame_delta_length_mismatch() {
+        assert!(frame_delta_ratio(&[0, 0, 0, 255], &[0, 0, 0]).is_err());
     }
 }
