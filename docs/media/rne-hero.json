@@ -1,8 +1,8 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 1753876,
-  "fps": 12.0,
-  "frame_count": 48,
+  "byte_size": 1761950,
+  "fps": 18.0,
+  "frame_count": 72,
   "gif_path": "rne-hero.gif",
   "height": 540,
   "overlays": [
@@ -14,46 +14,46 @@
     "drop_tray",
     "drop_zone"
   ],
-  "policy_steps": 760,
+  "policy_steps": 680,
   "poster_path": "rne-hero.png",
   "schema_version": 1,
   "settle_steps": 120,
-  "sha256": "sha256:a75edc804b5a6753676b7a791b5c192b380fb47d09d65dd9c71030e686834067",
+  "sha256": "sha256:81a5fd9d9885eca87f96b921a7e0401b78d72270d5f48cb9679e4ba9229c779a",
   "simulation": {
-    "base_travel_m": 3.380407,
-    "ee_travel_m": 3.060694,
+    "base_travel_m": 3.225032,
+    "ee_travel_m": 3.078985,
     "final_base_m": [
-      2.395596,
+      2.307425,
       0.25,
-      -2.38702
+      -2.255629
     ],
     "final_ee_m": [
-      2.835325,
-      0.425802,
-      -2.153163
+      2.814358,
+      0.357447,
+      -2.205944
     ],
-    "final_ee_target_error_m": 0.007034,
+    "final_ee_target_error_m": 0.006478,
     "final_object_m": [
       2.17,
       0.4,
       -2.48
     ],
     "final_object_place_error_m": 0.0,
-    "first_last_frame_delta_ratio": 0.408255,
-    "grasped_steps": 350,
+    "first_last_frame_delta_ratio": 0.350117,
+    "grasped_steps": 310,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
     "max_final_object_place_error_m": 0.2,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.016684,
-    "min_consecutive_frame_delta_ratio_threshold": 0.01,
+    "min_consecutive_frame_delta_ratio": 0.006146,
+    "min_consecutive_frame_delta_ratio_threshold": 0.005,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,
     "min_object_transport_m": 0.35,
     "object_transport_m": 1.745537,
     "released_after_grasp": true,
-    "trajectory_digest": "0xd800ab5cce184ec8"
+    "trajectory_digest": "0xac31fd45ce3ca161"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",

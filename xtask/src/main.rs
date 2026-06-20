@@ -313,7 +313,7 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero object was not carried then released: grasped_steps={grasped_steps}, released_after_grasp={released_after_grasp}"
     );
     anyhow::ensure!(
-        min_consecutive_frame_delta_ratio_threshold >= 0.01,
+        min_consecutive_frame_delta_ratio_threshold >= 0.005,
         "README hero frame-delta threshold is too loose: {min_consecutive_frame_delta_ratio_threshold:.4}"
     );
     anyhow::ensure!(

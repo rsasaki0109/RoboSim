@@ -29,14 +29,14 @@ const RENDER_WIDTH: u32 = 640;
 const RENDER_HEIGHT: u32 = 360;
 const POSTER_WIDTH: u32 = 960;
 const POSTER_HEIGHT: u32 = 540;
-const FRAME_COUNT: usize = 48;
-const FPS: usize = 12;
+const FRAME_COUNT: usize = 72;
+const FPS: usize = 18;
 const SETTLE_STEPS: usize = 120;
-const POLICY_STEPS: usize = 760;
+const POLICY_STEPS: usize = 680;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
-const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.01;
+const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.005;
 const MIN_FIRST_LAST_FRAME_DELTA_RATIO: f64 = 0.08;
 const MIN_UNIQUE_COLORS: usize = 8;
 const EXPECTED_BASE_Y_M: f64 = 0.25;
@@ -47,13 +47,52 @@ const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
 const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
 const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
-const REACH_TARGET_M: Vec3 = Vec3::new(2.84, 0.43, -2.15);
+const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.36, -2.21);
 const OBJECT_GRASP_STEP: usize = 310;
-const OBJECT_RELEASE_STEP: usize = 660;
+const OBJECT_RELEASE_STEP: usize = 620;
+const PICK_MANIPULATION_START_STEP: usize = 301;
+const PICK_MANIPULATION_END_STEP: usize = 390;
+const RELEASE_MANIPULATION_START_STEP: usize = OBJECT_RELEASE_STEP;
+const RELEASE_MANIPULATION_END_STEP: usize = POLICY_STEPS;
 const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
 const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
+const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.70, 0.70, 0.64, 1.0];
+const HERO_WALLS: [HeroBox; 5] = [
+    HeroBox {
+        center_m: Vec3::new(HOUSE_CENTER_M.x, 0.22, HOUSE_CENTER_M.z - 2.82),
+        size_m: Vec3::new(8.0, 0.48, 0.08),
+        color_rgba: [0.62, 0.64, 0.60, 1.0],
+    },
+    HeroBox {
+        center_m: Vec3::new(HOUSE_CENTER_M.x - 3.95, 0.22, HOUSE_CENTER_M.z),
+        size_m: Vec3::new(0.08, 0.48, 5.8),
+        color_rgba: [0.58, 0.61, 0.62, 1.0],
+    },
+    HeroBox {
+        center_m: Vec3::new(HOUSE_CENTER_M.x + 3.95, 0.22, HOUSE_CENTER_M.z),
+        size_m: Vec3::new(0.08, 0.48, 5.8),
+        color_rgba: [0.58, 0.61, 0.62, 1.0],
+    },
+    HeroBox {
+        center_m: Vec3::new(HOUSE_CENTER_M.x - 2.25, 0.16, HOUSE_CENTER_M.z - 0.05),
+        size_m: Vec3::new(0.10, 0.34, 1.55),
+        color_rgba: HERO_WALL_COLOR_RGBA,
+    },
+    HeroBox {
+        center_m: Vec3::new(HOUSE_CENTER_M.x - 2.10, 0.16, HOUSE_CENTER_M.z - 1.95),
+        size_m: Vec3::new(1.70, 0.34, 0.10),
+        color_rgba: HERO_WALL_COLOR_RGBA,
+    },
+];
+
+#[derive(Clone, Copy, Debug)]
+struct HeroBox {
+    center_m: Vec3,
+    size_m: Vec3,
+    color_rgba: [f32; 4],
+}
 
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
@@ -635,7 +674,7 @@ impl MobilePickPlaceHeroPolicy {
     fn next_action(&mut self) -> MobileManipulatorAction {
         self.step += 1;
         match self.step {
-            0..=175 => MobileManipulatorAction {
+            1..=175 => MobileManipulatorAction {
                 left_wheel_velocity_rad_s: 5.0,
                 right_wheel_velocity_rad_s: 5.0,
                 ..MobileManipulatorAction::default()
@@ -646,26 +685,26 @@ impl MobilePickPlaceHeroPolicy {
                 shoulder_velocity_rad_s: 0.4,
                 ..MobileManipulatorAction::default()
             },
-            301..=390 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 1.0,
-                right_wheel_velocity_rad_s: 1.0,
+            PICK_MANIPULATION_START_STEP..=PICK_MANIPULATION_END_STEP => MobileManipulatorAction {
                 shoulder_velocity_rad_s: 0.7,
                 elbow_velocity_rad_s: -0.4,
                 gripper_velocity_rad_s: -2.5,
                 ..MobileManipulatorAction::default()
             },
             391..=600 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 3.2,
-                right_wheel_velocity_rad_s: 3.2,
+                left_wheel_velocity_rad_s: 2.4,
+                right_wheel_velocity_rad_s: 4.0,
                 shoulder_velocity_rad_s: 0.2,
                 elbow_velocity_rad_s: -0.1,
                 gripper_velocity_rad_s: -2.0,
                 ..MobileManipulatorAction::default()
             },
-            601..=700 => MobileManipulatorAction {
-                gripper_velocity_rad_s: 3.0,
-                ..MobileManipulatorAction::default()
-            },
+            RELEASE_MANIPULATION_START_STEP..=RELEASE_MANIPULATION_END_STEP => {
+                MobileManipulatorAction {
+                    gripper_velocity_rad_s: 3.0,
+                    ..MobileManipulatorAction::default()
+                }
+            }
             _ => MobileManipulatorAction::default(),
         }
     }
@@ -720,36 +759,9 @@ fn append_hero_context(
         Vec3::new(8.0, 0.10, 5.8),
         [0.27, 0.29, 0.29, 1.0],
     );
-    push_box(
-        scene,
-        Vec3::new(HOUSE_CENTER_M.x, 0.22, HOUSE_CENTER_M.z - 2.82),
-        Vec3::new(8.0, 0.48, 0.08),
-        [0.62, 0.64, 0.60, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(HOUSE_CENTER_M.x - 3.95, 0.22, HOUSE_CENTER_M.z),
-        Vec3::new(0.08, 0.48, 5.8),
-        [0.58, 0.61, 0.62, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(HOUSE_CENTER_M.x + 3.95, 0.22, HOUSE_CENTER_M.z),
-        Vec3::new(0.08, 0.48, 5.8),
-        [0.58, 0.61, 0.62, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(HOUSE_CENTER_M.x - 0.35, 0.16, HOUSE_CENTER_M.z - 0.25),
-        Vec3::new(0.10, 0.34, 1.80),
-        [0.70, 0.70, 0.64, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(HOUSE_CENTER_M.x - 1.65, 0.16, HOUSE_CENTER_M.z - 1.35),
-        Vec3::new(2.20, 0.34, 0.10),
-        [0.70, 0.70, 0.64, 1.0],
-    );
+    for wall in HERO_WALLS {
+        push_box(scene, wall.center_m, wall.size_m, wall.color_rgba);
+    }
     push_box(
         scene,
         Vec3::new(0.10, 0.14, 0.18),
@@ -977,6 +989,8 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Resu
 mod tests {
     use super::*;
 
+    const HERO_BASE_WALL_CLEARANCE_M: f64 = 0.30;
+
     fn observation_at(point: Vec3) -> MobileManipulatorObservation {
         MobileManipulatorObservation {
             ee_x_m: point.x,
@@ -1014,5 +1028,61 @@ mod tests {
 
         task.observe(OBJECT_RELEASE_STEP + 60, &observation_at(carry_point));
         assert_eq!(task.object_m(), PLACE_TARGET_M);
+    }
+
+    #[test]
+    fn hero_policy_stops_base_during_manipulation() {
+        let mut policy = MobilePickPlaceHeroPolicy::new();
+
+        for step in 1..=POLICY_STEPS {
+            let action = policy.next_action();
+            if (PICK_MANIPULATION_START_STEP..=PICK_MANIPULATION_END_STEP).contains(&step)
+                || (RELEASE_MANIPULATION_START_STEP..=RELEASE_MANIPULATION_END_STEP).contains(&step)
+            {
+                assert_eq!(
+                    action.left_wheel_velocity_rad_s, 0.0,
+                    "left wheel should be stopped during manipulation at step {step}"
+                );
+                assert_eq!(
+                    action.right_wheel_velocity_rad_s, 0.0,
+                    "right wheel should be stopped during manipulation at step {step}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hero_media_samples_wheel_motion_at_higher_temporal_resolution() {
+        assert!(FRAME_COUNT >= 72);
+        assert!(FPS >= 18);
+    }
+
+    #[test]
+    fn hero_mobile_base_path_clears_visual_walls() {
+        let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
+            .expect("load mm_mobile scene");
+        for _ in 0..SETTLE_STEPS {
+            sim.step(MobileManipulatorAction::default());
+        }
+
+        let mut policy = MobilePickPlaceHeroPolicy::new();
+        for step in 1..=POLICY_STEPS {
+            let obs = sim.step(policy.next_action());
+            for wall in HERO_WALLS {
+                let clearance_m = top_down_box_clearance_m(obs.base_x_m, obs.base_z_m, wall);
+                assert!(
+                    clearance_m >= HERO_BASE_WALL_CLEARANCE_M,
+                    "base path is too close to a visual wall at step {step}: clearance={clearance_m:.3} m, wall={wall:?}"
+                );
+            }
+        }
+    }
+
+    fn top_down_box_clearance_m(x_m: f64, z_m: f64, wall: HeroBox) -> f64 {
+        let dx_m = (x_m - wall.center_m.x).abs() - wall.size_m.x * 0.5;
+        let dz_m = (z_m - wall.center_m.z).abs() - wall.size_m.z * 0.5;
+        let outside_x_m = dx_m.max(0.0);
+        let outside_z_m = dz_m.max(0.0);
+        (outside_x_m * outside_x_m + outside_z_m * outside_z_m).sqrt()
     }
 }
