@@ -36,6 +36,22 @@ const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
 
 fn main() {
+    if env::args().any(|arg| arg == "--smoke") {
+        let metrics = run_hero_smoke();
+        println!(
+            "3D hero simulation smoke ok: base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            metrics.base_travel_m,
+            metrics.ee_travel_m,
+            metrics.final_base_m[0],
+            metrics.final_base_m[1],
+            metrics.final_base_m[2],
+            metrics.final_ee_m[0],
+            metrics.final_ee_m[1],
+            metrics.final_ee_m[2]
+        );
+        return;
+    }
+
     if std::env::var("RNE_SKIP_GPU").is_ok() {
         eprintln!("RNE_SKIP_GPU set; skipping 3D mobile manipulator hero render");
         return;
@@ -113,26 +129,18 @@ fn main() {
     }
 
     let final_obs = sim.observe();
-    let base_travel_m = ((final_obs.base_x_m - start.base_x_m).powi(2)
-        + (final_obs.base_z_m - start.base_z_m).powi(2))
-    .sqrt();
-    let ee_travel_m = ((final_obs.ee_x_m - start.ee_x_m).powi(2)
-        + (final_obs.ee_y_m - start.ee_y_m).powi(2)
-        + (final_obs.ee_z_m - start.ee_z_m).powi(2))
-    .sqrt();
-    assert!(
-        base_travel_m > MIN_BASE_TRAVEL_M,
-        "expected mobile base navigation: base_travel={base_travel_m:.2} m"
-    );
-    assert!(
-        ee_travel_m > MIN_EE_TRAVEL_M,
-        "expected manipulator reach: ee_travel={ee_travel_m:.2} m"
-    );
-    write_sim_metadata_if_requested(
-        base_travel_m,
-        ee_travel_m,
+    let metrics = HeroSimMetrics::new(
+        [start.base_x_m, start.base_y_m, start.base_z_m],
+        [start.ee_x_m, start.ee_y_m, start.ee_z_m],
         [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
+    );
+    metrics.assert_navigation_and_reach();
+    write_sim_metadata_if_requested(
+        metrics.base_travel_m,
+        metrics.ee_travel_m,
+        metrics.final_base_m,
+        metrics.final_ee_m,
     )
     .expect("write hero simulation metadata");
 
@@ -145,16 +153,86 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
-        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, base_travel={base_travel_m:.2} m, ee_travel={ee_travel_m:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
+        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
         poster_path.display(),
         gif_path.display(),
-        final_obs.base_x_m,
-        final_obs.base_y_m,
-        final_obs.base_z_m,
-        final_obs.ee_x_m,
-        final_obs.ee_y_m,
-        final_obs.ee_z_m
+        metrics.base_travel_m,
+        metrics.ee_travel_m,
+        metrics.final_base_m[0],
+        metrics.final_base_m[1],
+        metrics.final_base_m[2],
+        metrics.final_ee_m[0],
+        metrics.final_ee_m[1],
+        metrics.final_ee_m[2]
     );
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeroSimMetrics {
+    base_travel_m: f64,
+    ee_travel_m: f64,
+    final_base_m: [f64; 3],
+    final_ee_m: [f64; 3],
+}
+
+impl HeroSimMetrics {
+    fn new(
+        start_base_m: [f64; 3],
+        start_ee_m: [f64; 3],
+        final_base_m: [f64; 3],
+        final_ee_m: [f64; 3],
+    ) -> Self {
+        let base_travel_m = ((final_base_m[0] - start_base_m[0]).powi(2)
+            + (final_base_m[2] - start_base_m[2]).powi(2))
+        .sqrt();
+        let ee_travel_m = ((final_ee_m[0] - start_ee_m[0]).powi(2)
+            + (final_ee_m[1] - start_ee_m[1]).powi(2)
+            + (final_ee_m[2] - start_ee_m[2]).powi(2))
+        .sqrt();
+        Self {
+            base_travel_m,
+            ee_travel_m,
+            final_base_m,
+            final_ee_m,
+        }
+    }
+
+    fn assert_navigation_and_reach(&self) {
+        assert!(
+            self.base_travel_m > MIN_BASE_TRAVEL_M,
+            "expected mobile base navigation: base_travel={:.2} m",
+            self.base_travel_m
+        );
+        assert!(
+            self.ee_travel_m > MIN_EE_TRAVEL_M,
+            "expected manipulator reach: ee_travel={:.2} m",
+            self.ee_travel_m
+        );
+    }
+}
+
+fn run_hero_smoke() -> HeroSimMetrics {
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
+        .expect("load mm_mobile scene");
+    for _ in 0..SETTLE_STEPS {
+        sim.step(MobileManipulatorAction::default());
+    }
+
+    let start = sim.observe();
+    let mut policy = MobileReachHeroPolicy::new();
+    for _ in 0..POLICY_STEPS {
+        sim.step(policy.next_action());
+    }
+
+    let final_obs = sim.observe();
+    let metrics = HeroSimMetrics::new(
+        [start.base_x_m, start.base_y_m, start.base_z_m],
+        [start.ee_x_m, start.ee_y_m, start.ee_z_m],
+        [final_obs.base_x_m, final_obs.base_y_m, final_obs.base_z_m],
+        [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
+    );
+    metrics.assert_navigation_and_reach();
+    metrics
 }
 
 struct MobileReachHeroPolicy {

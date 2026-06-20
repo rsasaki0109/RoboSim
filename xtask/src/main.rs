@@ -73,6 +73,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place -- --smoke",
     )?;
+    run_step("cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke")?;
     run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
     )?;
