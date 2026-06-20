@@ -35,6 +35,7 @@ const SETTLE_STEPS: usize = 120;
 const POLICY_STEPS: usize = 520;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
+const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
 const MIN_UNIQUE_COLORS: usize = 8;
 const EXPECTED_BASE_Y_M: f64 = 0.25;
 const MAX_BASE_HEIGHT_ERROR_M: f64 = 0.01;
@@ -50,10 +51,11 @@ fn main() {
         let repeat = run_hero_smoke();
         metrics.assert_deterministic_match(&repeat);
         println!(
-            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, final_ee_target_error={:.3} m, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
             metrics.trajectory_digest,
             metrics.base_travel_m,
             metrics.ee_travel_m,
+            metrics.final_ee_target_error_m,
             metrics.max_base_height_error_m,
             metrics.min_base_yaw_only_dot,
             metrics.final_base_m[0],
@@ -112,13 +114,13 @@ fn main() {
         append_hero_context(&mut scene, &base_path);
         let orbit = CameraOrbit {
             focus: Vec3::new(
-                obs.base_x_m * 0.55 + HOUSE_CENTER_M.x * 0.45,
-                0.44,
-                obs.base_z_m * 0.55 + HOUSE_CENTER_M.z * 0.45,
+                obs.base_x_m * 0.62 + REACH_TARGET_M.x * 0.24 + HOUSE_CENTER_M.x * 0.14,
+                0.52,
+                obs.base_z_m * 0.62 + REACH_TARGET_M.z * 0.24 + HOUSE_CENTER_M.z * 0.14,
             ),
-            yaw_rad: -0.74,
-            pitch_rad: 1.02,
-            distance_m: 4.6,
+            yaw_rad: -1.06,
+            pitch_rad: 1.15,
+            distance_m: 3.45,
         };
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -156,16 +158,7 @@ fn main() {
         planarity,
     );
     metrics.assert_navigation_and_reach();
-    write_sim_metadata_if_requested(
-        metrics.base_travel_m,
-        metrics.ee_travel_m,
-        metrics.trajectory_digest,
-        metrics.max_base_height_error_m,
-        metrics.min_base_yaw_only_dot,
-        metrics.final_base_m,
-        metrics.final_ee_m,
-    )
-    .expect("write hero simulation metadata");
+    write_sim_metadata_if_requested(&metrics).expect("write hero simulation metadata");
 
     let poster_src = &frame_paths[FRAME_COUNT - 1];
     let poster_path = media_dir.join("rne-hero.png");
@@ -176,12 +169,13 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
-        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
+        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, final_ee_target_error={:.3} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
         poster_path.display(),
         gif_path.display(),
         metrics.trajectory_digest,
         metrics.base_travel_m,
         metrics.ee_travel_m,
+        metrics.final_ee_target_error_m,
         metrics.final_base_m[0],
         metrics.final_base_m[1],
         metrics.final_base_m[2],
@@ -198,6 +192,7 @@ struct HeroSimMetrics {
     trajectory_digest: u64,
     max_base_height_error_m: f64,
     min_base_yaw_only_dot: f64,
+    final_ee_target_error_m: f64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
 }
@@ -218,12 +213,17 @@ impl HeroSimMetrics {
             + (final_ee_m[1] - start_ee_m[1]).powi(2)
             + (final_ee_m[2] - start_ee_m[2]).powi(2))
         .sqrt();
+        let final_ee_target_error_m = ((final_ee_m[0] - REACH_TARGET_M.x).powi(2)
+            + (final_ee_m[1] - REACH_TARGET_M.y).powi(2)
+            + (final_ee_m[2] - REACH_TARGET_M.z).powi(2))
+        .sqrt();
         Self {
             base_travel_m,
             ee_travel_m,
             trajectory_digest,
             max_base_height_error_m: planarity.max_base_height_error_m,
             min_base_yaw_only_dot: planarity.min_base_yaw_only_dot,
+            final_ee_target_error_m,
             final_base_m,
             final_ee_m,
         }
@@ -249,6 +249,11 @@ impl HeroSimMetrics {
             self.min_base_yaw_only_dot >= MIN_BASE_YAW_ONLY_DOT,
             "expected upright mobile base orientation: min_yaw_only_dot={:.9}",
             self.min_base_yaw_only_dot
+        );
+        assert!(
+            self.final_ee_target_error_m <= MAX_FINAL_EE_TARGET_ERROR_M,
+            "expected manipulator to reach target: final_ee_target_error={:.3} m",
+            self.final_ee_target_error_m
         );
     }
 
@@ -276,6 +281,11 @@ impl HeroSimMetrics {
             self.min_base_yaw_only_dot.to_bits(),
             repeat.min_base_yaw_only_dot.to_bits(),
             "hero simulation base upright metric changed between identical runs"
+        );
+        assert_eq!(
+            self.final_ee_target_error_m.to_bits(),
+            repeat.final_ee_target_error_m.to_bits(),
+            "hero simulation final reach error changed between identical runs"
         );
         assert_eq!(
             self.final_base_m.map(f64::to_bits),
@@ -508,15 +518,7 @@ fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rg
     ));
 }
 
-fn write_sim_metadata_if_requested(
-    base_travel_m: f64,
-    ee_travel_m: f64,
-    trajectory_digest: u64,
-    max_base_height_error_m: f64,
-    min_base_yaw_only_dot: f64,
-    final_base_m: [f64; 3],
-    final_ee_m: [f64; 3],
-) -> std::io::Result<()> {
+fn write_sim_metadata_if_requested(metrics: &HeroSimMetrics) -> std::io::Result<()> {
     let Some(path) = env::var_os("RNE_HERO_SIM_METADATA") else {
         return Ok(());
     };
@@ -532,25 +534,29 @@ fn write_sim_metadata_if_requested(
             "  \"trajectory_digest\": \"0x{:016x}\",\n",
             "  \"max_base_height_error_m\": {:.6},\n",
             "  \"min_base_yaw_only_dot\": {:.9},\n",
+            "  \"final_ee_target_error_m\": {:.6},\n",
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"min_base_travel_m\": {:.6},\n",
-            "  \"min_ee_travel_m\": {:.6}\n",
+            "  \"min_ee_travel_m\": {:.6},\n",
+            "  \"max_final_ee_target_error_m\": {:.6}\n",
             "}}\n"
         ),
-        base_travel_m,
-        ee_travel_m,
-        trajectory_digest,
-        max_base_height_error_m,
-        min_base_yaw_only_dot,
-        final_base_m[0],
-        final_base_m[1],
-        final_base_m[2],
-        final_ee_m[0],
-        final_ee_m[1],
-        final_ee_m[2],
+        metrics.base_travel_m,
+        metrics.ee_travel_m,
+        metrics.trajectory_digest,
+        metrics.max_base_height_error_m,
+        metrics.min_base_yaw_only_dot,
+        metrics.final_ee_target_error_m,
+        metrics.final_base_m[0],
+        metrics.final_base_m[1],
+        metrics.final_base_m[2],
+        metrics.final_ee_m[0],
+        metrics.final_ee_m[1],
+        metrics.final_ee_m[2],
         MIN_BASE_TRAVEL_M,
-        MIN_EE_TRAVEL_M
+        MIN_EE_TRAVEL_M,
+        MAX_FINAL_EE_TARGET_ERROR_M
     );
     fs::write(path, payload)
 }

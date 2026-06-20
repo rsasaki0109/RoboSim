@@ -168,6 +168,14 @@ fn hero_media_check() -> anyhow::Result<()> {
     let ee_travel_m = metadata["simulation"]["ee_travel_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing ee_travel_m"))?;
+    let final_ee_target_error_m = metadata["simulation"]["final_ee_target_error_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing final_ee_target_error_m"))?;
+    let max_final_ee_target_error_m = metadata["simulation"]["max_final_ee_target_error_m"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing max_final_ee_target_error_m")
+        })?;
     let max_base_height_error_m = metadata["simulation"]["max_base_height_error_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_base_height_error_m"))?;
@@ -184,6 +192,14 @@ fn hero_media_check() -> anyhow::Result<()> {
     anyhow::ensure!(
         ee_travel_m > 0.15,
         "README hero simulation end-effector travel is too small: {ee_travel_m:.2} m"
+    );
+    anyhow::ensure!(
+        max_final_ee_target_error_m <= 0.05,
+        "README hero reach target threshold is too loose: {max_final_ee_target_error_m:.3} m"
+    );
+    anyhow::ensure!(
+        final_ee_target_error_m <= max_final_ee_target_error_m,
+        "README hero manipulator does not reach the target: final_ee_target_error={final_ee_target_error_m:.3} m"
     );
     anyhow::ensure!(
         max_base_height_error_m <= 0.01,
