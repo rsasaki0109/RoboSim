@@ -61,7 +61,6 @@ payload = {
     "overlays": [
         "house_context",
         "base_path",
-        "wheel_disks",
         "object_path",
         "pickup_surface",
         "task_object",

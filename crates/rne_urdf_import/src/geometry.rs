@@ -41,7 +41,7 @@ pub fn visual_from_element(element: &UrdfGeometryElement, color_rgba: [f32; 4]) 
     Visual {
         shape: visual_shape_from_geometry(&element.geometry),
         local_offset: local_offset_from_element(element),
-        color_rgba,
+        color_rgba: element.material_rgba.unwrap_or(color_rgba),
     }
 }
 
@@ -85,6 +85,7 @@ mod tests {
         let element = UrdfGeometryElement {
             origin_xyz: Vec3::ZERO,
             origin_rpy: Vec3::ZERO,
+            material_rgba: None,
             geometry: UrdfGeometry::Box {
                 size_m: Vec3::new(1.0, 2.0, 3.0),
             },
@@ -103,6 +104,7 @@ mod tests {
         let element = UrdfGeometryElement {
             origin_xyz: Vec3::ZERO,
             origin_rpy: Vec3::ZERO,
+            material_rgba: None,
             geometry: UrdfGeometry::Mesh {
                 path: "package://robot/mesh.stl".into(),
                 scale: Vec3::ONE,
@@ -113,5 +115,19 @@ mod tests {
             visual_from_element(&element, [1.0, 1.0, 1.0, 1.0]).shape,
             VisualShape::Mesh { .. }
         ));
+    }
+
+    #[test]
+    fn visual_material_color_overrides_spawn_fallback() {
+        let element = UrdfGeometryElement {
+            origin_xyz: Vec3::ZERO,
+            origin_rpy: Vec3::ZERO,
+            material_rgba: Some([0.1, 0.2, 0.3, 1.0]),
+            geometry: UrdfGeometry::Sphere { radius_m: 0.25 },
+        };
+        assert_eq!(
+            visual_from_element(&element, [1.0, 1.0, 1.0, 1.0]).color_rgba,
+            [0.1, 0.2, 0.3, 1.0]
+        );
     }
 }

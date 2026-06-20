@@ -31,6 +31,8 @@ pub struct UrdfGeometryElement {
     pub origin_xyz: Vec3,
     /// Origin roll-pitch-yaw in radians.
     pub origin_rpy: Vec3,
+    /// Optional material color in RGBA components.
+    pub material_rgba: Option<[f32; 4]>,
     /// Primitive or mesh geometry.
     pub geometry: UrdfGeometry,
 }

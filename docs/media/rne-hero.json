@@ -1,6 +1,6 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 1768789,
+  "byte_size": 1753876,
   "fps": 12.0,
   "frame_count": 48,
   "gif_path": "rne-hero.gif",
@@ -8,7 +8,6 @@
   "overlays": [
     "house_context",
     "base_path",
-    "wheel_disks",
     "object_path",
     "pickup_surface",
     "task_object",
@@ -19,7 +18,7 @@
   "poster_path": "rne-hero.png",
   "schema_version": 1,
   "settle_steps": 120,
-  "sha256": "sha256:7b5b1879137219c9249a81bd176e63e5d21784d9ea3b6f89b79cef2022b8171b",
+  "sha256": "sha256:a75edc804b5a6753676b7a791b5c192b380fb47d09d65dd9c71030e686834067",
   "simulation": {
     "base_travel_m": 3.380407,
     "ee_travel_m": 3.060694,
@@ -40,14 +39,14 @@
       -2.48
     ],
     "final_object_place_error_m": 0.0,
-    "first_last_frame_delta_ratio": 0.408655,
+    "first_last_frame_delta_ratio": 0.408255,
     "grasped_steps": 350,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
     "max_final_object_place_error_m": 0.2,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.017027,
+    "min_consecutive_frame_delta_ratio": 0.016684,
     "min_consecutive_frame_delta_ratio_threshold": 0.01,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,

@@ -1423,6 +1423,11 @@ mod tests {
                 }
                 ref shape => panic!("{wheel_name} should render as a cylinder, got {shape:?}"),
             }
+            assert_eq!(
+                visual.color_rgba,
+                [0.08, 0.08, 0.08, 1.0],
+                "{wheel_name} should use the URDF wheel material color"
+            );
 
             let cylinder_axis = visual.local_offset.rotation * Vec3::Z;
             assert!(

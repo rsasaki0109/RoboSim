@@ -18,6 +18,9 @@
   <link name="left_wheel">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="wheel_black">
+        <color rgba="0.08 0.08 0.08 1.0"/>
+      </material>
       <geometry>
         <cylinder radius="0.1" length="0.05"/>
       </geometry>
@@ -33,6 +36,9 @@
   <link name="right_wheel">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="wheel_black">
+        <color rgba="0.08 0.08 0.08 1.0"/>
+      </material>
       <geometry>
         <cylinder radius="0.1" length="0.05"/>
       </geometry>

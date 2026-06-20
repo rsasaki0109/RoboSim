@@ -54,9 +54,6 @@ const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
 const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
-const HERO_WHEEL_RADIUS_M: f64 = 0.115;
-const HERO_WHEEL_WIDTH_M: f64 = 0.07;
-const HERO_WHEEL_LATERAL_OFFSET_M: f64 = 0.225;
 
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
@@ -143,7 +140,7 @@ fn main() {
         base_path.push(Vec3::new(obs.base_x_m, 0.0, obs.base_z_m));
         object_path.push(task.object_m());
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(&mut scene, &base_path, &object_path, &task, &obs);
+        append_hero_context(&mut scene, &base_path, &object_path, &task);
         let orbit = CameraOrbit {
             focus: Vec3::new(
                 obs.base_x_m * 0.62 + REACH_TARGET_M.x * 0.24 + HOUSE_CENTER_M.x * 0.14,
@@ -716,7 +713,6 @@ fn append_hero_context(
     base_path: &[Vec3],
     object_path: &[Vec3],
     task: &HeroTaskProgress,
-    obs: &MobileManipulatorObservation,
 ) {
     push_box(
         scene,
@@ -823,7 +819,6 @@ fn append_hero_context(
             Transform3::IDENTITY,
         ));
     }
-    append_mobile_wheel_overlays(scene, obs);
 }
 
 fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {
@@ -833,24 +828,6 @@ fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rg
         color_rgba,
         Transform3::IDENTITY,
     ));
-}
-
-fn append_mobile_wheel_overlays(scene: &mut RenderScene, obs: &MobileManipulatorObservation) {
-    let base_rotation = Quat::from_rotation_y(obs.base_yaw_rad);
-    let base_center = Vec3::new(obs.base_x_m, obs.base_y_m - 0.15, obs.base_z_m);
-    for side in [-1.0, 1.0] {
-        let wheel_center =
-            base_center + base_rotation * Vec3::new(0.0, 0.0, side * HERO_WHEEL_LATERAL_OFFSET_M);
-        scene.items.push(RenderScene::item_from_visual(
-            Transform3::from_translation_rotation(wheel_center, base_rotation),
-            VisualShape::Cylinder {
-                radius_m: HERO_WHEEL_RADIUS_M,
-                length_m: HERO_WHEEL_WIDTH_M,
-            },
-            [0.08, 0.08, 0.08, 1.0],
-            Transform3::IDENTITY,
-        ));
-    }
 }
 
 fn write_sim_metadata_if_requested(

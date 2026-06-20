@@ -106,12 +106,30 @@ fn parse_geometry_element(
         .find(|node| node.is_element() && node.tag_name().name() == "geometry")
         .ok_or_else(|| UrdfParseError::Missing("geometry".into()))
         .and_then(parse_geometry)?;
+    let material_rgba = parse_material_rgba(node)?;
 
     Ok(UrdfGeometryElement {
         origin_xyz,
         origin_rpy,
+        material_rgba,
         geometry,
     })
+}
+
+fn parse_material_rgba(node: roxmltree::Node<'_, '_>) -> Result<Option<[f32; 4]>, UrdfParseError> {
+    let Some(material) = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "material")
+    else {
+        return Ok(None);
+    };
+    let Some(color) = material
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "color")
+    else {
+        return Ok(None);
+    };
+    color.attribute("rgba").map(parse_rgba).transpose()
 }
 
 fn parse_geometry(node: roxmltree::Node<'_, '_>) -> Result<UrdfGeometry, UrdfParseError> {
@@ -264,6 +282,37 @@ fn parse_vec3(value: &str) -> Result<Vec3, UrdfParseError> {
     ))
 }
 
+fn parse_rgba(value: &str) -> Result<[f32; 4], UrdfParseError> {
+    let parts: Vec<_> = value.split_whitespace().collect();
+    if parts.len() != 4 {
+        return Err(UrdfParseError::InvalidValue {
+            field: "material/color@rgba".into(),
+            value: value.into(),
+        });
+    }
+
+    let parse = |part: &str| -> Result<f32, UrdfParseError> {
+        let component: f32 = part.parse().map_err(|_| UrdfParseError::InvalidValue {
+            field: "material/color@rgba".into(),
+            value: value.into(),
+        })?;
+        if !component.is_finite() {
+            return Err(UrdfParseError::InvalidValue {
+                field: "material/color@rgba".into(),
+                value: value.into(),
+            });
+        }
+        Ok(component)
+    };
+
+    Ok([
+        parse(parts[0])?,
+        parse(parts[1])?,
+        parse(parts[2])?,
+        parse(parts[3])?,
+    ])
+}
+
 fn parse_f64(value: &str) -> Result<f64, UrdfParseError> {
     value.parse().map_err(|_| UrdfParseError::InvalidValue {
         field: "f64".into(),
@@ -326,5 +375,30 @@ mod tests {
             base.visuals[0].geometry,
             UrdfGeometry::Mesh { .. }
         ));
+    }
+
+    #[test]
+    fn parses_inline_visual_material_color() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="material_robot">
+              <link name="wheel">
+                <visual>
+                  <material name="wheel_black">
+                    <color rgba="0.08 0.08 0.08 1.0"/>
+                  </material>
+                  <geometry>
+                    <cylinder radius="0.1" length="0.05"/>
+                  </geometry>
+                </visual>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            robot.links[0].visuals[0].material_rgba,
+            Some([0.08, 0.08, 0.08, 1.0])
+        );
     }
 }
