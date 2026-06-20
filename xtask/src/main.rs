@@ -189,6 +189,9 @@ fn hero_media_check() -> anyhow::Result<()> {
                 .any(|overlay| overlay.as_str() == Some("base_path"))
             && overlays
                 .iter()
+                .any(|overlay| overlay.as_str() == Some("wheel_disks"))
+            && overlays
+                .iter()
                 .any(|overlay| overlay.as_str() == Some("object_path"))
             && overlays
                 .iter()

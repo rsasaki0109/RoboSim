@@ -17,7 +17,7 @@
 
   <link name="left_wheel">
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <cylinder radius="0.1" length="0.05"/>
       </geometry>
@@ -32,7 +32,7 @@
 
   <link name="right_wheel">
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <cylinder radius="0.1" length="0.05"/>
       </geometry>

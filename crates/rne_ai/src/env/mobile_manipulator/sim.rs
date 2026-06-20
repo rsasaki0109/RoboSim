@@ -1267,6 +1267,7 @@ fn link_entity(links: &HashMap<String, Entity>, name: &str) -> Result<Entity, As
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rne_render::{Visual, VisualShape};
 
     #[test]
     fn physics_init_produces_repeatable_pose() {
@@ -1401,6 +1402,34 @@ mod tests {
         );
         assert_mobile_base_planar(&sim);
         assert_eq!(sim.joint_names().len(), 6);
+    }
+
+    #[test]
+    fn mobile_wheel_visuals_are_lateral_disks() {
+        let sim = MobileManipulatorSim::new_mm_mobile();
+
+        for wheel_name in ["left_wheel", "right_wheel"] {
+            let wheel = link_entity_named(&sim, wheel_name);
+            let visual = sim
+                .world
+                .get::<Visual>(wheel)
+                .unwrap_or_else(|| panic!("{wheel_name} should have a visual"));
+            match visual.shape {
+                VisualShape::Cylinder { radius_m, length_m } => {
+                    assert!(
+                        (radius_m - 0.1).abs() < 1.0e-9 && (length_m - 0.05).abs() < 1.0e-9,
+                        "{wheel_name} should render as a thin wheel cylinder, got radius={radius_m}, length={length_m}"
+                    );
+                }
+                ref shape => panic!("{wheel_name} should render as a cylinder, got {shape:?}"),
+            }
+
+            let cylinder_axis = visual.local_offset.rotation * Vec3::Z;
+            assert!(
+                cylinder_axis.dot(Vec3::Z).abs() > 0.999_999 && cylinder_axis.y.abs() < 1.0e-9,
+                "{wheel_name} cylinder axis should be lateral Z, got {cylinder_axis:?}"
+            );
+        }
     }
 
     #[test]
@@ -1918,5 +1947,15 @@ mod tests {
             base.rotation,
             yaw_only
         );
+    }
+
+    fn link_entity_named(sim: &MobileManipulatorSim, name: &str) -> Entity {
+        sim.world
+            .iter_entities()
+            .find_map(|entity| {
+                let link = entity.get::<Link>()?;
+                (link.name == name).then_some(entity.id())
+            })
+            .unwrap_or_else(|| panic!("expected link `{name}`"))
     }
 }
