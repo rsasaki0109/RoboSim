@@ -1126,7 +1126,15 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(metadata["sha256"], gif_info["sha256"])
         self.assertEqual(
             metadata["overlays"],
-            ["house_context", "base_path", "object_path", "task_object", "drop_zone"],
+            [
+                "house_context",
+                "base_path",
+                "object_path",
+                "pickup_surface",
+                "task_object",
+                "drop_tray",
+                "drop_zone",
+            ],
         )
         self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
         self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)

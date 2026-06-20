@@ -192,7 +192,13 @@ fn hero_media_check() -> anyhow::Result<()> {
                 .any(|overlay| overlay.as_str() == Some("object_path"))
             && overlays
                 .iter()
+                .any(|overlay| overlay.as_str() == Some("pickup_surface"))
+            && overlays
+                .iter()
                 .any(|overlay| overlay.as_str() == Some("task_object"))
+            && overlays
+                .iter()
+                .any(|overlay| overlay.as_str() == Some("drop_tray"))
             && overlays
                 .iter()
                 .any(|overlay| overlay.as_str() == Some("drop_zone")),

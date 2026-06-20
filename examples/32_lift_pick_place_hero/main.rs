@@ -53,6 +53,7 @@ const OBJECT_RELEASE_STEP: usize = 660;
 const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
+const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
 
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
@@ -761,6 +762,18 @@ fn append_hero_context(
         Vec3::new(0.56, 0.40, 0.80),
         [0.25, 0.40, 0.44, 1.0],
     );
+    push_box(
+        scene,
+        Vec3::new(PICK_OBJECT_M.x, PICK_OBJECT_M.y - 0.075, PICK_OBJECT_M.z),
+        Vec3::new(0.54, 0.05, 0.42),
+        [0.49, 0.36, 0.25, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(PLACE_TARGET_M.x, PLACE_TARGET_M.y - 0.075, PLACE_TARGET_M.z),
+        Vec3::new(0.58, 0.05, 0.46),
+        [0.24, 0.42, 0.36, 1.0],
+    );
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(
             Vec3::new(
@@ -777,7 +790,7 @@ fn append_hero_context(
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(task.object_m(), Quat::IDENTITY),
         VisualShape::Box {
-            size_m: Vec3::new(0.085, 0.085, 0.085),
+            size_m: TASK_OBJECT_SIZE_M,
         },
         [0.94, 0.53, 0.12, 1.0],
         Transform3::IDENTITY,
@@ -958,4 +971,48 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Resu
         .write_image_data(rgba)
         .map_err(std::io::Error::other)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observation_at(point: Vec3) -> MobileManipulatorObservation {
+        MobileManipulatorObservation {
+            ee_x_m: point.x,
+            ee_y_m: point.y,
+            ee_z_m: point.z,
+            ..MobileManipulatorObservation::default()
+        }
+    }
+
+    #[test]
+    fn hero_task_object_starts_at_pick_surface() {
+        let task = HeroTaskProgress::new();
+
+        assert_eq!(task.object_m(), PICK_OBJECT_M);
+        assert_eq!(task.initial_object_m(), PICK_OBJECT_M);
+        assert_eq!(task.drop_zone_m(), PLACE_TARGET_M);
+        assert_eq!(task.grasped_steps, 0);
+        assert!(!task.released_after_grasp);
+    }
+
+    #[test]
+    fn hero_task_object_carries_then_places() {
+        let mut task = HeroTaskProgress::new();
+        let carry_point = Vec3::new(2.6, 0.42, -2.2);
+
+        task.observe(OBJECT_GRASP_STEP - 1, &observation_at(carry_point));
+        assert_eq!(task.object_m(), PICK_OBJECT_M);
+
+        task.observe(OBJECT_GRASP_STEP + 45, &observation_at(carry_point));
+        assert_eq!(task.object_m(), carry_point);
+        assert!(task.grasped_steps > 0);
+
+        task.observe(OBJECT_RELEASE_STEP, &observation_at(carry_point));
+        assert!(task.released_after_grasp);
+
+        task.observe(OBJECT_RELEASE_STEP + 60, &observation_at(carry_point));
+        assert_eq!(task.object_m(), PLACE_TARGET_M);
+    }
 }

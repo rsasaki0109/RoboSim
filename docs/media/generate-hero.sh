@@ -58,7 +58,15 @@ payload = {
     "sha256": gif["sha256"],
     "settle_steps": 120,
     "policy_steps": 760,
-    "overlays": ["house_context", "base_path", "object_path", "task_object", "drop_zone"],
+    "overlays": [
+        "house_context",
+        "base_path",
+        "object_path",
+        "pickup_surface",
+        "task_object",
+        "drop_tray",
+        "drop_zone",
+    ],
     "simulation": simulation,
 }
 with open(metadata_path, "w", encoding="utf-8") as handle:
