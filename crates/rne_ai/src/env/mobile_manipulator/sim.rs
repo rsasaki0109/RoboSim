@@ -1,6 +1,8 @@
 //! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
 
-use super::drive::wheel_command_to_motor_rad_s;
+use super::drive::{
+    wheel_command_to_motor_rad_s, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_RADIUS_M,
+};
 use crate::action::MobileManipulatorAction;
 use crate::camera::{sync_wrist_camera_mounts, wrist_camera_mounts_from_spawned, WristCameraMount};
 use crate::observation::MobileManipulatorObservation;
@@ -270,6 +272,9 @@ const ARM_MOTOR_DAMPING: f64 = 60.0;
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
 /// Clamp on a position-holding arm joint's integrated angle target (radians).
 const ARM_TARGET_LIMIT_RAD: f64 = std::f64::consts::PI;
+/// Nominal mobile-base center height. The URDF places the base at 0.25 m so
+/// its wheels sit on the ground plane.
+const MOBILE_BASE_NOMINAL_Y_M: f64 = 0.25;
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -412,6 +417,7 @@ impl MobileManipulatorSim {
             self.dt,
         )
         .expect("physics step");
+        self.stabilize_mobile_base();
         self.update_grasp(action);
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
@@ -973,6 +979,43 @@ impl MobileManipulatorSim {
                 }
             }
         }
+        self.apply_mobile_base_planar_drive(action);
+    }
+
+    fn apply_mobile_base_planar_drive(&mut self, action: MobileManipulatorAction) {
+        if !self.mobile_base {
+            return;
+        }
+
+        let left_m_s = action.left_wheel_velocity_rad_s * MM_MOBILE_WHEEL_RADIUS_M;
+        let right_m_s = action.right_wheel_velocity_rad_s * MM_MOBILE_WHEEL_RADIUS_M;
+        let forward_m_s = 0.5 * (left_m_s + right_m_s);
+        let yaw_rate_rad_s = (right_m_s - left_m_s) / MM_MOBILE_TRACK_WIDTH_M;
+        let yaw = yaw_rad(world_transform_of(&self.world, self.base_link).rotation);
+        let forward = Quat::from_rotation_y(yaw) * Vec3::X;
+
+        if let Some(mut body) = self.world.get_mut::<RigidBody>(self.base_link) {
+            body.linear_velocity_m_s = forward * forward_m_s;
+            body.linear_velocity_m_s.y = 0.0;
+            body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rate_rad_s, 0.0);
+        }
+    }
+
+    fn stabilize_mobile_base(&mut self) {
+        if !self.mobile_base {
+            return;
+        }
+
+        let yaw = yaw_rad(world_transform_of(&self.world, self.base_link).rotation);
+        if let Some(mut transform) = self.world.get_mut::<Transform3>(self.base_link) {
+            transform.translation.y = MOBILE_BASE_NOMINAL_Y_M;
+            transform.rotation = Quat::from_rotation_y(yaw);
+        }
+        if let Some(mut body) = self.world.get_mut::<RigidBody>(self.base_link) {
+            body.linear_velocity_m_s.y = 0.0;
+            body.angular_velocity_rad_s.x = 0.0;
+            body.angular_velocity_rad_s.z = 0.0;
+        }
     }
 
     /// Configures the vertical lift as a position (spring-damper) motor so it holds
@@ -1356,7 +1399,57 @@ mod tests {
             delta_x.abs() > 0.05,
             "expected base translation, delta_x={delta_x}"
         );
+        assert_mobile_base_planar(&sim);
         assert_eq!(sim.joint_names().len(), 4);
+    }
+
+    #[test]
+    fn mobile_base_stays_planar_during_reach_rollout() {
+        let mut sim = MobileManipulatorSim::new_mm_mobile();
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let start = sim.observe();
+
+        for step in 0..420 {
+            let action = match step {
+                0..=90 => MobileManipulatorAction {
+                    left_wheel_velocity_rad_s: 1.2,
+                    right_wheel_velocity_rad_s: 1.2,
+                    ..MobileManipulatorAction::default()
+                },
+                91..=170 => MobileManipulatorAction {
+                    left_wheel_velocity_rad_s: 0.35,
+                    right_wheel_velocity_rad_s: 1.0,
+                    shoulder_velocity_rad_s: 0.8,
+                    ..MobileManipulatorAction::default()
+                },
+                _ => MobileManipulatorAction {
+                    shoulder_velocity_rad_s: 1.2,
+                    elbow_velocity_rad_s: -0.8,
+                    ..MobileManipulatorAction::default()
+                },
+            };
+            sim.step(action);
+            assert_mobile_base_planar(&sim);
+        }
+
+        let final_obs = sim.observe();
+        let base_travel_m = ((final_obs.base_x_m - start.base_x_m).powi(2)
+            + (final_obs.base_z_m - start.base_z_m).powi(2))
+        .sqrt();
+        let ee_travel_m = ((final_obs.ee_x_m - start.ee_x_m).powi(2)
+            + (final_obs.ee_y_m - start.ee_y_m).powi(2)
+            + (final_obs.ee_z_m - start.ee_z_m).powi(2))
+        .sqrt();
+        assert!(
+            base_travel_m > 0.05,
+            "mobile base should navigate without tipping, base_travel={base_travel_m:.3}"
+        );
+        assert!(
+            ee_travel_m > 0.15,
+            "arm should still reach while base is stabilized, ee_travel={ee_travel_m:.3}"
+        );
     }
 
     #[test]
@@ -1807,6 +1900,23 @@ mod tests {
         assert!(
             !sim.is_grasping(),
             "opening the gripper should release the grasp"
+        );
+    }
+
+    fn assert_mobile_base_planar(sim: &MobileManipulatorSim) {
+        let base = world_transform_of(&sim.world, sim.base_link);
+        let yaw_only = Quat::from_rotation_y(yaw_rad(base.rotation));
+        let orientation_dot = base.rotation.dot(yaw_only).abs();
+        assert!(
+            (base.translation.y - MOBILE_BASE_NOMINAL_Y_M).abs() < 1.0e-9,
+            "mobile base height should stay planar: y={}",
+            base.translation.y
+        );
+        assert!(
+            orientation_dot > 0.999_999,
+            "mobile base should keep yaw-only orientation: rotation={:?}, yaw_only={:?}",
+            base.rotation,
+            yaw_only
         );
     }
 }

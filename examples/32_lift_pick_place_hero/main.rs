@@ -37,8 +37,8 @@ const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MIN_UNIQUE_COLORS: usize = 8;
 const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
-const HOUSE_CENTER_M: Vec3 = Vec3::new(-2.2, 0.0, -1.2);
-const REACH_TARGET_M: Vec3 = Vec3::new(-4.04, 0.22, -2.15);
+const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
+const REACH_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
 
 fn main() {
     if env::args().any(|arg| arg == "--smoke") {
@@ -322,20 +322,22 @@ impl MobileReachHeroPolicy {
     fn next_action(&mut self) -> MobileManipulatorAction {
         self.step += 1;
         match self.step {
-            0..=90 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 1.2,
-                right_wheel_velocity_rad_s: 1.2,
+            0..=180 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 5.0,
+                right_wheel_velocity_rad_s: 5.0,
                 ..MobileManipulatorAction::default()
             },
-            91..=170 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 0.35,
-                right_wheel_velocity_rad_s: 1.0,
-                shoulder_velocity_rad_s: 0.8,
+            181..=300 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 2.0,
+                right_wheel_velocity_rad_s: 5.0,
+                shoulder_velocity_rad_s: 0.4,
                 ..MobileManipulatorAction::default()
             },
-            171..=420 => MobileManipulatorAction {
-                shoulder_velocity_rad_s: 1.2,
-                elbow_velocity_rad_s: -0.8,
+            301..=420 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 3.0,
+                right_wheel_velocity_rad_s: 3.0,
+                shoulder_velocity_rad_s: 0.9,
+                elbow_velocity_rad_s: -0.5,
                 ..MobileManipulatorAction::default()
             },
             _ => MobileManipulatorAction::default(),
@@ -382,19 +384,19 @@ fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
     );
     push_box(
         scene,
-        Vec3::new(-3.95, 0.12, -2.15),
+        Vec3::new(2.10, 0.12, -2.48),
         Vec3::new(0.72, 0.24, 0.56),
         [0.39, 0.33, 0.25, 1.0],
     );
     push_box(
         scene,
-        Vec3::new(-0.82, 0.14, 0.20),
+        Vec3::new(0.10, 0.14, 0.18),
         Vec3::new(0.82, 0.28, 0.54),
         [0.44, 0.42, 0.35, 1.0],
     );
     push_box(
         scene,
-        Vec3::new(-4.85, 0.20, -0.75),
+        Vec3::new(-1.65, 0.20, -0.65),
         Vec3::new(0.56, 0.40, 0.80),
         [0.25, 0.40, 0.44, 1.0],
     );
