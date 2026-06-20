@@ -181,6 +181,11 @@ fn hero_media_check() -> anyhow::Result<()> {
                 .all(|character| character.is_ascii_hexdigit()),
         "README hero trajectory_digest must be a 64-bit hex string"
     );
+    let live_trajectory_digest = hero_simulation_smoke_digest()?;
+    anyhow::ensure!(
+        live_trajectory_digest == trajectory_digest,
+        "README hero trajectory digest is stale: metadata={trajectory_digest}, live={live_trajectory_digest}"
+    );
     anyhow::ensure!(
         metadata["simulation"]["final_base_m"]
             .as_array()
@@ -200,6 +205,31 @@ fn hero_media_check() -> anyhow::Result<()> {
         metadata_path.display()
     );
     Ok(())
+}
+
+fn hero_simulation_smoke_digest() -> anyhow::Result<String> {
+    let command = "cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke";
+    let output = run_step_output(command)?;
+    extract_hero_digest(&output)
+        .ok_or_else(|| anyhow::anyhow!("hero smoke output did not include trajectory digest"))
+}
+
+fn extract_hero_digest(output: &str) -> Option<String> {
+    let marker = "digest=";
+    let start = output.find(marker)? + marker.len();
+    let digest = output[start..]
+        .split(|character: char| !character.is_ascii_hexdigit() && character != 'x')
+        .next()?;
+    if digest.len() == 18
+        && digest.starts_with("0x")
+        && digest[2..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        Some(digest.to_string())
+    } else {
+        None
+    }
 }
 
 fn python_command() -> anyhow::Result<&'static str> {
@@ -370,6 +400,26 @@ fn run_step(command: &str) -> anyhow::Result<()> {
     }
 }
 
+fn run_step_output(command: &str) -> anyhow::Result<String> {
+    println!("$ {command}");
+    let output = if cfg!(windows) {
+        Command::new("cmd").args(["/C", command]).output()?
+    } else {
+        Command::new("sh").arg("-c").arg(command).output()?
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    print!("{stdout}");
+    eprint!("{stderr}");
+
+    if output.status.success() {
+        Ok(format!("{stdout}\n{stderr}"))
+    } else {
+        anyhow::bail!("command failed with status {}", output.status);
+    }
+}
+
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let output = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--no-deps"])
@@ -404,4 +454,25 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
     }
 
     Ok(manifests)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_hero_digest;
+
+    #[test]
+    fn extracts_hero_digest_from_smoke_output() {
+        let output = "3D hero simulation smoke ok: digest=0xd85cd8fbdbce1cb9, base_travel=4.51 m";
+        assert_eq!(
+            extract_hero_digest(output).as_deref(),
+            Some("0xd85cd8fbdbce1cb9")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_hero_digest() {
+        assert_eq!(extract_hero_digest("3D hero simulation smoke ok"), None);
+        assert_eq!(extract_hero_digest("digest=d85cd8fbdbce1cb9"), None);
+        assert_eq!(extract_hero_digest("digest=0xd85cd8fbdbce1cb"), None);
+    }
 }
