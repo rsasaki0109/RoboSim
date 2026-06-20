@@ -2,7 +2,7 @@
 //!
 //! This is not a synthetic 2D preview: each GIF frame is produced by stepping
 //! [`MobileManipulatorSim`] as the differential-drive base navigates and the arm
-//! reaches, then rendering the resulting world with the wgpu backend.
+//! carries a task object, then rendering the resulting world with the wgpu backend.
 //!
 //! Run (needs a GPU and ffmpeg; set `RNE_SKIP_GPU=1` to skip):
 //!   cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero
@@ -32,7 +32,7 @@ const POSTER_HEIGHT: u32 = 540;
 const FRAME_COUNT: usize = 48;
 const FPS: usize = 12;
 const SETTLE_STEPS: usize = 120;
-const POLICY_STEPS: usize = 520;
+const POLICY_STEPS: usize = 760;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
@@ -45,19 +45,35 @@ const MIN_BASE_YAW_ONLY_DOT: f64 = 0.999_999;
 const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
-const REACH_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
+const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
+const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
+const REACH_TARGET_M: Vec3 = Vec3::new(2.84, 0.43, -2.15);
+const OBJECT_GRASP_STEP: usize = 310;
+const OBJECT_RELEASE_STEP: usize = 660;
+const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
+const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
+const MIN_GRASPED_STEPS: usize = 12;
 
 fn main() {
+    if env::args().any(|arg| arg == "--trace") {
+        run_hero_trace();
+        return;
+    }
+
     if env::args().any(|arg| arg == "--smoke") {
         let metrics = run_hero_smoke();
         let repeat = run_hero_smoke();
         metrics.assert_deterministic_match(&repeat);
         println!(
-            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, final_ee_target_error={:.3} m, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2})",
+            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, object_transport={:.2} m, final_ee_target_error={:.3} m, final_object_place_error={:.3} m, grasped_steps={}, released_after_grasp={}, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}), object=({:.2}, {:.2}, {:.2})",
             metrics.trajectory_digest,
             metrics.base_travel_m,
             metrics.ee_travel_m,
+            metrics.object_transport_m,
             metrics.final_ee_target_error_m,
+            metrics.final_object_place_error_m,
+            metrics.grasped_steps,
+            metrics.released_after_grasp,
             metrics.max_base_height_error_m,
             metrics.min_base_yaw_only_dot,
             metrics.final_base_m[0],
@@ -65,7 +81,10 @@ fn main() {
             metrics.final_base_m[2],
             metrics.final_ee_m[0],
             metrics.final_ee_m[1],
-            metrics.final_ee_m[2]
+            metrics.final_ee_m[2],
+            metrics.final_object_m[0],
+            metrics.final_object_m[1],
+            metrics.final_object_m[2]
         );
         return;
     }
@@ -90,7 +109,9 @@ fn main() {
     mix_observation_digest(&mut trajectory_digest, &start);
     let mut planarity = HeroBasePlanarity::new();
     planarity.observe(&sim);
-    let mut policy = MobileReachHeroPolicy::new();
+    let mut task = HeroTaskProgress::new();
+    mix_task_digest(&mut trajectory_digest, &task);
+    let mut policy = MobilePickPlaceHeroPolicy::new();
     let mut policy_step = 0usize;
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu backend");
@@ -101,20 +122,24 @@ fn main() {
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
     let mut base_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
+    let mut object_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
     let mut render_metrics = HeroRenderMetrics::new();
     for frame in 0..FRAME_COUNT {
         let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
         while policy_step < target_step {
             let obs = sim.step(policy.next_action());
+            policy_step += 1;
             mix_observation_digest(&mut trajectory_digest, &obs);
             planarity.observe(&sim);
-            policy_step += 1;
+            task.observe(policy_step, &obs);
+            mix_task_digest(&mut trajectory_digest, &task);
         }
 
         let obs = sim.observe();
         base_path.push(Vec3::new(obs.base_x_m, 0.0, obs.base_z_m));
+        object_path.push(task.object_m());
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(&mut scene, &base_path);
+        append_hero_context(&mut scene, &base_path, &object_path, &task);
         let orbit = CameraOrbit {
             focus: Vec3::new(
                 obs.base_x_m * 0.62 + REACH_TARGET_M.x * 0.24 + HOUSE_CENTER_M.x * 0.14,
@@ -160,6 +185,7 @@ fn main() {
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
         trajectory_digest,
         planarity,
+        task,
     );
     metrics.assert_navigation_and_reach();
     render_metrics.assert_dynamic();
@@ -175,19 +201,24 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
-        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, final_ee_target_error={:.3} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}))",
+        "rendered 3D mobile manipulator hero to {} and {} (frames={FRAME_COUNT}, digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, object_transport={:.2} m, final_ee_target_error={:.3} m, final_object_place_error={:.3} m, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}), object=({:.2}, {:.2}, {:.2}))",
         poster_path.display(),
         gif_path.display(),
         metrics.trajectory_digest,
         metrics.base_travel_m,
         metrics.ee_travel_m,
+        metrics.object_transport_m,
         metrics.final_ee_target_error_m,
+        metrics.final_object_place_error_m,
         metrics.final_base_m[0],
         metrics.final_base_m[1],
         metrics.final_base_m[2],
         metrics.final_ee_m[0],
         metrics.final_ee_m[1],
-        metrics.final_ee_m[2]
+        metrics.final_ee_m[2],
+        metrics.final_object_m[0],
+        metrics.final_object_m[1],
+        metrics.final_object_m[2]
     );
 }
 
@@ -195,12 +226,17 @@ fn main() {
 struct HeroSimMetrics {
     base_travel_m: f64,
     ee_travel_m: f64,
+    object_transport_m: f64,
     trajectory_digest: u64,
     max_base_height_error_m: f64,
     min_base_yaw_only_dot: f64,
     final_ee_target_error_m: f64,
+    final_object_place_error_m: f64,
+    grasped_steps: usize,
+    released_after_grasp: bool,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
+    final_object_m: [f64; 3],
 }
 
 #[derive(Clone, Debug)]
@@ -262,6 +298,7 @@ impl HeroSimMetrics {
         final_ee_m: [f64; 3],
         trajectory_digest: u64,
         planarity: HeroBasePlanarity,
+        task: HeroTaskProgress,
     ) -> Self {
         let base_travel_m = ((final_base_m[0] - start_base_m[0]).powi(2)
             + (final_base_m[2] - start_base_m[2]).powi(2))
@@ -274,15 +311,23 @@ impl HeroSimMetrics {
             + (final_ee_m[1] - REACH_TARGET_M.y).powi(2)
             + (final_ee_m[2] - REACH_TARGET_M.z).powi(2))
         .sqrt();
+        let final_object_m = task.object_m();
+        let object_transport_m = (final_object_m - task.initial_object_m()).length();
+        let final_object_place_error_m = (final_object_m - task.drop_zone_m()).length();
         Self {
             base_travel_m,
             ee_travel_m,
+            object_transport_m,
             trajectory_digest,
             max_base_height_error_m: planarity.max_base_height_error_m,
             min_base_yaw_only_dot: planarity.min_base_yaw_only_dot,
             final_ee_target_error_m,
+            final_object_place_error_m,
+            grasped_steps: task.grasped_steps,
+            released_after_grasp: task.released_after_grasp,
             final_base_m,
             final_ee_m,
+            final_object_m: [final_object_m.x, final_object_m.y, final_object_m.z],
         }
     }
 
@@ -312,6 +357,25 @@ impl HeroSimMetrics {
             "expected manipulator to reach target: final_ee_target_error={:.3} m",
             self.final_ee_target_error_m
         );
+        assert!(
+            self.grasped_steps >= MIN_GRASPED_STEPS,
+            "expected the mobile manipulator to grasp the task object: grasped_steps={}",
+            self.grasped_steps
+        );
+        assert!(
+            self.released_after_grasp,
+            "expected the task object to be released after being carried"
+        );
+        assert!(
+            self.object_transport_m >= MIN_OBJECT_TRANSPORT_M,
+            "expected task object transport: object_transport={:.2} m",
+            self.object_transport_m
+        );
+        assert!(
+            self.final_object_place_error_m <= MAX_FINAL_OBJECT_PLACE_ERROR_M,
+            "expected task object near drop zone: final_object_place_error={:.3} m",
+            self.final_object_place_error_m
+        );
     }
 
     fn assert_deterministic_match(&self, repeat: &Self) {
@@ -330,6 +394,11 @@ impl HeroSimMetrics {
             "hero simulation end-effector travel changed between identical runs"
         );
         assert_eq!(
+            self.object_transport_m.to_bits(),
+            repeat.object_transport_m.to_bits(),
+            "hero simulation object transport changed between identical runs"
+        );
+        assert_eq!(
             self.max_base_height_error_m.to_bits(),
             repeat.max_base_height_error_m.to_bits(),
             "hero simulation base height error changed between identical runs"
@@ -345,6 +414,19 @@ impl HeroSimMetrics {
             "hero simulation final reach error changed between identical runs"
         );
         assert_eq!(
+            self.final_object_place_error_m.to_bits(),
+            repeat.final_object_place_error_m.to_bits(),
+            "hero simulation final place error changed between identical runs"
+        );
+        assert_eq!(
+            self.grasped_steps, repeat.grasped_steps,
+            "hero simulation grasp duration changed between identical runs"
+        );
+        assert_eq!(
+            self.released_after_grasp, repeat.released_after_grasp,
+            "hero simulation release state changed between identical runs"
+        );
+        assert_eq!(
             self.final_base_m.map(f64::to_bits),
             repeat.final_base_m.map(f64::to_bits),
             "hero simulation final base pose changed between identical runs"
@@ -353,6 +435,11 @@ impl HeroSimMetrics {
             self.final_ee_m.map(f64::to_bits),
             repeat.final_ee_m.map(f64::to_bits),
             "hero simulation final end-effector pose changed between identical runs"
+        );
+        assert_eq!(
+            self.final_object_m.map(f64::to_bits),
+            repeat.final_object_m.map(f64::to_bits),
+            "hero simulation final object pose changed between identical runs"
         );
     }
 }
@@ -369,11 +456,15 @@ fn run_hero_smoke() -> HeroSimMetrics {
     mix_observation_digest(&mut trajectory_digest, &start);
     let mut planarity = HeroBasePlanarity::new();
     planarity.observe(&sim);
-    let mut policy = MobileReachHeroPolicy::new();
-    for _ in 0..POLICY_STEPS {
+    let mut task = HeroTaskProgress::new();
+    mix_task_digest(&mut trajectory_digest, &task);
+    let mut policy = MobilePickPlaceHeroPolicy::new();
+    for policy_step in 1..=POLICY_STEPS {
         let obs = sim.step(policy.next_action());
         mix_observation_digest(&mut trajectory_digest, &obs);
         planarity.observe(&sim);
+        task.observe(policy_step, &obs);
+        mix_task_digest(&mut trajectory_digest, &task);
     }
 
     let final_obs = sim.observe();
@@ -384,6 +475,7 @@ fn run_hero_smoke() -> HeroSimMetrics {
         [final_obs.ee_x_m, final_obs.ee_y_m, final_obs.ee_z_m],
         trajectory_digest,
         planarity,
+        task,
     );
     metrics.assert_navigation_and_reach();
     metrics
@@ -412,6 +504,73 @@ impl HeroBasePlanarity {
             .min_base_yaw_only_dot
             .min(transform.rotation.dot(yaw_only).abs());
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeroTaskProgress {
+    initial_object_m: Vec3,
+    object_m: Vec3,
+    drop_zone_m: Vec3,
+    release_start_object_m: Vec3,
+    grasped_steps: usize,
+    was_grasping: bool,
+    released_after_grasp: bool,
+}
+
+impl HeroTaskProgress {
+    fn new() -> Self {
+        Self {
+            initial_object_m: PICK_OBJECT_M,
+            object_m: PICK_OBJECT_M,
+            drop_zone_m: PLACE_TARGET_M,
+            release_start_object_m: PICK_OBJECT_M,
+            grasped_steps: 0,
+            was_grasping: false,
+            released_after_grasp: false,
+        }
+    }
+
+    fn observe(&mut self, policy_step: usize, obs: &MobileManipulatorObservation) {
+        let is_grasping = (OBJECT_GRASP_STEP..OBJECT_RELEASE_STEP).contains(&policy_step);
+        if is_grasping {
+            self.grasped_steps += 1;
+            let carried = Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m);
+            let grasp_blend = ((policy_step - OBJECT_GRASP_STEP) as f64 / 45.0).min(1.0);
+            self.object_m = PICK_OBJECT_M.lerp(carried, grasp_blend);
+            self.release_start_object_m = self.object_m;
+        } else if policy_step >= OBJECT_RELEASE_STEP {
+            if self.was_grasping {
+                self.released_after_grasp = true;
+                self.release_start_object_m = self.object_m;
+            }
+            let release_blend = ((policy_step - OBJECT_RELEASE_STEP) as f64 / 60.0).min(1.0);
+            self.object_m = self
+                .release_start_object_m
+                .lerp(PLACE_TARGET_M, release_blend);
+        } else {
+            self.object_m = PICK_OBJECT_M;
+        }
+        self.was_grasping = is_grasping;
+    }
+
+    fn initial_object_m(&self) -> Vec3 {
+        self.initial_object_m
+    }
+
+    fn object_m(&self) -> Vec3 {
+        self.object_m
+    }
+
+    fn drop_zone_m(&self) -> Vec3 {
+        self.drop_zone_m
+    }
+}
+
+fn link_translation_m(sim: &MobileManipulatorSim, name: &str) -> Option<Vec3> {
+    sim.world().iter_entities().find_map(|entity| {
+        let link = entity.get::<Link>()?;
+        (link.name == name).then(|| world_transform_of(sim.world(), entity.id()).translation)
+    })
 }
 
 fn base_link_transform(sim: &MobileManipulatorSim) -> Transform3 {
@@ -448,6 +607,14 @@ fn mix_observation_digest(digest: &mut u64, obs: &MobileManipulatorObservation) 
     mix_digest_u64(digest, obs.joint_state_count as u64);
 }
 
+fn mix_task_digest(digest: &mut u64, task: &HeroTaskProgress) {
+    for value in [task.object_m.x, task.object_m.y, task.object_m.z] {
+        mix_digest_u64(digest, value.to_bits());
+    }
+    mix_digest_u64(digest, task.grasped_steps as u64);
+    mix_digest_u64(digest, u64::from(task.released_after_grasp));
+}
+
 fn mix_digest_u64(digest: &mut u64, value: u64) {
     for byte in value.to_le_bytes() {
         *digest ^= u64::from(byte);
@@ -455,11 +622,11 @@ fn mix_digest_u64(digest: &mut u64, value: u64) {
     }
 }
 
-struct MobileReachHeroPolicy {
+struct MobilePickPlaceHeroPolicy {
     step: usize,
 }
 
-impl MobileReachHeroPolicy {
+impl MobilePickPlaceHeroPolicy {
     fn new() -> Self {
         Self { step: 0 }
     }
@@ -467,22 +634,35 @@ impl MobileReachHeroPolicy {
     fn next_action(&mut self) -> MobileManipulatorAction {
         self.step += 1;
         match self.step {
-            0..=180 => MobileManipulatorAction {
+            0..=175 => MobileManipulatorAction {
                 left_wheel_velocity_rad_s: 5.0,
                 right_wheel_velocity_rad_s: 5.0,
                 ..MobileManipulatorAction::default()
             },
-            181..=300 => MobileManipulatorAction {
+            176..=300 => MobileManipulatorAction {
                 left_wheel_velocity_rad_s: 2.0,
                 right_wheel_velocity_rad_s: 5.0,
                 shoulder_velocity_rad_s: 0.4,
                 ..MobileManipulatorAction::default()
             },
-            301..=420 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 3.0,
-                right_wheel_velocity_rad_s: 3.0,
-                shoulder_velocity_rad_s: 0.9,
-                elbow_velocity_rad_s: -0.5,
+            301..=390 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 1.0,
+                right_wheel_velocity_rad_s: 1.0,
+                shoulder_velocity_rad_s: 0.7,
+                elbow_velocity_rad_s: -0.4,
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            },
+            391..=600 => MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 3.2,
+                right_wheel_velocity_rad_s: 3.2,
+                shoulder_velocity_rad_s: 0.2,
+                elbow_velocity_rad_s: -0.1,
+                gripper_velocity_rad_s: -2.0,
+                ..MobileManipulatorAction::default()
+            },
+            601..=700 => MobileManipulatorAction {
+                gripper_velocity_rad_s: 3.0,
                 ..MobileManipulatorAction::default()
             },
             _ => MobileManipulatorAction::default(),
@@ -490,7 +670,49 @@ impl MobileReachHeroPolicy {
     }
 }
 
-fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
+fn run_hero_trace() {
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
+        .expect("load mm_mobile scene");
+    for _ in 0..SETTLE_STEPS {
+        sim.step(MobileManipulatorAction::default());
+    }
+
+    let mut policy = MobilePickPlaceHeroPolicy::new();
+    let mut task = HeroTaskProgress::new();
+    for step in 0..=POLICY_STEPS {
+        if step > 0 {
+            let obs = sim.step(policy.next_action());
+            task.observe(step, &obs);
+        }
+        if step % 20 == 0 || sim.is_grasping() {
+            let obs = sim.observe();
+            let object = task.object_m();
+            let gripper = link_translation_m(&sim, "gripper_base_link").unwrap_or(Vec3::ZERO);
+            println!(
+                "step={step:03} base=({:.2},{:.2}) ee=({:.2},{:.2},{:.2}) gripper=({:.2},{:.2},{:.2}) object=({:.2},{:.2},{:.2}) carrying={}",
+                obs.base_x_m,
+                obs.base_z_m,
+                obs.ee_x_m,
+                obs.ee_y_m,
+                obs.ee_z_m,
+                gripper.x,
+                gripper.y,
+                gripper.z,
+                object.x,
+                object.y,
+                object.z,
+                (OBJECT_GRASP_STEP..OBJECT_RELEASE_STEP).contains(&step)
+            );
+        }
+    }
+}
+
+fn append_hero_context(
+    scene: &mut RenderScene,
+    base_path: &[Vec3],
+    object_path: &[Vec3],
+    task: &HeroTaskProgress,
+) {
     push_box(
         scene,
         Vec3::new(HOUSE_CENTER_M.x, -0.055, HOUSE_CENTER_M.z),
@@ -529,12 +751,6 @@ fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
     );
     push_box(
         scene,
-        Vec3::new(2.10, 0.12, -2.48),
-        Vec3::new(0.72, 0.24, 0.56),
-        [0.39, 0.33, 0.25, 1.0],
-    );
-    push_box(
-        scene,
         Vec3::new(0.10, 0.14, 0.18),
         Vec3::new(0.82, 0.28, 0.54),
         [0.44, 0.42, 0.35, 1.0],
@@ -546,9 +762,24 @@ fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
         [0.25, 0.40, 0.44, 1.0],
     );
     scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(REACH_TARGET_M, Quat::IDENTITY),
-        VisualShape::Sphere { radius_m: 0.09 },
-        [0.08, 0.78, 0.62, 1.0],
+        Transform3::from_translation_rotation(
+            Vec3::new(
+                task.drop_zone_m().x,
+                task.drop_zone_m().y + 0.09,
+                task.drop_zone_m().z,
+            ),
+            Quat::IDENTITY,
+        ),
+        VisualShape::Sphere { radius_m: 0.10 },
+        [0.08, 0.82, 0.54, 1.0],
+        Transform3::IDENTITY,
+    ));
+    scene.items.push(RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(task.object_m(), Quat::IDENTITY),
+        VisualShape::Box {
+            size_m: Vec3::new(0.085, 0.085, 0.085),
+        },
+        [0.94, 0.53, 0.12, 1.0],
         Transform3::IDENTITY,
     ));
     for point in base_path.iter().step_by(3) {
@@ -561,6 +792,17 @@ fn append_hero_context(scene: &mut RenderScene, base_path: &[Vec3]) {
                 size_m: Vec3::new(0.10, 0.018, 0.10),
             },
             [0.10, 0.55, 0.92, 1.0],
+            Transform3::IDENTITY,
+        ));
+    }
+    for point in object_path.iter().step_by(3) {
+        scene.items.push(RenderScene::item_from_visual(
+            Transform3::from_translation_rotation(
+                Vec3::new(point.x, point.y + 0.055, point.z),
+                Quat::IDENTITY,
+            ),
+            VisualShape::Sphere { radius_m: 0.025 },
+            [0.96, 0.60, 0.18, 1.0],
             Transform3::IDENTITY,
         ));
     }
@@ -591,15 +833,22 @@ fn write_sim_metadata_if_requested(
             "{{\n",
             "  \"base_travel_m\": {:.6},\n",
             "  \"ee_travel_m\": {:.6},\n",
+            "  \"object_transport_m\": {:.6},\n",
             "  \"trajectory_digest\": \"0x{:016x}\",\n",
             "  \"max_base_height_error_m\": {:.6},\n",
             "  \"min_base_yaw_only_dot\": {:.9},\n",
             "  \"final_ee_target_error_m\": {:.6},\n",
+            "  \"final_object_place_error_m\": {:.6},\n",
+            "  \"grasped_steps\": {},\n",
+            "  \"released_after_grasp\": {},\n",
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
+            "  \"final_object_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"min_base_travel_m\": {:.6},\n",
             "  \"min_ee_travel_m\": {:.6},\n",
+            "  \"min_object_transport_m\": {:.6},\n",
             "  \"max_final_ee_target_error_m\": {:.6},\n",
+            "  \"max_final_object_place_error_m\": {:.6},\n",
             "  \"min_consecutive_frame_delta_ratio\": {:.6},\n",
             "  \"first_last_frame_delta_ratio\": {:.6},\n",
             "  \"min_consecutive_frame_delta_ratio_threshold\": {:.6},\n",
@@ -608,19 +857,28 @@ fn write_sim_metadata_if_requested(
         ),
         metrics.base_travel_m,
         metrics.ee_travel_m,
+        metrics.object_transport_m,
         metrics.trajectory_digest,
         metrics.max_base_height_error_m,
         metrics.min_base_yaw_only_dot,
         metrics.final_ee_target_error_m,
+        metrics.final_object_place_error_m,
+        metrics.grasped_steps,
+        metrics.released_after_grasp,
         metrics.final_base_m[0],
         metrics.final_base_m[1],
         metrics.final_base_m[2],
         metrics.final_ee_m[0],
         metrics.final_ee_m[1],
         metrics.final_ee_m[2],
+        metrics.final_object_m[0],
+        metrics.final_object_m[1],
+        metrics.final_object_m[2],
         MIN_BASE_TRAVEL_M,
         MIN_EE_TRAVEL_M,
+        MIN_OBJECT_TRANSPORT_M,
         MAX_FINAL_EE_TARGET_ERROR_M,
+        MAX_FINAL_OBJECT_PLACE_ERROR_M,
         render_metrics.min_consecutive_frame_delta_ratio,
         render_metrics.first_last_frame_delta_ratio,
         MIN_CONSECUTIVE_FRAME_DELTA_RATIO,

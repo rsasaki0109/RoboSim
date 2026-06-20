@@ -1115,7 +1115,7 @@ class ReportToolTests(unittest.TestCase):
         gif_info = render_house_gif.inspect_gif(README_HERO_METADATA.with_name("rne-hero.gif"))
 
         self.assertEqual(
-            metadata["artifact"], "rne_3d_mobile_manipulator_navigation_reach_hero"
+            metadata["artifact"], "rne_3d_mobile_manipulator_pick_place_hero"
         )
         self.assertEqual(metadata["gif_path"], "rne-hero.gif")
         self.assertEqual(metadata["poster_path"], "rne-hero.png")
@@ -1125,10 +1125,21 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(metadata["byte_size"], gif_info["byte_size"])
         self.assertEqual(metadata["sha256"], gif_info["sha256"])
         self.assertEqual(
-            metadata["overlays"], ["house_context", "base_path", "reach_target"]
+            metadata["overlays"],
+            ["house_context", "base_path", "object_path", "task_object", "drop_zone"],
         )
         self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
         self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)
+        self.assertGreaterEqual(
+            metadata["simulation"]["object_transport_m"],
+            metadata["simulation"]["min_object_transport_m"],
+        )
+        self.assertLessEqual(
+            metadata["simulation"]["final_object_place_error_m"],
+            metadata["simulation"]["max_final_object_place_error_m"],
+        )
+        self.assertGreaterEqual(metadata["simulation"]["grasped_steps"], 12)
+        self.assertTrue(metadata["simulation"]["released_after_grasp"])
         self.assertLessEqual(metadata["simulation"]["max_base_height_error_m"], 0.01)
         self.assertGreaterEqual(metadata["simulation"]["min_base_yaw_only_dot"], 0.999_999)
         self.assertRegex(
@@ -1136,13 +1147,14 @@ class ReportToolTests(unittest.TestCase):
         )
         self.assertEqual(len(metadata["simulation"]["final_base_m"]), 3)
         self.assertEqual(len(metadata["simulation"]["final_ee_m"]), 3)
+        self.assertEqual(len(metadata["simulation"]["final_object_m"]), 3)
         self.assertEqual(
             metadata["source"],
             {
                 "generator": "examples/32_lift_pick_place_hero",
                 "kind": "wgpu_simulation",
                 "physics": "MobileManipulatorSim/Rapier",
-                "policy": "MobileReachHeroPolicy",
+                "policy": "MobilePickPlaceHeroPolicy",
                 "scene": "assets/scenes/mm_mobile.rne.scene.toml",
             },
         )

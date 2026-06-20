@@ -119,7 +119,7 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains(
-            "3D RNE mobile manipulator simulation navigating a house-like room while reaching with its arm"
+            "3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object"
         ),
         "README hero alt text does not describe the 3D mobile manipulator simulation"
     );
@@ -141,8 +141,8 @@ fn hero_media_check() -> anyhow::Result<()> {
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     let gif_progression = inspect_gif_frame_progression(&gif_path)?;
     anyhow::ensure!(
-        metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_navigation_reach_hero"),
-        "README hero metadata does not describe the 3D navigation/reach hero"
+        metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
+        "README hero metadata does not describe the 3D pick/place hero"
     );
     let metadata_width = metadata["width"]
         .as_u64()
@@ -173,7 +173,7 @@ fn hero_media_check() -> anyhow::Result<()> {
             && metadata["source"]["generator"].as_str() == Some("examples/32_lift_pick_place_hero")
             && metadata["source"]["scene"].as_str()
                 == Some("assets/scenes/mm_mobile.rne.scene.toml")
-            && metadata["source"]["policy"].as_str() == Some("MobileReachHeroPolicy")
+            && metadata["source"]["policy"].as_str() == Some("MobilePickPlaceHeroPolicy")
             && metadata["source"]["physics"].as_str() == Some("MobileManipulatorSim/Rapier"),
         "README hero metadata source is not wgpu_simulation"
     );
@@ -189,7 +189,13 @@ fn hero_media_check() -> anyhow::Result<()> {
                 .any(|overlay| overlay.as_str() == Some("base_path"))
             && overlays
                 .iter()
-                .any(|overlay| overlay.as_str() == Some("reach_target")),
+                .any(|overlay| overlay.as_str() == Some("object_path"))
+            && overlays
+                .iter()
+                .any(|overlay| overlay.as_str() == Some("task_object"))
+            && overlays
+                .iter()
+                .any(|overlay| overlay.as_str() == Some("drop_zone")),
         "README hero metadata is missing expected 3D overlays"
     );
     let base_travel_m = metadata["simulation"]["base_travel_m"]
@@ -201,6 +207,28 @@ fn hero_media_check() -> anyhow::Result<()> {
     let final_ee_target_error_m = metadata["simulation"]["final_ee_target_error_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing final_ee_target_error_m"))?;
+    let object_transport_m = metadata["simulation"]["object_transport_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing object_transport_m"))?;
+    let min_object_transport_m = metadata["simulation"]["min_object_transport_m"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing min_object_transport_m"))?;
+    let final_object_place_error_m = metadata["simulation"]["final_object_place_error_m"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing final_object_place_error_m")
+        })?;
+    let max_final_object_place_error_m = metadata["simulation"]["max_final_object_place_error_m"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing max_final_object_place_error_m")
+        })?;
+    let grasped_steps = metadata["simulation"]["grasped_steps"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing grasped_steps"))?;
+    let released_after_grasp = metadata["simulation"]["released_after_grasp"]
+        .as_bool()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing released_after_grasp"))?;
     let max_final_ee_target_error_m = metadata["simulation"]["max_final_ee_target_error_m"]
         .as_f64()
         .ok_or_else(|| {
@@ -259,6 +287,26 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero manipulator does not reach the target: final_ee_target_error={final_ee_target_error_m:.3} m"
     );
     anyhow::ensure!(
+        min_object_transport_m >= 0.35,
+        "README hero object transport threshold is too loose: {min_object_transport_m:.2} m"
+    );
+    anyhow::ensure!(
+        object_transport_m >= min_object_transport_m,
+        "README hero object transport is too small: object_transport={object_transport_m:.2} m"
+    );
+    anyhow::ensure!(
+        max_final_object_place_error_m <= 0.20,
+        "README hero object place threshold is too loose: {max_final_object_place_error_m:.3} m"
+    );
+    anyhow::ensure!(
+        final_object_place_error_m <= max_final_object_place_error_m,
+        "README hero object is not near the drop zone: final_object_place_error={final_object_place_error_m:.3} m"
+    );
+    anyhow::ensure!(
+        grasped_steps >= 12 && released_after_grasp,
+        "README hero object was not carried then released: grasped_steps={grasped_steps}, released_after_grasp={released_after_grasp}"
+    );
+    anyhow::ensure!(
         min_consecutive_frame_delta_ratio_threshold >= 0.01,
         "README hero frame-delta threshold is too loose: {min_consecutive_frame_delta_ratio_threshold:.4}"
     );
@@ -311,6 +359,9 @@ fn hero_media_check() -> anyhow::Result<()> {
             .as_array()
             .is_some_and(|items| items.len() == 3)
             && metadata["simulation"]["final_ee_m"]
+                .as_array()
+                .is_some_and(|items| items.len() == 3)
+            && metadata["simulation"]["final_object_m"]
                 .as_array()
                 .is_some_and(|items| items.len() == 3),
         "README hero metadata final simulation positions must be 3D vectors"

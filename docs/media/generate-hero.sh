@@ -40,14 +40,14 @@ with open(sim_metadata_path, "r", encoding="utf-8") as handle:
     simulation = json.load(handle)
 payload = {
     "schema_version": 1,
-    "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
+    "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
     "gif_path": "rne-hero.gif",
     "poster_path": "rne-hero.png",
     "source": {
         "kind": "wgpu_simulation",
         "generator": "examples/32_lift_pick_place_hero",
         "scene": "assets/scenes/mm_mobile.rne.scene.toml",
-        "policy": "MobileReachHeroPolicy",
+        "policy": "MobilePickPlaceHeroPolicy",
         "physics": "MobileManipulatorSim/Rapier",
     },
     "fps": 12.0,
@@ -57,8 +57,8 @@ payload = {
     "byte_size": gif["byte_size"],
     "sha256": gif["sha256"],
     "settle_steps": 120,
-    "policy_steps": 520,
-    "overlays": ["house_context", "base_path", "reach_target"],
+    "policy_steps": 760,
+    "overlays": ["house_context", "base_path", "object_path", "task_object", "drop_zone"],
     "simulation": simulation,
 }
 with open(metadata_path, "w", encoding="utf-8") as handle:

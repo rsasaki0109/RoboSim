@@ -1,6 +1,6 @@
 {
-  "artifact": "rne_3d_mobile_manipulator_navigation_reach_hero",
-  "byte_size": 1680045,
+  "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
+  "byte_size": 1649235,
   "fps": 12.0,
   "frame_count": 48,
   "gif_path": "rne-hero.gif",
@@ -8,43 +8,56 @@
   "overlays": [
     "house_context",
     "base_path",
-    "reach_target"
+    "object_path",
+    "task_object",
+    "drop_zone"
   ],
-  "policy_steps": 520,
+  "policy_steps": 760,
   "poster_path": "rne-hero.png",
   "schema_version": 1,
   "settle_steps": 120,
-  "sha256": "sha256:546ee022c5a5c1fea9843e92497880b6180c62c91930d5f2481c154437b1c23f",
+  "sha256": "sha256:54271fd9f0f492f0024a9843052ea65a30a286311b090173e3f96cc9cedcaaa4",
   "simulation": {
-    "base_travel_m": 2.839192,
-    "ee_travel_m": 2.831635,
+    "base_travel_m": 3.380407,
+    "ee_travel_m": 3.060694,
     "final_base_m": [
-      2.037713,
+      2.395596,
       0.25,
-      -1.979673
+      -2.38702
     ],
     "final_ee_m": [
-      2.166291,
-      0.399285,
-      -2.477108
+      2.835325,
+      0.425802,
+      -2.153163
     ],
-    "final_ee_target_error_m": 0.004757,
-    "first_last_frame_delta_ratio": 0.398416,
+    "final_ee_target_error_m": 0.007034,
+    "final_object_m": [
+      2.17,
+      0.4,
+      -2.48
+    ],
+    "final_object_place_error_m": 0.0,
+    "first_last_frame_delta_ratio": 0.394084,
+    "grasped_steps": 350,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
+    "max_final_object_place_error_m": 0.2,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.020022,
+    "min_consecutive_frame_delta_ratio": 0.018038,
     "min_consecutive_frame_delta_ratio_threshold": 0.01,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,
-    "trajectory_digest": "0x06e1687ee28eade2"
+    "min_object_transport_m": 0.35,
+    "object_transport_m": 1.745537,
+    "released_after_grasp": true,
+    "trajectory_digest": "0xd800ab5cce184ec8"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
     "kind": "wgpu_simulation",
     "physics": "MobileManipulatorSim/Rapier",
-    "policy": "MobileReachHeroPolicy",
+    "policy": "MobilePickPlaceHeroPolicy",
     "scene": "assets/scenes/mm_mobile.rne.scene.toml"
   },
   "width": 960

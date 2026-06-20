@@ -1400,7 +1400,7 @@ mod tests {
             "expected base translation, delta_x={delta_x}"
         );
         assert_mobile_base_planar(&sim);
-        assert_eq!(sim.joint_names().len(), 4);
+        assert_eq!(sim.joint_names().len(), 6);
     }
 
     #[test]
@@ -1458,7 +1458,7 @@ mod tests {
             .join("../../assets/scenes/mm_mobile.rne.scene.toml");
         let sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load mm_mobile scene");
         assert!(sim.mobile_base());
-        assert_eq!(sim.joint_names().len(), 4);
+        assert_eq!(sim.joint_names().len(), 6);
         assert!(sim.wrist_camera_enabled());
         assert_eq!(sim.scene_path(), Some(scene_path.as_path()));
     }
