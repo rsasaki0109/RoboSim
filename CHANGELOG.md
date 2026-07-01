@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-02
+
 ### Added
 
 - **README 3D pick-and-place showcase**: a sim-captured hero still of the `mm_lift` robot

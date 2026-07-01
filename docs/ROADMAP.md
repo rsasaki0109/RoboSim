@@ -1,5 +1,55 @@
 # Roadmap
 
+## v0.10.0 goal: arm IK & trajectory following
+
+Primary development target for v0.10. Closes the one capability the mobile-manipulator
+architecture doc still marks **Missing** ([architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md)):
+today all pick-and-place is driven by a hand-written state machine (`LiftPickPlacePolicy`), so it cannot
+generalize to an arbitrary target pose. Analytic IK + joint-space trajectory following unlocks
+arbitrary-target manipulation and becomes the foundation for later perception / RL / clutter work.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Kinematics | Analytic IK helper for the `mm_lift` lift+arm chain (pure, deterministic, seed-free), rustdoc + unit test | Planned |
+| B | Control | Joint-space trajectory following: interpolate the IK solution into position-motor targets (`_rad` / `_m` / `_s` units), crate-approved tolerances | Planned |
+| C | AI | Replace `LiftPickPlacePolicy` internals with IK-solved targets; existing determinism/golden tests guard regression, new `ik_reaches_arbitrary_target` test | Planned |
+| D | Adapters | ROS 2 `trajectory_msgs/JointTrajectory` (subset) subscribe; expose IK / trajectory API via `rne_py` | Planned |
+
+**Why IK first:** it is the base every other theme rides on — perception (vision → target pose →
+IK), RL (act in EE space), and scene diversity (reach an arbitrary object position) all get simpler
+once IK exists. It also removes the doc's only self-declared `Missing`.
+
+### v0.10 candidates (detail)
+
+| Area | Idea |
+|------|------|
+| Kinematics | Analytic IK for the column-lift + revolute arm; keep it out of core as a pure helper |
+| Control | Interpolated joint-space trajectories driving the existing position motors |
+| AI | `LiftPickPlacePolicy` re-expressed as IK-to-target instead of a fixed step sequence |
+| ROS 2 | Subscribe `trajectory_msgs/JointTrajectory` (subset), map to arm joint targets |
+| Python | `rne_py` IK / trajectory bindings alongside the existing episode API |
+
+### Later theme candidates (v0.11+)
+
+| Area | Idea |
+|------|------|
+| Perception | Wrist RGB-D (`ImageRgb8` / depth) wired into a visuomotor policy input |
+| RL | Converging pick-and-place training on SB3 PPO / CEM + a reproducible bench + replay |
+| Scene diversity | Pick a specific object out of clutter; combined navigate + manipulate task |
+
+## v0.9.0 (released)
+
+Shipped 2026-07-02. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Manipulation | `mm_lift` column + sliding carriage; vertical lift position motor; top-down claw; full 3D pick → lift → carry → place |
+| Control | Position (spring-damper) arm joints; per-motor `max_force`; per-world solver iterations for stiff chains |
+| AI | `LiftPickPlacePolicy`; `lift_pick_place` episode; Place observation goal offset; reach curriculum + goal-conditioned reach |
+| ROS 2 | `/lift_command` (`std_msgs/Float64`) drives the vertical lift |
+| Rendering | Interactive viewer `--manipulator-lift` profile (`R` / `F` lift, arm + claw teleop) |
+| Docs | README 3D pick-and-place showcase + `32_lift_pick_place_hero` sim-captured hero |
+
 ## v0.8.0 (released)
 
 Shipped 2026-06-16. See [CHANGELOG.md](../CHANGELOG.md).
@@ -11,6 +61,29 @@ Shipped 2026-06-16. See [CHANGELOG.md](../CHANGELOG.md).
 | AI / RL | `reach` task, CEM training loop (example 27), vectorized env (example 28), `rne_py` bindings + SB3 PPO integration |
 | ROS 2 | Arm velocity / position / trajectory control + gripper command + `ee_link` TF |
 | Assets | `mm_mobile` drive-wheel fix (was spinning in place) |
+
+## v0.7.0 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| AI | `MobileManipulatorEpisode` (reach / grasp / transport / inspect tasks + rewards) |
+| Sensors | `[wrist_camera]` on `mm_mobile`; wrist camera DataBus in sim |
+| Rendering | Viewer wrist camera PiP (`P` toggle) on `--manipulator` profiles |
+| ROS 2 | `/camera/image_raw` from wrist camera in `mobile_manipulator` mode |
+| Examples | Example 25 episode smoke (inspect + transport termination) |
+
+## v0.6.2 (released)
+
+Shipped 2026-06-12. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Manipulation | Dynamic scene obstacles; transport helpers + `mm_minimal_transport` scene |
+| Sensors | Wrist camera DataBus (`ImageRgb8`); example 24 wrist cam smoke |
+| Examples | Example 23 transport smoke (finger contact + cube displacement) |
+| Physics | Zero-velocity ECS→Rapier sync on spawn for repeatable initial EE pose |
 
 ## v0.6.1 (released)
 
@@ -74,8 +147,8 @@ Primary development target for v0.6 (shipped in v0.6.0). See [architecture/006_m
 
 ## v0.5 candidates
 
-| Area | Idea |
-|------|------|
+| Area | Idea | Status |
+|------|------|--------|
 | Rendering | LiDAR hit visualization in wgpu and interactive viewer | Done (`19_lidar_render`, `append_lidar_overlay`, `L` toggle) |
 | Rendering | Simple normal-based lighting in wgpu fragment shader | Done (Lambert + ambient in `rne_render_wgpu`) |
 | Sensors | Scene-defined LiDAR mounts (not demo-only wall spawn) | Done (`[lidar]` robot asset, `[[obstacles]]` scene asset) |
@@ -141,8 +214,8 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 
 ## v0.4 candidates
 
-| Area | Idea |
-|------|------|
+| Area | Idea | Status |
+|------|------|--------|
 | AI | Goal-conditioned policies, curriculum / multi-task episodes | Done (`GoalSeekingPolicy`, `GoalCurriculum`, `16_goal_conditioned_agent`) |
 | Rendering | Viewer + scene assets integration, URDF mesh in interactive mode | Done (`14_interactive_viewer`, `[visuals]` robot assets) |
 | Physics | Multi-robot collision and interaction scenarios | Done (`multi_robot` helpers, `17_multi_robot_collision`) |
@@ -169,13 +242,13 @@ The native node is built with `--manifest-path` and is not part of the core work
 
 ## Release checklist
 
-After merging release changes:
+After merging release changes (replace `0.9.0` with the version you are shipping):
 
 ```bash
 cargo run -p xtask -- ci
-git tag -a v0.6.0 -m "Robot Native Engine v0.6.0"
+git tag -a v0.9.0 -m "Robot Native Engine v0.9.0"
 git push origin main --tags
-gh release create v0.6.0 --title "v0.6.0" --notes-file CHANGELOG.md
+gh release create v0.9.0 --title "v0.9.0" --notes-file CHANGELOG.md
 ```
 
-Adjust the `gh release create` notes to the `[0.6.0]` section only if you prefer a shorter GitHub release body.
+Adjust the `gh release create` notes to the `[0.9.0]` section only if you prefer a shorter GitHub release body.
