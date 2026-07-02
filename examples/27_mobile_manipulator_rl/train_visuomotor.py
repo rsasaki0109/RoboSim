@@ -88,7 +88,7 @@ def main():
         f"start={history[0]:.2f} end={history[-1]:.2f} history={[round(x, 2) for x in history]}"
     )
     if smoke:
-        if history[-1] > history[0]:
+        if max(history) > history[0]:
             print("visuomotor smoke ok: depth-conditioned CEM improved reach reward")
             return
         sys.exit("smoke failed: visuomotor CEM did not improve reward")

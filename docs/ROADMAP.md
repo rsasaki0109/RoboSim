@@ -1,5 +1,35 @@
 # Roadmap
 
+## v0.11.0 goal: wrist RGB-D, clutter RL bench, scene diversity
+
+Primary development target for v0.11. Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Perception | Wrist RGB-D on DataBus + depth in observations; `VisuomotorReachPolicy` | Done (`ImageDepth`, scene-aware wrist sampling, depth obs fields) |
+| B | RL | CEM pick-and-place + visuomotor reach bench; SB3 PPO smoke in CI | Done (`train_place.py`, `train_visuomotor.py`, `train_ppo.py` smokes) |
+| C | Scene diversity | Clutter pick + mobile navigate-and-place episodes | Done (`clutter_pick_place`, `mobile_clutter_pick_place`, clutter scenes) |
+
+### v0.12 candidates
+
+| Area | Idea |
+|------|------|
+| RL | Converging clutter pick-and-place on SB3 PPO / CEM + reproducible bench + replay |
+| Manipulation | Analytic IK for `mm_minimal` SCARA (mirrors `MmLiftKinematics`) |
+| Scene diversity | Full mobile navigate → grasp → place E2E on clutter scenes |
+| Physics | Wire URDF prismatic joints to Rapier (architecture gap) |
+
+## v0.11.0 (released)
+
+Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Perception | `ImageDepth` on DataBus; wrist depth obs fields; `VisuomotorReachPolicy` |
+| RL | `train_place.py`, `train_visuomotor.py`, `train_ppo.py` smokes; pinned CPU torch in CI |
+| Scenes | `mm_minimal_clutter` / `mm_mobile_clutter`; clutter + mobile navigate-place episodes |
+| AI | Snapshot v2 with v1 restore; pre-grasp approach reward on Place tasks |
+
 ## v0.10.0 goal: arm IK & trajectory following
 
 Primary development target for v0.10. Closes the one capability the mobile-manipulator
@@ -27,20 +57,6 @@ once IK exists.
 | AI | `LiftPickPlacePolicy` re-expressed as IK-to-target instead of a fixed step sequence |
 | ROS 2 | Subscribe `trajectory_msgs/JointTrajectory` (subset), map to arm joint targets |
 | Python | `rne_py` IK / trajectory bindings alongside the existing episode API |
-
-### Later theme candidates (v0.11+)
-
-| Phase | Area | Deliverable | Status |
-|-------|------|-------------|--------|
-| A | Perception | Wrist RGB-D on DataBus + depth in observations; `VisuomotorReachPolicy` | Done (`ImageDepth`, scene-aware wrist sampling, depth obs fields) |
-| B | RL | CEM pick-and-place + visuomotor reach bench; SB3 integration unchanged | Done (`train_place.py`, `train_visuomotor.py` smokes) |
-| C | Scene diversity | Clutter pick + mobile navigate-and-place episodes | Done (`clutter_pick_place`, `mobile_clutter_pick_place`, clutter scenes) |
-
-| Area | Idea |
-|------|------|
-| Perception | Wrist RGB-D (`ImageRgb8` / depth) wired into a visuomotor policy input |
-| RL | Converging pick-and-place training on SB3 PPO / CEM + a reproducible bench + replay |
-| Scene diversity | Pick a specific object out of clutter; combined navigate + manipulate task |
 
 ## v0.10.0 (released)
 

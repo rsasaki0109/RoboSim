@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-03
+
 ### Added
 
 - **`ImageDepth` DataBus payload** and paired wrist RGB-D sampling (`sample_camera_rgbd`,
@@ -17,7 +19,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **RL bench scripts**: `train_place.py` (CEM place smoke) and `train_visuomotor.py`
   (depth-conditioned reach smoke).
 - **`xtask ci`**: validates clutter scenes and runs `rne_py` RL smokes (`run.py`,
-  `train_place.py`, `train_visuomotor.py`).
+  `train_place.py`, `train_visuomotor.py`, `train_ppo.py`).
 - **`IkLiftPickPlacePolicy`**: pick-and-place state machine whose carry swing solves
   [`MmLiftKinematics`] targets and drives shoulder / elbow / lift at a fixed rate toward
   the IK joint solution. Example 31 and the `lift_pick_place` episode test use this
@@ -39,10 +41,11 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Clutter scenes**: tabletop support in `mm_minimal_clutter` (cubes settle on table, stay clear
   of idle arm sweep); E2E covers gripper contact on all targets, weld grasp of the center cube,
   transport Place script parity, and mobile-base approach.
-- **`xtask ci`**: runs `train_ppo.py --smoke` with pinned Python deps (`requirements-ci.txt`).
+- **`xtask ci`**: pinned Python deps in `requirements-ci.txt` (CPU-only torch, gymnasium, SB3);
+  set `RNE_SKIP_RL_SMOKES` to skip RL smokes locally.
 - **`rne_py` checkpoint tests**: tolerate JSON float roundtrip on episode rewards.
-- **RL smokes**: deterministic `random.seed(0)`; place CEM smoke checks best-iteration
-  improvement.
+- **RL smokes**: deterministic `random.seed(0)`; CEM smokes check best-iteration improvement
+  (`max(history) > history[0]`).
 
 ## [0.10.0] - 2026-07-02
 

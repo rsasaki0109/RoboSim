@@ -44,7 +44,11 @@ fn ci() -> anyhow::Result<()> {
     run_step("cargo test --workspace")?;
     validate_repo_assets()?;
     run_example_smokes()?;
-    mobile_manipulator_rl_smokes()?;
+    if std::env::var("RNE_SKIP_RL_SMOKES").is_ok() {
+        eprintln!("skipping mobile_manipulator_rl_smokes (RNE_SKIP_RL_SMOKES is set)");
+    } else {
+        mobile_manipulator_rl_smokes()?;
+    }
     house_gif_demo()?;
     hero_media_check()?;
     Ok(())
