@@ -1,0 +1,4 @@
+# Pinned deps for xtask mobile_manipulator_rl_smokes (SB3 pulls torch; keep versions stable in CI).
+gymnasium==1.0.0
+numpy==2.0.2
+stable-baselines3==2.4.0

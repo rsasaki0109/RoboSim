@@ -35,6 +35,8 @@ use std::path::{Path, PathBuf};
 
 const JOINT_STATE_STREAM: u32 = 300;
 const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 2;
+/// Oldest supported mobile-manipulator snapshot schema (v1 had no wrist depth frame).
+const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
 
 /// Error restoring or creating a mobile-manipulator simulation snapshot.
 #[derive(Clone, Debug, PartialEq)]
@@ -731,7 +733,9 @@ impl MobileManipulatorSim {
         &mut self,
         snapshot: &MobileManipulatorSimSnapshot,
     ) -> Result<(), MobileManipulatorSimSnapshotError> {
-        if snapshot.schema_version != MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION {
+        if snapshot.schema_version < MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION
+            || snapshot.schema_version > MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION
+        {
             return Err(
                 MobileManipulatorSimSnapshotError::UnsupportedSchemaVersion {
                     expected: MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
@@ -1682,24 +1686,37 @@ mod tests {
     }
 
     #[test]
-    fn clutter_scene_cubes_remain_spawned_after_brief_settle() {
+    fn clutter_scene_cubes_settle_on_table_after_physics() {
         let scene_path = mm_minimal_clutter_scene_path();
         let mut sim =
             MobileManipulatorSim::from_scene_path(&scene_path).expect("load clutter scene");
-        for _ in 0..20 {
+        for _ in 0..80 {
             sim.step(MobileManipulatorAction::default());
         }
+        const TABLE_TOP_Y_M: f64 = 0.54;
         for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
-            let (x, y, z) = sim.named_translation_m(name).expect(name);
+            let (_, y, _) = sim.named_translation_m(name).expect(name);
             assert!(
-                y > 0.02,
-                "{name} should remain in the scene after brief settle, y={y:.3} m"
-            );
-            assert!(
-                x.is_finite() && z.is_finite(),
-                "{name} pose should stay finite"
+                y >= TABLE_TOP_Y_M - 0.02,
+                "{name} should stay on the clutter table after settle, y={y:.3} m"
             );
         }
+    }
+
+    #[test]
+    fn restore_snapshot_accepts_schema_v1_without_depth_frame() {
+        let mut sim = MobileManipulatorSim::from_scene_path(&mm_minimal_grasp_scene_path())
+            .expect("load grasp scene");
+        sim.step(MobileManipulatorAction {
+            shoulder_velocity_rad_s: 0.5,
+            ..MobileManipulatorAction::default()
+        });
+        let mut snapshot = sim.snapshot();
+        snapshot.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION;
+        snapshot.wrist_depth_frame = None;
+        sim.restore_snapshot(&snapshot).unwrap();
+        assert_eq!(sim.step_count(), snapshot.step_count);
+        assert_eq!(sim.latest_wrist_depth(), None);
     }
 
     #[test]

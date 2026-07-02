@@ -125,6 +125,9 @@ impl ImageDepth {
 }
 
 /// Computes a stable FNV-1a hash over depth values bit patterns.
+///
+/// Keep in sync with the duplicate in `rne_render::depth::hash_depth_f32` (render
+/// cannot depend on `rne_data`).
 pub fn hash_depth_f32(values: &[f32]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for value in values {

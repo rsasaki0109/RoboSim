@@ -34,11 +34,12 @@ All notable changes to Robot Native Engine are documented in this file.
   (single source of truth).
 - **Place / reach progress rewards**: potential-based shaping (signed delta) instead of
   clamping progress at zero.
-- **Mobile manipulator snapshot v2**: `wrist_depth_frame` with `#[serde(default)]` for v1
-  checkpoint compatibility.
-- **Clutter scenes**: three spaced cubes on a shared layout with drop zone; solvability,
-  grasp, and mobile-base approach E2E tests.
-- **`xtask ci`**: runs `train_ppo.py --smoke` (Stable-Baselines3 reach integration).
+- **Mobile manipulator snapshot v2**: adds `wrist_depth_frame`; schema v1 checkpoints restore
+  with `wrist_depth_frame` absent (`#[serde(default)]`).
+- **Clutter scenes**: tabletop support in `mm_minimal_clutter` (cubes settle on table, stay clear
+  of idle arm sweep); E2E covers gripper contact on all targets, weld grasp of the center cube,
+  transport Place script parity, and mobile-base approach.
+- **`xtask ci`**: runs `train_ppo.py --smoke` with pinned Python deps (`requirements-ci.txt`).
 - **`rne_py` checkpoint tests**: tolerate JSON float roundtrip on episode rewards.
 - **RL smokes**: deterministic `random.seed(0)`; place CEM smoke checks best-iteration
   improvement.

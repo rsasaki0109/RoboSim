@@ -615,7 +615,10 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     }
     let venv = venv_py.display();
     run_step(&format!(
-        "\"{venv}\" -m pip install -q --upgrade pip maturin gymnasium numpy stable-baselines3"
+        "\"{venv}\" -m pip install -q --upgrade pip maturin"
+    ))?;
+    run_step(&format!(
+        "\"{venv}\" -m pip install -q -r examples/27_mobile_manipulator_rl/requirements-ci.txt"
     ))?;
     run_step(&format!(
         "\"{venv}\" -m maturin develop -m crates/rne_py/Cargo.toml --release"

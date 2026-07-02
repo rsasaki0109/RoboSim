@@ -1360,14 +1360,56 @@ mod tests {
         }
     }
 
-    fn grasp_clutter_cube(episode: &mut MobileManipulatorEpisode) -> bool {
+    fn clutter_target_accepts_gripper_contact(
+        episode: &mut MobileManipulatorEpisode,
+        object_name: &str,
+    ) -> bool {
+        use crate::finger_contacts_named;
+
         let mut step = episode.reset();
-        let close = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        };
-        for _ in 0..120 {
-            step = episode.step(close);
+        for _ in 0..20 {
+            step = episode.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..300 {
+            let obs = &step.observation;
+            step = episode.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: (4.0 * obs.target_dx_m).clamp(-6.0, 6.0),
+                elbow_velocity_rad_s: (4.0 * obs.target_dz_m).clamp(-6.0, 6.0),
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+            if finger_contacts_named(episode.simulation(), object_name)
+                || episode.simulation().is_grasping()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn grasp_clutter_cube(episode: &mut MobileManipulatorEpisode, object_name: &str) -> bool {
+        let mut step = episode.reset();
+        for _ in 0..20 {
+            step = episode.step(MobileManipulatorAction::default());
+        }
+        if object_name == "clutter_cube_c" {
+            for _ in 0..60 {
+                let obs = &step.observation;
+                step = episode.step(MobileManipulatorAction {
+                    shoulder_velocity_rad_s: (4.5 * obs.target_dx_m).clamp(-5.0, 5.0),
+                    gripper_velocity_rad_s: 1.0,
+                    ..MobileManipulatorAction::default()
+                });
+            }
+        }
+        for _ in 0..360 {
+            let obs = &step.observation;
+            step = episode.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: (4.0 * obs.target_dx_m).clamp(-6.0, 6.0),
+                elbow_velocity_rad_s: (4.0 * obs.target_dz_m).clamp(-6.0, 6.0),
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
             if episode.simulation().is_grasping() {
                 return true;
             }
@@ -1435,11 +1477,22 @@ mod tests {
     }
 
     #[test]
+    fn clutter_targets_accept_gripper_contact() {
+        for object_name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
+            let mut episode = MobileManipulatorEpisode::new(clutter_place_config(object_name));
+            assert!(
+                clutter_target_accepts_gripper_contact(&mut episode, object_name),
+                "expected gripper contact with `{object_name}` on the clutter table"
+            );
+        }
+    }
+
+    #[test]
     fn clutter_pick_place_episode_grasps_center_target() {
         let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
         assert!(
-            grasp_clutter_cube(&mut episode),
-            "expected scripted approach to grasp the center clutter cube"
+            grasp_clutter_cube(&mut episode, "clutter_cube_b"),
+            "expected scripted weld grasp of the center clutter cube"
         );
     }
 

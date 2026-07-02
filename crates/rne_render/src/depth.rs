@@ -31,6 +31,8 @@ impl DepthFrame {
 }
 
 /// Computes a stable FNV-1a hash over depth values bit patterns.
+///
+/// Keep in sync with `rne_data::payloads::hash_depth_f32`.
 pub fn hash_depth_f32(values: &[f32]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for value in values {

@@ -427,4 +427,24 @@ mod tests {
             "swing step count should scale carry reach: near={near:?}, far={far:?}, separation={separation:.2} m"
         );
     }
+
+    #[test]
+    fn visuomotor_depth_scale_clamps_and_defaults_without_depth() {
+        let mut policy = VisuomotorReachPolicy::default();
+        let mut obs = crate::MobileManipulatorObservation {
+            target_dx_m: 1.0,
+            wrist_depth_center_m: 0.0,
+            ..Default::default()
+        };
+        let action = policy.act(&obs);
+        assert_relative_eq!(action.shoulder_velocity_rad_s, 2.5, epsilon = 1e-9);
+
+        obs.wrist_depth_center_m = 0.2;
+        let action = policy.act(&obs);
+        assert_relative_eq!(action.shoulder_velocity_rad_s, 3.75, epsilon = 1e-9);
+
+        obs.wrist_depth_center_m = 5.0;
+        let action = policy.act(&obs);
+        assert_relative_eq!(action.shoulder_velocity_rad_s, 0.875, epsilon = 1e-9);
+    }
 }
