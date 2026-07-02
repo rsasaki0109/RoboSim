@@ -1,0 +1,31 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 47
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_minimal.rne.robot.toml"
+
+# Three cubes settle on the ground with enough spacing to pick one at a time.
+[[obstacles]]
+name = "clutter_cube_a"
+translation_m = [0.775, 0.585, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.08
+
+[[obstacles]]
+name = "clutter_cube_b"
+translation_m = [0.895, 0.585, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.08
+
+[[obstacles]]
+name = "clutter_cube_c"
+translation_m = [1.015, 0.585, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.08

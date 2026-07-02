@@ -36,8 +36,9 @@ Initial reference robot: **minimal URDF mobile manipulator** (diff base + 2–3 
 | Diff-drive kinematics + `DiffDriveSim` | Ready |
 | Combined base + arm environment | Ready (`MobileManipulatorSim::new_mm_mobile`, `mm_mobile` scene asset) |
 | Gripper / contact-rich manipulation | **Partial** (parallel jaw + grasp/transport smoke) |
-| Wrist / head camera from scene assets | **Partial** (`[wrist_camera]` on `mm_minimal`, DataBus `ImageRgb8`) |
+| Wrist / head camera from scene assets | Ready (`ImageRgb8` + `ImageDepth` on DataBus; depth in observations; `VisuomotorReachPolicy`) |
 | Arm trajectory / IK | **Partial** (`MmLiftKinematics`, `IkLiftPickPlacePolicy`, direct joint targets; ROS 3-DOF trajectory on `mm_lift`) |
+| Clutter / navigate-and-place | Ready (`clutter_pick_place`, `mobile_clutter_pick_place` episodes) |
 | ROS `/joint_states`, arm commands | Ready (`mobile_manipulator`: 2-DOF arm + `/arm_joint_trajectory`; `mm_lift`: 3-DOF lift-arm trajectory via `RNE_ROS2_MODE=mm_lift`) |
 
 ## Architecture (robot-native)

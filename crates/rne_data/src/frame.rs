@@ -13,6 +13,7 @@ impl FramePayload for crate::payloads::PointCloud {}
 impl FramePayload for crate::payloads::WheelEncoderSample {}
 impl FramePayload for crate::payloads::JointState {}
 impl FramePayload for crate::payloads::ImageRgb8 {}
+impl FramePayload for crate::payloads::ImageDepth {}
 
 /// Timestamped typed frame published on the DataBus.
 #[derive(Clone, Debug, PartialEq)]

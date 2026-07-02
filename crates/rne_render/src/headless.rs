@@ -96,13 +96,13 @@ impl RenderBackend for HeadlessRenderBackend {
         clear_color: [f32; 4],
     ) -> Result<CameraPassOutput, RenderError> {
         let color = self.render_clear(camera.render_target(), clear_color)?;
+        let (center_m, min_m) = crate::depth::scene_depth_probe(camera, view, scene);
         let mut depth_m = vec![camera.far_m as f32; (camera.width * camera.height) as usize];
-
-        if let Some(item) = scene.items.first() {
-            let distance = (view.translation - item.transform.translation).length() as f32;
+        if !depth_m.is_empty() {
+            depth_m.fill(min_m);
             let center = (camera.height / 2 * camera.width + camera.width / 2) as usize;
             if center < depth_m.len() {
-                depth_m[center] = distance;
+                depth_m[center] = center_m;
             }
         }
 

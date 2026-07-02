@@ -30,6 +30,12 @@ once IK exists.
 
 ### Later theme candidates (v0.11+)
 
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Perception | Wrist RGB-D on DataBus + depth in observations; `VisuomotorReachPolicy` | Done (`ImageDepth`, scene-aware wrist sampling, depth obs fields) |
+| B | RL | CEM pick-and-place + visuomotor reach bench; SB3 integration unchanged | Done (`train_place.py`, `train_visuomotor.py` smokes) |
+| C | Scene diversity | Clutter pick + mobile navigate-and-place episodes | Done (`clutter_pick_place`, `mobile_clutter_pick_place`, clutter scenes) |
+
 | Area | Idea |
 |------|------|
 | Perception | Wrist RGB-D (`ImageRgb8` / depth) wired into a visuomotor policy input |

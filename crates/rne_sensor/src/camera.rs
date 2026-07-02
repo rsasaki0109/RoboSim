@@ -1,10 +1,19 @@
 //! RGB camera sensor specification and sampling.
 
 use rne_core::SimTime;
-use rne_data::ImageRgb8;
-use rne_render::{Camera, RenderBackend};
+use rne_data::{ImageDepth, ImageRgb8};
+use rne_render::{pass::CameraPassOutput, Camera, RenderBackend, RenderScene};
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
+
+/// RGB + depth sample from one camera capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CameraRgbdSample {
+    /// RGBA8 color image.
+    pub rgb: ImageRgb8,
+    /// Matching linear depth image in meters.
+    pub depth: ImageDepth,
+}
 
 /// RGB camera parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -37,6 +46,17 @@ pub fn sample_camera<R: RenderBackend + ?Sized>(
     spec: &CameraSpec,
     sim_time: SimTime,
 ) -> ImageRgb8 {
+    sample_camera_rgbd(render, transform, spec, sim_time, &RenderScene::new()).rgb
+}
+
+/// Samples RGB and depth using scene geometry when provided.
+pub fn sample_camera_rgbd<R: RenderBackend + ?Sized>(
+    render: &mut R,
+    transform: &Transform3,
+    spec: &CameraSpec,
+    sim_time: SimTime,
+    scene: &RenderScene,
+) -> CameraRgbdSample {
     let camera = Camera::new(spec.width, spec.height, spec.fov_y_rad);
     let view = rne_math::Transform3 {
         translation: transform.translation,
@@ -44,11 +64,32 @@ pub fn sample_camera<R: RenderBackend + ?Sized>(
         scale: transform.scale,
     };
 
-    let frame = render
-        .render_camera(&camera, &view, [0.05, 0.08, 0.12, 1.0], sim_time, spec.seed)
-        .expect("camera render");
+    let output = if scene.items.is_empty() {
+        let frame = render
+            .render_camera(&camera, &view, [0.05, 0.08, 0.12, 1.0], sim_time, spec.seed)
+            .expect("camera render");
+        CameraPassOutput {
+            color: frame,
+            depth: rne_render::DepthFrame::new(
+                spec.width,
+                spec.height,
+                vec![camera.far_m as f32; (spec.width * spec.height) as usize],
+            ),
+        }
+    } else {
+        render
+            .render_scene_camera(&camera, &view, scene, [0.05, 0.08, 0.12, 1.0])
+            .expect("camera scene render")
+    };
 
-    ImageRgb8::from_rgba8(frame.width, frame.height, frame.rgba8)
+    CameraRgbdSample {
+        rgb: ImageRgb8::from_rgba8(output.color.width, output.color.height, output.color.rgba8),
+        depth: ImageDepth::new(
+            output.depth.width,
+            output.depth.height,
+            output.depth.depth_m,
+        ),
+    }
 }
 
 #[cfg(test)]

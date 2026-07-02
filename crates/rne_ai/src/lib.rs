@@ -38,10 +38,11 @@ pub use camera::{
 };
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_grasp_scene_path,
-    mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_scene_path,
-    mm_mobile_twist_to_wheel_velocities, wheel_command_to_motor_rad_s, DiffDriveEpisode,
-    DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot, DiffDriveEpisodeSnapshotError, DiffDriveSim,
+    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_clutter_scene_path,
+    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
+    mm_mobile_clutter_scene_path, mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities,
+    wheel_command_to_motor_rad_s, ClutterPickConfig, DiffDriveEpisode, DiffDriveEpisodeConfig,
+    DiffDriveEpisodeSnapshot, DiffDriveEpisodeSnapshotError, DiffDriveSim,
     MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
     MobileManipulatorEpisodeProgressSnapshot, MobileManipulatorEpisodeSnapshot,
     MobileManipulatorEpisodeSnapshotError, MobileManipulatorFixedJointSnapshot,
@@ -73,7 +74,10 @@ pub use multi_robot::{
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
-pub use policy::{ConstantVelocityPolicy, IkLiftPickPlacePolicy, LiftPickPlacePolicy, Policy};
+pub use policy::{
+    ConstantVelocityPolicy, IkLiftPickPlacePolicy, LiftPickPlacePolicy, Policy,
+    VisuomotorReachPolicy,
+};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
     JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,

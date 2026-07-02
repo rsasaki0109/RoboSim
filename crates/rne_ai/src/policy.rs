@@ -354,6 +354,55 @@ fn signed_rate_toward(current: f64, target: f64, max_rate: f64, tolerance: f64) 
     }
 }
 
+/// Goal-conditioned reach policy that scales arm motion from wrist depth.
+///
+/// Uses the center-pixel depth from the wrist RGB-D stream to slow the arm near
+/// obstacles and speed up in open space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VisuomotorReachPolicy {
+    /// Shoulder gain on goal-relative X error.
+    pub shoulder_gain: f64,
+    /// Elbow gain on goal-relative Z error.
+    pub elbow_gain: f64,
+    /// Depth in meters treated as a nominal stand-off distance.
+    pub depth_bias_m: f64,
+}
+
+impl Default for VisuomotorReachPolicy {
+    fn default() -> Self {
+        Self {
+            shoulder_gain: 2.5,
+            elbow_gain: 3.0,
+            depth_bias_m: 0.55,
+        }
+    }
+}
+
+impl VisuomotorReachPolicy {
+    fn depth_scale(&self, observation: &MobileManipulatorObservation) -> f64 {
+        if observation.wrist_depth_center_m <= 0.0 {
+            return 1.0;
+        }
+        (self.depth_bias_m / observation.wrist_depth_center_m).clamp(0.35, 1.5)
+    }
+}
+
+impl Policy<crate::env::MobileManipulatorEpisode> for VisuomotorReachPolicy {
+    fn act(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        let scale = self.depth_scale(observation);
+        crate::MobileManipulatorAction {
+            shoulder_velocity_rad_s: (self.shoulder_gain * observation.target_dx_m * scale)
+                .clamp(-6.0, 6.0),
+            elbow_velocity_rad_s: (self.elbow_gain * observation.target_dz_m * scale)
+                .clamp(-6.0, 6.0),
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -204,6 +204,7 @@ fn main() {
                 physics: &backend,
                 physics_world,
                 render: None,
+                scene: None,
             },
             &mut data_bus,
         );

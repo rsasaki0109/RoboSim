@@ -38,6 +38,8 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 ```bash
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py          # 20 iterations
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --smoke  # short, asserts learning
+.venv/bin/python examples/27_mobile_manipulator_rl/train_place.py --smoke  # CEM on place task
+.venv/bin/python examples/27_mobile_manipulator_rl/train_visuomotor.py --smoke  # depth-conditioned reach
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json --resume --iterations 30
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --policy-out best_policy.json
@@ -150,9 +152,10 @@ The JSON/CSV artifact contracts are documented in
 
 - **Action** (`shape=(5,)`): `[left_wheel, right_wheel, shoulder, elbow, gripper]`
   velocities (rad/s; gripper is m/s, negative closes).
-- **Observation** (`shape=(12,)`): base pose `(x, y, z, yaw)`, end-effector `(x, y, z)`,
+- **Observation** (`shape=(18,)`): base pose `(x, y, z, yaw)`, end-effector `(x, y, z)`,
   `shoulder`, `elbow`, `gripper` joint positions, `wrist_camera_pixels`,
-  `joint_state_count`.
+  `joint_state_count`, goal-relative `(target_dx, target_dy, target_dz)`,
+  `wrist_depth_center_m`, `wrist_depth_min_m`, `target_object_index`.
 
 ## Training with Stable-Baselines3 (`train_ppo.py`)
 

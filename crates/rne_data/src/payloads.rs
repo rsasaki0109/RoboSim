@@ -75,3 +75,63 @@ impl ImageRgb8 {
         }
     }
 }
+
+/// Linear depth image payload in meters (row-major).
+///
+/// Headless camera sensors publish probe-derived depth (see `scene_depth_probe` in
+/// `rne_render`). Values are noiseless and deterministic for a given scene pose.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageDepth {
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Row-major linear depth values in meters.
+    pub depth_m: Vec<f32>,
+}
+
+impl ImageDepth {
+    /// Creates a depth image payload from raw values.
+    pub fn new(width: u32, height: u32, depth_m: Vec<f32>) -> Self {
+        Self {
+            width,
+            height,
+            depth_m,
+        }
+    }
+
+    /// Returns the center-pixel depth in meters when the buffer is non-empty.
+    pub fn center_depth_m(&self) -> f32 {
+        if self.depth_m.is_empty() {
+            return 0.0;
+        }
+        let center = (self.height / 2 * self.width + self.width / 2) as usize;
+        self.depth_m.get(center).copied().unwrap_or(self.depth_m[0])
+    }
+
+    /// Returns the minimum finite depth in the buffer.
+    pub fn min_depth_m(&self) -> f32 {
+        self.depth_m
+            .iter()
+            .copied()
+            .filter(|depth| depth.is_finite())
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    /// Returns a stable FNV-1a hash of depth values for determinism tests.
+    pub fn hash_depth(&self) -> u64 {
+        hash_depth_f32(&self.depth_m)
+    }
+}
+
+/// Computes a stable FNV-1a hash over depth values bit patterns.
+pub fn hash_depth_f32(values: &[f32]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for value in values {
+        for byte in value.to_bits().to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}

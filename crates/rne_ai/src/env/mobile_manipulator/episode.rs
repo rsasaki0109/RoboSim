@@ -85,6 +85,12 @@ pub struct MobileManipulatorEpisodeProgressSnapshot {
     pub place_error_m: f64,
     /// Whether the object has been grasped at least once this episode.
     pub was_grasped: bool,
+    /// Previous end-effector-to-object distance used before grasp (Place).
+    #[serde(default)]
+    pub approach_error_m: f64,
+    /// Previous base-to-object horizontal distance used before grasp on mobile robots.
+    #[serde(default)]
+    pub base_approach_error_m: f64,
 }
 
 /// Completed-tick checkpoint of a [`MobileManipulatorEpisode`].
@@ -114,6 +120,17 @@ pub struct MobileManipulatorEpisodeSnapshot {
     pub reach_curriculum: Option<ReachCurriculumSnapshot>,
 }
 
+/// Randomized pick target among several named clutter objects.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClutterPickConfig {
+    /// Candidate object entity names in the scene.
+    pub object_names: Vec<String>,
+    /// World-frame placement target after grasp.
+    pub target: crate::reach::ReachTarget,
+    /// Horizontal success tolerance in meters.
+    pub place_tolerance_m: f64,
+}
+
 /// Configuration for a mobile manipulator manipulation episode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MobileManipulatorEpisodeConfig {
@@ -130,6 +147,8 @@ pub struct MobileManipulatorEpisodeConfig {
     /// When set (Reach task only), targets are sampled from a curriculum that widens as
     /// the policy succeeds (takes precedence over `reach_randomization`).
     pub reach_curriculum: Option<crate::reach::ReachCurriculumConfig>,
+    /// When set, a random object from the list becomes the Place target each reset.
+    pub clutter_pick: Option<ClutterPickConfig>,
     /// Seed for per-episode randomization.
     pub rng_seed: u64,
 }
@@ -147,6 +166,7 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
         }
     }
@@ -166,6 +186,7 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
         }
     }
@@ -193,6 +214,7 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: Some(randomization),
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed,
         }
     }
@@ -220,7 +242,62 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
+        }
+    }
+
+    /// Pick one of three clutter cubes and place it at the standard tabletop target.
+    pub fn clutter_pick_place(rng_seed: u64) -> Self {
+        let target = crate::reach::ReachTarget::new(1.23, 0.03, -0.53);
+        Self {
+            max_steps: 700,
+            scene_path: crate::mm_minimal_clutter_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "clutter_cube_a".into(),
+                target,
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            clutter_pick: Some(ClutterPickConfig {
+                object_names: vec![
+                    "clutter_cube_a".into(),
+                    "clutter_cube_b".into(),
+                    "clutter_cube_c".into(),
+                ],
+                target,
+                place_tolerance_m: 0.12,
+            }),
+            rng_seed,
+        }
+    }
+
+    /// Navigate a diff-drive base to one of three distant cubes, then pick and place it.
+    pub fn mobile_clutter_pick_place(rng_seed: u64) -> Self {
+        let target = crate::reach::ReachTarget::new(1.23, 0.03, -0.53);
+        Self {
+            max_steps: 900,
+            scene_path: crate::mm_mobile_clutter_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "clutter_cube_a".into(),
+                target,
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            clutter_pick: Some(ClutterPickConfig {
+                object_names: vec![
+                    "clutter_cube_a".into(),
+                    "clutter_cube_b".into(),
+                    "clutter_cube_c".into(),
+                ],
+                target,
+                place_tolerance_m: 0.12,
+            }),
+            rng_seed,
         }
     }
 
@@ -243,6 +320,7 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
         }
     }
@@ -258,6 +336,7 @@ impl MobileManipulatorEpisodeConfig {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
         }
     }
@@ -287,6 +366,10 @@ struct EpisodeProgressState {
     place_error_m: f64,
     /// True once the object has been grasped at least once this episode (Place).
     was_grasped: bool,
+    /// End-effector distance to the task object before grasp (Place shaping).
+    approach_error_m: f64,
+    /// Base horizontal distance to the task object before grasp on mobile robots.
+    base_approach_error_m: f64,
 }
 
 impl EpisodeProgressState {
@@ -297,6 +380,8 @@ impl EpisodeProgressState {
             contacted_object: self.contacted_object,
             place_error_m: self.place_error_m,
             was_grasped: self.was_grasped,
+            approach_error_m: self.approach_error_m,
+            base_approach_error_m: self.base_approach_error_m,
         }
     }
 
@@ -307,6 +392,8 @@ impl EpisodeProgressState {
             contacted_object: snapshot.contacted_object,
             place_error_m: snapshot.place_error_m,
             was_grasped: snapshot.was_grasped,
+            approach_error_m: snapshot.approach_error_m,
+            base_approach_error_m: snapshot.base_approach_error_m,
         }
     }
 }
@@ -354,15 +441,22 @@ impl MobileManipulatorEpisode {
                 ..
             } => {
                 if self.sim.is_grasping() {
-                    if let Some((ox, oy, oz)) = self.sim.named_translation_m(object_name) {
+                    if let Some((ox, oy, oz)) = named_translation_m(&self.sim, object_name) {
                         observation.target_dx_m = target.x_m - ox;
                         observation.target_dy_m = target.y_m - oy;
                         observation.target_dz_m = target.z_m - oz;
                     }
-                } else if let Some((ox, oy, oz)) = self.sim.named_translation_m(object_name) {
+                } else if let Some((ox, oy, oz)) = named_translation_m(&self.sim, object_name) {
                     observation.target_dx_m = ox - observation.ee_x_m;
                     observation.target_dy_m = oy - observation.ee_y_m;
                     observation.target_dz_m = oz - observation.ee_z_m;
+                }
+                if let Some(clutter) = &self.config.clutter_pick {
+                    observation.target_object_index = clutter
+                        .object_names
+                        .iter()
+                        .position(|name| name == object_name)
+                        .unwrap_or(0) as u32;
                 }
             }
             _ => {}
@@ -557,6 +651,14 @@ impl Episode for MobileManipulatorEpisode {
                 *target = randomization.sample(&mut self.rng);
                 *success_m = randomization.success_m;
             }
+        } else if let Some(clutter) = &self.config.clutter_pick {
+            let index = self.rng.uniform_usize(clutter.object_names.len());
+            let object_name = clutter.object_names[index].clone();
+            self.effective_task = MobileManipulatorTask::Place {
+                object_name,
+                target: clutter.target,
+                place_tolerance_m: clutter.place_tolerance_m,
+            };
         }
 
         self.progress_state = initial_progress_state(&self.sim, &self.effective_task);
@@ -614,10 +716,30 @@ where
     }
 }
 
+fn ee_object_distance_m(
+    observation: &MobileManipulatorObservation,
+    object: (f64, f64, f64),
+) -> f64 {
+    let dx = observation.ee_x_m - object.0;
+    let dy = observation.ee_y_m - object.1;
+    let dz = observation.ee_z_m - object.2;
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn base_object_horizontal_distance_m(
+    observation: &MobileManipulatorObservation,
+    object: (f64, f64, f64),
+) -> f64 {
+    let dx = observation.base_x_m - object.0;
+    let dz = observation.base_z_m - object.2;
+    (dx * dx + dz * dz).sqrt()
+}
+
 fn initial_progress_state(
     sim: &MobileManipulatorSim,
     task: &MobileManipulatorTask,
 ) -> EpisodeProgressState {
+    let observation = sim.observe();
     let object_initial = match task {
         MobileManipulatorTask::Transport { object_name, .. }
         | MobileManipulatorTask::Place { object_name, .. } => named_translation_m(sim, object_name),
@@ -631,9 +753,22 @@ fn initial_progress_state(
         } => object_horizontal_distance_to_target_m(sim, object_name, *target).unwrap_or(0.0),
         _ => 0.0,
     };
+    let (approach_error_m, base_approach_error_m) = match task {
+        MobileManipulatorTask::Place { .. } => object_initial
+            .map(|object| {
+                (
+                    ee_object_distance_m(&observation, object),
+                    base_object_horizontal_distance_m(&observation, object),
+                )
+            })
+            .unwrap_or((0.0, 0.0)),
+        _ => (0.0, 0.0),
+    };
     EpisodeProgressState {
         object_initial,
         place_error_m,
+        approach_error_m,
+        base_approach_error_m,
         ..EpisodeProgressState::default()
     }
 }
@@ -667,7 +802,7 @@ fn task_progress(
     match task {
         MobileManipulatorTask::Reach { target, .. } => {
             let error = ee_distance_to_target_m(observation, *target);
-            let progress = (state.ee_error_m - error).max(0.0);
+            let progress = state.ee_error_m - error;
             state.ee_error_m = error;
             progress
         }
@@ -696,9 +831,23 @@ fn task_progress(
             ..
         } => {
             state.was_grasped |= sim.is_grasping();
-            if let Some(current) = object_horizontal_distance_to_target_m(sim, object_name, *target)
+            if !state.was_grasped {
+                let mut progress = 0.0;
+                if let Some(object) = named_translation_m(sim, object_name) {
+                    let ee_dist = ee_object_distance_m(observation, object);
+                    progress += state.approach_error_m - ee_dist;
+                    state.approach_error_m = ee_dist;
+                    if sim.mobile_base() {
+                        let base_dist = base_object_horizontal_distance_m(observation, object);
+                        progress += 0.5 * (state.base_approach_error_m - base_dist);
+                        state.base_approach_error_m = base_dist;
+                    }
+                }
+                progress
+            } else if let Some(current) =
+                object_horizontal_distance_to_target_m(sim, object_name, *target)
             {
-                let progress = (state.place_error_m - current).max(0.0);
+                let progress = state.place_error_m - current;
                 state.place_error_m = current;
                 progress
             } else {
@@ -1153,6 +1302,29 @@ mod tests {
     }
 
     #[test]
+    fn clutter_pick_place_samples_target_object() {
+        let config = MobileManipulatorEpisodeConfig::clutter_pick_place(7);
+        let mut episode = MobileManipulatorEpisode::new(config);
+        let first = episode.reset().observation.target_object_index;
+        let _ = episode.reset();
+        let second = episode.reset().observation.target_object_index;
+        assert!(first < 3);
+        assert!(second < 3);
+    }
+
+    #[test]
+    fn clutter_scene_exposes_three_pick_targets() {
+        let scene_path = crate::mm_minimal_clutter_scene_path();
+        let sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load clutter scene");
+        for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
+            assert!(
+                sim.named_translation_m(name).is_some(),
+                "clutter scene should spawn `{name}`"
+            );
+        }
+    }
+
+    #[test]
     fn reach_episode_accepts_proportional_policy() {
         let target = ReachTarget::new(0.50, 0.58, 0.10);
         let config = MobileManipulatorEpisodeConfig {
@@ -1165,6 +1337,7 @@ mod tests {
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
             reach_curriculum: None,
+            clutter_pick: None,
             rng_seed: 0,
         };
         let mut episode = MobileManipulatorEpisode::new(config);

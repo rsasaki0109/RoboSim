@@ -17,7 +17,7 @@ pub mod visual;
 
 pub use backend::{RenderBackend, RenderError};
 pub use camera::Camera;
-pub use depth::{hash_depth_f32, DepthFrame};
+pub use depth::{hash_depth_f32, scene_depth_probe, DepthFrame};
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};
 pub use mesh::{load_stl, MeshLoadError, TriangleMesh};

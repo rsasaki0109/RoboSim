@@ -4,12 +4,18 @@ use super::drive::{
     wheel_command_to_motor_rad_s, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_RADIUS_M,
 };
 use crate::action::MobileManipulatorAction;
-use crate::camera::{sync_wrist_camera_mounts, wrist_camera_mounts_from_spawned, WristCameraMount};
+use crate::camera::{
+    sync_wrist_camera_mounts, wrist_camera_depth_stream, wrist_camera_mounts_from_spawned,
+    WristCameraMount,
+};
 use crate::observation::MobileManipulatorObservation;
+use crate::render::build_visual_render_scene;
 use bevy_ecs::prelude::{Component, Mut};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, AssetError};
 use rne_core::{SimDuration, SimTime};
-use rne_data::{DataBus, Frame, FramePayload, ImageRgb8, InMemoryDataBus, JointState, StreamId};
+use rne_data::{
+    DataBus, Frame, FramePayload, ImageDepth, ImageRgb8, InMemoryDataBus, JointState, StreamId,
+};
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
@@ -17,6 +23,7 @@ use rne_physics::{
     PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_render::HeadlessRenderBackend;
 use rne_robot::Link;
 use rne_sensor::{sample_sensors, Sensor, SensorSampleContext, SensorState};
 use rne_urdf_import::UrdfRobot;
@@ -27,7 +34,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const JOINT_STATE_STREAM: u32 = 300;
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 1;
+const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 2;
 
 /// Error restoring or creating a mobile-manipulator simulation snapshot.
 #[derive(Clone, Debug, PartialEq)]
@@ -193,6 +200,9 @@ pub struct MobileManipulatorSimSnapshot {
     pub joint_state_frame: Option<MobileManipulatorFrameSnapshot<JointState>>,
     /// Latest wrist camera DataBus frame.
     pub wrist_camera_frame: Option<MobileManipulatorFrameSnapshot<ImageRgb8>>,
+    /// Latest wrist depth DataBus frame (schema v2+).
+    #[serde(default)]
+    pub wrist_depth_frame: Option<MobileManipulatorFrameSnapshot<ImageDepth>>,
 }
 
 /// Default scene asset for the fixed-base `mm_minimal` robot.
@@ -227,6 +237,18 @@ pub fn mm_minimal_grasp_scene_path() -> PathBuf {
 pub fn mm_minimal_transport_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/scenes/mm_minimal_transport.rne.scene.toml")
+}
+
+/// Scene asset with three tabletop cubes for clutter pick episodes.
+pub fn mm_minimal_clutter_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_minimal_clutter.rne.scene.toml")
+}
+
+/// Scene asset with a diff-drive base and three cubes spread along X.
+pub fn mm_mobile_clutter_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml")
 }
 
 /// How an actuated joint's position is read back and how its command maps to a motor.
@@ -299,6 +321,8 @@ pub struct MobileManipulatorSim {
     named_entities: HashMap<String, Entity>,
     wrist_camera: Option<WristCameraMount>,
     wrist_camera_stream: Option<StreamId>,
+    wrist_depth_stream: Option<StreamId>,
+    render_backend: HeadlessRenderBackend,
     mobile_base: bool,
     data_bus: InMemoryDataBus,
     joint_stream: StreamId,
@@ -425,13 +449,15 @@ impl MobileManipulatorSim {
         self.update_grasp(action);
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
+            let render_scene = build_visual_render_scene(&self.world);
             sample_sensors(
                 &mut SensorSampleContext {
                     world: &mut self.world,
                     sim_time: self.sim_time,
                     physics: &self.backend,
                     physics_world: self.physics_world,
-                    render: None,
+                    render: Some(&mut self.render_backend),
+                    scene: Some(&render_scene),
                 },
                 &mut self.data_bus,
             );
@@ -465,6 +491,17 @@ impl MobileManipulatorSim {
             })
             .unwrap_or(0);
 
+        let (wrist_depth_center_m, wrist_depth_min_m) = self
+            .wrist_depth_stream
+            .and_then(|stream| self.data_bus.latest::<ImageDepth>(stream))
+            .map(|frame| {
+                (
+                    f64::from(frame.payload.center_depth_m()),
+                    f64::from(frame.payload.min_depth_m()),
+                )
+            })
+            .unwrap_or((0.0, 0.0));
+
         MobileManipulatorObservation {
             base_x_m: base.translation.x,
             base_y_m: base.translation.y,
@@ -482,6 +519,9 @@ impl MobileManipulatorSim {
             target_dx_m: 0.0,
             target_dy_m: 0.0,
             target_dz_m: 0.0,
+            wrist_depth_center_m,
+            wrist_depth_min_m,
+            target_object_index: 0,
         }
     }
 
@@ -542,6 +582,15 @@ impl MobileManipulatorSim {
         self.wrist_camera_stream.and_then(|stream| {
             self.data_bus
                 .latest::<ImageRgb8>(stream)
+                .map(|frame| frame.payload.clone())
+        })
+    }
+
+    /// Returns the latest wrist depth frame when a wrist camera is present.
+    pub fn latest_wrist_depth(&self) -> Option<ImageDepth> {
+        self.wrist_depth_stream.and_then(|stream| {
+            self.data_bus
+                .latest::<ImageDepth>(stream)
                 .map(|frame| frame.payload.clone())
         })
     }
@@ -610,6 +659,11 @@ impl MobileManipulatorSim {
             wrist_camera_frame: self.wrist_camera_stream.and_then(|stream| {
                 self.data_bus
                     .latest::<ImageRgb8>(stream)
+                    .map(MobileManipulatorFrameSnapshot::from_frame)
+            }),
+            wrist_depth_frame: self.wrist_depth_stream.and_then(|stream| {
+                self.data_bus
+                    .latest::<ImageDepth>(stream)
                     .map(MobileManipulatorFrameSnapshot::from_frame)
             }),
         };
@@ -749,6 +803,9 @@ impl MobileManipulatorSim {
         if let Some(frame) = &snapshot.wrist_camera_frame {
             self.data_bus.publish(frame.to_frame());
         }
+        if let Some(frame) = &snapshot.wrist_depth_frame {
+            self.data_bus.publish(frame.to_frame());
+        }
         self.rebuild_physics_from_ecs()?;
         Ok(())
     }
@@ -789,6 +846,8 @@ impl MobileManipulatorSim {
             .filter_map(|name| links.get(*name).copied())
             .collect();
 
+        let wrist_depth_stream = wrist_camera_stream.map(wrist_camera_depth_stream);
+
         let mut sim = Self {
             scene_path: None,
             world_seed,
@@ -807,6 +866,8 @@ impl MobileManipulatorSim {
             named_entities,
             wrist_camera,
             wrist_camera_stream,
+            wrist_depth_stream,
+            render_backend: HeadlessRenderBackend::new(),
             mobile_base,
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
@@ -1597,10 +1658,11 @@ mod tests {
     fn wrist_camera_publishes_image_on_data_bus() {
         use crate::wrist_camera_image_valid;
 
-        let mut sim = MobileManipulatorSim::new_mm_minimal();
-        for _ in 0..12 {
+        let scene_path = mm_minimal_grasp_scene_path();
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load grasp scene");
+        for _ in 0..40 {
             sim.step(MobileManipulatorAction {
-                gripper_velocity_rad_s: 0.0,
+                shoulder_velocity_rad_s: 0.4,
                 ..MobileManipulatorAction::default()
             });
         }
@@ -1612,6 +1674,55 @@ mod tests {
         );
         let image = sim.latest_wrist_camera().expect("wrist camera frame");
         assert!(wrist_camera_image_valid(&image, 64 * 48 * 4));
+        assert!(
+            obs.wrist_depth_center_m > 0.0 && obs.wrist_depth_center_m < 50.0,
+            "expected scene depth toward grasp cube, got {}",
+            obs.wrist_depth_center_m
+        );
+    }
+
+    #[test]
+    fn clutter_scene_cubes_settle_in_reach_after_physics() {
+        let scene_path = mm_minimal_clutter_scene_path();
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(&scene_path).expect("load clutter scene");
+        for _ in 0..60 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        const GROUND_CUBE_Y_M: f64 = 0.15;
+        for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
+            let (_, y, _) = sim.named_translation_m(name).expect(name);
+            assert!(
+                y <= GROUND_CUBE_Y_M,
+                "{name} should settle on the ground within arm reach, y={y:.3} m"
+            );
+        }
+    }
+
+    #[test]
+    fn wrist_depth_hash_is_deterministic() {
+        use rne_data::ImageDepth;
+
+        fn depth_hash_after_steps(scene_path: &Path, steps: u64) -> u64 {
+            let mut sim =
+                MobileManipulatorSim::from_scene_path(scene_path).expect("load scene for depth");
+            let action = MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.3,
+                ..MobileManipulatorAction::default()
+            };
+            for _ in 0..steps {
+                sim.step(action);
+            }
+            sim.latest_wrist_depth()
+                .unwrap_or_else(|| ImageDepth::new(1, 1, vec![0.0]))
+                .hash_depth()
+        }
+
+        let scene_path = mm_minimal_grasp_scene_path();
+        let first = depth_hash_after_steps(&scene_path, 40);
+        let second = depth_hash_after_steps(&scene_path, 40);
+        assert_eq!(first, second);
+        assert_ne!(first, 0, "depth hash should reflect scene geometry");
     }
 
     #[test]

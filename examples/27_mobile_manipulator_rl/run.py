@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - exercised only without gymnasium insta
 
 # Action layout: [left_wheel, right_wheel, shoulder, elbow, gripper] (rad/s; gripper m/s).
 ACTION_DIM = 5
-OBSERVATION_DIM = 15
+OBSERVATION_DIM = 18
 
 
 def _observation_to_list(obs):
@@ -56,6 +56,9 @@ def _observation_to_list(obs):
         obs.target_dx,
         obs.target_dy,
         obs.target_dz,
+        obs.wrist_depth_center_m,
+        obs.wrist_depth_min_m,
+        float(obs.target_object_index),
     ]
 
 

@@ -1,5 +1,8 @@
 //! Depth buffer output from a camera pass.
 
+use crate::{Camera, RenderScene};
+use rne_math::{Transform3, Vec3};
+
 /// Linear view-space depth in meters produced by a render pass.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DepthFrame {
@@ -39,13 +42,66 @@ pub fn hash_depth_f32(values: &[f32]) -> u64 {
     hash
 }
 
+/// Deterministic center and minimum depth from scene item transforms.
+///
+/// Uses a cone test in the camera forward direction. Suitable for headless
+/// camera sensors without a GPU rasterizer.
+pub fn scene_depth_probe(camera: &Camera, view: &Transform3, scene: &RenderScene) -> (f32, f32) {
+    let forward = (view.rotation * -Vec3::Z).normalize();
+    let mut min_m = camera.far_m as f32;
+    let mut center_m = camera.far_m as f32;
+    let half_fov = camera.fov_y_rad * 0.5;
+    let center_dot = (half_fov * 1.5).cos();
+
+    for item in &scene.items {
+        let delta = item.transform.translation - view.translation;
+        let dist = delta.length() as f32;
+        if dist < 0.02 {
+            continue;
+        }
+        let dir = delta.normalize();
+        let dot = forward.dot(dir);
+        if dot <= 0.05 {
+            continue;
+        }
+        min_m = min_m.min(dist);
+        if dot >= center_dot {
+            center_m = center_m.min(dist);
+        }
+    }
+
+    (center_m, min_m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::RenderScene;
+    use crate::VisualShape;
+    use rne_math::Quat;
+    use rne_world::Transform3 as WorldTransform3;
 
     #[test]
     fn depth_hash_is_stable() {
         let frame = DepthFrame::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(frame.hash_depth(), frame.hash_depth());
+    }
+
+    #[test]
+    fn scene_depth_probe_reports_nearest_item() {
+        let camera = Camera::new(64, 48, std::f64::consts::FRAC_PI_4);
+        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 0.6, 0.0), Quat::IDENTITY);
+        let mut scene = RenderScene::new();
+        scene.items.push(RenderScene::item_from_visual(
+            WorldTransform3::from_translation_rotation(Vec3::new(0.0, 0.58, -0.8), Quat::IDENTITY),
+            VisualShape::Box {
+                size_m: Vec3::new(0.06, 0.06, 0.06),
+            },
+            [1.0, 0.0, 0.0, 1.0],
+            WorldTransform3::IDENTITY,
+        ));
+        let (center, min) = scene_depth_probe(&camera, &view, &scene);
+        assert!(center < camera.far_m as f32);
+        assert!((center - min).abs() < f32::EPSILON);
     }
 }

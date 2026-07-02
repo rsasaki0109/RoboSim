@@ -4,7 +4,7 @@ use rne_assets::WristCameraMountSpawned;
 use rne_data::{ImageRgb8, StreamId};
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
-use rne_sensor::Sensor;
+use rne_sensor::{Sensor, CAMERA_DEPTH_STREAM_OFFSET};
 use rne_world::world_transform_of;
 
 const WRIST_CAMERA_STREAM_BASE: u32 = 400;
@@ -33,6 +33,11 @@ impl From<WristCameraMountSpawned> for WristCameraMount {
 /// Returns the DataBus stream id for a robot wrist camera.
 pub fn wrist_camera_stream_for_index(index: usize) -> StreamId {
     StreamId::new(WRIST_CAMERA_STREAM_BASE as u64 + index as u64)
+}
+
+/// Returns the paired depth stream id for a wrist camera RGB stream.
+pub fn wrist_camera_depth_stream(rgb_stream: StreamId) -> StreamId {
+    StreamId::new(rgb_stream.0 + CAMERA_DEPTH_STREAM_OFFSET)
 }
 
 /// Copies the parent link pose onto a free-floating camera mount entity.

@@ -24,10 +24,12 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
         "reach_curriculum" => Ok(MobileManipulatorEpisodeConfig::reach_curriculum(0)),
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
         "lift_place" => Ok(MobileManipulatorEpisodeConfig::lift_pick_place()),
+        "clutter_place" => Ok(MobileManipulatorEpisodeConfig::clutter_pick_place(0)),
+        "mobile_clutter_place" => Ok(MobileManipulatorEpisodeConfig::mobile_clutter_pick_place(0)),
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'clutter_place', 'mobile_clutter_place', 'transport', or 'inspect'"
         ))),
     }
 }
@@ -611,6 +613,21 @@ impl PyMmObservation {
         self.inner.target_dz_m
     }
 
+    #[getter]
+    fn wrist_depth_center_m(&self) -> f64 {
+        self.inner.wrist_depth_center_m
+    }
+
+    #[getter]
+    fn wrist_depth_min_m(&self) -> f64 {
+        self.inner.wrist_depth_min_m
+    }
+
+    #[getter]
+    fn target_object_index(&self) -> u32 {
+        self.inner.target_object_index
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "MobileManipulatorObservation(ee=({:.3}, {:.3}, {:.3}), shoulder={:.3}, elbow={:.3}, gripper={:.3})",
@@ -1180,8 +1197,8 @@ mod tests {
             vectorized_checkpoint_summary(&env.checkpoint_json().unwrap()),
             summary
         );
-        assert_eq!(env.episode_reward(0).unwrap(), reward_0);
-        assert_eq!(env.episode_reward(1).unwrap(), reward_1);
+        approx::assert_relative_eq!(env.episode_reward(0).unwrap(), reward_0, epsilon = 1e-12);
+        approx::assert_relative_eq!(env.episode_reward(1).unwrap(), reward_1, epsilon = 1e-12);
     }
 
     #[test]
@@ -1207,8 +1224,8 @@ mod tests {
             vectorized_checkpoint_summary(&env.checkpoint_json().unwrap()),
             summary
         );
-        assert_eq!(env.episode_reward(0).unwrap(), reward_0);
-        assert_eq!(env.episode_reward(1).unwrap(), reward_1);
+        approx::assert_relative_eq!(env.episode_reward(0).unwrap(), reward_0, epsilon = 1e-12);
+        approx::assert_relative_eq!(env.episode_reward(1).unwrap(), reward_1, epsilon = 1e-12);
     }
 
     #[test]

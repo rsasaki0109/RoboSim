@@ -848,6 +848,7 @@ impl DiffDriveSim {
                 physics: &self.backend,
                 physics_world: self.physics_world,
                 render: None,
+                scene: None,
             },
             &mut self.data_bus,
         );

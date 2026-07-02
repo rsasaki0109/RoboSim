@@ -6,16 +6,41 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **`ImageDepth` DataBus payload** and paired wrist RGB-D sampling (`sample_camera_rgbd`,
+  scene-aware headless depth via `scene_depth_probe`).
+- **Wrist depth observations**: `wrist_depth_center_m`, `wrist_depth_min_m`, and
+  `target_object_index` on `MobileManipulatorObservation` (Python bindings included).
+- **`VisuomotorReachPolicy`**: goal-conditioned reach that scales arm velocity from wrist depth.
+- **Clutter pick-and-place episodes**: `clutter_pick_place` and `mobile_clutter_pick_place`
+  configs with `mm_minimal_clutter` / `mm_mobile_clutter` scenes; pre-grasp approach reward
+  on Place tasks.
+- **RL bench scripts**: `train_place.py` (CEM place smoke) and `train_visuomotor.py`
+  (depth-conditioned reach smoke).
+- **`xtask ci`**: validates clutter scenes and runs `rne_py` RL smokes (`run.py`,
+  `train_place.py`, `train_visuomotor.py`).
 - **`IkLiftPickPlacePolicy`**: pick-and-place state machine whose carry swing solves
   [`MmLiftKinematics`] targets and drives shoulder / elbow / lift at a fixed rate toward
   the IK joint solution. Example 31 and the `lift_pick_place` episode test use this
   policy; [`LiftPickPlacePolicy`] remains for scripted regression tests.
-
 - **ROS 2 `mm_lift` mode** (`RNE_ROS2_MODE=mm_lift`): loads the `mm_lift` scene and exposes
   manipulator subscriptions including `/lift_command` and `/arm_joint_trajectory`.
 - **3-DOF lift-arm trajectories**: when `lift_joint`, `shoulder_joint`, and `elbow_joint`
   appear in `/arm_joint_trajectory` or `/arm_joint_position`, the bridge drives
   `MobileManipulatorAction::hold_lift_joints` waypoint following.
+
+### Fixed
+
+- **Depth stream id**: `rne_ai` wrist depth uses `rne_sensor::CAMERA_DEPTH_STREAM_OFFSET`
+  (single source of truth).
+- **Place / reach progress rewards**: potential-based shaping (signed delta) instead of
+  clamping progress at zero.
+- **Mobile manipulator snapshot v2**: `wrist_depth_frame` with `#[serde(default)]` for v1
+  checkpoint compatibility.
+- **Clutter scenes**: three ground-level cubes with arm-reach spacing; solvability and
+  depth determinism tests.
+- **`rne_py` checkpoint tests**: tolerate JSON float roundtrip on episode rewards.
+- **RL smokes**: deterministic `random.seed(0)`; place CEM smoke checks best-iteration
+  improvement.
 
 ## [0.10.0] - 2026-07-02
 

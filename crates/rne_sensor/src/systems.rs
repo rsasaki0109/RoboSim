@@ -1,6 +1,6 @@
 //! Sensor sampling systems.
 
-use crate::camera::sample_camera;
+use crate::camera::sample_camera_rgbd;
 use crate::components::{Sensor, SensorKind, SensorState};
 use crate::imu::sample_imu_keyed;
 use crate::lidar::sample_lidar_at_entity;
@@ -10,7 +10,7 @@ use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, Frame, FramePayload};
 use rne_ecs::World;
 use rne_physics::{PhysicsBackend, PhysicsWorldId};
-use rne_render::{HeadlessRenderBackend, RenderBackend};
+use rne_render::{HeadlessRenderBackend, RenderBackend, RenderScene};
 use rne_world::{Transform3, WorldRandom};
 
 /// Context required to sample sensors in the simulation loop.
@@ -25,7 +25,12 @@ pub struct SensorSampleContext<'a, B: PhysicsBackend> {
     pub physics_world: PhysicsWorldId,
     /// Optional render backend for camera sensors.
     pub render: Option<&'a mut dyn RenderBackend>,
+    /// Optional scene geometry for camera depth sampling.
+    pub scene: Option<&'a RenderScene>,
 }
+
+/// Stream-id offset for paired depth frames published beside RGB camera streams.
+pub const CAMERA_DEPTH_STREAM_OFFSET: u64 = 50;
 
 /// Samples all enabled sensors and publishes frames to the DataBus.
 pub fn sample_sensors<B: PhysicsBackend>(
@@ -35,6 +40,7 @@ pub fn sample_sensors<B: PhysicsBackend>(
     let mut published = 0_usize;
     let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
+    let empty_scene = RenderScene::new();
     let world_seed = ctx
         .world
         .get_resource::<WorldRandom>()
@@ -113,10 +119,11 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     .get::<Transform3>(entity)
                     .copied()
                     .unwrap_or_default();
-                let payload = if let Some(render) = &mut ctx.render {
-                    sample_camera(*render, &transform, spec, ctx.sim_time)
+                let scene = ctx.scene.unwrap_or(&empty_scene);
+                let sample = if let Some(render) = &mut ctx.render {
+                    sample_camera_rgbd(*render, &transform, spec, ctx.sim_time, scene)
                 } else {
-                    sample_camera(&mut headless_render, &transform, spec, ctx.sim_time)
+                    sample_camera_rgbd(&mut headless_render, &transform, spec, ctx.sim_time, scene)
                 };
                 publish_frame(
                     bus,
@@ -125,7 +132,18 @@ pub fn sample_sensors<B: PhysicsBackend>(
                         entity,
                         state.last_sequence,
                         ctx.sim_time,
-                        payload,
+                        sample.rgb,
+                    )
+                    .with_latency(sensor.latency()),
+                );
+                publish_frame(
+                    bus,
+                    Frame::new(
+                        rne_data::StreamId::new(sensor.stream_id.0 + CAMERA_DEPTH_STREAM_OFFSET),
+                        entity,
+                        state.last_sequence,
+                        ctx.sim_time,
+                        sample.depth,
                     )
                     .with_latency(sensor.latency()),
                 );
@@ -281,6 +299,7 @@ mod tests {
                     physics: &physics,
                     physics_world: PhysicsWorldId::DEFAULT,
                     render: None,
+                    scene: None,
                 },
                 &mut bus,
             );
@@ -319,6 +338,7 @@ mod tests {
                 physics: &physics,
                 physics_world: PhysicsWorldId::DEFAULT,
                 render: None,
+                scene: None,
             },
             &mut bus,
         );
@@ -326,6 +346,10 @@ mod tests {
         let image = bus.latest::<rne_data::ImageRgb8>(StreamId::new(2)).unwrap();
         assert_eq!(image.payload.width, 8);
         assert_eq!(image.payload.rgba8.len(), 8 * 8 * 4);
+        let depth = bus
+            .latest::<rne_data::ImageDepth>(StreamId::new(52))
+            .unwrap();
+        assert_eq!(depth.payload.width, 8);
     }
 
     #[test]
@@ -362,6 +386,7 @@ mod tests {
                 physics: &physics,
                 physics_world: PhysicsWorldId::DEFAULT,
                 render: None,
+                scene: None,
             },
             &mut bus,
         );
@@ -376,6 +401,7 @@ mod tests {
                 physics: &physics,
                 physics_world: PhysicsWorldId::DEFAULT,
                 render: None,
+                scene: None,
             },
             &mut bus,
         );

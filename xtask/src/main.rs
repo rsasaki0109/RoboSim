@@ -44,6 +44,7 @@ fn ci() -> anyhow::Result<()> {
     run_step("cargo test --workspace")?;
     validate_repo_assets()?;
     run_example_smokes()?;
+    mobile_manipulator_rl_smokes()?;
     house_gif_demo()?;
     hero_media_check()?;
     Ok(())
@@ -566,6 +567,8 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_minimal_transport.rne.scene.toml"),
         root.join("assets/scenes/mm_lift.rne.scene.toml"),
         root.join("assets/scenes/mm_lift_pick.rne.scene.toml"),
+        root.join("assets/scenes/mm_minimal_clutter.rne.scene.toml"),
+        root.join("assets/scenes/mm_mobile_clutter.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),
@@ -592,6 +595,36 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         println!("validated robot {}", robot.display());
     }
 
+    Ok(())
+}
+
+fn venv_python(root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        root.join(".venv/Scripts/python.exe")
+    } else {
+        root.join(".venv/bin/python")
+    }
+}
+
+fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let host_python = python_command()?;
+    let venv_py = venv_python(&root);
+    if !venv_py.exists() {
+        run_step(&format!("{host_python} -m venv .venv"))?;
+    }
+    let venv = venv_py.display();
+    run_step(&format!(
+        "\"{venv}\" -m pip install -q --upgrade pip maturin"
+    ))?;
+    run_step(&format!(
+        "\"{venv}\" -m maturin develop -m crates/rne_py/Cargo.toml --release"
+    ))?;
+    for script in ["run.py", "train_place.py", "train_visuomotor.py"] {
+        run_step(&format!(
+            "\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke"
+        ))?;
+    }
     Ok(())
 }
 

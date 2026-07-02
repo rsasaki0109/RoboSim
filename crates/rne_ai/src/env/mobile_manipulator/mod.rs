@@ -10,17 +10,18 @@ pub use drive::{
     MM_MOBILE_WHEEL_JOINT_SIGN, MM_MOBILE_WHEEL_RADIUS_M,
 };
 pub use episode::{
-    MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    ClutterPickConfig, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
     MobileManipulatorEpisodeProgressSnapshot, MobileManipulatorEpisodeSnapshot,
     MobileManipulatorEpisodeSnapshotError,
 };
 pub use sim::{
-    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_grasp_scene_path,
-    mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_scene_path,
-    MobileManipulatorFixedJointSnapshot, MobileManipulatorFrameSnapshot,
-    MobileManipulatorJointMotorSnapshot, MobileManipulatorRigidBodySnapshot,
-    MobileManipulatorSensorStateSnapshot, MobileManipulatorSim, MobileManipulatorSimSnapshot,
-    MobileManipulatorSimSnapshotError, MobileManipulatorTransformSnapshot,
+    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_clutter_scene_path,
+    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
+    mm_mobile_clutter_scene_path, mm_mobile_scene_path, MobileManipulatorFixedJointSnapshot,
+    MobileManipulatorFrameSnapshot, MobileManipulatorJointMotorSnapshot,
+    MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
+    MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
+    MobileManipulatorTransformSnapshot,
 };
 pub use vectorized::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,

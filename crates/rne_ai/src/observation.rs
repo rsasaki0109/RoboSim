@@ -83,4 +83,10 @@ pub struct MobileManipulatorObservation {
     pub target_dy_m: f64,
     /// Goal-relative end-effector Z offset (target_z - ee_z), zero when no goal.
     pub target_dz_m: f64,
+    /// Center-pixel wrist depth in meters (zero when absent).
+    pub wrist_depth_center_m: f64,
+    /// Minimum wrist depth in meters across the latest frame (zero when absent).
+    pub wrist_depth_min_m: f64,
+    /// Index of the target clutter object when a multi-object pick task is active.
+    pub target_object_index: u32,
 }
