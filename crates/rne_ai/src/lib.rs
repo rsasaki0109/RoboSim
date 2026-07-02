@@ -73,7 +73,7 @@ pub use multi_robot::{
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
-pub use policy::{ConstantVelocityPolicy, LiftPickPlacePolicy, Policy};
+pub use policy::{ConstantVelocityPolicy, IkLiftPickPlacePolicy, LiftPickPlacePolicy, Policy};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
     JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,

@@ -4,6 +4,19 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`IkLiftPickPlacePolicy`**: pick-and-place state machine whose carry swing solves
+  [`MmLiftKinematics`] targets and drives shoulder / elbow / lift at a fixed rate toward
+  the IK joint solution. Example 31 and the `lift_pick_place` episode test use this
+  policy; [`LiftPickPlacePolicy`] remains for scripted regression tests.
+
+- **ROS 2 `mm_lift` mode** (`RNE_ROS2_MODE=mm_lift`): loads the `mm_lift` scene and exposes
+  manipulator subscriptions including `/lift_command` and `/arm_joint_trajectory`.
+- **3-DOF lift-arm trajectories**: when `lift_joint`, `shoulder_joint`, and `elbow_joint`
+  appear in `/arm_joint_trajectory` or `/arm_joint_position`, the bridge drives
+  `MobileManipulatorAction::hold_lift_joints` waypoint following.
+
 ## [0.10.0] - 2026-07-02
 
 ### Added

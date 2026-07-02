@@ -1799,18 +1799,34 @@ mod tests {
         );
     }
 
-    /// Runs the scripted pick-and-place policy with the given swing and returns the
+    enum SwingPolicyKind {
+        Ik,
+        Scripted,
+    }
+
+    /// Runs the pick-and-place policy with the given swing and returns the
     /// cube's resting (x, z) after release.
-    fn place_location_for_swing(swing_steps: u64) -> (f64, f64) {
+    fn place_location_for_swing(swing_steps: u64, kind: SwingPolicyKind) -> (f64, f64) {
         let scene = mm_lift_pick_scene_path();
         let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load mm_lift_pick");
         for _ in 0..150 {
             sim.step(MobileManipulatorAction::default());
         }
-        let mut policy = crate::LiftPickPlacePolicy::with_swing_steps(swing_steps);
-        for _ in 0..policy.total_steps() {
-            let obs = sim.observe();
-            sim.step(policy.next_action(&obs));
+        match kind {
+            SwingPolicyKind::Ik => {
+                let mut policy = crate::IkLiftPickPlacePolicy::with_swing_steps(swing_steps);
+                for _ in 0..policy.total_steps() {
+                    let obs = sim.observe();
+                    sim.step(policy.next_action(&obs));
+                }
+            }
+            SwingPolicyKind::Scripted => {
+                let mut policy = crate::LiftPickPlacePolicy::with_swing_steps(swing_steps);
+                for _ in 0..policy.total_steps() {
+                    let obs = sim.observe();
+                    sim.step(policy.next_action(&obs));
+                }
+            }
         }
         let placed = sim.named_translation_m("lift_cube").expect("cube");
         (placed.0, placed.2)
@@ -1820,12 +1836,23 @@ mod tests {
     fn lift_place_swing_controls_drop_location() {
         // A longer carry swing rotates the arm further around the column, so the cube is
         // released at a different spot — the place location is controllable.
-        let near = place_location_for_swing(60);
-        let far = place_location_for_swing(120);
+        let near = place_location_for_swing(60, SwingPolicyKind::Ik);
+        let far = place_location_for_swing(120, SwingPolicyKind::Ik);
         let separation = ((far.0 - near.0).powi(2) + (far.1 - near.1).powi(2)).sqrt();
         assert!(
             separation > 0.3,
             "different swings should place the cube at different spots: near={near:?}, far={far:?}, separation={separation:.2} m"
+        );
+    }
+
+    #[test]
+    fn scripted_lift_place_swing_controls_drop_location() {
+        let near = place_location_for_swing(60, SwingPolicyKind::Scripted);
+        let far = place_location_for_swing(120, SwingPolicyKind::Scripted);
+        let separation = ((far.0 - near.0).powi(2) + (far.1 - near.1).powi(2)).sqrt();
+        assert!(
+            separation > 0.3,
+            "scripted swings should place the cube at different spots: near={near:?}, far={far:?}, separation={separation:.2} m"
         );
     }
 

@@ -7,7 +7,7 @@
 //! the top-down claw grasps a ground object the side-grip could not.
 
 use rne_ai::{
-    mm_lift_pick_scene_path, LiftPickPlacePolicy, MobileManipulatorAction, MobileManipulatorSim,
+    mm_lift_pick_scene_path, IkLiftPickPlacePolicy, MobileManipulatorAction, MobileManipulatorSim,
 };
 
 /// Minimum horizontal distance the cube must be carried for the place to count.
@@ -21,7 +21,7 @@ fn run_pick_place(sim: &mut MobileManipulatorSim) -> bool {
     for _ in 0..150 {
         sim.step(MobileManipulatorAction::default());
     }
-    let mut policy = LiftPickPlacePolicy::new();
+    let mut policy = IkLiftPickPlacePolicy::new();
     for _ in 0..PICK_PLACE_STEPS {
         let obs = sim.observe();
         sim.step(policy.next_action(&obs));

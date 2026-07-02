@@ -4,15 +4,15 @@
 
 Primary development target for v0.10. Closes the one capability the mobile-manipulator
 architecture doc still marks **Partial** ([architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md)):
-analytic IK + joint-space trajectory following now exist; the scripted carry swing in
-`LiftPickPlacePolicy` remains until IK carry converges under grasp load.
+analytic IK + joint-space trajectory following now exist; `IkLiftPickPlacePolicy` drives carry
+via IK joint targets. `LiftPickPlacePolicy` remains as a scripted regression baseline.
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
 | A | Kinematics | Analytic IK helper for the `mm_lift` lift+arm chain (pure, deterministic, seed-free), rustdoc + unit test | Done (`MmLiftKinematics`, `fk_ik_roundtrip`, `fk_matches_sim_at_idle`) |
 | B | Control | Joint-space trajectory following: interpolate the IK solution into position-motor targets (`_rad` / `_m` / `_s` units), crate-approved tolerances | Done (`JointTrajectory`, `joint_tracking_action`, `ik_reaches_arbitrary_target`) |
-| C | AI | Replace `LiftPickPlacePolicy` internals with IK-solved targets; existing determinism/golden tests guard regression | Partial (direct joint API + corrected kinematics; scripted carry swing retained) |
-| D | Adapters | ROS 2 `trajectory_msgs/JointTrajectory` (subset) subscribe; expose IK / trajectory API via `rne_py` | Partial (`MmLiftKinematics`, `step_hold_lift_joints` in `rne_py`; ROS trajectory planned) |
+| C | AI | Replace `LiftPickPlacePolicy` internals with IK-solved targets; existing determinism/golden tests guard regression | Done (`IkLiftPickPlacePolicy`; `LiftPickPlacePolicy` retained for regression) |
+| D | Adapters | ROS 2 `trajectory_msgs/JointTrajectory` (subset) subscribe; expose IK / trajectory API via `rne_py` | Done (`step_hold_lift_joints` in `rne_py`; `/arm_joint_trajectory` 3-DOF on `RNE_ROS2_MODE=mm_lift`) |
 
 **Why IK first:** it is the base every other theme rides on — perception (vision → target pose →
 IK), RL (act in EE space), and scene diversity (reach an arbitrary object position) all get simpler

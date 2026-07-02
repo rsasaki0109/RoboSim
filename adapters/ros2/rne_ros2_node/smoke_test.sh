@@ -229,5 +229,54 @@ if [[ -z "$LIFT_SUBS" || "$LIFT_SUBS" -lt 1 ]]; then
   exit 1
 fi
 
+echo "Running mm_lift bridge smoke..."
+kill "$NODE_PID" 2>/dev/null || true
+wait "$NODE_PID" 2>/dev/null || true
+NODE_PID=""
+rm -f "$SMOKE_LOG"
+SMOKE_LOG="$(mktemp "${TMPDIR:-/tmp}/rne_ros2_smoke.XXXXXX")"
+
+export RNE_ROS2_MODE=mm_lift
+export RNE_ROS2_HOLD_SECS=20
+"$NODE_DIR/target/release/rne_ros2_node" >"$SMOKE_LOG" 2>&1 &
+NODE_PID=$!
+
+for _ in $(seq 1 150); do
+  if ros2 service list 2>/dev/null | grep -q '/get_simulation_state'; then
+    break
+  fi
+  if ! kill -0 "$NODE_PID" 2>/dev/null; then
+    echo "mm_lift rne_ros2_node exited before services became available" >&2
+    wait "$NODE_PID" || true
+    exit 1
+  fi
+  sleep 0.1
+done
+
+wait_for_log_line "holding ROS graph" 600 || exit 1
+tail -5 "$SMOKE_LOG" || true
+
+echo "Checking mm_lift /joint_states publication..."
+wait_for_joint_state "lift_joint" 30 || exit 1
+
+LIFT_JOINT_WIDTH=$(
+  timeout 20 ros2 topic echo /joint_states --once 2>/dev/null \
+    | grep -c '_joint' \
+    || true
+)
+if [[ "$LIFT_JOINT_WIDTH" -lt 6 ]]; then
+  echo "expected mm_lift /joint_states to include 6 joints, got count=${LIFT_JOINT_WIDTH}" >&2
+  exit 1
+fi
+
+echo "Checking mm_lift /arm_joint_trajectory subscription exists..."
+MM_LIFT_TRAJ_SUBS=$(
+  ros2 topic info /arm_joint_trajectory 2>/dev/null | awk '/Subscription count/ {print $3}' || true
+)
+if [[ -z "$MM_LIFT_TRAJ_SUBS" || "$MM_LIFT_TRAJ_SUBS" -lt 1 ]]; then
+  echo "expected /arm_joint_trajectory subscription on mm_lift bridge, got count=${MM_LIFT_TRAJ_SUBS:-0}" >&2
+  exit 1
+fi
+
 rm -f "$SMOKE_LOG"
 echo "ROS 2 smoke tests passed."

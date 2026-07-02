@@ -1100,14 +1100,40 @@ mod tests {
 
     #[test]
     fn lift_pick_place_episode_picks_carries_and_places() {
+        use crate::IkLiftPickPlacePolicy;
+
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::lift_pick_place());
+        let _ = episode.reset();
+
+        // Settle the arm, then drive the IK pick-and-place policy; it should grasp the
+        // cube, carry it to the target, release it, and terminate with success.
+        for _ in 0..150 {
+            episode.step(MobileManipulatorAction::default());
+        }
+        let mut grasped = false;
+        let mut policy = IkLiftPickPlacePolicy::new();
+        let steps = policy.total_steps();
+        for _ in 0..steps {
+            let obs = episode.simulation().observe();
+            let step = episode.step(policy.next_action(&obs));
+            grasped |= episode.simulation().is_grasping();
+            if step.terminated {
+                assert!(grasped, "episode should have grasped before placing");
+                return;
+            }
+        }
+        panic!("expected lift pick-place episode to place the cube at the target and terminate");
+    }
+
+    #[test]
+    fn scripted_lift_pick_place_episode_picks_carries_and_places() {
         use crate::LiftPickPlacePolicy;
 
         let mut episode =
             MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::lift_pick_place());
         let _ = episode.reset();
 
-        // Settle the arm, then drive the shared scripted pick-and-place policy; it should
-        // grasp the cube, carry it to the target, release it, and terminate with success.
         for _ in 0..150 {
             episode.step(MobileManipulatorAction::default());
         }
@@ -1123,7 +1149,7 @@ mod tests {
                 return;
             }
         }
-        panic!("expected lift pick-place episode to place the cube at the target and terminate");
+        panic!("expected scripted lift pick-place episode to place the cube and terminate");
     }
 
     #[test]

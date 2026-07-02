@@ -12,6 +12,7 @@ use rne_adapter_ros2::{
     pointcloud_to_laserscan, to_ros_clock, to_ros_image, to_ros_joint_state, to_ros_pointcloud2,
     to_ros_transform_stamped, RosTfMessage,
 };
+use rne_ai::MmLiftJointTarget;
 use rne_data::PointCloud;
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 use rne_world::Transform3;
@@ -39,7 +40,16 @@ const MIN_FORWARD_X_M: f64 = 0.8;
 const MIN_LIDAR_HITS: usize = 8;
 const MIN_MOBILE_BASE_MOTION_M: f64 = 0.15;
 const MIN_MOBILE_JOINTS: usize = 4;
+const MIN_LIFT_JOINTS: usize = 6;
 const MIN_WRIST_CAMERA_PIXELS: usize = 64 * 48 * 4;
+
+/// Parsed `/arm_joint_trajectory` command for revolute or lift-arm chains.
+#[derive(Debug)]
+enum ArmTrajectoryCommand {
+    Empty,
+    Revolute(Vec<(f64, f64)>),
+    LiftArm(Vec<MmLiftJointTarget>),
+}
 
 type ClockPublisher = Publisher<rosgraph_msgs::msg::Clock>;
 type CloudPublisher = Publisher<sensor_msgs::msg::PointCloud2>;
@@ -223,6 +233,9 @@ pub fn run() -> Result<()> {
         BridgeMode::MobileManipulator => {
             eprintln!("Driving headless mm_mobile via rne_ai (RNE_ROS2_MODE=mobile_manipulator)")
         }
+        BridgeMode::MmLift => {
+            eprintln!("Driving headless mm_lift via rne_ai (RNE_ROS2_MODE=mm_lift)")
+        }
     }
 
     let mut steps = 0_usize;
@@ -297,6 +310,21 @@ fn verify_smoke(mode: BridgeMode, snapshot: &BridgeSnapshot, peak_abs_base_x_m: 
                     "expected wrist camera image on /camera/image_raw, got {} bytes",
                     snapshot.wrist_camera_pixels
                 );
+            }
+        }
+        BridgeMode::MmLift => {
+            if snapshot.joint_count < MIN_LIFT_JOINTS {
+                bail!(
+                    "expected {} joints in /joint_states, got {}",
+                    MIN_LIFT_JOINTS,
+                    snapshot.joint_count
+                );
+            }
+            if !snapshot.has_lift_joint {
+                bail!("expected lift_joint in /joint_states");
+            }
+            if !snapshot.has_shoulder_joint {
+                bail!("expected shoulder_joint in /joint_states");
             }
         }
     }
@@ -392,8 +420,8 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
         _arm_joint_position,
         _arm_joint_trajectory,
         _lift_command,
-    ) = if bridge.mode() == BridgeMode::MobileManipulator {
-        register_mobile_subscribers(node, Arc::clone(&bridge))?
+    ) = if bridge.mode().has_manipulator_subscribers() {
+        register_manipulator_subscribers(node, Arc::clone(&bridge))?
     } else {
         (None, None, None, None, None, None)
     };
@@ -414,7 +442,7 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
 }
 
 #[allow(clippy::type_complexity)]
-fn register_mobile_subscribers(
+fn register_manipulator_subscribers(
     node: &rclrs::Node,
     bridge: Arc<BridgeLoop>,
 ) -> Result<(
@@ -464,7 +492,9 @@ fn register_mobile_subscribers(
         .create_subscription(
             "/arm_joint_position",
             move |msg: sensor_msgs::msg::JointState| {
-                if let Some((shoulder, elbow)) = arm_positions_from_joint_state(&msg) {
+                if let Some(target) = lift_arm_positions_from_joint_state(&msg) {
+                    position_bridge.with_sim(|sim| sim.set_lift_arm_joint_positions(target));
+                } else if let Some((shoulder, elbow)) = arm_positions_from_joint_state(&msg) {
                     position_bridge.with_sim(|sim| sim.set_arm_joint_positions(shoulder, elbow));
                 }
             },
@@ -476,9 +506,14 @@ fn register_mobile_subscribers(
         .create_subscription(
             "/arm_joint_trajectory",
             move |msg: trajectory_msgs::msg::JointTrajectory| {
-                let waypoints = arm_trajectory_from_msg(&msg);
-                if !waypoints.is_empty() {
-                    trajectory_bridge.with_sim(|sim| sim.set_arm_trajectory(waypoints));
+                match arm_trajectory_from_msg(&msg) {
+                    ArmTrajectoryCommand::Revolute(waypoints) => {
+                        trajectory_bridge.with_sim(|sim| sim.set_arm_trajectory(waypoints));
+                    }
+                    ArmTrajectoryCommand::LiftArm(waypoints) => {
+                        trajectory_bridge.with_sim(|sim| sim.set_lift_arm_trajectory(waypoints));
+                    }
+                    ArmTrajectoryCommand::Empty => {}
                 }
             },
         )
@@ -521,14 +556,58 @@ fn arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<
     Some((shoulder?, elbow?))
 }
 
-/// Extracts ordered (shoulder, elbow) waypoints from a joint trajectory message.
-fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> Vec<(f64, f64)> {
+/// Extracts lift + shoulder + elbow targets when all three joints are present.
+fn lift_arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<MmLiftJointTarget> {
+    let mut lift_m = None;
+    let mut shoulder_rad = None;
+    let mut elbow_rad = None;
+    for (name, position) in msg.name.iter().zip(msg.position.iter()) {
+        match name.as_str() {
+            "lift_joint" => lift_m = Some(*position),
+            "shoulder_joint" => shoulder_rad = Some(*position),
+            "elbow_joint" => elbow_rad = Some(*position),
+            _ => {}
+        }
+    }
+    Some(MmLiftJointTarget {
+        lift_m: lift_m?,
+        shoulder_rad: shoulder_rad?,
+        elbow_rad: elbow_rad?,
+    })
+}
+
+/// Extracts ordered trajectory waypoints from a joint trajectory message.
+fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> ArmTrajectoryCommand {
+    let lift_idx = msg.joint_names.iter().position(|n| n == "lift_joint");
     let shoulder_idx = msg.joint_names.iter().position(|n| n == "shoulder_joint");
     let elbow_idx = msg.joint_names.iter().position(|n| n == "elbow_joint");
+
+    if let (Some(lift_idx), Some(shoulder_idx), Some(elbow_idx)) =
+        (lift_idx, shoulder_idx, elbow_idx)
+    {
+        let waypoints = msg
+            .points
+            .iter()
+            .filter_map(|point| {
+                Some(MmLiftJointTarget {
+                    lift_m: *point.positions.get(lift_idx)?,
+                    shoulder_rad: *point.positions.get(shoulder_idx)?,
+                    elbow_rad: *point.positions.get(elbow_idx)?,
+                })
+            })
+            .collect();
+        return if waypoints.is_empty() {
+            ArmTrajectoryCommand::Empty
+        } else {
+            ArmTrajectoryCommand::LiftArm(waypoints)
+        };
+    }
+
     let (Some(shoulder_idx), Some(elbow_idx)) = (shoulder_idx, elbow_idx) else {
-        return Vec::new();
+        return ArmTrajectoryCommand::Empty;
     };
-    msg.points
+    let waypoints = msg
+        .points
         .iter()
         .filter_map(|point| {
             Some((
@@ -536,7 +615,12 @@ fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> Vec<(
                 *point.positions.get(elbow_idx)?,
             ))
         })
-        .collect()
+        .collect();
+    if waypoints.is_empty() {
+        ArmTrajectoryCommand::Empty
+    } else {
+        ArmTrajectoryCommand::Revolute(waypoints)
+    }
 }
 
 async fn simulate_steps_action(
@@ -745,5 +829,65 @@ mod tests {
         let (shoulder, elbow) = arm_velocities_from_joint_state(&msg);
         assert!((shoulder - 1.5).abs() < f64::EPSILON);
         assert!((elbow - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn arm_trajectory_maps_revolute_waypoints() {
+        let msg = trajectory_msgs::msg::JointTrajectory {
+            joint_names: vec!["shoulder_joint".into(), "elbow_joint".into()],
+            points: vec![trajectory_msgs::msg::JointTrajectoryPoint {
+                positions: vec![0.5, -0.25],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        match arm_trajectory_from_msg(&msg) {
+            ArmTrajectoryCommand::Revolute(waypoints) => {
+                assert_eq!(waypoints, vec![(0.5, -0.25)]);
+            }
+            other => panic!("expected revolute trajectory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arm_trajectory_maps_lift_arm_waypoints() {
+        let msg = trajectory_msgs::msg::JointTrajectory {
+            joint_names: vec![
+                "lift_joint".into(),
+                "shoulder_joint".into(),
+                "elbow_joint".into(),
+            ],
+            points: vec![trajectory_msgs::msg::JointTrajectoryPoint {
+                positions: vec![0.1, 0.4, 0.2],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        match arm_trajectory_from_msg(&msg) {
+            ArmTrajectoryCommand::LiftArm(waypoints) => {
+                assert_eq!(waypoints.len(), 1);
+                assert!((waypoints[0].lift_m - 0.1).abs() < f64::EPSILON);
+                assert!((waypoints[0].shoulder_rad - 0.4).abs() < f64::EPSILON);
+                assert!((waypoints[0].elbow_rad - 0.2).abs() < f64::EPSILON);
+            }
+            other => panic!("expected lift-arm trajectory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lift_arm_positions_require_all_three_joints() {
+        let msg = sensor_msgs::msg::JointState {
+            name: vec![
+                "lift_joint".into(),
+                "shoulder_joint".into(),
+                "elbow_joint".into(),
+            ],
+            position: vec![0.2, 0.3, 0.1],
+            ..Default::default()
+        };
+        let target = lift_arm_positions_from_joint_state(&msg).expect("lift arm target");
+        assert!((target.lift_m - 0.2).abs() < f64::EPSILON);
+        assert!((target.shoulder_rad - 0.3).abs() < f64::EPSILON);
+        assert!((target.elbow_rad - 0.1).abs() < f64::EPSILON);
     }
 }
