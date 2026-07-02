@@ -36,8 +36,9 @@ All notable changes to Robot Native Engine are documented in this file.
   clamping progress at zero.
 - **Mobile manipulator snapshot v2**: `wrist_depth_frame` with `#[serde(default)]` for v1
   checkpoint compatibility.
-- **Clutter scenes**: three ground-level cubes with arm-reach spacing; solvability and
-  depth determinism tests.
+- **Clutter scenes**: three spaced cubes on a shared layout with drop zone; solvability,
+  grasp, and mobile-base approach E2E tests.
+- **`xtask ci`**: runs `train_ppo.py --smoke` (Stable-Baselines3 reach integration).
 - **`rne_py` checkpoint tests**: tolerate JSON float roundtrip on episode rewards.
 - **RL smokes**: deterministic `random.seed(0)`; place CEM smoke checks best-iteration
   improvement.

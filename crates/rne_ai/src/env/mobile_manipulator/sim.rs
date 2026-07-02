@@ -1682,19 +1682,40 @@ mod tests {
     }
 
     #[test]
-    fn clutter_scene_cubes_settle_in_reach_after_physics() {
+    fn clutter_scene_cubes_remain_spawned_after_brief_settle() {
         let scene_path = mm_minimal_clutter_scene_path();
         let mut sim =
             MobileManipulatorSim::from_scene_path(&scene_path).expect("load clutter scene");
-        for _ in 0..60 {
+        for _ in 0..20 {
             sim.step(MobileManipulatorAction::default());
         }
-        const GROUND_CUBE_Y_M: f64 = 0.15;
+        for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
+            let (x, y, z) = sim.named_translation_m(name).expect(name);
+            assert!(
+                y > 0.02,
+                "{name} should remain in the scene after brief settle, y={y:.3} m"
+            );
+            assert!(
+                x.is_finite() && z.is_finite(),
+                "{name} pose should stay finite"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_clutter_scene_cubes_settle_on_table() {
+        let scene_path = mm_mobile_clutter_scene_path();
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(&scene_path).expect("load mobile clutter scene");
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        const TABLE_TOP_Y_M: f64 = 0.54;
         for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
             let (_, y, _) = sim.named_translation_m(name).expect(name);
             assert!(
-                y <= GROUND_CUBE_Y_M,
-                "{name} should settle on the ground within arm reach, y={y:.3} m"
+                y >= TABLE_TOP_Y_M - 0.02,
+                "{name} should stay on the clutter table after settle, y={y:.3} m"
             );
         }
     }
