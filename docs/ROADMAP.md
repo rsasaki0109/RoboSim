@@ -3,21 +3,20 @@
 ## v0.10.0 goal: arm IK & trajectory following
 
 Primary development target for v0.10. Closes the one capability the mobile-manipulator
-architecture doc still marks **Missing** ([architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md)):
-today all pick-and-place is driven by a hand-written state machine (`LiftPickPlacePolicy`), so it cannot
-generalize to an arbitrary target pose. Analytic IK + joint-space trajectory following unlocks
-arbitrary-target manipulation and becomes the foundation for later perception / RL / clutter work.
+architecture doc still marks **Partial** ([architecture/006_mobile_manipulator.md](architecture/006_mobile_manipulator.md)):
+analytic IK + joint-space trajectory following now exist; the scripted carry swing in
+`LiftPickPlacePolicy` remains until IK carry converges under grasp load.
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
-| A | Kinematics | Analytic IK helper for the `mm_lift` lift+arm chain (pure, deterministic, seed-free), rustdoc + unit test | Planned |
-| B | Control | Joint-space trajectory following: interpolate the IK solution into position-motor targets (`_rad` / `_m` / `_s` units), crate-approved tolerances | Planned |
-| C | AI | Replace `LiftPickPlacePolicy` internals with IK-solved targets; existing determinism/golden tests guard regression, new `ik_reaches_arbitrary_target` test | Planned |
-| D | Adapters | ROS 2 `trajectory_msgs/JointTrajectory` (subset) subscribe; expose IK / trajectory API via `rne_py` | Planned |
+| A | Kinematics | Analytic IK helper for the `mm_lift` lift+arm chain (pure, deterministic, seed-free), rustdoc + unit test | Done (`MmLiftKinematics`, `fk_ik_roundtrip`, `fk_matches_sim_at_idle`) |
+| B | Control | Joint-space trajectory following: interpolate the IK solution into position-motor targets (`_rad` / `_m` / `_s` units), crate-approved tolerances | Done (`JointTrajectory`, `joint_tracking_action`, `ik_reaches_arbitrary_target`) |
+| C | AI | Replace `LiftPickPlacePolicy` internals with IK-solved targets; existing determinism/golden tests guard regression | Partial (direct joint API + corrected kinematics; scripted carry swing retained) |
+| D | Adapters | ROS 2 `trajectory_msgs/JointTrajectory` (subset) subscribe; expose IK / trajectory API via `rne_py` | Partial (`MmLiftKinematics`, `step_hold_lift_joints` in `rne_py`; ROS trajectory planned) |
 
 **Why IK first:** it is the base every other theme rides on — perception (vision → target pose →
 IK), RL (act in EE space), and scene diversity (reach an arbitrary object position) all get simpler
-once IK exists. It also removes the doc's only self-declared `Missing`.
+once IK exists.
 
 ### v0.10 candidates (detail)
 
@@ -36,6 +35,17 @@ once IK exists. It also removes the doc's only self-declared `Missing`.
 | Perception | Wrist RGB-D (`ImageRgb8` / depth) wired into a visuomotor policy input |
 | RL | Converging pick-and-place training on SB3 PPO / CEM + a reproducible bench + replay |
 | Scene diversity | Pick a specific object out of clutter; combined navigate + manipulate task |
+
+## v0.10.0 (released)
+
+Shipped 2026-07-02. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Kinematics | `MmLiftKinematics` analytic FK/IK for `mm_lift` (sim shoulder sign corrected) |
+| Control | Direct joint targets (`hold_lift_joints`), `JointTrajectory`, `joint_tracking_action` |
+| AI | `ik_reaches_arbitrary_target`; `LiftPickPlacePolicy::kinematics()` helper |
+| Python | `rne_py` `MmLiftKinematics`, `step_hold_lift_joints`, `MobileManipulatorSim("mm_lift")` |
 
 ## v0.9.0 (released)
 

@@ -267,6 +267,9 @@ const LIFT_SOLVER_ITERATIONS: usize = 16;
 /// hold it. Stable now that the column geometry settles the arm straight.
 const ARM_MOTOR_STIFFNESS: f64 = 400.0;
 const ARM_MOTOR_DAMPING: f64 = 60.0;
+/// Extra stiffness when writing absolute lift-arm joint targets (direct IK hold).
+const ARM_DIRECT_TARGET_STIFFNESS: f64 = 1200.0;
+const ARM_DIRECT_TARGET_DAMPING: f64 = 100.0;
 /// Torque cap for the lift robot's arm joints (overrides the 50 N·m revolute default),
 /// so the position motor can move and settle the heavy arm reasonably quickly.
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
@@ -292,6 +295,7 @@ pub struct MobileManipulatorSim {
     /// Commanded height target of the vertical lift, integrated from lift velocity.
     lift_target_m: f64,
     joint_names: Vec<String>,
+    robot_links: HashMap<String, Entity>,
     named_entities: HashMap<String, Entity>,
     wrist_camera: Option<WristCameraMount>,
     wrist_camera_stream: Option<StreamId>,
@@ -444,6 +448,7 @@ impl MobileManipulatorSim {
         let ee = world_transform_of(&self.world, self.ee_link).translation;
         let shoulder = self.joint_position_rad("shoulder_joint");
         let elbow = self.joint_position_rad("elbow_joint");
+        let lift_position_m = self.lift_position_m();
         let gripper_position_rad = self.gripper_position_rad();
         let joint_state_count = self
             .data_bus
@@ -471,6 +476,7 @@ impl MobileManipulatorSim {
             shoulder_position_rad: shoulder,
             elbow_position_rad: elbow,
             gripper_position_rad,
+            lift_position_m,
             wrist_camera_pixels,
             joint_state_count,
             target_dx_m: 0.0,
@@ -797,6 +803,7 @@ impl MobileManipulatorSim {
             actuated,
             lift_target_m: 0.0,
             joint_names,
+            robot_links: links,
             named_entities,
             wrist_camera,
             wrist_camera_stream,
@@ -827,6 +834,24 @@ impl MobileManipulatorSim {
     pub fn named_translation_m(&self, name: &str) -> Option<(f64, f64, f64)> {
         self.entity_named(name).map(|entity| {
             let translation = world_transform_of(&self.world, entity).translation;
+            (translation.x, translation.y, translation.z)
+        })
+    }
+
+    /// Returns the prismatic lift displacement in meters (zero when absent).
+    pub fn lift_position_m(&self) -> f64 {
+        self.joint_position_rad("lift_joint")
+    }
+
+    /// Drives the `mm_lift` lift / shoulder / elbow position motors to absolute targets.
+    pub fn set_lift_joint_targets(&mut self, target: crate::mm_lift_kinematics::MmLiftJointTarget) {
+        self.apply_lift_joint_targets(target);
+    }
+
+    /// Returns the world-frame translation of a URDF link on this robot.
+    pub fn link_translation_m(&self, link_name: &str) -> Option<(f64, f64, f64)> {
+        self.robot_links.get(link_name).map(|entity| {
+            let translation = world_transform_of(&self.world, *entity).translation;
             (translation.x, translation.y, translation.z)
         })
     }
@@ -950,6 +975,12 @@ impl MobileManipulatorSim {
     }
 
     fn apply_action(&mut self, action: MobileManipulatorAction) {
+        if let Some(target) = action.lift_joint_target {
+            self.apply_lift_joint_targets(target);
+            self.apply_gripper_and_base_velocities(action);
+            return;
+        }
+
         // Integrate the lift command into a height target so the position motor
         // holds the commanded height instead of drifting under the arm's weight.
         let dt_s = self.dt.as_seconds().value();
@@ -967,6 +998,8 @@ impl MobileManipulatorSim {
                     // Position-holding revolute arm joint: integrate the velocity command
                     // into a held angle so the heavy arm moves to and holds the commanded
                     // pose (a plain velocity motor is too weak to move or hold it).
+                    motor.stiffness = ARM_MOTOR_STIFFNESS;
+                    motor.gain = ARM_MOTOR_DAMPING;
                     motor.target_position = (motor.target_position + velocity * dt_s)
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
                     motor.velocity_rad_s = velocity;
@@ -977,6 +1010,58 @@ impl MobileManipulatorSim {
                         velocity
                     };
                 }
+            }
+        }
+        self.apply_mobile_base_planar_drive(action);
+    }
+
+    fn apply_lift_joint_targets(&mut self, target: crate::mm_lift_kinematics::MmLiftJointTarget) {
+        self.lift_target_m = target.lift_m.clamp(LIFT_TARGET_MIN_M, LIFT_TARGET_MAX_M);
+        for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) else {
+                continue;
+            };
+            match joint_name.as_str() {
+                "lift_joint" => {
+                    motor.target_position = self.lift_target_m;
+                    motor.velocity_rad_s = 0.0;
+                }
+                "shoulder_joint" => {
+                    motor.target_position = target
+                        .shoulder_rad
+                        .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
+                    motor.velocity_rad_s = 0.0;
+                    motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
+                    motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                }
+                "elbow_joint" => {
+                    motor.target_position = target
+                        .elbow_rad
+                        .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
+                    motor.velocity_rad_s = 0.0;
+                    motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
+                    motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn apply_gripper_and_base_velocities(&mut self, action: MobileManipulatorAction) {
+        for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            let velocity = velocity_for_joint(joint_name, action);
+            if matches!(
+                joint_name.as_str(),
+                "lift_joint" | "shoulder_joint" | "elbow_joint"
+            ) {
+                continue;
+            }
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
+                motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
+                    wheel_command_to_motor_rad_s(velocity)
+                } else {
+                    velocity
+                };
             }
         }
         self.apply_mobile_base_planar_drive(action);
@@ -1300,8 +1385,8 @@ mod tests {
                 shoulder_velocity_rad_s: 3.0,
                 elbow_velocity_rad_s: 0.0,
                 gripper_velocity_rad_s: 0.0,
-
                 lift_velocity_m_s: 0.0,
+                ..MobileManipulatorAction::default()
             });
         }
         let final_obs = sim.observe();
@@ -1326,8 +1411,8 @@ mod tests {
             shoulder_velocity_rad_s: 1.0,
             elbow_velocity_rad_s: 0.5,
             gripper_velocity_rad_s: 0.0,
-
             lift_velocity_m_s: 0.0,
+            ..MobileManipulatorAction::default()
         });
         let obs = sim.observe();
         assert_eq!(obs.joint_state_count, 4);
@@ -1390,8 +1475,8 @@ mod tests {
                 shoulder_velocity_rad_s: 0.0,
                 elbow_velocity_rad_s: 0.0,
                 gripper_velocity_rad_s: 0.0,
-
                 lift_velocity_m_s: 0.0,
+                ..MobileManipulatorAction::default()
             });
         }
         let final_obs = sim.observe();
@@ -1724,7 +1809,8 @@ mod tests {
         }
         let mut policy = crate::LiftPickPlacePolicy::with_swing_steps(swing_steps);
         for _ in 0..policy.total_steps() {
-            sim.step(policy.next_action());
+            let obs = sim.observe();
+            sim.step(policy.next_action(&obs));
         }
         let placed = sim.named_translation_m("lift_cube").expect("cube");
         (placed.0, placed.2)
@@ -1934,6 +2020,88 @@ mod tests {
         assert!(
             !sim.is_grasping(),
             "opening the gripper should release the grasp"
+        );
+    }
+
+    #[test]
+    fn fk_shoulder_sign_matches_positive_velocity_swing() {
+        use crate::mm_lift_kinematics::{MmLiftJointTarget, MmLiftKinematics};
+
+        let kin = MmLiftKinematics::mm_lift();
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..90 {
+            sim.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.8,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let obs = sim.observe();
+        let gripper = sim
+            .link_translation_m("gripper_base_link")
+            .expect("gripper link");
+        let fk = kin.forward_kinematics(MmLiftJointTarget {
+            lift_m: sim.lift_position_m(),
+            shoulder_rad: obs.shoulder_position_rad,
+            elbow_rad: obs.elbow_position_rad,
+        });
+        let err = ((fk.x_m - gripper.0).powi(2)
+            + (fk.y_m - gripper.1).powi(2)
+            + (fk.z_m - gripper.2).powi(2))
+        .sqrt();
+        eprintln!(
+            "shoulder={:.3} sim=({:.3},{:.3},{:.3}) fk=({:.3},{:.3},{:.3}) err={:.3}",
+            obs.shoulder_position_rad, gripper.0, gripper.1, gripper.2, fk.x_m, fk.y_m, fk.z_m, err
+        );
+        assert!(
+            err < 0.05,
+            "FK should match sim after shoulder swing, err={err:.3} m"
+        );
+    }
+
+    #[test]
+    fn ik_reaches_arbitrary_target() {
+        use crate::joint_trajectory::hold_lift_joint_action;
+        use crate::mm_lift_kinematics::{MmLiftJointTarget, MmLiftKinematics};
+
+        let kin = MmLiftKinematics::mm_lift();
+        let mut sim = MobileManipulatorSim::new_mm_lift();
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let obs = sim.observe();
+        let goal = MmLiftJointTarget {
+            lift_m: (obs.lift_position_m - 0.05).clamp(-0.5, 0.5),
+            shoulder_rad: obs.shoulder_position_rad + 0.20,
+            elbow_rad: obs.elbow_position_rad + 0.15,
+        };
+        let target = kin.forward_kinematics(goal);
+        kin.inverse_kinematics(target)
+            .expect("synthesized target should lie in the analytic workspace");
+        for _ in 0..480 {
+            sim.step(hold_lift_joint_action(goal, 0.0));
+        }
+
+        let obs = sim.observe();
+        let fk = kin.forward_kinematics(MmLiftJointTarget {
+            lift_m: obs.lift_position_m,
+            shoulder_rad: obs.shoulder_position_rad,
+            elbow_rad: obs.elbow_position_rad,
+        });
+        let error_m = ((fk.x_m - target.x_m).powi(2)
+            + (fk.y_m - target.y_m).powi(2)
+            + (fk.z_m - target.z_m).powi(2))
+        .sqrt();
+        assert!(
+            error_m < 0.08,
+            "FK gripper pose should match IK target, error={error_m:.3} m"
+        );
+        assert!(
+            (obs.lift_position_m - goal.lift_m).abs() < 0.06,
+            "lift should reach IK target, err={:.3} m",
+            (obs.lift_position_m - goal.lift_m).abs()
         );
     }
 

@@ -4,6 +4,32 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-02
+
+### Added
+
+- **`MmLiftKinematics`**: analytic forward / inverse kinematics for the `mm_lift`
+  column + 2R arm chain (pure, deterministic, seed-free). Matches the simulation
+  shoulder sign convention. Tests: `fk_ik_roundtrip_for_reachable_targets`,
+  `fk_matches_sim_at_idle`, `fk_shoulder_sign_matches_positive_velocity_swing`.
+- **Direct lift-arm joint targets**: `MobileManipulatorAction::lift_joint_target`,
+  `MobileManipulatorAction::hold_lift_joints()`, and
+  `MobileManipulatorSim::set_lift_joint_targets()` drive lift / shoulder / elbow
+  position motors to absolute targets (with raised stiffness for direct holds).
+- **Joint-space trajectory helpers**: `JointTrajectory`, `joint_tracking_action`,
+  and `hold_lift_joint_action` for position-motor tracking. Test
+  `ik_reaches_arbitrary_target`.
+- **`rne_py` IK bindings**: `MmLiftKinematics`, `MmLiftJointTarget`,
+  `MmLiftGripperTarget`, `MobileManipulatorSim(mode="mm_lift")`,
+  `step_hold_lift_joints()` on sim and episode, and `lift_position_m` on
+  observations.
+
+### Changed
+
+- **`LiftPickPlacePolicy`**: exposes `kinematics()` and `default_place_target()` for
+  IK-based controllers; carry swing remains the proven scripted shoulder rate until
+  IK carry converges reliably under grasp load.
+
 ## [0.9.0] - 2026-07-02
 
 ### Added

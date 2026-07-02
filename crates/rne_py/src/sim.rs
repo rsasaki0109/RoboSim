@@ -2,6 +2,7 @@
 
 pub use rne_ai::{DiffDriveAction, DiffDriveEpisode, DiffDriveObservation, DiffDriveSim};
 pub use rne_ai::{
+    MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget, MmLiftKinematics,
     MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
     MobileManipulatorObservation, MobileManipulatorSim, VectorizedMobileManipulatorConfig,
     VectorizedMobileManipulatorEnv,

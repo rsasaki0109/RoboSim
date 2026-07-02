@@ -1113,8 +1113,10 @@ mod tests {
         }
         let mut grasped = false;
         let mut policy = LiftPickPlacePolicy::new();
-        for _ in 0..1030 {
-            let step = episode.step(policy.next_action());
+        let steps = policy.total_steps();
+        for _ in 0..steps {
+            let obs = episode.simulation().observe();
+            let step = episode.step(policy.next_action(&obs));
             grasped |= episode.simulation().is_grasping();
             if step.terminated {
                 assert!(grasped, "episode should have grasped before placing");

@@ -1,6 +1,8 @@
 //! Policy traits for controlling episodes.
 
 use crate::episode::Episode;
+use crate::mm_lift_kinematics::{MmLiftGripperTarget, MmLiftKinematics};
+use crate::observation::MobileManipulatorObservation;
 
 /// Maps observations to actions for a specific episode type.
 pub trait Policy<E: Episode> {
@@ -31,6 +33,10 @@ impl Policy<crate::env::DiffDriveEpisode> for ConstantVelocityPolicy {
 /// that lowers the top-down claw over the cube, grasps it, lifts it, swings the arm to a
 /// new spot, lowers it, and opens to release. Drives the same trajectory used by the
 /// `lift_pick_place` episode and example 31, so they share one implementation.
+///
+/// The carry swing uses a fixed shoulder rate; longer [`Self::with_swing_steps`] values
+/// rotate further and place the cube farther around the column. [`MmLiftKinematics`] is
+/// available for IK-based controllers that replace this scripted swing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LiftPickPlacePolicy {
     step: u64,
@@ -49,10 +55,7 @@ impl LiftPickPlacePolicy {
 
     /// Creates a policy at the start of the pick-and-place sequence.
     pub fn new() -> Self {
-        Self {
-            step: 0,
-            swing_steps: Self::DEFAULT_SWING_STEPS,
-        }
+        Self::with_swing_steps(Self::DEFAULT_SWING_STEPS)
     }
 
     /// Creates a policy whose carry swing lasts `swing_steps` steps — more steps rotate
@@ -70,9 +73,11 @@ impl LiftPickPlacePolicy {
     }
 
     /// Returns the action for the current step and advances the state machine.
-    pub fn next_action(&mut self) -> crate::MobileManipulatorAction {
+    pub fn next_action(
+        &mut self,
+        _observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
         use crate::MobileManipulatorAction;
-        // Cumulative phase boundaries (steps); the swing phase length is configurable.
         const LOWER_TO_PICK: u64 = 200;
         const GRASP: u64 = LOWER_TO_PICK + 120;
         const LIFT: u64 = GRASP + 150;
@@ -126,13 +131,23 @@ impl LiftPickPlacePolicy {
             MobileManipulatorAction::default()
         }
     }
+
+    /// Analytic kinematics for the `mm_lift` arm (used by IK-based policies).
+    pub fn kinematics() -> MmLiftKinematics {
+        MmLiftKinematics::mm_lift()
+    }
+
+    /// World-frame place target used by the default `lift_pick_place` episode.
+    pub fn default_place_target() -> MmLiftGripperTarget {
+        MmLiftGripperTarget::new(0.55, 0.03, -0.87)
+    }
 }
 
 impl Policy<crate::MobileManipulatorEpisode> for LiftPickPlacePolicy {
     fn act(
         &mut self,
-        _observation: &crate::MobileManipulatorObservation,
+        observation: &crate::MobileManipulatorObservation,
     ) -> crate::MobileManipulatorAction {
-        self.next_action()
+        self.next_action(observation)
     }
 }

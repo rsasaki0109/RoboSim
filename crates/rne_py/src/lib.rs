@@ -5,7 +5,8 @@ mod sim;
 use pyo3::prelude::*;
 use rne_ai::{DiffDriveEpisodeConfig, Episode};
 use sim::{
-    DiffDriveObservation, DiffDriveSim, MobileManipulatorAction, MobileManipulatorEpisode,
+    DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
+    MmLiftKinematics, MobileManipulatorAction, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorObservation, MobileManipulatorSim,
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
 };
@@ -350,6 +351,177 @@ impl PyDiffDriveEpisode {
     }
 }
 
+fn ik_error_to_py(error: MmLiftIkError) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{error:?}"))
+}
+
+/// Joint-space target for the `mm_lift` lift + shoulder + elbow chain.
+#[pyclass(name = "MmLiftJointTarget")]
+#[derive(Clone, Copy)]
+struct PyMmLiftJointTarget {
+    lift_m: f64,
+    shoulder_rad: f64,
+    elbow_rad: f64,
+}
+
+#[pymethods]
+impl PyMmLiftJointTarget {
+    /// Creates a joint target in simulation motor units.
+    #[new]
+    fn new(lift_m: f64, shoulder_rad: f64, elbow_rad: f64) -> Self {
+        Self {
+            lift_m,
+            shoulder_rad,
+            elbow_rad,
+        }
+    }
+
+    #[getter]
+    fn lift_m(&self) -> f64 {
+        self.lift_m
+    }
+
+    #[getter]
+    fn shoulder_rad(&self) -> f64 {
+        self.shoulder_rad
+    }
+
+    #[getter]
+    fn elbow_rad(&self) -> f64 {
+        self.elbow_rad
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MmLiftJointTarget(lift_m={:.3}, shoulder_rad={:.3}, elbow_rad={:.3})",
+            self.lift_m, self.shoulder_rad, self.elbow_rad
+        )
+    }
+}
+
+impl From<MmLiftJointTarget> for PyMmLiftJointTarget {
+    fn from(value: MmLiftJointTarget) -> Self {
+        Self {
+            lift_m: value.lift_m,
+            shoulder_rad: value.shoulder_rad,
+            elbow_rad: value.elbow_rad,
+        }
+    }
+}
+
+impl From<PyMmLiftJointTarget> for MmLiftJointTarget {
+    fn from(value: PyMmLiftJointTarget) -> Self {
+        Self {
+            lift_m: value.lift_m,
+            shoulder_rad: value.shoulder_rad,
+            elbow_rad: value.elbow_rad,
+        }
+    }
+}
+
+/// World-frame gripper-base target for `mm_lift` analytic IK.
+#[pyclass(name = "MmLiftGripperTarget")]
+#[derive(Clone, Copy)]
+struct PyMmLiftGripperTarget {
+    x_m: f64,
+    y_m: f64,
+    z_m: f64,
+}
+
+#[pymethods]
+impl PyMmLiftGripperTarget {
+    /// Creates a world-frame gripper-base target in meters.
+    #[new]
+    fn new(x_m: f64, y_m: f64, z_m: f64) -> Self {
+        Self { x_m, y_m, z_m }
+    }
+
+    #[getter]
+    fn x_m(&self) -> f64 {
+        self.x_m
+    }
+
+    #[getter]
+    fn y_m(&self) -> f64 {
+        self.y_m
+    }
+
+    #[getter]
+    fn z_m(&self) -> f64 {
+        self.z_m
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MmLiftGripperTarget(x_m={:.3}, y_m={:.3}, z_m={:.3})",
+            self.x_m, self.y_m, self.z_m
+        )
+    }
+}
+
+impl From<MmLiftGripperTarget> for PyMmLiftGripperTarget {
+    fn from(value: MmLiftGripperTarget) -> Self {
+        Self {
+            x_m: value.x_m,
+            y_m: value.y_m,
+            z_m: value.z_m,
+        }
+    }
+}
+
+impl From<PyMmLiftGripperTarget> for MmLiftGripperTarget {
+    fn from(value: PyMmLiftGripperTarget) -> Self {
+        Self {
+            x_m: value.x_m,
+            y_m: value.y_m,
+            z_m: value.z_m,
+        }
+    }
+}
+
+/// Analytic forward / inverse kinematics for the `mm_lift` robot.
+#[pyclass(name = "MmLiftKinematics")]
+struct PyMmLiftKinematics {
+    inner: MmLiftKinematics,
+}
+
+#[pymethods]
+impl PyMmLiftKinematics {
+    /// Returns geometry for the shipped `mm_lift` asset.
+    #[staticmethod]
+    fn mm_lift() -> Self {
+        Self {
+            inner: MmLiftKinematics::mm_lift(),
+        }
+    }
+
+    /// Computes the world-frame gripper-base pose from joint targets.
+    fn forward_kinematics(&self, joints: PyMmLiftJointTarget) -> PyMmLiftGripperTarget {
+        self.inner.forward_kinematics(joints.into()).into()
+    }
+
+    /// Solves analytic IK for a world-frame gripper-base target.
+    fn inverse_kinematics(&self, target: PyMmLiftGripperTarget) -> PyResult<PyMmLiftJointTarget> {
+        self.inner
+            .inverse_kinematics(target.into())
+            .map(Into::into)
+            .map_err(ik_error_to_py)
+    }
+
+    /// Solves shoulder / elbow IK at a fixed lift displacement.
+    fn inverse_kinematics_at_lift(
+        &self,
+        lift_m: f64,
+        gripper_x_m: f64,
+        gripper_z_m: f64,
+    ) -> PyResult<PyMmLiftJointTarget> {
+        self.inner
+            .inverse_kinematics_at_lift(lift_m, gripper_x_m, gripper_z_m)
+            .map(Into::into)
+            .map_err(ik_error_to_py)
+    }
+}
+
 /// Observation returned by the mobile manipulator environment.
 #[pyclass(name = "MobileManipulatorObservation")]
 #[derive(Clone, Copy)]
@@ -407,6 +579,11 @@ impl PyMmObservation {
     #[getter]
     fn gripper_position(&self) -> f64 {
         self.inner.gripper_position_rad
+    }
+
+    #[getter]
+    fn lift_position_m(&self) -> f64 {
+        self.inner.lift_position_m
     }
 
     #[getter]
@@ -517,16 +694,17 @@ struct PyMobileManipulatorSim {
 
 #[pymethods]
 impl PyMobileManipulatorSim {
-    /// Creates a sim for the `"mm_minimal"` (default) or `"mm_mobile"` robot.
+    /// Creates a sim for `"mm_minimal"` (default), `"mm_mobile"`, or `"mm_lift"`.
     #[new]
     #[pyo3(signature = (mode="mm_minimal"))]
     fn new(mode: &str) -> PyResult<Self> {
         let inner = match mode {
             "mm_minimal" => MobileManipulatorSim::new_mm_minimal(),
             "mm_mobile" => MobileManipulatorSim::new_mm_mobile(),
+            "mm_lift" => MobileManipulatorSim::new_mm_lift(),
             other => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown mode '{other}', expected 'mm_minimal' or 'mm_mobile'"
+                    "unknown mode '{other}', expected 'mm_minimal', 'mm_mobile', or 'mm_lift'"
                 )))
             }
         };
@@ -563,8 +741,27 @@ impl PyMobileManipulatorSim {
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
                 lift_velocity_m_s,
+                ..MobileManipulatorAction::default()
             })
             .into()
+    }
+
+    /// Steps the sim while holding absolute lift-arm joint targets.
+    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0))]
+    fn step_hold_lift_joints(
+        &mut self,
+        lift_m: f64,
+        shoulder_rad: f64,
+        elbow_rad: f64,
+        gripper_velocity_rad_s: f64,
+    ) -> PyMmObservation {
+        let mut action = MobileManipulatorAction::hold_lift_joints(MmLiftJointTarget {
+            lift_m,
+            shoulder_rad,
+            elbow_rad,
+        });
+        action.gripper_velocity_rad_s = gripper_velocity_rad_s;
+        self.inner.step(action).into()
     }
 
     #[getter]
@@ -627,8 +824,27 @@ impl PyMobileManipulatorEpisode {
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
                 lift_velocity_m_s,
+                ..MobileManipulatorAction::default()
             })
             .into()
+    }
+
+    /// Steps the episode while holding absolute lift-arm joint targets.
+    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0))]
+    fn step_hold_lift_joints(
+        &mut self,
+        lift_m: f64,
+        shoulder_rad: f64,
+        elbow_rad: f64,
+        gripper_velocity_rad_s: f64,
+    ) -> PyMmStepResult {
+        let mut action = MobileManipulatorAction::hold_lift_joints(MmLiftJointTarget {
+            lift_m,
+            shoulder_rad,
+            elbow_rad,
+        });
+        action.gripper_velocity_rad_s = gripper_velocity_rad_s;
+        self.inner.step(action).into()
     }
 
     #[getter]
@@ -715,6 +931,7 @@ impl PyVectorizedMobileManipulatorEnv {
                     elbow_velocity_rad_s: elbow,
                     gripper_velocity_rad_s: gripper,
                     lift_velocity_m_s: 0.0,
+                    ..MobileManipulatorAction::default()
                 },
             )
             .collect();
@@ -790,6 +1007,9 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDiffDriveEpisode>()?;
     m.add_class::<PyObservation>()?;
     m.add_class::<PyStepResult>()?;
+    m.add_class::<PyMmLiftJointTarget>()?;
+    m.add_class::<PyMmLiftGripperTarget>()?;
+    m.add_class::<PyMmLiftKinematics>()?;
     m.add_class::<PyMobileManipulatorSim>()?;
     m.add_class::<PyMobileManipulatorEpisode>()?;
     m.add_class::<PyVectorizedMobileManipulatorEnv>()?;
@@ -801,6 +1021,23 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mm_lift_kinematics_roundtrip_from_python_api() {
+        let kin = MmLiftKinematics::mm_lift();
+        let joints = MmLiftJointTarget {
+            lift_m: -0.1,
+            shoulder_rad: 0.4,
+            elbow_rad: 0.6,
+        };
+        let target = kin.forward_kinematics(joints);
+        let solved = kin
+            .inverse_kinematics(target)
+            .expect("roundtrip target should be reachable");
+        let reshot = kin.forward_kinematics(solved);
+        approx::assert_relative_eq!(target.x_m, reshot.x_m, epsilon = 1e-9);
+        approx::assert_relative_eq!(target.z_m, reshot.z_m, epsilon = 1e-9);
+    }
 
     fn assert_py_error<T>(error: PyErr, expected_message: &str)
     where

@@ -23,7 +23,8 @@ fn run_pick_place(sim: &mut MobileManipulatorSim) -> bool {
     }
     let mut policy = LiftPickPlacePolicy::new();
     for _ in 0..PICK_PLACE_STEPS {
-        sim.step(policy.next_action());
+        let obs = sim.observe();
+        sim.step(policy.next_action(&obs));
     }
     !sim.is_grasping()
 }

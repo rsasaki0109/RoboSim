@@ -1,5 +1,7 @@
 //! Action types for robot-native environments.
 
+use crate::mm_lift_kinematics::MmLiftJointTarget;
+
 /// Wheel velocity command for a differential drive robot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiffDriveAction {
@@ -36,4 +38,23 @@ pub struct MobileManipulatorAction {
     /// raises the arm. Only the lift-equipped robot acts on this; other robots
     /// ignore it.
     pub lift_velocity_m_s: f64,
+    /// When set on the `mm_lift` robot, drives lift / shoulder / elbow position
+    /// motors directly to these targets instead of integrating velocity commands.
+    pub lift_joint_target: Option<MmLiftJointTarget>,
+}
+
+impl MobileManipulatorAction {
+    /// Creates an action that holds the lift arm at absolute joint targets.
+    pub fn hold_lift_joints(target: MmLiftJointTarget) -> Self {
+        Self {
+            lift_joint_target: Some(target),
+            ..Self::default()
+        }
+    }
+
+    /// Attaches a lift joint-space target to an existing velocity command.
+    pub fn with_lift_joint_target(mut self, target: MmLiftJointTarget) -> Self {
+        self.lift_joint_target = Some(target);
+        self
+    }
 }

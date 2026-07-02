@@ -10,7 +10,9 @@ pub mod env;
 pub mod episode;
 pub mod goal;
 pub mod grasp;
+pub mod joint_trajectory;
 pub mod lidar;
+pub mod mm_lift_kinematics;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
@@ -59,7 +61,13 @@ pub use goal::{
     GoalSeekingPolicy, GoalTaskSet,
 };
 pub use grasp::{finger_contacts_named, sim_contacts_named, FINGER_LINK_NAMES};
+pub use joint_trajectory::{
+    hold_lift_joint_action, joint_tracking_action, JointTrackingLimits, JointTrajectory,
+};
 pub use lidar::{lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mounts, LidarMount};
+pub use mm_lift_kinematics::{
+    MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget, MmLiftKinematics,
+};
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
