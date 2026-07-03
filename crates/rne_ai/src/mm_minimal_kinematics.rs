@@ -76,6 +76,45 @@ impl MmMinimalKinematics {
         }
     }
 
+    /// Geometry for the diff-drive `mm_mobile` asset (shoulder pivot offset differs).
+    pub fn mm_mobile() -> Self {
+        Self {
+            base_y_m: 0.25,
+            shoulder_offset_y_m: 0.15,
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
+            upper_arm_m: 0.5,
+            forearm_m: 0.4,
+        }
+    }
+
+    /// Extra shoulder-pivot Z offset in world meters for the mobile base pose.
+    pub fn mobile_shoulder_z_offset_m(&self) -> f64 {
+        0.0
+    }
+
+    /// Shoulder pivot height in world Y for a base at `base_y_m`.
+    pub fn shoulder_y_at_base(&self, base_y_m: f64) -> f64 {
+        base_y_m + self.shoulder_offset_y_m
+    }
+
+    /// Solves IK when the shoulder pivot sits at the given mobile-base pose.
+    pub fn inverse_kinematics_at_base(
+        &self,
+        base_x_m: f64,
+        base_y_m: f64,
+        base_z_m: f64,
+        target: MmMinimalGripperTarget,
+    ) -> Result<MmMinimalJointTarget, MmMinimalIkError> {
+        let local = Self {
+            base_y_m,
+            shoulder_x_m: base_x_m,
+            shoulder_z_m: base_z_m + self.mobile_shoulder_z_offset_m(),
+            ..*self
+        };
+        local.inverse_kinematics(target)
+    }
+
     /// Shoulder pivot height in world Y.
     pub fn shoulder_y_m(&self) -> f64 {
         self.base_y_m + self.shoulder_offset_y_m
@@ -241,6 +280,46 @@ fn planar_chain_shoulder(
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn fk_matches_sim_mm_mobile_at_idle() {
+        use crate::{mm_mobile_clutter_scene_path, MobileManipulatorAction, MobileManipulatorSim};
+
+        let kin = MmMinimalKinematics::mm_mobile();
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(&mm_mobile_clutter_scene_path()).expect("scene");
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let obs = sim.observe();
+        let model = MmMinimalKinematics {
+            base_y_m: obs.base_y_m,
+            shoulder_x_m: obs.base_x_m,
+            shoulder_z_m: obs.base_z_m + kin.mobile_shoulder_z_offset_m(),
+            ..kin
+        };
+        let fk = model.forward_kinematics(MmMinimalJointTarget {
+            shoulder_rad: obs.shoulder_position_rad,
+            elbow_rad: obs.elbow_position_rad,
+        });
+        let gripper = sim
+            .link_translation_m("gripper_base_link")
+            .expect("gripper link");
+        let err = ((fk.x_m - gripper.0).powi(2)
+            + (fk.y_m - gripper.1).powi(2)
+            + (fk.z_m - gripper.2).powi(2))
+        .sqrt();
+        assert!(
+            err < 0.08,
+            "mm_mobile FK should match sim after settle, err={err:.3} m sim=({:.3},{:.3},{:.3}) fk=({:.3},{:.3},{:.3})",
+            gripper.0,
+            gripper.1,
+            gripper.2,
+            fk.x_m,
+            fk.y_m,
+            fk.z_m
+        );
+    }
 
     #[test]
     fn fk_ik_roundtrip_for_reachable_targets() {

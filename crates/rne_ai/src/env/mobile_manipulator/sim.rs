@@ -1,4 +1,4 @@
-//! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
+﻿//! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
 
 use super::drive::{
     wheel_command_to_motor_rad_s, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_RADIUS_M,
@@ -274,7 +274,7 @@ struct ActuatedJoint {
 /// (spring-damper) motor, not a velocity motor, so it holds the arm's weight at a
 /// commanded height without drift; the command integrates into the height target.
 const LIFT_MOTOR_STIFFNESS: f64 = 600.0;
-/// Damping for the vertical lift motor (≈ critical for the ~6 kg arm), so the lift
+/// Damping for the vertical lift motor (竕・critical for the ~6 kg arm), so the lift
 /// settles to its target height without oscillating.
 const LIFT_MOTOR_DAMPING: f64 = 120.0;
 /// Travel limits of the lift height target, in meters about its rest position.
@@ -294,7 +294,7 @@ const ARM_MOTOR_DAMPING: f64 = 60.0;
 /// Extra stiffness when writing absolute lift-arm joint targets (direct IK hold).
 const ARM_DIRECT_TARGET_STIFFNESS: f64 = 1200.0;
 const ARM_DIRECT_TARGET_DAMPING: f64 = 100.0;
-/// Torque cap for the lift robot's arm joints (overrides the 50 N·m revolute default),
+/// Torque cap for the lift robot's arm joints (overrides the 50 Nﾂｷm revolute default),
 /// so the position motor can move and settle the heavy arm reasonably quickly.
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
 /// Clamp on a position-holding arm joint's integrated angle target (radians).
@@ -326,6 +326,8 @@ pub struct MobileManipulatorSim {
     wrist_depth_stream: Option<StreamId>,
     render_backend: HeadlessRenderBackend,
     mobile_base: bool,
+    /// When true, planar base motion is zeroed after each physics step (arm-only manipulation).
+    base_planar_locked: bool,
     data_bus: InMemoryDataBus,
     joint_stream: StreamId,
     sim_time: SimTime,
@@ -524,6 +526,12 @@ impl MobileManipulatorSim {
             wrist_depth_center_m,
             wrist_depth_min_m,
             target_object_index: 0,
+            pick_object_x_m: 0.0,
+            pick_object_y_m: 0.0,
+            pick_object_z_m: 0.0,
+            gripper_target_dx_m: 0.0,
+            gripper_target_dy_m: 0.0,
+            gripper_target_dz_m: 0.0,
         }
     }
 
@@ -873,6 +881,7 @@ impl MobileManipulatorSim {
             wrist_depth_stream,
             render_backend: HeadlessRenderBackend::new(),
             mobile_base,
+            base_planar_locked: false,
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
             sim_time: SimTime::ZERO,
@@ -1141,6 +1150,7 @@ impl MobileManipulatorSim {
         let right_m_s = action.right_wheel_velocity_rad_s * MM_MOBILE_WHEEL_RADIUS_M;
         let forward_m_s = 0.5 * (left_m_s + right_m_s);
         let yaw_rate_rad_s = (right_m_s - left_m_s) / MM_MOBILE_TRACK_WIDTH_M;
+        self.base_planar_locked = forward_m_s.abs() < 1.0e-9 && yaw_rate_rad_s.abs() < 1.0e-9;
         let yaw = yaw_rad(world_transform_of(&self.world, self.base_link).rotation);
         let forward = Quat::from_rotation_y(yaw) * Vec3::X;
 
@@ -1165,6 +1175,11 @@ impl MobileManipulatorSim {
             body.linear_velocity_m_s.y = 0.0;
             body.angular_velocity_rad_s.x = 0.0;
             body.angular_velocity_rad_s.z = 0.0;
+            if self.base_planar_locked {
+                body.linear_velocity_m_s.x = 0.0;
+                body.linear_velocity_m_s.z = 0.0;
+                body.angular_velocity_rad_s.y = 0.0;
+            }
         }
     }
 
@@ -1862,7 +1877,7 @@ mod tests {
 
     #[test]
     fn lift_picks_carries_and_places_cube() {
-        // Phase 4 of the manipulator redesign: the full pick-and-place — lower the claw
+        // Phase 4 of the manipulator redesign: the full pick-and-place 窶・lower the claw
         // over a ground cube, grasp it, lift it, swing the arm to a new location, lower it
         // back down, and open to release. The cube ends resting at a different spot.
         let scene = mm_lift_pick_scene_path();
@@ -1984,7 +1999,7 @@ mod tests {
     #[test]
     fn lift_place_swing_controls_drop_location() {
         // A longer carry swing rotates the arm further around the column, so the cube is
-        // released at a different spot — the place location is controllable.
+        // released at a different spot 窶・the place location is controllable.
         let near = place_location_for_swing(60, SwingPolicyKind::Ik);
         let far = place_location_for_swing(120, SwingPolicyKind::Ik);
         let separation = ((far.0 - near.0).powi(2) + (far.1 - near.1).powi(2)).sqrt();
@@ -2008,7 +2023,7 @@ mod tests {
     #[test]
     fn lift_picks_cube_off_ground_and_raises_it() {
         // Phase 3 of the manipulator redesign: the top-down claw lowers over a cube on
-        // the ground, grasps it (contact-triggered weld), and the lift raises it — a real
+        // the ground, grasps it (contact-triggered weld), and the lift raises it 窶・a real
         // 3D pick that the previous side-grip geometry could not perform.
         let scene = mm_lift_pick_scene_path();
         let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load mm_lift_pick");
@@ -2130,7 +2145,7 @@ mod tests {
         };
 
         // Let the arm settle on the lift, then record its resting height. The lift
-        // is a position motor, so it holds the ~6 kg arm against gravity here — a
+        // is a position motor, so it holds the ~6 kg arm against gravity here 窶・a
         // plain velocity motor sagged or oscillated instead.
         let baseline = mean_ee_height(&mut sim, MobileManipulatorAction::default(), 120, 30);
 
@@ -2141,7 +2156,7 @@ mod tests {
             "lift up should raise the arm against gravity: baseline={baseline:.3}, raised={raised:.3}"
         );
 
-        // Lowering the lift brings it back down — the motion is reversible.
+        // Lowering the lift brings it back down 窶・the motion is reversible.
         let lowered = mean_ee_height(&mut sim, down, 240, 30);
         assert!(
             lowered < raised - 0.15,

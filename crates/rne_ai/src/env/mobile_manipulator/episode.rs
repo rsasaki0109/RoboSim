@@ -487,9 +487,21 @@ impl MobileManipulatorEpisode {
                         observation.target_dz_m = target.z_m - oz;
                     }
                 } else if let Some((ox, oy, oz)) = named_translation_m(&self.sim, object_name) {
+                    observation.pick_object_x_m = ox;
+                    observation.pick_object_y_m = oy;
+                    observation.pick_object_z_m = oz;
                     observation.target_dx_m = ox - observation.ee_x_m;
                     observation.target_dy_m = oy - observation.ee_y_m;
                     observation.target_dz_m = oz - observation.ee_z_m;
+                    if let Some((gx, gy, gz)) = self.sim.link_translation_m("gripper_base_link") {
+                        observation.gripper_target_dx_m = ox - gx;
+                        observation.gripper_target_dy_m = oy - gy;
+                        observation.gripper_target_dz_m = oz - gz;
+                    } else {
+                        observation.gripper_target_dx_m = observation.target_dx_m;
+                        observation.gripper_target_dy_m = observation.target_dy_m;
+                        observation.gripper_target_dz_m = observation.target_dz_m;
+                    }
                 }
                 if let Some(clutter) = &self.config.clutter_pick {
                     observation.target_object_index = clutter
