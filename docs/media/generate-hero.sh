@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SIM_METADATA="$ROOT/docs/media/rne-hero-sim.tmp.json"
 trap 'rm -f "$SIM_METADATA"' EXIT
 
+HERO_FPS=15
+HERO_ANIMATION_FRAMES=100
+HERO_HOLD_FRAMES=10
+HERO_MAX_COLORS=192
+HERO_BAYER_SCALE=4
+HERO_SCALE_WIDTH=960
+HERO_MAX_BYTE_SIZE=3500000
+
 if [[ "${RNE_SKIP_GPU:-}" == "1" ]]; then
   echo "RNE_SKIP_GPU set; keeping existing README hero media"
   exit 0
@@ -24,7 +32,7 @@ RNE_HERO_SIM_METADATA="$SIM_METADATA_FOR_RUST" cargo run \
   --manifest-path "$ROOT/examples/32_lift_pick_place_hero/Cargo.toml" \
   --example 32_lift_pick_place_hero
 
-PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT" "$SIM_METADATA" <<'PY'
+PYTHONPATH="$ROOT/examples/27_mobile_manipulator_rl" python - "$ROOT" "$SIM_METADATA" <<PY
 import json
 import os
 import sys
@@ -36,10 +44,14 @@ sim_metadata_path = sys.argv[2]
 metadata_path = os.path.join(root, "docs/media/rne-hero.json")
 gif_path = os.path.join(root, "docs/media/rne-hero.gif")
 gif = inspect_gif(gif_path)
+if gif["byte_size"] > ${HERO_MAX_BYTE_SIZE}:
+    raise SystemExit(
+        f"hero gif exceeds size budget: {gif['byte_size']} bytes > ${HERO_MAX_BYTE_SIZE} bytes"
+    )
 with open(sim_metadata_path, "r", encoding="utf-8") as handle:
     simulation = json.load(handle)
 payload = {
-    "schema_version": 1,
+    "schema_version": 2,
     "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
     "gif_path": "rne-hero.gif",
     "poster_path": "rne-hero.png",
@@ -50,7 +62,18 @@ payload = {
         "policy": "MobilePickPlaceHeroPolicy",
         "physics": "MobileManipulatorSim/Rapier",
     },
-    "fps": 18.0,
+    "encode": {
+        "animation_frames": ${HERO_ANIMATION_FRAMES},
+        "bayer_scale": ${HERO_BAYER_SCALE},
+        "dither": "bayer",
+        "fps": float(${HERO_FPS}),
+        "hold_frames": ${HERO_HOLD_FRAMES},
+        "max_byte_size": ${HERO_MAX_BYTE_SIZE},
+        "max_colors": ${HERO_MAX_COLORS},
+        "palette_mode": "global",
+        "scale_width": ${HERO_SCALE_WIDTH},
+    },
+    "fps": float(${HERO_FPS}),
     "frame_count": gif["frame_count"],
     "width": gif["width"],
     "height": gif["height"],
@@ -58,6 +81,7 @@ payload = {
     "sha256": gif["sha256"],
     "settle_steps": 120,
     "policy_steps": 680,
+    "poster_policy_step": simulation.get("poster_policy_step", 355),
     "overlays": [
         "house_context",
         "base_path",

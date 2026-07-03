@@ -1117,6 +1117,13 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(
             metadata["artifact"], "rne_3d_mobile_manipulator_pick_place_hero"
         )
+        self.assertEqual(metadata["schema_version"], 2)
+        self.assertEqual(metadata["encode"]["fps"], 15.0)
+        self.assertEqual(metadata["encode"]["animation_frames"], 100)
+        self.assertEqual(metadata["encode"]["hold_frames"], 10)
+        self.assertGreaterEqual(
+            metadata["encode"]["max_byte_size"], metadata["byte_size"]
+        )
         self.assertEqual(metadata["gif_path"], "rne-hero.gif")
         self.assertEqual(metadata["poster_path"], "rne-hero.png")
         self.assertEqual(metadata["width"], gif_info["width"])
@@ -1156,6 +1163,10 @@ class ReportToolTests(unittest.TestCase):
         self.assertEqual(len(metadata["simulation"]["final_base_m"]), 3)
         self.assertEqual(len(metadata["simulation"]["final_ee_m"]), 3)
         self.assertEqual(len(metadata["simulation"]["final_object_m"]), 3)
+        self.assertLessEqual(
+            metadata["simulation"]["max_hold_frame_delta_ratio"],
+            metadata["simulation"]["max_hold_frame_delta_ratio_threshold"],
+        )
         self.assertEqual(
             metadata["source"],
             {

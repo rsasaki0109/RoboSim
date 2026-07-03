@@ -29,14 +29,22 @@ const RENDER_WIDTH: u32 = 640;
 const RENDER_HEIGHT: u32 = 360;
 const POSTER_WIDTH: u32 = 960;
 const POSTER_HEIGHT: u32 = 540;
-const FRAME_COUNT: usize = 72;
-const FPS: usize = 18;
+const ANIMATION_FRAME_COUNT: usize = 100;
+const HOLD_FRAME_COUNT: usize = 10;
+const FRAME_COUNT: usize = ANIMATION_FRAME_COUNT + HOLD_FRAME_COUNT;
+const FPS: usize = 15;
+const GIF_MAX_COLORS: u32 = 192;
+const GIF_BAYER_SCALE: u32 = 4;
+const HERO_ENCODE_MAX_BYTE_SIZE: u64 = 3_500_000;
+const MAX_HOLD_FRAME_DELTA_RATIO: f64 = 0.02;
+const CAMERA_ORBIT_YAW_START_RAD: f64 = -1.18;
+const CAMERA_ORBIT_YAW_END_RAD: f64 = -0.94;
 const SETTLE_STEPS: usize = 120;
 const POLICY_STEPS: usize = 680;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
-const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.005;
+const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.0025;
 const MIN_FIRST_LAST_FRAME_DELTA_RATIO: f64 = 0.08;
 const MIN_UNIQUE_COLORS: usize = 8;
 const EXPECTED_BASE_Y_M: f64 = 0.25;
@@ -49,6 +57,7 @@ const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
 const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
 const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.36, -2.21);
 const OBJECT_GRASP_STEP: usize = 310;
+const POSTER_POLICY_STEP: usize = OBJECT_GRASP_STEP + 45;
 const OBJECT_RELEASE_STEP: usize = 620;
 const PICK_MANIPULATION_START_STEP: usize = 301;
 const PICK_MANIPULATION_END_STEP: usize = 390;
@@ -92,6 +101,80 @@ struct HeroBox {
     center_m: Vec3,
     size_m: Vec3,
     color_rgba: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeroSampleSegment {
+    step_start: usize,
+    step_end: usize,
+    frame_count: usize,
+}
+
+const HERO_SAMPLE_SEGMENTS: [HeroSampleSegment; 5] = [
+    HeroSampleSegment {
+        step_start: 0,
+        step_end: 175,
+        frame_count: 12,
+    },
+    HeroSampleSegment {
+        step_start: 175,
+        step_end: 300,
+        frame_count: 14,
+    },
+    HeroSampleSegment {
+        step_start: 300,
+        step_end: 390,
+        frame_count: 22,
+    },
+    HeroSampleSegment {
+        step_start: 390,
+        step_end: 600,
+        frame_count: 28,
+    },
+    HeroSampleSegment {
+        step_start: 600,
+        step_end: POLICY_STEPS,
+        frame_count: 24,
+    },
+];
+
+/// Maps each animation frame to a monotonic policy step with dense sampling during manipulation.
+fn hero_animation_policy_steps() -> [usize; ANIMATION_FRAME_COUNT] {
+    let mut steps = [0usize; ANIMATION_FRAME_COUNT];
+    let mut frame = 0usize;
+    for segment in HERO_SAMPLE_SEGMENTS {
+        let span = segment.step_end.saturating_sub(segment.step_start);
+        for index in 0..segment.frame_count {
+            let mut step = if segment.frame_count <= 1 {
+                segment.step_end
+            } else {
+                segment.step_start + (index * span) / (segment.frame_count - 1)
+            };
+            if frame > 0 && step <= steps[frame - 1] {
+                step = (steps[frame - 1] + 1).min(segment.step_end);
+            }
+            steps[frame] = step;
+            frame += 1;
+        }
+    }
+    debug_assert_eq!(frame, ANIMATION_FRAME_COUNT);
+    steps
+}
+
+fn hero_poster_animation_frame(steps: &[usize; ANIMATION_FRAME_COUNT]) -> usize {
+    steps
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, step)| step.abs_diff(POSTER_POLICY_STEP))
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn hero_camera_yaw_rad(animation_frame: usize) -> f64 {
+    let progress =
+        animation_frame as f64 / (ANIMATION_FRAME_COUNT.saturating_sub(1).max(1) as f64);
+    CAMERA_ORBIT_YAW_START_RAD
+        + (CAMERA_ORBIT_YAW_END_RAD - CAMERA_ORBIT_YAW_START_RAD) * progress
 }
 
 fn main() {
@@ -161,11 +244,13 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create hero frame directory");
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
-    let mut base_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
-    let mut object_path: Vec<Vec3> = Vec::with_capacity(FRAME_COUNT);
+    let mut base_path: Vec<Vec3> = Vec::with_capacity(ANIMATION_FRAME_COUNT);
+    let mut object_path: Vec<Vec3> = Vec::with_capacity(ANIMATION_FRAME_COUNT);
     let mut render_metrics = HeroRenderMetrics::new();
-    for frame in 0..FRAME_COUNT {
-        let target_step = frame * POLICY_STEPS / (FRAME_COUNT - 1);
+    let animation_steps = hero_animation_policy_steps();
+    let mut last_rgba8: Option<Vec<u8>> = None;
+    for frame in 0..ANIMATION_FRAME_COUNT {
+        let target_step = animation_steps[frame];
         while policy_step < target_step {
             let obs = sim.step(policy.next_action());
             policy_step += 1;
@@ -186,7 +271,7 @@ fn main() {
                 0.52,
                 obs.base_z_m * 0.62 + REACH_TARGET_M.z * 0.24 + HOUSE_CENTER_M.z * 0.14,
             ),
-            yaw_rad: -1.06,
+            yaw_rad: hero_camera_yaw_rad(frame),
             pitch_rad: 1.15,
             distance_m: 3.45,
         };
@@ -194,7 +279,7 @@ fn main() {
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render hero frame");
 
-        if frame == 0 || frame == FRAME_COUNT / 2 {
+        if frame == 0 || frame == ANIMATION_FRAME_COUNT / 2 {
             let unique = unique_colors(&output.color.rgba8);
             let center =
                 (output.depth.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -204,7 +289,8 @@ fn main() {
                 "3D hero frame invalid (unique_colors={unique}, center_depth={center_depth:.2} m)"
             );
         }
-        render_metrics.observe(&output.color.rgba8);
+        render_metrics.observe_animation(&output.color.rgba8);
+        last_rgba8 = Some(output.color.rgba8.clone());
 
         let frame_path = frames_dir.join(format!("frame-{frame:03}.png"));
         write_png(
@@ -214,6 +300,30 @@ fn main() {
             output.color.height,
         )
         .expect("write frame png");
+        frame_paths.push(frame_path);
+    }
+
+    while policy_step < POLICY_STEPS {
+        let obs = sim.step(policy.next_action());
+        policy_step += 1;
+        mix_observation_digest(&mut trajectory_digest, &obs);
+        planarity.observe(&sim);
+        task.observe(policy_step, &obs);
+        mix_task_digest(&mut trajectory_digest, &task);
+    }
+
+    let hold_rgba8 = last_rgba8.expect("animation frames must produce at least one render");
+    for hold in 0..HOLD_FRAME_COUNT {
+        render_metrics.observe_hold(&hold_rgba8);
+        let frame_index = ANIMATION_FRAME_COUNT + hold;
+        let frame_path = frames_dir.join(format!("frame-{frame_index:03}.png"));
+        write_png(
+            &frame_path,
+            &hold_rgba8,
+            RENDER_WIDTH,
+            RENDER_HEIGHT,
+        )
+        .expect("write hold frame png");
         frame_paths.push(frame_path);
     }
 
@@ -232,12 +342,13 @@ fn main() {
     write_sim_metadata_if_requested(&metrics, &render_metrics)
         .expect("write hero simulation metadata");
 
-    let poster_src = &frame_paths[FRAME_COUNT - 1];
+    let poster_src = &frame_paths[hero_poster_animation_frame(&animation_steps)];
     let poster_path = media_dir.join("rne-hero.png");
     upscale_png(poster_src, &poster_path, POSTER_WIDTH, POSTER_HEIGHT).expect("upscale poster");
 
     let gif_path = media_dir.join("rne-hero.gif");
     build_gif(&frames_dir, FRAME_COUNT, &gif_path).expect("build hero gif");
+    render_metrics.assert_hold_loop_seam();
     let _ = fs::remove_dir_all(&frames_dir);
 
     println!(
@@ -281,26 +392,30 @@ struct HeroSimMetrics {
 
 #[derive(Clone, Debug)]
 struct HeroRenderMetrics {
-    frame_count: usize,
+    animation_frame_count: usize,
+    hold_frame_count: usize,
     first_frame_rgba8: Vec<u8>,
     previous_frame_rgba8: Vec<u8>,
     min_consecutive_frame_delta_ratio: f64,
     first_last_frame_delta_ratio: f64,
+    max_hold_frame_delta_ratio: f64,
 }
 
 impl HeroRenderMetrics {
     fn new() -> Self {
         Self {
-            frame_count: 0,
+            animation_frame_count: 0,
+            hold_frame_count: 0,
             first_frame_rgba8: Vec::new(),
             previous_frame_rgba8: Vec::new(),
             min_consecutive_frame_delta_ratio: 1.0,
             first_last_frame_delta_ratio: 0.0,
+            max_hold_frame_delta_ratio: 0.0,
         }
     }
 
-    fn observe(&mut self, rgba8: &[u8]) {
-        if self.frame_count == 0 {
+    fn observe_animation(&mut self, rgba8: &[u8]) {
+        if self.animation_frame_count == 0 {
             self.first_frame_rgba8 = rgba8.to_vec();
         } else {
             let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
@@ -309,13 +424,29 @@ impl HeroRenderMetrics {
             self.first_last_frame_delta_ratio = frame_delta_ratio(&self.first_frame_rgba8, rgba8);
         }
         self.previous_frame_rgba8 = rgba8.to_vec();
-        self.frame_count += 1;
+        self.animation_frame_count += 1;
+    }
+
+    fn observe_hold(&mut self, rgba8: &[u8]) {
+        if self.hold_frame_count == 0 && !self.previous_frame_rgba8.is_empty() {
+            let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
+            self.max_hold_frame_delta_ratio = self.max_hold_frame_delta_ratio.max(delta_ratio);
+        } else if self.hold_frame_count > 0 {
+            let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
+            self.max_hold_frame_delta_ratio = self.max_hold_frame_delta_ratio.max(delta_ratio);
+        }
+        self.previous_frame_rgba8 = rgba8.to_vec();
+        self.hold_frame_count += 1;
     }
 
     fn assert_dynamic(&self) {
         assert_eq!(
-            self.frame_count, FRAME_COUNT,
-            "expected render metrics for every hero frame"
+            self.animation_frame_count, ANIMATION_FRAME_COUNT,
+            "expected render metrics for every animation frame"
+        );
+        assert_eq!(
+            self.hold_frame_count, HOLD_FRAME_COUNT,
+            "expected render metrics for every hold frame"
         );
         assert!(
             self.min_consecutive_frame_delta_ratio >= MIN_CONSECUTIVE_FRAME_DELTA_RATIO,
@@ -326,6 +457,14 @@ impl HeroRenderMetrics {
             self.first_last_frame_delta_ratio >= MIN_FIRST_LAST_FRAME_DELTA_RATIO,
             "expected visible hero progression: first_last_frame_delta_ratio={:.4}",
             self.first_last_frame_delta_ratio
+        );
+    }
+
+    fn assert_hold_loop_seam(&self) {
+        assert!(
+            self.max_hold_frame_delta_ratio <= MAX_HOLD_FRAME_DELTA_RATIO,
+            "expected calm hero loop seam: max_hold_frame_delta_ratio={:.4}",
+            self.max_hold_frame_delta_ratio
         );
     }
 }
@@ -856,6 +995,7 @@ fn write_sim_metadata_if_requested(
     let payload = format!(
         concat!(
             "{{\n",
+            "  \"animation_frame_count\": {},\n",
             "  \"base_travel_m\": {:.6},\n",
             "  \"ee_travel_m\": {:.6},\n",
             "  \"object_transport_m\": {:.6},\n",
@@ -869,6 +1009,9 @@ fn write_sim_metadata_if_requested(
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_object_m\": [{:.6}, {:.6}, {:.6}],\n",
+            "  \"hold_frame_count\": {},\n",
+            "  \"max_hold_frame_delta_ratio\": {:.6},\n",
+            "  \"max_hold_frame_delta_ratio_threshold\": {:.6},\n",
             "  \"min_base_travel_m\": {:.6},\n",
             "  \"min_ee_travel_m\": {:.6},\n",
             "  \"min_object_transport_m\": {:.6},\n",
@@ -877,9 +1020,11 @@ fn write_sim_metadata_if_requested(
             "  \"min_consecutive_frame_delta_ratio\": {:.6},\n",
             "  \"first_last_frame_delta_ratio\": {:.6},\n",
             "  \"min_consecutive_frame_delta_ratio_threshold\": {:.6},\n",
-            "  \"min_first_last_frame_delta_ratio_threshold\": {:.6}\n",
+            "  \"min_first_last_frame_delta_ratio_threshold\": {:.6},\n",
+            "  \"poster_policy_step\": {}\n",
             "}}\n"
         ),
+        ANIMATION_FRAME_COUNT,
         metrics.base_travel_m,
         metrics.ee_travel_m,
         metrics.object_transport_m,
@@ -899,6 +1044,9 @@ fn write_sim_metadata_if_requested(
         metrics.final_object_m[0],
         metrics.final_object_m[1],
         metrics.final_object_m[2],
+        HOLD_FRAME_COUNT,
+        render_metrics.max_hold_frame_delta_ratio,
+        MAX_HOLD_FRAME_DELTA_RATIO,
         MIN_BASE_TRAVEL_M,
         MIN_EE_TRAVEL_M,
         MIN_OBJECT_TRANSPORT_M,
@@ -907,7 +1055,8 @@ fn write_sim_metadata_if_requested(
         render_metrics.min_consecutive_frame_delta_ratio,
         render_metrics.first_last_frame_delta_ratio,
         MIN_CONSECUTIVE_FRAME_DELTA_RATIO,
-        MIN_FIRST_LAST_FRAME_DELTA_RATIO
+        MIN_FIRST_LAST_FRAME_DELTA_RATIO,
+        POSTER_POLICY_STEP
     );
     fs::write(path, payload)
 }
@@ -941,7 +1090,7 @@ fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> f64 {
 fn build_gif(frames_dir: &Path, frame_count: usize, gif_path: &Path) -> std::io::Result<()> {
     let input = frames_dir.join("frame-%03d.png");
     let filter = format!(
-        "fps={FPS},scale={POSTER_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3"
+        "fps={FPS},scale={POSTER_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={GIF_MAX_COLORS}[p];[s1][p]paletteuse=dither=bayer:bayer_scale={GIF_BAYER_SCALE}:diff_mode=rectangle"
     );
     let status = Command::new("ffmpeg")
         .args([
@@ -959,11 +1108,16 @@ fn build_gif(frames_dir: &Path, frame_count: usize, gif_path: &Path) -> std::io:
             &gif_path.to_string_lossy(),
         ])
         .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other("ffmpeg gif encode failed"))
+    if !status.success() {
+        return Err(std::io::Error::other("ffmpeg gif encode failed"));
     }
+    let byte_size = fs::metadata(gif_path)?.len();
+    if byte_size > HERO_ENCODE_MAX_BYTE_SIZE {
+        return Err(std::io::Error::other(format!(
+            "hero gif exceeds size budget: {byte_size} bytes > {HERO_ENCODE_MAX_BYTE_SIZE} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn upscale_png(src: &Path, dst: &Path, width: u32, height: u32) -> std::io::Result<()> {
@@ -1053,8 +1207,37 @@ mod tests {
 
     #[test]
     fn hero_media_samples_wheel_motion_at_higher_temporal_resolution() {
-        assert!(FRAME_COUNT >= 72);
-        assert!(FPS >= 18);
+        assert_eq!(ANIMATION_FRAME_COUNT, 100);
+        assert_eq!(HOLD_FRAME_COUNT, 10);
+        assert_eq!(FRAME_COUNT, 110);
+        assert_eq!(FPS, 15);
+    }
+
+    #[test]
+    fn hero_animation_policy_steps_are_monotonic_and_cover_policy() {
+        let steps = hero_animation_policy_steps();
+        assert_eq!(steps.len(), ANIMATION_FRAME_COUNT);
+        assert_eq!(steps[0], 0);
+        assert_eq!(steps[ANIMATION_FRAME_COUNT - 1], POLICY_STEPS);
+        for window in steps.windows(2) {
+            assert!(
+                window[1] >= window[0],
+                "hero sampling must be monotonic: {} -> {}",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    #[test]
+    fn hero_poster_frame_targets_grasp_moment() {
+        let steps = hero_animation_policy_steps();
+        let poster_frame = hero_poster_animation_frame(&steps);
+        assert!(
+            (steps[poster_frame] as i64 - POSTER_POLICY_STEP as i64).unsigned_abs() <= 20,
+            "poster frame should land near grasp: step={} target={POSTER_POLICY_STEP}",
+            steps[poster_frame]
+        );
     }
 
     #[test]

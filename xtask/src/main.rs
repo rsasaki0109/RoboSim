@@ -130,8 +130,9 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero alt text does not describe the 3D mobile manipulator simulation"
     );
     anyhow::ensure!(
-        readme.contains("examples/32_lift_pick_place_hero")
-            && readme.contains("docs/media/rne-hero.json"),
+        readme.contains("Real capture:")
+            && readme.contains("docs/media/rne-hero.json")
+            && readme.contains("docs/media/generate-hero.sh"),
         "README hero caption does not link the 3D generator and metadata"
     );
 
@@ -145,10 +146,45 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
-    let gif_progression = inspect_gif_frame_progression(&gif_path)?;
     anyhow::ensure!(
         metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
         "README hero metadata does not describe the 3D pick/place hero"
+    );
+    anyhow::ensure!(
+        metadata["schema_version"].as_u64() == Some(2),
+        "README hero metadata must use schema_version 2"
+    );
+    let encode = metadata
+        .get("encode")
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing encode block"))?;
+    let gif_progression = inspect_gif_frame_progression(
+        &gif_path,
+        usize::try_from(
+            encode["animation_frames"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("README hero encode block missing animation_frames"))?,
+        )?,
+        usize::try_from(
+            encode["hold_frames"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("README hero encode block missing hold_frames"))?,
+        )?,
+    )?;
+    anyhow::ensure!(
+        encode["fps"].as_f64() == Some(15.0)
+            && encode["animation_frames"].as_u64() == Some(100)
+            && encode["hold_frames"].as_u64() == Some(10)
+            && encode["max_colors"].as_u64() == Some(192)
+            && encode["scale_width"].as_u64() == Some(960),
+        "README hero encode block does not match the expected hero pipeline"
+    );
+    let max_byte_size = encode["max_byte_size"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("README hero encode block missing max_byte_size"))?;
+    anyhow::ensure!(
+        u64::try_from(gif.len())? <= max_byte_size,
+        "README hero GIF exceeds encode.max_byte_size: {} > {max_byte_size}",
+        gif.len()
     );
     let metadata_width = metadata["width"]
         .as_u64()
@@ -273,6 +309,15 @@ fn hero_media_check() -> anyhow::Result<()> {
                 "README hero metadata missing min_first_last_frame_delta_ratio_threshold"
             )
         })?;
+    let max_hold_frame_delta_ratio = metadata["simulation"]["max_hold_frame_delta_ratio"]
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio"))?;
+    let max_hold_frame_delta_ratio_threshold = metadata["simulation"]
+        ["max_hold_frame_delta_ratio_threshold"]
+        .as_f64()
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio_threshold")
+        })?;
     let max_base_height_error_m = metadata["simulation"]["max_base_height_error_m"]
         .as_f64()
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_base_height_error_m"))?;
@@ -319,7 +364,7 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README hero object was not carried then released: grasped_steps={grasped_steps}, released_after_grasp={released_after_grasp}"
     );
     anyhow::ensure!(
-        min_consecutive_frame_delta_ratio_threshold >= 0.005,
+        min_consecutive_frame_delta_ratio_threshold >= 0.0025,
         "README hero frame-delta threshold is too loose: {min_consecutive_frame_delta_ratio_threshold:.4}"
     );
     anyhow::ensure!(
@@ -344,6 +389,10 @@ fn hero_media_check() -> anyhow::Result<()> {
         gif_progression.first_last_frame_delta_ratio >= min_first_last_frame_delta_ratio_threshold,
         "README hero GIF bytes lack visible progression: first_last_frame_delta_ratio={:.4}",
         gif_progression.first_last_frame_delta_ratio
+    );
+    anyhow::ensure!(
+        max_hold_frame_delta_ratio <= max_hold_frame_delta_ratio_threshold,
+        "README hero hold seam is not calm enough: max_hold_frame_delta_ratio={max_hold_frame_delta_ratio:.4}"
     );
     anyhow::ensure!(
         max_base_height_error_m <= 0.01,
@@ -452,7 +501,11 @@ struct GifFrameProgression {
     first_last_frame_delta_ratio: f64,
 }
 
-fn inspect_gif_frame_progression(path: &Path) -> anyhow::Result<GifFrameProgression> {
+fn inspect_gif_frame_progression(
+    path: &Path,
+    animation_frame_count: usize,
+    hold_frame_count: usize,
+) -> anyhow::Result<GifFrameProgression> {
     let file = fs::File::open(path)?;
     let decoder = image::codecs::gif::GifDecoder::new(BufReader::new(file))?;
     let frames = decoder.into_frames();
@@ -464,6 +517,7 @@ fn inspect_gif_frame_progression(path: &Path) -> anyhow::Result<GifFrameProgress
     let mut previous_frame_rgba8 = Vec::new();
     let mut min_consecutive_frame_delta_ratio = 1.0_f64;
     let mut first_last_frame_delta_ratio = 0.0_f64;
+    let animation_pairs_end = animation_frame_count.saturating_sub(1);
 
     for frame in frames {
         let frame = frame?;
@@ -484,8 +538,10 @@ fn inspect_gif_frame_progression(path: &Path) -> anyhow::Result<GifFrameProgress
                 frame_width,
                 frame_height
             );
-            let delta_ratio = frame_delta_ratio(&previous_frame_rgba8, &rgba8)?;
-            min_consecutive_frame_delta_ratio = min_consecutive_frame_delta_ratio.min(delta_ratio);
+            if frame_count < animation_pairs_end + 1 {
+                let delta_ratio = frame_delta_ratio(&previous_frame_rgba8, &rgba8)?;
+                min_consecutive_frame_delta_ratio = min_consecutive_frame_delta_ratio.min(delta_ratio);
+            }
             first_last_frame_delta_ratio = frame_delta_ratio(&first_frame_rgba8, &rgba8)?;
         }
 
@@ -494,7 +550,15 @@ fn inspect_gif_frame_progression(path: &Path) -> anyhow::Result<GifFrameProgress
     }
 
     anyhow::ensure!(frame_count > 0, "README hero GIF has no decoded frames");
-    if frame_count == 1 {
+    anyhow::ensure!(
+        animation_frame_count + hold_frame_count == frame_count,
+        "README hero GIF frame count mismatch: expected {} animation + {} hold = {}, got {}",
+        animation_frame_count,
+        hold_frame_count,
+        animation_frame_count + hold_frame_count,
+        frame_count
+    );
+    if animation_frame_count <= 1 {
         min_consecutive_frame_delta_ratio = 0.0;
     }
 

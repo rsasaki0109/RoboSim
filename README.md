@@ -1,18 +1,19 @@
+# Robot Native Engine
+
+**Robots are not plugins.** A Rust robot-native game engine for deterministic simulation,
+headless CI, and real wgpu rendering.
+
+[![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
+[![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
+
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
     <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object" width="960">
   </picture>
   <br>
-  <sub>Captured from the real <code>mm_mobile</code> 3D simulation carrying a deterministic task object in a procedural house context via <code>examples/32_lift_pick_place_hero</code> (<a href="docs/media/rne-hero.json">metadata</a>)</sub>
+  <sub>Real capture: the <code>mm_mobile</code> robot drives, picks, carries ~1.7&nbsp;m, and places — one deterministic wgpu run, no keyframes. (<a href="docs/media/rne-hero.json">how it's made</a> · <a href="docs/media/generate-hero.sh">regenerate</a>)</sub>
 </p>
-
-# Robot Native Engine
-
-[![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
-[![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
-
-Robots are not plugins.
 
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
 embodied AI, synthetic sensor data, and policy evaluation.
@@ -26,9 +27,9 @@ embodied AI, synthetic sensor data, and policy evaluation.
 ## 3D pick-and-place
 
 <p align="center">
-  <img src="docs/media/mm-lift-pickplace.png" alt="The mm_lift robot lifting a grasped cube with its top-down claw" width="760">
+  <img src="docs/media/mm-lift-pickplace.png" alt="The mm_lift robot lifting a grasped cube with its top-down claw" width="480">
   <br>
-  <sub>The <code>mm_lift</code> robot grasps a cube off the ground and hoists it on its vertical lift.</sub>
+  <sub>The hero above shows the mobile platform navigating a house context; here is the <code>mm_lift</code> arm doing vertical pick-and-place up close.</sub>
 </p>
 
 The `mm_lift` manipulator performs a full vertical pick-and-place: a column-mounted lift
@@ -70,30 +71,9 @@ cargo run -p falling_cube --example 01_falling_cube
 cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
 cargo run -p render_clear --example 02_render_clear
 cargo run -p urdf_import --example 03_urdf_import
-cargo run -p episode_diff_drive --example 05_episode_diff_drive
-cargo run -p scene_load --example 06_scene_load
-cargo run -p render_primitives --example 07_render_primitives
-cargo run -p scene_episode --example 08_scene_episode
-cargo run -p urdf_mesh_render --example 09_urdf_mesh_render
-cargo run -p vectorized_episode --example 10_vectorized_episode
-cargo run -p agent_policy --example 11_agent_policy
-cargo run -p shared_world_agent --example 12_shared_world_agent
-cargo run -p multi_robot_agent --example 13_multi_robot_agent
-cargo run -p interactive_viewer --example 14_interactive_viewer
-cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke
-cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn
 ```
 
 See [examples/README.md](examples/README.md) for the full list.
-
-Regenerate README hero media from the 3D simulation:
-
-```bash
-bash docs/media/generate-hero.sh
-```
-
-This steps `MobileManipulatorSim` through mobile-base navigation and arm reach, renders
-each frame through wgpu, and encodes `docs/media/rne-hero.gif` with ffmpeg.
 
 **Highlights:** 3D pick-and-place on a lift-equipped arm (top-down claw + vertical lift),
 position-controlled joints, goal-conditioned RL agents, reach curricula, multi-robot
@@ -137,6 +117,12 @@ cargo run -p xtask -- ci
 ```
 
 This includes the no-renderer house GIF smoke and README hero metadata verification.
+
+Regenerate the README hero GIF from the real 3D simulation (GPU + ffmpeg required):
+
+```bash
+bash docs/media/generate-hero.sh
+```
 
 With ROS 2 Jazzy or Humble installed:
 
