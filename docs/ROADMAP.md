@@ -16,10 +16,33 @@ Primary development target for v0.11. Shipped 2026-07-03. See [CHANGELOG.md](../
 |------|------|
 | RL | Converging clutter pick-and-place on SB3 PPO / CEM + reproducible bench + replay |
 | Manipulation | Analytic IK for `mm_minimal` SCARA (mirrors `MmLiftKinematics`) |
-| Scene diversity | Full mobile navigate → grasp → place E2E on clutter scenes |
+| Scene diversity | Full mobile navigate → grasp → place E2E on clutter scenes | In progress (`IkMobileClutterPickPlacePolicy`, example 34) |
 | Physics | Wire URDF prismatic joints to Rapier (architecture gap) |
 
-## v0.11.0 (released)
+## v0.12 goal: close the clutter pick-and-place loop
+
+Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md). Fixed-base clutter place E2E and RL
+bench are complete; mobile navigate-and-place remains a stretch goal (example 34, policy skeleton).
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Kinematics | `MmMinimalKinematics` — analytic FK/IK for the `mm_minimal` SCARA chain | Done |
+| B | Scene / E2E | `IkClutterPickPlacePolicy` + example `33_clutter_pick_place_e2e` | Done |
+| C | RL | `train_clutter.py` + `train_clutter_ppo.py` converging bench + replay | Done |
+
+## v0.12.0 (released)
+
+Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Kinematics | `MmMinimalKinematics` analytic FK/IK for `mm_minimal` SCARA |
+| Manipulation | `IkClutterPickPlacePolicy`; example 33 fixed-base clutter place E2E |
+| RL | `train_clutter.py` (CEM + replay); `train_clutter_ppo.py` (SB3 smoke) |
+| Scenes | `clutter_place_center`; `mm_minimal_clutter` ground place target |
+| Stretch | `IkMobileClutterPickPlacePolicy`, example 34 (mobile place tuning) |
+
+## v0.11.0 goal: wrist RGB-D, clutter RL bench, scene diversity
 
 Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md).
 

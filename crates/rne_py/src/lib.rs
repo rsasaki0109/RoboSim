@@ -25,11 +25,15 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
         "lift_place" => Ok(MobileManipulatorEpisodeConfig::lift_pick_place()),
         "clutter_place" => Ok(MobileManipulatorEpisodeConfig::clutter_pick_place(0)),
+        "clutter_place_center" => Ok(MobileManipulatorEpisodeConfig::clutter_pick_place_center(0)),
+        "mobile_clutter_place_center" => {
+            Ok(MobileManipulatorEpisodeConfig::mobile_clutter_pick_place_center(0))
+        }
         "mobile_clutter_place" => Ok(MobileManipulatorEpisodeConfig::mobile_clutter_pick_place(0)),
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'clutter_place', 'mobile_clutter_place', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'clutter_place', 'clutter_place_center', 'mobile_clutter_place', 'mobile_clutter_place_center', 'transport', or 'inspect'"
         ))),
     }
 }

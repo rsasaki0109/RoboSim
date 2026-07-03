@@ -4,6 +4,26 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-03
+
+### Added
+
+- **`MmMinimalKinematics`**: analytic FK/IK for the fixed-base `mm_minimal` SCARA arm
+  (`mm_minimal_kinematics.rs`), with roundtrip tests, sim XZ parity, and reachability helper.
+- **`IkClutterPickPlacePolicy`**: IK approach + tuned fixed-velocity carry toward
+  `mm_minimal_clutter_place_target` (fixed-base ground target off the table edge).
+  Example 33 `--smoke` asserts grasp and place on `clutter_cube_b`; 15 clutter unit
+  tests cover grasp, carry tuning, and full scripted place E2E.
+- **`train_clutter.py`**: CEM smoke on the `clutter_place_center` episode (approach reward +
+  place progress, grasp assertion, deterministic replay on the best candidate).
+- **`train_clutter_ppo.py`**: SB3 PPO integration smoke on `clutter_place_center`.
+- **`clutter_pick_place_center`**: pinned center-cube config for reproducible clutter RL benches.
+- **`IkMobileClutterPickPlacePolicy`**: diff-drive approach + IK arm pick/place for
+  `mm_mobile_clutter` (example 34; full place E2E still tuning).
+- **`mm_mobile_clutter_place_target`**: shared ground place target helper for mobile clutter episodes.
+- **`mobile_clutter_pick_place_center`**: pinned `clutter_cube_a` config for mobile RL benches.
+- **`xtask ci`**: runs `train_clutter.py` / `train_clutter_ppo.py --smoke` alongside existing RL smokes.
+
 ## [0.11.0] - 2026-07-03
 
 ### Added

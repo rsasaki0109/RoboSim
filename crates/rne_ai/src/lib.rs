@@ -13,6 +13,7 @@ pub mod grasp;
 pub mod joint_trajectory;
 pub mod lidar;
 pub mod mm_lift_kinematics;
+pub mod mm_minimal_kinematics;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
@@ -69,14 +70,20 @@ pub use lidar::{lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mo
 pub use mm_lift_kinematics::{
     MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget, MmLiftKinematics,
 };
+pub use mm_minimal_kinematics::{
+    mm_minimal_clutter_place_target, mm_mobile_clutter_place_target, MmMinimalGripperTarget,
+    MmMinimalIkError, MmMinimalJointTarget, MmMinimalKinematics, MM_MINIMAL_CLUTTER_PLACE_X_M,
+    MM_MINIMAL_CLUTTER_PLACE_Y_M, MM_MINIMAL_CLUTTER_PLACE_Z_M, MM_MOBILE_CLUTTER_PLACE_X_M,
+    MM_MOBILE_CLUTTER_PLACE_Y_M, MM_MOBILE_CLUTTER_PLACE_Z_M,
+};
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{
-    ConstantVelocityPolicy, IkLiftPickPlacePolicy, LiftPickPlacePolicy, Policy,
-    VisuomotorReachPolicy,
+    ConstantVelocityPolicy, IkClutterPickPlacePolicy, IkLiftPickPlacePolicy,
+    IkMobileClutterPickPlacePolicy, LiftPickPlacePolicy, Policy, VisuomotorReachPolicy,
 };
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,

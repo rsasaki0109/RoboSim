@@ -247,11 +247,11 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
-    /// Pick one of three clutter cubes and place it at the standard tabletop target.
+    /// Pick one of three clutter cubes and place it at the fixed-base ground target.
     pub fn clutter_pick_place(rng_seed: u64) -> Self {
-        let target = crate::reach::ReachTarget::new(1.23, 0.03, -0.53);
+        let target = crate::mm_minimal_kinematics::mm_minimal_clutter_place_target();
         Self {
-            max_steps: 700,
+            max_steps: 960,
             scene_path: crate::mm_minimal_clutter_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: "clutter_cube_a".into(),
@@ -274,11 +274,32 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
+    /// Fixed-base clutter place on the center cube (`clutter_cube_b`) at the ground target.
+    ///
+    /// Pins the pick target for reproducible RL benches (example 33 and `train_clutter.py`).
+    pub fn clutter_pick_place_center(rng_seed: u64) -> Self {
+        let target = crate::mm_minimal_kinematics::mm_minimal_clutter_place_target();
+        Self {
+            max_steps: 960,
+            scene_path: crate::mm_minimal_clutter_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "clutter_cube_b".into(),
+                target,
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            clutter_pick: None,
+            rng_seed,
+        }
+    }
+
     /// Navigate a diff-drive base to one of three distant cubes, then pick and place it.
     pub fn mobile_clutter_pick_place(rng_seed: u64) -> Self {
-        let target = crate::reach::ReachTarget::new(1.23, 0.03, -0.53);
+        let target = crate::mm_minimal_kinematics::mm_mobile_clutter_place_target();
         Self {
-            max_steps: 900,
+            max_steps: 1600,
             scene_path: crate::mm_mobile_clutter_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: "clutter_cube_a".into(),
@@ -297,6 +318,25 @@ impl MobileManipulatorEpisodeConfig {
                 target,
                 place_tolerance_m: 0.12,
             }),
+            rng_seed,
+        }
+    }
+
+    /// Mobile navigate-and-place on the left clutter cube (`clutter_cube_a`).
+    pub fn mobile_clutter_pick_place_center(rng_seed: u64) -> Self {
+        let target = crate::mm_minimal_kinematics::mm_mobile_clutter_place_target();
+        Self {
+            max_steps: 1600,
+            scene_path: crate::mm_mobile_clutter_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "clutter_cube_a".into(),
+                target,
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            clutter_pick: None,
             rng_seed,
         }
     }
@@ -1325,9 +1365,9 @@ mod tests {
     }
 
     fn clutter_place_config(object_name: &str) -> MobileManipulatorEpisodeConfig {
-        let target = ReachTarget::new(1.23, 0.03, -0.53);
+        let target = crate::mm_minimal_kinematics::mm_minimal_clutter_place_target();
         MobileManipulatorEpisodeConfig {
-            max_steps: 900,
+            max_steps: 1300,
             scene_path: crate::mm_minimal_clutter_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: object_name.into(),
@@ -1343,9 +1383,9 @@ mod tests {
     }
 
     fn mobile_clutter_place_config(object_name: &str) -> MobileManipulatorEpisodeConfig {
-        let target = ReachTarget::new(1.23, 0.03, -0.53);
+        let target = crate::mm_minimal_kinematics::mm_mobile_clutter_place_target();
         MobileManipulatorEpisodeConfig {
-            max_steps: 1200,
+            max_steps: 1600,
             scene_path: crate::mm_mobile_clutter_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: object_name.into(),
@@ -1487,6 +1527,95 @@ mod tests {
         }
     }
 
+    fn run_clutter_place_after_grasp(
+        episode: &mut MobileManipulatorEpisode,
+        carry: MobileManipulatorAction,
+        carry_steps: usize,
+    ) -> bool {
+        let hold = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+        for _ in 0..carry_steps {
+            episode.step(carry);
+        }
+        for _ in 0..80 {
+            episode.step(hold);
+        }
+        for _ in 0..150 {
+            if episode.step(open).terminated {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn fixed_clutter_carry_params_place_center_cube() {
+        use crate::{IkClutterPickPlacePolicy, Policy};
+
+        let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        for _ in 0..(20 + 360) {
+            step = episode.step(policy.act(&step.observation));
+        }
+        assert!(
+            episode.simulation().is_grasping(),
+            "expected grasp before tuned fixed carry"
+        );
+        assert!(
+            run_clutter_place_after_grasp(
+                &mut episode,
+                MobileManipulatorAction {
+                    gripper_velocity_rad_s: -2.5,
+                    shoulder_velocity_rad_s: -0.50,
+                    elbow_velocity_rad_s: -0.69,
+                    ..MobileManipulatorAction::default()
+                },
+                340,
+            ),
+            "expected tuned fixed carry to place clutter_cube_b"
+        );
+    }
+
+    #[test]
+    fn ik_clutter_policy_completes_center_place() {
+        use crate::{IkClutterPickPlacePolicy, Policy};
+
+        let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        for _ in 0..policy.total_steps() {
+            step = episode.step(policy.act(&step.observation));
+        }
+        assert!(
+            step.terminated,
+            "expected IK clutter policy to place clutter_cube_b on the ground target"
+        );
+    }
+
+    #[test]
+    fn ik_clutter_policy_grasps_center_target() {
+        use crate::{IkClutterPickPlacePolicy, Policy};
+
+        let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        let approach_end = 20 + 360;
+        for _ in 0..approach_end {
+            step = episode.step(policy.act(&step.observation));
+            if episode.simulation().is_grasping() {
+                return;
+            }
+        }
+        panic!("expected IK clutter policy to grasp center cube during approach");
+    }
+
     #[test]
     fn clutter_pick_place_episode_grasps_center_target() {
         let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
@@ -1527,6 +1656,99 @@ mod tests {
             base_dist < 0.55,
             "expected mobile base to approach clutter_cube_a, remaining distance={base_dist:.3} m"
         );
+    }
+
+    #[test]
+    #[ignore = "mobile drive+arm grasp tuning in progress (see mobile_clutter_transport_script_places_cube_a)"]
+    fn mobile_clutter_policy_completes_place() {
+        use crate::{IkMobileClutterPickPlacePolicy, Policy};
+
+        let mut episode =
+            MobileManipulatorEpisode::new(mobile_clutter_place_config("clutter_cube_a"));
+        let mut policy = IkMobileClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        let mut grasped = false;
+        for _ in 0..policy.total_steps() {
+            step = episode.step(policy.act(&step.observation));
+            if episode.simulation().is_grasping() {
+                grasped = true;
+            }
+        }
+        assert!(
+            grasped,
+            "expected mobile clutter policy to grasp clutter_cube_a before place"
+        );
+        assert!(
+            step.terminated,
+            "expected mobile clutter policy to place clutter_cube_a on the ground target"
+        );
+    }
+
+    #[test]
+    #[ignore = "manual tuning helper"]
+    fn mobile_clutter_contact_without_drive() {
+        let mut episode =
+            MobileManipulatorEpisode::new(mobile_clutter_place_config("clutter_cube_a"));
+        assert!(
+            clutter_target_accepts_gripper_contact(&mut episode, "clutter_cube_a"),
+            "expected gripper contact from spawn on mobile clutter scene"
+        );
+    }
+
+    #[test]
+    #[ignore = "mobile drive+arm grasp tuning in progress"]
+    fn mobile_clutter_transport_script_places_cube_a() {
+        use crate::{IkMobileClutterPickPlacePolicy, Policy};
+
+        let mut episode =
+            MobileManipulatorEpisode::new(mobile_clutter_place_config("clutter_cube_a"));
+        let mut step = episode.reset();
+        for _ in 0..80 {
+            step = episode.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..480 {
+            let obs = &step.observation;
+            let object_x = obs.ee_x_m + obs.target_dx_m;
+            let object_z = obs.ee_z_m + obs.target_dz_m;
+            let dx = object_x - obs.base_x_m;
+            let dz = object_z - obs.base_z_m;
+            let base_dist = (dx * dx + dz * dz).sqrt();
+            if base_dist < 0.55 && obs.target_dx_m > 0.08 && obs.target_dz_m.abs() < 0.35 {
+                break;
+            }
+            let forward = dx.clamp(0.0, 1.5);
+            let turn = dz.clamp(-1.0, 1.0);
+            step = episode.step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s: (2.5 * forward - 1.5 * turn).clamp(-3.0, 3.0),
+                right_wheel_velocity_rad_s: (2.5 * forward + 1.5 * turn).clamp(-3.0, 3.0),
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let mut policy = IkMobileClutterPickPlacePolicy::new();
+        policy.set_step(policy.arm_start_step());
+        let mut grasped = false;
+        for _ in 0..policy.total_steps() - policy.arm_start_step() {
+            step = episode.step(policy.act(&step.observation));
+            if episode.simulation().is_grasping() {
+                grasped = true;
+            }
+            if step.terminated {
+                return;
+            }
+        }
+        if !grasped {
+            let obs = &step.observation;
+            panic!(
+                "grasp failed after drive: target_dx={:.3} target_dz={:.3} ee=({:.3},{:.3}) base=({:.3},{:.3})",
+                obs.target_dx_m,
+                obs.target_dz_m,
+                obs.ee_x_m,
+                obs.ee_z_m,
+                obs.base_x_m,
+                obs.base_z_m
+            );
+        }
+        panic!("expected mobile transport script to terminate with place success");
     }
 
     #[test]

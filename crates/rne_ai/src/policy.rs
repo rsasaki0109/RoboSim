@@ -2,6 +2,9 @@
 
 use crate::episode::Episode;
 use crate::mm_lift_kinematics::{MmLiftGripperTarget, MmLiftJointTarget, MmLiftKinematics};
+use crate::mm_minimal_kinematics::{
+    MmMinimalGripperTarget, MmMinimalJointTarget, MmMinimalKinematics,
+};
 use crate::observation::MobileManipulatorObservation;
 
 /// Maps observations to actions for a specific episode type.
@@ -293,6 +296,319 @@ impl Policy<crate::MobileManipulatorEpisode> for IkLiftPickPlacePolicy {
     }
 }
 
+const CLUTTER_SETTLE_STEPS: u64 = 20;
+const CLUTTER_APPROACH_STEPS: u64 = 360;
+const CLUTTER_IK_CARRY_STEPS: u64 = 340;
+const CLUTTER_HOLD_STEPS: u64 = 80;
+const CLUTTER_RELEASE_STEPS: u64 = 150;
+const CLUTTER_CARRY_SHOULDER_RAD_S: f64 = -0.50;
+const CLUTTER_CARRY_ELBOW_RAD_S: f64 = -0.69;
+const CLUTTER_CARRY_GRIPPER_RAD_S: f64 = -2.5;
+
+const MOBILE_CLUTTER_SETTLE_STEPS: u64 = 80;
+const MOBILE_CLUTTER_DRIVE_STEPS: u64 = 480;
+const MOBILE_CLUTTER_MIN_DRIVE_STEPS: u64 = 40;
+const MOBILE_CLUTTER_ARM_SETTLE_STEPS: u64 = 60;
+const MOBILE_CLUTTER_CARRY_SHOULDER_RAD_S: f64 = 0.6;
+const MOBILE_CLUTTER_CARRY_ELBOW_RAD_S: f64 = 0.0;
+const MOBILE_CLUTTER_IK_CARRY_STEPS: u64 = 220;
+const MOBILE_CLUTTER_HOLD_STEPS: u64 = 40;
+const MOBILE_CLUTTER_RELEASE_STEPS: u64 = 150;
+
+/// IK-assisted navigate → pick → place for `mm_mobile` clutter episodes.
+///
+/// Drives the diff-drive base toward the pick target, then reuses the fixed-base clutter
+/// arm phases (approach → tuned carry → hold → release) toward
+/// [`mm_mobile_clutter_place_target`](crate::mm_mobile_clutter_place_target).
+#[derive(Clone, Debug, PartialEq)]
+pub struct IkMobileClutterPickPlacePolicy {
+    step: u64,
+    kin: MmMinimalKinematics,
+}
+
+impl Default for IkMobileClutterPickPlacePolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IkMobileClutterPickPlacePolicy {
+    /// Creates a policy for the default mobile clutter place target.
+    pub fn new() -> Self {
+        Self {
+            step: 0,
+            kin: MmMinimalKinematics::mm_minimal(),
+        }
+    }
+
+    /// Total scripted steps (settle → drive → arm settle → approach → carry → hold → release).
+    pub fn total_steps(&self) -> u64 {
+        MOBILE_CLUTTER_SETTLE_STEPS
+            + MOBILE_CLUTTER_DRIVE_STEPS
+            + MOBILE_CLUTTER_ARM_SETTLE_STEPS
+            + CLUTTER_APPROACH_STEPS
+            + MOBILE_CLUTTER_IK_CARRY_STEPS
+            + MOBILE_CLUTTER_HOLD_STEPS
+            + MOBILE_CLUTTER_RELEASE_STEPS
+    }
+
+    /// Step index where the arm settle / approach phases begin (after base drive).
+    pub fn arm_start_step(&self) -> u64 {
+        self.mobile_arm_start_step()
+    }
+
+    /// Overrides the internal step counter (for composing drive + arm phases in tests).
+    pub fn set_step(&mut self, step: u64) {
+        self.step = step;
+    }
+
+    fn mobile_arm_start_step(&self) -> u64 {
+        MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS + MOBILE_CLUTTER_ARM_SETTLE_STEPS
+    }
+
+    /// Returns the action for the current step and advances the internal counter.
+    pub fn next_action(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        use crate::MobileManipulatorAction;
+
+        let arm_start = self.mobile_arm_start_step();
+        let approach_end = arm_start + CLUTTER_APPROACH_STEPS;
+        let carry_end = approach_end + MOBILE_CLUTTER_IK_CARRY_STEPS;
+        let hold_end = carry_end + MOBILE_CLUTTER_HOLD_STEPS;
+        let release_end = hold_end + MOBILE_CLUTTER_RELEASE_STEPS;
+
+        let s = self.step;
+        self.step += 1;
+
+        if s < MOBILE_CLUTTER_SETTLE_STEPS {
+            MobileManipulatorAction::default()
+        } else if s < MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS {
+            let action = mobile_clutter_drive_action(observation);
+            let driven = s - MOBILE_CLUTTER_SETTLE_STEPS + 1;
+            if driven >= MOBILE_CLUTTER_MIN_DRIVE_STEPS && mobile_drive_ready_for_arm_m(observation)
+            {
+                self.step = arm_start;
+            }
+            action
+        } else if s < arm_start {
+            mobile_clutter_backup_action(observation)
+        } else if s < approach_end {
+            clutter_approach_action(observation, &self.kin)
+        } else if s < carry_end {
+            mobile_clutter_carry_action()
+        } else if s < hold_end {
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.0,
+                ..MobileManipulatorAction::default()
+            }
+        } else if s < release_end {
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: 3.0,
+                ..MobileManipulatorAction::default()
+            }
+        } else {
+            MobileManipulatorAction::default()
+        }
+    }
+}
+
+impl Policy<crate::MobileManipulatorEpisode> for IkMobileClutterPickPlacePolicy {
+    fn act(
+        &mut self,
+        observation: &crate::MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        self.next_action(observation)
+    }
+}
+
+/// IK-assisted pick-and-place for the fixed-base `mm_minimal` clutter episodes.
+///
+/// Uses analytic IK during approach, then a tuned fixed-velocity carry that tracks
+/// object-to-place deltas in simulation before release on the ground target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IkClutterPickPlacePolicy {
+    step: u64,
+    kin: MmMinimalKinematics,
+}
+
+impl Default for IkClutterPickPlacePolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IkClutterPickPlacePolicy {
+    /// Creates a policy for the default clutter place target.
+    pub fn new() -> Self {
+        Self {
+            step: 0,
+            kin: MmMinimalKinematics::mm_minimal(),
+        }
+    }
+
+    /// Total scripted steps (settle → approach → carry → hold → release).
+    pub fn total_steps(&self) -> u64 {
+        CLUTTER_SETTLE_STEPS
+            + CLUTTER_APPROACH_STEPS
+            + CLUTTER_IK_CARRY_STEPS
+            + CLUTTER_HOLD_STEPS
+            + CLUTTER_RELEASE_STEPS
+    }
+
+    /// Returns the action for the current step and advances the internal counter.
+    pub fn next_action(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        use crate::MobileManipulatorAction;
+        let approach_end = CLUTTER_SETTLE_STEPS + CLUTTER_APPROACH_STEPS;
+        let carry_end = approach_end + CLUTTER_IK_CARRY_STEPS;
+        let hold_end = carry_end + CLUTTER_HOLD_STEPS;
+        let release_end = hold_end + CLUTTER_RELEASE_STEPS;
+
+        let s = self.step;
+        self.step += 1;
+
+        if s < CLUTTER_SETTLE_STEPS {
+            MobileManipulatorAction::default()
+        } else if s < approach_end {
+            clutter_approach_action(observation, &self.kin)
+        } else if s < carry_end {
+            clutter_carry_action(observation)
+        } else if s < hold_end {
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: CLUTTER_CARRY_GRIPPER_RAD_S,
+                ..MobileManipulatorAction::default()
+            }
+        } else if s < release_end {
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: 3.0,
+                ..MobileManipulatorAction::default()
+            }
+        } else {
+            MobileManipulatorAction::default()
+        }
+    }
+}
+
+impl Policy<crate::MobileManipulatorEpisode> for IkClutterPickPlacePolicy {
+    fn act(
+        &mut self,
+        observation: &crate::MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        self.next_action(observation)
+    }
+}
+
+fn clutter_approach_action(
+    observation: &MobileManipulatorObservation,
+    kin: &MmMinimalKinematics,
+) -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    let object_x_m = observation.ee_x_m + observation.target_dx_m;
+    let object_z_m = observation.ee_z_m + observation.target_dz_m;
+    let target = MmMinimalGripperTarget::new(object_x_m, kin.shoulder_y_m(), object_z_m);
+    if let Ok(joints) = kin.inverse_kinematics(target) {
+        let mut action = joint_rate_toward_minimal(observation, joints, CARRY_JOINT_RATE_RAD_S);
+        action.gripper_velocity_rad_s = -2.5;
+        action
+    } else {
+        MobileManipulatorAction {
+            shoulder_velocity_rad_s: (4.0 * observation.target_dx_m).clamp(-6.0, 6.0),
+            elbow_velocity_rad_s: (4.0 * observation.target_dz_m).clamp(-6.0, 6.0),
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        }
+    }
+}
+
+fn clutter_carry_action(
+    _observation: &MobileManipulatorObservation,
+) -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    MobileManipulatorAction {
+        gripper_velocity_rad_s: CLUTTER_CARRY_GRIPPER_RAD_S,
+        shoulder_velocity_rad_s: CLUTTER_CARRY_SHOULDER_RAD_S,
+        elbow_velocity_rad_s: CLUTTER_CARRY_ELBOW_RAD_S,
+        ..MobileManipulatorAction::default()
+    }
+}
+
+fn mobile_clutter_carry_action() -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    MobileManipulatorAction {
+        gripper_velocity_rad_s: -2.0,
+        shoulder_velocity_rad_s: MOBILE_CLUTTER_CARRY_SHOULDER_RAD_S,
+        elbow_velocity_rad_s: MOBILE_CLUTTER_CARRY_ELBOW_RAD_S,
+        ..MobileManipulatorAction::default()
+    }
+}
+
+fn mobile_clutter_drive_action(
+    observation: &MobileManipulatorObservation,
+) -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    let object_x_m = observation.ee_x_m + observation.target_dx_m;
+    let object_z_m = observation.ee_z_m + observation.target_dz_m;
+    let dx = object_x_m - observation.base_x_m;
+    let dz = object_z_m - observation.base_z_m;
+    let forward = dx.clamp(0.0, 1.5);
+    let turn = dz.clamp(-1.0, 1.0);
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: (2.5 * forward - 1.5 * turn).clamp(-3.0, 3.0),
+        right_wheel_velocity_rad_s: (2.5 * forward + 1.5 * turn).clamp(-3.0, 3.0),
+        ..MobileManipulatorAction::default()
+    }
+}
+
+fn mobile_drive_ready_for_arm_m(observation: &MobileManipulatorObservation) -> bool {
+    let object_x_m = observation.ee_x_m + observation.target_dx_m;
+    let object_z_m = observation.ee_z_m + observation.target_dz_m;
+    let dx = object_x_m - observation.base_x_m;
+    let dz = object_z_m - observation.base_z_m;
+    let base_dist = (dx * dx + dz * dz).sqrt();
+    base_dist < 0.55 && observation.target_dx_m > 0.08 && observation.target_dz_m.abs() < 0.35
+}
+
+fn mobile_clutter_backup_action(
+    observation: &MobileManipulatorObservation,
+) -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    if observation.target_dx_m >= 0.08 {
+        return MobileManipulatorAction::default();
+    }
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: -0.8,
+        right_wheel_velocity_rad_s: -0.8,
+        ..MobileManipulatorAction::default()
+    }
+}
+
+fn joint_rate_toward_minimal(
+    observation: &MobileManipulatorObservation,
+    target: MmMinimalJointTarget,
+    max_rate_rad_s: f64,
+) -> crate::MobileManipulatorAction {
+    use crate::MobileManipulatorAction;
+    MobileManipulatorAction {
+        shoulder_velocity_rad_s: signed_rate_toward(
+            observation.shoulder_position_rad,
+            target.shoulder_rad,
+            max_rate_rad_s,
+            0.05,
+        ),
+        elbow_velocity_rad_s: signed_rate_toward(
+            observation.elbow_position_rad,
+            target.elbow_rad,
+            max_rate_rad_s,
+            0.05,
+        ),
+        ..MobileManipulatorAction::default()
+    }
+}
+
 fn pick_place_total_steps(swing_steps: u64) -> u64 {
     LIFT + swing_steps + SETTLE_AFTER_SWING + LOWER_TO_PLACE + RELEASE
 }
@@ -426,6 +742,18 @@ mod tests {
             separation > 0.15,
             "swing step count should scale carry reach: near={near:?}, far={far:?}, separation={separation:.2} m"
         );
+    }
+
+    #[test]
+    fn ik_clutter_policy_total_steps_matches_phases() {
+        let policy = IkClutterPickPlacePolicy::new();
+        assert_eq!(policy.total_steps(), 950);
+    }
+
+    #[test]
+    fn ik_mobile_clutter_policy_total_steps_matches_phases() {
+        let policy = IkMobileClutterPickPlacePolicy::new();
+        assert_eq!(policy.total_steps(), 1390);
     }
 
     #[test]

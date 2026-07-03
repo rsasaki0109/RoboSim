@@ -39,6 +39,8 @@ iterations, demonstrating an end-to-end learning loop without `torch`/`gymnasium
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py          # 20 iterations
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --smoke  # short, asserts learning
 .venv/bin/python examples/27_mobile_manipulator_rl/train_place.py --smoke  # CEM on place task
+.venv/bin/python examples/27_mobile_manipulator_rl/train_clutter.py --smoke  # CEM on clutter place
+.venv/bin/python examples/27_mobile_manipulator_rl/train_clutter_ppo.py --smoke  # SB3 PPO on clutter place
 .venv/bin/python examples/27_mobile_manipulator_rl/train_visuomotor.py --smoke  # depth-conditioned reach
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json
 .venv/bin/python examples/27_mobile_manipulator_rl/train.py --checkpoint cem_checkpoint.json --resume --iterations 30

@@ -16,8 +16,8 @@ body_type = "fixed"
 
 [[obstacles]]
 name = "drop_zone"
-translation_m = [1.05, 0.52, 0.0]
-half_extents_m = [0.06, 0.02, 0.06]
+translation_m = [0.82, 0.025, -0.42]
+half_extents_m = [0.06, 0.025, 0.06]
 body_type = "fixed"
 
 [[obstacles]]

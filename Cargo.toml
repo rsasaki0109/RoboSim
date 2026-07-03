@@ -49,6 +49,8 @@ members = [
   "examples/30_mobile_manipulator_lift",
   "examples/31_mobile_manipulator_lift_pick_place",
   "examples/32_lift_pick_place_hero",
+  "examples/33_clutter_pick_place_e2e",
+  "examples/34_mobile_clutter_pick_place_e2e",
   "tests/determinism",
   "tools/rne_asset_cli",
   "xtask",
@@ -62,7 +64,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
-version = "0.11.0"
+version = "0.12.0"
 
 [workspace.dependencies]
 anyhow = "1"
