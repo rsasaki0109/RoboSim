@@ -99,20 +99,31 @@ impl MmMinimalKinematics {
     }
 
     /// Solves IK when the shoulder pivot sits at the given mobile-base pose.
+    ///
+    /// `base_yaw_rad` rotates the world-frame target into the base frame so the
+    /// planar chain solves in the frame the joint motors are defined in.
     pub fn inverse_kinematics_at_base(
         &self,
         base_x_m: f64,
         base_y_m: f64,
         base_z_m: f64,
+        base_yaw_rad: f64,
         target: MmMinimalGripperTarget,
     ) -> Result<MmMinimalJointTarget, MmMinimalIkError> {
+        let shoulder_x_m = base_x_m;
+        let shoulder_z_m = base_z_m + self.mobile_shoulder_z_offset_m();
+        let (local_x, local_z) = rotate_y_xz(
+            target.x_m - shoulder_x_m,
+            target.z_m - shoulder_z_m,
+            base_yaw_rad,
+        );
         let local = Self {
             base_y_m,
-            shoulder_x_m: base_x_m,
-            shoulder_z_m: base_z_m + self.mobile_shoulder_z_offset_m(),
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
             ..*self
         };
-        local.inverse_kinematics(target)
+        local.inverse_kinematics(MmMinimalGripperTarget::new(local_x, target.y_m, local_z))
     }
 
     /// Shoulder pivot height in world Y.
@@ -319,6 +330,35 @@ mod tests {
             fk.y_m,
             fk.z_m
         );
+    }
+
+    #[test]
+    fn ik_at_base_roundtrip_with_yaw() {
+        let kin = MmMinimalKinematics::mm_mobile();
+        // Elbow-up branch (IK always returns elbow_rad <= 0).
+        let joints = MmMinimalJointTarget {
+            shoulder_rad: 0.5,
+            elbow_rad: -0.7,
+        };
+        let base = (1.2_f64, 0.25_f64, -0.8_f64);
+        for yaw_rad in [0.0, 0.6, -1.1, 2.4] {
+            // Tip in the base frame (shoulder pivot at the origin).
+            let local = MmMinimalKinematics {
+                base_y_m: base.1,
+                shoulder_x_m: 0.0,
+                shoulder_z_m: 0.0,
+                ..kin
+            };
+            let tip_local = local.forward_kinematics(joints);
+            // rotate_y_xz(x, z, -yaw) applies the URDF-convention base yaw rotation.
+            let (wx, wz) = rotate_y_xz(tip_local.x_m, tip_local.z_m, -yaw_rad);
+            let target = MmMinimalGripperTarget::new(base.0 + wx, tip_local.y_m, base.2 + wz);
+            let solved = kin
+                .inverse_kinematics_at_base(base.0, base.1, base.2, yaw_rad, target)
+                .expect("reachable rotated target");
+            assert_relative_eq!(solved.shoulder_rad, joints.shoulder_rad, epsilon = 1e-9);
+            assert_relative_eq!(solved.elbow_rad, joints.elbow_rad, epsilon = 1e-9);
+        }
     }
 
     #[test]
