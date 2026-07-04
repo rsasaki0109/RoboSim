@@ -247,8 +247,11 @@ fn main() {
     let mut render_metrics = HeroRenderMetrics::new();
     let animation_steps = hero_animation_policy_steps();
     let mut last_rgba8: Option<Vec<u8>> = None;
-    for frame in 0..ANIMATION_FRAME_COUNT {
-        let target_step = animation_steps[frame];
+    for (frame, &target_step) in animation_steps
+        .iter()
+        .enumerate()
+        .take(ANIMATION_FRAME_COUNT)
+    {
         while policy_step < target_step {
             let obs = sim.step(policy.next_action());
             policy_step += 1;
@@ -421,10 +424,7 @@ impl HeroRenderMetrics {
     }
 
     fn observe_hold(&mut self, rgba8: &[u8]) {
-        if self.hold_frame_count == 0 && !self.previous_frame_rgba8.is_empty() {
-            let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
-            self.max_hold_frame_delta_ratio = self.max_hold_frame_delta_ratio.max(delta_ratio);
-        } else if self.hold_frame_count > 0 {
+        if !self.previous_frame_rgba8.is_empty() {
             let delta_ratio = frame_delta_ratio(&self.previous_frame_rgba8, rgba8);
             self.max_hold_frame_delta_ratio = self.max_hold_frame_delta_ratio.max(delta_ratio);
         }
