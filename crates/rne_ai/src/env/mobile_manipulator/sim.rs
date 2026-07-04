@@ -1652,6 +1652,30 @@ mod tests {
     }
 
     #[test]
+    fn mobile_twist_positive_yaw_rate_decreases_observed_yaw() {
+        let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml");
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("scene");
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let yaw_start = sim.observe().base_yaw_rad;
+        let (left, right) = crate::mm_mobile_twist_to_wheel_velocities(0.0, 0.5);
+        for _ in 0..120 {
+            sim.step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s: left,
+                right_wheel_velocity_rad_s: right,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let yaw_end = sim.observe().base_yaw_rad;
+        assert!(
+            yaw_end < yaw_start - 0.2,
+            "positive twist yaw rate decreases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
+        );
+    }
+
+    #[test]
     fn loads_mm_mobile_scene_asset() {
         let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_mobile.rne.scene.toml");

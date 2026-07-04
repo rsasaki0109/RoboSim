@@ -254,7 +254,8 @@ pub fn mm_mobile_clutter_place_target() -> crate::reach::ReachTarget {
     )
 }
 
-fn rotate_y_xz(x: f64, z: f64, angle_rad: f64) -> (f64, f64) {
+/// Rotates a world-frame XZ offset into the mobile-base frame (positive yaw about +Y).
+pub(crate) fn rotate_y_xz(x: f64, z: f64, angle_rad: f64) -> (f64, f64) {
     let (sin, cos) = angle_rad.sin_cos();
     (x * cos - z * sin, x * sin + z * cos)
 }
