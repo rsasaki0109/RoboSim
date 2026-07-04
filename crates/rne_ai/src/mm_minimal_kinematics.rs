@@ -76,6 +76,56 @@ impl MmMinimalKinematics {
         }
     }
 
+    /// Geometry for the diff-drive `mm_mobile` asset (shoulder pivot offset differs).
+    pub fn mm_mobile() -> Self {
+        Self {
+            base_y_m: 0.25,
+            shoulder_offset_y_m: 0.15,
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
+            upper_arm_m: 0.5,
+            forearm_m: 0.4,
+        }
+    }
+
+    /// Extra shoulder-pivot Z offset in world meters for the mobile base pose.
+    pub fn mobile_shoulder_z_offset_m(&self) -> f64 {
+        0.0
+    }
+
+    /// Shoulder pivot height in world Y for a base at `base_y_m`.
+    pub fn shoulder_y_at_base(&self, base_y_m: f64) -> f64 {
+        base_y_m + self.shoulder_offset_y_m
+    }
+
+    /// Solves IK when the shoulder pivot sits at the given mobile-base pose.
+    ///
+    /// `base_yaw_rad` rotates the world-frame target into the base frame so the
+    /// planar chain solves in the frame the joint motors are defined in.
+    pub fn inverse_kinematics_at_base(
+        &self,
+        base_x_m: f64,
+        base_y_m: f64,
+        base_z_m: f64,
+        base_yaw_rad: f64,
+        target: MmMinimalGripperTarget,
+    ) -> Result<MmMinimalJointTarget, MmMinimalIkError> {
+        let shoulder_x_m = base_x_m;
+        let shoulder_z_m = base_z_m + self.mobile_shoulder_z_offset_m();
+        let (local_x, local_z) = rotate_y_xz(
+            target.x_m - shoulder_x_m,
+            target.z_m - shoulder_z_m,
+            base_yaw_rad,
+        );
+        let local = Self {
+            base_y_m,
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
+            ..*self
+        };
+        local.inverse_kinematics(MmMinimalGripperTarget::new(local_x, target.y_m, local_z))
+    }
+
     /// Shoulder pivot height in world Y.
     pub fn shoulder_y_m(&self) -> f64 {
         self.base_y_m + self.shoulder_offset_y_m
@@ -241,6 +291,81 @@ fn planar_chain_shoulder(
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn fk_matches_sim_mm_mobile_at_idle() {
+        use crate::{mm_mobile_clutter_scene_path, MobileManipulatorAction, MobileManipulatorSim};
+
+        let kin = MmMinimalKinematics::mm_mobile();
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(&mm_mobile_clutter_scene_path()).expect("scene");
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let obs = sim.observe();
+        // FK in the base frame, then rotate by the settled base yaw so the check
+        // holds even when the physics settle drifts differently per platform.
+        let local = MmMinimalKinematics {
+            base_y_m: obs.base_y_m,
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
+            ..kin
+        };
+        let fk_local = local.forward_kinematics(MmMinimalJointTarget {
+            shoulder_rad: obs.shoulder_position_rad,
+            elbow_rad: obs.elbow_position_rad,
+        });
+        let (wx, wz) = rotate_y_xz(fk_local.x_m, fk_local.z_m, -obs.base_yaw_rad);
+        let fk_x = obs.base_x_m + wx;
+        let fk_y = fk_local.y_m;
+        let fk_z = obs.base_z_m + kin.mobile_shoulder_z_offset_m() + wz;
+        let gripper = sim
+            .link_translation_m("gripper_base_link")
+            .expect("gripper link");
+        let err =
+            ((fk_x - gripper.0).powi(2) + (fk_y - gripper.1).powi(2) + (fk_z - gripper.2).powi(2))
+                .sqrt();
+        assert!(
+            err < 0.08,
+            "mm_mobile FK should match sim after settle, err={err:.3} m sim=({:.3},{:.3},{:.3}) fk=({:.3},{:.3},{:.3}) yaw={:.3}",
+            gripper.0,
+            gripper.1,
+            gripper.2,
+            fk_x,
+            fk_y,
+            fk_z,
+            obs.base_yaw_rad
+        );
+    }
+
+    #[test]
+    fn ik_at_base_roundtrip_with_yaw() {
+        let kin = MmMinimalKinematics::mm_mobile();
+        // Elbow-up branch (IK always returns elbow_rad <= 0).
+        let joints = MmMinimalJointTarget {
+            shoulder_rad: 0.5,
+            elbow_rad: -0.7,
+        };
+        let base = (1.2_f64, 0.25_f64, -0.8_f64);
+        for yaw_rad in [0.0, 0.6, -1.1, 2.4] {
+            // Tip in the base frame (shoulder pivot at the origin).
+            let local = MmMinimalKinematics {
+                base_y_m: base.1,
+                shoulder_x_m: 0.0,
+                shoulder_z_m: 0.0,
+                ..kin
+            };
+            let tip_local = local.forward_kinematics(joints);
+            // rotate_y_xz(x, z, -yaw) applies the URDF-convention base yaw rotation.
+            let (wx, wz) = rotate_y_xz(tip_local.x_m, tip_local.z_m, -yaw_rad);
+            let target = MmMinimalGripperTarget::new(base.0 + wx, tip_local.y_m, base.2 + wz);
+            let solved = kin
+                .inverse_kinematics_at_base(base.0, base.1, base.2, yaw_rad, target)
+                .expect("reachable rotated target");
+            assert_relative_eq!(solved.shoulder_rad, joints.shoulder_rad, epsilon = 1e-9);
+            assert_relative_eq!(solved.elbow_rad, joints.elbow_rad, epsilon = 1e-9);
+        }
+    }
 
     #[test]
     fn fk_ik_roundtrip_for_reachable_targets() {

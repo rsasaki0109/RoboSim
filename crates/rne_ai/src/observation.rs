@@ -89,4 +89,16 @@ pub struct MobileManipulatorObservation {
     pub wrist_depth_min_m: f64,
     /// Index of the target clutter object when a multi-object pick task is active.
     pub target_object_index: u32,
+    /// World-frame pick object position for Place tasks before grasp (zero otherwise).
+    pub pick_object_x_m: f64,
+    /// World-frame pick object Y for Place tasks before grasp (zero otherwise).
+    pub pick_object_y_m: f64,
+    /// World-frame pick object Z for Place tasks before grasp (zero otherwise).
+    pub pick_object_z_m: f64,
+    /// Gripper-frame X offset to the pick object (object_x - gripper_x).
+    pub gripper_target_dx_m: f64,
+    /// Gripper-frame Y offset to the pick object (object_y - gripper_y).
+    pub gripper_target_dy_m: f64,
+    /// Gripper-frame Z offset to the pick object (object_z - gripper_z).
+    pub gripper_target_dz_m: f64,
 }
