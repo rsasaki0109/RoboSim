@@ -159,11 +159,9 @@ fn hero_media_check() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("README hero metadata missing encode block"))?;
     let gif_progression = inspect_gif_frame_progression(
         &gif_path,
-        usize::try_from(
-            encode["animation_frames"]
-                .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("README hero encode block missing animation_frames"))?,
-        )?,
+        usize::try_from(encode["animation_frames"].as_u64().ok_or_else(|| {
+            anyhow::anyhow!("README hero encode block missing animation_frames")
+        })?)?,
         usize::try_from(
             encode["hold_frames"]
                 .as_u64()
@@ -311,7 +309,9 @@ fn hero_media_check() -> anyhow::Result<()> {
         })?;
     let max_hold_frame_delta_ratio = metadata["simulation"]["max_hold_frame_delta_ratio"]
         .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio")
+        })?;
     let max_hold_frame_delta_ratio_threshold = metadata["simulation"]
         ["max_hold_frame_delta_ratio_threshold"]
         .as_f64()
@@ -540,7 +540,8 @@ fn inspect_gif_frame_progression(
             );
             if frame_count < animation_pairs_end + 1 {
                 let delta_ratio = frame_delta_ratio(&previous_frame_rgba8, &rgba8)?;
-                min_consecutive_frame_delta_ratio = min_consecutive_frame_delta_ratio.min(delta_ratio);
+                min_consecutive_frame_delta_ratio =
+                    min_consecutive_frame_delta_ratio.min(delta_ratio);
             }
             first_last_frame_delta_ratio = frame_delta_ratio(&first_frame_rgba8, &rgba8)?;
         }
