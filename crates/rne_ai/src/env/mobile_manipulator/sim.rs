@@ -1,4 +1,4 @@
-﻿//! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
+//! Headless mobile manipulator environment (fixed-base arm and diff-drive mobile variant).
 
 use super::drive::{
     wheel_command_to_motor_rad_s, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_RADIUS_M,
