@@ -171,10 +171,8 @@ fn hero_poster_animation_frame(steps: &[usize; ANIMATION_FRAME_COUNT]) -> usize 
 }
 
 fn hero_camera_yaw_rad(animation_frame: usize) -> f64 {
-    let progress =
-        animation_frame as f64 / (ANIMATION_FRAME_COUNT.saturating_sub(1).max(1) as f64);
-    CAMERA_ORBIT_YAW_START_RAD
-        + (CAMERA_ORBIT_YAW_END_RAD - CAMERA_ORBIT_YAW_START_RAD) * progress
+    let progress = animation_frame as f64 / (ANIMATION_FRAME_COUNT.saturating_sub(1).max(1) as f64);
+    CAMERA_ORBIT_YAW_START_RAD + (CAMERA_ORBIT_YAW_END_RAD - CAMERA_ORBIT_YAW_START_RAD) * progress
 }
 
 fn main() {
@@ -317,13 +315,8 @@ fn main() {
         render_metrics.observe_hold(&hold_rgba8);
         let frame_index = ANIMATION_FRAME_COUNT + hold;
         let frame_path = frames_dir.join(format!("frame-{frame_index:03}.png"));
-        write_png(
-            &frame_path,
-            &hold_rgba8,
-            RENDER_WIDTH,
-            RENDER_HEIGHT,
-        )
-        .expect("write hold frame png");
+        write_png(&frame_path, &hold_rgba8, RENDER_WIDTH, RENDER_HEIGHT)
+            .expect("write hold frame png");
         frame_paths.push(frame_path);
     }
 
