@@ -303,32 +303,38 @@ mod tests {
             sim.step(MobileManipulatorAction::default());
         }
         let obs = sim.observe();
-        let model = MmMinimalKinematics {
+        // FK in the base frame, then rotate by the settled base yaw so the check
+        // holds even when the physics settle drifts differently per platform.
+        let local = MmMinimalKinematics {
             base_y_m: obs.base_y_m,
-            shoulder_x_m: obs.base_x_m,
-            shoulder_z_m: obs.base_z_m + kin.mobile_shoulder_z_offset_m(),
+            shoulder_x_m: 0.0,
+            shoulder_z_m: 0.0,
             ..kin
         };
-        let fk = model.forward_kinematics(MmMinimalJointTarget {
+        let fk_local = local.forward_kinematics(MmMinimalJointTarget {
             shoulder_rad: obs.shoulder_position_rad,
             elbow_rad: obs.elbow_position_rad,
         });
+        let (wx, wz) = rotate_y_xz(fk_local.x_m, fk_local.z_m, -obs.base_yaw_rad);
+        let fk_x = obs.base_x_m + wx;
+        let fk_y = fk_local.y_m;
+        let fk_z = obs.base_z_m + kin.mobile_shoulder_z_offset_m() + wz;
         let gripper = sim
             .link_translation_m("gripper_base_link")
             .expect("gripper link");
-        let err = ((fk.x_m - gripper.0).powi(2)
-            + (fk.y_m - gripper.1).powi(2)
-            + (fk.z_m - gripper.2).powi(2))
-        .sqrt();
+        let err =
+            ((fk_x - gripper.0).powi(2) + (fk_y - gripper.1).powi(2) + (fk_z - gripper.2).powi(2))
+                .sqrt();
         assert!(
             err < 0.08,
-            "mm_mobile FK should match sim after settle, err={err:.3} m sim=({:.3},{:.3},{:.3}) fk=({:.3},{:.3},{:.3})",
+            "mm_mobile FK should match sim after settle, err={err:.3} m sim=({:.3},{:.3},{:.3}) fk=({:.3},{:.3},{:.3}) yaw={:.3}",
             gripper.0,
             gripper.1,
             gripper.2,
-            fk.x_m,
-            fk.y_m,
-            fk.z_m
+            fk_x,
+            fk_y,
+            fk_z,
+            obs.base_yaw_rad
         );
     }
 
