@@ -392,8 +392,7 @@ impl IkMobileClutterPickPlacePolicy {
         } else if s < MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS {
             let action = mobile_clutter_drive_action(observation);
             let driven = s - MOBILE_CLUTTER_SETTLE_STEPS + 1;
-            if driven >= MOBILE_CLUTTER_MIN_DRIVE_STEPS
-                && (mobile_drive_stop_for_arm_m(observation) || observation.target_dx_m < 0.0)
+            if driven >= MOBILE_CLUTTER_MIN_DRIVE_STEPS && mobile_drive_stop_for_arm_m(observation)
             {
                 self.step = MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS;
             }
@@ -566,49 +565,12 @@ fn mobile_transport_approach_action(step_in_approach: u64) -> crate::MobileManip
     }
 }
 
-fn mobile_clutter_approach_action(
-    observation: &MobileManipulatorObservation,
-    kin: &MmMinimalKinematics,
-) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
-    let target = MmMinimalGripperTarget::new(
-        object_x_m,
-        kin.shoulder_y_at_base(observation.base_y_m),
-        object_z_m,
-    );
-    if let Ok(joints) = kin.inverse_kinematics_at_base(
-        observation.base_x_m,
-        observation.base_y_m,
-        observation.base_z_m,
-        target,
-    ) {
-        let mut action = joint_rate_toward_minimal(observation, joints, CARRY_JOINT_RATE_RAD_S);
-        action.gripper_velocity_rad_s = -2.5;
-        action
-    } else {
-        mobile_gripper_approach_action(observation)
-    }
-}
-
 fn mobile_gripper_pick_dx(observation: &MobileManipulatorObservation) -> f64 {
     observation.gripper_target_dx_m
 }
 
 fn mobile_gripper_pick_dz(observation: &MobileManipulatorObservation) -> f64 {
     observation.gripper_target_dz_m
-}
-
-fn mobile_gripper_approach_action(
-    observation: &MobileManipulatorObservation,
-) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    MobileManipulatorAction {
-        shoulder_velocity_rad_s: (4.0 * mobile_gripper_pick_dx(observation)).clamp(-6.0, 6.0),
-        elbow_velocity_rad_s: (4.0 * mobile_gripper_pick_dz(observation)).clamp(-6.0, 6.0),
-        gripper_velocity_rad_s: -2.5,
-        ..MobileManipulatorAction::default()
-    }
 }
 
 fn mobile_pick_object_xz(observation: &MobileManipulatorObservation) -> (f64, f64) {
@@ -647,13 +609,15 @@ fn mobile_forearm_in_pick_envelope(observation: &MobileManipulatorObservation) -
         && observation.target_dz_m.abs() <= 0.35
 }
 
+/// Drive stops once the base is near the object and either the forearm is in the
+/// pick envelope or the arm has overshot past the object (backup phase recovers).
 fn mobile_drive_stop_for_arm_m(observation: &MobileManipulatorObservation) -> bool {
-    mobile_forearm_in_pick_envelope(observation)
-}
-
-fn mobile_drive_ready_for_arm_m(observation: &MobileManipulatorObservation) -> bool {
-    mobile_forearm_in_pick_envelope(observation)
-        && mobile_gripper_pick_dx(observation) >= MOBILE_CLUTTER_MIN_GRIPPER_DX_M
+    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
+    let dx = object_x_m - observation.base_x_m;
+    let dz = object_z_m - observation.base_z_m;
+    let base_dist = (dx * dx + dz * dz).sqrt();
+    base_dist < 0.55
+        && (mobile_forearm_in_pick_envelope(observation) || observation.target_dx_m < 0.0)
 }
 
 fn mobile_clutter_backup_action(
