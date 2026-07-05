@@ -25,6 +25,14 @@ All notable changes to Robot Native Engine are documented in this file.
   phases deterministic; mobile arm joints use position-hold motors with an anti-windup lead
   and the mobile world runs at the lift robot's solver iteration count.
 
+### Known issues
+
+- **Linux settle divergence**: the `mm_minimal` fixed-base arm has no position-hold motors and
+  its base/upper-arm colliders interpenetrate, so the idle pose oscillates chaotically and
+  platform floating-point differences diverge. Seven settle-sensitive `rne_ai` tests are gated
+  `#[cfg_attr(target_os = "linux", ignore)]` until the mm_minimal physics fix lands (see
+  ROADMAP v0.13 candidates); they run and pass on Windows.
+
 ## [0.12.0] - 2026-07-03
 
 ### Added
