@@ -29,9 +29,9 @@ All notable changes to Robot Native Engine are documented in this file.
 
 - **Linux settle divergence**: the `mm_minimal` fixed-base arm has no position-hold motors and
   its base/upper-arm colliders interpenetrate, so the idle pose oscillates chaotically and
-  platform floating-point differences diverge. Seven settle-sensitive `rne_ai` tests are gated
-  `#[cfg_attr(target_os = "linux", ignore)]` until the mm_minimal physics fix lands (see
-  ROADMAP v0.13 candidates); they run and pass on Windows.
+  platform floating-point differences diverge. Settle-sensitive tests (seven in `rne_ai`, one
+  in `rne_py`) are gated `#[cfg_attr(target_os = "linux", ignore)]` until the mm_minimal
+  physics fix lands (see ROADMAP v0.13 candidates); they run and pass on Windows.
 
 ## [0.12.0] - 2026-07-03
 
