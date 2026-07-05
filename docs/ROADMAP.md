@@ -1,5 +1,27 @@
 # Roadmap
 
+## v0.13 goal: mobile clutter place E2E
+
+Primary development target for v0.13. Closes the v0.12 stretch goal: full mobile
+navigate → grasp → place on `mm_mobile_clutter` (example 34,
+`IkMobileClutterPickPlacePolicy`). Fixed-base clutter (example 33) is the template;
+the pinned `mobile_clutter_pick_place_center` config already exists for RL benches.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Manipulation | Tune `IkMobileClutterPickPlacePolicy` carry/place; un-ignore `mobile_clutter_policy_completes_place` and `mobile_clutter_transport_script_places_cube_a` | Pending |
+| B | Examples | Example 34 `--smoke` asserts grasp + place (mirrors example 33) | Pending |
+| C | RL | `train_mobile_clutter.py` (CEM + replay) and PPO smoke on `mobile_clutter_pick_place_center`; wire into `xtask ci` | Pending |
+| D | Release | README hero / CHANGELOG / ROADMAP update, ship v0.13.0 | Pending |
+
+### v0.13 candidates
+
+| Area | Idea |
+|------|------|
+| Physics | Wire URDF prismatic joints to Rapier (carried-over architecture gap) |
+| Perception | Wrist-camera grasp target estimation (visuomotor pick) — natural v0.14 follow-up |
+| Scene diversity | Domain randomization + curriculum over clutter layouts |
+
 ## v0.11.0 goal: wrist RGB-D, clutter RL bench, scene diversity
 
 Primary development target for v0.11. Shipped 2026-07-03. See [CHANGELOG.md](../CHANGELOG.md).

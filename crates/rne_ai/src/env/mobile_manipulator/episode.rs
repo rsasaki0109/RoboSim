@@ -1996,7 +1996,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mobile clutter E2E still tuning drive + approach"]
     fn mobile_clutter_policy_completes_place() {
         use crate::{IkMobileClutterPickPlacePolicy, Policy};
 
@@ -2033,7 +2032,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mobile clutter E2E still tuning drive + approach"]
     fn mobile_clutter_transport_script_places_cube_a() {
         use crate::{IkMobileClutterPickPlacePolicy, Policy};
 
