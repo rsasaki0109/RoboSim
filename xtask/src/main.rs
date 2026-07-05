@@ -706,6 +706,9 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "\"{venv}\" -m maturin develop -m crates/rne_py/Cargo.toml --release"
     ))?;
     for script in [
+        // run.py replays a pick-and-place script tuned on the mm_minimal settle
+        // pose, which diverges on linux (see run_settle_sensitive_step); the CEM
+        // and PPO smokes adapt on-platform and stay enabled everywhere.
         "run.py",
         "train_place.py",
         "train_visuomotor.py",
@@ -713,9 +716,12 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "train_clutter_ppo.py",
         "train_ppo.py",
     ] {
-        run_step(&format!(
-            "\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke"
-        ))?;
+        let command = format!("\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke");
+        if script == "run.py" {
+            run_settle_sensitive_step(&command)?;
+        } else {
+            run_step(&command)?;
+        }
     }
     Ok(())
 }
