@@ -8,9 +8,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 - **Mobile clutter place E2E**: `IkMobileClutterPickPlacePolicy` now completes the full
   navigate → grasp → place loop on `mm_mobile_clutter` (observation-gated phases: poke-grasp
-  drive, carry drive to a place standoff, base-frame IK place swing with an object-over-target
-  release gate). The two mobile clutter E2E tests run un-ignored, and example 34 places
-  `clutter_cube_a` on the ground target.
+  drive, straight retreat that drags the welded object clear of the tabletop contact wedge,
+  carry drive that parks the object over the target, object-over-target release gate). The
+  two mobile clutter E2E tests run un-ignored, and example 34 places `clutter_cube_a` on the
+  ground target.
 
 ### Fixed
 

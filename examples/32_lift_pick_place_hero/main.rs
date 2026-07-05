@@ -55,7 +55,7 @@ const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
 const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
 const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
-const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.36, -2.21);
+const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.40, -2.21);
 const OBJECT_GRASP_STEP: usize = 310;
 const POSTER_POLICY_STEP: usize = OBJECT_GRASP_STEP + 45;
 const OBJECT_RELEASE_STEP: usize = 620;
@@ -812,8 +812,8 @@ impl MobilePickPlaceHeroPolicy {
                 ..MobileManipulatorAction::default()
             },
             176..=300 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 2.0,
-                right_wheel_velocity_rad_s: 5.0,
+                left_wheel_velocity_rad_s: 3.348,
+                right_wheel_velocity_rad_s: 5.913,
                 shoulder_velocity_rad_s: 0.4,
                 ..MobileManipulatorAction::default()
             },
@@ -824,8 +824,8 @@ impl MobilePickPlaceHeroPolicy {
                 ..MobileManipulatorAction::default()
             },
             391..=600 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 2.4,
-                right_wheel_velocity_rad_s: 4.0,
+                left_wheel_velocity_rad_s: 4.319,
+                right_wheel_velocity_rad_s: 3.9,
                 shoulder_velocity_rad_s: 0.2,
                 elbow_velocity_rad_s: -0.1,
                 gripper_velocity_rad_s: -2.0,

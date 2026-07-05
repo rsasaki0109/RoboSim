@@ -307,45 +307,40 @@ const CLUTTER_CARRY_GRIPPER_RAD_S: f64 = -2.5;
 
 const MOBILE_CLUTTER_SETTLE_STEPS: u64 = 80;
 const MOBILE_CLUTTER_PICK_DRIVE_STEPS: u64 = 480;
-const MOBILE_CLUTTER_CARRY_DRIVE_STEPS: u64 = 360;
-const MOBILE_CLUTTER_PLACE_SWING_STEPS: u64 = 360;
+const MOBILE_CLUTTER_RETREAT_STEPS: u64 = 300;
+const MOBILE_CLUTTER_CARRY_DRIVE_STEPS: u64 = 480;
 const MOBILE_CLUTTER_RELEASE_STEPS: u64 = CLUTTER_RELEASE_STEPS;
-/// Base-to-place-target horizontal distance at which the carry drive stops (m).
-/// Inside this standoff the place target sits within the arm's 0.9 m reach while
-/// keeping the pulled-back gripper target at a shallow elbow fold — deep folds run
-/// the forearm into the arm's self-collision envelope and stall short of the pose.
-const MOBILE_CLUTTER_PLACE_STANDOFF_M: f64 = 0.78;
 /// Object-to-place horizontal distance that gates the gripper release (m); slightly
 /// tighter than the episode's 0.12 m place tolerance to absorb the drop.
 const MOBILE_CLUTTER_RELEASE_GATE_M: f64 = 0.10;
 /// Forward speed cap while poking the gripper into the pick object (m/s).
 const MOBILE_CLUTTER_PICK_DRIVE_SPEED_M_S: f64 = 0.15;
-/// Forward speed cap while carrying the object toward the place standoff (m/s).
+/// Forward speed cap while carrying the object toward the place target (m/s).
 const MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S: f64 = 0.25;
-/// Proportional gain from remaining joint error to commanded rate in the place swing.
-const MOBILE_CLUTTER_SWING_GAIN_PER_S: f64 = 1.0;
-/// Joint-rate cap during the place swing (rad/s). Quasi-static: slow enough that the
-/// position-held joints track the ramp without momentum, so the carried object sweeps
-/// smoothly through the release gate instead of orbiting it.
-const MOBILE_CLUTTER_SWING_RATE_RAD_S: f64 = 0.25;
-/// Radial pull-back applied to the place-swing gripper target (m): the poke-grasped
-/// object rides ~0.10 m in front of the gripper base, plus margin for the arm's
-/// tracking lag, so aiming the gripper this far short of the place point settles the
-/// object itself inside the release gate.
-const MOBILE_CLUTTER_GRASP_OFFSET_M: f64 = 0.16;
+/// Wheel velocity during the post-grasp retreat (rad/s, negative = reverse).
+const MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S: f64 = -1.5;
+/// Base-to-place-target horizontal distance at which the post-grasp retreat stops
+/// (m). Far enough back that the welded object (carried ~0.95 m ahead of the base
+/// center) has been dragged clear off the clutter table's near edge, so the carry
+/// drive's turn toward the place target swings it in free air instead of grinding
+/// it across the tabletop, and so that the subsequent straight carry line passes
+/// the table on its open side.
+const MOBILE_CLUTTER_RETREAT_DISTANCE_M: f64 = 1.9;
 
-/// IK-assisted navigate → pick → place for `mm_mobile` clutter episodes.
+/// Scripted navigate → pick → retreat → carry → release for `mm_mobile` clutter
+/// episodes.
 ///
 /// Observation-gated phase machine: drives the base slowly into the pick object with
 /// the gripper closing until the contact weld grasps it (the arm stays extended, like
-/// the transport pick script), then drives toward
-/// [`mm_mobile_clutter_place_target`](crate::mm_mobile_clutter_place_target), swings the
-/// arm onto the target via base-frame IK, and releases once the carried object is over
-/// the target.
+/// the transport pick script), backs straight up until the welded object clears the
+/// clutter table, then drives toward
+/// [`mm_mobile_clutter_place_target`](crate::mm_mobile_clutter_place_target) with the
+/// object carried ahead of the base and releases once the object is over the target.
+/// The base does all the transport work: the kinematically pinned platform can drag
+/// the payload where the position-held arm's force-limited motors cannot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IkMobileClutterPickPlacePolicy {
     step: u64,
-    kin: MmMinimalKinematics,
 }
 
 impl Default for IkMobileClutterPickPlacePolicy {
@@ -357,25 +352,23 @@ impl Default for IkMobileClutterPickPlacePolicy {
 impl IkMobileClutterPickPlacePolicy {
     /// Creates a policy for the default mobile clutter place target.
     pub fn new() -> Self {
-        Self {
-            step: 0,
-            kin: MmMinimalKinematics::mm_mobile(),
-        }
+        Self { step: 0 }
     }
 
-    /// Total scripted steps (settle → pick drive → carry drive → place swing → release).
+    /// Total scripted steps (settle → pick drive → retreat → carry drive → release).
     pub fn total_steps(&self) -> u64 {
         MOBILE_CLUTTER_SETTLE_STEPS
             + MOBILE_CLUTTER_PICK_DRIVE_STEPS
+            + MOBILE_CLUTTER_RETREAT_STEPS
             + MOBILE_CLUTTER_CARRY_DRIVE_STEPS
-            + MOBILE_CLUTTER_PLACE_SWING_STEPS
             + MOBILE_CLUTTER_RELEASE_STEPS
     }
 
-    /// Step index where the arm place-swing phase begins (after both drive phases).
+    /// Step index where the release phase begins (after the drive phases).
     pub fn arm_start_step(&self) -> u64 {
         MOBILE_CLUTTER_SETTLE_STEPS
             + MOBILE_CLUTTER_PICK_DRIVE_STEPS
+            + MOBILE_CLUTTER_RETREAT_STEPS
             + MOBILE_CLUTTER_CARRY_DRIVE_STEPS
     }
 
@@ -398,9 +391,9 @@ impl IkMobileClutterPickPlacePolicy {
 
         let settle_end = MOBILE_CLUTTER_SETTLE_STEPS;
         let pick_drive_end = settle_end + MOBILE_CLUTTER_PICK_DRIVE_STEPS;
-        let carry_drive_end = pick_drive_end + MOBILE_CLUTTER_CARRY_DRIVE_STEPS;
-        let place_swing_end = carry_drive_end + MOBILE_CLUTTER_PLACE_SWING_STEPS;
-        let release_end = place_swing_end + MOBILE_CLUTTER_RELEASE_STEPS;
+        let retreat_end = pick_drive_end + MOBILE_CLUTTER_RETREAT_STEPS;
+        let carry_drive_end = retreat_end + MOBILE_CLUTTER_CARRY_DRIVE_STEPS;
+        let release_end = carry_drive_end + MOBILE_CLUTTER_RELEASE_STEPS;
 
         // Before a grasp the episode reports the pick object pose (nonzero Y for a
         // tabletop object); once grasped it zeroes the pick pose and switches the
@@ -412,17 +405,17 @@ impl IkMobileClutterPickPlacePolicy {
         if (settle_end..pick_drive_end).contains(&s) && grasped {
             s = pick_drive_end;
         }
-        if (pick_drive_end..carry_drive_end).contains(&s)
-            && mobile_place_base_distance_m(observation) < MOBILE_CLUTTER_PLACE_STANDOFF_M
+        if (pick_drive_end..retreat_end).contains(&s)
+            && mobile_place_base_distance_m(observation) > MOBILE_CLUTTER_RETREAT_DISTANCE_M
         {
-            s = carry_drive_end;
+            s = retreat_end;
         }
-        if (carry_drive_end..place_swing_end).contains(&s)
+        if (retreat_end..carry_drive_end).contains(&s)
             && grasped
             && observation.target_dx_m.hypot(observation.target_dz_m)
                 < MOBILE_CLUTTER_RELEASE_GATE_M
         {
-            s = place_swing_end;
+            s = carry_drive_end;
         }
         self.step = s + 1;
 
@@ -438,18 +431,30 @@ impl IkMobileClutterPickPlacePolicy {
             );
             action.gripper_velocity_rad_s = -2.5;
             action
+        } else if s < retreat_end {
+            // Back straight up to drag the welded object off the near table edge so
+            // it hangs on the weld in free air: the grasp captures the cube pressed
+            // a few millimetres into the tabletop, and that contact wedge resists
+            // sideways arm motion far harder than the force-limited arm motors can
+            // pull. The kinematically pinned base has no such limit.
+            MobileManipulatorAction {
+                left_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
+                right_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
+                ..MobileManipulatorAction::default()
+            }
         } else if s < carry_drive_end {
-            // Gripper velocity stays zero: the contact weld holds the object and only
-            // an opening command releases it; continuing to command "close" leaves the
-            // limitless fingers flapping against the welded object.
+            // Drive straight at the place target with the object carried ahead of
+            // the base; the release gate above fires when the object passes over
+            // the target. Gripper velocity stays zero: the contact weld holds the
+            // object and only an opening command releases it; continuing to command
+            // "close" leaves the limitless fingers flapping against the welded
+            // object.
             mobile_drive_toward_action(
                 observation,
                 crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
                 crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
                 MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
             )
-        } else if s < place_swing_end {
-            mobile_place_swing_action(observation, &self.kin)
         } else if s < release_end {
             MobileManipulatorAction {
                 gripper_velocity_rad_s: 3.0,
@@ -591,60 +596,6 @@ fn clutter_carry_action(
     }
 }
 
-/// Swings the arm's gripper onto the mobile clutter place target via base-frame IK
-/// while holding the grasped object; commands only grip hold when the target is
-/// momentarily outside the analytic workspace (should not happen inside the standoff).
-fn mobile_place_swing_action(
-    observation: &MobileManipulatorObservation,
-    kin: &MmMinimalKinematics,
-) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    // Aim the gripper short of the place point along the base-to-target ray so the
-    // welded object (carried in front of the gripper) settles over the target.
-    let place_x_m = crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M;
-    let place_z_m = crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M;
-    let dx = place_x_m - observation.base_x_m;
-    let dz = place_z_m - observation.base_z_m;
-    let radial_m = dx.hypot(dz).max(1e-6);
-    let pullback = MOBILE_CLUTTER_GRASP_OFFSET_M / radial_m;
-    let target = MmMinimalGripperTarget::new(
-        place_x_m - dx * pullback,
-        kin.shoulder_y_at_base(observation.base_y_m),
-        place_z_m - dz * pullback,
-    );
-    if let Ok(joints) = kin.inverse_kinematics_at_base(
-        observation.base_x_m,
-        observation.base_y_m,
-        observation.base_z_m,
-        observation.base_yaw_rad,
-        target,
-    ) {
-        // Proportional joint rates (not bang-bang): the sim integrates arm velocity
-        // commands into held position targets, so a fixed-rate command winds the
-        // target far past the IK pose while the joint lags, and the arm oscillates
-        // around the place target. Rates that decay with the remaining error settle
-        // the carried object over the target so the release gate can fire.
-        // Gripper velocity stays zero: the weld holds the object without a close command.
-        MobileManipulatorAction {
-            shoulder_velocity_rad_s: (MOBILE_CLUTTER_SWING_GAIN_PER_S
-                * (joints.shoulder_rad - observation.shoulder_position_rad))
-                .clamp(
-                    -MOBILE_CLUTTER_SWING_RATE_RAD_S,
-                    MOBILE_CLUTTER_SWING_RATE_RAD_S,
-                ),
-            elbow_velocity_rad_s: (MOBILE_CLUTTER_SWING_GAIN_PER_S
-                * (joints.elbow_rad - observation.elbow_position_rad))
-                .clamp(
-                    -MOBILE_CLUTTER_SWING_RATE_RAD_S,
-                    MOBILE_CLUTTER_SWING_RATE_RAD_S,
-                ),
-            ..MobileManipulatorAction::default()
-        }
-    } else {
-        MobileManipulatorAction::default()
-    }
-}
-
 /// Horizontal base distance to the mobile clutter place target.
 fn mobile_place_base_distance_m(observation: &MobileManipulatorObservation) -> f64 {
     let dx = crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M - observation.base_x_m;
@@ -690,16 +641,18 @@ fn mobile_drive_toward_action(
     let heading_to_target = dz_world.atan2(dx_world);
     // The base's forward axis is `Quat::from_rotation_y(yaw) * X = (cos yaw, -sin yaw)`
     // in the XZ plane, so its travel-direction angle in `atan2(z, x)` terms is `-yaw`;
-    // a positive commanded twist yaw rate decreases the observed yaw (see the
-    // `mobile_twist_positive_yaw_rate_decreases_observed_yaw` sim test), i.e. it
-    // increases the travel-direction angle, so a plain positive gain closes the error.
+    // this heading error is `heading_to_target - (-yaw) = heading_to_target + yaw`.
+    // A positive commanded twist yaw rate increases the observed yaw (see the
+    // `mobile_twist_positive_yaw_rate_increases_observed_yaw` sim test), i.e. it
+    // decreases the travel-direction angle, so the commanded rate needs a negative
+    // gain to drive the error toward zero.
     let heading_error = wrap_heading_rad(heading_to_target + observation.base_yaw_rad);
     let forward_m_s = if heading_error.abs() > 0.12 {
         0.0
     } else {
         (0.65 * distance_m).clamp(0.0, max_forward_m_s)
     };
-    let yaw_rate_rad_s = (2.0 * heading_error).clamp(-0.7, 0.7);
+    let yaw_rate_rad_s = (-2.0 * heading_error).clamp(-0.7, 0.7);
     let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
     MobileManipulatorAction {
         left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
@@ -875,7 +828,7 @@ mod tests {
     #[test]
     fn ik_mobile_clutter_policy_total_steps_matches_phases() {
         let policy = IkMobileClutterPickPlacePolicy::new();
-        assert_eq!(policy.total_steps(), 1430);
+        assert_eq!(policy.total_steps(), 1490);
     }
 
     #[test]

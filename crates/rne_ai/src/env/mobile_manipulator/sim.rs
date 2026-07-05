@@ -1093,9 +1093,14 @@ impl MobileManipulatorSim {
             // Anti-windup lead for the mobile arm: without it the integrated angle
             // target runs several radians ahead of the lagging joint during long
             // moves, and the spring then drags the joint far past the commanded
-            // stop, oscillating the carried payload.
-            let windup_position_rad = (self.mobile_base && joint.axis == JointReadAxis::YawY)
-                .then(|| joint_sample(&self.world, &self.actuated[index]).position_rad);
+            // stop, oscillating the carried payload. Applied only while a velocity
+            // command is integrating: at zero command the target must hold firm,
+            // otherwise external disturbances (payload swings, base turns) re-base
+            // the clamped target onto the back-driven joint and permanently deform
+            // the held pose instead of springing back.
+            let windup_position_rad =
+                (self.mobile_base && joint.axis == JointReadAxis::YawY && velocity != 0.0)
+                    .then(|| joint_sample(&self.world, &self.actuated[index]).position_rad);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if joint.axis == JointReadAxis::LiftY {
                     // Position (spring-damper) control with the velocity as feedforward.
@@ -1226,9 +1231,15 @@ impl MobileManipulatorSim {
         let (pos0, yaw0) = self.base_pose_before_step;
         let forward_dir = Quat::from_rotation_y(yaw0) * Vec3::X;
         let new_pos = pos0 + forward_dir * (self.base_command_forward_m_s * dt_s);
-        // Empirically, a positive commanded yaw rate decreases the observed yaw (see
-        // `mobile_twist_positive_yaw_rate_decreases_observed_yaw`).
-        let new_yaw = wrap_yaw_rad(yaw0 - self.base_command_yaw_rate_rad_s * dt_s);
+        // `mm_mobile_twist_to_wheel_velocities` puts the right wheel faster than the left
+        // for a positive commanded yaw rate (standard diff-drive: right-faster steers
+        // left, i.e. toward -Z given the base's `Quat::from_rotation_y(yaw) * X` forward
+        // axis), so a positive commanded yaw rate increases yaw (see
+        // `mobile_twist_positive_yaw_rate_increases_observed_yaw`). This matches the
+        // real-dynamics trajectory example 32's hero script was tuned against: on the
+        // dynamic path (pre-kinematic-repin) the same wheel commands steered the base
+        // toward -Z to reach its pick/place targets there.
+        let new_yaw = wrap_yaw_rad(yaw0 + self.base_command_yaw_rate_rad_s * dt_s);
 
         if let Some(mut transform) = self.world.get_mut::<Transform3>(self.base_link) {
             transform.translation.x = new_pos.x;
@@ -1768,7 +1779,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_twist_positive_yaw_rate_decreases_observed_yaw() {
+    fn mobile_twist_positive_yaw_rate_increases_observed_yaw() {
         let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml");
         let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("scene");
@@ -1786,8 +1797,8 @@ mod tests {
         }
         let yaw_end = sim.observe().base_yaw_rad;
         assert!(
-            yaw_end < yaw_start - 0.2,
-            "positive twist yaw rate decreases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
+            yaw_end > yaw_start + 0.2,
+            "positive twist yaw rate increases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
         );
     }
 
