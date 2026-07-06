@@ -449,18 +449,28 @@ impl IkMobileClutterPickPlacePolicy {
                 ..MobileManipulatorAction::default()
             }
         } else if s < carry_drive_end {
-            // Drive straight at the place target with the object carried ahead of
-            // the base; the release gate above fires when the object passes over
+            // Drive so the CARRIED OBJECT (not the base) converges on the place
+            // target. The object rides on the spring-held arm nearly a meter ahead
+            // of the base, and its lateral offset after the retreat's drag-and-turn
+            // is contact-history dependent (it differs measurably across
+            // platforms), so steering the base straight at the place point can
+            // march the object past the release gate without ever crossing it.
+            // `mobile_carry_object_toward_action` closed-loops the object error
+            // instead; the release gate above fires when the object passes over
             // the target. Gripper velocity stays zero: the contact weld holds the
-            // object and only an opening command releases it; continuing to command
-            // "close" leaves the limitless fingers flapping against the welded
-            // object.
-            mobile_drive_toward_action(
-                observation,
-                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
-                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
-                MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
-            )
+            // object and only an opening command releases it; continuing to
+            // command "close" leaves the limitless fingers flapping against the
+            // welded object.
+            if grasped {
+                mobile_carry_object_toward_action(observation)
+            } else {
+                mobile_drive_toward_action(
+                    observation,
+                    crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
+                    crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
+                    MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+                )
+            }
         } else if s < release_end {
             MobileManipulatorAction {
                 gripper_velocity_rad_s: 3.0,
@@ -701,6 +711,53 @@ fn mobile_drive_toward_action(
 
 /// Gain for `joint_rate_toward_minimal`'s proportional tracking (rad/s per rad of error).
 const CLUTTER_APPROACH_GAIN: f64 = 0.5;
+
+/// Nominal forward distance of the carried clutter object from the mobile base
+/// center (m); scales the steering share of the object-error feedback below.
+const MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M: f64 = 0.95;
+/// Proportional gain mapping carried-object position error to base twist (1/s).
+const MOBILE_CLUTTER_CARRY_OBJECT_GAIN: f64 = 0.6;
+
+/// Diff-drive step that moves the CARRIED OBJECT toward the place target.
+///
+/// Treats the object as a lookahead point rigidly ~`MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M`
+/// ahead of the base and feedback-linearizes the unicycle: for a point `P = B + L f(yaw)`,
+/// `dP = v f + L w df/dyaw`, so commanding `v` from the error's heading-aligned
+/// component and `w` from its lateral component moves `P` straight at the target.
+/// Steering the base's own heading at a compensated aim point does not work here:
+/// the aim rotates with the base (the object error vector is expressed through the
+/// base yaw), so a bearing controller chases a moving target and dithers in place.
+/// Requires a grasped object (`target_d*` = place target relative to the object).
+fn mobile_carry_object_toward_action(
+    observation: &MobileManipulatorObservation,
+) -> crate::MobileManipulatorAction {
+    use crate::mm_mobile_twist_to_wheel_velocities;
+    use crate::MobileManipulatorAction;
+
+    let error_x = observation.target_dx_m;
+    let error_z = observation.target_dz_m;
+    let yaw = observation.base_yaw_rad;
+    // Base forward axis in the XZ plane is `Quat::from_rotation_y(yaw) * X`
+    // (see `apply_mobile_base_planar_drive`), and its yaw-derivative is `g`.
+    let forward = (yaw.cos(), -yaw.sin());
+    let forward_yaw_derivative = (-yaw.sin(), -yaw.cos());
+    let along_m = error_x * forward.0 + error_z * forward.1;
+    let lateral_m = error_x * forward_yaw_derivative.0 + error_z * forward_yaw_derivative.1;
+
+    let forward_m_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * along_m).clamp(
+        -MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+        MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+    );
+    let yaw_rate_rad_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * lateral_m
+        / MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M)
+        .clamp(-0.7, 0.7);
+    let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
+        right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
+        ..MobileManipulatorAction::default()
+    }
+}
 
 fn joint_rate_toward_minimal(
     observation: &MobileManipulatorObservation,
