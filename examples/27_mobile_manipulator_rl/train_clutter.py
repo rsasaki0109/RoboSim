@@ -1,9 +1,13 @@
 """CEM training smoke for the fixed-base clutter pick-and-place task.
 
 Phased policy mirrors ``IkClutterPickPlacePolicy``: settle, goal-conditioned
-approach, tuned fixed-velocity carry, hold, and release. CEM optimizes approach
-gains on the pinned center cube (`clutter_place_center`); carry uses the
-scripted winners from the Rust E2E tests.
+approach, held carry, hold, and release. CEM optimizes approach gains and the
+gripper command on the pinned center cube (`clutter_place_center`); under the
+stable arm dynamics the grasp weld is what separates success from failure, so
+the weak baseline keeps the gripper open and the CEM must discover closing it.
+The carry holds the grasp pose, matching the re-derived Rust E2E tests (the
+approach hands off next to the place bearing and the derived place target is
+where the held carry sets the cube down).
 
     .venv/bin/maturin develop -m crates/rne_py/Cargo.toml
     .venv/bin/python examples/27_mobile_manipulator_rl/train_clutter.py --smoke
@@ -29,17 +33,18 @@ RELEASE_STEPS = 150
 EPISODE_STEPS = (
     SETTLE_STEPS + APPROACH_STEPS + CARRY_STEPS + HOLD_STEPS + RELEASE_STEPS
 )
-PARAM_DIM = 5  # shoulder_bias, elbow_bias, shoulder_gain, elbow_gain, gripper_close
+PARAM_DIM = 5  # shoulder_gain, elbow_gain, gripper_close, carry_shoulder, carry_elbow
 TASK = "clutter_place_center"
 
-CARRY_SHOULDER_RAD_S = -0.50
-CARRY_ELBOW_RAD_S = -0.69
 GRIPPER_CLOSE_RAD_S = -2.5
 GRIPPER_OPEN_RAD_S = 3.0
-# Weak gains that rarely grasp; CEM should beat this baseline.
-WEAK_BASELINE = [0.0, 0.0, 0.6, 0.6, -0.5]
-# Proven approach gains from the Rust grasp helper (carry/release are scripted).
-SCRIPTED_APPROACH = [0.0, 0.0, 4.0, 4.0, -2.5]
+# Weak baseline: gripper held open (never triggers the contact weld), so it
+# collects at most approach shaping; CEM should beat it by learning to close
+# the gripper and carry the welded cube toward the place target.
+WEAK_BASELINE = [0.6, 0.6, 0.5, 0.0, 0.0]
+# Proven approach gains (carry/release timing scripted; carry velocities zero
+# hold the grasp pose like the re-derived Rust fixed-carry test).
+SCRIPTED_APPROACH = [4.0, 4.0, -2.5, 0.0, 0.0]
 
 
 def clamp(value, limit=ACTION_LIMIT):
@@ -47,7 +52,7 @@ def clamp(value, limit=ACTION_LIMIT):
 
 
 def act(params, obs, step_idx):
-    shoulder_bias, elbow_bias, shoulder_gain, elbow_gain, gripper_close = params
+    shoulder_gain, elbow_gain, gripper_close, carry_shoulder, carry_elbow = params
     if step_idx < SETTLE_STEPS:
         return [0.0, 0.0, 0.0, 0.0, 0.0]
     approach_end = SETTLE_STEPS + APPROACH_STEPS
@@ -58,16 +63,16 @@ def act(params, obs, step_idx):
         return [
             0.0,
             0.0,
-            clamp(shoulder_bias + shoulder_gain * obs.target_dx),
-            clamp(elbow_bias + elbow_gain * obs.target_dz),
+            clamp(shoulder_gain * obs.target_dx),
+            clamp(elbow_gain * obs.target_dz),
             clamp(gripper_close),
         ]
     if step_idx < carry_end:
         return [
             0.0,
             0.0,
-            CARRY_SHOULDER_RAD_S,
-            CARRY_ELBOW_RAD_S,
+            clamp(carry_shoulder),
+            clamp(carry_elbow),
             GRIPPER_CLOSE_RAD_S,
         ]
     if step_idx < hold_end:
@@ -102,8 +107,8 @@ def cem_smoke():
     population = 16
     elite = 4
     iterations = 8
-    mean = list(WEAK_BASELINE)
-    std = [0.15, 0.15, 0.35, 0.35, 0.25]
+    mean = [0.6, 0.6, 0.0, 0.0, 0.0]
+    std = [0.35, 0.35, 0.5, 0.3, 0.3]
     history = []
     best_reward = float("-inf")
     best_params = mean
