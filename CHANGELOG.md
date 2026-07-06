@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **`train_mobile_clutter.py`**: CEM smoke on the pinned `mobile_clutter_pick_place_center`
+  episode (`mm_mobile_clutter` scene, `clutter_cube_a`). Re-implements
+  `IkMobileClutterPickPlacePolicy`'s observation-gated phase machine (settle, pick drive,
+  retreat, carry drive, release) in Python, with CEM tuning the pick-phase gripper rate
+  and the pick/retreat/carry drive speeds against a weak baseline that holds the gripper
+  open (structurally unable to grasp); asserts improvement margin, grasp, and deterministic
+  replay of the best candidate.
+- **`train_mobile_clutter_ppo.py`**: SB3 PPO integration smoke on `mobile_clutter_place_center`.
 - **Mobile clutter place E2E**: `IkMobileClutterPickPlacePolicy` now completes the full
   navigate → grasp → place loop on `mm_mobile_clutter` (observation-gated phases: poke-grasp
   drive, straight retreat that drags the welded object clear of the tabletop contact wedge,
