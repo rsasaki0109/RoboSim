@@ -26,13 +26,14 @@
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --so101
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --cart
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
 
 use rne_ai::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    cart_minimal_scene_path, mm_lift_scene_path, mm_minimal_scene_path, mm_mobile_scene_path,
-    so101_scene_path, DiffDriveAction, DiffDriveSim, MobileManipulatorAction, MobileManipulatorSim,
-    UrdfArmAction, UrdfCartAction, UrdfSceneSim,
+    cart_minimal_scene_path, lekiwi_scene_path, mm_lift_scene_path, mm_minimal_scene_path,
+    mm_mobile_scene_path, so101_scene_path, DiffDriveAction, DiffDriveSim, MobileManipulatorAction,
+    MobileManipulatorSim, UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
@@ -63,6 +64,7 @@ enum ViewerProfile {
     ManipulatorLift(PathBuf),
     So101(PathBuf),
     Cart(PathBuf),
+    LeKiwi(PathBuf),
 }
 
 enum ViewerSim {
@@ -80,10 +82,15 @@ impl ViewerSim {
             Self::Manipulator(sim) => {
                 sim.step(teleop_manipulator(keys, sim.mobile_base()));
             }
-            Self::UrdfScene(sim) => match sim.left_wheel().is_some() {
-                true => sim.step_cart(teleop_urdf_cart(keys)),
-                false => sim.step_arm(teleop_urdf_arm(keys)),
-            },
+            Self::UrdfScene(sim) => {
+                if sim.is_kiwi_drive() {
+                    sim.step_kiwi(teleop_urdf_kiwi(keys));
+                } else if sim.left_wheel().is_some() {
+                    sim.step_cart(teleop_urdf_cart(keys));
+                } else {
+                    sim.step_arm(teleop_urdf_arm(keys));
+                }
+            }
         }
     }
 
@@ -264,6 +271,9 @@ fn viewer_profile_from_args() -> ViewerProfile {
     if args.iter().any(|arg| arg == "--cart") {
         return ViewerProfile::Cart(scene_arg.unwrap_or_else(cart_minimal_scene_path));
     }
+    if args.iter().any(|arg| arg == "--lekiwi") {
+        return ViewerProfile::LeKiwi(scene_arg.unwrap_or_else(lekiwi_scene_path));
+    }
     let scene_path = scene_arg.unwrap_or_else(default_scene_path);
     ViewerProfile::DiffDriveScene(scene_path)
 }
@@ -282,7 +292,7 @@ fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
         ViewerProfile::ManipulatorLift(path) => MobileManipulatorSim::from_scene_path(path)
             .map(|sim| ViewerSim::Manipulator(Box::new(sim)))
             .map_err(|error| error.to_string()),
-        ViewerProfile::So101(path) | ViewerProfile::Cart(path) => {
+        ViewerProfile::So101(path) | ViewerProfile::Cart(path) | ViewerProfile::LeKiwi(path) => {
             UrdfSceneSim::from_scene_path(path)
                 .map(|sim| ViewerSim::UrdfScene(Box::new(sim)))
                 .map_err(|error| error.to_string())
@@ -298,6 +308,7 @@ fn profile_label(profile: &ViewerProfile) -> String {
         ViewerProfile::ManipulatorLift(path) => format!("mm_lift ({})", path.display()),
         ViewerProfile::So101(path) => format!("so101 ({})", path.display()),
         ViewerProfile::Cart(path) => format!("cart_minimal ({})", path.display()),
+        ViewerProfile::LeKiwi(path) => format!("lekiwi ({})", path.display()),
     }
 }
 
@@ -308,6 +319,10 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
     }
 
     let mut sim = load_sim(profile).expect("load viewer simulation");
+    let initial_urdf_pose = match &sim {
+        ViewerSim::UrdfScene(sim) => Some(sim.observe()),
+        _ => None,
+    };
     for _ in 0..60 {
         sim.step(&smoke_keys(profile));
     }
@@ -438,6 +453,36 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 std::process::exit(1);
             }
         }
+        ViewerProfile::LeKiwi(_) => {
+            let obs = match &sim {
+                ViewerSim::UrdfScene(sim) => sim.observe(),
+                _ => unreachable!(),
+            };
+            if obs.actuated_joint_count < 3 {
+                eprintln!(
+                    "interactive viewer smoke expected 3 lekiwi wheel joints, got {}",
+                    obs.actuated_joint_count
+                );
+                std::process::exit(1);
+            }
+            if mesh_items < 3 {
+                eprintln!(
+                    "interactive viewer smoke expected lekiwi mesh visuals, got {mesh_items}"
+                );
+                std::process::exit(1);
+            }
+            if let Some(initial) = initial_urdf_pose {
+                let dx_m = obs.base_x_m - initial.base_x_m;
+                let dz_m = obs.base_z_m - initial.base_z_m;
+                let planar_m = (dx_m * dx_m + dz_m * dz_m).sqrt();
+                if planar_m <= 0.02 {
+                    eprintln!(
+                        "interactive viewer smoke expected lekiwi displacement, planar={planar_m:.4} m"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -464,6 +509,9 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
             keys.insert(KeyCode::KeyQ);
         }
         ViewerProfile::Cart(_) => {
+            keys.insert(KeyCode::KeyW);
+        }
+        ViewerProfile::LeKiwi(_) => {
             keys.insert(KeyCode::KeyW);
         }
     }
@@ -814,6 +862,38 @@ fn teleop_urdf_arm(keys: &HashSet<KeyCode>) -> UrdfArmAction {
     }
     UrdfArmAction {
         shoulder_pan_velocity_rad_s,
+    }
+}
+
+const KIWI_DRIVE_SPEED_M_S: f64 = 0.35;
+const KIWI_TURN_RAD_S: f64 = 0.45;
+
+fn teleop_urdf_kiwi(keys: &HashSet<KeyCode>) -> UrdfKiwiAction {
+    let mut vx_m_s = 0.0;
+    let mut vz_m_s = 0.0;
+    let mut wz_rad_s = 0.0;
+    if keys.contains(&KeyCode::KeyW) {
+        vx_m_s += KIWI_DRIVE_SPEED_M_S;
+    }
+    if keys.contains(&KeyCode::KeyS) {
+        vx_m_s -= KIWI_DRIVE_SPEED_M_S;
+    }
+    if keys.contains(&KeyCode::KeyA) {
+        vz_m_s += KIWI_DRIVE_SPEED_M_S;
+    }
+    if keys.contains(&KeyCode::KeyD) {
+        vz_m_s -= KIWI_DRIVE_SPEED_M_S;
+    }
+    if keys.contains(&KeyCode::KeyQ) {
+        wz_rad_s += KIWI_TURN_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyE) {
+        wz_rad_s -= KIWI_TURN_RAD_S;
+    }
+    UrdfKiwiAction {
+        vx_m_s,
+        vz_m_s,
+        wz_rad_s,
     }
 }
 

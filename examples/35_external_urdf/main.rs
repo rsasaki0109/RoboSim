@@ -1,8 +1,8 @@
-//! Loads vendored external URDF scenes (SO-101 arm and minimal cart).
+//! Loads vendored external URDF scenes (SO-101 arm, minimal cart, LeKiwi base).
 
 use rne_ai::{
-    build_visual_render_scene, cart_minimal_scene_path, so101_scene_path, UrdfArmAction,
-    UrdfCartAction, UrdfSceneSim,
+    build_visual_render_scene, cart_minimal_scene_path, lekiwi_scene_path, so101_scene_path,
+    UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_render::VisualShape;
 
@@ -32,6 +32,24 @@ fn main() {
     let moved = (cart.observe().base_x_m - start).abs();
     println!("cart_minimal: |displacement_x|={moved:.3} m");
 
+    let mut lekiwi = UrdfSceneSim::from_scene_path(&lekiwi_scene_path()).expect("load lekiwi");
+    let lekiwi_start = lekiwi.observe();
+    for _ in 0..120 {
+        lekiwi.step_kiwi(UrdfKiwiAction {
+            vx_m_s: 0.2,
+            vz_m_s: 0.0,
+            wz_rad_s: 0.0,
+        });
+    }
+    let lekiwi_obs = lekiwi.observe();
+    let lekiwi_dx = lekiwi_obs.base_x_m - lekiwi_start.base_x_m;
+    let lekiwi_dz = lekiwi_obs.base_z_m - lekiwi_start.base_z_m;
+    let lekiwi_planar = (lekiwi_dx * lekiwi_dx + lekiwi_dz * lekiwi_dz).sqrt();
+    println!(
+        "lekiwi: joints={} planar_displacement={:.3} m",
+        lekiwi_obs.actuated_joint_count, lekiwi_planar
+    );
+
     let mut arm = UrdfSceneSim::from_scene_path(&so101_scene_path()).expect("reload so101");
     for _ in 0..60 {
         arm.step_arm(UrdfArmAction {
@@ -43,7 +61,11 @@ fn main() {
         arm.observe().base_yaw_rad
     );
 
-    if so101_meshes < 5 || moved < 0.02 {
+    if so101_meshes < 5
+        || moved < 0.02
+        || lekiwi_obs.actuated_joint_count < 3
+        || lekiwi_planar < 0.02
+    {
         std::process::exit(1);
     }
 }
