@@ -124,8 +124,13 @@ pub fn spawn_robot_asset(
                 )
             })?;
 
-            let spawned = spawn_urdf_robot_with_config(world, &urdf, section.to_spawn_config())
-                .map_err(|error| {
+            let mut spawn_config = section.to_spawn_config();
+            if let Some(parent) = urdf_path.parent() {
+                spawn_config.mesh_assets_root = Some(parent.to_path_buf());
+            }
+
+            let spawned =
+                spawn_urdf_robot_with_config(world, &urdf, spawn_config).map_err(|error| {
                     AssetError::invalid(
                         asset_path.display().to_string(),
                         format!("urdf spawn failed: {error}"),

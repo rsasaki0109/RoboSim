@@ -403,10 +403,13 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
 
         let (parent, joint, motor_axis) = if let Some(desc) = world.get::<RevoluteJointDesc>(entity)
         {
-            let joint = RevoluteJointBuilder::new(normalized_axis(desc.axis))
+            let mut builder = RevoluteJointBuilder::new(normalized_axis(desc.axis))
                 .local_anchor1(vec3_to_point(desc.anchor_parent_m))
-                .local_anchor2(vec3_to_point(desc.anchor_child_m))
-                .build();
+                .local_anchor2(vec3_to_point(desc.anchor_child_m));
+            if let (Some(lower_rad), Some(upper_rad)) = (desc.lower_rad, desc.upper_rad) {
+                builder = builder.limits([lower_rad as f32, upper_rad as f32]);
+            }
+            let joint = builder.build();
             (
                 desc.parent,
                 GenericJoint::from(joint),

@@ -25,4 +25,4 @@ pub use mesh_cache::MeshRenderCache;
 pub use pass::CameraPassOutput;
 pub use path::resolve_package_uri;
 pub use scene::{RenderScene, RenderSceneItem};
-pub use visual::{Visual, VisualShape};
+pub use visual::{LinkVisuals, Visual, VisualShape};

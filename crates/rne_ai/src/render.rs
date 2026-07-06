@@ -4,7 +4,7 @@ use rne_data::{DataBus, InMemoryDataBus, PointCloud};
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{yaw_rad, Quat, Vec3};
 use rne_physics::Collider;
-use rne_render::{RenderScene, Visual, VisualShape};
+use rne_render::{LinkVisuals, RenderScene, Visual, VisualShape};
 use rne_robot::DiffDriveSpawned;
 use rne_sensor::{Sensor, SensorKind};
 use rne_world::{world_transform_of, Transform3 as WorldTransform3};
@@ -82,7 +82,10 @@ pub fn build_visual_render_scene(world: &World) -> RenderScene {
     let mut scene = RenderScene::new();
     for entity_ref in world.iter_entities() {
         let entity = entity_ref.id();
-        if world.get::<Visual>(entity).is_some() || world.get::<Collider>(entity).is_some() {
+        if world.get::<Visual>(entity).is_some()
+            || world.get::<LinkVisuals>(entity).is_some()
+            || world.get::<Collider>(entity).is_some()
+        {
             append_entity_visual(&mut scene, world, entity, false, None);
         }
     }
@@ -149,6 +152,18 @@ fn append_entity_visual(
     fallback: Option<(VisualShape, [f32; 4])>,
 ) {
     let world_transform = link_render_transform(world, entity, yaw_only);
+
+    if let Some(link_visuals) = world.get::<LinkVisuals>(entity) {
+        for visual in &link_visuals.visuals {
+            scene.items.push(RenderScene::item_from_visual(
+                world_transform,
+                visual.shape.clone(),
+                visual.color_rgba,
+                visual.local_offset,
+            ));
+        }
+        return;
+    }
 
     if let Some(visual) = world.get::<Visual>(entity) {
         scene.items.push(RenderScene::item_from_visual(

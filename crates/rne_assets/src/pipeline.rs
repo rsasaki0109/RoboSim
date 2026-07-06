@@ -111,9 +111,15 @@ pub fn validate_robot_references(path: &Path, asset: &RobotAsset) -> Result<(), 
 pub fn mesh_package_roots(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for (robot_path, robot) in &bundle.robots {
+        let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(visuals) = &robot.visuals {
-            let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
             let urdf_path = visuals.resolve_urdf_path(base_dir);
+            if let Some(parent) = urdf_path.parent() {
+                roots.push(parent.to_path_buf());
+            }
+        }
+        if let Some(urdf) = &robot.urdf {
+            let urdf_path = urdf.resolve_path(base_dir);
             if let Some(parent) = urdf_path.parent() {
                 roots.push(parent.to_path_buf());
             }
