@@ -49,7 +49,14 @@ pub fn load_stl(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
         path: path.display().to_string(),
         message: error.to_string(),
     })?;
-    parse_stl_bytes(path, &bytes)
+    load_stl_bytes(path, &bytes)
+}
+
+/// Parses an STL mesh from in-memory bytes.
+///
+/// `path` is used only for error messages (for example a virtual `package://` URI).
+pub fn load_stl_bytes(path: impl AsRef<Path>, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadError> {
+    parse_stl_bytes(path.as_ref(), bytes)
 }
 
 fn parse_stl_bytes(path: &Path, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadError> {

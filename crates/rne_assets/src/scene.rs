@@ -147,6 +147,45 @@ pub fn load_scene_robots(
         .collect()
 }
 
+/// Parses robot assets referenced by a scene from in-memory TOML.
+///
+/// `robot_texts` must list `(resolved_robot_path, toml_text)` pairs matching the
+/// scene's robot references after path resolution relative to `scene_path`.
+pub fn parse_scene_robots(
+    scene_path: &Path,
+    scene: &SceneAsset,
+    robot_texts: &[(PathBuf, &str)],
+) -> Result<Vec<(PathBuf, RobotAsset)>, AssetError> {
+    if robot_texts.len() != scene.robots.len() {
+        return Err(AssetError::invalid(
+            scene_path.display().to_string(),
+            format!(
+                "expected {} robot assets, got {}",
+                scene.robots.len(),
+                robot_texts.len()
+            ),
+        ));
+    }
+
+    let base_dir = scene_path.parent().unwrap_or_else(|| Path::new("."));
+    scene
+        .robots
+        .iter()
+        .enumerate()
+        .map(|(index, reference)| {
+            let robot_path = reference.resolve_path(base_dir);
+            let (_, text) = robot_texts.get(index).ok_or_else(|| {
+                AssetError::invalid(
+                    scene_path.display().to_string(),
+                    format!("missing robot asset text for index {index}"),
+                )
+            })?;
+            let robot = crate::robot::parse_robot_asset(text, &robot_path)?;
+            Ok((robot_path, robot))
+        })
+        .collect()
+}
+
 fn default_gravity() -> [f64; 3] {
     [0.0, -9.81, 0.0]
 }
