@@ -1,7 +1,8 @@
 //! Mobile clutter navigate-and-place E2E: diff-drive approach on `mm_mobile_clutter`,
 //! then IK arm pick-and-place toward the ground target.
 //!
-//! `--smoke` asserts the policy grasps `clutter_cube_a` (full place is still being tuned).
+//! `--smoke` asserts the policy grasps `clutter_cube_a`; the full run also places it
+//! on the ground target and terminates the episode.
 
 use rne_ai::{
     mm_mobile_clutter_place_target, mm_mobile_clutter_scene_path, Episode,

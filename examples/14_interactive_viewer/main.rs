@@ -61,8 +61,8 @@ enum ViewerProfile {
 }
 
 enum ViewerSim {
-    DiffDrive(DiffDriveSim),
-    Manipulator(MobileManipulatorSim),
+    DiffDrive(Box<DiffDriveSim>),
+    Manipulator(Box<MobileManipulatorSim>),
 }
 
 impl ViewerSim {
@@ -230,16 +230,16 @@ fn viewer_profile_from_args() -> ViewerProfile {
 fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
     match profile {
         ViewerProfile::DiffDriveScene(path) => DiffDriveSim::from_scene_path(path)
-            .map(ViewerSim::DiffDrive)
+            .map(|sim| ViewerSim::DiffDrive(Box::new(sim)))
             .map_err(|error| error.to_string()),
         ViewerProfile::ManipulatorFixed(path) => MobileManipulatorSim::from_scene_path(path)
-            .map(ViewerSim::Manipulator)
+            .map(|sim| ViewerSim::Manipulator(Box::new(sim)))
             .map_err(|error| error.to_string()),
         ViewerProfile::ManipulatorMobile(path) => MobileManipulatorSim::from_scene_path(path)
-            .map(ViewerSim::Manipulator)
+            .map(|sim| ViewerSim::Manipulator(Box::new(sim)))
             .map_err(|error| error.to_string()),
         ViewerProfile::ManipulatorLift(path) => MobileManipulatorSim::from_scene_path(path)
-            .map(ViewerSim::Manipulator)
+            .map(|sim| ViewerSim::Manipulator(Box::new(sim)))
             .map_err(|error| error.to_string()),
     }
 }

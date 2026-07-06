@@ -7,10 +7,14 @@
         <box size="0.5 0.3 0.4"/>
       </geometry>
     </visual>
+    <!-- Collision box is shorter than the visual chassis and shifted down: the
+         shoulder pivot sits at +0.15 and the upper-arm collision box (0.08 tall)
+         reaches down to +0.11, so a full-height chassis collider interpenetrates
+         the arm and contact impulses lock the shoulder joint solid. -->
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.05" rpy="0 0 0"/>
       <geometry>
-        <box size="0.5 0.3 0.4"/>
+        <box size="0.5 0.2 0.4"/>
       </geometry>
     </collision>
   </link>
@@ -58,10 +62,13 @@
         <box size="0.5 0.08 0.08"/>
       </geometry>
     </visual>
+    <!-- Collision boxes along the arm chain are slightly shorter than the visuals
+         so adjacent links do not interpenetrate: overlapping colliders on jointed
+         links generate contact impulses that lock the joint solid. -->
     <collision>
-      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <origin xyz="0.24 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.5 0.08 0.08"/>
+        <box size="0.46 0.08 0.08"/>
       </geometry>
     </collision>
   </link>
@@ -74,9 +81,9 @@
       </geometry>
     </visual>
     <collision>
-      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <origin xyz="0.18 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.06 0.06"/>
+        <box size="0.34 0.06 0.06"/>
       </geometry>
     </collision>
   </link>
@@ -88,6 +95,12 @@
         <box size="0.06 0.04 0.04"/>
       </geometry>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.06 0.04 0.04"/>
+      </geometry>
+    </collision>
   </link>
 
   <link name="left_finger_link">
@@ -97,6 +110,12 @@
         <box size="0.02 0.02 0.08"/>
       </geometry>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </collision>
   </link>
 
   <link name="right_finger_link">
@@ -106,6 +125,12 @@
         <box size="0.02 0.02 0.08"/>
       </geometry>
     </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.08"/>
+      </geometry>
+    </collision>
   </link>
 
   <joint name="left_wheel_joint" type="continuous">

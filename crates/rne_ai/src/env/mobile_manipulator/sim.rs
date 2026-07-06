@@ -299,6 +299,10 @@ const ARM_DIRECT_TARGET_DAMPING: f64 = 100.0;
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
 /// Clamp on a position-holding arm joint's integrated angle target (radians).
 const ARM_TARGET_LIMIT_RAD: f64 = std::f64::consts::PI;
+/// Maximum lead the mobile arm's integrated angle target may hold over the joint's
+/// measured position (radians). Anti-windup: keeps a long velocity command from
+/// ramping the spring target far past the lagging joint.
+const ARM_TARGET_LEAD_RAD: f64 = 0.15;
 /// Nominal mobile-base center height. The URDF places the base at 0.25 m so
 /// its wheels sit on the ground plane.
 const MOBILE_BASE_NOMINAL_Y_M: f64 = 0.25;
@@ -328,6 +332,14 @@ pub struct MobileManipulatorSim {
     mobile_base: bool,
     /// When true, planar base motion is zeroed after each physics step (arm-only manipulation).
     base_planar_locked: bool,
+    /// Commanded forward speed for the pending physics tick, used to kinematically
+    /// integrate the base pose in [`Self::stabilize_mobile_base`].
+    base_command_forward_m_s: f64,
+    /// Commanded yaw rate for the pending physics tick (see `base_command_forward_m_s`).
+    base_command_yaw_rate_rad_s: f64,
+    /// Base translation captured immediately before the physics step, used as the
+    /// kinematic integration's starting point.
+    base_pose_before_step: (Vec3, f64),
     data_bus: InMemoryDataBus,
     joint_stream: StreamId,
     sim_time: SimTime,
@@ -840,11 +852,17 @@ impl MobileManipulatorSim {
     ) -> Self {
         let mut backend = RapierBackend::new();
         // The lift robot's tall jointed chain (lift + shoulder + elbow + gripper) needs
-        // more constraint-solver iterations to stay stable; other robots keep the default.
+        // more constraint-solver iterations to stay stable, and so does the mobile
+        // robot's position-held arm on its floating diff-drive base; fixed-base robots
+        // keep the default.
         let has_lift = actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
-                solver_iterations: if has_lift { LIFT_SOLVER_ITERATIONS } else { 0 },
+                solver_iterations: if has_lift || mobile_base {
+                    LIFT_SOLVER_ITERATIONS
+                } else {
+                    0
+                },
                 ..PhysicsWorldDesc::default()
             })
             .expect("physics world");
@@ -882,6 +900,9 @@ impl MobileManipulatorSim {
             render_backend: HeadlessRenderBackend::new(),
             mobile_base,
             base_planar_locked: false,
+            base_command_forward_m_s: 0.0,
+            base_command_yaw_rate_rad_s: 0.0,
+            base_pose_before_step: (Vec3::ZERO, 0.0),
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
             sim_time: SimTime::ZERO,
@@ -890,6 +911,7 @@ impl MobileManipulatorSim {
             joint_sequence: 0,
         };
         sim.configure_lift_motor();
+        sim.configure_mobile_arm_motors();
         sim.warmup_physics();
         sim
     }
@@ -1061,8 +1083,24 @@ impl MobileManipulatorSim {
         self.lift_target_m = (self.lift_target_m + action.lift_velocity_m_s * dt_s)
             .clamp(LIFT_TARGET_MIN_M, LIFT_TARGET_MAX_M);
 
-        for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
+        for (index, (joint, joint_name)) in self
+            .actuated
+            .iter()
+            .zip(self.joint_names.iter())
+            .enumerate()
+        {
             let velocity = velocity_for_joint(joint_name, action);
+            // Anti-windup lead for the mobile arm: without it the integrated angle
+            // target runs several radians ahead of the lagging joint during long
+            // moves, and the spring then drags the joint far past the commanded
+            // stop, oscillating the carried payload. Applied only while a velocity
+            // command is integrating: at zero command the target must hold firm,
+            // otherwise external disturbances (payload swings, base turns) re-base
+            // the clamped target onto the back-driven joint and permanently deform
+            // the held pose instead of springing back.
+            let windup_position_rad =
+                (self.mobile_base && joint.axis == JointReadAxis::YawY && velocity != 0.0)
+                    .then(|| joint_sample(&self.world, &self.actuated[index]).position_rad);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if joint.axis == JointReadAxis::LiftY {
                     // Position (spring-damper) control with the velocity as feedforward.
@@ -1074,8 +1112,15 @@ impl MobileManipulatorSim {
                     // pose (a plain velocity motor is too weak to move or hold it).
                     motor.stiffness = ARM_MOTOR_STIFFNESS;
                     motor.gain = ARM_MOTOR_DAMPING;
-                    motor.target_position = (motor.target_position + velocity * dt_s)
+                    let mut target = (motor.target_position + velocity * dt_s)
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
+                    if let Some(position_rad) = windup_position_rad {
+                        target = target.clamp(
+                            position_rad - ARM_TARGET_LEAD_RAD,
+                            position_rad + ARM_TARGET_LEAD_RAD,
+                        );
+                    }
+                    motor.target_position = target;
                     motor.velocity_rad_s = velocity;
                 } else {
                     motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
@@ -1151,7 +1196,11 @@ impl MobileManipulatorSim {
         let forward_m_s = 0.5 * (left_m_s + right_m_s);
         let yaw_rate_rad_s = (right_m_s - left_m_s) / MM_MOBILE_TRACK_WIDTH_M;
         self.base_planar_locked = forward_m_s.abs() < 1.0e-9 && yaw_rate_rad_s.abs() < 1.0e-9;
-        let yaw = yaw_rad(world_transform_of(&self.world, self.base_link).rotation);
+        self.base_command_forward_m_s = forward_m_s;
+        self.base_command_yaw_rate_rad_s = yaw_rate_rad_s;
+        let transform = world_transform_of(&self.world, self.base_link);
+        let yaw = planar_yaw_rad(transform.rotation);
+        self.base_pose_before_step = (transform.translation, yaw);
         let forward = Quat::from_rotation_y(yaw) * Vec3::X;
 
         if let Some(mut body) = self.world.get_mut::<RigidBody>(self.base_link) {
@@ -1161,15 +1210,42 @@ impl MobileManipulatorSim {
         }
     }
 
+    /// Re-pins the mobile base to a deterministic kinematic pose after the physics step.
+    ///
+    /// The base is meant to behave as a planar diff-drive platform, but letting Rapier's
+    /// dynamic solver own its XZ translation and yaw lets wheel-ground contact noise (and
+    /// the arm's own overturning torque, since the arm's reach is long relative to the
+    /// chassis) leak into the tracked pose, compounding tick over tick into large,
+    /// unstable drift and heading oscillation under sustained driving. Since vertical
+    /// position and roll/pitch were already fully re-pinned here, this extends the same
+    /// treatment to X/Z translation and yaw: both are integrated analytically from the
+    /// exact command applied in [`Self::apply_mobile_base_planar_drive`] and the
+    /// pre-step pose, discarding whatever the dynamic solve produced for those channels.
+    /// Physics still governs the arm, grasped payload, and ground/obstacle contact.
     fn stabilize_mobile_base(&mut self) {
         if !self.mobile_base {
             return;
         }
 
-        let yaw = yaw_rad(world_transform_of(&self.world, self.base_link).rotation);
+        let dt_s = self.dt.as_seconds().value();
+        let (pos0, yaw0) = self.base_pose_before_step;
+        let forward_dir = Quat::from_rotation_y(yaw0) * Vec3::X;
+        let new_pos = pos0 + forward_dir * (self.base_command_forward_m_s * dt_s);
+        // `mm_mobile_twist_to_wheel_velocities` puts the right wheel faster than the left
+        // for a positive commanded yaw rate (standard diff-drive: right-faster steers
+        // left, i.e. toward -Z given the base's `Quat::from_rotation_y(yaw) * X` forward
+        // axis), so a positive commanded yaw rate increases yaw (see
+        // `mobile_twist_positive_yaw_rate_increases_observed_yaw`). This matches the
+        // real-dynamics trajectory example 32's hero script was tuned against: on the
+        // dynamic path (pre-kinematic-repin) the same wheel commands steered the base
+        // toward -Z to reach its pick/place targets there.
+        let new_yaw = wrap_yaw_rad(yaw0 + self.base_command_yaw_rate_rad_s * dt_s);
+
         if let Some(mut transform) = self.world.get_mut::<Transform3>(self.base_link) {
+            transform.translation.x = new_pos.x;
             transform.translation.y = MOBILE_BASE_NOMINAL_Y_M;
-            transform.rotation = Quat::from_rotation_y(yaw);
+            transform.translation.z = new_pos.z;
+            transform.rotation = Quat::from_rotation_y(new_yaw);
         }
         if let Some(mut body) = self.world.get_mut::<RigidBody>(self.base_link) {
             body.linear_velocity_m_s.y = 0.0;
@@ -1180,6 +1256,30 @@ impl MobileManipulatorSim {
                 body.linear_velocity_m_s.z = 0.0;
                 body.angular_velocity_rad_s.y = 0.0;
             }
+        }
+    }
+
+    /// Configures the mobile base robot's shoulder/elbow as position (spring-damper)
+    /// motors, mirroring the lift robot's arm setup: on the floating diff-drive base a
+    /// plain velocity motor cannot hold the extended arm against gravity, so it droops
+    /// onto scene geometry and whips when the base moves. The position hold keeps the
+    /// arm at its commanded pose while driving and lets velocity commands integrate
+    /// into tracked angle targets (see `apply_action`).
+    fn configure_mobile_arm_motors(&mut self) {
+        if !self.mobile_base {
+            return;
+        }
+        for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            if name != "shoulder_joint" && name != "elbow_joint" {
+                continue;
+            }
+            let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) else {
+                continue;
+            };
+            motor.stiffness = ARM_MOTOR_STIFFNESS;
+            motor.gain = ARM_MOTOR_DAMPING;
+            motor.target_position = 0.0;
+            motor.max_force = ARM_MOTOR_MAX_FORCE;
         }
     }
 
@@ -1218,7 +1318,11 @@ impl MobileManipulatorSim {
         let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         let mut backend = RapierBackend::new();
         let physics_world = backend.create_world(PhysicsWorldDesc {
-            solver_iterations: if has_lift { LIFT_SOLVER_ITERATIONS } else { 0 },
+            solver_iterations: if has_lift || self.mobile_base {
+                LIFT_SOLVER_ITERATIONS
+            } else {
+                0
+            },
             ..PhysicsWorldDesc::default()
         })?;
         backend.sync_from_ecs(&mut self.world, physics_world)?;
@@ -1334,6 +1438,29 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
 
 fn z_rotation_rad(rotation: Quat) -> f64 {
     2.0 * f64::atan2(rotation.z, rotation.w)
+}
+
+/// Planar heading in radians, extracted by projecting the rotated +X axis onto the
+/// world XZ plane rather than taking a raw Euler `yaw_rad` decomposition.
+///
+/// For a pure yaw rotation the two agree exactly, but `yaw_rad`'s YXZ Euler
+/// decomposition can alias transient roll/pitch (e.g. from a single physics tick of
+/// wheel-ground contact) into a badly corrupted "yaw" value. Projecting onto the
+/// horizontal plane recovers the intended planar heading even when tilt is present.
+fn planar_yaw_rad(rotation: Quat) -> f64 {
+    let forward = rotation * Vec3::X;
+    (-forward.z).atan2(forward.x)
+}
+
+/// Wraps an angle in radians to `(-PI, PI]`.
+fn wrap_yaw_rad(angle_rad: f64) -> f64 {
+    let mut wrapped = angle_rad % std::f64::consts::TAU;
+    if wrapped <= -std::f64::consts::PI {
+        wrapped += std::f64::consts::TAU;
+    } else if wrapped > std::f64::consts::PI {
+        wrapped -= std::f64::consts::TAU;
+    }
+    wrapped
 }
 
 fn collect_robot_links(world: &mut World, robot: Entity) -> HashMap<String, Entity> {
@@ -1652,7 +1779,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_twist_positive_yaw_rate_decreases_observed_yaw() {
+    fn mobile_twist_positive_yaw_rate_increases_observed_yaw() {
         let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml");
         let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("scene");
@@ -1670,8 +1797,58 @@ mod tests {
         }
         let yaw_end = sim.observe().base_yaw_rad;
         assert!(
-            yaw_end < yaw_start - 0.2,
-            "positive twist yaw rate decreases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
+            yaw_end > yaw_start + 0.2,
+            "positive twist yaw rate increases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
+        );
+    }
+
+    /// Guards the fix for mm_mobile's finger colliders: without collision geometry the
+    /// finger joints never articulate and the contact-weld grasp can never fire.
+    #[test]
+    fn mm_mobile_gripper_fingers_articulate() {
+        let mut sim = MobileManipulatorSim::new_mm_mobile();
+        for _ in 0..40 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let before = sim.observe().gripper_position_rad;
+        for _ in 0..60 {
+            sim.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let after = sim.observe().gripper_position_rad;
+        assert!(
+            (after - before).abs() > 0.2,
+            "mm_mobile fingers should close under a gripper command, before={before:.3} after={after:.3}"
+        );
+    }
+
+    /// Guards the fix for mm_mobile's arm actuation: interpenetrating chassis/arm
+    /// collision boxes used to lock the shoulder and elbow joints solid.
+    #[test]
+    fn mm_mobile_arm_tracks_joint_commands() {
+        let mut sim = MobileManipulatorSim::new_mm_mobile();
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..240 {
+            sim.step(MobileManipulatorAction {
+                shoulder_velocity_rad_s: 0.8,
+                elbow_velocity_rad_s: -0.8,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let obs = sim.observe();
+        assert!(
+            obs.shoulder_position_rad > 0.8,
+            "shoulder should track a sustained positive rate, got {:.3}",
+            obs.shoulder_position_rad
+        );
+        assert!(
+            obs.elbow_position_rad < -0.8,
+            "elbow should track a sustained negative rate, got {:.3}",
+            obs.elbow_position_rad
         );
     }
 
@@ -1766,7 +1943,9 @@ mod tests {
         for _ in 0..80 {
             sim.step(MobileManipulatorAction::default());
         }
-        const TABLE_TOP_Y_M: f64 = 0.54;
+        // `mm_mobile`'s arm has no lift joint, so the mobile clutter table sits lower
+        // than the fixed-base clutter table (see `mm_mobile_clutter.rne.scene.toml`).
+        const TABLE_TOP_Y_M: f64 = 0.34;
         for name in ["clutter_cube_a", "clutter_cube_b", "clutter_cube_c"] {
             let (_, y, _) = sim.named_translation_m(name).expect(name);
             assert!(

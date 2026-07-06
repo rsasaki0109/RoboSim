@@ -306,23 +306,41 @@ const CLUTTER_CARRY_ELBOW_RAD_S: f64 = -0.69;
 const CLUTTER_CARRY_GRIPPER_RAD_S: f64 = -2.5;
 
 const MOBILE_CLUTTER_SETTLE_STEPS: u64 = 80;
-const MOBILE_CLUTTER_DRIVE_STEPS: u64 = 480;
-const MOBILE_CLUTTER_MIN_DRIVE_STEPS: u64 = 40;
-const MOBILE_CLUTTER_ARM_SETTLE_STEPS: u64 = 120;
-const MOBILE_CLUTTER_MIN_GRIPPER_DX_M: f64 = 0.04;
-const MOBILE_CLUTTER_IK_CARRY_STEPS: u64 = CLUTTER_IK_CARRY_STEPS;
-const MOBILE_CLUTTER_HOLD_STEPS: u64 = CLUTTER_HOLD_STEPS;
+const MOBILE_CLUTTER_PICK_DRIVE_STEPS: u64 = 480;
+const MOBILE_CLUTTER_RETREAT_STEPS: u64 = 300;
+const MOBILE_CLUTTER_CARRY_DRIVE_STEPS: u64 = 480;
 const MOBILE_CLUTTER_RELEASE_STEPS: u64 = CLUTTER_RELEASE_STEPS;
+/// Object-to-place horizontal distance that gates the gripper release (m); slightly
+/// tighter than the episode's 0.12 m place tolerance to absorb the drop.
+const MOBILE_CLUTTER_RELEASE_GATE_M: f64 = 0.10;
+/// Forward speed cap while poking the gripper into the pick object (m/s).
+const MOBILE_CLUTTER_PICK_DRIVE_SPEED_M_S: f64 = 0.15;
+/// Forward speed cap while carrying the object toward the place target (m/s).
+const MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S: f64 = 0.25;
+/// Wheel velocity during the post-grasp retreat (rad/s, negative = reverse).
+const MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S: f64 = -1.5;
+/// Base-to-place-target horizontal distance at which the post-grasp retreat stops
+/// (m). Far enough back that the welded object (carried ~0.95 m ahead of the base
+/// center) has been dragged clear off the clutter table's near edge, so the carry
+/// drive's turn toward the place target swings it in free air instead of grinding
+/// it across the tabletop, and so that the subsequent straight carry line passes
+/// the table on its open side.
+const MOBILE_CLUTTER_RETREAT_DISTANCE_M: f64 = 1.9;
 
-/// IK-assisted navigate → pick → place for `mm_mobile` clutter episodes.
+/// Scripted navigate → pick → retreat → carry → release for `mm_mobile` clutter
+/// episodes.
 ///
-/// Drives the diff-drive base toward the pick target, then reuses the fixed-base clutter
-/// arm phases (approach → tuned carry → hold → release) toward
-/// [`mm_mobile_clutter_place_target`](crate::mm_mobile_clutter_place_target).
+/// Observation-gated phase machine: drives the base slowly into the pick object with
+/// the gripper closing until the contact weld grasps it (the arm stays extended, like
+/// the transport pick script), backs straight up until the welded object clears the
+/// clutter table, then drives toward
+/// [`mm_mobile_clutter_place_target`](crate::mm_mobile_clutter_place_target) with the
+/// object carried ahead of the base and releases once the object is over the target.
+/// The base does all the transport work: the kinematically pinned platform can drag
+/// the payload where the position-held arm's force-limited motors cannot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IkMobileClutterPickPlacePolicy {
     step: u64,
-    kin: MmMinimalKinematics,
 }
 
 impl Default for IkMobileClutterPickPlacePolicy {
@@ -334,26 +352,24 @@ impl Default for IkMobileClutterPickPlacePolicy {
 impl IkMobileClutterPickPlacePolicy {
     /// Creates a policy for the default mobile clutter place target.
     pub fn new() -> Self {
-        Self {
-            step: 0,
-            kin: MmMinimalKinematics::mm_mobile(),
-        }
+        Self { step: 0 }
     }
 
-    /// Total scripted steps (settle → drive → arm settle → approach → carry → hold → release).
+    /// Total scripted steps (settle → pick drive → retreat → carry drive → release).
     pub fn total_steps(&self) -> u64 {
         MOBILE_CLUTTER_SETTLE_STEPS
-            + MOBILE_CLUTTER_DRIVE_STEPS
-            + MOBILE_CLUTTER_ARM_SETTLE_STEPS
-            + CLUTTER_APPROACH_STEPS
-            + MOBILE_CLUTTER_IK_CARRY_STEPS
-            + MOBILE_CLUTTER_HOLD_STEPS
+            + MOBILE_CLUTTER_PICK_DRIVE_STEPS
+            + MOBILE_CLUTTER_RETREAT_STEPS
+            + MOBILE_CLUTTER_CARRY_DRIVE_STEPS
             + MOBILE_CLUTTER_RELEASE_STEPS
     }
 
-    /// Step index where the arm settle / approach phases begin (after base drive).
+    /// Step index where the release phase begins (after the drive phases).
     pub fn arm_start_step(&self) -> u64 {
-        self.mobile_arm_start_step()
+        MOBILE_CLUTTER_SETTLE_STEPS
+            + MOBILE_CLUTTER_PICK_DRIVE_STEPS
+            + MOBILE_CLUTTER_RETREAT_STEPS
+            + MOBILE_CLUTTER_CARRY_DRIVE_STEPS
     }
 
     /// Overrides the internal step counter (for composing drive + arm phases in tests).
@@ -366,10 +382,6 @@ impl IkMobileClutterPickPlacePolicy {
         self.step
     }
 
-    fn mobile_arm_start_step(&self) -> u64 {
-        MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS + MOBILE_CLUTTER_ARM_SETTLE_STEPS
-    }
-
     /// Returns the action for the current step and advances the internal counter.
     pub fn next_action(
         &mut self,
@@ -377,36 +389,72 @@ impl IkMobileClutterPickPlacePolicy {
     ) -> crate::MobileManipulatorAction {
         use crate::MobileManipulatorAction;
 
-        let arm_start = self.mobile_arm_start_step();
-        let approach_end = arm_start + CLUTTER_APPROACH_STEPS;
-        let carry_end = approach_end + MOBILE_CLUTTER_IK_CARRY_STEPS;
-        let hold_end = carry_end + MOBILE_CLUTTER_HOLD_STEPS;
-        let release_end = hold_end + MOBILE_CLUTTER_RELEASE_STEPS;
+        let settle_end = MOBILE_CLUTTER_SETTLE_STEPS;
+        let pick_drive_end = settle_end + MOBILE_CLUTTER_PICK_DRIVE_STEPS;
+        let retreat_end = pick_drive_end + MOBILE_CLUTTER_RETREAT_STEPS;
+        let carry_drive_end = retreat_end + MOBILE_CLUTTER_CARRY_DRIVE_STEPS;
+        let release_end = carry_drive_end + MOBILE_CLUTTER_RELEASE_STEPS;
 
-        let s = self.step;
-        self.step += 1;
+        // Before a grasp the episode reports the pick object pose (nonzero Y for a
+        // tabletop object); once grasped it zeroes the pick pose and switches the
+        // target deltas to place-target-relative.
+        let grasped = observation.pick_object_y_m == 0.0;
 
-        if s < MOBILE_CLUTTER_SETTLE_STEPS {
+        // Observation-gated early phase exits.
+        let mut s = self.step;
+        if (settle_end..pick_drive_end).contains(&s) && grasped {
+            s = pick_drive_end;
+        }
+        if (pick_drive_end..retreat_end).contains(&s)
+            && mobile_place_base_distance_m(observation) > MOBILE_CLUTTER_RETREAT_DISTANCE_M
+        {
+            s = retreat_end;
+        }
+        if (retreat_end..carry_drive_end).contains(&s)
+            && grasped
+            && observation.target_dx_m.hypot(observation.target_dz_m)
+                < MOBILE_CLUTTER_RELEASE_GATE_M
+        {
+            s = carry_drive_end;
+        }
+        self.step = s + 1;
+
+        if s < settle_end {
             MobileManipulatorAction::default()
-        } else if s < MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS {
-            let action = mobile_clutter_drive_action(observation);
-            let driven = s - MOBILE_CLUTTER_SETTLE_STEPS + 1;
-            if driven >= MOBILE_CLUTTER_MIN_DRIVE_STEPS && mobile_drive_stop_for_arm_m(observation)
-            {
-                self.step = MOBILE_CLUTTER_SETTLE_STEPS + MOBILE_CLUTTER_DRIVE_STEPS;
-            }
+        } else if s < pick_drive_end {
+            let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
+            let mut action = mobile_drive_toward_action(
+                observation,
+                object_x_m,
+                object_z_m,
+                MOBILE_CLUTTER_PICK_DRIVE_SPEED_M_S,
+            );
+            action.gripper_velocity_rad_s = -2.5;
             action
-        } else if s < arm_start {
-            mobile_clutter_backup_action(observation)
-        } else if s < approach_end {
-            mobile_clutter_approach_action(observation, &self.kin)
-        } else if s < carry_end {
-            clutter_carry_action(observation)
-        } else if s < hold_end {
+        } else if s < retreat_end {
+            // Back straight up to drag the welded object off the near table edge so
+            // it hangs on the weld in free air: the grasp captures the cube pressed
+            // a few millimetres into the tabletop, and that contact wedge resists
+            // sideways arm motion far harder than the force-limited arm motors can
+            // pull. The kinematically pinned base has no such limit.
             MobileManipulatorAction {
-                gripper_velocity_rad_s: CLUTTER_CARRY_GRIPPER_RAD_S,
+                left_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
+                right_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
                 ..MobileManipulatorAction::default()
             }
+        } else if s < carry_drive_end {
+            // Drive straight at the place target with the object carried ahead of
+            // the base; the release gate above fires when the object passes over
+            // the target. Gripper velocity stays zero: the contact weld holds the
+            // object and only an opening command releases it; continuing to command
+            // "close" leaves the limitless fingers flapping against the welded
+            // object.
+            mobile_drive_toward_action(
+                observation,
+                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
+                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
+                MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+            )
         } else if s < release_end {
             MobileManipulatorAction {
                 gripper_velocity_rad_s: 3.0,
@@ -548,41 +596,11 @@ fn clutter_carry_action(
     }
 }
 
-fn mobile_clutter_approach_action(
-    observation: &MobileManipulatorObservation,
-    kin: &MmMinimalKinematics,
-) -> crate::MobileManipulatorAction {
-    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
-    let target = MmMinimalGripperTarget::new(
-        object_x_m,
-        kin.shoulder_y_at_base(observation.base_y_m),
-        object_z_m,
-    );
-    if let Ok(joints) = kin.inverse_kinematics_at_base(
-        observation.base_x_m,
-        observation.base_y_m,
-        observation.base_z_m,
-        observation.base_yaw_rad,
-        target,
-    ) {
-        let mut action = joint_rate_toward_minimal(observation, joints, CARRY_JOINT_RATE_RAD_S);
-        action.gripper_velocity_rad_s = -2.5;
-        action
-    } else {
-        mobile_gripper_approach_action(observation)
-    }
-}
-
-fn mobile_gripper_approach_action(
-    observation: &MobileManipulatorObservation,
-) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    MobileManipulatorAction {
-        shoulder_velocity_rad_s: (4.0 * mobile_gripper_pick_dx(observation)).clamp(-6.0, 6.0),
-        elbow_velocity_rad_s: (4.0 * mobile_gripper_pick_dz(observation)).clamp(-6.0, 6.0),
-        gripper_velocity_rad_s: -2.5,
-        ..MobileManipulatorAction::default()
-    }
+/// Horizontal base distance to the mobile clutter place target.
+fn mobile_place_base_distance_m(observation: &MobileManipulatorObservation) -> f64 {
+    let dx = crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M - observation.base_x_m;
+    let dz = crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M - observation.base_z_m;
+    dx.hypot(dz)
 }
 
 fn mobile_pick_object_xz(observation: &MobileManipulatorObservation) -> (f64, f64) {
@@ -604,72 +622,41 @@ fn wrap_heading_rad(angle: f64) -> f64 {
     wrapped
 }
 
-fn mobile_clutter_drive_action(
+/// Heading-based diff-drive step toward a world XZ point: rotates in place until the
+/// heading error is small, then drives forward with speed proportional to distance
+/// (capped at `max_forward_m_s`). The arm and gripper channels are left at zero for
+/// the caller to fill in.
+fn mobile_drive_toward_action(
     observation: &MobileManipulatorObservation,
+    target_x_m: f64,
+    target_z_m: f64,
+    max_forward_m_s: f64,
 ) -> crate::MobileManipulatorAction {
     use crate::mm_mobile_twist_to_wheel_velocities;
     use crate::MobileManipulatorAction;
 
-    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
-    let dx_world = object_x_m - observation.base_x_m;
-    let dz_world = object_z_m - observation.base_z_m;
-    let distance_m = (dx_world * dx_world + dz_world * dz_world).sqrt();
-    let heading_to_object = dz_world.atan2(dx_world);
-    let heading_error = wrap_heading_rad(heading_to_object - observation.base_yaw_rad);
+    let dx_world = target_x_m - observation.base_x_m;
+    let dz_world = target_z_m - observation.base_z_m;
+    let distance_m = dx_world.hypot(dz_world);
+    let heading_to_target = dz_world.atan2(dx_world);
+    // The base's forward axis is `Quat::from_rotation_y(yaw) * X = (cos yaw, -sin yaw)`
+    // in the XZ plane, so its travel-direction angle in `atan2(z, x)` terms is `-yaw`;
+    // this heading error is `heading_to_target - (-yaw) = heading_to_target + yaw`.
+    // A positive commanded twist yaw rate increases the observed yaw (see the
+    // `mobile_twist_positive_yaw_rate_increases_observed_yaw` sim test), i.e. it
+    // decreases the travel-direction angle, so the commanded rate needs a negative
+    // gain to drive the error toward zero.
+    let heading_error = wrap_heading_rad(heading_to_target + observation.base_yaw_rad);
     let forward_m_s = if heading_error.abs() > 0.12 {
         0.0
     } else {
-        (0.65 * distance_m).clamp(0.0, 0.25)
+        (0.65 * distance_m).clamp(0.0, max_forward_m_s)
     };
     let yaw_rate_rad_s = (-2.0 * heading_error).clamp(-0.7, 0.7);
     let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
     MobileManipulatorAction {
         left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
         right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
-        shoulder_velocity_rad_s: 0.0,
-        elbow_velocity_rad_s: 0.0,
-        gripper_velocity_rad_s: 0.0,
-        ..MobileManipulatorAction::default()
-    }
-}
-
-fn mobile_gripper_pick_dx(observation: &MobileManipulatorObservation) -> f64 {
-    observation.gripper_target_dx_m
-}
-
-fn mobile_gripper_pick_dz(observation: &MobileManipulatorObservation) -> f64 {
-    observation.gripper_target_dz_m
-}
-
-/// Drive stops once the base is within arm reach of the pick object or has overshot it.
-fn mobile_drive_stop_for_arm_m(observation: &MobileManipulatorObservation) -> bool {
-    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
-    let dx = object_x_m - observation.base_x_m;
-    let dz = object_z_m - observation.base_z_m;
-    let base_dist = (dx * dx + dz * dz).sqrt();
-    base_dist < 0.55 || dx < 0.08
-}
-
-fn mobile_clutter_backup_action(
-    observation: &MobileManipulatorObservation,
-) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    let gripper_dx = mobile_gripper_pick_dx(observation);
-    if gripper_dx >= MOBILE_CLUTTER_MIN_GRIPPER_DX_M {
-        return MobileManipulatorAction::default();
-    }
-    if gripper_dx < 0.0 {
-        return MobileManipulatorAction {
-            shoulder_velocity_rad_s: (3.0 * gripper_dx).clamp(-4.0, 0.0),
-            elbow_velocity_rad_s: (3.0 * mobile_gripper_pick_dz(observation)).clamp(-4.0, 4.0),
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        };
-    }
-    MobileManipulatorAction {
-        shoulder_velocity_rad_s: (4.0 * gripper_dx).clamp(0.0, 4.0),
-        elbow_velocity_rad_s: (3.0 * mobile_gripper_pick_dz(observation)).clamp(-4.0, 4.0),
-        gripper_velocity_rad_s: -2.5,
         ..MobileManipulatorAction::default()
     }
 }
@@ -841,7 +828,7 @@ mod tests {
     #[test]
     fn ik_mobile_clutter_policy_total_steps_matches_phases() {
         let policy = IkMobileClutterPickPlacePolicy::new();
-        assert_eq!(policy.total_steps(), 1610);
+        assert_eq!(policy.total_steps(), 1490);
     }
 
     #[test]
