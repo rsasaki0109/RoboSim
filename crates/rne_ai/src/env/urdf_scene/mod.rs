@@ -1,5 +1,13 @@
 //! Headless simulation for scenes that spawn URDF articulation robots.
 
+mod lekiwi_drive;
+
+pub use lekiwi_drive::{
+    lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
+    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+};
+
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{Entity, World};
@@ -52,6 +60,7 @@ pub struct UrdfSceneSim {
     base_link: Entity,
     left_wheel: Option<Entity>,
     right_wheel: Option<Entity>,
+    kiwi_wheels: [Option<Entity>; 3],
     shoulder_pan_link: Option<Entity>,
     actuated_joint_count: usize,
     sim_time: SimTime,
@@ -76,6 +85,11 @@ impl UrdfSceneSim {
         let base_link = first_robot.base_link;
         let left_wheel = find_link_by_name(&world, "left_wheel");
         let right_wheel = find_link_by_name(&world, "right_wheel");
+        let kiwi_wheels = [
+            find_link_by_name(&world, LEKIWI_DRIVE_WHEEL_LINKS[0]),
+            find_link_by_name(&world, LEKIWI_DRIVE_WHEEL_LINKS[1]),
+            find_link_by_name(&world, LEKIWI_DRIVE_WHEEL_LINKS[2]),
+        ];
         let shoulder_pan_link = find_link_by_name(&world, "shoulder_link");
         let actuated_joint_count = world
             .iter_entities()
@@ -100,6 +114,7 @@ impl UrdfSceneSim {
             base_link,
             left_wheel,
             right_wheel,
+            kiwi_wheels,
             shoulder_pan_link,
             actuated_joint_count,
             sim_time: SimTime::default(),
@@ -121,9 +136,19 @@ impl UrdfSceneSim {
         cart_minimal_scene_path()
     }
 
+    /// Built-in LeKiwi base scene path.
+    pub fn lekiwi_scene_path() -> PathBuf {
+        lekiwi_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
+    }
+
+    /// Returns whether this scene uses LeKiwi kiwi-drive wheel motors.
+    pub fn is_kiwi_drive(&self) -> bool {
+        self.kiwi_wheels[0].is_some()
     }
     /// Returns the loaded scene path.
     pub fn scene_path(&self) -> &Path {
@@ -155,6 +180,20 @@ impl UrdfSceneSim {
         if let Some(right) = self.right_wheel {
             if let Some(mut motor) = self.world.get_mut::<JointMotor>(right) {
                 motor.velocity_rad_s = action.right_velocity_rad_s;
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Applies a kiwi-drive planar action and steps one simulation tick.
+    pub fn step_kiwi(&mut self, action: UrdfKiwiAction) {
+        use lekiwi_drive::{lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s};
+        let wheel_velocities_rad_s = lekiwi_twist_to_wheel_velocities(action);
+        for (wheel, velocity_rad_s) in self.kiwi_wheels.iter().zip(wheel_velocities_rad_s) {
+            if let Some(entity) = wheel {
+                if let Some(mut motor) = self.world.get_mut::<JointMotor>(*entity) {
+                    motor.velocity_rad_s = lekiwi_wheel_command_to_motor_rad_s(velocity_rad_s);
+                }
             }
         }
         self.step_physics();
@@ -230,6 +269,11 @@ pub fn cart_minimal_scene_path() -> PathBuf {
     assets_scene_path("cart_minimal.rne.scene.toml")
 }
 
+/// Built-in LeKiwi base scene path.
+pub fn lekiwi_scene_path() -> PathBuf {
+    assets_scene_path("lekiwi.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +304,56 @@ mod tests {
         assert!(
             moved > 0.05,
             "cart should advance under wheel motors, |moved|={moved}"
+        );
+    }
+
+    #[test]
+    fn lekiwi_spawns_with_three_drive_wheels() {
+        let scene_path = lekiwi_scene_path();
+        assert!(scene_path.is_file(), "missing {}", scene_path.display());
+        let sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn lekiwi");
+        assert!(sim.is_kiwi_drive());
+        assert_eq!(sim.actuated_joint_count, 3);
+    }
+
+    #[test]
+    fn lekiwi_drives_forward_under_positive_vx() {
+        let scene_path = lekiwi_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn lekiwi");
+        let initial = sim.observe();
+        for _ in 0..180 {
+            sim.step_kiwi(UrdfKiwiAction {
+                vx_m_s: 0.15,
+                vz_m_s: 0.0,
+                wz_rad_s: 0.0,
+            });
+        }
+        let obs = sim.observe();
+        let dx_m = obs.base_x_m - initial.base_x_m;
+        let dz_m = obs.base_z_m - initial.base_z_m;
+        let planar_m = (dx_m * dx_m + dz_m * dz_m).sqrt();
+        assert!(
+            planar_m > 0.03,
+            "lekiwi should translate under +vx, planar={planar_m:.4} m (dx={dx_m:.4}, dz={dz_m:.4})"
+        );
+    }
+
+    #[test]
+    fn lekiwi_yaw_under_positive_wz() {
+        let scene_path = lekiwi_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn lekiwi");
+        let initial_yaw = sim.observe().base_yaw_rad;
+        for _ in 0..240 {
+            sim.step_kiwi(UrdfKiwiAction {
+                vx_m_s: 0.0,
+                vz_m_s: 0.0,
+                wz_rad_s: 0.4,
+            });
+        }
+        let yaw_delta = (sim.observe().base_yaw_rad - initial_yaw).abs();
+        assert!(
+            yaw_delta > 0.05,
+            "lekiwi should yaw under +wz, |delta|={yaw_delta:.4} rad"
         );
     }
 }

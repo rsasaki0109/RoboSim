@@ -151,7 +151,7 @@ pub fn spawn_robot_asset(
                 .entity_mut(spawned.base_link)
                 .insert(Transform3::from_translation_rotation(
                     vec3_from_array(section.initial_translation_m),
-                    Quat::IDENTITY,
+                    quat_from_rpy(section.initial_rotation_rpy),
                 ));
 
             let wrist_camera = asset.wrist_camera.as_ref().and_then(|config| {
@@ -389,6 +389,10 @@ pub fn spawn_diff_drive_from_asset(
 
 fn vec3_from_array(values: [f64; 3]) -> Vec3 {
     Vec3::new(values[0], values[1], values[2])
+}
+
+fn quat_from_rpy(rpy: [f64; 3]) -> Quat {
+    Quat::from_rotation_z(rpy[2]) * Quat::from_rotation_y(rpy[1]) * Quat::from_rotation_x(rpy[0])
 }
 
 fn attach_diff_drive_visuals(

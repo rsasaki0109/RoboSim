@@ -27,6 +27,9 @@ pub use mobile_manipulator::{
     MM_MOBILE_WHEEL_RADIUS_M,
 };
 pub use urdf_scene::{
-    cart_minimal_scene_path, so101_scene_path, UrdfArmAction, UrdfCartAction, UrdfSceneObservation,
-    UrdfSceneSim,
+    cart_minimal_scene_path, lekiwi_scene_path, lekiwi_twist_to_wheel_velocities,
+    lekiwi_wheel_command_to_motor_rad_s, so101_scene_path, UrdfArmAction, UrdfCartAction,
+    UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim, LEKIWI_DRIVE_WHEEL_LINKS,
+    LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN, LEKIWI_WHEEL_PIVOT_RADIUS_M,
+    LEKIWI_WHEEL_RADIUS_M,
 };
