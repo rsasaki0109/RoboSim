@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod urdf_scene;
 
 pub use diff_drive::DiffDriveSim;
 pub use diff_drive::{
@@ -24,4 +25,8 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
     MM_MOBILE_WHEEL_RADIUS_M,
+};
+pub use urdf_scene::{
+    cart_minimal_scene_path, so101_scene_path, UrdfArmAction, UrdfCartAction, UrdfSceneObservation,
+    UrdfSceneSim,
 };

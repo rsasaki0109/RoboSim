@@ -24,12 +24,15 @@
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-mobile
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --so101
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --cart
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
 
 use rne_ai::{
     append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    mm_lift_scene_path, mm_minimal_scene_path, mm_mobile_scene_path, DiffDriveAction, DiffDriveSim,
-    MobileManipulatorAction, MobileManipulatorSim,
+    cart_minimal_scene_path, mm_lift_scene_path, mm_minimal_scene_path, mm_mobile_scene_path,
+    so101_scene_path, DiffDriveAction, DiffDriveSim, MobileManipulatorAction, MobileManipulatorSim,
+    UrdfArmAction, UrdfCartAction, UrdfSceneSim,
 };
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
@@ -58,11 +61,14 @@ enum ViewerProfile {
     ManipulatorFixed(PathBuf),
     ManipulatorMobile(PathBuf),
     ManipulatorLift(PathBuf),
+    So101(PathBuf),
+    Cart(PathBuf),
 }
 
 enum ViewerSim {
     DiffDrive(Box<DiffDriveSim>),
     Manipulator(Box<MobileManipulatorSim>),
+    UrdfScene(Box<UrdfSceneSim>),
 }
 
 impl ViewerSim {
@@ -74,6 +80,10 @@ impl ViewerSim {
             Self::Manipulator(sim) => {
                 sim.step(teleop_manipulator(keys, sim.mobile_base()));
             }
+            Self::UrdfScene(sim) => match sim.left_wheel().is_some() {
+                true => sim.step_cart(teleop_urdf_cart(keys)),
+                false => sim.step_arm(teleop_urdf_arm(keys)),
+            },
         }
     }
 
@@ -86,6 +96,10 @@ impl ViewerSim {
             Self::Manipulator(sim) => {
                 let obs = sim.observe();
                 Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m)
+            }
+            Self::UrdfScene(sim) => {
+                let obs = sim.observe();
+                Vec3::new(obs.base_x_m, obs.base_y_m + 0.25, obs.base_z_m)
             }
         }
     }
@@ -112,6 +126,17 @@ impl ViewerSim {
                     obs.base_z_m
                 )
             }
+            Self::UrdfScene(sim) => {
+                let obs = sim.observe();
+                format!(
+                    "base=({:.2}, {:.2}, {:.2}) yaw={:.2} rad joints={}",
+                    obs.base_x_m,
+                    obs.base_y_m,
+                    obs.base_z_m,
+                    obs.base_yaw_rad,
+                    obs.actuated_joint_count
+                )
+            }
         }
     }
 
@@ -121,6 +146,7 @@ impl ViewerSim {
                 .latest_wrist_camera()
                 .map(|image| (image.rgba8, image.width, image.height)),
             Self::DiffDrive(_) => None,
+            Self::UrdfScene(_) => None,
         }
     }
 
@@ -138,6 +164,7 @@ impl ViewerSim {
                 scene
             }
             Self::Manipulator(sim) => build_visual_render_scene(sim.world()),
+            Self::UrdfScene(sim) => build_visual_render_scene(sim.world()),
         }
     }
 
@@ -145,6 +172,7 @@ impl ViewerSim {
         match self {
             Self::DiffDrive(sim) => sim.mesh_package_roots().to_vec(),
             Self::Manipulator(_) => Vec::new(),
+            Self::UrdfScene(sim) => sim.mesh_package_roots().to_vec(),
         }
     }
 
@@ -161,6 +189,10 @@ impl ViewerSim {
                 let _ = scene_path;
                 Ok(())
             }
+            Self::UrdfScene(_) => {
+                let _ = scene_path;
+                Ok(())
+            }
         }
     }
 
@@ -168,13 +200,15 @@ impl ViewerSim {
         match self {
             Self::DiffDrive(sim) => sim.world_seed(),
             Self::Manipulator(_) => 0,
+            Self::UrdfScene(sim) => sim.world_seed(),
         }
     }
 
     fn smoke_base_x(&self) -> f64 {
         match self {
             Self::DiffDrive(sim) => sim.observe().base_x_m,
-            Self::Manipulator(sim) => sim.observe().base_x_m,
+            Self::Manipulator(_) => 0.0,
+            Self::UrdfScene(sim) => sim.observe().base_x_m,
         }
     }
 
@@ -185,6 +219,7 @@ impl ViewerSim {
                 append_lidar_overlay(&mut scene, sim.world(), sim.data_bus()).hit_markers
             }
             Self::Manipulator(_) => 0,
+            Self::UrdfScene(_) => 0,
         }
     }
 }
@@ -223,6 +258,12 @@ fn viewer_profile_from_args() -> ViewerProfile {
     if args.iter().any(|arg| arg == "--manipulator") {
         return ViewerProfile::ManipulatorFixed(scene_arg.unwrap_or_else(mm_minimal_scene_path));
     }
+    if args.iter().any(|arg| arg == "--so101") {
+        return ViewerProfile::So101(scene_arg.unwrap_or_else(so101_scene_path));
+    }
+    if args.iter().any(|arg| arg == "--cart") {
+        return ViewerProfile::Cart(scene_arg.unwrap_or_else(cart_minimal_scene_path));
+    }
     let scene_path = scene_arg.unwrap_or_else(default_scene_path);
     ViewerProfile::DiffDriveScene(scene_path)
 }
@@ -241,6 +282,11 @@ fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
         ViewerProfile::ManipulatorLift(path) => MobileManipulatorSim::from_scene_path(path)
             .map(|sim| ViewerSim::Manipulator(Box::new(sim)))
             .map_err(|error| error.to_string()),
+        ViewerProfile::So101(path) | ViewerProfile::Cart(path) => {
+            UrdfSceneSim::from_scene_path(path)
+                .map(|sim| ViewerSim::UrdfScene(Box::new(sim)))
+                .map_err(|error| error.to_string())
+        }
     }
 }
 
@@ -250,6 +296,8 @@ fn profile_label(profile: &ViewerProfile) -> String {
         ViewerProfile::ManipulatorFixed(path) => format!("mm_minimal ({})", path.display()),
         ViewerProfile::ManipulatorMobile(path) => format!("mm_mobile ({})", path.display()),
         ViewerProfile::ManipulatorLift(path) => format!("mm_lift ({})", path.display()),
+        ViewerProfile::So101(path) => format!("so101 ({})", path.display()),
+        ViewerProfile::Cart(path) => format!("cart_minimal ({})", path.display()),
     }
 }
 
@@ -362,6 +410,34 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 std::process::exit(1);
             }
         }
+        ViewerProfile::So101(_) => {
+            let obs = match &sim {
+                ViewerSim::UrdfScene(sim) => sim.observe(),
+                _ => unreachable!(),
+            };
+            if obs.actuated_joint_count < 5 {
+                eprintln!(
+                    "interactive viewer smoke expected SO-101 actuated joints, got {}",
+                    obs.actuated_joint_count
+                );
+                std::process::exit(1);
+            }
+            if mesh_items < 5 {
+                eprintln!(
+                    "interactive viewer smoke expected SO-101 mesh visuals, got {mesh_items}"
+                );
+                std::process::exit(1);
+            }
+        }
+        ViewerProfile::Cart(_) => {
+            if sim.smoke_base_x().abs() <= 0.02 {
+                eprintln!(
+                    "interactive viewer smoke expected cart displacement, base_x={}",
+                    sim.smoke_base_x()
+                );
+                std::process::exit(1);
+            }
+        }
     }
 
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -383,6 +459,12 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
         }
         ViewerProfile::ManipulatorLift(_) => {
             keys.insert(KeyCode::KeyR);
+        }
+        ViewerProfile::So101(_) => {
+            keys.insert(KeyCode::KeyQ);
+        }
+        ViewerProfile::Cart(_) => {
+            keys.insert(KeyCode::KeyW);
         }
     }
     keys
@@ -712,6 +794,27 @@ fn teleop_manipulator(keys: &HashSet<KeyCode>, mobile_base: bool) -> MobileManip
     }
 
     action
+}
+
+fn teleop_urdf_cart(keys: &HashSet<KeyCode>) -> UrdfCartAction {
+    let drive = teleop_diff_drive(keys);
+    UrdfCartAction {
+        left_velocity_rad_s: drive.left_velocity_rad_s,
+        right_velocity_rad_s: drive.right_velocity_rad_s,
+    }
+}
+
+fn teleop_urdf_arm(keys: &HashSet<KeyCode>) -> UrdfArmAction {
+    let mut shoulder_pan_velocity_rad_s = 0.0;
+    if keys.contains(&KeyCode::KeyQ) {
+        shoulder_pan_velocity_rad_s += ARM_SPEED_RAD_S;
+    }
+    if keys.contains(&KeyCode::KeyE) {
+        shoulder_pan_velocity_rad_s -= ARM_SPEED_RAD_S;
+    }
+    UrdfArmAction {
+        shoulder_pan_velocity_rad_s,
+    }
 }
 
 fn count_mesh_items(scene: &rne_render::RenderScene) -> usize {

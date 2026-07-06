@@ -1,0 +1,265 @@
+//! Headless simulation for scenes that spawn URDF articulation robots.
+
+use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
+use rne_core::{SimDuration, SimTime};
+use rne_ecs::{Entity, World};
+use rne_math::{yaw_rad, Hertz};
+use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
+use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_robot::Link;
+use rne_world::world_transform_of;
+use std::path::{Path, PathBuf};
+
+/// Observation for a generic URDF scene simulation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfSceneObservation {
+    /// Base link world X position in meters.
+    pub base_x_m: f64,
+    /// Base link world Y position in meters.
+    pub base_y_m: f64,
+    /// Base link world Z position in meters.
+    pub base_z_m: f64,
+    /// Base yaw in radians (Y-up world).
+    pub base_yaw_rad: f64,
+    /// Number of revolute / continuous joints with motors in the scene.
+    pub actuated_joint_count: usize,
+}
+
+/// Action for driving a URDF diff-drive cart (continuous wheel joints).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UrdfCartAction {
+    /// Left wheel angular velocity in rad/s.
+    pub left_velocity_rad_s: f64,
+    /// Right wheel angular velocity in rad/s.
+    pub right_velocity_rad_s: f64,
+}
+
+/// Action for teleoperating the first arm joint of a fixed-base URDF arm.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UrdfArmAction {
+    /// Shoulder pan motor velocity in rad/s.
+    pub shoulder_pan_velocity_rad_s: f64,
+}
+
+/// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
+pub struct UrdfSceneSim {
+    world: World,
+    backend: RapierBackend,
+    physics_world: PhysicsWorldId,
+    scene_path: PathBuf,
+    mesh_package_roots: Vec<PathBuf>,
+    world_seed: u64,
+    base_link: Entity,
+    left_wheel: Option<Entity>,
+    right_wheel: Option<Entity>,
+    shoulder_pan_link: Option<Entity>,
+    actuated_joint_count: usize,
+    sim_time: SimTime,
+    dt: SimDuration,
+}
+
+impl UrdfSceneSim {
+    /// Loads a `.rne.scene.toml` whose primary robot is a URDF articulation.
+    pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
+        let mut world = World::new();
+        let spawned = load_and_spawn_scene(&mut world, scene_path)?;
+        let world_seed = world
+            .get::<rne_world::WorldEntity>(spawned.world)
+            .map(|world_entity| world_entity.seed)
+            .unwrap_or(0);
+
+        let (_, first_robot) = spawned.robots.first().ok_or_else(|| AssetError::Invalid {
+            path: scene_path.display().to_string(),
+            message: "no robots".into(),
+        })?;
+
+        let base_link = first_robot.base_link;
+        let left_wheel = find_link_by_name(&world, "left_wheel");
+        let right_wheel = find_link_by_name(&world, "right_wheel");
+        let shoulder_pan_link = find_link_by_name(&world, "shoulder_link");
+        let actuated_joint_count = world
+            .iter_entities()
+            .filter(|entity_ref| world.get::<JointMotor>(entity_ref.id()).is_some())
+            .count();
+
+        let bundle = load_scene_bundle(scene_path)?;
+        let mesh_roots = mesh_package_roots(&bundle);
+
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .map_err(|error| asset_physics_error(scene_path, error))?;
+
+        let mut sim = Self {
+            world,
+            backend,
+            physics_world,
+            scene_path: scene_path.to_path_buf(),
+            mesh_package_roots: mesh_roots,
+            world_seed,
+            base_link,
+            left_wheel,
+            right_wheel,
+            shoulder_pan_link,
+            actuated_joint_count,
+            sim_time: SimTime::default(),
+            dt: SimDuration::from_hertz(Hertz::new(60.0)),
+        };
+        sim.backend
+            .sync_from_ecs(&mut sim.world, sim.physics_world)
+            .map_err(|error| asset_physics_error(scene_path, error))?;
+        Ok(sim)
+    }
+
+    /// Built-in SO-101 scene path.
+    pub fn so101_scene_path() -> PathBuf {
+        so101_scene_path()
+    }
+
+    /// Built-in cart scene path.
+    pub fn cart_minimal_scene_path() -> PathBuf {
+        cart_minimal_scene_path()
+    }
+
+    /// Returns whether this scene has diff-drive wheel motors.
+    pub fn left_wheel(&self) -> Option<Entity> {
+        self.left_wheel
+    }
+    /// Returns the loaded scene path.
+    pub fn scene_path(&self) -> &Path {
+        &self.scene_path
+    }
+
+    /// Returns mesh package roots for rendering.
+    pub fn mesh_package_roots(&self) -> &[PathBuf] {
+        &self.mesh_package_roots
+    }
+
+    /// Returns the world seed from the scene.
+    pub fn world_seed(&self) -> u64 {
+        self.world_seed
+    }
+
+    /// Returns the ECS world.
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    /// Applies a diff-drive wheel action and steps one simulation tick.
+    pub fn step_cart(&mut self, action: UrdfCartAction) {
+        if let Some(left) = self.left_wheel {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(left) {
+                motor.velocity_rad_s = action.left_velocity_rad_s;
+            }
+        }
+        if let Some(right) = self.right_wheel {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(right) {
+                motor.velocity_rad_s = action.right_velocity_rad_s;
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Applies an arm teleop action and steps one simulation tick.
+    pub fn step_arm(&mut self, action: UrdfArmAction) {
+        if let Some(shoulder) = self.shoulder_pan_link {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(shoulder) {
+                motor.velocity_rad_s = action.shoulder_pan_velocity_rad_s;
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Returns the latest observation.
+    pub fn observe(&self) -> UrdfSceneObservation {
+        let base = world_transform_of(&self.world, self.base_link);
+        UrdfSceneObservation {
+            base_x_m: base.translation.x,
+            base_y_m: base.translation.y,
+            base_z_m: base.translation.z,
+            base_yaw_rad: yaw_rad(base.rotation),
+            actuated_joint_count: self.actuated_joint_count,
+        }
+    }
+
+    fn step_physics(&mut self) {
+        step_physics(
+            &mut self.backend,
+            &mut self.world,
+            self.physics_world,
+            self.dt,
+        )
+        .expect("urdf scene physics step");
+        self.sim_time = self.sim_time + self.dt;
+    }
+}
+
+fn asset_physics_error(path: &Path, error: rne_physics::PhysicsError) -> AssetError {
+    AssetError::Invalid {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn find_link_by_name(world: &World, name: &str) -> Option<Entity> {
+    for entity_ref in world.iter_entities() {
+        let entity = entity_ref.id();
+        if world
+            .get::<Link>(entity)
+            .is_some_and(|link| link.name == name)
+        {
+            return Some(entity);
+        }
+    }
+    None
+}
+
+fn assets_scene_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes")
+        .join(file_name)
+}
+
+/// Built-in SO-101 scene path.
+pub fn so101_scene_path() -> PathBuf {
+    assets_scene_path("so101.rne.scene.toml")
+}
+
+/// Built-in cart scene path.
+pub fn cart_minimal_scene_path() -> PathBuf {
+    assets_scene_path("cart_minimal.rne.scene.toml")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn so101_urdf_parses_and_spawns_from_scene() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        assert!(scene_path.is_file(), "missing {}", scene_path.display());
+        let sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        assert!(sim.actuated_joint_count >= 5);
+        assert!(!sim.mesh_package_roots().is_empty());
+        let obs = sim.observe();
+        assert!(obs.base_y_m >= 0.0);
+    }
+
+    #[test]
+    fn cart_minimal_drives_forward_under_wheel_velocity() {
+        let scene_path = UrdfSceneSim::cart_minimal_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn cart");
+        let initial_x = sim.observe().base_x_m;
+        for _ in 0..180 {
+            sim.step_cart(UrdfCartAction {
+                left_velocity_rad_s: 4.0,
+                right_velocity_rad_s: 4.0,
+            });
+        }
+        let moved = (sim.observe().base_x_m - initial_x).abs();
+        assert!(
+            moved > 0.05,
+            "cart should advance under wheel motors, |moved|={moved}"
+        );
+    }
+}
