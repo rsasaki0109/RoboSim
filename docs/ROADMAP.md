@@ -1,5 +1,38 @@
 # Roadmap
 
+## v0.14 goal: realistic grasping
+
+User feedback after v0.13: "the manipulator holding an object doesn't look real". The
+contact-triggered weld grasps at whatever raw contact pose it catches (off-center dangling,
+a 2 cm seat-lift pop on the fixed base, the mobile carry dragging the object ~10 cm in front
+of the gripper), and the fingers ignore the object once welded. Two-stage plan: first make
+the weld *look* like a grasp, then replace it with physical friction-based grasping.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Manipulation | Weld visual realism: two-finger contact gating (no single-finger graze capture), smooth weld-anchor retarget to a canonical in-gripper pose (centered between finger pads, folds in the 2 cm seat lift — no teleports), fingers pinch to the object surface | In progress (`feat/grasp-visual-realism`) |
+| B | Physics | Friction-based grasp core: force-limited finger position motors + friction-cone holding, weld removed for graspable objects. **Risk**: reintroduces contact-history sensitivity — the v0.13 settle fixes (stable equilibria, kinematic base) are the prerequisite that makes this attemptable. Validate cross-platform from day one (temp linux workflow loop) | Pending |
+| C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | Pending |
+| D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | Pending |
+
+### v0.14 candidates
+
+| Area | Idea |
+|------|------|
+| Perception | Wrist-camera grasp target estimation (visuomotor pick) — pairs naturally with Phase B |
+| Physics | Wire URDF prismatic joints to Rapier (carried-over architecture gap) |
+| Scene diversity | Domain randomization + curriculum over clutter layouts |
+| DevEx | Fix `xtask` `run_step` on Windows: `cmd /C` strips the leading quote of the venv python path, so the RL smoke stage's pip steps fail locally (Linux CI unaffected; reproduces on main) |
+| CI | ROS 2 jobs (`rne_ros2_node`, `rne_ros2_bridge`) are red on the runner: `simulation_interfaces` package missing from crates.io / the Python env — runner provisioning issue, predates v0.13 |
+
+### Known platform notes (carried forward)
+
+- The README hero live trajectory digest is compared only on Windows (the generating
+  platform): cross-platform contact dynamics are outcome-stable but not bit-identical.
+  Outcome-level hero checks run everywhere.
+- `cargo test --workspace --features headless` is listed in AGENTS.md but no workspace
+  package defines a `headless` feature (pre-existing; also absent from `xtask ci`).
+
 ## v0.13 goal: mobile clutter place E2E
 
 Primary development target for v0.13. Shipped 2026-07-06. See [CHANGELOG.md](../CHANGELOG.md).
