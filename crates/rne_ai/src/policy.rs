@@ -296,13 +296,19 @@ impl Policy<crate::MobileManipulatorEpisode> for IkLiftPickPlacePolicy {
     }
 }
 
+/// Joint rate for the fixed-base clutter approach's IK tracking, distinct from
+/// `CARRY_JOINT_RATE_RAD_S`: the shoulder/elbow are now a position-hold servo (see
+/// `configure_arm_position_motors`) with real spring lag, and bang-bang control
+/// (`signed_rate_toward`'s all-or-nothing max rate) at 0.8 rad/s overshoots the IK
+/// target on every approach, then reverses — a sustained limit-cycle chatter that
+/// never settles inside the grasp tolerance. A slower rate keeps the overshoot (and
+/// so the settle time) small enough that the servo actually reaches the target.
+const CLUTTER_APPROACH_RATE_RAD_S: f64 = 0.3;
 const CLUTTER_SETTLE_STEPS: u64 = 20;
 const CLUTTER_APPROACH_STEPS: u64 = 360;
 const CLUTTER_IK_CARRY_STEPS: u64 = 340;
 const CLUTTER_HOLD_STEPS: u64 = 80;
 const CLUTTER_RELEASE_STEPS: u64 = 150;
-const CLUTTER_CARRY_SHOULDER_RAD_S: f64 = -0.50;
-const CLUTTER_CARRY_ELBOW_RAD_S: f64 = -0.69;
 const CLUTTER_CARRY_GRIPPER_RAD_S: f64 = -2.5;
 
 const MOBILE_CLUTTER_SETTLE_STEPS: u64 = 80;
@@ -443,18 +449,28 @@ impl IkMobileClutterPickPlacePolicy {
                 ..MobileManipulatorAction::default()
             }
         } else if s < carry_drive_end {
-            // Drive straight at the place target with the object carried ahead of
-            // the base; the release gate above fires when the object passes over
+            // Drive so the CARRIED OBJECT (not the base) converges on the place
+            // target. The object rides on the spring-held arm nearly a meter ahead
+            // of the base, and its lateral offset after the retreat's drag-and-turn
+            // is contact-history dependent (it differs measurably across
+            // platforms), so steering the base straight at the place point can
+            // march the object past the release gate without ever crossing it.
+            // `mobile_carry_object_toward_action` closed-loops the object error
+            // instead; the release gate above fires when the object passes over
             // the target. Gripper velocity stays zero: the contact weld holds the
-            // object and only an opening command releases it; continuing to command
-            // "close" leaves the limitless fingers flapping against the welded
-            // object.
-            mobile_drive_toward_action(
-                observation,
-                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
-                crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
-                MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
-            )
+            // object and only an opening command releases it; continuing to
+            // command "close" leaves the limitless fingers flapping against the
+            // welded object.
+            if grasped {
+                mobile_carry_object_toward_action(observation)
+            } else {
+                mobile_drive_toward_action(
+                    observation,
+                    crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_X_M,
+                    crate::mm_minimal_kinematics::MM_MOBILE_CLUTTER_PLACE_Z_M,
+                    MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+                )
+            }
         } else if s < release_end {
             MobileManipulatorAction {
                 gripper_velocity_rad_s: 3.0,
@@ -526,9 +542,18 @@ impl IkClutterPickPlacePolicy {
         if s < CLUTTER_SETTLE_STEPS {
             MobileManipulatorAction::default()
         } else if s < approach_end {
-            clutter_approach_action(observation, &self.kin)
+            // `pick_object_y_m` is only filled while the object is still free; once
+            // the grasp weld attaches, switch straight to the carry so the approach
+            // does not keep integrating toward a stale pick pose and fold the arm
+            // onto its own welded payload (a self-jam the position-held servo
+            // cannot push out of, since the payload moves rigidly with the arm).
+            if observation.pick_object_y_m != 0.0 {
+                clutter_approach_action(observation, &self.kin)
+            } else {
+                clutter_carry_action(observation, &self.kin)
+            }
         } else if s < carry_end {
-            clutter_carry_action(observation)
+            clutter_carry_action(observation, &self.kin)
         } else if s < hold_end {
             MobileManipulatorAction {
                 gripper_velocity_rad_s: CLUTTER_CARRY_GRIPPER_RAD_S,
@@ -558,7 +583,6 @@ fn clutter_approach_action(
     observation: &MobileManipulatorObservation,
     kin: &MmMinimalKinematics,
 ) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
     let object_x_m = if observation.pick_object_y_m != 0.0 {
         observation.pick_object_x_m
     } else {
@@ -570,30 +594,54 @@ fn clutter_approach_action(
         observation.ee_z_m + observation.target_dz_m
     };
     let target = MmMinimalGripperTarget::new(object_x_m, kin.shoulder_y_m(), object_z_m);
-    if let Ok(joints) = kin.inverse_kinematics(target) {
-        let mut action = joint_rate_toward_minimal(observation, joints, CARRY_JOINT_RATE_RAD_S);
-        action.gripper_velocity_rad_s = -2.5;
-        action
-    } else {
-        MobileManipulatorAction {
-            shoulder_velocity_rad_s: (4.0 * observation.target_dx_m).clamp(-6.0, 6.0),
-            elbow_velocity_rad_s: (4.0 * observation.target_dz_m).clamp(-6.0, 6.0),
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        }
-    }
+    // Solve IK (elbow-down branch: for the clutter table's -z pick lane it folds the
+    // fingertips onto the object in a tight arc instead of leading with the forearm's
+    // side face, which would bulldoze the object off the table without ever making
+    // finger contact). When the object lies outside the analytic workspace, aim at
+    // the nearest reachable point along the same bearing instead of falling back to
+    // a naive Cartesian-error-to-joint-velocity law: against the position-held servo
+    // (see `configure_arm_position_motors`), that naive law is a genuine closed-loop
+    // instability (a sustained limit cycle), since it maps Cartesian axes directly
+    // onto joint velocities without accounting for the arm's coupled Jacobian.
+    let joints = kin
+        .inverse_kinematics_elbow_down(target)
+        .unwrap_or_else(|_| {
+            kin.inverse_kinematics_elbow_down(kin.max_reach_toward(object_x_m, object_z_m))
+                .expect("max_reach_toward scales inside the analytic workspace")
+        });
+    let mut action = joint_rate_toward_minimal(observation, joints, CLUTTER_APPROACH_RATE_RAD_S);
+    // Keep the gripper closing for the whole approach: the grasp weld triggers on
+    // the first finger contact, so the swing welds the object wherever a finger
+    // bar first brushes it. That offset is not precisely controllable (this
+    // gripper's finger bars extend sideways and the forearm leads any azimuthal
+    // sweep), so the clutter place target is derived from where the scripted
+    // policy actually lands the cube — the same convention the lift place target
+    // uses (see `MobileManipulatorEpisodeConfig::lift_pick_place`).
+    action.gripper_velocity_rad_s = -2.5;
+    action
 }
 
+/// Carries the grasped cube toward the fixed-base clutter place target by driving
+/// the joints to the IK solution at maximal reach toward it (the ground target
+/// itself lies just outside the horizontal workspace; the cube is released at the
+/// closest reachable point above it and falls within the place tolerance).
+/// Replaces the old fixed shoulder/elbow velocity pair, which was tuned against
+/// the unstable pre-fix arm dynamics and has no meaning against the stable
+/// position-held servo.
 fn clutter_carry_action(
-    _observation: &MobileManipulatorObservation,
+    observation: &MobileManipulatorObservation,
+    kin: &MmMinimalKinematics,
 ) -> crate::MobileManipulatorAction {
-    use crate::MobileManipulatorAction;
-    MobileManipulatorAction {
-        gripper_velocity_rad_s: CLUTTER_CARRY_GRIPPER_RAD_S,
-        shoulder_velocity_rad_s: CLUTTER_CARRY_SHOULDER_RAD_S,
-        elbow_velocity_rad_s: CLUTTER_CARRY_ELBOW_RAD_S,
-        ..MobileManipulatorAction::default()
-    }
+    let place = crate::mm_minimal_kinematics::mm_minimal_clutter_place_target();
+    let carry_target = kin.max_reach_toward(place.x_m, place.z_m);
+    // Elbow-down branch, matching the approach: keeps the carry a short in-branch
+    // extension instead of a full arm reconfiguration through the +z clutter.
+    let mut action = match kin.inverse_kinematics_elbow_down(carry_target) {
+        Ok(joints) => joint_rate_toward_minimal(observation, joints, CLUTTER_APPROACH_RATE_RAD_S),
+        Err(_) => crate::MobileManipulatorAction::default(),
+    };
+    action.gripper_velocity_rad_s = CLUTTER_CARRY_GRIPPER_RAD_S;
+    action
 }
 
 /// Horizontal base distance to the mobile clutter place target.
@@ -661,6 +709,56 @@ fn mobile_drive_toward_action(
     }
 }
 
+/// Gain for `joint_rate_toward_minimal`'s proportional tracking (rad/s per rad of error).
+const CLUTTER_APPROACH_GAIN: f64 = 0.5;
+
+/// Nominal forward distance of the carried clutter object from the mobile base
+/// center (m); scales the steering share of the object-error feedback below.
+const MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M: f64 = 0.95;
+/// Proportional gain mapping carried-object position error to base twist (1/s).
+const MOBILE_CLUTTER_CARRY_OBJECT_GAIN: f64 = 0.6;
+
+/// Diff-drive step that moves the CARRIED OBJECT toward the place target.
+///
+/// Treats the object as a lookahead point rigidly ~`MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M`
+/// ahead of the base and feedback-linearizes the unicycle: for a point `P = B + L f(yaw)`,
+/// `dP = v f + L w df/dyaw`, so commanding `v` from the error's heading-aligned
+/// component and `w` from its lateral component moves `P` straight at the target.
+/// Steering the base's own heading at a compensated aim point does not work here:
+/// the aim rotates with the base (the object error vector is expressed through the
+/// base yaw), so a bearing controller chases a moving target and dithers in place.
+/// Requires a grasped object (`target_d*` = place target relative to the object).
+fn mobile_carry_object_toward_action(
+    observation: &MobileManipulatorObservation,
+) -> crate::MobileManipulatorAction {
+    use crate::mm_mobile_twist_to_wheel_velocities;
+    use crate::MobileManipulatorAction;
+
+    let error_x = observation.target_dx_m;
+    let error_z = observation.target_dz_m;
+    let yaw = observation.base_yaw_rad;
+    // Base forward axis in the XZ plane is `Quat::from_rotation_y(yaw) * X`
+    // (see `apply_mobile_base_planar_drive`), and its yaw-derivative is `g`.
+    let forward = (yaw.cos(), -yaw.sin());
+    let forward_yaw_derivative = (-yaw.sin(), -yaw.cos());
+    let along_m = error_x * forward.0 + error_z * forward.1;
+    let lateral_m = error_x * forward_yaw_derivative.0 + error_z * forward_yaw_derivative.1;
+
+    let forward_m_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * along_m).clamp(
+        -MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+        MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+    );
+    let yaw_rate_rad_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * lateral_m
+        / MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M)
+        .clamp(-0.7, 0.7);
+    let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
+        right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
+        ..MobileManipulatorAction::default()
+    }
+}
+
 fn joint_rate_toward_minimal(
     observation: &MobileManipulatorObservation,
     target: MmMinimalJointTarget,
@@ -668,19 +766,45 @@ fn joint_rate_toward_minimal(
 ) -> crate::MobileManipulatorAction {
     use crate::MobileManipulatorAction;
     MobileManipulatorAction {
-        shoulder_velocity_rad_s: signed_rate_toward(
+        shoulder_velocity_rad_s: proportional_rate_toward(
             observation.shoulder_position_rad,
             target.shoulder_rad,
             max_rate_rad_s,
+            CLUTTER_APPROACH_GAIN,
             0.05,
         ),
-        elbow_velocity_rad_s: signed_rate_toward(
+        elbow_velocity_rad_s: proportional_rate_toward(
             observation.elbow_position_rad,
             target.elbow_rad,
             max_rate_rad_s,
+            CLUTTER_APPROACH_GAIN,
             0.05,
         ),
         ..MobileManipulatorAction::default()
+    }
+}
+
+/// Proportional (not bang-bang) rate toward `target`: scales with the error and
+/// saturates at `max_rate`, instead of always commanding the full rate right up
+/// until snapping to zero inside `tolerance`. `joint_rate_toward_minimal` drives
+/// the fixed-base clutter approach against the shoulder/elbow's spring-lagged
+/// position-hold servo (see `configure_arm_position_motors`); bang-bang control
+/// against a lagged plant is a textbook relay oscillator (a sustained limit cycle
+/// around the target that never settles inside tolerance), so this ramps the
+/// commanded rate down near the target instead of holding it at max until the
+/// last instant.
+fn proportional_rate_toward(
+    current: f64,
+    target: f64,
+    max_rate: f64,
+    gain: f64,
+    tolerance: f64,
+) -> f64 {
+    let error = target - current;
+    if error.abs() < tolerance {
+        0.0
+    } else {
+        (error * gain).clamp(-max_rate, max_rate)
     }
 }
 

@@ -1141,10 +1141,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "linux",
-        ignore = "linux settle divergence; tracked in ROADMAP v0.13 mm_minimal physics fix"
-    )]
     fn mobile_manipulator_place_episode_succeeds() {
         let mut env = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
         let _ = env.reset();
@@ -1172,7 +1168,9 @@ mod tests {
                 break;
             }
         }
-        for _ in 0..200 {
+        // 60-step carry: matches the sweep the place() target was derived from
+        // under the stable arm dynamics (see MobileManipulatorEpisodeConfig::place).
+        for _ in 0..60 {
             env.step(carry);
         }
         for _ in 0..30 {

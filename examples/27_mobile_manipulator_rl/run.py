@@ -118,7 +118,9 @@ def run_scripted_place(env) -> bool:
         if info["is_grasping"]:
             break
     # Carry the cube along the arm sweep, settle, then release at the target.
-    for _ in range(200):
+    # 60 steps at 0.6 rad/s: the sweep the place task's target was derived from
+    # under the stable arm dynamics.
+    for _ in range(60):
         env.step([0.0, 0.0, 0.6, 0.0, -2.0])
     for _ in range(30):
         env.step([0.0, 0.0, 0.0, 0.0, -2.0])

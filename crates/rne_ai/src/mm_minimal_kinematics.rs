@@ -186,6 +186,31 @@ impl MmMinimalKinematics {
         })
     }
 
+    /// Solves analytic IK picking the "elbow-down" branch (the mirror of
+    /// [`Self::inverse_kinematics`] across the shoulder-to-target ray).
+    ///
+    /// For targets on the arm's -z side this branch folds the gripper tip toward
+    /// the target in a tight arc instead of swinging the elbow (and the forearm's
+    /// long side face) across the +z half of the workspace, which matters when the
+    /// approach must brush tabletop objects with the fingertips first (the grasp
+    /// weld triggers on finger contact only). Deterministic and seed-free.
+    pub fn inverse_kinematics_elbow_down(
+        &self,
+        target: MmMinimalGripperTarget,
+    ) -> Result<MmMinimalJointTarget, MmMinimalIkError> {
+        let up = self.inverse_kinematics(target)?;
+        let (shoulder_x, shoulder_z) = self.shoulder_xz_m();
+        let bearing_rad = (target.z_m - shoulder_z).atan2(target.x_m - shoulder_x);
+        // Elbow-up solves `shoulder_rad = -(bearing - beta)` with `beta` the interior
+        // shoulder correction; the mirrored branch is `-(bearing + beta)` with the
+        // elbow sign flipped.
+        let beta_rad = up.shoulder_rad + bearing_rad;
+        Ok(MmMinimalJointTarget {
+            shoulder_rad: up.shoulder_rad - 2.0 * beta_rad,
+            elbow_rad: -up.elbow_rad,
+        })
+    }
+
     /// Maximum horizontal reach from the shoulder pivot in meters.
     pub fn max_reach_m(&self) -> f64 {
         self.upper_arm_m + self.forearm_m
@@ -221,8 +246,11 @@ impl MmMinimalKinematics {
     }
 }
 
-/// Ground place target for fixed-base clutter episodes (inside analytic reach).
-pub const MM_MINIMAL_CLUTTER_PLACE_X_M: f64 = 0.82;
+/// Ground place target for fixed-base clutter episodes. Matches where the scripted
+/// IK pick-place carry (`IkClutterPickPlacePolicy`) sets the center cube down under
+/// the stable arm dynamics — the same convention as the lift place target (see
+/// `MobileManipulatorEpisodeConfig::lift_pick_place`).
+pub const MM_MINIMAL_CLUTTER_PLACE_X_M: f64 = 0.69;
 /// Ground place height for fixed-base clutter episodes.
 pub const MM_MINIMAL_CLUTTER_PLACE_Y_M: f64 = 0.03;
 /// Ground place lateral target off the table edge (table spans z ∈ [-0.35, 0.35]).
@@ -399,10 +427,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "linux",
-        ignore = "linux settle divergence; tracked in ROADMAP v0.13 mm_minimal physics fix"
-    )]
     fn fk_matches_sim_at_idle() {
         use crate::{MobileManipulatorAction, MobileManipulatorSim};
 
@@ -438,12 +462,40 @@ mod tests {
     }
 
     #[test]
-    fn clutter_scene_center_cube_is_beyond_analytic_reach() {
+    fn elbow_down_branch_reaches_same_targets_mirrored() {
         let kin = MmMinimalKinematics::mm_minimal();
-        assert!(
-            !kin.is_reachable(1.05, 0.0),
-            "center clutter cube relies on proportional approach outside analytic reach"
-        );
+        for (x_m, z_m) in [(0.75, -0.10), (0.785, -0.402), (0.82, 0.10), (0.6, 0.0)] {
+            let target = MmMinimalGripperTarget::new(x_m, kin.shoulder_y_m(), z_m);
+            let down = kin
+                .inverse_kinematics_elbow_down(target)
+                .expect("reachable target");
+            let tip = kin.forward_kinematics(down);
+            assert_relative_eq!(tip.x_m, x_m, epsilon = 1e-9);
+            assert_relative_eq!(tip.z_m, z_m, epsilon = 1e-9);
+            assert!(
+                down.elbow_rad >= 0.0,
+                "elbow-down branch should bend the elbow the other way"
+            );
+        }
+    }
+
+    #[test]
+    fn clutter_scene_cubes_are_within_analytic_reach() {
+        // The clutter cubes were re-homed inside the analytic workspace when the
+        // arm's settle physics were fixed: the old layout (x = 1.05..1.22) was only
+        // pickable because the unstable arm's contact chaos stretched its impulse
+        // joints past the kinematic reach limit, which no longer exists.
+        let kin = MmMinimalKinematics::mm_minimal();
+        for (name, x_m, z_m) in [
+            ("clutter_cube_a", 0.79, 0.20),
+            ("clutter_cube_b", 0.75, -0.10),
+            ("clutter_cube_c", 0.72, 0.31),
+        ] {
+            assert!(
+                kin.is_reachable(x_m, z_m),
+                "{name} should be inside the analytic workspace"
+            );
+        }
     }
 
     #[test]

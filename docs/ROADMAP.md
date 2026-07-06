@@ -18,7 +18,7 @@ the pinned `mobile_clutter_pick_place_center` config already exists for RL bench
 
 | Area | Idea |
 |------|------|
-| Physics | **mm_minimal settle fix (linux CI)**: the fixed-base arm has no position-hold motors (`configure_mobile_arm_motors` early-returns without a mobile base) and base/upper-arm collider interpenetration keeps injecting contact energy, so the idle pose is a sustained oscillation — chaotic, hence platform-divergent. Fix mirrors the merged mm_mobile work (interpenetration removal + spring-damper hold + anti-windup lead), then re-derive the affected fixed-base/lift open-loop test scripts (~15-17 tests across mm_minimal and mm_lift; do mm_minimal first, mm_lift second). Un-gate the 7 `cfg_attr(target_os = "linux", ignore)` rne_ai tests when done |
+| Physics | ~~mm_minimal settle fix (linux CI)~~ **Done**: collision boxes trimmed, spring-damper position hold + anti-windup lead extended to the fixed-base arm, fixed-base grasp welds seated clear of the support surface, clutter/place tasks re-derived against the stable equilibrium, all 8 linux gates removed (see CHANGELOG Unreleased → Fixed) |
 | Physics | Wire URDF prismatic joints to Rapier (carried-over architecture gap) |
 | Perception | Wrist-camera grasp target estimation (visuomotor pick) — natural v0.14 follow-up |
 | Scene diversity | Domain randomization + curriculum over clutter layouts |

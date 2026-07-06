@@ -1,7 +1,11 @@
 """CEM training smoke for the tabletop pick-and-place task.
 
-Demonstrates learning signal from the pre-grasp approach reward on the `place`
-episode. Needs only ``rne_py`` and the standard library.
+Demonstrates learning signal on the `place` episode: the cube spawns between the
+gripper fingers (grasping is immediate under the stable arm dynamics), so the
+learnable structure is the carry schedule — how fast and how long to sweep the
+arm, and when to release — and the CEM must discover the timing that parks the
+cube over the place target before opening the gripper (success bonus +10).
+Needs only ``rne_py`` and the standard library.
 
     .venv/bin/maturin develop -m crates/rne_py/Cargo.toml
     .venv/bin/python examples/27_mobile_manipulator_rl/train_place.py --smoke
@@ -20,30 +24,26 @@ except ImportError:
 
 ACTION_LIMIT = 6.0
 EPISODE_STEPS = 400
-PARAM_DIM = 4  # shoulder_bias, elbow_bias, gripper_close, shoulder_gain
+PARAM_DIM = 4  # carry_rate, stop_frac, release_frac, elbow_rate
 
 
 def clamp(value, limit=ACTION_LIMIT):
     return max(-limit, min(limit, value))
 
 
-def act(params, obs):
-    shoulder_bias, elbow_bias, gripper_close, shoulder_gain = params
-    return [
-        0.0,
-        0.0,
-        clamp(shoulder_bias + shoulder_gain * obs.target_dx),
-        clamp(elbow_bias + 2.0 * obs.target_dz),
-        clamp(gripper_close),
-    ]
-
-
 def rollout(params):
+    """Scheduled grasp-carry-release rollout: sweep until ``stop_frac``, keep the
+    gripper closed until ``release_frac``, then open and let the cube settle."""
+    carry_rate, stop_frac, release_frac, elbow_rate = params
+    stop_t = int(max(0.0, min(1.0, stop_frac)) * EPISODE_STEPS)
+    release_t = int(max(0.0, min(1.0, release_frac)) * EPISODE_STEPS)
     episode = rne_py.MobileManipulatorEpisode("place")
-    step = episode.reset()
-    for _ in range(EPISODE_STEPS):
-        action = act(params, step.observation)
-        step = episode.step(*action)
+    episode.reset()
+    for t in range(EPISODE_STEPS):
+        gripper = -2.5 if t < release_t else 3.0
+        shoulder = carry_rate if t < stop_t else 0.0
+        elbow = elbow_rate if t < stop_t else 0.0
+        step = episode.step(0.0, 0.0, clamp(shoulder), clamp(elbow), gripper)
         if step.terminated or step.truncated:
             break
     return episode.total_reward
@@ -53,8 +53,10 @@ def cem_smoke():
     population = 12
     elite = 4
     iterations = 6
-    mean = [0.5, 0.0, -2.5, 2.0]
-    std = [0.8, 0.8, 0.5, 1.0]
+    # Deliberately poor start (slow sweep, release far too late) so the smoke
+    # has headroom to demonstrate improvement.
+    mean = [0.1, 0.15, 0.9, 0.0]
+    std = [0.3, 0.25, 0.25, 0.3]
     history = []
 
     for _ in range(iterations):
@@ -64,9 +66,11 @@ def cem_smoke():
             candidates.append((rollout(params), params))
         candidates.sort(key=lambda item: item[0], reverse=True)
         elites = candidates[:elite]
-        history.append(elites[0][0])
+        # Track the elite MEAN: it is robust to a single lucky draw in the
+        # first iteration, unlike the per-iteration best.
+        history.append(sum(item[0] for item in elites) / elite)
         mean = [sum(item[1][i] for item in elites) / elite for i in range(PARAM_DIM)]
-        std = [max(0.2, s * 0.9) for s in std]
+        std = [max(0.05, s * 0.9) for s in std]
 
     return history
 
@@ -80,7 +84,9 @@ def main():
         f"history={[round(x, 2) for x in history]}"
     )
     if smoke:
-        if max(history) > history[0]:
+        # Require a solid margin so cross-platform reward jitter cannot fake
+        # (or hide) the learning signal.
+        if max(history) > history[0] + 1.0:
             print("place smoke ok: CEM improved pick-and-place reward")
             return
         sys.exit("smoke failed: place CEM did not improve reward")

@@ -25,14 +25,21 @@ All notable changes to Robot Native Engine are documented in this file.
   Euler yaw, which aliased transient contact tilt into corrupted headings), making drive
   phases deterministic; mobile arm joints use position-hold motors with an anti-windup lead
   and the mobile world runs at the lift robot's solver iteration count.
-
-### Known issues
-
-- **Linux settle divergence**: the `mm_minimal` fixed-base arm has no position-hold motors and
-  its base/upper-arm colliders interpenetrate, so the idle pose oscillates chaotically and
-  platform floating-point differences diverge. Settle-sensitive tests (seven in `rne_ai`, one
-  in `rne_py`) are gated `#[cfg_attr(target_os = "linux", ignore)]` until the mm_minimal
-  physics fix lands (see ROADMAP v0.13 candidates); they run and pass on Windows.
+- **`mm_minimal` settle physics (linux CI)**: the fixed-base SCARA arm never settled — its
+  chassis/arm colliders interpenetrated (injecting contact energy every tick) and its
+  shoulder/elbow were bare velocity motors with no restoring force, so the idle pose was a
+  sustained chaotic oscillation that merely sampled differently per platform. The arm now
+  mirrors the mm_mobile fix (collision boxes trimmed, spring-damper position-hold motors,
+  anti-windup lead) and settles to a true equilibrium (shoulder/elbow within mrad of zero,
+  identical on Windows and Linux). Fixed-base grasp welds seat the object 2 cm upward so a
+  horizontal carry does not fight the object's pinned support contact; the clutter cubes and
+  the fixed-base place targets were re-derived against the stable dynamics (the old layouts
+  were only reachable through the unstable arm's joint stretch); the mobile clutter carry
+  steers the carried object (not the base) onto the place target so its platform-dependent
+  carry offset no longer skips the release gate. All eight formerly linux-gated tests
+  (seven in `rne_ai`, one in `rne_py`) and the example 26/33 + `run.py` smokes now run
+  un-gated on all platforms. The README hero live-digest comparison stays Windows-only:
+  cross-platform contact dynamics are outcome-stable, not bit-identical.
 
 ## [0.12.0] - 2026-07-03
 

@@ -306,6 +306,13 @@ const ARM_TARGET_LEAD_RAD: f64 = 0.15;
 /// Nominal mobile-base center height. The URDF places the base at 0.25 m so
 /// its wheels sit on the ground plane.
 const MOBILE_BASE_NOMINAL_Y_M: f64 = 0.25;
+/// Upward seat of the fixed-base arm's grasp weld anchor (see
+/// [`MobileManipulatorSim::attach_grasp`]): enough to lift a grasped object clear
+/// of its former support so a horizontal carry does not fight the object's pinned
+/// support contact, with margin for welds that catch the object a centimeter low
+/// (the closing fingers can press a tabletop cube into its support before the
+/// first contact fires the weld), while staying visually unobtrusive.
+const FIXED_BASE_GRASP_SEAT_LIFT_M: f64 = 0.02;
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -855,14 +862,9 @@ impl MobileManipulatorSim {
         // more constraint-solver iterations to stay stable, and so does the mobile
         // robot's position-held arm on its floating diff-drive base; fixed-base robots
         // keep the default.
-        let has_lift = actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
-                solver_iterations: if has_lift || mobile_base {
-                    LIFT_SOLVER_ITERATIONS
-                } else {
-                    0
-                },
+                solver_iterations: LIFT_SOLVER_ITERATIONS,
                 ..PhysicsWorldDesc::default()
             })
             .expect("physics world");
@@ -911,7 +913,7 @@ impl MobileManipulatorSim {
             joint_sequence: 0,
         };
         sim.configure_lift_motor();
-        sim.configure_mobile_arm_motors();
+        sim.configure_arm_position_motors();
         sim.warmup_physics();
         sim
     }
@@ -1027,11 +1029,27 @@ impl MobileManipulatorSim {
     }
 
     /// Welds `object` to the end-effector link, preserving its current relative pose.
+    ///
+    /// On the fixed-base SCARA arm the weld anchor is seated slightly upward
+    /// (`FIXED_BASE_GRASP_SEAT_LIFT_M`): the arm has no vertical joint, so a weld at
+    /// exactly the object's resting height pins the object's resting contact with its
+    /// support (tabletop) into the constraint system, and the contact response then
+    /// resists any horizontal carry far harder than sliding friction would — the
+    /// carry stalls. The lift and mobile robots keep the exact-pose weld: the lift
+    /// robot raises the object off its support with its prismatic joint, and the
+    /// mobile robot's kinematically re-pinned base imposes the carry positionally.
     fn attach_grasp(&mut self, object: Entity) {
         let ee = world_transform_of(&self.world, self.ee_link);
         let obj = world_transform_of(&self.world, object);
         let ee_rotation_inverse = ee.rotation.inverse();
-        let relative_translation = ee_rotation_inverse * (obj.translation - ee.translation);
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        let seat_lift_m = if !self.mobile_base && !has_lift {
+            FIXED_BASE_GRASP_SEAT_LIFT_M
+        } else {
+            0.0
+        };
+        let relative_translation =
+            ee_rotation_inverse * (obj.translation + Vec3::Y * seat_lift_m - ee.translation);
         let relative_rotation = ee_rotation_inverse * obj.rotation;
         self.world.entity_mut(object).insert(FixedJointDesc {
             parent: self.ee_link,
@@ -1082,6 +1100,12 @@ impl MobileManipulatorSim {
         let dt_s = self.dt.as_seconds().value();
         self.lift_target_m = (self.lift_target_m + action.lift_velocity_m_s * dt_s)
             .clamp(LIFT_TARGET_MIN_M, LIFT_TARGET_MAX_M);
+        // Both fixed-base (`mm_minimal`) and mobile-base (`mm_mobile`) arms use the
+        // velocity-integrated position hold below and so need the anti-windup lead;
+        // `mm_lift` drives its arm through `apply_lift_joint_targets` with direct IK
+        // targets instead, so it is excluded here (unchanged from before this gate
+        // covered `mm_minimal` too).
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
 
         for (index, (joint, joint_name)) in self
             .actuated
@@ -1099,7 +1123,7 @@ impl MobileManipulatorSim {
             // the clamped target onto the back-driven joint and permanently deform
             // the held pose instead of springing back.
             let windup_position_rad =
-                (self.mobile_base && joint.axis == JointReadAxis::YawY && velocity != 0.0)
+                (!has_lift && joint.axis == JointReadAxis::YawY && velocity != 0.0)
                     .then(|| joint_sample(&self.world, &self.actuated[index]).position_rad);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if joint.axis == JointReadAxis::LiftY {
@@ -1259,14 +1283,20 @@ impl MobileManipulatorSim {
         }
     }
 
-    /// Configures the mobile base robot's shoulder/elbow as position (spring-damper)
-    /// motors, mirroring the lift robot's arm setup: on the floating diff-drive base a
-    /// plain velocity motor cannot hold the extended arm against gravity, so it droops
-    /// onto scene geometry and whips when the base moves. The position hold keeps the
-    /// arm at its commanded pose while driving and lets velocity commands integrate
+    /// Configures the shoulder/elbow of any non-lift robot (fixed-base `mm_minimal` or
+    /// the mobile-base `mm_mobile`) as position (spring-damper) motors, mirroring the
+    /// lift robot's arm setup (`configure_lift_motor`, which covers `mm_lift` instead).
+    /// A plain velocity motor has no restoring force, so residual contact energy (from
+    /// e.g. grazing collider contacts as the arm moves) accumulates in the joint
+    /// instead of damping out, and on the floating diff-drive base a velocity motor
+    /// also cannot hold the extended arm against gravity, so it droops onto scene
+    /// geometry and whips when the base moves. The position hold keeps the arm at its
+    /// commanded pose at rest and while driving, and lets velocity commands integrate
     /// into tracked angle targets (see `apply_action`).
-    fn configure_mobile_arm_motors(&mut self) {
-        if !self.mobile_base {
+    fn configure_arm_position_motors(&mut self) {
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        if has_lift {
+            // mm_lift's shoulder/elbow are already configured by `configure_lift_motor`.
             return;
         }
         for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
@@ -1315,14 +1345,9 @@ impl MobileManipulatorSim {
     }
 
     fn rebuild_physics_from_ecs(&mut self) -> Result<(), PhysicsError> {
-        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         let mut backend = RapierBackend::new();
         let physics_world = backend.create_world(PhysicsWorldDesc {
-            solver_iterations: if has_lift || self.mobile_base {
-                LIFT_SOLVER_ITERATIONS
-            } else {
-                0
-            },
+            solver_iterations: LIFT_SOLVER_ITERATIONS,
             ..PhysicsWorldDesc::default()
         })?;
         backend.sync_from_ecs(&mut self.world, physics_world)?;
@@ -1880,9 +1905,16 @@ mod tests {
 
         let scene_path = mm_minimal_grasp_scene_path();
         let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).expect("load grasp scene");
+        // A gentler sweep than the original 0.4 rad/s: `mm_minimal_grasp`'s cube sits right
+        // at the arm's resting reach, and now that the shoulder/elbow are a converged
+        // position hold instead of a chaotic free-floating joint (see
+        // `configure_arm_position_motors`), a fast sweep drives the wrist camera off the
+        // cube for many ticks (transient contact with the cube while it settles into the
+        // new equilibrium) before it swings back into view too late for a 40-tick budget.
+        // The slower sweep keeps the settle transient short enough to recover in time.
         for _ in 0..40 {
             sim.step(MobileManipulatorAction {
-                shoulder_velocity_rad_s: 0.4,
+                shoulder_velocity_rad_s: 0.1,
                 ..MobileManipulatorAction::default()
             });
         }
