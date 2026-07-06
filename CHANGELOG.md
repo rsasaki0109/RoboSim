@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-06
+
 ### Added
 
 - **`train_mobile_clutter.py`**: CEM smoke on the pinned `mobile_clutter_pick_place_center`

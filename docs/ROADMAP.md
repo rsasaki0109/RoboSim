@@ -2,17 +2,28 @@
 
 ## v0.13 goal: mobile clutter place E2E
 
-Primary development target for v0.13. Closes the v0.12 stretch goal: full mobile
-navigate → grasp → place on `mm_mobile_clutter` (example 34,
-`IkMobileClutterPickPlacePolicy`). Fixed-base clutter (example 33) is the template;
-the pinned `mobile_clutter_pick_place_center` config already exists for RL benches.
+Primary development target for v0.13. Shipped 2026-07-06. See [CHANGELOG.md](../CHANGELOG.md).
+Closes the v0.12 stretch goal: full mobile navigate → grasp → place on `mm_mobile_clutter`
+(example 34, `IkMobileClutterPickPlacePolicy`).
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
 | A | Manipulation | Tune `IkMobileClutterPickPlacePolicy` carry/place; un-ignore `mobile_clutter_policy_completes_place` and `mobile_clutter_transport_script_places_cube_a` | Done (PR #31) |
 | B | Examples | Example 34 `--smoke` asserts grasp + place (mirrors example 33) | Done (PR #31) |
-| C | RL | `train_mobile_clutter.py` (CEM + replay) and PPO smoke on `mobile_clutter_pick_place_center`; wire into `xtask ci` | Done |
-| D | Release | README hero / CHANGELOG / ROADMAP update, ship v0.13.0 | Pending |
+| C | RL | `train_mobile_clutter.py` (CEM + replay) and PPO smoke on `mobile_clutter_pick_place_center`; wire into `xtask ci` | Done (PR #33) |
+| D | Release | README hero / CHANGELOG / ROADMAP update, ship v0.13.0 | Done |
+
+## v0.13.0 (released)
+
+Shipped 2026-07-06. See [CHANGELOG.md](../CHANGELOG.md).
+
+| Area | Feature |
+|------|---------|
+| Manipulation | Mobile clutter place E2E: navigate → poke-grasp → retreat-drag → carry → release (example 34) |
+| Physics | mm_minimal/mm_mobile settle fixes: collider interpenetration removed, spring-damper position holds, kinematic base integration with corrected yaw sign |
+| RL | `train_mobile_clutter.py` (CEM + deterministic replay), `train_mobile_clutter_ppo.py` (SB3 smoke) |
+| CI | Cross-platform green: all linux settle gates removed; SB3 pin numpy-2 compatible |
+| Media | README hero retuned to the corrected base dynamics and regenerated |
 
 ### v0.13 candidates
 
