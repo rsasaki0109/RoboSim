@@ -9,6 +9,18 @@ enabled = true
 path = "../robots/mm_minimal.rne.robot.toml"
 
 [[obstacles]]
+# Supports `grasp_cube` at its resting height (top = 0.55 = cube center 0.585 - half
+# extent 0.035): the cube is dynamic (it must be picked up and carried), and with
+# `mm_minimal`'s base/arm colliders no longer interpenetrating (see mm_minimal.urdf)
+# the arm no longer jitters the gripper into the cube by accident, so an unsupported
+# dynamic cube here free-falls out of the fixed-height gripper's reach before the
+# grasp can close. Sized to stay clear of `drop_zone`'s footprint.
+name = "grasp_table"
+translation_m = [0.895, 0.53, 0.0]
+half_extents_m = [0.09, 0.02, 0.09]
+body_type = "fixed"
+
+[[obstacles]]
 name = "grasp_cube"
 translation_m = [0.895, 0.585, 0.0]
 half_extents_m = [0.035, 0.035, 0.035]

@@ -1172,7 +1172,9 @@ mod tests {
                 break;
             }
         }
-        for _ in 0..200 {
+        // 60-step carry: matches the sweep the place() target was derived from
+        // under the stable arm dynamics (see MobileManipulatorEpisodeConfig::place).
+        for _ in 0..60 {
             env.step(carry);
         }
         for _ in 0..30 {

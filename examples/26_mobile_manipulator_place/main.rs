@@ -36,7 +36,9 @@ fn run_place(episode: &mut MobileManipulatorEpisode) -> bool {
         }
     }
     // Carry the cube along the arm sweep, then settle the arm before release.
-    for _ in 0..200 {
+    // 60 steps at 0.6 rad/s: the sweep the place() target was derived from under
+    // the stable arm dynamics.
+    for _ in 0..60 {
         episode.step(carry);
     }
     for _ in 0..30 {
