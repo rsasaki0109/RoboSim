@@ -2025,10 +2025,30 @@ mod tests {
         let mut policy = IkMobileClutterPickPlacePolicy::new();
         let mut step = episode.reset();
         let mut grasped = false;
-        for _ in 0..policy.total_steps() {
+        for i in 0..policy.total_steps() {
             step = episode.step(policy.act(&step.observation));
             if episode.simulation().is_grasping() {
                 grasped = true;
+            }
+            // TEMP diagnostics for the linux CI validation loop; removed before merge.
+            if i % 200 == 0 || i + 1 == policy.total_steps() {
+                let cube = episode
+                    .simulation()
+                    .named_translation_m("clutter_cube_a")
+                    .unwrap_or((f64::NAN, f64::NAN, f64::NAN));
+                let obs = &step.observation;
+                eprintln!(
+                    "[mobile-place] i={i} policy_step={} base=({:.3},{:.3}) yaw={:.3} cube=({:.3},{:.3},{:.3}) grasping={} terminated={}",
+                    policy.current_step(),
+                    obs.base_x_m,
+                    obs.base_z_m,
+                    obs.base_yaw_rad,
+                    cube.0,
+                    cube.1,
+                    cube.2,
+                    episode.simulation().is_grasping(),
+                    step.terminated,
+                );
             }
         }
         assert!(
