@@ -267,6 +267,24 @@ mod tests {
     }
 
     #[test]
+    fn relative_mesh_collision_resolves_against_assets_root() {
+        let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mesh_diff_drive_package");
+        let element = UrdfGeometryElement {
+            origin_xyz: Vec3::ZERO,
+            origin_rpy: Vec3::ZERO,
+            material_rgba: None,
+            geometry: UrdfGeometry::Mesh {
+                path: "meshes/base_link.stl".into(),
+                scale: Vec3::ONE,
+            },
+        };
+        let collider =
+            collider_from_element(&element, Some(package_root.as_path())).expect("mesh collider");
+        assert!(matches!(collider.shape, ColliderShape::Cuboid { .. }));
+    }
+
+    #[test]
     fn visual_material_color_overrides_spawn_fallback() {
         let element = UrdfGeometryElement {
             origin_xyz: Vec3::ZERO,
