@@ -711,6 +711,8 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "train_visuomotor.py",
         "train_clutter.py",
         "train_clutter_ppo.py",
+        "train_mobile_clutter.py",
+        "train_mobile_clutter_ppo.py",
         "train_ppo.py",
     ] {
         run_step(&format!(

@@ -9,9 +9,9 @@ the pinned `mobile_clutter_pick_place_center` config already exists for RL bench
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
-| A | Manipulation | Tune `IkMobileClutterPickPlacePolicy` carry/place; un-ignore `mobile_clutter_policy_completes_place` and `mobile_clutter_transport_script_places_cube_a` | Pending |
-| B | Examples | Example 34 `--smoke` asserts grasp + place (mirrors example 33) | Pending |
-| C | RL | `train_mobile_clutter.py` (CEM + replay) and PPO smoke on `mobile_clutter_pick_place_center`; wire into `xtask ci` | Pending |
+| A | Manipulation | Tune `IkMobileClutterPickPlacePolicy` carry/place; un-ignore `mobile_clutter_policy_completes_place` and `mobile_clutter_transport_script_places_cube_a` | Done (PR #31) |
+| B | Examples | Example 34 `--smoke` asserts grasp + place (mirrors example 33) | Done (PR #31) |
+| C | RL | `train_mobile_clutter.py` (CEM + replay) and PPO smoke on `mobile_clutter_pick_place_center`; wire into `xtask ci` | Done |
 | D | Release | README hero / CHANGELOG / ROADMAP update, ship v0.13.0 | Pending |
 
 ### v0.13 candidates
