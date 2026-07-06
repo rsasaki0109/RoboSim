@@ -1,0 +1,483 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="lekiwi_base">
+    <!-- Reduced LeKiwi mobile base (no arm/cameras). Upstream Z-up CAD; spawn with initial_rotation_rpy. -->
+<link name="base_link">
+<visual name="base_plate_layer1-v5_visual">
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/base_plate_layer1-v5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="base_plate_layer1-v5_collision">
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/base_plate_layer1-v5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="drive_motor_mount-v11-2">
+<visual name="drive_motor_mount-v11-2_visual">
+            <origin xyz="0.0 0.0 -0.0035000000000000005" rpy="3.141592653589793 -0.0 1.5707963267948966" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="drive_motor_mount-v11-2_collision">
+            <origin xyz="0.0 0.0 -0.0035000000000000005" rpy="3.141592653589793 -0.0 1.5707963267948966" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="ST3215_Servo_Motor-v1-2">
+<visual name="ST3215_Servo_Motor-v1-2_visual">
+            <origin xyz="0.010249999999999999 -0.025599999999999987 -0.007250000007450583" rpy="-3.141592653589793 -1.5707963267948966 0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="ST3215_Servo_Motor-v1-2_collision">
+            <origin xyz="0.010249999999999999 -0.025599999999999987 -0.007250000007450583" rpy="-3.141592653589793 -1.5707963267948966 0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="4-Omni-Directional-Wheel_Single_Body-v1-2">
+    <visual name="4-Omni-Directional-Wheel_Single_Body-v1-2_visual">
+    <origin xyz="7.450578487500081e-12 0.015874999999999986 6.661338147750939e-18" rpy="1.5707963267948966 0.26179938779914924 -1.0046485565123013e-33" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </visual>
+    <collision name="4-Omni-Directional-Wheel_Single_Body-v1-2_collision">
+    <origin xyz="7.450578487500081e-12 0.015874999999999986 6.661338147750939e-18" rpy="1.5707963267948966 0.26179938779914924 -1.0046485565123013e-33" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </collision>
+</link>
+<link name="omni_wheel_mount-v5-2">
+<visual name="omni_wheel_mount-v5-2_visual">
+            <origin xyz="7.450581818169155e-12 2.220446049250313e-18 -0.005587499999999999" rpy="3.141592653589793 6.887535064975403e-49 1.8369701987210297e-16" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="omni_wheel_mount-v5-2_collision">
+            <origin xyz="7.450581818169155e-12 2.220446049250313e-18 -0.005587499999999999" rpy="3.141592653589793 6.887535064975403e-49 1.8369701987210297e-16" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="drive_motor_mount-v11-1">
+<visual name="drive_motor_mount-v11-1_visual">
+            <origin xyz="2.3027551065979426e-09 1.924311203715945e-09 0.0035000000000000005" rpy="0.0 -0.0 0.5235987755982988" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="drive_motor_mount-v11-1_collision">
+            <origin xyz="2.3027551065979426e-09 1.924311203715945e-09 0.0035000000000000005" rpy="0.0 -0.0 0.5235987755982988" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="ST3215_Servo_Motor-v1-1">
+<visual name="ST3215_Servo_Motor-v1-1_visual">
+            <origin xyz="0.010250000000000013 0.019478687706257793 -0.019238066498388086" rpy="-1.570796326794896 0.5235987755982991 -1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="ST3215_Servo_Motor-v1-1_collision">
+            <origin xyz="0.010250000000000013 0.019478687706257793 -0.019238066498388086" rpy="-1.570796326794896 0.5235987755982991 -1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="omni_wheel_mount-v5-1">
+<visual name="omni_wheel_mount-v5-1_visual">
+            <origin xyz="0.004838917318364206 -1.7763568394002505e-17 0.002793745502761027" rpy="1.047197551196598 -1.1102230246251563e-16 1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="omni_wheel_mount-v5-1_collision">
+            <origin xyz="0.004838917318364206 -1.7763568394002505e-17 0.002793745502761027" rpy="1.047197551196598 -1.1102230246251563e-16 1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="4-Omni-Directional-Wheel_Single_Body-v1-1">
+    <visual name="4-Omni-Directional-Wheel_Single_Body-v1-1_visual">
+    <origin xyz="0.013748155931950041 -0.007937495502761073 -2.2204460492503132e-17" rpy="-0.5235987755982988 -1.5707963267948963 0" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </visual>
+    <collision name="4-Omni-Directional-Wheel_Single_Body-v1-1_collision">
+    <origin xyz="0.013748155931950041 -0.007937495502761073 -2.2204460492503132e-17" rpy="-0.5235987755982988 -1.5707963267948963 0" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </collision>
+</link>
+<link name="drive_motor_mount-v11">
+<visual name="drive_motor_mount-v11_visual">
+            <origin xyz="-2.3027550621890213e-09 1.9243111992750526e-09 -0.0035000000000000035" rpy="-3.141592653589793 -1.0340504353649803e-16 -2.6179938779914944" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="drive_motor_mount-v11_collision">
+            <origin xyz="-2.3027550621890213e-09 1.9243111992750526e-09 -0.0035000000000000035" rpy="-3.141592653589793 -1.0340504353649803e-16 -2.6179938779914944" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/drive_motor_mount-v11.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="ST3215_Servo_Motor-v1">
+<visual name="ST3215_Servo_Motor-v1_visual">
+            <origin xyz="0.010250000000000035 0.006521312293742278 0.02579524618281096" rpy="1.5707963267948968 0.523598775598299 1.5707963267948972" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="ST3215_Servo_Motor-v1_collision">
+            <origin xyz="0.010250000000000035 0.006521312293742278 0.02579524618281096" rpy="1.5707963267948968 0.523598775598299 1.5707963267948972" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/ST3215_Servo_Motor-v1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="omni_wheel_mount-v5">
+<visual name="omni_wheel_mount-v5_visual">
+            <origin xyz="-0.004838917002787113 -4.662936703425657e-17 0.002793754497239087" rpy="-1.0471975511965974 5.537547822683577e-16 1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="omni_wheel_mount-v5_collision">
+            <origin xyz="-0.004838917002787113 -4.662936703425657e-17 0.002793754497239087" rpy="-1.0471975511965974 5.537547822683577e-16 1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/omni_wheel_mount-v5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="4-Omni-Directional-Wheel_Single_Body-v1">
+    <visual name="4-Omni-Directional-Wheel_Single_Body-v1_visual">
+    <origin xyz="-0.013748155616372878 -0.007937504497239081 -5.773159728050814e-17" rpy="1.5707963267948974 -1.3089969389957468 2.094395102393195" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </visual>
+    <collision name="4-Omni-Directional-Wheel_Single_Body-v1_collision">
+    <origin xyz="-0.013748155616372878 -0.007937504497239081 -5.773159728050814e-17" rpy="1.5707963267948974 -1.3089969389957468 2.094395102393195" />
+        <geometry>
+    <cylinder radius="0.0508" length="0.025"/>
+        </geometry>
+    </collision>
+</link>
+<link name="servo_controller_mount-v3">
+<visual name="servo_controller_mount-v3_visual">
+            <origin xyz="0.0 0.0 0.006000000000000001" rpy="0.0 -0.0 1.5707963267948966" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/servo_controller_mount-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="servo_controller_mount-v3_collision">
+            <origin xyz="0.0 0.0 0.006000000000000001" rpy="0.0 -0.0 1.5707963267948966" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/servo_controller_mount-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="lipo_battery_mount-v3">
+<visual name="lipo_battery_mount-v3_visual">
+            <origin xyz="-0.01 0.0 -0.0034999999999999966" rpy="3.141592653589793 -0.0 -1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/lipo_battery_mount-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="lipo_battery_mount-v3_collision">
+            <origin xyz="-0.01 0.0 -0.0034999999999999966" rpy="3.141592653589793 -0.0 -1.5707963267948968" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/lipo_battery_mount-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="Battery---Battery-5.2-Ah-DC5521-Plug-v2">
+<visual name="Battery---Battery-5.2-Ah-DC5521-Plug-v2_visual">
+            <origin xyz="-0.03499999999999998 -4.440892098500626e-18 -1.4432899320127036e-17" rpy="1.224646799147353e-16 -1.5707963267948966 0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Battery---Battery-5.2-Ah-DC5521-Plug-v2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="Battery---Battery-5.2-Ah-DC5521-Plug-v2_collision">
+            <origin xyz="-0.03499999999999998 -4.440892098500626e-18 -1.4432899320127036e-17" rpy="1.224646799147353e-16 -1.5707963267948966 0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Battery---Battery-5.2-Ah-DC5521-Plug-v2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff_visual">
+            <origin xyz="0.0 -1.3010426069826053e-18 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff_collision">
+            <origin xyz="0.0 -1.3010426069826053e-18 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="base_plate_layer2-v3">
+<visual name="base_plate_layer2-v3_visual">
+            <origin xyz="0.0 -6.430841866638185e-19 0.006999999999999993" rpy="0.0 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/base_plate_layer2-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="base_plate_layer2-v3_collision">
+            <origin xyz="0.0 -6.430841866638185e-19 0.006999999999999993" rpy="0.0 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/base_plate_layer2-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="Bottom-V2-v3">
+<visual name="Bottom-V2-v3_visual">
+            <origin xyz="0.019999999970197697 0.03599999999999999 1.3322676295501878e-16" rpy="4.2524008931839986e-17 3.472469791440238e-17 -3.141592653589793" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Bottom-V2-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="Bottom-V2-v3_collision">
+            <origin xyz="0.019999999970197697 0.03599999999999999 1.3322676295501878e-16" rpy="4.2524008931839986e-17 3.472469791440238e-17 -3.141592653589793" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Bottom-V2-v3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="Top-V2-v2">
+<visual name="Top-V2-v2_visual">
+            <origin xyz="0.0003002260252632436 -0.00012500000000001065 0.026499570509487737" rpy="-3.141592653589793 3.851859888774472e-34 -3.141592653589793" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Top-V2-v2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="Top-V2-v2_collision">
+            <origin xyz="0.0003002260252632436 -0.00012500000000001065 0.026499570509487737" rpy="-3.141592653589793 3.851859888774472e-34 -3.141592653589793" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/Top-V2-v2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1_visual">
+            <origin xyz="0.0 0.0 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1_collision">
+            <origin xyz="0.0 0.0 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2_visual">
+            <origin xyz="0.0 0.0 -0.0248159696016958" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2_collision">
+            <origin xyz="0.0 0.0 -0.0248159696016958" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3_visual">
+            <origin xyz="-3.784438185050476e-10 -1.924311248124866e-09 -0.02499999999999999" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3_collision">
+            <origin xyz="-3.784438185050476e-10 -1.924311248124866e-09 -0.02499999999999999" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4_visual">
+            <origin xyz="3.784438895593212e-10 1.924311243683974e-09 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4_collision">
+            <origin xyz="3.784438895593212e-10 1.924311243683974e-09 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5">
+<visual name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5_visual">
+            <origin xyz="0.0 0.0 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+        <collision name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5_collision">
+            <origin xyz="0.0 0.0 -0.025" rpy="3.141592653589793 -0.0 0.0" />
+            <geometry>
+                <mesh filename="package://lekiwi/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </collision>
+    </link>
+<link name="arm_mount"/>
+<joint name="arm_mount_joint" type="fixed">
+    <origin xyz="0.04 0.08 0.007000000000000002" rpy="0 0 0"/>
+    <parent link="base_plate_layer2-v3"/>
+    <child link="arm_mount"/>
+</joint>
+<joint name="base_link_baseplate2bottom_mount" type="fixed">
+        <origin xyz="-0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="drive_motor_mount-v11-2" />
+    </joint>
+<joint name="drive_motor_mount-v11-2_Rigid-2" type="fixed">
+        <origin xyz="-0.01214 -0.015999999999999997 -0.0076100000000000004" rpy="3.141592653589793 1.5707963267948966 0" />
+        <parent link="drive_motor_mount-v11-2" />
+        <child link="ST3215_Servo_Motor-v1-2" />
+    </joint>
+<joint name="omni_wheel_mount-v5-2_Rigid-61" type="fixed">
+        <origin xyz="0.0 0.0 -0.007174999999999994" rpy="-1.5707963267948966 -0.0 0.0" />
+        <parent link="omni_wheel_mount-v5-2" />
+        <child link="4-Omni-Directional-Wheel_Single_Body-v1-2" />
+    </joint>
+<joint name="ST3215_Servo_Motor-v1-2_Revolute-60" type="continuous">
+        <origin xyz="0.010249999999999999 -0.035199999999999995 -0.03275" rpy="-1.5707963267948966 1.5707963267948966 0" />
+        <parent link="ST3215_Servo_Motor-v1-2" />
+        <child link="omni_wheel_mount-v5-2" />
+        <axis xyz="0.0 0.0 -1.0" />
+    </joint>
+<joint name="base_link_baseplate2right_mount" type="fixed">
+        <origin xyz="0.07928203 0.022679490000000004 0.0" rpy="0.0 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="drive_motor_mount-v11-1" />
+    </joint>
+<joint name="drive_motor_mount-v11-1_Rigid-35" type="fixed">
+        <origin xyz="-0.007786400000000002 -0.018513550000000004 0.0076100000000000004" rpy="-7.401486830834375e-17 -1.5707963267948966 0" />
+        <parent link="drive_motor_mount-v11-1" />
+        <child link="ST3215_Servo_Motor-v1-1" />
+    </joint>
+<joint name="ST3215_Servo_Motor-v1-1_Revolute-62" type="continuous">
+        <origin xyz="0.010249999999999999 0.04636234 -0.014801910000000005" rpy="-1.5707963267948966 1.5707963267948966 0" />
+        <parent link="ST3215_Servo_Motor-v1-1" />
+        <child link="omni_wheel_mount-v5-1" />
+        <axis xyz="0.866025 1.0674582272562919e-32 0.5" />
+    </joint>
+<joint name="omni_wheel_mount-v5-1_Rigid-63" type="fixed">
+        <origin xyz="0.0062137300000000015 0.0 0.0035875000000000056" rpy="-1.5707963267948966 5.551115123125765e-17 -1.8816263559048997e-48" />
+        <parent link="omni_wheel_mount-v5-1" />
+        <child link="4-Omni-Directional-Wheel_Single_Body-v1-1" />
+    </joint>
+<joint name="base_link_baseplate2left_mount" type="fixed">
+        <origin xyz="-0.05928203 0.057320510000000005 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="drive_motor_mount-v11" />
+    </joint>
+<joint name="drive_motor_mount-v11_Rigid-39" type="fixed">
+        <origin xyz="0.019926399999999997 -0.0025135499999999933 -0.0076100000000000004" rpy="3.141592653589793 1.5707963267948966 0" />
+        <parent link="drive_motor_mount-v11" />
+        <child link="ST3215_Servo_Motor-v1" />
+    </joint>
+<joint name="ST3215_Servo_Motor-v1_Revolute-64" type="continuous">
+        <origin xyz="0.010249999999999999 -0.010762340000000004 0.046859090000000006" rpy="-1.5707963267948966 1.5707963267948966 0" />
+        <parent link="ST3215_Servo_Motor-v1" />
+        <child link="omni_wheel_mount-v5" />
+        <axis xyz="-0.866025 -2.0578792567370943e-32 0.5" />
+    </joint>
+<joint name="omni_wheel_mount-v5_Rigid-65" type="fixed">
+        <origin xyz="-0.0062137300000000015 0.0 0.003587499999999997" rpy="-1.5707963267948966 5.551115123125802e-17 4.930380657631324e-32" />
+        <parent link="omni_wheel_mount-v5" />
+        <child link="4-Omni-Directional-Wheel_Single_Body-v1" />
+    </joint>
+<joint name="base_link_Rigid-15" type="fixed">
+        <origin xyz="0.0 0.06 0.0" rpy="0.0 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="servo_controller_mount-v3" />
+    </joint>
+<joint name="base_link_Rigid-18" type="fixed">
+        <origin xyz="-0.04 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="lipo_battery_mount-v3" />
+    </joint>
+<joint name="lipo_battery_mount-v3_Rigid-19" type="fixed">
+        <origin xyz="-0.011500000000000003 0.0 -0.006500000000000001" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="lipo_battery_mount-v3" />
+        <child link="Battery---Battery-5.2-Ah-DC5521-Plug-v2" />
+    </joint>
+<joint name="base_link_Rigid-20" type="fixed">
+        <origin xyz="0.0 0.0 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" />
+    </joint>
+<joint name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff_Rigid-21" type="fixed">
+        <origin xyz="0.0 0.0 -0.05" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" />
+        <child link="base_plate_layer2-v3" />
+    </joint>
+<joint name="base_plate_layer2-v3_Rigid-22" type="fixed">
+        <origin xyz="-0.02 -0.1 0.007000000000000002" rpy="0.0 -0.0 0.0" />
+        <parent link="base_plate_layer2-v3" />
+        <child link="Bottom-V2-v3" />
+    </joint>
+<joint name="Bottom-V2-v3_Rigid-24" type="fixed">
+        <origin xyz="0.0197 0.036125 0.0025" rpy="0.0 -0.0 -2.465190328815662e-32" />
+        <parent link="Bottom-V2-v3" />
+        <child link="Top-V2-v2" />
+    </joint>
+<joint name="base_link_Rigid-30" type="fixed">
+        <origin xyz="0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5" />
+    </joint>
+<joint name="base_link_Rigid-31" type="fixed">
+        <origin xyz="0.07660254 0.06732051 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4" />
+    </joint>
+<joint name="base_link_Rigid-32" type="fixed">
+        <origin xyz="-0.09660254 0.032679490000000005 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3" />
+    </joint>
+<joint name="base_link_Rigid-69" type="fixed">
+        <origin xyz="0.1 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2" />
+    </joint>
+<joint name="base_link_Rigid-70" type="fixed">
+        <origin xyz="-0.1 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <parent link="base_link" />
+        <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
+    </joint>
+</robot>
