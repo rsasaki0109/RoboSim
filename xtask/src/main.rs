@@ -54,16 +54,6 @@ fn ci() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Runs a smoke that depends on the `mm_minimal` settle pose, which diverges on
-/// Linux until the ROADMAP v0.13 physics fix lands (see CHANGELOG "Known issues").
-fn run_settle_sensitive_step(command: &str) -> anyhow::Result<()> {
-    if cfg!(target_os = "linux") {
-        eprintln!("skipping settle-sensitive smoke on linux (ROADMAP v0.13 mm_minimal physics fix): {command}");
-        return Ok(());
-    }
-    run_step(command)
-}
-
 fn run_example_smokes() -> anyhow::Result<()> {
     run_step("cargo run -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke")?;
     run_step(
@@ -81,7 +71,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run -p mobile_manipulator_episode --example 25_mobile_manipulator_episode -- --smoke",
     )?;
-    run_settle_sensitive_step(
+    run_step(
         "cargo run -p mobile_manipulator_place --example 26_mobile_manipulator_place -- --smoke",
     )?;
     run_step(
@@ -97,9 +87,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place -- --smoke",
     )?;
     run_step("cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke")?;
-    run_settle_sensitive_step(
-        "cargo run -p clutter_pick_place_e2e --example 33_clutter_pick_place_e2e -- --smoke",
-    )?;
+    run_step("cargo run -p clutter_pick_place_e2e --example 33_clutter_pick_place_e2e -- --smoke")?;
     run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
     )?;
@@ -424,11 +412,13 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     // The recorded digest is produced on Windows (docs/media/generate-hero.sh);
     // the hero smoke passes everywhere, but arm/payload contact dynamics are not
-    // bit-identical across platforms, so only compare the live digest on the
-    // generating platform until the ROADMAP v0.13 physics fix lands.
+    // bit-identical across platforms (outcome-stable, not bitwise-stable: even
+    // with the mm_minimal settle physics fixed, contact impulse ordering and libm
+    // differences shift trajectories by millimetres), so only compare the
+    // bit-exact live digest on the generating platform.
     if cfg!(target_os = "linux") {
         eprintln!(
-            "skipping README hero live digest comparison on linux (ROADMAP v0.13 mm_minimal physics fix)"
+            "skipping README hero live digest comparison on linux (digest is bit-exact and recorded on Windows)"
         );
     } else {
         let live_trajectory_digest = hero_simulation_smoke_digest()?;
@@ -716,9 +706,6 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "\"{venv}\" -m maturin develop -m crates/rne_py/Cargo.toml --release"
     ))?;
     for script in [
-        // run.py replays a pick-and-place script tuned on the mm_minimal settle
-        // pose, which diverges on linux (see run_settle_sensitive_step); the CEM
-        // and PPO smokes adapt on-platform and stay enabled everywhere.
         "run.py",
         "train_place.py",
         "train_visuomotor.py",
@@ -726,12 +713,9 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "train_clutter_ppo.py",
         "train_ppo.py",
     ] {
-        let command = format!("\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke");
-        if script == "run.py" {
-            run_settle_sensitive_step(&command)?;
-        } else {
-            run_step(&command)?;
-        }
+        run_step(&format!(
+            "\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke"
+        ))?;
     }
     Ok(())
 }

@@ -1,5 +1,7 @@
 # TEMPORARY workflow for validating the mm_minimal settle-physics fix on Linux.
-# Runs the formerly linux-gated tests with output. Delete before merging.
+# The real CI workflow does not trigger on non-main branches, so this runs the
+# exact same `xtask ci` surface (now with the linux gates removed) plus 3x
+# determinism reruns of the formerly gated tests. Delete before merging.
 name: debug-rne-ai
 
 on:
@@ -7,7 +9,7 @@ on:
     branches: [fix/mm-minimal-settle-physics]
 
 jobs:
-  settle-sensitive:
+  full-ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,26 +18,20 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Formerly linux-gated rne_ai tests
-        run: >
-          cargo test -p rne_ai --lib --
-          --include-ignored --exact --nocapture
-          mm_minimal_kinematics::tests::fk_matches_sim_at_idle
-          env::mobile_manipulator::episode::tests::place_episode_picks_carries_and_sets_down
-          env::mobile_manipulator::episode::tests::clutter_pick_place_task_matches_transport_place_script
-          env::mobile_manipulator::episode::tests::fixed_clutter_carry_params_place_center_cube
-          env::mobile_manipulator::episode::tests::ik_clutter_policy_completes_center_place
-          env::mobile_manipulator::episode::tests::mobile_clutter_policy_completes_place
-          env::mobile_manipulator::episode::tests::mobile_clutter_transport_script_places_cube_a
+      - name: Core workspace CI (same as main CI)
+        run: cargo run -p xtask -- ci
 
-      - name: Formerly linux-gated rne_py test
-        run: >
-          cargo test -p rne_py --
-          --include-ignored --exact --nocapture
-          tests::mobile_manipulator_place_episode_succeeds
-
-      - name: Example 26 place smoke
-        run: cargo run -p mobile_manipulator_place --example 26_mobile_manipulator_place -- --smoke
-
-      - name: Example 33 clutter pick-place smoke
-        run: cargo run -p clutter_pick_place_e2e --example 33_clutter_pick_place_e2e -- --smoke
+      - name: Determinism reruns of formerly gated tests (3x)
+        run: |
+          for i in 1 2 3; do
+            echo "=== determinism rerun $i ==="
+            cargo test -p rne_ai --lib -- --exact \
+              mm_minimal_kinematics::tests::fk_matches_sim_at_idle \
+              env::mobile_manipulator::episode::tests::place_episode_picks_carries_and_sets_down \
+              env::mobile_manipulator::episode::tests::clutter_pick_place_task_matches_transport_place_script \
+              env::mobile_manipulator::episode::tests::fixed_clutter_carry_params_place_center_cube \
+              env::mobile_manipulator::episode::tests::ik_clutter_policy_completes_center_place \
+              env::mobile_manipulator::episode::tests::mobile_clutter_policy_completes_place \
+              env::mobile_manipulator::episode::tests::mobile_clutter_transport_script_places_cube_a
+            cargo test -p rne_py -- --exact tests::mobile_manipulator_place_episode_succeeds
+          done

@@ -427,10 +427,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "linux",
-        ignore = "linux settle divergence; tracked in ROADMAP v0.13 mm_minimal physics fix"
-    )]
     fn fk_matches_sim_at_idle() {
         use crate::{MobileManipulatorAction, MobileManipulatorSim};
 

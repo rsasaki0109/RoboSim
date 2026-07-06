@@ -1141,10 +1141,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "linux",
-        ignore = "linux settle divergence; tracked in ROADMAP v0.13 mm_minimal physics fix"
-    )]
     fn mobile_manipulator_place_episode_succeeds() {
         let mut env = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
         let _ = env.reset();
