@@ -18,7 +18,7 @@ body_type = "fixed"
 # which matches where the scripted IK carry sets the cube down.
 [[obstacles]]
 name = "drop_zone"
-translation_m = [0.69, 0.025, -0.42]
+translation_m = [0.795, 0.025, -0.52]
 half_extents_m = [0.06, 0.025, 0.06]
 body_type = "fixed"
 

@@ -1142,42 +1142,14 @@ mod tests {
 
     #[test]
     fn mobile_manipulator_place_episode_succeeds() {
-        let mut env = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
-        let _ = env.reset();
-        let close = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        };
-        let carry = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            shoulder_velocity_rad_s: 0.6,
-            ..MobileManipulatorAction::default()
-        };
-        let hold = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            ..MobileManipulatorAction::default()
-        };
-        let open = MobileManipulatorAction {
-            gripper_velocity_rad_s: 3.0,
-            ..MobileManipulatorAction::default()
-        };
+        use rne_ai::{IkClutterPickPlacePolicy, Policy};
 
-        for _ in 0..30 {
-            env.step(close);
-            if env.simulation().is_grasping() {
-                break;
-            }
-        }
-        // 60-step carry: matches the sweep the place() target was derived from
-        // under the stable arm dynamics (see MobileManipulatorEpisodeConfig::place).
-        for _ in 0..60 {
-            env.step(carry);
-        }
-        for _ in 0..30 {
-            env.step(hold);
-        }
-        for _ in 0..150 {
-            if env.step(open).terminated {
+        let mut env = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = env.reset();
+        for _ in 0..policy.total_steps() {
+            step = env.step(policy.act(&step.observation));
+            if step.terminated {
                 return;
             }
         }

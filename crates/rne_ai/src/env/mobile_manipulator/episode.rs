@@ -229,21 +229,22 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
-    /// Default pick-and-place episode: grasp the cube and set it down at a target.
+    /// Default pick-and-place episode: grasp the center clutter cube and set it down
+    /// at the ground target beside the table.
     ///
-    /// The target matches where the scripted grasp-carry-release rollout (close,
-    /// 60-step shoulder sweep at 0.6 rad/s, hold, open — see example 26) sets the
-    /// cube down under the stable arm dynamics, the same convention as
-    /// [`Self::lift_pick_place`]. The pre-fix target (1.23, 0.03, -0.53) lay beyond
-    /// the arm's kinematic reach and was only hit by the old unstable dynamics
-    /// flinging the cube.
+    /// Uses the clutter table scene and [`IkClutterPickPlacePolicy`] timing (see
+    /// `ik_clutter_policy_completes_center_place`): the old transport-side-table
+    /// script no longer reaches the ground target once the arm uses two-finger
+    /// weld gating and position-held servos — the welded cube stays table-pinned
+    /// on the narrow grasp table through velocity-only carries.
     pub fn place() -> Self {
+        let target = crate::mm_minimal_kinematics::mm_minimal_clutter_place_target();
         Self {
-            max_steps: 600,
-            scene_path: crate::mm_minimal_transport_scene_path(),
+            max_steps: 1010,
+            scene_path: crate::mm_minimal_clutter_scene_path(),
             task: MobileManipulatorTask::Place {
-                object_name: "grasp_cube".into(),
-                target: crate::reach::ReachTarget::new(0.69, 0.03, -0.42),
+                object_name: "clutter_cube_b".into(),
+                target,
                 place_tolerance_m: 0.12,
             },
             reward: MobileManipulatorRewardConfig::default(),
@@ -1204,44 +1205,13 @@ mod tests {
 
     #[test]
     fn place_episode_picks_carries_and_sets_down() {
+        use crate::{IkClutterPickPlacePolicy, Policy};
+
         let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
-        let _ = episode.reset();
-
-        let close = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        };
-        let carry = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            shoulder_velocity_rad_s: 0.6,
-            ..MobileManipulatorAction::default()
-        };
-        let hold = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            ..MobileManipulatorAction::default()
-        };
-        let open = MobileManipulatorAction {
-            gripper_velocity_rad_s: 3.0,
-            ..MobileManipulatorAction::default()
-        };
-
-        for _ in 0..30 {
-            episode.step(close);
-            if episode.simulation().is_grasping() {
-                break;
-            }
-        }
-        // 60-step carry: matches the sweep the `place()` target was derived from
-        // under the stable arm dynamics (the old 200-step sweep was tuned against
-        // the pre-fix arm, which stalled against its own carried payload).
-        for _ in 0..60 {
-            episode.step(carry);
-        }
-        for _ in 0..30 {
-            episode.step(hold);
-        }
-        for _ in 0..150 {
-            let step = episode.step(open);
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        for _ in 0..policy.total_steps() {
+            step = episode.step(policy.act(&step.observation));
             if step.terminated {
                 return;
             }
@@ -1436,8 +1406,20 @@ mod tests {
         // than a fragile-but-tolerable approximation (it ignores the arm's coupled Jacobian).
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
-        for _ in 0..(20 + 360) {
+        for _ in 0..(20 + 420) {
             step = episode.step(policy.act(&step.observation));
+            if finger_contacts_named(episode.simulation(), object_name)
+                || episode.simulation().is_grasping()
+            {
+                return true;
+            }
+        }
+        // Two-finger weld may lag the first finger contact; finish closing if needed.
+        for _ in 0..60 {
+            episode.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
             if finger_contacts_named(episode.simulation(), object_name)
                 || episode.simulation().is_grasping()
             {
@@ -1447,16 +1429,25 @@ mod tests {
         false
     }
 
-    fn grasp_clutter_cube(episode: &mut MobileManipulatorEpisode, object_name: &str) -> bool {
+    fn grasp_clutter_cube(episode: &mut MobileManipulatorEpisode, _object_name: &str) -> bool {
         use crate::{IkClutterPickPlacePolicy, Policy};
-        let _ = object_name;
 
         // See `clutter_target_accepts_gripper_contact`: reuses the fixed IK approach instead
         // of the old naive proportional law.
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
-        for _ in 0..(20 + 360) {
+        for _ in 0..(20 + 420) {
             step = episode.step(policy.act(&step.observation));
+            if episode.simulation().is_grasping() {
+                return true;
+            }
+        }
+        // Two-finger weld may lag the first finger contact; finish closing if needed.
+        for _ in 0..60 {
+            episode.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
             if episode.simulation().is_grasping() {
                 return true;
             }
@@ -1487,66 +1478,22 @@ mod tests {
         false
     }
 
-    /// Validates the clutter Place task matches the proven transport pick-and-place script.
+    /// Validates the default Place episode config completes under the IK pick-place policy.
     #[test]
     fn clutter_pick_place_task_matches_transport_place_script() {
-        // Matches `MobileManipulatorEpisodeConfig::place()`: the target is where the
-        // scripted grasp-carry-release rollout sets the cube down (re-derived for the
-        // stable arm dynamics).
-        let target = ReachTarget::new(0.69, 0.03, -0.42);
-        let config = MobileManipulatorEpisodeConfig {
-            max_steps: 600,
-            scene_path: crate::mm_minimal_transport_scene_path(),
-            task: MobileManipulatorTask::Place {
-                object_name: "grasp_cube".into(),
-                target,
-                place_tolerance_m: 0.12,
-            },
-            reward: MobileManipulatorRewardConfig::default(),
-            reach_randomization: None,
-            reach_curriculum: None,
-            clutter_pick: None,
-            rng_seed: 0,
-        };
+        use crate::{IkClutterPickPlacePolicy, Policy};
+
+        let config = MobileManipulatorEpisodeConfig::place();
         let mut episode = MobileManipulatorEpisode::new(config);
-        let _ = episode.reset();
-
-        let close = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.5,
-            ..MobileManipulatorAction::default()
-        };
-        let carry = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            shoulder_velocity_rad_s: 0.6,
-            ..MobileManipulatorAction::default()
-        };
-        let hold = MobileManipulatorAction {
-            gripper_velocity_rad_s: -2.0,
-            ..MobileManipulatorAction::default()
-        };
-        let open = MobileManipulatorAction {
-            gripper_velocity_rad_s: 3.0,
-            ..MobileManipulatorAction::default()
-        };
-
-        for _ in 0..30 {
-            episode.step(close);
-            if episode.simulation().is_grasping() {
-                break;
-            }
-        }
-        for _ in 0..60 {
-            episode.step(carry);
-        }
-        for _ in 0..30 {
-            episode.step(hold);
-        }
-        for _ in 0..150 {
-            if episode.step(open).terminated {
+        let mut policy = IkClutterPickPlacePolicy::new();
+        let mut step = episode.reset();
+        for _ in 0..policy.total_steps() {
+            step = episode.step(policy.act(&step.observation));
+            if step.terminated {
                 return;
             }
         }
-        panic!("expected clutter Place task parameters to complete the transport pick-and-place script");
+        panic!("expected Place task parameters to complete the IK pick-and-place policy");
     }
 
     #[test]
@@ -1594,8 +1541,19 @@ mod tests {
         let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
-        for _ in 0..(20 + 360) {
+        for _ in 0..(20 + 420) {
             step = episode.step(policy.act(&step.observation));
+        }
+        if !episode.simulation().is_grasping() {
+            for _ in 0..60 {
+                episode.step(MobileManipulatorAction {
+                    gripper_velocity_rad_s: -2.5,
+                    ..MobileManipulatorAction::default()
+                });
+                if episode.simulation().is_grasping() {
+                    break;
+                }
+            }
         }
         assert!(
             episode.simulation().is_grasping(),
@@ -1642,9 +1600,18 @@ mod tests {
         let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
-        let approach_end = 20 + 360;
+        let approach_end = 20 + 420;
         for _ in 0..approach_end {
             step = episode.step(policy.act(&step.observation));
+            if episode.simulation().is_grasping() {
+                return;
+            }
+        }
+        for _ in 0..60 {
+            episode.step(MobileManipulatorAction {
+                gripper_velocity_rad_s: -2.5,
+                ..MobileManipulatorAction::default()
+            });
             if episode.simulation().is_grasping() {
                 return;
             }

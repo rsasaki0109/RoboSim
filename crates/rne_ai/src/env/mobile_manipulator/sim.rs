@@ -19,8 +19,8 @@ use rne_data::{
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId, RigidBody, RigidBodyType,
+    Collider, ColliderShape, ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend,
+    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_render::HeadlessRenderBackend;
@@ -34,8 +34,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const JOINT_STATE_STREAM: u32 = 300;
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 2;
-/// Oldest supported mobile-manipulator snapshot schema (v1 had no wrist depth frame).
+const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 3;
+/// Oldest supported mobile-manipulator snapshot schema (v1 had no wrist depth frame;
+/// v2 had no in-progress grasp weld-anchor retarget or finger pinch limits).
 const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
 
 /// Error restoring or creating a mobile-manipulator simulation snapshot.
@@ -91,6 +92,28 @@ pub struct MobileManipulatorJointMotorSnapshot {
     pub entity_index: u32,
     /// Physics joint motor command state.
     pub motor: JointMotor,
+}
+
+/// Snapshot of an in-progress smooth weld-anchor retarget (see
+/// [`MobileManipulatorSim::attach_grasp`]) and the finger pinch-close limits it
+/// establishes, so restoring a snapshot mid-carry resumes the same animated
+/// convergence and clamp instead of losing them.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileManipulatorGraspRetargetSnapshot {
+    /// Weld anchor translation (end-effector-local) at the moment of grasp.
+    pub start_translation_m: Vec3,
+    /// Weld anchor rotation (end-effector-local) at the moment of grasp.
+    pub start_rotation: Quat,
+    /// Canonical in-gripper weld anchor translation the retarget converges to.
+    pub target_translation_m: Vec3,
+    /// Canonical in-gripper weld anchor rotation the retarget converges to.
+    pub target_rotation: Quat,
+    /// Retarget steps completed so far, out of [`GRASP_RETARGET_STEPS`].
+    pub step: u32,
+    /// Left finger joint closing-limit position, if established.
+    pub pinch_left_limit_rad: Option<f64>,
+    /// Right finger joint closing-limit position, if established.
+    pub pinch_right_limit_rad: Option<f64>,
 }
 
 /// Fixed joint runtime state snapshot for one mobile-manipulator entity.
@@ -205,6 +228,9 @@ pub struct MobileManipulatorSimSnapshot {
     /// Latest wrist depth DataBus frame (schema v2+).
     #[serde(default)]
     pub wrist_depth_frame: Option<MobileManipulatorFrameSnapshot<ImageDepth>>,
+    /// In-progress grasp weld-anchor retarget and finger pinch limits (schema v3+).
+    #[serde(default)]
+    pub grasp_retarget: Option<MobileManipulatorGraspRetargetSnapshot>,
 }
 
 /// Default scene asset for the fixed-base `mm_minimal` robot.
@@ -306,13 +332,84 @@ const ARM_TARGET_LEAD_RAD: f64 = 0.15;
 /// Nominal mobile-base center height. The URDF places the base at 0.25 m so
 /// its wheels sit on the ground plane.
 const MOBILE_BASE_NOMINAL_Y_M: f64 = 0.25;
-/// Upward seat of the fixed-base arm's grasp weld anchor (see
+/// Upward seat of the fixed-base arm's canonical grasp anchor (see
 /// [`MobileManipulatorSim::attach_grasp`]): enough to lift a grasped object clear
 /// of its former support so a horizontal carry does not fight the object's pinned
 /// support contact, with margin for welds that catch the object a centimeter low
 /// (the closing fingers can press a tabletop cube into its support before the
-/// first contact fires the weld), while staying visually unobtrusive.
+/// first contact fires the weld), while staying visually unobtrusive. Folded into
+/// the canonical-pose retarget target (not applied as an instant offset at weld
+/// time), so the lift is animated smoothly rather than popping the object upward
+/// in a single tick.
 const FIXED_BASE_GRASP_SEAT_LIFT_M: f64 = 0.02;
+/// Number of physics steps over which a new grasp weld's anchor smoothly
+/// interpolates from its raw contact-time pose to the canonical in-gripper pose
+/// (see [`MobileManipulatorSim::attach_grasp`]). At the 60 Hz fixed step this is
+/// 0.25 s: fast enough that the carry does not visibly lag behind the gripper,
+/// slow enough that the correction reads as an animated settle rather than a snap.
+/// Fixed-step interpolation driven by a step counter, not wall-clock time, so the
+/// retarget is exactly reproducible.
+const GRASP_RETARGET_STEPS: u32 = 15;
+/// Extra closing travel allowed per finger joint after the two-finger grasp weld
+/// attaches, expressed as a fraction of the angular half-width the grasped object
+/// subtends at the finger's contact radius (the finger's own collision-geometry
+/// offset from its joint pivot, read from its [`Collider`] so this scales with the
+/// real per-robot finger geometry instead of a hardcoded arm length). Two-finger
+/// contact gating already means each finger sits close to the object's surface
+/// when the weld fires, so this only needs to cover the small residual travel the
+/// same tick's contact response has not fully arrested yet, not model an exact
+/// surface-contact angle.
+const GRASP_PINCH_MARGIN_FRACTION: f64 = 0.25;
+/// Hard ceiling on the extra finger-closing travel regardless of object size (rad).
+const GRASP_PINCH_MARGIN_MAX_RAD: f64 = 0.08;
+/// Fallback object half-width (m) used to size the finger pinch-close limit when
+/// the grasped object has no [`Collider`] shape to read (should not normally occur
+/// for graspable dynamic bodies).
+const GRASP_PINCH_FALLBACK_HALF_WIDTH_M: f64 = 0.03;
+/// Velocity-tracking gain for the `mm_lift` claw's finger joints (see
+/// [`JointMotor::gain`]), well above the plain-velocity-motor default of `1.0`.
+/// The top-down claw's fingers are a roll-axis (gravity-loaded) revolute joint —
+/// a pendulum — and the default gain is too weak to swing them away from their
+/// hanging rest angle against gravity (the same weakness the arm joints had, see
+/// `configure_arm_position_motors`), which left the two-finger contact gate of
+/// [`MobileManipulatorSim::find_graspable_in_contact`] unreachable no matter how
+/// long the close command ran.
+const LIFT_FINGER_MOTOR_GAIN: f64 = 30.0;
+/// Position-hold stiffness for the planar (`mm_minimal`/`mm_mobile`) gripper
+/// finger joints. At the old pure velocity motor (gain 1.0, no restoring force) a
+/// zero command did not HOLD the fingers: the arm's own swing flung them about
+/// their free axis, and the flailing bars knocked tabletop objects around during
+/// an approach — invisible while a one-finger graze instantly welded the object,
+/// fatal now that the grasp needs a deliberate two-sided pinch. Sized far above
+/// the arm joints' 400 because the motor spring's torque scales with the joint's
+/// effective angular inertia: the finger links carry their URDF mass as body-origin
+/// `additional_mass` with near-zero angular inertia, so only the thin bar
+/// collider's tiny moment (~2e-5 kg·m²) multiplies the gain, and a stiffness this
+/// large is needed before the restoring torque outweighs the coupling torques of
+/// the swinging arm. Empirically holds the commanded opening to within ~0.01 rad
+/// at idle and ~0.1 rad under full arm swings, with no visible jitter.
+const FINGER_MOTOR_STIFFNESS: f64 = 100000.0;
+/// Damping for the planar finger joints' position hold (≈ critical for the
+/// stiffness above in acceleration units: 2·√100000 ≈ 630).
+const FINGER_MOTOR_DAMPING: f64 = 640.0;
+
+/// In-progress smooth interpolation of a grasp weld's anchor from its raw
+/// contact-time pose to the canonical in-gripper pose. Advanced one step per
+/// simulation tick in [`MobileManipulatorSim::progress_grasp_retarget`]; never
+/// driven by wall-clock time, so replay is exact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GraspRetarget {
+    /// Weld anchor translation (end-effector-local) at the moment of grasp.
+    start_translation_m: Vec3,
+    /// Weld anchor rotation (end-effector-local) at the moment of grasp.
+    start_rotation: Quat,
+    /// Canonical in-gripper weld anchor translation the retarget converges to.
+    target_translation_m: Vec3,
+    /// Canonical in-gripper weld anchor rotation the retarget converges to.
+    target_rotation: Quat,
+    /// Retarget steps completed so far, out of [`GRASP_RETARGET_STEPS`].
+    step: u32,
+}
 
 /// Headless environment for minimal mobile manipulator URDFs.
 pub struct MobileManipulatorSim {
@@ -326,6 +423,13 @@ pub struct MobileManipulatorSim {
     ee_link: Entity,
     finger_links: Vec<Entity>,
     grasped_object: Option<Entity>,
+    /// Smooth weld-anchor retarget in progress for the current grasp, if any.
+    grasp_retarget: Option<GraspRetarget>,
+    /// Left finger joint closing limit for the current grasp, if established
+    /// (see [`Self::attach_grasp`] and [`GRASP_PINCH_MARGIN_FRACTION`]).
+    grasp_pinch_left_limit_rad: Option<f64>,
+    /// Right finger joint closing limit for the current grasp, if established.
+    grasp_pinch_right_limit_rad: Option<f64>,
     actuated: Vec<ActuatedJoint>,
     /// Commanded height target of the vertical lift, integrated from lift velocity.
     lift_target_m: f64,
@@ -695,6 +799,17 @@ impl MobileManipulatorSim {
                     .latest::<ImageDepth>(stream)
                     .map(MobileManipulatorFrameSnapshot::from_frame)
             }),
+            grasp_retarget: self.grasp_retarget.map(|retarget| {
+                MobileManipulatorGraspRetargetSnapshot {
+                    start_translation_m: retarget.start_translation_m,
+                    start_rotation: retarget.start_rotation,
+                    target_translation_m: retarget.target_translation_m,
+                    target_rotation: retarget.target_rotation,
+                    step: retarget.step,
+                    pinch_left_limit_rad: self.grasp_pinch_left_limit_rad,
+                    pinch_right_limit_rad: self.grasp_pinch_right_limit_rad,
+                }
+            }),
         };
 
         for entity in sorted_world_entities(&self.world) {
@@ -821,6 +936,24 @@ impl MobileManipulatorSim {
         } else {
             self.grasped_object = None;
         }
+        match &snapshot.grasp_retarget {
+            Some(retarget) => {
+                self.grasp_retarget = Some(GraspRetarget {
+                    start_translation_m: retarget.start_translation_m,
+                    start_rotation: retarget.start_rotation,
+                    target_translation_m: retarget.target_translation_m,
+                    target_rotation: retarget.target_rotation,
+                    step: retarget.step,
+                });
+                self.grasp_pinch_left_limit_rad = retarget.pinch_left_limit_rad;
+                self.grasp_pinch_right_limit_rad = retarget.pinch_right_limit_rad;
+            }
+            None => {
+                self.grasp_retarget = None;
+                self.grasp_pinch_left_limit_rad = None;
+                self.grasp_pinch_right_limit_rad = None;
+            }
+        }
 
         self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);
         self.step_count = snapshot.step_count;
@@ -891,6 +1024,9 @@ impl MobileManipulatorSim {
             ee_link,
             finger_links,
             grasped_object: None,
+            grasp_retarget: None,
+            grasp_pinch_left_limit_rad: None,
+            grasp_pinch_right_limit_rad: None,
             actuated,
             lift_target_m: 0.0,
             joint_names,
@@ -914,6 +1050,7 @@ impl MobileManipulatorSim {
         };
         sim.configure_lift_motor();
         sim.configure_arm_position_motors();
+        sim.configure_finger_motors();
         sim.warmup_physics();
         sim
     }
@@ -975,9 +1112,13 @@ impl MobileManipulatorSim {
     /// Attaches or releases a grasp based on the gripper command and finger contacts.
     ///
     /// Closing the gripper (`gripper_velocity_rad_s` below a small negative threshold)
-    /// onto a graspable body welds it to the end-effector link at its current relative
-    /// pose; opening the gripper releases the weld. This contact-triggered weld is a
-    /// robust stand-in for friction-based grasping.
+    /// onto a graspable body — with BOTH fingers in contact with it simultaneously,
+    /// see [`Self::find_graspable_in_contact`] — welds it to the end-effector link;
+    /// opening the gripper releases the weld. This contact-triggered weld is a
+    /// robust stand-in for friction-based grasping. After the weld attaches, its
+    /// anchor smoothly retargets to a canonical in-gripper pose over
+    /// [`GRASP_RETARGET_STEPS`] ticks (see [`Self::attach_grasp`] and
+    /// [`Self::progress_grasp_retarget`]).
     fn update_grasp(&mut self, action: MobileManipulatorAction) {
         const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
         const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
@@ -990,10 +1131,23 @@ impl MobileManipulatorSim {
         } else if self.grasped_object.is_some() && command > OPEN_THRESHOLD_RAD_S {
             self.release_grasp();
         }
+        self.progress_grasp_retarget();
     }
 
-    /// Finds a graspable body currently contacting a gripper finger.
+    /// Finds a graspable body currently contacting EVERY gripper finger simultaneously.
+    ///
+    /// A single finger grazing an object must not capture it — otherwise a graze
+    /// mid-approach welds the object at whatever off-center, tilted pose the graze
+    /// happened to have. Requiring contact on every entry of [`Self::finger_links`]
+    /// (both fingers, for every current robot) means the object is already
+    /// bracketed by the gripper when the weld fires. Candidates are sorted by
+    /// entity index for a deterministic pick on the rare tick where more than one
+    /// body satisfies full contact.
     fn find_graspable_in_contact(&self) -> Option<Entity> {
+        if self.finger_links.is_empty() {
+            return None;
+        }
+        let mut candidates: Vec<Entity> = Vec::new();
         for contact in self.last_contacts() {
             for finger in &self.finger_links {
                 let other = if contact.entity_a == *finger {
@@ -1004,13 +1158,18 @@ impl MobileManipulatorSim {
                     None
                 };
                 if let Some(other) = other {
-                    if self.is_graspable(other) {
-                        return Some(other);
+                    if self.is_graspable(other) && !candidates.contains(&other) {
+                        candidates.push(other);
                     }
                 }
             }
         }
-        None
+        candidates.sort_by_key(|entity| entity.index());
+        candidates.into_iter().find(|&object| {
+            self.finger_links
+                .iter()
+                .all(|finger| self.contacts_between(*finger, object))
+        })
     }
 
     /// A body is graspable when it is dynamic and not part of the robot articulation.
@@ -1028,43 +1187,194 @@ impl MobileManipulatorSim {
         dynamic && !is_robot_link
     }
 
-    /// Welds `object` to the end-effector link, preserving its current relative pose.
+    /// Welds `object` to the end-effector link and starts an animated retarget of
+    /// the weld anchor from `object`'s raw contact-time relative pose to a
+    /// canonical in-gripper pose (centered between the finger pads, resting depth
+    /// against the palm/mount, axis-aligned to the gripper frame — see
+    /// [`Self::canonical_grasp_anchor`]). The weld attaches at the raw pose
+    /// immediately (so contact never has to wait), then [`Self::progress_grasp_retarget`]
+    /// eases the anchor to the canonical target over [`GRASP_RETARGET_STEPS`] ticks;
+    /// nothing about the object's world transform is teleported mid-physics, only
+    /// the joint's own local anchor, so the correction plays out as the constraint
+    /// solver pulling the object smoothly into place.
     ///
-    /// On the fixed-base SCARA arm the weld anchor is seated slightly upward
-    /// (`FIXED_BASE_GRASP_SEAT_LIFT_M`): the arm has no vertical joint, so a weld at
-    /// exactly the object's resting height pins the object's resting contact with its
-    /// support (tabletop) into the constraint system, and the contact response then
-    /// resists any horizontal carry far harder than sliding friction would — the
-    /// carry stalls. The lift and mobile robots keep the exact-pose weld: the lift
-    /// robot raises the object off its support with its prismatic joint, and the
-    /// mobile robot's kinematically re-pinned base imposes the carry positionally.
+    /// On the fixed-base SCARA arm the canonical anchor is also seated slightly
+    /// upward (`FIXED_BASE_GRASP_SEAT_LIFT_M`): the arm has no vertical joint, so a
+    /// weld at exactly the object's resting height pins the object's resting
+    /// contact with its support (tabletop) into the constraint system, and the
+    /// contact response then resists any horizontal carry far harder than sliding
+    /// friction would — the carry stalls. The lift and mobile robots keep the
+    /// canonical anchor at the natural finger-pad height: the lift robot raises the
+    /// object off its support with its prismatic joint, and the mobile robot's
+    /// kinematically re-pinned base imposes the carry positionally.
+    ///
+    /// Also establishes the finger pinch-close limits (see
+    /// [`GRASP_PINCH_MARGIN_FRACTION`]) so future closing commands stop at the
+    /// object's surface instead of driving the fingers through it.
     fn attach_grasp(&mut self, object: Entity) {
         let ee = world_transform_of(&self.world, self.ee_link);
         let obj = world_transform_of(&self.world, object);
         let ee_rotation_inverse = ee.rotation.inverse();
-        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
-        let seat_lift_m = if !self.mobile_base && !has_lift {
-            FIXED_BASE_GRASP_SEAT_LIFT_M
-        } else {
-            0.0
-        };
-        let relative_translation =
-            ee_rotation_inverse * (obj.translation + Vec3::Y * seat_lift_m - ee.translation);
-        let relative_rotation = ee_rotation_inverse * obj.rotation;
+        let start_translation_m = ee_rotation_inverse * (obj.translation - ee.translation);
+        let start_rotation = ee_rotation_inverse * obj.rotation;
+        let target_translation_m = self.canonical_grasp_anchor(ee);
+        let target_rotation = Quat::IDENTITY;
+
         self.world.entity_mut(object).insert(FixedJointDesc {
             parent: self.ee_link,
-            anchor_parent_m: relative_translation,
+            anchor_parent_m: start_translation_m,
             anchor_child_m: Vec3::ZERO,
-            relative_rotation,
+            relative_rotation: start_rotation,
         });
         self.grasped_object = Some(object);
+        self.grasp_retarget = Some(GraspRetarget {
+            start_translation_m,
+            start_rotation,
+            target_translation_m,
+            target_rotation,
+            step: 0,
+        });
+        self.establish_pinch_limits(object);
     }
 
-    /// Releases the current grasp by removing the weld joint.
+    /// Canonical in-gripper weld-anchor translation (end-effector-local): the point
+    /// centered between the two finger links' world positions, which (by
+    /// construction — the finger mounts are symmetric about the gripper's midline)
+    /// is laterally centered and sits at the fingers' natural reach depth,
+    /// approximating "resting between the finger pads" without hardcoding any
+    /// per-robot geometry. On the fixed-base arm this is nudged upward by
+    /// `FIXED_BASE_GRASP_SEAT_LIFT_M` (see [`Self::attach_grasp`]).
+    fn canonical_grasp_anchor(&self, ee: Transform3) -> Vec3 {
+        let ee_rotation_inverse = ee.rotation.inverse();
+        let anchor = if self.finger_links.len() == 2 {
+            let a = world_transform_of(&self.world, self.finger_links[0]);
+            let b = world_transform_of(&self.world, self.finger_links[1]);
+            let mid_world = 0.5 * (a.translation + b.translation);
+            ee_rotation_inverse * (mid_world - ee.translation)
+        } else {
+            Vec3::ZERO
+        };
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        if !self.mobile_base && !has_lift {
+            anchor + Vec3::Y * FIXED_BASE_GRASP_SEAT_LIFT_M
+        } else {
+            anchor
+        }
+    }
+
+    /// Advances the in-progress grasp weld-anchor retarget by one fixed step, easing
+    /// the [`FixedJointDesc`] anchor from its raw contact-time pose toward the
+    /// canonical pose with a smoothstep curve. No-op once fully converged or when
+    /// nothing is grasped. Driven entirely by the retarget's own step counter (not
+    /// wall-clock time), so it replays exactly.
+    fn progress_grasp_retarget(&mut self) {
+        let Some(object) = self.grasped_object else {
+            return;
+        };
+        let Some(mut retarget) = self.grasp_retarget else {
+            return;
+        };
+        if retarget.step >= GRASP_RETARGET_STEPS {
+            return;
+        }
+        retarget.step += 1;
+        let t = smoothstep01(retarget.step as f64 / GRASP_RETARGET_STEPS as f64);
+        let translation = retarget
+            .start_translation_m
+            .lerp(retarget.target_translation_m, t);
+        let rotation = retarget.start_rotation.slerp(retarget.target_rotation, t);
+        if let Some(mut desc) = self.world.get_mut::<FixedJointDesc>(object) {
+            desc.anchor_parent_m = translation;
+            desc.relative_rotation = rotation;
+        }
+        self.grasp_retarget = Some(retarget);
+    }
+
+    /// Records the per-finger joint angle beyond which future closing commands are
+    /// clamped (see [`Self::clamp_finger_closing_velocity`]), sized from the
+    /// object's half-width so bigger objects get a touch more closing headroom.
+    fn establish_pinch_limits(&mut self, object: Entity) {
+        let left_rad = self.joint_position_rad("left_finger_joint");
+        let right_rad = self.joint_position_rad("right_finger_joint");
+        let half_width_m = object_half_width_m(&self.world, object);
+        let left_budget = self.pinch_close_budget_rad(0, half_width_m);
+        let right_budget = self.pinch_close_budget_rad(1, half_width_m);
+        // Left closes by decreasing its angle, right by increasing (see
+        // `velocity_for_joint`), so each limit trails its measured angle in the
+        // closing direction.
+        self.grasp_pinch_left_limit_rad = Some(left_rad - left_budget);
+        self.grasp_pinch_right_limit_rad = Some(right_rad + right_budget);
+    }
+
+    /// Extra closing travel (rad) allowed for `self.finger_links[finger_index]`,
+    /// scaled by the object's half-width relative to the finger's own
+    /// collision-geometry offset from its joint pivot (a generic, per-robot-correct
+    /// stand-in for "arm length" that needs no hardcoded per-robot constant).
+    fn pinch_close_budget_rad(&self, finger_index: usize, half_width_m: f64) -> f64 {
+        let arm_m = self
+            .finger_links
+            .get(finger_index)
+            .and_then(|finger| self.world.get::<Collider>(*finger))
+            .map(|collider| collider.local_offset.translation.length())
+            .filter(|length| *length > 1.0e-6)
+            .unwrap_or(GRASP_PINCH_FALLBACK_HALF_WIDTH_M);
+        (GRASP_PINCH_MARGIN_FRACTION * half_width_m / arm_m).clamp(0.0, GRASP_PINCH_MARGIN_MAX_RAD)
+    }
+
+    /// Clamps a commanded finger-joint velocity so a continuing "close" command
+    /// cannot drive the finger past its pinch limit once an object is grasped
+    /// (fixes fingers visually closing through the held object or, without any
+    /// clamp at all, ignoring it entirely). Commands that open the gripper (the
+    /// opposite sign) are never clamped, so releasing still works. A no-op when
+    /// nothing is grasped or the joint has no established limit.
+    fn clamp_finger_closing_velocity(&self, joint_name: &str, velocity: f64, dt_s: f64) -> f64 {
+        if self.grasped_object.is_none() {
+            return velocity;
+        }
+        match joint_name {
+            "left_finger_joint" => {
+                let Some(limit) = self.grasp_pinch_left_limit_rad else {
+                    return velocity;
+                };
+                if velocity >= 0.0 {
+                    return velocity;
+                }
+                let current = self.joint_position_rad(joint_name);
+                let remaining = current - limit;
+                if remaining <= 0.0 {
+                    0.0
+                } else {
+                    velocity.max(-remaining / dt_s)
+                }
+            }
+            "right_finger_joint" => {
+                let Some(limit) = self.grasp_pinch_right_limit_rad else {
+                    return velocity;
+                };
+                if velocity <= 0.0 {
+                    return velocity;
+                }
+                let current = self.joint_position_rad(joint_name);
+                let remaining = limit - current;
+                if remaining <= 0.0 {
+                    0.0
+                } else {
+                    velocity.min(remaining / dt_s)
+                }
+            }
+            _ => velocity,
+        }
+    }
+
+    /// Releases the current grasp by removing the weld joint and clearing the
+    /// retarget and pinch-limit state.
     fn release_grasp(&mut self) {
         if let Some(object) = self.grasped_object.take() {
             self.world.entity_mut(object).remove::<FixedJointDesc>();
         }
+        self.grasp_retarget = None;
+        self.grasp_pinch_left_limit_rad = None;
+        self.grasp_pinch_right_limit_rad = None;
     }
 
     fn joint_position_rad(&self, joint_name: &str) -> f64 {
@@ -1113,7 +1423,11 @@ impl MobileManipulatorSim {
             .zip(self.joint_names.iter())
             .enumerate()
         {
-            let velocity = velocity_for_joint(joint_name, action);
+            let velocity = self.clamp_finger_closing_velocity(
+                joint_name,
+                velocity_for_joint(joint_name, action),
+                dt_s,
+            );
             // Anti-windup lead for the mobile arm: without it the integrated angle
             // target runs several radians ahead of the lagging joint during long
             // moves, and the spring then drags the joint far past the commanded
@@ -1131,11 +1445,19 @@ impl MobileManipulatorSim {
                     motor.velocity_rad_s = velocity;
                     motor.target_position = self.lift_target_m;
                 } else if motor.stiffness > 0.0 {
-                    // Position-holding revolute arm joint: integrate the velocity command
-                    // into a held angle so the heavy arm moves to and holds the commanded
-                    // pose (a plain velocity motor is too weak to move or hold it).
-                    motor.stiffness = ARM_MOTOR_STIFFNESS;
-                    motor.gain = ARM_MOTOR_DAMPING;
+                    // Position-holding revolute joint: integrate the velocity command
+                    // into a held angle so the joint moves to and holds the commanded
+                    // pose (a plain velocity motor is too weak to move or hold the
+                    // heavy arm, and does not hold the light fingers at all). Arm
+                    // joints re-assert their spring constants (direct lift targets
+                    // may have overridden them); finger joints keep their own
+                    // lighter constants (see `configure_finger_motors`).
+                    let is_finger =
+                        joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                    if !is_finger {
+                        motor.stiffness = ARM_MOTOR_STIFFNESS;
+                        motor.gain = ARM_MOTOR_DAMPING;
+                    }
                     let mut target = (motor.target_position + velocity * dt_s)
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
                     if let Some(position_rad) = windup_position_rad {
@@ -1191,8 +1513,13 @@ impl MobileManipulatorSim {
     }
 
     fn apply_gripper_and_base_velocities(&mut self, action: MobileManipulatorAction) {
+        let dt_s = self.dt.as_seconds().value();
         for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
-            let velocity = velocity_for_joint(joint_name, action);
+            let velocity = self.clamp_finger_closing_velocity(
+                joint_name,
+                velocity_for_joint(joint_name, action),
+                dt_s,
+            );
             if matches!(
                 joint_name.as_str(),
                 "lift_joint" | "shoulder_joint" | "elbow_joint"
@@ -1337,6 +1664,35 @@ impl MobileManipulatorSim {
         }
     }
 
+    /// Configures the gripper finger joint motors so they actually track and hold
+    /// their commands instead of flailing:
+    ///
+    /// - `mm_lift`'s gravity-loaded roll-axis fingers get a stronger
+    ///   velocity-tracking gain ([`LIFT_FINGER_MOTOR_GAIN`]) but stay pure
+    ///   velocity motors — the claw hangs vertically and a closing rate command
+    ///   must swing the pendulum fingers against gravity.
+    /// - The planar robots' fingers become position (spring-damper) motors
+    ///   ([`FINGER_MOTOR_STIFFNESS`]/[`FINGER_MOTOR_DAMPING`]) like the arm
+    ///   joints, so a zero command holds the current opening through arm swings
+    ///   and a closing command integrates into a held pinch angle.
+    fn configure_finger_motors(&mut self) {
+        let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            if name != "left_finger_joint" && name != "right_finger_joint" {
+                continue;
+            }
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
+                if has_lift {
+                    motor.gain = LIFT_FINGER_MOTOR_GAIN;
+                } else {
+                    motor.stiffness = FINGER_MOTOR_STIFFNESS;
+                    motor.gain = FINGER_MOTOR_DAMPING;
+                    motor.target_position = 0.0;
+                }
+            }
+        }
+    }
+
     fn warmup_physics(&mut self) {
         self.zero_joint_motors();
         self.backend
@@ -1463,6 +1819,31 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
 
 fn z_rotation_rad(rotation: Quat) -> f64 {
     2.0 * f64::atan2(rotation.z, rotation.w)
+}
+
+/// Cubic ease-in/ease-out over `[0, 1]`, clamped at the ends. Used to animate the
+/// grasp weld-anchor retarget (see [`MobileManipulatorSim::progress_grasp_retarget`])
+/// so the correction reads as a smooth settle rather than a linear snap.
+fn smoothstep01(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Approximate half-width (m) of a graspable object's collision shape, used to size
+/// the finger pinch-close limit (see [`GRASP_PINCH_MARGIN_FRACTION`]). Falls back to
+/// [`GRASP_PINCH_FALLBACK_HALF_WIDTH_M`] when the object has no [`Collider`].
+fn object_half_width_m(world: &World, object: Entity) -> f64 {
+    world
+        .get::<Collider>(object)
+        .map(|collider| match collider.shape {
+            ColliderShape::Cuboid { half_extents_m } => {
+                half_extents_m.x.min(half_extents_m.y).min(half_extents_m.z)
+            }
+            ColliderShape::Sphere { radius_m } => radius_m,
+            ColliderShape::Capsule { radius_m, .. } => radius_m,
+            ColliderShape::Plane { .. } => GRASP_PINCH_FALLBACK_HALF_WIDTH_M,
+        })
+        .unwrap_or(GRASP_PINCH_FALLBACK_HALF_WIDTH_M)
 }
 
 /// Planar heading in radians, extracted by projecting the rotated +X axis onto the
@@ -2417,7 +2798,12 @@ mod tests {
             ..MobileManipulatorAction::default()
         };
 
-        for _ in 0..30 {
+        // Two-finger gating (see `find_graspable_in_contact`) means the weld no
+        // longer fires on the very first graze: with the fingers closing at a fixed
+        // rate and the arm stationary, the light free cube rocks between alternating
+        // single-finger contacts for a while before both fingers catch it at once.
+        // 220 steps comfortably covers that settle with margin.
+        for _ in 0..220 {
             sim.step(close);
             if sim.is_grasping() {
                 break;
