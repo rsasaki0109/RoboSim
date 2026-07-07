@@ -330,7 +330,8 @@ mod tests {
         let scene_path = UrdfSceneSim::cart_minimal_scene_path();
         let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn cart");
         let initial_x = sim.observe().base_x_m;
-        for _ in 0..180 {
+        // Linux CI physics stepping is slightly slower to accumulate wheel travel.
+        for _ in 0..240 {
             sim.step_cart(UrdfCartAction {
                 left_velocity_rad_s: 4.0,
                 right_velocity_rad_s: 4.0,
