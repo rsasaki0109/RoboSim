@@ -28,6 +28,8 @@ pub struct PhysicsHarness {
     pub world: World,
     /// Gravity vector from the world descriptor (negative Y by default).
     pub gravity_m_s2: Vec3,
+    /// Number of physics substeps executed so far.
+    pub steps: u32,
 }
 
 impl PhysicsHarness {
@@ -41,6 +43,7 @@ impl PhysicsHarness {
             physics_world,
             world: World::new(),
             gravity_m_s2,
+            steps: 0,
         }
     }
 
@@ -50,6 +53,7 @@ impl PhysicsHarness {
         for _ in 0..steps {
             step_physics(&mut self.backend, &mut self.world, self.physics_world, dt)
                 .expect("physics step");
+            self.steps += 1;
         }
     }
 
@@ -58,6 +62,7 @@ impl PhysicsHarness {
         for _ in 0..steps {
             step_physics(&mut self.backend, &mut self.world, self.physics_world, dt)
                 .expect("physics step");
+            self.steps += 1;
         }
     }
 
@@ -238,6 +243,104 @@ pub fn spawn_pendulum(
     ));
 
     (pivot, bob)
+}
+
+/// Planar tip position from joint angles (q[0] from vertical, q[i] relative for i > 0).
+pub fn planar_tip_m(lengths_m: &[f64], q_rad: &[f64]) -> Vec3 {
+    assert_eq!(lengths_m.len(), q_rad.len());
+    let mut angle = q_rad[0];
+    let mut x = lengths_m[0] * angle.sin();
+    let mut y = -lengths_m[0] * angle.cos();
+    for i in 1..lengths_m.len() {
+        angle += q_rad[i];
+        x += lengths_m[i] * angle.sin();
+        y -= lengths_m[i] * angle.cos();
+    }
+    Vec3::new(x, y, 0.0)
+}
+
+/// Two-link planar arm: fixed base + two revolute links on Z (distal sphere tips).
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_two_link_planar(
+    harness: &mut PhysicsHarness,
+    link1_length_m: f64,
+    link2_length_m: f64,
+    link1_mass_kg: f64,
+    link2_mass_kg: f64,
+    link_radius_m: f64,
+    q1_rad: f64,
+    q2_rad: f64,
+) -> (Entity, Entity, Entity) {
+    let base = spawn_named(&mut harness.world, "base");
+    harness.world.entity_mut(base).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::sphere(0.02),
+        Transform3::from_translation_rotation(Vec3::ZERO, Quat::IDENTITY),
+    ));
+
+    let link1_center = Vec3::new(
+        link1_length_m * q1_rad.sin(),
+        -link1_length_m * q1_rad.cos(),
+        0.0,
+    );
+    let link1 = spawn_named(&mut harness.world, "link1");
+    harness.world.entity_mut(link1).insert((
+        RigidBody {
+            mass_kg: link1_mass_kg,
+            ..RigidBody::default()
+        },
+        Collider::sphere(link_radius_m),
+        Transform3::from_translation_rotation(link1_center, Quat::IDENTITY),
+        RevoluteJointDesc {
+            parent: base,
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::new(0.0, link1_length_m, 0.0),
+        },
+    ));
+
+    let tip_angle = q1_rad + q2_rad;
+    let link2_center = link1_center
+        + Vec3::new(
+            link2_length_m * tip_angle.sin(),
+            -link2_length_m * tip_angle.cos(),
+            0.0,
+        );
+    let link2 = spawn_named(&mut harness.world, "link2");
+    harness.world.entity_mut(link2).insert((
+        RigidBody {
+            mass_kg: link2_mass_kg,
+            ..RigidBody::default()
+        },
+        Collider::sphere(link_radius_m),
+        Transform3::from_translation_rotation(link2_center, Quat::IDENTITY),
+        RevoluteJointDesc {
+            parent: link1,
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::new(
+                -link2_length_m * tip_angle.sin(),
+                link2_length_m * tip_angle.cos(),
+                0.0,
+            ),
+        },
+    ));
+
+    (base, link1, link2)
+}
+
+/// Planar angle from downward vertical (radians) for a segment `from` → `to`.
+pub fn planar_angle_from_vertical_rad(from: Vec3, to: Vec3) -> f64 {
+    let d = to - from;
+    f64::atan2(d.x, -d.y)
+}
+
+/// Relative planar joint angle between two consecutive links.
+pub fn planar_relative_angle_rad(parent: Vec3, joint: Vec3, tip: Vec3) -> f64 {
+    planar_angle_from_vertical_rad(joint, tip) - planar_angle_from_vertical_rad(parent, joint)
 }
 
 /// Pendulum angle (radians) from horizontal displacement and rope length.

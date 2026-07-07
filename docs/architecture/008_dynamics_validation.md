@@ -60,6 +60,27 @@ model bug.
 No `rne_physics` trait changes were required: `PhysicsMaterial.friction` and
 `.restitution` on `Collider` are already wired in `rne_physics_rapier`.
 
+## Phase 2 — Pinocchio golden references
+
+Golden trajectories under `tests/golden/dynamics/` compare Rapier revolute chains
+against Pinocchio (or equivalent serial-chain Lagrangian) references at 60 Hz.
+
+| Scenario | Duration | Primary metric | Tolerance |
+|----------|----------|----------------|-----------|
+| Single pendulum (L=2 m, 5°) | 2 s | tip position + joint angle | 12 cm, 0.15 rad |
+| Two-link planar (1 m + 1 m) | 0.25 s | tip position | 18 cm |
+
+Regenerate goldens (Linux with `pip install pin`, or Windows/macOS fallback):
+
+```bash
+python scripts/pinocchio_reference.py --write-golden
+python scripts/pinocchio_reference.py --write-golden --lagrangian-fallback
+cargo test -p rne_dynamics_tests pinocchio
+```
+
+On Linux CI, `xtask ci` optionally verifies goldens when `pin` is installed
+(`RNE_SKIP_PINOCCHIO_GOLDEN=1` to skip).
+
 ## Related
 
 - Determinism replay: `tests/determinism/`
