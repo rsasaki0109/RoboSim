@@ -987,7 +987,24 @@ const CLUTTER_APPROACH_GAIN: f64 = 0.5;
 
 /// Nominal forward distance of the carried clutter object from the mobile base
 /// center (m); scales the steering share of the object-error feedback below.
-const MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M: f64 = 0.95;
+///
+/// Re-derived (was `0.95`) after `canonical_grasp_anchor` in
+/// `env::mobile_manipulator::sim` gained a forward standoff (see
+/// `GRASP_FORWARD_STANDOFF_MARGIN_M`): the grasped cube now rides further ahead of
+/// the gripper mount, which increases this lever arm by roughly the clutter cube's
+/// half-width (0.035 m) plus that margin. Measured directly from the simulation
+/// (logging the welded cube's world position against the base's during a carry
+/// rollout) as ~1.00 m when the base isn't actively turning; turning induces a
+/// transient lag (the weld is a spring/constraint, not an infinitely rigid rod, so
+/// the cube swings wide under yaw) that made the previous, now-more-mismatched
+/// constant feed an incorrect lever arm into the `w = GAIN * lateral / L` term
+/// below, amplifying the lateral-channel loop gain enough to leave the
+/// carry-drive's fixed step budget without a converged margin: it visibly
+/// oscillated back and forth past centerline before barely settling by the last
+/// step on one platform and not quite settling on another (float-rounding and
+/// Rapier solver iteration order differ enough between the Windows and Linux CI
+/// runners to tip a borderline convergence either way).
+const MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M: f64 = 1.00;
 /// Proportional gain mapping carried-object position error to base twist (1/s).
 const MOBILE_CLUTTER_CARRY_OBJECT_GAIN: f64 = 0.6;
 
