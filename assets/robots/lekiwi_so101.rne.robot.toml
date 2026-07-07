@@ -1,0 +1,9 @@
+kind = "urdf"
+model_name = "lekiwi_so101"
+
+[urdf]
+path = "lekiwi_so101/lekiwi_so101.urdf"
+base_body_type = "dynamic"
+initial_translation_m = [0.0, 0.06, 0.0]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true

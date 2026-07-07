@@ -1,8 +1,8 @@
-//! Loads vendored external URDF scenes (SO-101 arm, minimal cart, LeKiwi base).
+//! Loads vendored external URDF scenes (SO-101 arm, minimal cart, LeKiwi base, composite).
 
 use rne_ai::{
-    build_visual_render_scene, cart_minimal_scene_path, lekiwi_scene_path, so101_scene_path,
-    UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
+    build_visual_render_scene, cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
+    so101_scene_path, UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_render::VisualShape;
 
@@ -61,10 +61,41 @@ fn main() {
         arm.observe().base_yaw_rad
     );
 
+    let mut lekiwi_so101 =
+        UrdfSceneSim::from_scene_path(&lekiwi_so101_scene_path()).expect("load lekiwi_so101");
+    let composite_start = lekiwi_so101.observe();
+    for _ in 0..120 {
+        lekiwi_so101.step_kiwi_and_arm(
+            UrdfKiwiAction {
+                vx_m_s: 0.2,
+                vz_m_s: 0.0,
+                wz_rad_s: 0.0,
+            },
+            UrdfArmAction {
+                shoulder_pan_velocity_rad_s: 1.0,
+            },
+        );
+    }
+    let composite_obs = lekiwi_so101.observe();
+    let composite_dx = composite_obs.base_x_m - composite_start.base_x_m;
+    let composite_dz = composite_obs.base_z_m - composite_start.base_z_m;
+    let composite_planar = (composite_dx * composite_dx + composite_dz * composite_dz).sqrt();
+    println!(
+        "lekiwi_so101: joints={} planar_displacement={:.3} m has_arm={}",
+        composite_obs.actuated_joint_count,
+        composite_planar,
+        lekiwi_so101.has_arm()
+    );
+
     if so101_meshes < 5
         || moved < 0.02
         || lekiwi_obs.actuated_joint_count < 3
         || lekiwi_planar < 0.02
+        || !lekiwi_so101.is_kiwi_drive()
+        || !lekiwi_so101.has_arm()
+        || composite_obs.actuated_joint_count < 8
+        || composite_planar < 0.02
+        || composite_planar > 2.0
     {
         std::process::exit(1);
     }

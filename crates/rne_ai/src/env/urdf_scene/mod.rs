@@ -141,6 +141,11 @@ impl UrdfSceneSim {
         lekiwi_scene_path()
     }
 
+    /// Built-in LeKiwi + SO-101 composite scene path.
+    pub fn lekiwi_so101_scene_path() -> PathBuf {
+        lekiwi_so101_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -149,6 +154,11 @@ impl UrdfSceneSim {
     /// Returns whether this scene uses LeKiwi kiwi-drive wheel motors.
     pub fn is_kiwi_drive(&self) -> bool {
         self.kiwi_wheels[0].is_some()
+    }
+
+    /// Returns whether a SO-101 style shoulder pan joint is present.
+    pub fn has_arm(&self) -> bool {
+        self.shoulder_pan_link.is_some()
     }
     /// Returns the loaded scene path.
     pub fn scene_path(&self) -> &Path {
@@ -194,6 +204,27 @@ impl UrdfSceneSim {
                 if let Some(mut motor) = self.world.get_mut::<JointMotor>(*entity) {
                     motor.velocity_rad_s = lekiwi_wheel_command_to_motor_rad_s(velocity_rad_s);
                 }
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Applies kiwi-drive and arm teleop actions, then steps one simulation tick.
+    ///
+    /// Used by the LeKiwi + SO-101 composite where wheel and arm motors share one articulation.
+    pub fn step_kiwi_and_arm(&mut self, kiwi: UrdfKiwiAction, arm: UrdfArmAction) {
+        use lekiwi_drive::{lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s};
+        let wheel_velocities_rad_s = lekiwi_twist_to_wheel_velocities(kiwi);
+        for (wheel, velocity_rad_s) in self.kiwi_wheels.iter().zip(wheel_velocities_rad_s) {
+            if let Some(entity) = wheel {
+                if let Some(mut motor) = self.world.get_mut::<JointMotor>(*entity) {
+                    motor.velocity_rad_s = lekiwi_wheel_command_to_motor_rad_s(velocity_rad_s);
+                }
+            }
+        }
+        if let Some(shoulder) = self.shoulder_pan_link {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(shoulder) {
+                motor.velocity_rad_s = arm.shoulder_pan_velocity_rad_s;
             }
         }
         self.step_physics();
@@ -272,6 +303,11 @@ pub fn cart_minimal_scene_path() -> PathBuf {
 /// Built-in LeKiwi base scene path.
 pub fn lekiwi_scene_path() -> PathBuf {
     assets_scene_path("lekiwi.rne.scene.toml")
+}
+
+/// Built-in LeKiwi + SO-101 composite scene path.
+pub fn lekiwi_so101_scene_path() -> PathBuf {
+    assets_scene_path("lekiwi_so101.rne.scene.toml")
 }
 
 #[cfg(test)]
@@ -354,6 +390,57 @@ mod tests {
         assert!(
             yaw_delta > 0.05,
             "lekiwi should yaw under +wz, |delta|={yaw_delta:.4} rad"
+        );
+    }
+
+    #[test]
+    fn lekiwi_so101_loads_with_kiwi_drive_and_arm() {
+        let scene_path = lekiwi_so101_scene_path();
+        assert!(scene_path.is_file(), "missing {}", scene_path.display());
+        let sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn lekiwi_so101");
+        assert!(sim.is_kiwi_drive());
+        assert!(sim.has_arm());
+        assert!(
+            sim.actuated_joint_count >= 8,
+            "expected wheel + arm motors, got {}",
+            sim.actuated_joint_count
+        );
+        assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn lekiwi_so101_drives_and_arm_joints_exist() {
+        let scene_path = lekiwi_so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn lekiwi_so101");
+        let initial = sim.observe();
+        for _ in 0..180 {
+            sim.step_kiwi_and_arm(
+                UrdfKiwiAction {
+                    vx_m_s: 0.15,
+                    vz_m_s: 0.0,
+                    wz_rad_s: 0.0,
+                },
+                UrdfArmAction {
+                    shoulder_pan_velocity_rad_s: 0.5,
+                },
+            );
+        }
+        let obs = sim.observe();
+        let dx_m = obs.base_x_m - initial.base_x_m;
+        let dz_m = obs.base_z_m - initial.base_z_m;
+        let planar_m = (dx_m * dx_m + dz_m * dz_m).sqrt();
+        assert!(
+            planar_m > 0.03,
+            "lekiwi_so101 should translate under +vx, planar={planar_m:.4} m"
+        );
+        assert!(
+            planar_m < 2.0,
+            "lekiwi_so101 planar displacement should stay bounded, planar={planar_m:.4} m"
+        );
+        assert!(
+            obs.actuated_joint_count >= 8,
+            "arm joints should remain after stepping, got {}",
+            obs.actuated_joint_count
         );
     }
 }

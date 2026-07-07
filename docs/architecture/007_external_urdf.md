@@ -71,6 +71,7 @@ URDF robot assets may set `initial_rotation_rpy` (roll-pitch-yaw radians) on the
 | `so101` | [TheRobotStudio/SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) | Apache-2.0 | ~15 MB STL set from `Simulation/SO101/assets` |
 | `cart_minimal` | RNE-authored | project license | Primitive diff-drive cart (continuous wheel joints) |
 | `lekiwi` | [SIGRobotics-UIUC/LeKiwi](https://github.com/SIGRobotics-UIUC/LeKiwi) | Apache-2.0 | Reduced base-only URDF (~5 MB / 22 STLs); omni wheel bodies replaced with cylinders |
+| `lekiwi_so101` | composite (`lekiwi` + `so101`) | Apache-2.0 | LeKiwi base with SO-101 arm rigidly mounted at `arm_mount` |
 
 ### LeKiwi reduction strategy
 
@@ -96,6 +97,18 @@ Upstream `LeKiwi.urdf` is a 45-link / 44-joint assembly (~61 MB meshes). `lekiwi
 
 Mount URDF offsets `(x, y, 0)` map to world `(x, 0, -y)` under the spawn rotation.
 
+### LeKiwi + SO-101 composite
+
+`assets/robots/lekiwi_so101/lekiwi_so101.urdf` merges `lekiwi_base.urdf` with vendored `so101.urdf`:
+
+- SO-101 `base_link` is renamed `so101_base_link` to avoid clashing with the LeKiwi `base_link`.
+- `so101_mount_joint` (fixed) attaches `so101_base_link` to `arm_mount` using the upstream LeKiwi `Base_08q` → first-servo offset (`xyz="-0.02975 -0.04565 0.0278"`, `rpy="π/2 0 0"`).
+- SO-101 mesh `<collision>` elements are stripped in the generated URDF (visuals retained) to prevent mesh-AABB interpenetration with the base deck at spawn.
+- Mesh URIs use `../lekiwi/` and `../so101/` relative paths from the composite directory.
+- Regenerate with `python scripts/gen_lekiwi_so101_urdf.py`.
+
+`UrdfSceneSim::step_kiwi_and_arm` drives kiwi wheels and shoulder pan in one physics step.
+
 ## Examples & viewer
 
 - `cargo run -p urdf_import --example 03_urdf_import` — inline fixture import
@@ -103,6 +116,7 @@ Mount URDF offsets `(x, y, 0)` map to world `(x, 0, -y)` under the spawn rotatio
 - `cargo run -p interactive_viewer --example 14_interactive_viewer -- --so101`
 - `cargo run -p interactive_viewer --example 14_interactive_viewer -- --cart`
 - `cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi`
+- `cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi-so101`
 
 ## Intentionally unsupported (skipped)
 
