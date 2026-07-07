@@ -94,8 +94,7 @@ fn main() {
         || !lekiwi_so101.is_kiwi_drive()
         || !lekiwi_so101.has_arm()
         || composite_obs.actuated_joint_count < 8
-        || composite_planar < 0.02
-        || composite_planar > 2.0
+        || !(0.02..=2.0).contains(&composite_planar)
     {
         std::process::exit(1);
     }

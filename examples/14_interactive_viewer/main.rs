@@ -515,7 +515,7 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 let dx_m = obs.base_x_m - initial.base_x_m;
                 let dz_m = obs.base_z_m - initial.base_z_m;
                 let planar_m = (dx_m * dx_m + dz_m * dz_m).sqrt();
-                if planar_m <= 0.02 || planar_m > 2.0 {
+                if !(0.02..=2.0).contains(&planar_m) {
                     eprintln!(
                         "interactive viewer smoke expected lekiwi_so101 displacement in (0.02, 2.0] m, planar={planar_m:.4} m"
                     );
