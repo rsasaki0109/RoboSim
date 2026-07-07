@@ -2,7 +2,6 @@
 
 use crate::overlay::{ImageOverlay, ImageOverlayDraw};
 use crate::primitive::{PrimitiveRenderViews, PrimitiveRenderer, PrimitiveSurfacePass};
-use pollster::block_on;
 use rne_math::Transform3;
 use rne_render::{Camera, RenderError, RenderScene};
 use std::sync::Arc;
@@ -49,6 +48,11 @@ pub struct InteractiveViewer {
 impl InteractiveViewer {
     /// Creates a viewer bound to an existing winit window.
     pub fn new(window: Arc<Window>) -> Result<Self, ViewerError> {
+        pollster::block_on(Self::new_async(window))
+    }
+
+    /// Creates a viewer asynchronously (required on `wasm32`).
+    pub async fn new_async(window: Arc<Window>) -> Result<Self, ViewerError> {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
@@ -61,23 +65,27 @@ impl InteractiveViewer {
             .create_surface(window.clone())
             .map_err(|error| ViewerError::Surface(error.to_string()))?;
 
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .ok_or(ViewerError::NoAdapter)?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .ok_or(ViewerError::NoAdapter)?;
 
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("rne_interactive_viewer"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-            },
-            None,
-        ))
-        .map_err(|error| ViewerError::InitFailed(error.to_string()))?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("rne_interactive_viewer"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: wgpu::MemoryHints::Performance,
+                },
+                None,
+            )
+            .await
+            .map_err(|error| ViewerError::InitFailed(error.to_string()))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
         let format = surface_caps

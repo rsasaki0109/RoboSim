@@ -180,6 +180,8 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
                     axis: Vec3::Y,
                     anchor_parent_m: Vec3::new(x_offset, wheel_offset.y, 0.0),
                     anchor_child_m: Vec3::ZERO,
+                    lower_rad: None,
+                    upper_rad: None,
                 },
                 JointMotor::default(),
             ));

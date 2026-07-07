@@ -1,7 +1,8 @@
 //! URDF parsing.
 
 use crate::schema::{
-    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot,
+    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointLimit, UrdfJointMimic, UrdfJointType,
+    UrdfLink, UrdfRobot,
 };
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
@@ -207,6 +208,17 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         .transpose()?
         .unwrap_or(Vec3::Z);
 
+    let limit = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "limit")
+        .map(parse_joint_limit)
+        .transpose()?;
+    let mimic = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "mimic")
+        .map(parse_joint_mimic)
+        .transpose()?;
+
     Ok(UrdfJoint {
         name,
         joint_type,
@@ -215,6 +227,55 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         origin_xyz,
         origin_rpy,
         axis,
+        limit,
+        mimic,
+    })
+}
+
+fn parse_joint_limit(node: roxmltree::Node<'_, '_>) -> Result<UrdfJointLimit, UrdfParseError> {
+    let lower = node
+        .attribute("lower")
+        .ok_or_else(|| UrdfParseError::Missing("limit@lower".into()))
+        .and_then(parse_f64)?;
+    let upper = node
+        .attribute("upper")
+        .ok_or_else(|| UrdfParseError::Missing("limit@upper".into()))
+        .and_then(parse_f64)?;
+    let max_velocity_rad_s = node
+        .attribute("velocity")
+        .ok_or_else(|| UrdfParseError::Missing("limit@velocity".into()))
+        .and_then(parse_f64)?;
+    let max_effort_nm = node
+        .attribute("effort")
+        .ok_or_else(|| UrdfParseError::Missing("limit@effort".into()))
+        .and_then(parse_f64)?;
+    Ok(UrdfJointLimit {
+        lower,
+        upper,
+        max_velocity_rad_s,
+        max_effort_nm,
+    })
+}
+
+fn parse_joint_mimic(node: roxmltree::Node<'_, '_>) -> Result<UrdfJointMimic, UrdfParseError> {
+    let joint = node
+        .attribute("joint")
+        .ok_or_else(|| UrdfParseError::Missing("mimic@joint".into()))?
+        .to_string();
+    let multiplier = node
+        .attribute("multiplier")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(1.0);
+    let offset = node
+        .attribute("offset")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(0.0);
+    Ok(UrdfJointMimic {
+        joint,
+        multiplier,
+        offset,
     })
 }
 
@@ -375,6 +436,59 @@ mod tests {
             base.visuals[0].geometry,
             UrdfGeometry::Mesh { .. }
         ));
+    }
+
+    #[test]
+    fn parses_revolute_joint_limits() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="limited_arm">
+              <link name="base_link"/>
+              <link name="arm_link"/>
+              <joint name="shoulder" type="revolute">
+                <parent link="base_link"/>
+                <child link="arm_link"/>
+                <axis xyz="0 0 1"/>
+                <limit lower="-1.5" upper="1.5" velocity="2.0" effort="10.0"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let limit = robot.joints[0].limit.expect("limit");
+        assert_eq!(limit.lower, -1.5);
+        assert_eq!(limit.upper, 1.5);
+        assert_eq!(limit.max_velocity_rad_s, 2.0);
+        assert_eq!(limit.max_effort_nm, 10.0);
+    }
+
+    #[test]
+    fn parses_joint_mimic_metadata() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="mimic_gripper">
+              <link name="base_link"/>
+              <link name="finger_a"/>
+              <link name="finger_b"/>
+              <joint name="finger_a_joint" type="revolute">
+                <parent link="base_link"/>
+                <child link="finger_a"/>
+                <axis xyz="0 0 1"/>
+              </joint>
+              <joint name="finger_b_joint" type="revolute">
+                <parent link="base_link"/>
+                <child link="finger_b"/>
+                <axis xyz="0 0 1"/>
+                <mimic joint="finger_a_joint" multiplier="-1.0" offset="0.0"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let mimic = robot.joints[1].mimic.as_ref().expect("mimic");
+        assert_eq!(mimic.joint, "finger_a_joint");
+        assert_eq!(mimic.multiplier, -1.0);
+        assert_eq!(mimic.offset, 0.0);
     }
 
     #[test]

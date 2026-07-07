@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<robot name="mesh_collision_test">
+  <link name="base_link">
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://mesh_diff_drive/meshes/base_link.stl" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

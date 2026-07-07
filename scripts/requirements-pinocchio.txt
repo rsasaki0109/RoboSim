@@ -1,0 +1,3 @@
+# Optional: Pinocchio Python bindings for regenerating dynamics goldens (Linux).
+# pip install -r scripts/requirements-pinocchio.txt
+pin>=3.0

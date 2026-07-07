@@ -61,3 +61,10 @@ impl Visual {
         self
     }
 }
+
+/// Multiple visuals on one link (common in external URDFs).
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinkVisuals {
+    /// Visual elements in URDF document order.
+    pub visuals: Vec<Visual>,
+}

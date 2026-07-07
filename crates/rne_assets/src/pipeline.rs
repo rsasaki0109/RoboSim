@@ -1,7 +1,9 @@
 //! Asset validation, inspection, dependency tracking, and hot reload.
 
 use crate::robot::{load_robot_asset, RobotAsset, RobotKind};
-use crate::scene::{load_scene_asset, load_scene_robots, SceneAsset};
+use crate::scene::{
+    load_scene_asset, load_scene_robots, parse_scene_asset, parse_scene_robots, SceneAsset,
+};
 use crate::spawn::load_and_spawn_scene;
 use crate::AssetError;
 use rne_ecs::World;
@@ -69,8 +71,38 @@ pub fn is_robot_asset_path(path: &Path) -> bool {
 pub fn load_scene_bundle(scene_path: &Path) -> Result<SceneAssetBundle, AssetError> {
     let scene = load_scene_asset(scene_path)?;
     let robots = load_scene_robots(scene_path, &scene)?;
+    validate_scene_bundle_robots(scene_path, &robots)?;
+
+    Ok(SceneAssetBundle {
+        scene_path: scene_path.to_path_buf(),
+        scene,
+        robots,
+    })
+}
+
+/// Parses a scene bundle from in-memory TOML and referenced robot asset text.
+///
+/// `scene_path` is a virtual path used for relative reference resolution and error
+/// messages. `robot_texts` must be ordered to match the scene's `[[robots]]` entries.
+pub fn parse_scene_bundle(
+    scene_path: &Path,
+    scene_text: &str,
+    robot_texts: &[(PathBuf, &str)],
+) -> Result<SceneAssetBundle, AssetError> {
+    parse_scene_bundle_with_sources(scene_path, scene_text, robot_texts, None)
+}
+
+/// Like [`parse_scene_bundle`], but accepts embedded URDF XML keyed by resolved path.
+pub fn parse_scene_bundle_with_sources(
+    scene_path: &Path,
+    scene_text: &str,
+    robot_texts: &[(PathBuf, &str)],
+    urdf_xml: Option<&std::collections::HashMap<PathBuf, &str>>,
+) -> Result<SceneAssetBundle, AssetError> {
+    let scene = parse_scene_asset(scene_text, scene_path)?;
+    let robots = parse_scene_robots(scene_path, &scene, robot_texts)?;
     for (robot_path, robot) in &robots {
-        validate_robot_references(robot_path, robot)?;
+        validate_robot_references_with_sources(robot_path, robot, urdf_xml)?;
     }
 
     Ok(SceneAssetBundle {
@@ -80,15 +112,36 @@ pub fn load_scene_bundle(scene_path: &Path) -> Result<SceneAssetBundle, AssetErr
     })
 }
 
+fn validate_scene_bundle_robots(
+    scene_path: &Path,
+    robots: &[(PathBuf, RobotAsset)],
+) -> Result<(), AssetError> {
+    for (robot_path, robot) in robots {
+        validate_robot_references(robot_path, robot)?;
+    }
+    let _ = scene_path;
+    Ok(())
+}
+
 /// Validates on-disk references for a robot asset.
 pub fn validate_robot_references(path: &Path, asset: &RobotAsset) -> Result<(), AssetError> {
+    validate_robot_references_with_sources(path, asset, None)
+}
+
+/// Validates robot asset references, optionally accepting embedded URDF XML.
+pub fn validate_robot_references_with_sources(
+    path: &Path,
+    asset: &RobotAsset,
+    urdf_xml: Option<&std::collections::HashMap<PathBuf, &str>>,
+) -> Result<(), AssetError> {
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     if asset.kind == RobotKind::Urdf {
         let urdf = asset.urdf.as_ref().ok_or_else(|| {
             AssetError::invalid(path.display().to_string(), "missing urdf section")
         })?;
         let urdf_path = urdf.resolve_path(base_dir);
-        if !urdf_path.is_file() {
+        let has_embedded = urdf_xml.is_some_and(|sources| sources.contains_key(&urdf_path));
+        if !has_embedded && !urdf_path.is_file() {
             return Err(AssetError::invalid(
                 path.display().to_string(),
                 format!("urdf file not found: {}", urdf_path.display()),
@@ -111,9 +164,15 @@ pub fn validate_robot_references(path: &Path, asset: &RobotAsset) -> Result<(), 
 pub fn mesh_package_roots(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for (robot_path, robot) in &bundle.robots {
+        let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(visuals) = &robot.visuals {
-            let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
             let urdf_path = visuals.resolve_urdf_path(base_dir);
+            if let Some(parent) = urdf_path.parent() {
+                roots.push(parent.to_path_buf());
+            }
+        }
+        if let Some(urdf) = &robot.urdf {
+            let urdf_path = urdf.resolve_path(base_dir);
             if let Some(parent) = urdf_path.parent() {
                 roots.push(parent.to_path_buf());
             }

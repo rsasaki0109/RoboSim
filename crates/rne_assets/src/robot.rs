@@ -183,6 +183,9 @@ pub struct UrdfRobotAsset {
     /// Initial base translation in meters.
     #[serde(default = "default_initial_translation_m")]
     pub initial_translation_m: [f64; 3],
+    /// Initial base rotation as roll-pitch-yaw in radians.
+    #[serde(default = "default_initial_rotation_rpy")]
+    pub initial_rotation_rpy: [f64; 3],
     /// Rigid-body type applied to the URDF base link.
     #[serde(default)]
     pub base_body_type: UrdfBaseBodyType,
@@ -341,6 +344,10 @@ fn default_max_wheel_velocity_rad_s() -> f64 {
 
 fn default_initial_translation_m() -> [f64; 3] {
     [0.0, 0.25, 0.0]
+}
+
+fn default_initial_rotation_rpy() -> [f64; 3] {
+    [0.0, 0.0, 0.0]
 }
 
 fn default_lidar_enabled() -> bool {

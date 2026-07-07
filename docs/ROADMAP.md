@@ -21,9 +21,10 @@ Three long-running pillars steer the next releases alongside the phased goals ab
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|
-| Browser-native visualization | The engine's own wgpu renderer running in the browser (wasm32, WebGPU/WebGL2) — no parallel JS rendering stack | MVP in progress (`feat/web-viewer`) |
-| External URDF support | Ingest real-world URDFs (SO-101 / LeRobot arms, mobile carts): joint limits, mesh-collision fallback, vendored assets, viewer profiles | In progress (`feat/external-urdf-so101`) |
-| Precise dynamics validation | Analytic-reference physics accuracy suite (free fall, pendulum period, friction stick/slip, energy drift) with documented tolerances — the trust foundation for friction-based grasping (Phase B). Phase 2: cross-validate articulated-chain dynamics (gravity torques, mass matrix) against Pinocchio-generated golden data (offline Python `pin` script; no core-crate dependency) | Done, Phase 2 pending (`feat/dynamics-validation`) |
+| Browser-native visualization | The engine's own wgpu renderer running in the browser (wasm32, WebGPU/WebGL2) — no parallel JS rendering stack | MVP shipped (`feat/web-viewer`, `web/rne_web_viewer`) |
+| External URDF support | Ingest real-world URDFs (SO-101 / LeRobot arms, mobile carts): joint limits, mesh-collision fallback, vendored assets, viewer profiles | Done (`feat/external-urdf-so101`) |
+| Precise dynamics validation | Analytic-reference physics accuracy suite (free fall, pendulum period, friction stick/slip, energy drift) with documented tolerances — the trust foundation for friction-based grasping (Phase B). Phase 2: Pinocchio golden trajectory comparisons (`tests/golden/pinocchio/`) | Done (`feat/dynamics-validation`) |
+
 
 ### v0.14 candidates
 
