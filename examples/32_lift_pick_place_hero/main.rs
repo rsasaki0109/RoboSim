@@ -64,6 +64,24 @@ const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
 const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
 const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.40, -2.21);
 const OBJECT_GRASP_STEP: usize = 310;
+/// Steps over which [`HeroTaskProgress::observe`] eases the rendered object from
+/// its resting pick-surface pose to the carried pose once grasping starts.
+///
+/// Was `45`. That duration was tuned against the old (buggy) carried-point
+/// formula; with the corrected, further-out carried point (see
+/// `HERO_EE_TO_GRIPPER_MOUNT_REACH_M`), a 45-step ease lingers too long in the
+/// gap between `PICK_OBJECT_M` (a fixed point on the table) and the carried point
+/// (a point racing away from it as the arm swings up from the table): the linear
+/// world-space blend between those two can sweep close enough to the arm to
+/// visibly graze it partway through, even though both the pre-grasp and
+/// steady-carry endpoints are individually clear. Shortening the ease reduces the
+/// time spent in that swept transition; confirmed numerically (a temporary
+/// instrumented rollout measuring object-to-arm-segment clearance every frame)
+/// that this value keeps every one of the 100 rendered animation frames'
+/// clearance non-negative against both `upper_arm_link` and `forearm_link`
+/// (worst case +0.007 m at the shortest attempted duration below which the ease
+/// starts reading as an instant pop rather than a quick lift).
+const HERO_GRASP_BLEND_STEPS: f64 = 15.0;
 const POSTER_POLICY_STEP: usize = 480;
 const OBJECT_RELEASE_STEP: usize = 620;
 const PICK_MANIPULATION_START_STEP: usize = 301;
@@ -74,18 +92,48 @@ const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
 const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
-/// Forward standoff (m) added to the carried task object's rendered position
-/// beyond the raw end-effector point (see [`HeroTaskProgress::observe`]).
+/// Extra forward clearance (m), on top of [`HERO_EE_TO_GRIPPER_MOUNT_REACH_M`]
+/// and the object's own half-width, added to the carried task object's rendered
+/// position beyond the raw end-effector point (see
+/// [`HeroTaskProgress::observe`]).
 ///
 /// This hero capture animates the carried object's pose directly from the
 /// observation stream rather than going through the physics grasp weld /
 /// `canonical_grasp_anchor` in `rne_ai::env::mobile_manipulator::sim` (which has
-/// its own, separate `GRASP_FORWARD_STANDOFF_MARGIN_M` of the same value) — so
-/// without this standoff the rendered cube is centered exactly on the
-/// end-effector point and its rear half visually embeds into the
-/// forearm/gripper mount mesh, the same bug `canonical_grasp_anchor` fixes for
-/// the physics-driven grasp env.
-const HERO_GRASP_FORWARD_STANDOFF_MARGIN_M: f64 = 0.04;
+/// its own, separate `GRASP_FORWARD_STANDOFF_MARGIN_M`) — so without any
+/// standoff the rendered cube is centered exactly on the end-effector point and
+/// its rear half visually embeds into the forearm/gripper mount mesh, the same
+/// bug `canonical_grasp_anchor` fixes for the physics-driven grasp env.
+///
+/// Was `0.04` (matching `sim.rs`'s margin exactly), which left only ~0.01 m of
+/// real clearance between the object and `forearm_link`'s visual cross-section
+/// during the steady carry once combined with `HERO_EE_TO_GRIPPER_MOUNT_REACH_M`
+/// — thin enough that the visual boxes' corners (which extend further than the
+/// cylindrical clearance check's inscribed radius) could still graze. Widened to
+/// `0.08` (~0.05 m real clearance) after measuring the full rollout; confirmed
+/// by re-measuring that this does not by itself fix the separate transient dip
+/// during the grasp-blend ease (see [`HERO_GRASP_BLEND_STEPS`]) — that one is a
+/// blend-timing issue, not a magnitude one.
+const HERO_GRASP_FORWARD_STANDOFF_MARGIN_M: f64 = 0.08;
+/// Reach (m) from the end-effector observation point to the gripper mount face.
+///
+/// `obs.ee_x_m/ee_y_m/ee_z_m` is `forearm_link`'s own origin — the elbow pivot,
+/// per `MobileManipulatorSim::observe` in `rne_ai::env::mobile_manipulator::sim`,
+/// which reports `world_transform_of(self.ee_link)` and resolves `ee_link` to
+/// `forearm_link` for every robot in that env (see `from_spawned`) — **not** the
+/// gripper tip. `mm_mobile.urdf`'s `gripper_base_joint` sits 0.4 m further along
+/// the forearm's local `+X` (`origin xyz="0.4 0 0"`), so a standoff added directly
+/// to the raw `ee` point without this reach lands 0.4 m short of the mount, deep
+/// inside the forearm's own visual box, for almost the entire carry (confirmed by
+/// instrumenting a full rollout: the object sat at an almost-constant ~-0.08 m
+/// penetration into `forearm_link`'s segment across dozens of very different
+/// shoulder/elbow angles — a fixed-magnitude gap, not an elbow-fold-dependent
+/// one). `rne_ai`'s own physics-driven grasp weld
+/// (`canonical_grasp_anchor`/`attach_grasp` in `env::mobile_manipulator::sim`)
+/// does not have this bug: it starts from the two finger links' midpoint, which
+/// is already out near the mount, and only adds the small
+/// `GRASP_FORWARD_STANDOFF_MARGIN_M`-sized margin on top.
+const HERO_EE_TO_GRIPPER_MOUNT_REACH_M: f64 = 0.4;
 const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.58, 0.50, 0.40, 1.0];
 const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.74, 0.78, 0.84, 1.0];
 const HERO_ROBOT_BODY_COLOR_RGBA: [f32; 4] = [0.20, 0.46, 0.82, 1.0];
@@ -762,11 +810,16 @@ impl HeroTaskProgress {
             let total_yaw_rad =
                 obs.base_yaw_rad + obs.shoulder_position_rad + obs.elbow_position_rad;
             let forward = Quat::from_rotation_y(total_yaw_rad) * Vec3::X;
-            let forward_standoff_m =
-                TASK_OBJECT_SIZE_M.x / 2.0 + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
+            // `HERO_EE_TO_GRIPPER_MOUNT_REACH_M` carries the raw ee (elbow) point out
+            // to the gripper mount face; the object half-width plus margin then
+            // clears the mount itself, matching `canonical_grasp_anchor`'s approach.
+            let forward_standoff_m = HERO_EE_TO_GRIPPER_MOUNT_REACH_M
+                + TASK_OBJECT_SIZE_M.x / 2.0
+                + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
             let carried =
                 Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m) + forward * forward_standoff_m;
-            let grasp_blend = ((policy_step - OBJECT_GRASP_STEP) as f64 / 45.0).min(1.0);
+            let grasp_blend =
+                ((policy_step - OBJECT_GRASP_STEP) as f64 / HERO_GRASP_BLEND_STEPS).min(1.0);
             self.object_m = PICK_OBJECT_M.lerp(carried, grasp_blend);
             self.release_start_object_m = self.object_m;
         } else if policy_step >= OBJECT_RELEASE_STEP {
@@ -1210,7 +1263,9 @@ mod tests {
         // elbow_position_rad at 0.0 (via `..Default::default()`), so the total
         // heading is 0 and forward is world +X: the carried point should be the
         // raw end-effector point plus the forward standoff on X only.
-        let forward_standoff_m = TASK_OBJECT_SIZE_M.x / 2.0 + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
+        let forward_standoff_m = HERO_EE_TO_GRIPPER_MOUNT_REACH_M
+            + TASK_OBJECT_SIZE_M.x / 2.0
+            + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
         let carried_point = carry_point + Vec3::new(forward_standoff_m, 0.0, 0.0);
 
         task.observe(OBJECT_GRASP_STEP - 1, &observation_at(carry_point));

@@ -1,6 +1,6 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 2442803,
+  "byte_size": 2445578,
   "encode": {
     "animation_frames": 100,
     "bayer_scale": 4,
@@ -30,7 +30,7 @@
   "poster_policy_step": 480,
   "schema_version": 2,
   "settle_steps": 120,
-  "sha256": "sha256:4f9be2a2924815b2651a027f0334641b47af841f850171995f93a5663c18dc6d",
+  "sha256": "sha256:b4092ec944458eaf0c45cf59f00428434d5d2ef40e52926f9488bd2bb381177f",
   "simulation": {
     "animation_frame_count": 100,
     "base_travel_m": 3.425542,
@@ -70,7 +70,7 @@
     "object_transport_m": 1.745537,
     "poster_policy_step": 480,
     "released_after_grasp": true,
-    "trajectory_digest": "0x94aba6e1f7d08538"
+    "trajectory_digest": "0x1f83388199173986"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
