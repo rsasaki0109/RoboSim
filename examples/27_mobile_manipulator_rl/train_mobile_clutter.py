@@ -258,11 +258,29 @@ def replay_best(params):
     return first
 
 
+def ik_policy_metrics():
+    """Reference rollout using the Rust mobile clutter IK policy."""
+    policy = rne_py.IkMobileClutterPickPlacePolicy()
+    episode = rne_py.MobileManipulatorEpisode(TASK)
+    step = episode.reset()
+    grasped = False
+    placed = False
+    for _ in range(policy.total_steps()):
+        left, right, shoulder, elbow, gripper, lift = policy.act(step.observation)
+        step = episode.step(left, right, shoulder, elbow, gripper, lift)
+        if episode.is_grasping:
+            grasped = True
+        if step.terminated:
+            placed = True
+            break
+    return episode.total_reward, grasped, placed
+
+
 def main():
     random.seed(0)
     smoke = "--smoke" in sys.argv
     baseline = rollout(WEAK_BASELINE)
-    _, scripted_grasped, scripted_placed = rollout_metrics(SCRIPTED_PARAMS)
+    _, scripted_grasped, scripted_placed = ik_policy_metrics()
     history, best_params, best_reward, best_grasped, best_placed = cem_smoke()
     replay_reward = replay_best(best_params)
     print(

@@ -3,7 +3,10 @@
 mod sim;
 
 use pyo3::prelude::*;
-use rne_ai::{DiffDriveEpisodeConfig, Episode, IkClutterPickPlacePolicy, Policy};
+use rne_ai::{
+    DiffDriveEpisodeConfig, Episode, IkClutterPickPlacePolicy, IkMobileClutterPickPlacePolicy,
+    Policy,
+};
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
     MmLiftKinematics, MobileManipulatorAction, MobileManipulatorEpisode,
@@ -924,6 +927,40 @@ impl PyIkClutterPickPlacePolicy {
     }
 }
 
+/// Scripted mobile clutter pick-place policy (matches Rust E2E tests).
+#[pyclass(name = "IkMobileClutterPickPlacePolicy")]
+struct PyIkMobileClutterPickPlacePolicy {
+    inner: IkMobileClutterPickPlacePolicy,
+}
+
+#[pymethods]
+impl PyIkMobileClutterPickPlacePolicy {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: IkMobileClutterPickPlacePolicy::new(),
+        }
+    }
+
+    /// Total scripted steps (settle → pick drive → retreat → carry → release).
+    fn total_steps(&self) -> u64 {
+        self.inner.total_steps()
+    }
+
+    /// Returns `(left_wheel, right_wheel, shoulder, elbow, gripper, lift)` rad/s or m/s.
+    fn act(&mut self, observation: PyMmObservation) -> (f64, f64, f64, f64, f64, f64) {
+        let action = self.inner.act(&observation.inner);
+        (
+            action.left_wheel_velocity_rad_s,
+            action.right_wheel_velocity_rad_s,
+            action.shoulder_velocity_rad_s,
+            action.elbow_velocity_rad_s,
+            action.gripper_velocity_rad_s,
+            action.lift_velocity_m_s,
+        )
+    }
+}
+
 /// Batched mobile manipulator environment for population-based / parallel RL.
 #[pyclass(name = "VectorizedMobileManipulatorEnv")]
 struct PyVectorizedMobileManipulatorEnv {
@@ -1068,6 +1105,7 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMobileManipulatorSim>()?;
     m.add_class::<PyMobileManipulatorEpisode>()?;
     m.add_class::<PyIkClutterPickPlacePolicy>()?;
+    m.add_class::<PyIkMobileClutterPickPlacePolicy>()?;
     m.add_class::<PyVectorizedMobileManipulatorEnv>()?;
     m.add_class::<PyMmObservation>()?;
     m.add_class::<PyMmStepResult>()?;
