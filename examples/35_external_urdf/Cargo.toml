@@ -1,0 +1,13 @@
+[package]
+name = "external_urdf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_render = { path = "../../crates/rne_render" }
+
+[[example]]
+name = "35_external_urdf"
+path = "main.rs"

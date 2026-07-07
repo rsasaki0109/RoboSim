@@ -13,7 +13,8 @@ pub use articulation::{
 };
 pub use parse::{parse_urdf, parse_urdf_file, rpy_to_quat, UrdfParseError};
 pub use schema::{
-    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot,
+    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointLimit, UrdfJointMimic, UrdfJointType,
+    UrdfLink, UrdfRobot,
 };
 pub use spawn::{
     attach_urdf_visuals, spawn_urdf_robot, spawn_urdf_robot_with_config, SpawnedUrdfRobot,
