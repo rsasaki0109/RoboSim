@@ -2651,11 +2651,13 @@ mod tests {
         for _ in 0..200 {
             sim.step(MobileManipulatorAction {
                 lift_velocity_m_s: -0.3,
+                gripper_velocity_rad_s: -2.5,
                 ..MobileManipulatorAction::default()
             });
         }
-        // Close the claw to grasp the cube.
-        for _ in 0..150 {
+        // Two-finger gating needs both contacts before the weld fires; keep closing
+        // long enough for Linux CI physics stepping (see `grasp_attaches_and_releases_object`).
+        for _ in 0..220 {
             sim.step(MobileManipulatorAction {
                 gripper_velocity_rad_s: -2.5,
                 ..MobileManipulatorAction::default()
