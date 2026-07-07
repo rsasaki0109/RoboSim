@@ -110,23 +110,20 @@ class MobileManipulatorPlaceEnv(_Base):
 
 
 def run_scripted_place(env) -> bool:
-    """Scripted pick-and-place rollout; returns True if the episode terminates."""
-    env.reset()
-    # Close the gripper until the cube is grasped (welded to the end-effector).
-    for _ in range(30):
-        _, _, _, _, info = env.step([0.0, 0.0, 0.0, 0.0, -2.5])
-        if info["is_grasping"]:
-            break
-    # Carry the cube along the arm sweep, settle, then release at the target.
-    # 60 steps at 0.6 rad/s: the sweep the place task's target was derived from
-    # under the stable arm dynamics.
-    for _ in range(60):
-        env.step([0.0, 0.0, 0.6, 0.0, -2.0])
-    for _ in range(30):
-        env.step([0.0, 0.0, 0.0, 0.0, -2.0])
-    for _ in range(150):
-        _, _, terminated, _, _ = env.step([0.0, 0.0, 0.0, 0.0, 3.0])
-        if terminated:
+    """IK clutter pick-place rollout; returns True if the episode terminates."""
+    policy = rne_py.IkClutterPickPlacePolicy()
+    step = env._episode.reset()
+    for _ in range(policy.total_steps()):
+        left, right, shoulder, elbow, gripper, lift = policy.act(step.observation)
+        step = env._episode.step(
+            left_wheel_velocity_rad_s=left,
+            right_wheel_velocity_rad_s=right,
+            shoulder_velocity_rad_s=shoulder,
+            elbow_velocity_rad_s=elbow,
+            gripper_velocity_rad_s=gripper,
+            lift_velocity_m_s=lift,
+        )
+        if step.terminated:
             return True
     return False
 

@@ -248,13 +248,13 @@ impl MmMinimalKinematics {
 
 /// Ground place target for fixed-base clutter episodes. Matches where the scripted
 /// IK pick-place carry (`IkClutterPickPlacePolicy`) sets the center cube down under
-/// the stable arm dynamics — the same convention as the lift place target (see
-/// `MobileManipulatorEpisodeConfig::lift_pick_place`).
-pub const MM_MINIMAL_CLUTTER_PLACE_X_M: f64 = 0.69;
+/// the stable arm dynamics — re-derived under two-finger weld + retarget (see
+/// `env::mobile_manipulator::episode::tests::ik_clutter_policy_completes_center_place`).
+pub const MM_MINIMAL_CLUTTER_PLACE_X_M: f64 = 0.795;
 /// Ground place height for fixed-base clutter episodes.
 pub const MM_MINIMAL_CLUTTER_PLACE_Y_M: f64 = 0.03;
 /// Ground place lateral target off the table edge (table spans z ∈ [-0.35, 0.35]).
-pub const MM_MINIMAL_CLUTTER_PLACE_Z_M: f64 = -0.42;
+pub const MM_MINIMAL_CLUTTER_PLACE_Z_M: f64 = -0.52;
 
 /// Returns the fixed-base clutter [`ReachTarget`](crate::ReachTarget) inside workspace reach.
 pub fn mm_minimal_clutter_place_target() -> crate::reach::ReachTarget {

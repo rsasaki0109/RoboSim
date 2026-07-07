@@ -24,7 +24,7 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::Link;
 use rne_world::{world_transform_of, Transform3};
 
-const CLEAR_COLOR: [f32; 4] = [0.06, 0.07, 0.07, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.10, 0.09, 0.08, 1.0];
 const RENDER_WIDTH: u32 = 640;
 const RENDER_HEIGHT: u32 = 360;
 const POSTER_WIDTH: u32 = 960;
@@ -37,8 +37,15 @@ const GIF_MAX_COLORS: u32 = 192;
 const GIF_BAYER_SCALE: u32 = 4;
 const HERO_ENCODE_MAX_BYTE_SIZE: u64 = 3_500_000;
 const MAX_HOLD_FRAME_DELTA_RATIO: f64 = 0.02;
-const CAMERA_ORBIT_YAW_START_RAD: f64 = -1.18;
-const CAMERA_ORBIT_YAW_END_RAD: f64 = -0.94;
+const CAMERA_ORBIT_YAW_START_RAD: f64 = -1.28;
+const CAMERA_ORBIT_YAW_END_RAD: f64 = -0.78;
+const CAMERA_ORBIT_PITCH_RAD: f64 = 0.98;
+const CAMERA_ORBIT_DISTANCE_M: f64 = 2.28;
+const OPENING_CAMERA_BLEND_FRAMES: usize = 25;
+const CAMERA_ORBIT_PITCH_OPENING_RAD: f64 = 0.86;
+const CAMERA_ORBIT_DISTANCE_OPENING_M: f64 = 3.78;
+const CAMERA_FOCUS_Y_M: f64 = 0.36;
+const CAMERA_FOCUS_Y_OPENING_M: f64 = 0.20;
 const SETTLE_STEPS: usize = 120;
 const POLICY_STEPS: usize = 680;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
@@ -57,7 +64,7 @@ const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
 const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
 const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.40, -2.21);
 const OBJECT_GRASP_STEP: usize = 310;
-const POSTER_POLICY_STEP: usize = OBJECT_GRASP_STEP + 45;
+const POSTER_POLICY_STEP: usize = 480;
 const OBJECT_RELEASE_STEP: usize = 620;
 const PICK_MANIPULATION_START_STEP: usize = 301;
 const PICK_MANIPULATION_END_STEP: usize = 390;
@@ -67,26 +74,29 @@ const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
 const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
-const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.70, 0.70, 0.64, 1.0];
+const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.58, 0.50, 0.40, 1.0];
+const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.74, 0.78, 0.84, 1.0];
+const HERO_ROBOT_BODY_COLOR_RGBA: [f32; 4] = [0.20, 0.46, 0.82, 1.0];
+const HERO_ROBOT_ARM_COLOR_RGBA: [f32; 4] = [0.32, 0.58, 0.90, 1.0];
 const HERO_WALLS: [HeroBox; 5] = [
     HeroBox {
         center_m: Vec3::new(HOUSE_CENTER_M.x, 0.22, HOUSE_CENTER_M.z - 2.82),
         size_m: Vec3::new(8.0, 0.48, 0.08),
-        color_rgba: [0.62, 0.64, 0.60, 1.0],
+        color_rgba: [0.68, 0.72, 0.78, 1.0],
     },
     HeroBox {
         center_m: Vec3::new(HOUSE_CENTER_M.x - 3.95, 0.22, HOUSE_CENTER_M.z),
         size_m: Vec3::new(0.08, 0.48, 5.8),
-        color_rgba: [0.58, 0.61, 0.62, 1.0],
+        color_rgba: [0.64, 0.69, 0.76, 1.0],
     },
     HeroBox {
         center_m: Vec3::new(HOUSE_CENTER_M.x + 3.95, 0.22, HOUSE_CENTER_M.z),
         size_m: Vec3::new(0.08, 0.48, 5.8),
-        color_rgba: [0.58, 0.61, 0.62, 1.0],
+        color_rgba: [0.64, 0.69, 0.76, 1.0],
     },
     HeroBox {
         center_m: Vec3::new(HOUSE_CENTER_M.x - 2.25, 0.16, HOUSE_CENTER_M.z - 0.05),
-        size_m: Vec3::new(0.10, 0.34, 1.55),
+        size_m: Vec3::new(0.10, 0.34, 0.55),
         color_rgba: HERO_WALL_COLOR_RGBA,
     },
     HeroBox {
@@ -175,6 +185,37 @@ fn hero_camera_yaw_rad(animation_frame: usize) -> f64 {
     CAMERA_ORBIT_YAW_START_RAD + (CAMERA_ORBIT_YAW_END_RAD - CAMERA_ORBIT_YAW_START_RAD) * progress
 }
 
+/// Returns 1.0 at frame 0 and 0.0 from [`OPENING_CAMERA_BLEND_FRAMES`] onward.
+fn hero_opening_camera_blend(animation_frame: usize) -> f64 {
+    if animation_frame >= OPENING_CAMERA_BLEND_FRAMES {
+        return 0.0;
+    }
+    1.0 - animation_frame as f64 / OPENING_CAMERA_BLEND_FRAMES as f64
+}
+
+fn hero_camera_pitch_rad(animation_frame: usize) -> f64 {
+    let blend = hero_opening_camera_blend(animation_frame);
+    CAMERA_ORBIT_PITCH_RAD + (CAMERA_ORBIT_PITCH_OPENING_RAD - CAMERA_ORBIT_PITCH_RAD) * blend
+}
+
+fn hero_camera_distance_m(animation_frame: usize) -> f64 {
+    let blend = hero_opening_camera_blend(animation_frame);
+    CAMERA_ORBIT_DISTANCE_M + (CAMERA_ORBIT_DISTANCE_OPENING_M - CAMERA_ORBIT_DISTANCE_M) * blend
+}
+
+fn hero_camera_focus(obs: &MobileManipulatorObservation, animation_frame: usize) -> Vec3 {
+    let blend = hero_opening_camera_blend(animation_frame);
+    let steady_x = obs.base_x_m * 0.58 + PICK_OBJECT_M.x * 0.27 + PLACE_TARGET_M.x * 0.15;
+    let steady_z = obs.base_z_m * 0.58 + PICK_OBJECT_M.z * 0.27 + PLACE_TARGET_M.z * 0.15;
+    let opening_x = obs.base_x_m;
+    let opening_z = obs.base_z_m;
+    Vec3::new(
+        steady_x + (opening_x - steady_x) * blend,
+        CAMERA_FOCUS_Y_M + (CAMERA_FOCUS_Y_OPENING_M - CAMERA_FOCUS_Y_M) * blend,
+        steady_z + (opening_z - steady_z) * blend,
+    )
+}
+
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
         run_hero_trace();
@@ -242,8 +283,6 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create hero frame directory");
 
     let mut frame_paths = Vec::with_capacity(FRAME_COUNT);
-    let mut base_path: Vec<Vec3> = Vec::with_capacity(ANIMATION_FRAME_COUNT);
-    let mut object_path: Vec<Vec3> = Vec::with_capacity(ANIMATION_FRAME_COUNT);
     let mut render_metrics = HeroRenderMetrics::new();
     let animation_steps = hero_animation_policy_steps();
     let mut last_rgba8: Option<Vec<u8>> = None;
@@ -262,19 +301,14 @@ fn main() {
         }
 
         let obs = sim.observe();
-        base_path.push(Vec3::new(obs.base_x_m, 0.0, obs.base_z_m));
-        object_path.push(task.object_m());
         let mut scene = build_visual_render_scene(sim.world());
-        append_hero_context(&mut scene, &base_path, &object_path, &task);
+        tint_hero_robot(&mut scene);
+        append_hero_context(&mut scene, &task);
         let orbit = CameraOrbit {
-            focus: Vec3::new(
-                obs.base_x_m * 0.62 + REACH_TARGET_M.x * 0.24 + HOUSE_CENTER_M.x * 0.14,
-                0.52,
-                obs.base_z_m * 0.62 + REACH_TARGET_M.z * 0.24 + HOUSE_CENTER_M.z * 0.14,
-            ),
+            focus: hero_camera_focus(&obs, frame),
             yaw_rad: hero_camera_yaw_rad(frame),
-            pitch_rad: 1.15,
-            distance_m: 3.45,
+            pitch_rad: hero_camera_pitch_rad(frame),
+            distance_m: hero_camera_distance_m(frame),
         };
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -879,44 +913,27 @@ fn run_hero_trace() {
     }
 }
 
-fn append_hero_context(
-    scene: &mut RenderScene,
-    base_path: &[Vec3],
-    object_path: &[Vec3],
-    task: &HeroTaskProgress,
-) {
+fn append_hero_context(scene: &mut RenderScene, task: &HeroTaskProgress) {
     push_box(
         scene,
         Vec3::new(HOUSE_CENTER_M.x, -0.055, HOUSE_CENTER_M.z),
         Vec3::new(8.0, 0.10, 5.8),
-        [0.27, 0.29, 0.29, 1.0],
+        HERO_FLOOR_COLOR_RGBA,
     );
     for wall in HERO_WALLS {
         push_box(scene, wall.center_m, wall.size_m, wall.color_rgba);
     }
     push_box(
         scene,
-        Vec3::new(0.10, 0.14, 0.18),
-        Vec3::new(0.82, 0.28, 0.54),
-        [0.44, 0.42, 0.35, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(-1.65, 0.20, -0.65),
-        Vec3::new(0.56, 0.40, 0.80),
-        [0.25, 0.40, 0.44, 1.0],
-    );
-    push_box(
-        scene,
         Vec3::new(PICK_OBJECT_M.x, PICK_OBJECT_M.y - 0.075, PICK_OBJECT_M.z),
         Vec3::new(0.54, 0.05, 0.42),
-        [0.49, 0.36, 0.25, 1.0],
+        [0.62, 0.44, 0.28, 1.0],
     );
     push_box(
         scene,
         Vec3::new(PLACE_TARGET_M.x, PLACE_TARGET_M.y - 0.075, PLACE_TARGET_M.z),
         Vec3::new(0.58, 0.05, 0.46),
-        [0.24, 0.42, 0.36, 1.0],
+        [0.28, 0.48, 0.40, 1.0],
     );
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(
@@ -928,7 +945,7 @@ fn append_hero_context(
             Quat::IDENTITY,
         ),
         VisualShape::Sphere { radius_m: 0.10 },
-        [0.08, 0.82, 0.54, 1.0],
+        [0.10, 0.78, 0.52, 1.0],
         Transform3::IDENTITY,
     ));
     scene.items.push(RenderScene::item_from_visual(
@@ -936,33 +953,35 @@ fn append_hero_context(
         VisualShape::Box {
             size_m: TASK_OBJECT_SIZE_M,
         },
-        [0.94, 0.53, 0.12, 1.0],
+        [0.96, 0.58, 0.14, 1.0],
         Transform3::IDENTITY,
     ));
-    for point in base_path.iter().step_by(3) {
-        scene.items.push(RenderScene::item_from_visual(
-            Transform3::from_translation_rotation(
-                Vec3::new(point.x, 0.012, point.z),
-                Quat::IDENTITY,
-            ),
-            VisualShape::Box {
-                size_m: Vec3::new(0.10, 0.018, 0.10),
-            },
-            [0.10, 0.55, 0.92, 1.0],
-            Transform3::IDENTITY,
-        ));
+}
+
+fn tint_hero_robot(scene: &mut RenderScene) {
+    const URDF_DEFAULT_BODY_RGBA: [f32; 4] = [0.7, 0.7, 0.75, 1.0];
+    const WHEEL_RGBA: [f32; 4] = [0.08, 0.08, 0.08, 1.0];
+    for item in &mut scene.items {
+        if colors_close(item.color_rgba, WHEEL_RGBA) {
+            continue;
+        }
+        if colors_close(item.color_rgba, URDF_DEFAULT_BODY_RGBA) {
+            item.color_rgba = if matches!(
+                item.shape,
+                VisualShape::Box { size_m } if size_m.x >= 0.35 && size_m.x <= 0.55
+            ) {
+                HERO_ROBOT_BODY_COLOR_RGBA
+            } else {
+                HERO_ROBOT_ARM_COLOR_RGBA
+            };
+        }
     }
-    for point in object_path.iter().step_by(3) {
-        scene.items.push(RenderScene::item_from_visual(
-            Transform3::from_translation_rotation(
-                Vec3::new(point.x, point.y + 0.055, point.z),
-                Quat::IDENTITY,
-            ),
-            VisualShape::Sphere { radius_m: 0.025 },
-            [0.96, 0.60, 0.18, 1.0],
-            Transform3::IDENTITY,
-        ));
-    }
+}
+
+fn colors_close(left: [f32; 4], right: [f32; 4]) -> bool {
+    left.iter()
+        .zip(right.iter())
+        .all(|(a, b)| (a - b).abs() <= 0.02)
 }
 
 fn push_box(scene: &mut RenderScene, translation_m: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {

@@ -304,8 +304,89 @@ impl Policy<crate::MobileManipulatorEpisode> for IkLiftPickPlacePolicy {
 /// never settles inside the grasp tolerance. A slower rate keeps the overshoot (and
 /// so the settle time) small enough that the servo actually reaches the target.
 const CLUTTER_APPROACH_RATE_RAD_S: f64 = 0.3;
+/// Gripper-mount-to-object horizontal distance below which a clutter approach
+/// starts closing the fingers (m). The grasp weld requires BOTH fingers in contact
+/// simultaneously (see `MobileManipulatorSim::find_graspable_in_contact`), so the
+/// old "close for the whole approach" tuning no longer works: a partially-closed
+/// leading finger bar bulldozes the cube out of the finger pocket (or clean off
+/// the table) before the trailing finger can reach its far side. Keeping the
+/// fingers open until the cube sits between them and only then closing gives the
+/// two-sided pinch the weld gate needs. A bit wider than the finger pocket
+/// (0.08 m across) so the ~1 rad of closing travel completes at about the time
+/// the mount settles onto the cube.
+const CLUTTER_CLOSE_GRIPPER_DISTANCE_M: f64 = 0.12;
+/// Inbound radial offset of the stage-3 IK target short of the pick object (m).
+/// Stage 3 used to aim the gripper mount at the object center; with the
+/// position-held arm's spring lag the mount routinely overshoots past the cube
+/// along the inbound radial, so only the trailing finger bar contacts (never
+/// both — the two-finger weld gate never fires). Stopping short by roughly the
+/// finger-pad reach (0.04 m offset + 0.035 m cube half-width) keeps the open
+/// pocket spanning the cube when the close command starts.
+const CLUTTER_STAGE3_MOUNT_LEAD_M: f64 = 0.07;
+/// Parallel-gripper opening metric (`0.5 * (left - right)`) at rest; once a
+/// clutter approach has begun closing (metric below this), keep issuing close
+/// even if contact nudges the mount-to-object distance back above
+/// [`CLUTTER_CLOSE_GRIPPER_DISTANCE_M`] — otherwise the trailing finger never
+/// reaches the far side of the cube.
+const CLUTTER_GRIPPER_OPEN_REST_RAD: f64 = -0.02;
+/// Radial standoff of the fixed-base clutter approach's intermediate waypoint,
+/// short of the pick object along its bearing from the shoulder (m). The arm
+/// first swings to this waypoint, then extends radially onto the object so the
+/// open finger pocket (bars flanking the mount tangentially) leads the final
+/// approach. Approaching azimuthally instead sweeps a finger bar tip — up to
+/// 0.12 m ahead of the mount along the sweep — through the object first, and
+/// with the two-finger weld gate that leading bar just shoves the object away
+/// (or off the table) before the pocket can ever bracket it. Long enough to
+/// clear the bar length (0.12 m) plus the object's width with margin.
+const CLUTTER_APPROACH_STANDOFF_M: f64 = 0.22;
+/// Tangential (cross-bearing) mount-to-object misalignment below which the
+/// fixed-base clutter approach switches from the standoff waypoint to the radial
+/// final approach (m). Must be small relative to the finger pocket's clearance
+/// around a clutter cube (0.08 m pocket vs 0.07 m cube), so the cube actually
+/// enters the pocket instead of being rammed radially by a misaligned bar tip.
+const CLUTTER_RADIAL_ALIGN_TOLERANCE_M: f64 = 0.02;
+/// Slack on the mount's radial retraction before the fixed-base clutter approach
+/// starts its short-radius swing (m); loose on purpose — the swing only needs the
+/// finger structure pulled well inside the clutter cubes' radial band, not an
+/// exact radius hold.
+const CLUTTER_RETRACT_RADIUS_TOLERANCE_M: f64 = 0.08;
+/// Object radial Z above which a pick sits on the table's +z rim (`clutter_cube_c`
+/// at z ≈ 0.31 vs table half-extent 0.35 m). Uses [`clutter_high_z_approach_action`]
+/// instead of the generic three-stage swing so inbound motion does not shove the
+/// cube past the edge. Kept above `clutter_cube_a`'s nominal z (0.20 m) plus the
+/// transient +z drift the generic approach induces (~0.29 m) so mid-approach lane
+/// switches do not derail the nearer cube.
+const CLUTTER_HIGH_Z_PICK_RADIAL_DZ_M: f64 = 0.30;
+/// West offset for the high +z standoff waypoint (m). Positions the mount on the
+/// -x side of the object so inbound motion does not sweep finger bars through it.
+const CLUTTER_HIGH_Z_STANDOFF_WEST_M: f64 = 0.08;
+/// Fraction of [`CLUTTER_HIGH_Z_STANDOFF_WEST_M`] applied when forming the
+/// southwest column X for the south-corridor waypoint (0.75 × 0.08 m).
+const CLUTTER_HIGH_Z_STANDOFF_SCALE: f64 = 0.75;
+/// Stage-1 south dipping waypoint Z for high +z picks (m). Below the parked arm
+/// and the +z clutter cubes so the retract arc does not sweep through them.
+const CLUTTER_HIGH_Z_SOUTH_DIP_Z_M: f64 = -0.12;
+/// Mount X must be at or west of the southwest column (`sw_x` + this slack) before
+/// the high +z approach commits to the inbound final arc (m). One-sided gate so
+/// the final-stage servo cannot re-trigger the south-corridor dip.
+const CLUTTER_HIGH_Z_SOUTH_CORRIDOR_X_TOLERANCE_M: f64 = 0.18;
+/// Joint rate scale for the high +z south-corridor stage (×
+/// [`CLUTTER_APPROACH_RATE_RAD_S`]). Slightly faster than the final stage so the
+/// dip clears the +z lane with steps to spare for the inbound close.
+const CLUTTER_HIGH_Z_CORRIDOR_RATE_SCALE: f64 = 1.35;
+/// Inbound Z offset subtracted from the radial high +z final IK target (m). Zero
+/// keeps the target on the object bearing so the elbow-down branch can lift the
+/// mount into the finger pocket without stalling short.
+const CLUTTER_HIGH_Z_FINAL_LEAD_Z_M: f64 = 0.0;
+/// Gripper-mount-to-object distance below which the high +z final stage starts
+/// closing (m). Matches [`CLUTTER_CLOSE_GRIPPER_DISTANCE_M`] plus margin for the
+/// spring-lagged mount settling ~0.20 m short of the cube center on this path.
+const CLUTTER_HIGH_Z_CLOSE_GRIPPER_DISTANCE_M: f64 = 0.20;
 const CLUTTER_SETTLE_STEPS: u64 = 20;
-const CLUTTER_APPROACH_STEPS: u64 = 360;
+/// Approach phase length for fixed-base clutter policies and tests. Long enough for
+/// `clutter_cube_b` on the -z lane (object-bearing stage-1 retract plus two-finger
+/// close) to finish within the phase; the center cube typically grasps earlier.
+const CLUTTER_APPROACH_STEPS: u64 = 420;
 const CLUTTER_IK_CARRY_STEPS: u64 = 340;
 const CLUTTER_HOLD_STEPS: u64 = 80;
 const CLUTTER_RELEASE_STEPS: u64 = 150;
@@ -435,7 +516,11 @@ impl IkMobileClutterPickPlacePolicy {
                 object_z_m,
                 MOBILE_CLUTTER_PICK_DRIVE_SPEED_M_S,
             );
-            action.gripper_velocity_rad_s = -2.5;
+            // Close only once the object is inside the finger pocket (see
+            // `CLUTTER_CLOSE_GRIPPER_DISTANCE_M`): the two-finger weld gate needs
+            // a two-sided pinch, and driving in with partially-closed fingers just
+            // plows the cube ahead of the leading finger bar.
+            action.gripper_velocity_rad_s = mobile_clutter_gripper_velocity_rad_s(observation);
             action
         } else if s < retreat_end {
             // Back straight up to drag the welded object off the near table edge so
@@ -593,7 +678,90 @@ fn clutter_approach_action(
     } else {
         observation.ee_z_m + observation.target_dz_m
     };
-    let target = MmMinimalGripperTarget::new(object_x_m, kin.shoulder_y_m(), object_z_m);
+    let (shoulder_x_m, shoulder_z_m) = kin.shoulder_xz_m();
+    let radial_dz_m = object_z_m - shoulder_z_m;
+    if radial_dz_m > CLUTTER_HIGH_Z_PICK_RADIAL_DZ_M {
+        return clutter_high_z_approach_action(
+            observation,
+            kin,
+            object_x_m,
+            object_z_m,
+            radial_dz_m,
+        );
+    }
+    // Three-stage approach (stateless — each step re-derives its stage from the
+    // observed mount and object poses): retract the mount to the standoff radius
+    // at its CURRENT bearing, swing at that short radius onto the object's
+    // bearing, then extend radially so the open finger pocket leads onto the
+    // object (see `CLUTTER_APPROACH_STANDOFF_M` / the tolerances below for why an
+    // azimuthal sweep at reach radius cannot capture against the two-finger weld
+    // gate — and worse, the joint-space transient from the extended rest pose
+    // straight to a folded IK pose sweeps the finger structure tangentially at
+    // near-full radius, plowing through any cube near the path).
+    let radial_dx_m = object_x_m - shoulder_x_m;
+    let radial_dz_m = object_z_m - shoulder_z_m;
+    let object_radius_m = radial_dx_m.hypot(radial_dz_m);
+    let standoff_radius_m = (object_radius_m - CLUTTER_APPROACH_STANDOFF_M).max(0.2);
+    // Mount position from the pre-grasp observation (object minus mount->object
+    // delta); `gripper_target_d*` is zeroed post-grasp, but the approach only
+    // runs pre-grasp.
+    let mount_x_m = object_x_m - observation.gripper_target_dx_m;
+    let mount_z_m = object_z_m - observation.gripper_target_dz_m;
+    let mount_dx_m = mount_x_m - shoulder_x_m;
+    let mount_dz_m = mount_z_m - shoulder_z_m;
+    let mount_radius_m = mount_dx_m.hypot(mount_dz_m);
+    let tangential_offset_m = if object_radius_m > 1.0e-9 {
+        // Cross-bearing component of the mount->object offset: how far the mount
+        // sits off the object's radial line from the shoulder.
+        ((mount_x_m - shoulder_x_m) * radial_dz_m - (mount_z_m - shoulder_z_m) * radial_dx_m).abs()
+            / object_radius_m
+    } else {
+        0.0
+    };
+    let aligned = tangential_offset_m <= CLUTTER_RADIAL_ALIGN_TOLERANCE_M;
+    let retracted = mount_radius_m <= standoff_radius_m + CLUTTER_RETRACT_RADIUS_TOLERANCE_M;
+    let target = if aligned {
+        // Stage 3: radial final approach with the mount short of the object so the
+        // open finger pocket (bars flanking the mount in gripper Z) leads onto the
+        // cube instead of the mount overshooting past it along the inbound radial.
+        let mount_radius_m = (object_radius_m - CLUTTER_STAGE3_MOUNT_LEAD_M).max(standoff_radius_m);
+        let scale = mount_radius_m / object_radius_m.max(1.0e-9);
+        MmMinimalGripperTarget::new(
+            shoulder_x_m + radial_dx_m * scale,
+            kin.shoulder_y_m(),
+            shoulder_z_m + radial_dz_m * scale,
+        )
+    } else if retracted {
+        // Stage 2: swing at the short standoff radius onto the object's bearing.
+        let scale = standoff_radius_m / object_radius_m.max(1.0e-9);
+        MmMinimalGripperTarget::new(
+            shoulder_x_m + radial_dx_m * scale,
+            kin.shoulder_y_m(),
+            shoulder_z_m + radial_dz_m * scale,
+        )
+    } else {
+        // Stage 1: retract to a fixed waypoint at the standoff radius. On the +z
+        // clutter lane the arm's +x rest bearing keeps the retract servo stable
+        // (retracting "along the mount's own bearing" chases the servo's own
+        // transient bulge and never converges). On the -z lane (`clutter_cube_b`)
+        // that +x waypoint sits above the object and the spring-lagged servo
+        // bulges even further +z, so the mount never retracts enough to enter the
+        // swing stage — use the object's bearing for the standoff waypoint there.
+        let scale = standoff_radius_m / object_radius_m.max(1.0e-9);
+        if radial_dz_m < 0.0 {
+            MmMinimalGripperTarget::new(
+                shoulder_x_m + radial_dx_m * scale,
+                kin.shoulder_y_m(),
+                shoulder_z_m + radial_dz_m * scale,
+            )
+        } else {
+            MmMinimalGripperTarget::new(
+                shoulder_x_m + standoff_radius_m,
+                kin.shoulder_y_m(),
+                shoulder_z_m,
+            )
+        }
+    };
     // Solve IK (elbow-down branch: for the clutter table's -z pick lane it folds the
     // fingertips onto the object in a tight arc instead of leading with the forearm's
     // side face, which would bulldoze the object off the table without ever making
@@ -606,19 +774,124 @@ fn clutter_approach_action(
     let joints = kin
         .inverse_kinematics_elbow_down(target)
         .unwrap_or_else(|_| {
-            kin.inverse_kinematics_elbow_down(kin.max_reach_toward(object_x_m, object_z_m))
+            kin.inverse_kinematics_elbow_down(kin.max_reach_toward(target.x_m, target.z_m))
                 .expect("max_reach_toward scales inside the analytic workspace")
         });
     let mut action = joint_rate_toward_minimal(observation, joints, CLUTTER_APPROACH_RATE_RAD_S);
-    // Keep the gripper closing for the whole approach: the grasp weld triggers on
-    // the first finger contact, so the swing welds the object wherever a finger
-    // bar first brushes it. That offset is not precisely controllable (this
-    // gripper's finger bars extend sideways and the forearm leads any azimuthal
-    // sweep), so the clutter place target is derived from where the scripted
-    // policy actually lands the cube — the same convention the lift place target
-    // uses (see `MobileManipulatorEpisodeConfig::lift_pick_place`).
-    action.gripper_velocity_rad_s = -2.5;
+    // Close only once the object sits inside the finger pocket (see
+    // `clutter_approach_gripper_velocity_rad_s`): the two-finger weld gate needs a
+    // two-sided pinch, and closing during the sweep just bulldozes the cube with
+    // the leading finger bar.
+    action.gripper_velocity_rad_s = clutter_approach_gripper_velocity_rad_s(observation);
     action
+}
+
+/// Two-stage south-corridor approach for table-edge +z clutter picks.
+///
+/// The generic three-stage radial swing bulldozes such cubes past the table's +z
+/// rim before the trailing finger can reach them. This path first dips the mount
+/// south along the southwest standoff column (clearing the +z clutter lane), then
+/// closes radially inward from below with the open finger pocket leading.
+fn clutter_high_z_approach_action(
+    observation: &MobileManipulatorObservation,
+    kin: &MmMinimalKinematics,
+    object_x_m: f64,
+    object_z_m: f64,
+    _radial_dz_m: f64,
+) -> crate::MobileManipulatorAction {
+    let (shoulder_x_m, shoulder_z_m) = kin.shoulder_xz_m();
+    let radial_dx_m = object_x_m - shoulder_x_m;
+    let radial_dz_m = object_z_m - shoulder_z_m;
+    let object_radius_m = radial_dx_m.hypot(radial_dz_m);
+    let mount_x_m = object_x_m - observation.gripper_target_dx_m;
+    let gripper_distance_m = observation
+        .gripper_target_dx_m
+        .hypot(observation.gripper_target_dz_m);
+    let sw_x_m = object_x_m - CLUTTER_HIGH_Z_STANDOFF_WEST_M * CLUTTER_HIGH_Z_STANDOFF_SCALE;
+    let in_final = mount_x_m <= sw_x_m + CLUTTER_HIGH_Z_SOUTH_CORRIDOR_X_TOLERANCE_M;
+    let target = if in_final {
+        let mount_radius_m = (object_radius_m - CLUTTER_STAGE3_MOUNT_LEAD_M)
+            .max(standoff_radius_for_high_z(object_radius_m));
+        let scale = mount_radius_m / object_radius_m.max(1.0e-9);
+        MmMinimalGripperTarget::new(
+            shoulder_x_m + radial_dx_m * scale,
+            kin.shoulder_y_m(),
+            shoulder_z_m + radial_dz_m * scale - CLUTTER_HIGH_Z_FINAL_LEAD_Z_M,
+        )
+    } else {
+        MmMinimalGripperTarget::new(sw_x_m, kin.shoulder_y_m(), CLUTTER_HIGH_Z_SOUTH_DIP_Z_M)
+    };
+    let joints = kin
+        .inverse_kinematics_elbow_down(target)
+        .unwrap_or_else(|_| {
+            kin.inverse_kinematics_elbow_down(kin.max_reach_toward(target.x_m, target.z_m))
+                .expect("max_reach_toward scales inside the analytic workspace")
+        });
+    let approach_rate_rad_s = if in_final && gripper_distance_m < 0.18 {
+        CLUTTER_APPROACH_RATE_RAD_S * 0.5
+    } else if in_final {
+        CLUTTER_APPROACH_RATE_RAD_S * 1.25
+    } else {
+        CLUTTER_APPROACH_RATE_RAD_S * CLUTTER_HIGH_Z_CORRIDOR_RATE_SCALE
+    };
+    let mut action = joint_rate_toward_minimal(observation, joints, approach_rate_rad_s);
+    action.gripper_velocity_rad_s = clutter_high_z_gripper_velocity_rad_s(observation, in_final);
+    action
+}
+
+fn standoff_radius_for_high_z(object_radius_m: f64) -> f64 {
+    (object_radius_m - CLUTTER_APPROACH_STANDOFF_M).max(0.2)
+}
+
+/// Gripper close command for high +z clutter approaches.
+///
+/// Fingers stay open through the south-corridor stage. During the final radial
+/// stage, close once inside [`CLUTTER_HIGH_Z_CLOSE_GRIPPER_DISTANCE_M`], then
+/// keep closing while still within 1.2× that distance so contact transients do
+/// not reopen the gripper before the trailing finger reaches the far side.
+fn clutter_high_z_gripper_velocity_rad_s(
+    observation: &MobileManipulatorObservation,
+    in_final_approach: bool,
+) -> f64 {
+    if !in_final_approach {
+        return 0.0;
+    }
+    let gripper_distance_m = observation
+        .gripper_target_dx_m
+        .hypot(observation.gripper_target_dz_m);
+    let started_closing = observation.gripper_position_rad < CLUTTER_GRIPPER_OPEN_REST_RAD;
+    if gripper_distance_m < CLUTTER_HIGH_Z_CLOSE_GRIPPER_DISTANCE_M
+        || (started_closing && gripper_distance_m < CLUTTER_HIGH_Z_CLOSE_GRIPPER_DISTANCE_M * 1.2)
+    {
+        -2.5
+    } else {
+        0.0
+    }
+}
+
+/// Gripper close command for fixed-base clutter approaches.
+fn clutter_approach_gripper_velocity_rad_s(observation: &MobileManipulatorObservation) -> f64 {
+    let gripper_distance_m = observation
+        .gripper_target_dx_m
+        .hypot(observation.gripper_target_dz_m);
+    let started_closing = observation.gripper_position_rad < CLUTTER_GRIPPER_OPEN_REST_RAD;
+    if gripper_distance_m < CLUTTER_CLOSE_GRIPPER_DISTANCE_M || started_closing {
+        -2.5
+    } else {
+        0.0
+    }
+}
+
+/// Gripper close command for mobile clutter drive-in (distance gate only).
+fn mobile_clutter_gripper_velocity_rad_s(observation: &MobileManipulatorObservation) -> f64 {
+    let gripper_distance_m = observation
+        .gripper_target_dx_m
+        .hypot(observation.gripper_target_dz_m);
+    if gripper_distance_m < CLUTTER_CLOSE_GRIPPER_DISTANCE_M {
+        -2.5
+    } else {
+        0.0
+    }
 }
 
 /// Carries the grasped cube toward the fixed-base clutter place target by driving
@@ -946,7 +1219,7 @@ mod tests {
     #[test]
     fn ik_clutter_policy_total_steps_matches_phases() {
         let policy = IkClutterPickPlacePolicy::new();
-        assert_eq!(policy.total_steps(), 950);
+        assert_eq!(policy.total_steps(), 1010);
     }
 
     #[test]

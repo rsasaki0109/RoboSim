@@ -239,6 +239,8 @@ pub fn spawn_pendulum(
             axis: Vec3::new(0.0, 0.0, 1.0),
             anchor_parent_m: Vec3::ZERO,
             anchor_child_m: Vec3::new(0.0, length_m, 0.0),
+            lower_rad: None,
+            upper_rad: None,
         },
     ));
 
@@ -299,6 +301,8 @@ pub fn spawn_two_link_planar(
             axis: Vec3::new(0.0, 0.0, 1.0),
             anchor_parent_m: Vec3::ZERO,
             anchor_child_m: Vec3::new(0.0, link1_length_m, 0.0),
+            lower_rad: None,
+            upper_rad: None,
         },
     ));
 
@@ -326,6 +330,8 @@ pub fn spawn_two_link_planar(
                 link2_length_m * tip_angle.cos(),
                 0.0,
             ),
+            lower_rad: None,
+            upper_rad: None,
         },
     ));
 

@@ -1,11 +1,9 @@
-"""CEM training smoke for the tabletop pick-and-place task.
+"""CEM training smoke for a scripted grasp-carry-release episode.
 
-Demonstrates learning signal on the `place` episode: the cube spawns between the
-gripper fingers (grasping is immediate under the stable arm dynamics), so the
-learnable structure is the carry schedule — how fast and how long to sweep the
-arm, and when to release — and the CEM must discover the timing that parks the
-cube over the place target before opening the gripper (success bonus +10).
-Needs only ``rne_py`` and the standard library.
+The clutter `place` task now needs ``IkClutterPickPlacePolicy`` (see ``run.py``);
+this script keeps a lightweight CEM demo on the ``transport`` task, where the
+cube spawns between the gripper fingers and the learnable structure is still the
+carry schedule — sweep rate, stop fraction, and release timing.
 
     .venv/bin/maturin develop -m crates/rne_py/Cargo.toml
     .venv/bin/python examples/27_mobile_manipulator_rl/train_place.py --smoke
@@ -37,12 +35,17 @@ def rollout(params):
     carry_rate, stop_frac, release_frac, elbow_rate = params
     stop_t = int(max(0.0, min(1.0, stop_frac)) * EPISODE_STEPS)
     release_t = int(max(0.0, min(1.0, release_frac)) * EPISODE_STEPS)
-    episode = rne_py.MobileManipulatorEpisode("place")
+    episode = rne_py.MobileManipulatorEpisode("transport")
     episode.reset()
     for t in range(EPISODE_STEPS):
         gripper = -2.5 if t < release_t else 3.0
-        shoulder = carry_rate if t < stop_t else 0.0
-        elbow = elbow_rate if t < stop_t else 0.0
+        # Two-finger weld gating: hold the arm still while the fingers close.
+        if t < 220 and not episode.is_grasping:
+            shoulder = 0.0
+            elbow = 0.0
+        else:
+            shoulder = carry_rate if t < stop_t else 0.0
+            elbow = elbow_rate if t < stop_t else 0.0
         step = episode.step(0.0, 0.0, clamp(shoulder), clamp(elbow), gripper)
         if step.terminated or step.truncated:
             break
@@ -80,16 +83,16 @@ def main():
     smoke = "--smoke" in sys.argv
     history = cem_smoke()
     print(
-        f"place CEM: start={history[0]:.2f} end={history[-1]:.2f} "
+        f"transport CEM: start={history[0]:.2f} end={history[-1]:.2f} "
         f"history={[round(x, 2) for x in history]}"
     )
     if smoke:
         # Require a solid margin so cross-platform reward jitter cannot fake
         # (or hide) the learning signal.
         if max(history) > history[0] + 1.0:
-            print("place smoke ok: CEM improved pick-and-place reward")
+            print("transport smoke ok: CEM improved carry-release reward")
             return
-        sys.exit("smoke failed: place CEM did not improve reward")
+        sys.exit("smoke failed: transport CEM did not improve reward")
 
 
 if __name__ == "__main__":
