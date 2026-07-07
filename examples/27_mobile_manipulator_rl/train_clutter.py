@@ -143,11 +143,24 @@ def replay_best(params):
     return first
 
 
+def ik_policy_grasps() -> bool:
+    """Reference grasp check using the Rust IK clutter policy (two-finger weld)."""
+    policy = rne_py.IkClutterPickPlacePolicy()
+    episode = rne_py.MobileManipulatorEpisode(TASK)
+    step = episode.reset()
+    for _ in range(policy.total_steps()):
+        left, right, shoulder, elbow, gripper, lift = policy.act(step.observation)
+        step = episode.step(left, right, shoulder, elbow, gripper, lift)
+        if episode.is_grasping:
+            return True
+    return False
+
+
 def main():
     random.seed(0)
     smoke = "--smoke" in sys.argv
     baseline = rollout(WEAK_BASELINE)
-    _, scripted_grasped, _ = rollout_metrics(SCRIPTED_APPROACH)
+    scripted_grasped = ik_policy_grasps()
     history, best_params, best_reward, best_grasped, best_placed = cem_smoke()
     replay_reward = replay_best(best_params)
     print(
