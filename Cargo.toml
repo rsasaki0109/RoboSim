@@ -59,6 +59,9 @@ members = [
 ]
 exclude = [
   "adapters/ros2/rne_ros2_node",
+  # Standalone wasm crate with its own [workspace]: joining the root workspace
+  # would unify native-only features into the wasm32 build.
+  "web/rne_web_viewer",
 ]
 resolver = "2"
 

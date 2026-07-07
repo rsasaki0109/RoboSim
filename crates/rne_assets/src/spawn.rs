@@ -10,11 +10,32 @@ use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_articulation, attach_urdf_visuals, parse_urdf_file, spawn_urdf_robot_with_config,
+    attach_urdf_articulation, attach_urdf_visuals, parse_urdf, parse_urdf_file,
+    spawn_urdf_robot_with_config, UrdfRobot,
 };
 use rne_world::{spawn_world, world_transform_of, Gravity, Transform3, WorldEntity, WorldRandom};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Optional embedded URDF XML keyed by resolved robot-relative path.
+pub type UrdfSourceMap<'a> = HashMap<PathBuf, &'a str>;
+
+/// Controls how [`spawn_scene`] wires physics articulation for URDF robots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpawnSceneOptions {
+    /// When false, URDF joints are spawned without Rapier articulation wiring.
+    pub wire_articulation: bool,
+}
+
+impl Default for SpawnSceneOptions {
+    /// Headless simulation and examples expect wired articulation unless a viewer
+    /// opts out (see the web viewer's kinematic preview mode).
+    fn default() -> Self {
+        Self {
+            wire_articulation: true,
+        }
+    }
+}
 
 const LIDAR_STREAM_BASE: u32 = 200;
 const WRIST_CAMERA_STREAM_BASE: u32 = 400;
@@ -79,6 +100,18 @@ pub fn spawn_robot_asset(
     asset: &RobotAsset,
     lidar_stream_index: Option<usize>,
 ) -> Result<(SpawnedRobot, RobotSensorMounts), AssetError> {
+    spawn_robot_asset_with_sources(world, asset_path, asset, lidar_stream_index, None, true)
+}
+
+/// Spawns a robot asset using optional embedded URDF XML.
+pub fn spawn_robot_asset_with_sources(
+    world: &mut World,
+    asset_path: &Path,
+    asset: &RobotAsset,
+    lidar_stream_index: Option<usize>,
+    urdf_sources: Option<&UrdfSourceMap<'_>>,
+    wire_articulation: bool,
+) -> Result<(SpawnedRobot, RobotSensorMounts), AssetError> {
     match asset.kind {
         RobotKind::DiffDrive => {
             let section = asset
@@ -117,7 +150,7 @@ pub fn spawn_robot_asset(
                 .ok_or_else(|| AssetError::invalid("robot", "missing urdf section"))?;
             let base_dir = asset_path.parent().unwrap_or_else(|| Path::new("."));
             let urdf_path = section.resolve_path(base_dir);
-            let urdf = parse_urdf_file(&urdf_path).map_err(|error| {
+            let urdf = load_urdf_robot(&urdf_path, urdf_sources).map_err(|error| {
                 AssetError::invalid(
                     asset_path.display().to_string(),
                     format!("urdf parse failed ({}): {error}", urdf_path.display()),
@@ -137,7 +170,7 @@ pub fn spawn_robot_asset(
                     )
                 })?;
 
-            if section.articulation {
+            if wire_articulation && section.articulation {
                 attach_urdf_articulation(world, &urdf, &spawned, section.to_articulation_config())
                     .map_err(|error| {
                         AssetError::invalid(
@@ -185,6 +218,17 @@ pub fn spawn_scene(
     scene: &SceneAsset,
     robots: &[(PathBuf, RobotAsset)],
 ) -> Result<SpawnedScene, AssetError> {
+    spawn_scene_with_sources(world, scene, robots, None, SpawnSceneOptions::default())
+}
+
+/// Spawns a parsed scene using optional embedded URDF sources.
+pub fn spawn_scene_with_sources(
+    world: &mut World,
+    scene: &SceneAsset,
+    robots: &[(PathBuf, RobotAsset)],
+    urdf_sources: Option<&UrdfSourceMap<'_>>,
+    options: SpawnSceneOptions,
+) -> Result<SpawnedScene, AssetError> {
     if robots.len() != scene.robots.len() {
         return Err(AssetError::invalid(
             "scene",
@@ -221,14 +265,21 @@ pub fn spawn_scene(
     let mut lidar_mounts = Vec::new();
     let mut wrist_camera_mounts = Vec::new();
     for (index, (robot_path, robot_asset)) in robots.iter().enumerate() {
-        let (spawned, mounts) = spawn_robot_asset(world, robot_path, robot_asset, Some(index))
-            .map_err(|error| match error {
-                AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
-                    scene.robots[index].path.clone(),
-                    format!("robot #{index} kind `{kind}` is not supported by spawn_scene"),
-                ),
-                other => other,
-            })?;
+        let (spawned, mounts) = spawn_robot_asset_with_sources(
+            world,
+            robot_path,
+            robot_asset,
+            Some(index),
+            urdf_sources,
+            options.wire_articulation,
+        )
+        .map_err(|error| match error {
+            AssetError::UnsupportedRobotKind { kind } => AssetError::invalid(
+                scene.robots[index].path.clone(),
+                format!("robot #{index} kind `{kind}` is not supported by spawn_scene"),
+            ),
+            other => other,
+        })?;
         if let Some(mount) = mounts.lidar {
             lidar_mounts.push(mount);
         }
@@ -254,6 +305,28 @@ pub fn load_and_spawn_scene(
     let scene = crate::scene::load_scene_asset(scene_path)?;
     let robots = crate::scene::load_scene_robots(scene_path, &scene)?;
     spawn_scene(world, &scene, &robots)
+}
+
+/// Spawns a parsed scene bundle with optional embedded URDF sources.
+pub fn spawn_scene_bundle(
+    world: &mut World,
+    bundle: &crate::pipeline::SceneAssetBundle,
+    urdf_sources: Option<&UrdfSourceMap<'_>>,
+    options: SpawnSceneOptions,
+) -> Result<SpawnedScene, AssetError> {
+    spawn_scene_with_sources(world, &bundle.scene, &bundle.robots, urdf_sources, options)
+}
+
+fn load_urdf_robot(
+    urdf_path: &Path,
+    urdf_sources: Option<&UrdfSourceMap<'_>>,
+) -> Result<UrdfRobot, rne_urdf_import::UrdfParseError> {
+    if let Some(sources) = urdf_sources {
+        if let Some(xml) = sources.get(urdf_path) {
+            return parse_urdf(xml);
+        }
+    }
+    parse_urdf_file(urdf_path)
 }
 
 /// Spawns a fixed ground plane collider used by built-in scenes.
