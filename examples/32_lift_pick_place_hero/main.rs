@@ -67,21 +67,59 @@ const OBJECT_GRASP_STEP: usize = 310;
 /// Steps over which [`HeroTaskProgress::observe`] eases the rendered object from
 /// its resting pick-surface pose to the carried pose once grasping starts.
 ///
-/// Was `45`. That duration was tuned against the old (buggy) carried-point
-/// formula; with the corrected, further-out carried point (see
-/// `HERO_EE_TO_GRIPPER_MOUNT_REACH_M`), a 45-step ease lingers too long in the
-/// gap between `PICK_OBJECT_M` (a fixed point on the table) and the carried point
-/// (a point racing away from it as the arm swings up from the table): the linear
-/// world-space blend between those two can sweep close enough to the arm to
-/// visibly graze it partway through, even though both the pre-grasp and
-/// steady-carry endpoints are individually clear. Shortening the ease reduces the
-/// time spent in that swept transition; confirmed numerically (a temporary
-/// instrumented rollout measuring object-to-arm-segment clearance every frame)
-/// that this value keeps every one of the 100 rendered animation frames'
-/// clearance non-negative against both `upper_arm_link` and `forearm_link`
-/// (worst case +0.007 m at the shortest attempted duration below which the ease
-/// starts reading as an instant pop rather than a quick lift).
-const HERO_GRASP_BLEND_STEPS: f64 = 15.0;
+/// Restored to the original `45` (was briefly shortened to `15` — see below for
+/// why that was wrong). At `45` steps this reads as a deliberate lift-and-carry
+/// rather than a snap: the dedicated dense sampling segment for this window
+/// (`HERO_SAMPLE_SEGMENTS`, steps 300-390 over 22 frames) renders it across
+/// roughly 10-11 animation frames.
+///
+/// History: with the old (buggy), too-short carried-point formula, `45` steps of
+/// a straight-line world-space lerp from `PICK_OBJECT_M` (fixed, on the table) to
+/// the carried point (racing away as the arm swings up) swept close enough to
+/// the arm to visibly graze it partway through. Shortening the ease to `15`
+/// masked that by spending less time in the sweep — but per a viewer report, at
+/// `15` steps (≈3-4 frames) the whole pick reads as an instant teleport/"sucked
+/// in" pop, not a lift. The graze and the snappiness were both symptoms of the
+/// same root issue: a straight-line blend has no slack to avoid the arm's own
+/// swept silhouette. `HERO_PICK_LIFT_HEIGHT_M` below fixes that at its source
+/// (an out-of-plane detour around the arm) so the duration can be picked purely
+/// for how the motion reads, independent of grazing.
+const HERO_GRASP_BLEND_STEPS: f64 = 45.0;
+/// Extra height (m) added to the rendered pick-to-carry path as a
+/// `sqrt(sin(pi * blend))` arc — zero at both ends (so the resting and
+/// steady-carry poses are untouched exactly), peaking at the blend's midpoint.
+///
+/// `mm_mobile`'s arm is planar: `shoulder_joint`/`elbow_joint` both rotate about
+/// world `+Y` with no vertical joint, so the entire arm — and the object resting
+/// at pick height — sits within a narrow, *fixed* vertical band regardless of
+/// shoulder/elbow angle (measured: `base_link`'s chassis top is at `y=0.40`;
+/// `upper_arm_link`'s visual cross-section reaches `y=0.44`, the tallest part of
+/// the robot). A straight world-space lerp therefore has to weave the object
+/// past the arm's own silhouette laterally, with no vertical slack to spare —
+/// that lateral squeeze is what caused the graze `HERO_GRASP_BLEND_STEPS` used to
+/// paper over by rushing through it. Arcing the object up clears the entire
+/// robot vertically no matter where the arm's swept path is horizontally at that
+/// instant, so the blend duration above can be chosen purely for visual pacing.
+/// This also reads as a more natural pick (lift clear, carry over, settle in)
+/// than a flat slide would.
+///
+/// Uses `sqrt` of the sine rather than the sine itself: a plain
+/// `sin(pi * blend)` arc peaking at `y ≈ 0.7` (0.30 m above the 0.40 m arm
+/// plane) still let clearance dip slightly negative late in the blend (the arc
+/// is falling fastest right where blend approaches 1 and the object's X/Z has
+/// nearly caught up to the swinging arm) — pushing the peak higher to
+/// compensate started to look like the block flying implausibly far above the
+/// robot (peak `y` past 1.0 m). `sqrt` of the sine keeps the same peak but stays
+/// closer to it near both ends (it rises/falls slower there), buying back
+/// clearance during that late-blend crossing without raising the peak. Verified
+/// by sampling clearance every physics step (not just per rendered animation
+/// frame, so a graze that only shows up between two sampled frames can't hide)
+/// across the whole rollout: worst case with this shape and height is
+/// +0.037 m against `forearm_link` and +0.19 m against `upper_arm_link` (both
+/// comfortably positive — box corners exceed the segment-capsule approximation
+/// used to measure this by roughly 0.012 m, so this shape carries ~3x that
+/// margin).
+const HERO_PICK_LIFT_HEIGHT_M: f64 = 0.30;
 const POSTER_POLICY_STEP: usize = 480;
 const OBJECT_RELEASE_STEP: usize = 620;
 const PICK_MANIPULATION_START_STEP: usize = 301;
@@ -820,7 +858,18 @@ impl HeroTaskProgress {
                 Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m) + forward * forward_standoff_m;
             let grasp_blend =
                 ((policy_step - OBJECT_GRASP_STEP) as f64 / HERO_GRASP_BLEND_STEPS).min(1.0);
-            self.object_m = PICK_OBJECT_M.lerp(carried, grasp_blend);
+            // Arc up and over rather than sliding straight through the arm's own
+            // swept silhouette — see `HERO_PICK_LIFT_HEIGHT_M`. Clamped to exactly
+            // 0 at full blend (rather than trusting `sin(pi)` to land on exactly
+            // 0.0) so the steady-carry pose matches `carried` bit-for-bit, same as
+            // before this arc was added.
+            let lift_arc_m = if grasp_blend >= 1.0 {
+                0.0
+            } else {
+                HERO_PICK_LIFT_HEIGHT_M * (std::f64::consts::PI * grasp_blend).sin().sqrt()
+            };
+            self.object_m =
+                PICK_OBJECT_M.lerp(carried, grasp_blend) + Vec3::new(0.0, lift_arc_m, 0.0);
             self.release_start_object_m = self.object_m;
         } else if policy_step >= OBJECT_RELEASE_STEP {
             if self.was_grasping {
@@ -1280,6 +1329,51 @@ mod tests {
 
         task.observe(OBJECT_RELEASE_STEP + 60, &observation_at(carry_point));
         assert_eq!(task.object_m(), PLACE_TARGET_M);
+    }
+
+    /// Regression guard for the pick-to-carry lift arc (see
+    /// `HERO_PICK_LIFT_HEIGHT_M`): the arc must vanish exactly at both ends (so
+    /// the resting and steady-carry poses are untouched) and must stay above the
+    /// tallest robot surface (measured at `y=0.44`, see that constant's doc
+    /// comment) for the *entire* blend window, not just at the midpoint — a
+    /// previous version of this arc peaked at the midpoint but had already
+    /// decayed below that height by the time the blend neared completion, which
+    /// let the object graze `forearm_link` late in the pick.
+    #[test]
+    fn hero_pick_lift_arc_vanishes_at_ends_and_clears_robot_everywhere() {
+        let mut task = HeroTaskProgress::new();
+        let carry_point = Vec3::new(2.6, 0.42, -2.2);
+        const TALLEST_ROBOT_SURFACE_Y_M: f64 = 0.44;
+
+        task.observe(OBJECT_GRASP_STEP, &observation_at(carry_point));
+        assert_eq!(
+            task.object_m().y,
+            PICK_OBJECT_M.y,
+            "arc must vanish at the start of the blend"
+        );
+
+        let mut min_margin_m = f64::INFINITY;
+        for step_offset in 1..(HERO_GRASP_BLEND_STEPS as usize) {
+            task.observe(
+                OBJECT_GRASP_STEP + step_offset,
+                &observation_at(carry_point),
+            );
+            min_margin_m = min_margin_m.min(task.object_m().y - TALLEST_ROBOT_SURFACE_Y_M);
+        }
+        assert!(
+            min_margin_m > 0.0,
+            "lift arc must clear the tallest robot surface at every step of the blend, got margin {min_margin_m:.4} m"
+        );
+
+        task.observe(
+            OBJECT_GRASP_STEP + HERO_GRASP_BLEND_STEPS as usize,
+            &observation_at(carry_point),
+        );
+        assert_eq!(
+            task.object_m().y,
+            carry_point.y,
+            "arc must vanish exactly at full blend, matching the raw carried height"
+        );
     }
 
     #[test]
