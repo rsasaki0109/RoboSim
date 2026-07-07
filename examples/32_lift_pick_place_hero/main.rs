@@ -74,6 +74,18 @@ const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
 const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
+/// Forward standoff (m) added to the carried task object's rendered position
+/// beyond the raw end-effector point (see [`HeroTaskProgress::observe`]).
+///
+/// This hero capture animates the carried object's pose directly from the
+/// observation stream rather than going through the physics grasp weld /
+/// `canonical_grasp_anchor` in `rne_ai::env::mobile_manipulator::sim` (which has
+/// its own, separate `GRASP_FORWARD_STANDOFF_MARGIN_M` of the same value) — so
+/// without this standoff the rendered cube is centered exactly on the
+/// end-effector point and its rear half visually embeds into the
+/// forearm/gripper mount mesh, the same bug `canonical_grasp_anchor` fixes for
+/// the physics-driven grasp env.
+const HERO_GRASP_FORWARD_STANDOFF_MARGIN_M: f64 = 0.04;
 const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.58, 0.50, 0.40, 1.0];
 const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.74, 0.78, 0.84, 1.0];
 const HERO_ROBOT_BODY_COLOR_RGBA: [f32; 4] = [0.20, 0.46, 0.82, 1.0];
@@ -740,7 +752,20 @@ impl HeroTaskProgress {
         let is_grasping = (OBJECT_GRASP_STEP..OBJECT_RELEASE_STEP).contains(&policy_step);
         if is_grasping {
             self.grasped_steps += 1;
-            let carried = Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m);
+            // Base yaw, shoulder, and elbow all rotate about world +Y in
+            // mm_mobile.urdf (`shoulder_joint`/`elbow_joint` both have
+            // `axis="0 1 0"`), and `gripper_base_joint` is a fixed identity-rotation
+            // joint, so the end-effector's total world heading is just the sum of
+            // the upstream joint angles. Forward is that heading's local +X, the
+            // same "rotation * Vec3::X" convention `planar_yaw_rad` and
+            // `canonical_grasp_anchor` use in `rne_ai::env::mobile_manipulator::sim`.
+            let total_yaw_rad =
+                obs.base_yaw_rad + obs.shoulder_position_rad + obs.elbow_position_rad;
+            let forward = Quat::from_rotation_y(total_yaw_rad) * Vec3::X;
+            let forward_standoff_m =
+                TASK_OBJECT_SIZE_M.x / 2.0 + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
+            let carried =
+                Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m) + forward * forward_standoff_m;
             let grasp_blend = ((policy_step - OBJECT_GRASP_STEP) as f64 / 45.0).min(1.0);
             self.object_m = PICK_OBJECT_M.lerp(carried, grasp_blend);
             self.release_start_object_m = self.object_m;
@@ -1181,12 +1206,18 @@ mod tests {
     fn hero_task_object_carries_then_places() {
         let mut task = HeroTaskProgress::new();
         let carry_point = Vec3::new(2.6, 0.42, -2.2);
+        // `observation_at` leaves base_yaw_rad/shoulder_position_rad/
+        // elbow_position_rad at 0.0 (via `..Default::default()`), so the total
+        // heading is 0 and forward is world +X: the carried point should be the
+        // raw end-effector point plus the forward standoff on X only.
+        let forward_standoff_m = TASK_OBJECT_SIZE_M.x / 2.0 + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
+        let carried_point = carry_point + Vec3::new(forward_standoff_m, 0.0, 0.0);
 
         task.observe(OBJECT_GRASP_STEP - 1, &observation_at(carry_point));
         assert_eq!(task.object_m(), PICK_OBJECT_M);
 
         task.observe(OBJECT_GRASP_STEP + 45, &observation_at(carry_point));
-        assert_eq!(task.object_m(), carry_point);
+        assert_eq!(task.object_m(), carried_point);
         assert!(task.grasped_steps > 0);
 
         task.observe(OBJECT_RELEASE_STEP, &observation_at(carry_point));

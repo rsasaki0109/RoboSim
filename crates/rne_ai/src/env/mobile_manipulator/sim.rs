@@ -350,6 +350,22 @@ const FIXED_BASE_GRASP_SEAT_LIFT_M: f64 = 0.02;
 /// Fixed-step interpolation driven by a step counter, not wall-clock time, so the
 /// retarget is exactly reproducible.
 const GRASP_RETARGET_STEPS: u32 = 15;
+/// Extra forward standoff (m), along the end-effector's local `+X` reach axis (the
+/// axis every joint in the URDF arm chains — shoulder-to-forearm, forearm-to-gripper
+/// mount — is offset along; see also [`planar_yaw_rad`], which reads world-frame
+/// "forward" the same way), added on top of [`GRASP_FORWARD_STANDOFF_MARGIN_M`] plus
+/// the grasped object's own half-width (see [`object_half_width_m`]) when computing
+/// [`MobileManipulatorSim::canonical_grasp_anchor`]. Forward-facing parallel grippers
+/// (`mm_mobile`, `mm_minimal`) mount their two fingers flush at the forearm tip with
+/// the finger joints offset from the mount only laterally (their local Z), not
+/// forward — so the unmodified two-finger midpoint collapses to exactly the mount's
+/// own origin, zero standoff, and a grasped object welded there embeds backward into
+/// the forearm/mount visual mesh by roughly its own half-width. This constant
+/// approximates typical mount half-depth across current robots (the `mm_mobile` /
+/// `mm_minimal` mount box is 0.06 m long, i.e. 0.03 m half-depth) with a small extra
+/// clearance, so the object's near face lands just past the mount face rather than
+/// exactly flush with it, without hardcoding any specific robot's mount geometry.
+const GRASP_FORWARD_STANDOFF_MARGIN_M: f64 = 0.04;
 /// Extra closing travel allowed per finger joint after the two-finger grasp weld
 /// attaches, expressed as a fraction of the angular half-width the grasped object
 /// subtends at the finger's contact radius (the finger's own collision-geometry
@@ -1189,9 +1205,9 @@ impl MobileManipulatorSim {
 
     /// Welds `object` to the end-effector link and starts an animated retarget of
     /// the weld anchor from `object`'s raw contact-time relative pose to a
-    /// canonical in-gripper pose (centered between the finger pads, resting depth
-    /// against the palm/mount, axis-aligned to the gripper frame — see
-    /// [`Self::canonical_grasp_anchor`]). The weld attaches at the raw pose
+    /// canonical in-gripper pose (centered between the finger pads, standing off
+    /// just clear of the palm/mount face rather than flush against it, axis-aligned
+    /// to the gripper frame — see [`Self::canonical_grasp_anchor`]). The weld attaches at the raw pose
     /// immediately (so contact never has to wait), then [`Self::progress_grasp_retarget`]
     /// eases the anchor to the canonical target over [`GRASP_RETARGET_STEPS`] ticks;
     /// nothing about the object's world transform is teleported mid-physics, only
@@ -1217,7 +1233,8 @@ impl MobileManipulatorSim {
         let ee_rotation_inverse = ee.rotation.inverse();
         let start_translation_m = ee_rotation_inverse * (obj.translation - ee.translation);
         let start_rotation = ee_rotation_inverse * obj.rotation;
-        let target_translation_m = self.canonical_grasp_anchor(ee);
+        let half_width_m = object_half_width_m(&self.world, object);
+        let target_translation_m = self.canonical_grasp_anchor(ee, half_width_m);
         let target_rotation = Quat::IDENTITY;
 
         self.world.entity_mut(object).insert(FixedJointDesc {
@@ -1242,9 +1259,25 @@ impl MobileManipulatorSim {
     /// construction — the finger mounts are symmetric about the gripper's midline)
     /// is laterally centered and sits at the fingers' natural reach depth,
     /// approximating "resting between the finger pads" without hardcoding any
-    /// per-robot geometry. On the fixed-base arm this is nudged upward by
+    /// per-robot geometry.
+    ///
+    /// Forward-facing parallel grippers (no lift joint — see `has_lift` below) also
+    /// get a forward standoff added along the end-effector's local `+X` reach axis
+    /// (the axis this codebase consistently treats as "forward" — see
+    /// [`planar_yaw_rad`] and every arm-chain joint origin in the URDFs), sized from
+    /// `half_width_m` (the grasped object's own half-width) plus
+    /// [`GRASP_FORWARD_STANDOFF_MARGIN_M`]: their finger joints are offset from the
+    /// gripper mount only laterally, not forward, so the unmodified finger midpoint
+    /// collapses to the mount's own origin and a welded object embeds backward into
+    /// the mount/forearm visual mesh. The `mm_lift` top-down claw does not need this:
+    /// its fingers hang well clear of the mount along a different axis (local `-Y`),
+    /// so adding forward standoff there would only push the object away from the
+    /// fingers that are actually flanking it — skipped via the same `has_lift` check
+    /// already used below for the vertical seat nudge.
+    ///
+    /// On the fixed-base arm this is additionally nudged upward by
     /// `FIXED_BASE_GRASP_SEAT_LIFT_M` (see [`Self::attach_grasp`]).
-    fn canonical_grasp_anchor(&self, ee: Transform3) -> Vec3 {
+    fn canonical_grasp_anchor(&self, ee: Transform3, half_width_m: f64) -> Vec3 {
         let ee_rotation_inverse = ee.rotation.inverse();
         let anchor = if self.finger_links.len() == 2 {
             let a = world_transform_of(&self.world, self.finger_links[0]);
@@ -1255,6 +1288,11 @@ impl MobileManipulatorSim {
             Vec3::ZERO
         };
         let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
+        let anchor = if has_lift {
+            anchor
+        } else {
+            anchor + Vec3::X * (half_width_m + GRASP_FORWARD_STANDOFF_MARGIN_M)
+        };
         if !self.mobile_base && !has_lift {
             anchor + Vec3::Y * FIXED_BASE_GRASP_SEAT_LIFT_M
         } else {

@@ -78,8 +78,15 @@
   </link>
 
   <link name="left_finger_link">
+    <!-- Visual is shifted +0.04 forward (local X) of the collision box: the finger
+         joints are offset from gripper_base_link only laterally (Z), so the
+         unmodified visual sits flush at the forearm tip while the weld-anchor
+         computed in sim.rs (canonical_grasp_anchor) now gives the grasped object a
+         forward standoff, leaving the rendered pads floating behind the held
+         object. Shifting only the visual keeps grasp contact geometry (and thus
+         grasp physics) exactly where it was. -->
     <visual>
-      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+      <origin xyz="0.04 0 -0.04" rpy="0 0 0"/>
       <geometry>
         <box size="0.02 0.02 0.08"/>
       </geometry>
@@ -93,8 +100,10 @@
   </link>
 
   <link name="right_finger_link">
+    <!-- See left_finger_link: visual-only forward shift to meet the grasp
+         weld-anchor's new forward standoff; collision left untouched. -->
     <visual>
-      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <origin xyz="0.04 0 0.04" rpy="0 0 0"/>
       <geometry>
         <box size="0.02 0.02 0.08"/>
       </geometry>
