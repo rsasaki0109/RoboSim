@@ -51,7 +51,9 @@ members = [
   "examples/32_lift_pick_place_hero",
   "examples/33_clutter_pick_place_e2e",
   "examples/34_mobile_clutter_pick_place_e2e",
+  "examples/35_external_urdf",
   "tests/determinism",
+  "tests/dynamics",
   "tools/rne_asset_cli",
   "xtask",
 ]

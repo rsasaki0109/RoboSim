@@ -15,6 +15,16 @@ the weld *look* like a grasp, then replace it with physical friction-based grasp
 | C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | Pending |
 | D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | Pending |
 
+### Direction pillars (v0.14+)
+
+Three long-running pillars steer the next releases alongside the phased goals above:
+
+| Pillar | Meaning | Status |
+|--------|---------|--------|
+| Browser-native visualization | The engine's own wgpu renderer running in the browser (wasm32, WebGPU/WebGL2) — no parallel JS rendering stack | MVP shipped (`feat/web-viewer`, `web/rne_web_viewer`) |
+| External URDF support | Ingest real-world URDFs (SO-101 / LeRobot arms, mobile carts): joint limits, mesh-collision fallback, vendored assets, viewer profiles | Done (`feat/external-urdf-so101`) |
+| Precise dynamics validation | Analytic-reference physics accuracy suite (free fall, pendulum period, friction stick/slip, energy drift) with documented tolerances — the trust foundation for friction-based grasping (Phase B) | Done (`feat/dynamics-validation`) |
+
 ### v0.14 candidates
 
 | Area | Idea |

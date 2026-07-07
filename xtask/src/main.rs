@@ -42,6 +42,7 @@ fn ci() -> anyhow::Result<()> {
     lint_boundaries()?;
     run_step("cargo clippy --workspace --all-targets -- -D warnings")?;
     run_step("cargo test --workspace")?;
+    pinocchio_golden_optional()?;
     validate_repo_assets()?;
     run_example_smokes()?;
     if std::env::var("RNE_SKIP_RL_SMOKES").is_ok() {
@@ -817,6 +818,38 @@ fn lint_boundaries() -> anyhow::Result<()> {
     }
 
     println!("dependency boundary check passed");
+    Ok(())
+}
+
+/// On Linux CI with `pin` installed, optionally regenerate and diff Pinocchio goldens.
+///
+/// Set `RNE_SKIP_PINOCCHIO_GOLDEN=1` to skip. Set `RNE_PINOCCHIO_REGEN=1` to enable
+/// regeneration (default: skip regen, rely on committed JSON + `cargo test`).
+fn pinocchio_golden_optional() -> anyhow::Result<()> {
+    if std::env::var("RNE_SKIP_PINOCCHIO_GOLDEN").is_ok() {
+        eprintln!("skipping pinocchio golden check (RNE_SKIP_PINOCCHIO_GOLDEN is set)");
+        return Ok(());
+    }
+    if std::env::var("RNE_PINOCCHIO_REGEN").is_err() {
+        return Ok(());
+    }
+    if !cfg!(target_os = "linux") {
+        eprintln!("pinocchio golden regen is Linux-only; using committed goldens");
+        return Ok(());
+    }
+    let has_pin = Command::new("python3")
+        .args(["-c", "import pinocchio"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !has_pin {
+        eprintln!("pin not installed; using committed pinocchio goldens");
+        return Ok(());
+    }
+    run_step("python3 scripts/pinocchio_reference.py --write-golden")?;
+    run_step("git diff --exit-code -- tests/golden/dynamics/")?;
     Ok(())
 }
 

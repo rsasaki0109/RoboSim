@@ -147,6 +147,10 @@ pub struct RevoluteJointDesc {
     pub anchor_parent_m: Vec3,
     /// Anchor point in the child body's local frame.
     pub anchor_child_m: Vec3,
+    /// Optional lower angle limit in radians.
+    pub lower_rad: Option<f64>,
+    /// Optional upper angle limit in radians.
+    pub upper_rad: Option<f64>,
 }
 
 /// Prismatic (linear sliding) joint description for physics backends.

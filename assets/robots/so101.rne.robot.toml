@@ -1,0 +1,8 @@
+kind = "urdf"
+model_name = "so101"
+
+[urdf]
+path = "so101/so101.urdf"
+base_body_type = "fixed"
+initial_translation_m = [0.0, 0.0, 0.0]
+articulation = true

@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod urdf_scene;
 
 pub use diff_drive::DiffDriveSim;
 pub use diff_drive::{
@@ -24,4 +25,11 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
     MM_MOBILE_WHEEL_RADIUS_M,
+};
+pub use urdf_scene::{
+    cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
+    lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, so101_scene_path,
+    UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim,
+    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
 };

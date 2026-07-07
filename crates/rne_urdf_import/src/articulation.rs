@@ -78,12 +78,15 @@ pub fn attach_urdf_articulation(
             }
             UrdfJointType::Revolute | UrdfJointType::Continuous => {
                 ensure_dynamic_link(world, child);
+                let (lower_rad, upper_rad) = revolute_limits_rad(joint);
                 world.entity_mut(child).insert((
                     RevoluteJointDesc {
                         parent,
                         axis: normalize_axis(joint.axis),
                         anchor_parent_m: joint.origin_xyz,
                         anchor_child_m: Vec3::ZERO,
+                        lower_rad,
+                        upper_rad,
                     },
                     JointMotor::default(),
                 ));
@@ -129,6 +132,16 @@ fn normalize_axis(axis: Vec3) -> Vec3 {
     } else {
         axis.normalize()
     }
+}
+
+fn revolute_limits_rad(joint: &crate::schema::UrdfJoint) -> (Option<f64>, Option<f64>) {
+    if joint.joint_type == UrdfJointType::Continuous {
+        return (None, None);
+    }
+    joint
+        .limit
+        .map(|limit| (Some(limit.lower), Some(limit.upper)))
+        .unwrap_or((None, None))
 }
 
 #[cfg(test)]
