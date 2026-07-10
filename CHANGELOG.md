@@ -4,6 +4,22 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Friction-based grasp core (v0.14 Phase B)**: opt-in `GraspMode::Friction` on
+  `MobileManipulatorSim` (`set_grasp_mode`) holds a grasped object with
+  force-limited finger squeeze and surface friction only — no weld joint is
+  inserted, the object stays a free rigid body, and the grasp drops when both
+  fingers stop bearing load for 5 consecutive steps (or on an open command).
+  The finger motors get a 1.0 N·m force cap in friction mode so the squeeze
+  saturates at the object surface instead of wedging through it. Weld remains
+  the default mode: all existing scenes, tests, and the README hero trajectory
+  digest are bit-for-bit unchanged. Supporting plumbing: `ContactEvent` now
+  carries the pair's accumulated normal-impulse magnitude from Rapier's solver
+  (`impulse`, N·s per step), and scene TOML obstacles accept an optional
+  `friction` coefficient override — used by the new tests to prove a µ=0.02
+  cube slips out of the same grasp that carries a µ=0.5 cube.
+
 ### Fixed
 
 - **`mm_mobile` arm servo sway**: base motion alone (a yaw turn, or a driving
