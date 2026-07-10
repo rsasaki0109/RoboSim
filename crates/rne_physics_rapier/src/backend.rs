@@ -228,11 +228,13 @@ impl PhysicsBackend for RapierBackend {
                 .first()
                 .map(|manifold| vec3_from_rapier(manifold.local_n1))
                 .unwrap_or(Vec3::Y);
+            let impulse = contact_pair.total_impulse_magnitude();
 
             state.contacts.push(ContactEvent {
                 entity_a,
                 entity_b,
                 normal,
+                impulse,
             });
         }
 
@@ -595,6 +597,61 @@ mod tests {
             .y;
         assert!(y < 5.0, "cube should fall from initial height, y={y}");
         assert!(y > 0.0, "cube should rest above ground, y={y}");
+    }
+
+    #[test]
+    fn resting_contact_impulse_matches_steady_state_weight() {
+        // A box resting on the ground plane needs the ground's contact impulse to
+        // balance gravity each step: impulse ≈ weight * dt = m * g * dt on average.
+        // Verifies ContactEvent::impulse carries real solver data (not just a
+        // placeholder zero) and is in the right ballpark once the cube has
+        // settled. A single step's impulse is noisy (the TGS soft solver's bias
+        // term over/under-corrects tick to tick even at rest), so this averages
+        // over a settled window instead of asserting on one step.
+        let (mut backend, physics_world, mut world, ground, cube) = setup_world();
+        let dt = fixed_step();
+
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        for _ in 0..240 {
+            backend.step(physics_world, dt).unwrap();
+            backend.sync_to_ecs(&mut world, physics_world).unwrap();
+            backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        }
+
+        let mut samples = Vec::new();
+        for _ in 0..60 {
+            backend.step(physics_world, dt).unwrap();
+            backend.sync_to_ecs(&mut world, physics_world).unwrap();
+            backend.sync_from_ecs(&mut world, physics_world).unwrap();
+
+            let contacts = backend.contacts(physics_world).unwrap();
+            let impulse = contacts
+                .iter()
+                .find(|contact| {
+                    (contact.entity_a == ground && contact.entity_b == cube)
+                        || (contact.entity_a == cube && contact.entity_b == ground)
+                })
+                .map(|contact| contact.impulse as f64)
+                .expect("cube should be resting in contact with the ground");
+            samples.push(impulse);
+        }
+
+        let mean_impulse = samples.iter().sum::<f64>() / samples.len() as f64;
+        // `setup_world`'s cube has RigidBody::default().mass_kg == 1.0, but Rapier
+        // treats that as ADDITIONAL mass on top of the mass its 1 m^3 collider
+        // contributes at the engine's default density of 1.0 kg/m^3 (see
+        // RigidBodyBuilder::additional_mass docs), so the body's real total mass
+        // is 2.0 kg, not 1.0 kg.
+        let total_mass_kg = 2.0;
+        let expected_impulse = total_mass_kg * 9.81 * dt.as_seconds().value();
+        assert!(
+            mean_impulse > 0.0,
+            "resting contact should carry a nonzero impulse"
+        );
+        assert!(
+            (mean_impulse - expected_impulse).abs() < 0.5 * expected_impulse,
+            "mean resting contact impulse {mean_impulse} should approximate steady-state weight*dt {expected_impulse}"
+        );
     }
 
     #[test]
