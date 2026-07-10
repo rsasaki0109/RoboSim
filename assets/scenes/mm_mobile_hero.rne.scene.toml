@@ -1,0 +1,73 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 43
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_mobile.rne.robot.toml"
+
+# Fixed pick table under the hero pick spot. Top at y=0.35 (translation_m.y +
+# half_extents_m.y = 0.325 + 0.025), matching the mobile arm's fixed 0.40 m
+# shoulder-height plane (base 0.25 m + shoulder offset 0.15 m) minus the task
+# cube's own half-height so the cube rests inside the gripper's finger-pocket
+# vertical band. See `mm_mobile_clutter.rne.scene.toml` for the analogous
+# fixed-base-relative table height convention.
+#
+# Positioned directly ahead of the robot's spawn pose (z=0, same as the base's
+# spawn z) rather than off to a diagonal: the mobile base's own rotation
+# induces a large transient lag in the arm's position-held shoulder/elbow
+# servo (confirmed by tracing `shoulder_position_rad` through a diagonal
+# approach: it swings by several tenths of a radian purely from base yaw
+# changes, even though it is never itself commanded), and that lag was enough
+# to sweep the gripper sideways across the cube and bulldoze it before both
+# fingers could close. Placing the pick object on the base's initial heading
+# means the approach never needs to turn at all, so the arm never gets
+# perturbed before the two-finger weld gate fires.
+#
+# Much wider than the render-only decoration it replaces (and wider than
+# `mm_mobile_clutter`'s table along Z): the arm's position-held shoulder/elbow
+# sways slowly even during a dead-straight approach (a residual several-tenths
+# -of-a-radian sway present from the first driven step, not just from
+# turning), so an imperfect first contact is expected, not exceptional. A
+# generous margin around the resting cube means a mistimed nudge slides it
+# sideways on the tabletop instead of walking it off the near/far edge,
+# giving the two-finger contact gate repeated chances across many sway
+# cycles instead of exactly one.
+[[obstacles]]
+name = "hero_pick_table"
+translation_m = [1.70, 0.325, 0.0]
+half_extents_m = [0.60, 0.025, 0.45]
+body_type = "fixed"
+
+# Fixed place tray under the hero drop spot. Off the pick heading (unlike
+# the table): the carry phase's turn toward it happens AFTER the object is
+# already welded to the gripper, so the arm-lag transient just means a
+# wobblier carry, not a failed grasp.
+#
+# Position: centered on the carried cube's measured release point (see
+# `PLACE_TARGET_M` in examples/32_lift_pick_place_hero/main.rs — the tray is
+# placed where the deterministic physics drops the cube, not vice versa).
+#
+# Height: top at y=0.30, LOWER than the pick table's 0.35 on purpose. The
+# welded cube rides at roughly its grasp height (~0.37 center, ~0.335
+# bottom), so a 0.35-top tray would catch the carried cube's underside as it
+# crosses the tray edge; a 0.30 top leaves ~0.035 m of clearance, and the
+# release then drops the cube ~0.04 m onto the tray.
+[[obstacles]]
+name = "hero_place_tray"
+translation_m = [2.50, 0.275, -2.36]
+half_extents_m = [0.29, 0.025, 0.23]
+body_type = "fixed"
+
+# Dynamic task cube resting on the pick table. Sized like the mobile clutter
+# cubes (0.07 m) rather than the old 0.11 m render-only decoration: the
+# gripper's two-finger pocket is ~0.08 m across, so a 0.11 m cube would not
+# fit between the closed fingers.
+[[obstacles]]
+name = "hero_task_cube"
+translation_m = [1.70, 0.385, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.08

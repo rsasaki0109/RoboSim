@@ -213,7 +213,7 @@ fn hero_media_check() -> anyhow::Result<()> {
         metadata["source"]["kind"].as_str() == Some("wgpu_simulation")
             && metadata["source"]["generator"].as_str() == Some("examples/32_lift_pick_place_hero")
             && metadata["source"]["scene"].as_str()
-                == Some("assets/scenes/mm_mobile.rne.scene.toml")
+                == Some("assets/scenes/mm_mobile_hero.rne.scene.toml")
             && metadata["source"]["policy"].as_str() == Some("MobilePickPlaceHeroPolicy")
             && metadata["source"]["physics"].as_str() == Some("MobileManipulatorSim/Rapier"),
         "README hero metadata source is not wgpu_simulation"
@@ -652,6 +652,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_lift_pick.rne.scene.toml"),
         root.join("assets/scenes/mm_minimal_clutter.rne.scene.toml"),
         root.join("assets/scenes/mm_mobile_clutter.rne.scene.toml"),
+        root.join("assets/scenes/mm_mobile_hero.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),

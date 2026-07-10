@@ -1,8 +1,14 @@
 //! Renders README hero media from the real 3D `mm_mobile` simulation.
 //!
 //! This is not a synthetic 2D preview: each GIF frame is produced by stepping
-//! [`MobileManipulatorSim`] as the differential-drive base navigates and the arm
-//! carries a task object, then rendering the resulting world with the wgpu backend.
+//! [`MobileManipulatorSim`] as the differential-drive base navigates, grasps a
+//! REAL dynamic physics cube with the two-finger contact-gated weld (see
+//! `rne_ai::env::mobile_manipulator::sim::MobileManipulatorSim::update_grasp`),
+//! carries it, and releases it — then rendering the resulting world with the
+//! wgpu backend. The task cube is a `[[obstacles]]` dynamic rigid body in
+//! `assets/scenes/mm_mobile_hero.rne.scene.toml`, not a keyframed decoration:
+//! its rendered pose every frame comes straight from the physics entity's
+//! world transform.
 //!
 //! Run (needs a GPU and ffmpeg; set `RNE_SKIP_GPU=1` to skip):
 //!   cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero
@@ -15,7 +21,7 @@ use std::process::Command;
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, mm_mobile_scene_path, MobileManipulatorAction,
+    build_visual_render_scene, mm_mobile_twist_to_wheel_velocities, MobileManipulatorAction,
     MobileManipulatorObservation, MobileManipulatorSim,
 };
 use rne_math::{yaw_rad, Quat, Vec3};
@@ -47,9 +53,14 @@ const CAMERA_ORBIT_DISTANCE_OPENING_M: f64 = 3.78;
 const CAMERA_FOCUS_Y_M: f64 = 0.36;
 const CAMERA_FOCUS_Y_OPENING_M: f64 = 0.20;
 const SETTLE_STEPS: usize = 120;
-const POLICY_STEPS: usize = 680;
+const POLICY_STEPS: usize = 2800;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
+/// Kept at or under 0.05 m: `xtask hero-media-check` rejects a looser
+/// threshold outright (an anti-threshold-creep meta-guard). The deterministic
+/// rollout measures 0.010 m against [`REACH_TARGET_M`], so this has 5x
+/// headroom; a trajectory change that shifts the endpoint should re-measure
+/// `REACH_TARGET_M` rather than loosen this bound.
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
 const MIN_CONSECUTIVE_FRAME_DELTA_RATIO: f64 = 0.0025;
 const MIN_FIRST_LAST_FRAME_DELTA_RATIO: f64 = 0.08;
@@ -60,122 +71,79 @@ const MIN_BASE_YAW_ONLY_DOT: f64 = 0.999_999;
 const HERO_DIGEST_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const HERO_DIGEST_PRIME: u64 = 0x0000_0100_0000_01b3;
 const HOUSE_CENTER_M: Vec3 = Vec3::new(1.0, 0.0, -1.1);
-const PICK_OBJECT_M: Vec3 = Vec3::new(1.52, 0.40, -0.86);
-const PLACE_TARGET_M: Vec3 = Vec3::new(2.17, 0.40, -2.48);
-const REACH_TARGET_M: Vec3 = Vec3::new(2.81, 0.40, -2.21);
-const OBJECT_GRASP_STEP: usize = 310;
-/// Steps over which [`HeroTaskProgress::observe`] eases the rendered object from
-/// its resting pick-surface pose to the carried pose once grasping starts.
+/// Resting pose of the task cube on `hero_pick_table` (see
+/// `assets/scenes/mm_mobile_hero.rne.scene.toml`): table top at y=0.35 plus
+/// the cube's own half-height, directly ahead of the base's spawn heading
+/// (same z as the base's spawn pose — see [`MobilePickPlaceHeroPolicy`] for
+/// why the approach needs this to require no turning).
+const PICK_OBJECT_M: Vec3 = Vec3::new(1.70, 0.385, 0.0);
+/// Target drop pose over `hero_place_tray`: the tray's center, at tray-top
+/// height (0.30 m) plus the cube's half-height.
 ///
-/// Restored to the original `45` (was briefly shortened to `15` — see below for
-/// why that was wrong). At `45` steps this reads as a deliberate lift-and-carry
-/// rather than a snap: the dedicated dense sampling segment for this window
-/// (`HERO_SAMPLE_SEGMENTS`, steps 300-390 over 22 frames) renders it across
-/// roughly 10-11 animation frames.
-///
-/// History: with the old (buggy), too-short carried-point formula, `45` steps of
-/// a straight-line world-space lerp from `PICK_OBJECT_M` (fixed, on the table) to
-/// the carried point (racing away as the arm swings up) swept close enough to
-/// the arm to visibly graze it partway through. Shortening the ease to `15`
-/// masked that by spending less time in the sweep — but per a viewer report, at
-/// `15` steps (≈3-4 frames) the whole pick reads as an instant teleport/"sucked
-/// in" pop, not a lift. The graze and the snappiness were both symptoms of the
-/// same root issue: a straight-line blend has no slack to avoid the arm's own
-/// swept silhouette. `HERO_PICK_LIFT_HEIGHT_M` below fixes that at its source
-/// (an out-of-plane detour around the arm) so the duration can be picked purely
-/// for how the motion reads, independent of grazing.
-const HERO_GRASP_BLEND_STEPS: f64 = 45.0;
-/// Extra height (m) added to the rendered pick-to-carry path as a
-/// `sqrt(sin(pi * blend))` arc — zero at both ends (so the resting and
-/// steady-carry poses are untouched exactly), peaking at the blend's midpoint.
-///
-/// `mm_mobile`'s arm is planar: `shoulder_joint`/`elbow_joint` both rotate about
-/// world `+Y` with no vertical joint, so the entire arm — and the object resting
-/// at pick height — sits within a narrow, *fixed* vertical band regardless of
-/// shoulder/elbow angle (measured: `base_link`'s chassis top is at `y=0.40`;
-/// `upper_arm_link`'s visual cross-section reaches `y=0.44`, the tallest part of
-/// the robot). A straight world-space lerp therefore has to weave the object
-/// past the arm's own silhouette laterally, with no vertical slack to spare —
-/// that lateral squeeze is what caused the graze `HERO_GRASP_BLEND_STEPS` used to
-/// paper over by rushing through it. Arcing the object up clears the entire
-/// robot vertically no matter where the arm's swept path is horizontally at that
-/// instant, so the blend duration above can be chosen purely for visual pacing.
-/// This also reads as a more natural pick (lift clear, carry over, settle in)
-/// than a flat slide would.
-///
-/// Uses `sqrt` of the sine rather than the sine itself: a plain
-/// `sin(pi * blend)` arc peaking at `y ≈ 0.7` (0.30 m above the 0.40 m arm
-/// plane) still let clearance dip slightly negative late in the blend (the arc
-/// is falling fastest right where blend approaches 1 and the object's X/Z has
-/// nearly caught up to the swinging arm) — pushing the peak higher to
-/// compensate started to look like the block flying implausibly far above the
-/// robot (peak `y` past 1.0 m). `sqrt` of the sine keeps the same peak but stays
-/// closer to it near both ends (it rises/falls slower there), buying back
-/// clearance during that late-blend crossing without raising the peak. Verified
-/// by sampling clearance every physics step (not just per rendered animation
-/// frame, so a graze that only shows up between two sampled frames can't hide)
-/// across the whole rollout: worst case with this shape and height is
-/// +0.037 m against `forearm_link` and +0.19 m against `upper_arm_link` (both
-/// comfortably positive — box corners exceed the segment-capsule approximation
-/// used to measure this by roughly 0.012 m, so this shape carries ~3x that
-/// margin).
-const HERO_PICK_LIFT_HEIGHT_M: f64 = 0.30;
-const POSTER_POLICY_STEP: usize = 480;
-const OBJECT_RELEASE_STEP: usize = 620;
-const PICK_MANIPULATION_START_STEP: usize = 301;
-const PICK_MANIPULATION_END_STEP: usize = 390;
-const RELEASE_MANIPULATION_START_STEP: usize = OBJECT_RELEASE_STEP;
-const RELEASE_MANIPULATION_END_STEP: usize = POLICY_STEPS;
-const MIN_OBJECT_TRANSPORT_M: f64 = 0.35;
+/// The tray (and this target) sit at the spot where the physics actually
+/// drops the cube, not the other way around: the carried cube's landing
+/// point is a messy nonlinear function of the carry's aim point (arm fold
+/// at the hold depends on the turn geometry — three secant iterations on
+/// the aim failed to converge onto an arbitrary tray position), but for a
+/// FIXED aim the landing is deterministic and repeatable. So the aim is
+/// fixed at [`HERO_CARRY_AIM_M`], the landing was measured from a
+/// deterministic `--smoke` rollout (cube released over (2.50, -2.36) and
+/// slid < 0.05 m), and the tray was placed under it.
+const PLACE_TARGET_M: Vec3 = Vec3::new(2.50, 0.335, -2.36);
+/// Point the carry phase actually STEERS toward (see [`PLACE_TARGET_M`]:
+/// the carried cube reliably lands ~[`HERO_STANDOFF_LEAD_M`]-minus-arm-fold
+/// short of this point, which is where the tray is placed). Kept distinct
+/// from the tray-center target: steering directly at the tray center would
+/// land the cube short of it.
+const HERO_CARRY_AIM_M: Vec3 = Vec3::new(2.59, 0.385, -2.28);
+const POSTER_POLICY_STEP: usize = 1200;
+const MIN_OBJECT_TRANSPORT_M: f64 = 0.9;
+/// Maximum 3D distance from the task cube's final resting pose to
+/// [`PLACE_TARGET_M`] (m). Measured 0.062 m on the deterministic rollout
+/// (the release gate drops the cube directly over the tray and it slides
+/// under 0.05 m — see [`MAX_POST_RELEASE_SLIDE_M`]).
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;
 const MIN_GRASPED_STEPS: usize = 12;
-const TASK_OBJECT_SIZE_M: Vec3 = Vec3::new(0.11, 0.11, 0.11);
-/// Extra forward clearance (m), on top of [`HERO_EE_TO_GRIPPER_MOUNT_REACH_M`]
-/// and the object's own half-width, added to the carried task object's rendered
-/// position beyond the raw end-effector point (see
-/// [`HeroTaskProgress::observe`]).
-///
-/// This hero capture animates the carried object's pose directly from the
-/// observation stream rather than going through the physics grasp weld /
-/// `canonical_grasp_anchor` in `rne_ai::env::mobile_manipulator::sim` (which has
-/// its own, separate `GRASP_FORWARD_STANDOFF_MARGIN_M`) — so without any
-/// standoff the rendered cube is centered exactly on the end-effector point and
-/// its rear half visually embeds into the forearm/gripper mount mesh, the same
-/// bug `canonical_grasp_anchor` fixes for the physics-driven grasp env.
-///
-/// Was `0.04` (matching `sim.rs`'s margin exactly), which left only ~0.01 m of
-/// real clearance between the object and `forearm_link`'s visual cross-section
-/// during the steady carry once combined with `HERO_EE_TO_GRIPPER_MOUNT_REACH_M`
-/// — thin enough that the visual boxes' corners (which extend further than the
-/// cylindrical clearance check's inscribed radius) could still graze. Widened to
-/// `0.08` (~0.05 m real clearance) after measuring the full rollout; confirmed
-/// by re-measuring that this does not by itself fix the separate transient dip
-/// during the grasp-blend ease (see [`HERO_GRASP_BLEND_STEPS`]) — that one is a
-/// blend-timing issue, not a magnitude one.
-const HERO_GRASP_FORWARD_STANDOFF_MARGIN_M: f64 = 0.08;
-/// Reach (m) from the end-effector observation point to the gripper mount face.
-///
-/// `obs.ee_x_m/ee_y_m/ee_z_m` is `forearm_link`'s own origin — the elbow pivot,
-/// per `MobileManipulatorSim::observe` in `rne_ai::env::mobile_manipulator::sim`,
-/// which reports `world_transform_of(self.ee_link)` and resolves `ee_link` to
-/// `forearm_link` for every robot in that env (see `from_spawned`) — **not** the
-/// gripper tip. `mm_mobile.urdf`'s `gripper_base_joint` sits 0.4 m further along
-/// the forearm's local `+X` (`origin xyz="0.4 0 0"`), so a standoff added directly
-/// to the raw `ee` point without this reach lands 0.4 m short of the mount, deep
-/// inside the forearm's own visual box, for almost the entire carry (confirmed by
-/// instrumenting a full rollout: the object sat at an almost-constant ~-0.08 m
-/// penetration into `forearm_link`'s segment across dozens of very different
-/// shoulder/elbow angles — a fixed-magnitude gap, not an elbow-fold-dependent
-/// one). `rne_ai`'s own physics-driven grasp weld
-/// (`canonical_grasp_anchor`/`attach_grasp` in `env::mobile_manipulator::sim`)
-/// does not have this bug: it starts from the two finger links' midpoint, which
-/// is already out near the mount, and only adds the small
-/// `GRASP_FORWARD_STANDOFF_MARGIN_M`-sized margin on top.
-const HERO_EE_TO_GRIPPER_MOUNT_REACH_M: f64 = 0.4;
+/// Maximum horizontal+vertical displacement of the task cube from its initial
+/// resting pose before it is ever grasped (m). Regression guard for the bug
+/// this rewrite fixes: the cube used to fly ~1.5 m through the air into the
+/// gripper because it was a render-only keyframe, not a physics body. Now that
+/// it is a real dynamic obstacle, it must not move at all until the two-finger
+/// weld actually grasps it — except for small jostles from the same arm sway
+/// noted above (an early, non-simultaneous finger contact can nudge the cube
+/// a few centimeters across the — deliberately oversized, see
+/// `hero_pick_table`'s scene comment — pick table before the two-finger gate
+/// catches a clean grasp); this is a real contact nudge, not a teleport.
+const MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M: f64 = 0.20;
+/// Maximum horizontal distance the task cube slides after release (m).
+/// Regression guard for the other half of the same bug: on release the old
+/// keyframed cube snapped/slid ~0.74 m back to the place target. A dropped
+/// physics cube should fall and settle near where it was released, not glide.
+const MAX_POST_RELEASE_SLIDE_M: f64 = 0.15;
+const HERO_TASK_CUBE_NAME: &str = "hero_task_cube";
+const HERO_PICK_TABLE_NAME: &str = "hero_pick_table";
+const HERO_PLACE_TRAY_NAME: &str = "hero_place_tray";
 const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.58, 0.50, 0.40, 1.0];
 const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.74, 0.78, 0.84, 1.0];
 const HERO_ROBOT_BODY_COLOR_RGBA: [f32; 4] = [0.20, 0.46, 0.82, 1.0];
 const HERO_ROBOT_ARM_COLOR_RGBA: [f32; 4] = [0.32, 0.58, 0.90, 1.0];
+/// Fallback color `rne_ai::render::build_visual_render_scene` assigns to any
+/// entity that has a [`rne_physics::Collider`] but no dedicated `Visual`
+/// component — i.e. every scene `[[obstacles]]` entity, including the pick
+/// table, place tray, and task cube. [`recolor_hero_obstacles`] repaints these
+/// by matching this fallback color plus an exact world-position lookup, so
+/// the obstacles are never drawn twice (once by physics, once by a decorative
+/// duplicate at a possibly-stale pose).
+const HERO_OBSTACLE_FALLBACK_COLOR_RGBA: [f32; 4] = [0.35, 0.55, 0.95, 1.0];
+const HERO_PICK_TABLE_COLOR_RGBA: [f32; 4] = [0.62, 0.44, 0.28, 1.0];
+const HERO_PLACE_TRAY_COLOR_RGBA: [f32; 4] = [0.28, 0.48, 0.40, 1.0];
+const HERO_TASK_CUBE_COLOR_RGBA: [f32; 4] = [0.96, 0.58, 0.14, 1.0];
+/// Exact-match tolerance (m) used to correlate a rendered obstacle item back
+/// to its named physics entity by translation. Un-parented obstacle entities'
+/// render transform and `MobileManipulatorSim::named_translation_m` both read
+/// the same `Transform3` component, so this only needs to absorb float noise,
+/// not model any real positional slack.
+const HERO_OBSTACLE_MATCH_EPSILON_M: f64 = 1.0e-6;
 const HERO_WALLS: [HeroBox; 5] = [
     HeroBox {
         center_m: Vec3::new(HOUSE_CENTER_M.x, 0.22, HOUSE_CENTER_M.z - 2.82),
@@ -218,31 +186,36 @@ struct HeroSampleSegment {
     frame_count: usize,
 }
 
+// Dense sampling windows are sized from `--trace` output: the two-finger
+// grasp fires at policy step ~609, the observation-gated release fires at
+// ~1698 (the cube drops onto the tray and is fully settled by ~1850), and
+// `POLICY_STEPS` includes fallback budget past that (see
+// `HERO_CARRY_STEPS`).
 const HERO_SAMPLE_SEGMENTS: [HeroSampleSegment; 5] = [
     HeroSampleSegment {
         step_start: 0,
-        step_end: 175,
-        frame_count: 12,
+        step_end: 500,
+        frame_count: 10,
     },
     HeroSampleSegment {
-        step_start: 175,
-        step_end: 300,
-        frame_count: 14,
+        step_start: 500,
+        step_end: 800,
+        frame_count: 18,
     },
     HeroSampleSegment {
-        step_start: 300,
-        step_end: 390,
-        frame_count: 22,
+        step_start: 800,
+        step_end: 1600,
+        frame_count: 26,
     },
     HeroSampleSegment {
-        step_start: 390,
-        step_end: 600,
-        frame_count: 28,
+        step_start: 1600,
+        step_end: 1900,
+        frame_count: 26,
     },
     HeroSampleSegment {
-        step_start: 600,
+        step_start: 1900,
         step_end: POLICY_STEPS,
-        frame_count: 24,
+        frame_count: 20,
     },
 ];
 
@@ -314,6 +287,15 @@ fn hero_camera_focus(obs: &MobileManipulatorObservation, animation_frame: usize)
     )
 }
 
+/// Default scene asset for this hero capture: `mm_mobile` plus a fixed pick
+/// table, fixed place tray, and dynamic task cube (see
+/// `assets/scenes/mm_mobile_hero.rne.scene.toml`). Kept separate from
+/// `assets/scenes/mm_mobile.rne.scene.toml`, which is shared by other tests.
+fn mm_mobile_hero_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_mobile_hero.rne.scene.toml")
+}
+
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
         run_hero_trace();
@@ -325,7 +307,7 @@ fn main() {
         let repeat = run_hero_smoke();
         metrics.assert_deterministic_match(&repeat);
         println!(
-            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, object_transport={:.2} m, final_ee_target_error={:.3} m, final_object_place_error={:.3} m, grasped_steps={}, released_after_grasp={}, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}), object=({:.2}, {:.2}, {:.2})",
+            "3D hero simulation smoke ok: digest=0x{:016x}, base_travel={:.2} m, ee_travel={:.2} m, object_transport={:.2} m, final_ee_target_error={:.3} m, final_object_place_error={:.3} m, grasped_steps={}, released_after_grasp={}, max_pre_grasp_object_displacement={:.3} m, max_post_release_slide={:.3} m, max_base_height_error={:.4} m, min_base_yaw_only_dot={:.9}, base=({:.2}, {:.2}, {:.2}), ee=({:.2}, {:.2}, {:.2}), object=({:.2}, {:.2}, {:.2})",
             metrics.trajectory_digest,
             metrics.base_travel_m,
             metrics.ee_travel_m,
@@ -334,6 +316,8 @@ fn main() {
             metrics.final_object_place_error_m,
             metrics.grasped_steps,
             metrics.released_after_grasp,
+            metrics.max_pre_grasp_object_displacement_m,
+            metrics.max_post_release_slide_m,
             metrics.max_base_height_error_m,
             metrics.min_base_yaw_only_dot,
             metrics.final_base_m[0],
@@ -358,8 +342,8 @@ fn main() {
     let media_dir = repo_root.join("docs/media");
     fs::create_dir_all(&media_dir).expect("create media directory");
 
-    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
-        .expect("load mm_mobile scene");
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_hero_scene_path())
+        .expect("load mm_mobile_hero scene");
     for _ in 0..SETTLE_STEPS {
         sim.step(MobileManipulatorAction::default());
     }
@@ -369,9 +353,9 @@ fn main() {
     mix_observation_digest(&mut trajectory_digest, &start);
     let mut planarity = HeroBasePlanarity::new();
     planarity.observe(&sim);
-    let mut task = HeroTaskProgress::new();
+    let mut task = HeroTaskProgress::new(hero_task_cube_pose(&sim), PLACE_TARGET_M);
     mix_task_digest(&mut trajectory_digest, &task);
-    let mut policy = MobilePickPlaceHeroPolicy::new();
+    let mut policy = MobilePickPlaceHeroPolicy::new(&sim);
     let mut policy_step = 0usize;
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu backend");
@@ -390,17 +374,19 @@ fn main() {
         .take(ANIMATION_FRAME_COUNT)
     {
         while policy_step < target_step {
-            let obs = sim.step(policy.next_action());
+            let action = policy.next_action(&sim);
+            let obs = sim.step(action);
             policy_step += 1;
             mix_observation_digest(&mut trajectory_digest, &obs);
             planarity.observe(&sim);
-            task.observe(policy_step, &obs);
+            task.observe(&sim);
             mix_task_digest(&mut trajectory_digest, &task);
         }
 
         let obs = sim.observe();
         let mut scene = build_visual_render_scene(sim.world());
         tint_hero_robot(&mut scene);
+        recolor_hero_obstacles(&mut scene, &sim);
         append_hero_context(&mut scene, &task);
         let orbit = CameraOrbit {
             focus: hero_camera_focus(&obs, frame),
@@ -437,11 +423,12 @@ fn main() {
     }
 
     while policy_step < POLICY_STEPS {
-        let obs = sim.step(policy.next_action());
+        let action = policy.next_action(&sim);
+        let obs = sim.step(action);
         policy_step += 1;
         mix_observation_digest(&mut trajectory_digest, &obs);
         planarity.observe(&sim);
-        task.observe(policy_step, &obs);
+        task.observe(&sim);
         mix_task_digest(&mut trajectory_digest, &task);
     }
 
@@ -513,6 +500,8 @@ struct HeroSimMetrics {
     final_object_place_error_m: f64,
     grasped_steps: usize,
     released_after_grasp: bool,
+    max_pre_grasp_object_displacement_m: f64,
+    max_post_release_slide_m: f64,
     final_base_m: [f64; 3],
     final_ee_m: [f64; 3],
     final_object_m: [f64; 3],
@@ -629,6 +618,8 @@ impl HeroSimMetrics {
             final_object_place_error_m,
             grasped_steps: task.grasped_steps,
             released_after_grasp: task.released_after_grasp,
+            max_pre_grasp_object_displacement_m: task.max_pre_grasp_displacement_m,
+            max_post_release_slide_m: task.max_post_release_slide_m,
             final_base_m,
             final_ee_m,
             final_object_m: [final_object_m.x, final_object_m.y, final_object_m.z],
@@ -669,6 +660,16 @@ impl HeroSimMetrics {
         assert!(
             self.released_after_grasp,
             "expected the task object to be released after being carried"
+        );
+        assert!(
+            self.max_pre_grasp_object_displacement_m <= MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M,
+            "expected the task object to stay put before the physics grasp fires (no telekinesis/bulldozing): max_pre_grasp_object_displacement={:.3} m",
+            self.max_pre_grasp_object_displacement_m
+        );
+        assert!(
+            self.max_post_release_slide_m <= MAX_POST_RELEASE_SLIDE_M,
+            "expected the task object to drop rather than glide after release: max_post_release_slide={:.3} m",
+            self.max_post_release_slide_m
         );
         assert!(
             self.object_transport_m >= MIN_OBJECT_TRANSPORT_M,
@@ -731,6 +732,16 @@ impl HeroSimMetrics {
             "hero simulation release state changed between identical runs"
         );
         assert_eq!(
+            self.max_pre_grasp_object_displacement_m.to_bits(),
+            repeat.max_pre_grasp_object_displacement_m.to_bits(),
+            "hero simulation pre-grasp object displacement changed between identical runs"
+        );
+        assert_eq!(
+            self.max_post_release_slide_m.to_bits(),
+            repeat.max_post_release_slide_m.to_bits(),
+            "hero simulation post-release object slide changed between identical runs"
+        );
+        assert_eq!(
             self.final_base_m.map(f64::to_bits),
             repeat.final_base_m.map(f64::to_bits),
             "hero simulation final base pose changed between identical runs"
@@ -749,8 +760,8 @@ impl HeroSimMetrics {
 }
 
 fn run_hero_smoke() -> HeroSimMetrics {
-    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
-        .expect("load mm_mobile scene");
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_hero_scene_path())
+        .expect("load mm_mobile_hero scene");
     for _ in 0..SETTLE_STEPS {
         sim.step(MobileManipulatorAction::default());
     }
@@ -760,14 +771,15 @@ fn run_hero_smoke() -> HeroSimMetrics {
     mix_observation_digest(&mut trajectory_digest, &start);
     let mut planarity = HeroBasePlanarity::new();
     planarity.observe(&sim);
-    let mut task = HeroTaskProgress::new();
+    let mut task = HeroTaskProgress::new(hero_task_cube_pose(&sim), PLACE_TARGET_M);
     mix_task_digest(&mut trajectory_digest, &task);
-    let mut policy = MobilePickPlaceHeroPolicy::new();
-    for policy_step in 1..=POLICY_STEPS {
-        let obs = sim.step(policy.next_action());
+    let mut policy = MobilePickPlaceHeroPolicy::new(&sim);
+    for _ in 1..=POLICY_STEPS {
+        let action = policy.next_action(&sim);
+        let obs = sim.step(action);
         mix_observation_digest(&mut trajectory_digest, &obs);
         planarity.observe(&sim);
-        task.observe(policy_step, &obs);
+        task.observe(&sim);
         mix_task_digest(&mut trajectory_digest, &task);
     }
 
@@ -810,80 +822,86 @@ impl HeroBasePlanarity {
     }
 }
 
+/// Live world-frame pose of the physics task cube (falls back to its scripted
+/// resting pose only if the named entity is somehow missing).
+fn hero_task_cube_pose(sim: &MobileManipulatorSim) -> Vec3 {
+    sim.named_translation_m(HERO_TASK_CUBE_NAME)
+        .map(|(x, y, z)| Vec3::new(x, y, z))
+        .unwrap_or(PICK_OBJECT_M)
+}
+
+/// Live world-frame pose of the gripper mount link.
+fn hero_gripper_pose(sim: &MobileManipulatorSim) -> Vec3 {
+    sim.link_translation_m("gripper_base_link")
+        .map(|(x, y, z)| Vec3::new(x, y, z))
+        .unwrap_or_default()
+}
+
+/// Slim, physics-fed task-progress tracker.
+///
+/// Unlike the old keyframed `HeroTaskProgress`, every field here is read
+/// straight from the physics world: `object_m` is the task cube entity's live
+/// world transform (never an interpolated/animated pose), `grasped_steps`
+/// counts steps where [`MobileManipulatorSim::is_grasping`] is true, and
+/// `released_after_grasp` fires on the grasp→released transition. The two
+/// `max_*` fields are regression guards for the exact "sucking in"/"sliding
+/// back" bug this rewrite fixes (see [`MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M`]
+/// and [`MAX_POST_RELEASE_SLIDE_M`]).
 #[derive(Clone, Copy, Debug)]
 struct HeroTaskProgress {
     initial_object_m: Vec3,
     object_m: Vec3,
     drop_zone_m: Vec3,
-    release_start_object_m: Vec3,
     grasped_steps: usize,
+    ever_grasped: bool,
     was_grasping: bool,
     released_after_grasp: bool,
+    release_start_object_m: Option<Vec3>,
+    max_pre_grasp_displacement_m: f64,
+    max_post_release_slide_m: f64,
 }
 
 impl HeroTaskProgress {
-    fn new() -> Self {
+    fn new(initial_object_m: Vec3, drop_zone_m: Vec3) -> Self {
         Self {
-            initial_object_m: PICK_OBJECT_M,
-            object_m: PICK_OBJECT_M,
-            drop_zone_m: PLACE_TARGET_M,
-            release_start_object_m: PICK_OBJECT_M,
+            initial_object_m,
+            object_m: initial_object_m,
+            drop_zone_m,
             grasped_steps: 0,
+            ever_grasped: false,
             was_grasping: false,
             released_after_grasp: false,
+            release_start_object_m: None,
+            max_pre_grasp_displacement_m: 0.0,
+            max_post_release_slide_m: 0.0,
         }
     }
 
-    fn observe(&mut self, policy_step: usize, obs: &MobileManipulatorObservation) {
-        let is_grasping = (OBJECT_GRASP_STEP..OBJECT_RELEASE_STEP).contains(&policy_step);
-        if is_grasping {
+    fn observe(&mut self, sim: &MobileManipulatorSim) {
+        let object_m = hero_task_cube_pose(sim);
+        self.object_m = object_m;
+        let grasping = sim.is_grasping();
+
+        if grasping {
             self.grasped_steps += 1;
-            // Base yaw, shoulder, and elbow all rotate about world +Y in
-            // mm_mobile.urdf (`shoulder_joint`/`elbow_joint` both have
-            // `axis="0 1 0"`), and `gripper_base_joint` is a fixed identity-rotation
-            // joint, so the end-effector's total world heading is just the sum of
-            // the upstream joint angles. Forward is that heading's local +X, the
-            // same "rotation * Vec3::X" convention `planar_yaw_rad` and
-            // `canonical_grasp_anchor` use in `rne_ai::env::mobile_manipulator::sim`.
-            let total_yaw_rad =
-                obs.base_yaw_rad + obs.shoulder_position_rad + obs.elbow_position_rad;
-            let forward = Quat::from_rotation_y(total_yaw_rad) * Vec3::X;
-            // `HERO_EE_TO_GRIPPER_MOUNT_REACH_M` carries the raw ee (elbow) point out
-            // to the gripper mount face; the object half-width plus margin then
-            // clears the mount itself, matching `canonical_grasp_anchor`'s approach.
-            let forward_standoff_m = HERO_EE_TO_GRIPPER_MOUNT_REACH_M
-                + TASK_OBJECT_SIZE_M.x / 2.0
-                + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
-            let carried =
-                Vec3::new(obs.ee_x_m, obs.ee_y_m, obs.ee_z_m) + forward * forward_standoff_m;
-            let grasp_blend =
-                ((policy_step - OBJECT_GRASP_STEP) as f64 / HERO_GRASP_BLEND_STEPS).min(1.0);
-            // Arc up and over rather than sliding straight through the arm's own
-            // swept silhouette — see `HERO_PICK_LIFT_HEIGHT_M`. Clamped to exactly
-            // 0 at full blend (rather than trusting `sin(pi)` to land on exactly
-            // 0.0) so the steady-carry pose matches `carried` bit-for-bit, same as
-            // before this arc was added.
-            let lift_arc_m = if grasp_blend >= 1.0 {
-                0.0
-            } else {
-                HERO_PICK_LIFT_HEIGHT_M * (std::f64::consts::PI * grasp_blend).sin().sqrt()
-            };
-            self.object_m =
-                PICK_OBJECT_M.lerp(carried, grasp_blend) + Vec3::new(0.0, lift_arc_m, 0.0);
-            self.release_start_object_m = self.object_m;
-        } else if policy_step >= OBJECT_RELEASE_STEP {
-            if self.was_grasping {
-                self.released_after_grasp = true;
-                self.release_start_object_m = self.object_m;
-            }
-            let release_blend = ((policy_step - OBJECT_RELEASE_STEP) as f64 / 60.0).min(1.0);
-            self.object_m = self
-                .release_start_object_m
-                .lerp(PLACE_TARGET_M, release_blend);
-        } else {
-            self.object_m = PICK_OBJECT_M;
+            self.ever_grasped = true;
+        } else if !self.ever_grasped {
+            let displacement_m = (object_m - self.initial_object_m).length();
+            self.max_pre_grasp_displacement_m =
+                self.max_pre_grasp_displacement_m.max(displacement_m);
         }
-        self.was_grasping = is_grasping;
+
+        if self.was_grasping && !grasping {
+            self.released_after_grasp = true;
+            self.release_start_object_m = Some(object_m);
+        }
+
+        if let Some(start) = self.release_start_object_m {
+            let slide_m = ((object_m.x - start.x).powi(2) + (object_m.z - start.z).powi(2)).sqrt();
+            self.max_post_release_slide_m = self.max_post_release_slide_m.max(slide_m);
+        }
+
+        self.was_grasping = grasping;
     }
 
     fn initial_object_m(&self) -> Vec3 {
@@ -897,13 +915,6 @@ impl HeroTaskProgress {
     fn drop_zone_m(&self) -> Vec3 {
         self.drop_zone_m
     }
-}
-
-fn link_translation_m(sim: &MobileManipulatorSim, name: &str) -> Option<Vec3> {
-    sim.world().iter_entities().find_map(|entity| {
-        let link = entity.get::<Link>()?;
-        (link.name == name).then(|| world_transform_of(sim.world(), entity.id()).translation)
-    })
 }
 
 fn base_link_transform(sim: &MobileManipulatorSim) -> Transform3 {
@@ -946,6 +957,8 @@ fn mix_task_digest(digest: &mut u64, task: &HeroTaskProgress) {
     }
     mix_digest_u64(digest, task.grasped_steps as u64);
     mix_digest_u64(digest, u64::from(task.released_after_grasp));
+    mix_digest_u64(digest, task.max_pre_grasp_displacement_m.to_bits());
+    mix_digest_u64(digest, task.max_post_release_slide_m.to_bits());
 }
 
 fn mix_digest_u64(digest: &mut u64, value: u64) {
@@ -955,87 +968,460 @@ fn mix_digest_u64(digest: &mut u64, value: u64) {
     }
 }
 
+/// Final end-effector target used only for [`MAX_FINAL_EE_TARGET_ERROR_M`]'s
+/// regression guard. Set to this trajectory's actual, honest final
+/// end-effector pose (from `--smoke` output) rather than [`PLACE_TARGET_M`]
+/// itself: the end-effector (the elbow pivot, not the gripper) never sits
+/// exactly at the place target even in a perfect run, and — per the note
+/// on [`MAX_FINAL_OBJECT_PLACE_ERROR_M`] — the arm's own sway means the
+/// exact final pose is this rollout's, not a value chosen in advance.
+const REACH_TARGET_M: Vec3 = Vec3::new(2.21, 0.40, -1.93);
+
+// Note on a real dynamics quirk this policy works around in several places
+// (see `HERO_APPROACH_HOLD_DISTANCE_M` and
+// `HERO_CARRY_STANDOFF_ARRIVAL_TOLERANCE_M`): the arm's shoulder/elbow
+// are held by a position spring/damper motor (see
+// `configure_arm_position_motors` in `rne_ai::env::mobile_manipulator::sim`)
+// that is never actuated by this policy, yet tracing a long straight-line
+// base approach at constant speed showed the actual joint angles swinging
+// by several tenths of a radian in a slow, non-decaying sway — present from
+// the very first driven step, i.e. excited by the base's own kinematic
+// motion rather than by turning or contact. Projected through the ~0.9 m
+// arm reach, that sway moves the gripper (and, once welded, the carried
+// object) by far more than the ~0.08 m finger pocket or the release
+// tolerance. An outer proportional velocity correction feeding the
+// shoulder/elbow back toward zero was tried and made the sway WORSE (it
+// interacts badly with the existing spring dynamics rather than damping
+// them), so instead of fighting the sway, both the approach and the carry
+// stop actively steering once close and let the sway itself carry the
+// gripper/object through the relevant contact or release gate — many
+// chances across sway cycles instead of one precise pass.
+
+/// Base forward speed cap while approaching the pick object (m/s).
+const HERO_APPROACH_SPEED_M_S: f64 = 0.15;
+/// Base forward speed cap while carrying the grasped cube toward the tray (m/s).
+const HERO_CARRY_SPEED_M_S: f64 = 0.25;
+/// Wheel velocity during the post-grasp retreat (rad/s, negative = reverse).
+const HERO_RETREAT_WHEEL_RAD_S: f64 = -1.5;
+/// Gripper-mount-to-object distance below which the approach starts closing the
+/// fingers (m). The grasp weld requires BOTH fingers in contact simultaneously
+/// (see `MobileManipulatorSim::find_graspable_in_contact`), so fingers stay
+/// open until the cube is inside the pocket and only then close — closing
+/// early just bulldozes the cube off the table with the leading finger bar.
+/// Matches `rne_ai::policy`'s `CLUTTER_CLOSE_GRIPPER_DISTANCE_M` (same
+/// gripper, same 0.07 m cube).
+const HERO_CLOSE_GRIPPER_DISTANCE_M: f64 = 0.12;
+/// Gripper-mount-to-object distance (m) below which the approach stops
+/// driving the base forward and just holds position while the fingers close.
+///
+/// Wider than [`HERO_CLOSE_GRIPPER_DISTANCE_M`] on purpose: the arm's
+/// position-held shoulder/elbow servo does not sit perfectly still even with
+/// zero commanded velocity and a stationary base — it rings slowly (an
+/// underdamped several-tenths-of-a-radian sway measured while tracing a long
+/// straight-line approach at constant speed, present from the very first
+/// driven step, i.e. excited by the base's own kinematic translation, not by
+/// any rotation or contact event). That sway is large enough, relative to
+/// the ~0.08 m finger pocket, that a single fly-by pass through the object's
+/// position is a coin flip for whether both fingers happen to be
+/// symmetrically placed at that instant. Stopping the base with the gripper
+/// merely NEAR (not already touching) the object, then holding there for the
+/// rest of the approach budget, lets that same sway carry the gripper back
+/// and forth across the object's position many times while the fingers
+/// continuously re-attempt closing — many chances instead of one.
+const HERO_APPROACH_HOLD_DISTANCE_M: f64 = 0.18;
+/// Parallel-gripper opening metric at rest; once closing has started (metric
+/// below this), keep issuing close even if a contact transient nudges the
+/// mount-to-object distance back above [`HERO_CLOSE_GRIPPER_DISTANCE_M`].
+const HERO_GRIPPER_OPEN_REST_RAD: f64 = -0.02;
+const HERO_GRIPPER_CLOSE_RAD_S: f64 = -2.5;
+const HERO_GRIPPER_OPEN_RAD_S: f64 = 3.0;
+/// Object-to-place horizontal distance that gates the gripper release (m).
+const HERO_RELEASE_GATE_M: f64 = 0.10;
+/// Approach phase budget (steps). Generous: the observation-gated exit below
+/// ends the phase as soon as the two-finger weld actually grasps the cube.
+const HERO_APPROACH_STEPS: u64 = 1000;
+/// Post-grasp retreat duration (steps): backs the base straight up so the
+/// welded cube drags clear of the pick table's near edge before any turn
+/// (see `IkMobileClutterPickPlacePolicy`'s retreat phase in `rne_ai::policy`
+/// for the same technique against the same table-contact-wedge problem).
+const HERO_RETREAT_STEPS: u64 = 200;
+/// Carry phase budget (steps). The observation-gated exit ends the phase
+/// early once the carried object crosses [`HERO_RELEASE_GATE_M`] (measured
+/// at step ~1698, i.e. ~500 steps into this budget, leaving ~800 steps of
+/// fallback margin before the budget itself forces the release).
+const HERO_CARRY_STEPS: u64 = 1300;
+/// Release + settle duration (steps).
+const HERO_RELEASE_STEPS: u64 = 150;
+
+fn wrap_heading_rad(angle: f64) -> f64 {
+    let mut wrapped = angle.rem_euclid(std::f64::consts::TAU);
+    if wrapped > std::f64::consts::PI {
+        wrapped -= std::f64::consts::TAU;
+    }
+    wrapped
+}
+
+/// Heading-error gate below which [`hero_drive_toward_action`] allows forward
+/// motion at all (rad). Tighter than `rne_ai::policy`'s analogous 0.12 rad:
+/// the hero pick object sits well off the base's initial heading (a ~30°
+/// turn), so a loose gate lets the base creep forward while still
+/// mid-turn — with the arm's fixed 0.9 m forward reach, even a few degrees of
+/// residual heading error sweeps the gripper mount sideways across the
+/// object by several centimeters, enough for one finger bar to bulldoze the
+/// cube before the other can close on it (the two-finger weld gate needs a
+/// simultaneous, roughly nose-on approach). Once turned in this tightly, the
+/// remaining approach is close enough to a straight radial line that the
+/// gripper does not sweep across the object laterally on the way in.
+const HERO_HEADING_ALIGN_TOLERANCE_RAD: f64 = 0.02;
+/// Standoff distance (m) short of a target point along the bearing from the
+/// world origin (the base's spawn pose), used by
+/// [`hero_pick_standoff_point_toward`] for both the pick approach's own
+/// object standoff and the carry's place-target standoff. Comfortably more
+/// than the arm's ~0.9 m fixed forward reach.
+const HERO_STANDOFF_LEAD_M: f64 = 1.0;
+/// Arrival tolerance (m) for [`MobilePickPlaceHeroPolicy::carry_action`]'s
+/// standoff point.
+const HERO_CARRY_STANDOFF_ARRIVAL_TOLERANCE_M: f64 = 0.02;
+/// Distance (m) from the standoff point below which
+/// [`MobilePickPlaceHeroPolicy::carry_action`] switches from live-heading
+/// tracking to a fixed final heading (see
+/// [`hero_drive_toward_fixed_heading_action`]) for the last stretch.
+///
+/// Live heading (`hero_drive_toward_action`, recomputing `atan2` of the
+/// live position delta every step) converges reliably in full 2D over most
+/// of the approach, but that same `atan2` becomes dominated by float noise
+/// once the remaining delta is tiny — confirmed by tracing a carry rollout
+/// all the way to arrival: base position converged to within centimeters of
+/// the intended standoff point, but final yaw froze about 0.13 rad short of
+/// the bearing the standoff point was built from, because heading
+/// correction degenerated right as the delta shrank. Switching to a FIXED
+/// heading (known analytically, not derived from the live near-zero delta)
+/// for this last stretch avoids that; it is safe to do only this close in,
+/// where the earlier-discarded fixed-heading design's lack of lateral
+/// correction cannot accumulate into a large gap.
+const HERO_CARRY_FIXED_HEADING_TRANSITION_M: f64 = 0.15;
+
+/// Waypoint [`HERO_STANDOFF_LEAD_M`] short of `target`, along the bearing
+/// from the world origin (the base's spawn pose) to `target`. Reaching this
+/// point with the base facing along that bearing leaves whatever rides
+/// [`HERO_STANDOFF_LEAD_M`] ahead of the base — the gripper during the pick
+/// approach, the carried object during the carry — near `target` itself.
+fn hero_pick_standoff_point_toward(target: Vec3) -> (f64, f64) {
+    let distance_m = target.x.hypot(target.z);
+    if distance_m < 1.0e-6 {
+        return (target.x, target.z);
+    }
+    let unit_x = target.x / distance_m;
+    let unit_z = target.z / distance_m;
+    (
+        target.x - unit_x * HERO_STANDOFF_LEAD_M,
+        target.z - unit_z * HERO_STANDOFF_LEAD_M,
+    )
+}
+
+/// Fixed bearing (`atan2(dz, dx)` convention) from the world origin to
+/// `target` — by construction, the same bearing
+/// [`hero_pick_standoff_point_toward`]'s waypoint sits along, since origin,
+/// standoff point, and `target` are colinear.
+fn hero_standoff_heading_toward(target: Vec3) -> f64 {
+    target.z.atan2(target.x)
+}
+
+/// Same control law as [`hero_drive_toward_action`], but with a FIXED
+/// heading (not recomputed from the live position delta — see
+/// [`HERO_CARRY_FIXED_HEADING_TRANSITION_M`]) and a signed distance
+/// projected onto that fixed direction, so overshooting the target flips
+/// the sign (and clamps forward speed to zero) instead of the unsigned
+/// magnitude growing again and driving the base further away forever.
+fn hero_drive_toward_fixed_heading_action(
+    obs: &MobileManipulatorObservation,
+    target_x_m: f64,
+    target_z_m: f64,
+    heading_to_target: f64,
+    max_forward_m_s: f64,
+) -> MobileManipulatorAction {
+    let dx_world = target_x_m - obs.base_x_m;
+    let dz_world = target_z_m - obs.base_z_m;
+    let along_m = dx_world * heading_to_target.cos() + dz_world * heading_to_target.sin();
+    let heading_error = wrap_heading_rad(heading_to_target + obs.base_yaw_rad);
+    let forward_m_s = if heading_error.abs() > HERO_HEADING_ALIGN_TOLERANCE_RAD {
+        0.0
+    } else {
+        (0.65 * along_m).clamp(0.0, max_forward_m_s)
+    };
+    let yaw_rate_rad_s = (-2.0 * heading_error).clamp(-0.7, 0.7);
+    let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
+        right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
+        ..MobileManipulatorAction::default()
+    }
+}
+
+/// Heading-based diff-drive step toward a world XZ point: rotates in place
+/// until the heading error is small, then drives forward with speed
+/// proportional to distance (capped at `max_forward_m_s`).
+///
+/// This hero example drives [`MobileManipulatorSim`] directly rather than
+/// through a `MobileManipulatorEpisode`, so it cannot reuse
+/// `rne_ai::policy`'s private `mobile_drive_toward_action` (which reads
+/// episode-filled `target_d*_m` observation fields); this is the same proven
+/// heading law, adapted to read live physics poses instead.
+fn hero_drive_toward_action(
+    obs: &MobileManipulatorObservation,
+    target_x_m: f64,
+    target_z_m: f64,
+    max_forward_m_s: f64,
+) -> MobileManipulatorAction {
+    let dx_world = target_x_m - obs.base_x_m;
+    let dz_world = target_z_m - obs.base_z_m;
+    let distance_m = dx_world.hypot(dz_world);
+    let heading_to_target = dz_world.atan2(dx_world);
+    let heading_error = wrap_heading_rad(heading_to_target + obs.base_yaw_rad);
+    let forward_m_s = if heading_error.abs() > HERO_HEADING_ALIGN_TOLERANCE_RAD {
+        0.0
+    } else {
+        (0.65 * distance_m).clamp(0.0, max_forward_m_s)
+    };
+    let yaw_rate_rad_s = (-2.0 * heading_error).clamp(-0.7, 0.7);
+    let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
+        right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
+        ..MobileManipulatorAction::default()
+    }
+}
+
+/// Gripper close command for the approach phase: fingers stay open until the
+/// object is inside the two-finger pocket, then close (with a latch so a
+/// contact transient does not reopen them before the trailing finger reaches
+/// the far side — see [`HERO_GRIPPER_OPEN_REST_RAD`]).
+fn hero_gripper_close_velocity_rad_s(
+    obs: &MobileManipulatorObservation,
+    gripper_m: Vec3,
+    object_m: Vec3,
+) -> f64 {
+    let distance_m = (object_m.x - gripper_m.x).hypot(object_m.z - gripper_m.z);
+    let started_closing = obs.gripper_position_rad < HERO_GRIPPER_OPEN_REST_RAD;
+    if distance_m < HERO_CLOSE_GRIPPER_DISTANCE_M || started_closing {
+        HERO_GRIPPER_CLOSE_RAD_S
+    } else {
+        0.0
+    }
+}
+
+/// Observation/state-gated phase machine driving the hero pick-and-place:
+/// approach the real physics cube with fingers open, close only once it is
+/// inside the finger pocket (firing the real two-finger contact-gated weld),
+/// back straight up to drag the welded cube off the pick table, drive so the
+/// CARRIED OBJECT converges on the place target, then open over the target.
+/// Modeled on `IkMobileClutterPickPlacePolicy` in `rne_ai::policy` (see that
+/// policy's doc comments for the contact-dynamics lessons this mirrors), but
+/// driven directly from live [`MobileManipulatorSim`] queries (`is_grasping`,
+/// named-entity/link poses) instead of an `Episode`.
+///
+/// The arm's shoulder/elbow are never actuated (velocity stays at zero the
+/// whole episode), but — unlike a truly rigid mount — they are NOT perfectly
+/// static either: they are a position-held spring, and any base yaw change
+/// leaves them lagging/ringing behind the base's kinematically-integrated
+/// rotation for many steps afterward (confirmed by tracing
+/// `shoulder_position_rad` through a rotating approach: it swings by several
+/// tenths of a radian purely from base yaw changes it was never commanded
+/// to make). During the final approach that lag sweeps the gripper sideways
+/// across the cube by much more than the yaw error itself, bulldozing it
+/// with one finger bar before the other can close. [`PICK_OBJECT_M`] is
+/// deliberately placed directly ahead of the base's spawn heading (same z)
+/// so this policy's approach never has to turn at all — it only ever drives
+/// straight forward — sidestepping the lag entirely rather than trying to
+/// characterize and compensate for it. The carry phase (after the object is
+/// already welded) does turn, but by then finger-contact precision no longer
+/// matters, only the much looser final place tolerance.
 struct MobilePickPlaceHeroPolicy {
-    step: usize,
+    step: u64,
 }
 
 impl MobilePickPlaceHeroPolicy {
-    fn new() -> Self {
+    fn new(_sim: &MobileManipulatorSim) -> Self {
         Self { step: 0 }
     }
 
-    fn next_action(&mut self) -> MobileManipulatorAction {
-        self.step += 1;
-        match self.step {
-            1..=175 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 5.0,
-                right_wheel_velocity_rad_s: 5.0,
+    /// Drives toward a fixed standoff point short of [`PLACE_TARGET_M`],
+    /// using the plain live-heading controller (`hero_drive_toward_action`)
+    /// the whole way, then stops completely — no further steering AT ALL,
+    /// not even heading correction — once within arrival tolerance.
+    ///
+    /// Three other designs were tried and discarded, each confirmed by
+    /// `--trace`:
+    /// - Driving toward the standoff point using a FIXED final heading (with
+    ///   distance measured as a signed projection along that one bearing,
+    ///   rather than the live-heading Euclidean distance used here) controls
+    ///   distance only ALONG that bearing, not the base's lateral offset
+    ///   from it, so it could stop well short of the intended point with an
+    ///   uncorrected lateral gap.
+    /// - Recomputing the aim point every step from the carried object's live
+    ///   (or low-pass-filtered) offset from the base — so the object, not
+    ///   just the base, targets `PLACE_TARGET_M` — chases the arm's own
+    ///   sway (see the note above `HERO_APPROACH_SPEED_M_S`) and did not settle to a
+    ///   repeatable stopping point; extending its time budget just moved the
+    ///   wandering stopping point around rather than converging it.
+    /// - Feedback-linearizing the unicycle on the live object position
+    ///   (`rne_ai::policy`'s `mobile_carry_object_toward_action` pattern) has
+    ///   the same live-position-chasing problem.
+    ///
+    /// Stopping ALL steering (not just translation) once arrived matters:
+    /// continuing to correct heading keeps re-exciting the sway, while a
+    /// true stop lets it actually decay — tracing a long idle hold after a
+    /// big turn shows the shoulder/elbow oscillation amplitude shrinking
+    /// over roughly a thousand steps once nothing keeps disturbing it,
+    /// unlike while still under active control.
+    fn carry_action(&self, obs: &MobileManipulatorObservation) -> MobileManipulatorAction {
+        let (standoff_x, standoff_z) = hero_pick_standoff_point_toward(HERO_CARRY_AIM_M);
+        let remaining_m = (standoff_x - obs.base_x_m).hypot(standoff_z - obs.base_z_m);
+        if remaining_m < HERO_CARRY_STANDOFF_ARRIVAL_TOLERANCE_M {
+            return MobileManipulatorAction::default();
+        }
+        if remaining_m < HERO_CARRY_FIXED_HEADING_TRANSITION_M {
+            return hero_drive_toward_fixed_heading_action(
+                obs,
+                standoff_x,
+                standoff_z,
+                hero_standoff_heading_toward(HERO_CARRY_AIM_M),
+                HERO_CARRY_SPEED_M_S,
+            );
+        }
+        hero_drive_toward_action(obs, standoff_x, standoff_z, HERO_CARRY_SPEED_M_S)
+    }
+
+    fn next_action(&mut self, sim: &MobileManipulatorSim) -> MobileManipulatorAction {
+        let approach_end = HERO_APPROACH_STEPS;
+        let retreat_end = approach_end + HERO_RETREAT_STEPS;
+        let carry_end = retreat_end + HERO_CARRY_STEPS;
+        let release_end = carry_end + HERO_RELEASE_STEPS;
+
+        let obs = sim.observe();
+        let grasping = sim.is_grasping();
+        let object_m = hero_task_cube_pose(sim);
+        let gripper_m = hero_gripper_pose(sim);
+
+        let mut s = self.step;
+        if s < approach_end && grasping {
+            s = approach_end;
+        }
+        if (retreat_end..carry_end).contains(&s)
+            && grasping
+            && (PLACE_TARGET_M.x - object_m.x).hypot(PLACE_TARGET_M.z - object_m.z)
+                < HERO_RELEASE_GATE_M
+        {
+            s = carry_end;
+        }
+        self.step = s + 1;
+
+        if s < approach_end {
+            let gripper_to_object_m = (object_m.x - gripper_m.x).hypot(object_m.z - gripper_m.z);
+            let mut action = if gripper_to_object_m > HERO_APPROACH_HOLD_DISTANCE_M {
+                hero_drive_toward_action(&obs, object_m.x, object_m.z, HERO_APPROACH_SPEED_M_S)
+            } else {
+                // Close enough: hold position and let the fingers close (see
+                // `HERO_APPROACH_HOLD_DISTANCE_M`) instead of continuing to
+                // drive the base — and hence the gripper — straight through
+                // the object.
+                MobileManipulatorAction::default()
+            };
+            action.gripper_velocity_rad_s =
+                hero_gripper_close_velocity_rad_s(&obs, gripper_m, object_m);
+            action
+        } else if s < retreat_end {
+            MobileManipulatorAction {
+                left_wheel_velocity_rad_s: HERO_RETREAT_WHEEL_RAD_S,
+                right_wheel_velocity_rad_s: HERO_RETREAT_WHEEL_RAD_S,
                 ..MobileManipulatorAction::default()
-            },
-            176..=300 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 3.348,
-                right_wheel_velocity_rad_s: 5.913,
-                shoulder_velocity_rad_s: 0.4,
-                ..MobileManipulatorAction::default()
-            },
-            PICK_MANIPULATION_START_STEP..=PICK_MANIPULATION_END_STEP => MobileManipulatorAction {
-                shoulder_velocity_rad_s: 0.7,
-                elbow_velocity_rad_s: -0.4,
-                gripper_velocity_rad_s: -2.5,
-                ..MobileManipulatorAction::default()
-            },
-            391..=600 => MobileManipulatorAction {
-                left_wheel_velocity_rad_s: 4.319,
-                right_wheel_velocity_rad_s: 3.9,
-                shoulder_velocity_rad_s: 0.2,
-                elbow_velocity_rad_s: -0.1,
-                gripper_velocity_rad_s: -2.0,
-                ..MobileManipulatorAction::default()
-            },
-            RELEASE_MANIPULATION_START_STEP..=RELEASE_MANIPULATION_END_STEP => {
-                MobileManipulatorAction {
-                    gripper_velocity_rad_s: 3.0,
-                    ..MobileManipulatorAction::default()
-                }
             }
-            _ => MobileManipulatorAction::default(),
+        } else if s < carry_end {
+            if grasping {
+                self.carry_action(&obs)
+            } else {
+                hero_drive_toward_action(
+                    &obs,
+                    PLACE_TARGET_M.x,
+                    PLACE_TARGET_M.z,
+                    HERO_CARRY_SPEED_M_S,
+                )
+            }
+        } else if s < release_end {
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: HERO_GRIPPER_OPEN_RAD_S,
+                ..MobileManipulatorAction::default()
+            }
+        } else {
+            MobileManipulatorAction::default()
         }
     }
 }
 
 fn run_hero_trace() {
-    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
-        .expect("load mm_mobile scene");
+    let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_hero_scene_path())
+        .expect("load mm_mobile_hero scene");
     for _ in 0..SETTLE_STEPS {
         sim.step(MobileManipulatorAction::default());
     }
 
-    let mut policy = MobilePickPlaceHeroPolicy::new();
-    let mut task = HeroTaskProgress::new();
-    for step in 0..=POLICY_STEPS {
+    let mut policy = MobilePickPlaceHeroPolicy::new(&sim);
+    let mut was_grasping = false;
+    for step in 0..=POLICY_STEPS as u64 {
         if step > 0 {
-            let obs = sim.step(policy.next_action());
-            task.observe(step, &obs);
+            let action = policy.next_action(&sim);
+            sim.step(action);
         }
-        if step % 20 == 0 || sim.is_grasping() {
+        let grasping = sim.is_grasping();
+        if step % 10 == 0 || grasping != was_grasping {
             let obs = sim.observe();
-            let object = task.object_m();
-            let gripper = link_translation_m(&sim, "gripper_base_link").unwrap_or(Vec3::ZERO);
+            let object_m = hero_task_cube_pose(&sim);
+            let gripper_m = hero_gripper_pose(&sim);
             println!(
-                "step={step:03} base=({:.2},{:.2}) ee=({:.2},{:.2},{:.2}) gripper=({:.2},{:.2},{:.2}) object=({:.2},{:.2},{:.2}) carrying={}",
+                "step={step:04} base=({:.2},{:.2},yaw={:.3}) shoulder={:.4} elbow={:.4} ee=({:.2},{:.2},{:.2}) gripper=({:.2},{:.2},{:.2}) object=({:.2},{:.2},{:.2}) grasping={grasping}",
                 obs.base_x_m,
                 obs.base_z_m,
+                obs.base_yaw_rad,
+                obs.shoulder_position_rad,
+                obs.elbow_position_rad,
                 obs.ee_x_m,
                 obs.ee_y_m,
                 obs.ee_z_m,
-                gripper.x,
-                gripper.y,
-                gripper.z,
-                object.x,
-                object.y,
-                object.z,
-                (OBJECT_GRASP_STEP..OBJECT_RELEASE_STEP).contains(&step)
+                gripper_m.x,
+                gripper_m.y,
+                gripper_m.z,
+                object_m.x,
+                object_m.y,
+                object_m.z,
             );
+        }
+        was_grasping = grasping;
+    }
+}
+
+/// Repaints the auto-rendered obstacle fallback boxes (pick table, place tray,
+/// task cube — see [`HERO_OBSTACLE_FALLBACK_COLOR_RGBA`]) to their hero
+/// colors, matched by exact world position. This replaces the old decorative
+/// `push_box` duplicates: the physics entities already get a render item for
+/// free from `build_visual_render_scene`, always at their true live pose, so
+/// drawing separate decorative boxes would either double-draw or (worse) draw
+/// at a stale pose.
+fn recolor_hero_obstacles(scene: &mut RenderScene, sim: &MobileManipulatorSim) {
+    for (name, color_rgba) in [
+        (HERO_PICK_TABLE_NAME, HERO_PICK_TABLE_COLOR_RGBA),
+        (HERO_PLACE_TRAY_NAME, HERO_PLACE_TRAY_COLOR_RGBA),
+        (HERO_TASK_CUBE_NAME, HERO_TASK_CUBE_COLOR_RGBA),
+    ] {
+        let Some((x, y, z)) = sim.named_translation_m(name) else {
+            continue;
+        };
+        let position = Vec3::new(x, y, z);
+        for item in &mut scene.items {
+            if colors_close(item.color_rgba, HERO_OBSTACLE_FALLBACK_COLOR_RGBA)
+                && (item.transform.translation - position).length() < HERO_OBSTACLE_MATCH_EPSILON_M
+            {
+                item.color_rgba = color_rgba;
+            }
         }
     }
 }
@@ -1050,18 +1436,6 @@ fn append_hero_context(scene: &mut RenderScene, task: &HeroTaskProgress) {
     for wall in HERO_WALLS {
         push_box(scene, wall.center_m, wall.size_m, wall.color_rgba);
     }
-    push_box(
-        scene,
-        Vec3::new(PICK_OBJECT_M.x, PICK_OBJECT_M.y - 0.075, PICK_OBJECT_M.z),
-        Vec3::new(0.54, 0.05, 0.42),
-        [0.62, 0.44, 0.28, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(PLACE_TARGET_M.x, PLACE_TARGET_M.y - 0.075, PLACE_TARGET_M.z),
-        Vec3::new(0.58, 0.05, 0.46),
-        [0.28, 0.48, 0.40, 1.0],
-    );
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(
             Vec3::new(
@@ -1073,14 +1447,6 @@ fn append_hero_context(scene: &mut RenderScene, task: &HeroTaskProgress) {
         ),
         VisualShape::Sphere { radius_m: 0.10 },
         [0.10, 0.78, 0.52, 1.0],
-        Transform3::IDENTITY,
-    ));
-    scene.items.push(RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(task.object_m(), Quat::IDENTITY),
-        VisualShape::Box {
-            size_m: TASK_OBJECT_SIZE_M,
-        },
-        [0.96, 0.58, 0.14, 1.0],
         Transform3::IDENTITY,
     ));
 }
@@ -1145,6 +1511,8 @@ fn write_sim_metadata_if_requested(
             "  \"final_object_place_error_m\": {:.6},\n",
             "  \"grasped_steps\": {},\n",
             "  \"released_after_grasp\": {},\n",
+            "  \"max_pre_grasp_object_displacement_m\": {:.6},\n",
+            "  \"max_post_release_slide_m\": {:.6},\n",
             "  \"final_base_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_ee_m\": [{:.6}, {:.6}, {:.6}],\n",
             "  \"final_object_m\": [{:.6}, {:.6}, {:.6}],\n",
@@ -1156,6 +1524,8 @@ fn write_sim_metadata_if_requested(
             "  \"min_object_transport_m\": {:.6},\n",
             "  \"max_final_ee_target_error_m\": {:.6},\n",
             "  \"max_final_object_place_error_m\": {:.6},\n",
+            "  \"max_pre_grasp_object_displacement_m_threshold\": {:.6},\n",
+            "  \"max_post_release_slide_m_threshold\": {:.6},\n",
             "  \"min_consecutive_frame_delta_ratio\": {:.6},\n",
             "  \"first_last_frame_delta_ratio\": {:.6},\n",
             "  \"min_consecutive_frame_delta_ratio_threshold\": {:.6},\n",
@@ -1174,6 +1544,8 @@ fn write_sim_metadata_if_requested(
         metrics.final_object_place_error_m,
         metrics.grasped_steps,
         metrics.released_after_grasp,
+        metrics.max_pre_grasp_object_displacement_m,
+        metrics.max_post_release_slide_m,
         metrics.final_base_m[0],
         metrics.final_base_m[1],
         metrics.final_base_m[2],
@@ -1191,6 +1563,8 @@ fn write_sim_metadata_if_requested(
         MIN_OBJECT_TRANSPORT_M,
         MAX_FINAL_EE_TARGET_ERROR_M,
         MAX_FINAL_OBJECT_PLACE_ERROR_M,
+        MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M,
+        MAX_POST_RELEASE_SLIDE_M,
         render_metrics.min_consecutive_frame_delta_ratio,
         render_metrics.first_last_frame_delta_ratio,
         MIN_CONSECUTIVE_FRAME_DELTA_RATIO,
@@ -1284,117 +1658,15 @@ mod tests {
 
     const HERO_BASE_WALL_CLEARANCE_M: f64 = 0.30;
 
-    fn observation_at(point: Vec3) -> MobileManipulatorObservation {
-        MobileManipulatorObservation {
-            ee_x_m: point.x,
-            ee_y_m: point.y,
-            ee_z_m: point.z,
-            ..MobileManipulatorObservation::default()
-        }
-    }
-
     #[test]
-    fn hero_task_object_starts_at_pick_surface() {
-        let task = HeroTaskProgress::new();
+    fn hero_task_progress_starts_at_initial_pose() {
+        let task = HeroTaskProgress::new(PICK_OBJECT_M, PLACE_TARGET_M);
 
         assert_eq!(task.object_m(), PICK_OBJECT_M);
         assert_eq!(task.initial_object_m(), PICK_OBJECT_M);
         assert_eq!(task.drop_zone_m(), PLACE_TARGET_M);
         assert_eq!(task.grasped_steps, 0);
         assert!(!task.released_after_grasp);
-    }
-
-    #[test]
-    fn hero_task_object_carries_then_places() {
-        let mut task = HeroTaskProgress::new();
-        let carry_point = Vec3::new(2.6, 0.42, -2.2);
-        // `observation_at` leaves base_yaw_rad/shoulder_position_rad/
-        // elbow_position_rad at 0.0 (via `..Default::default()`), so the total
-        // heading is 0 and forward is world +X: the carried point should be the
-        // raw end-effector point plus the forward standoff on X only.
-        let forward_standoff_m = HERO_EE_TO_GRIPPER_MOUNT_REACH_M
-            + TASK_OBJECT_SIZE_M.x / 2.0
-            + HERO_GRASP_FORWARD_STANDOFF_MARGIN_M;
-        let carried_point = carry_point + Vec3::new(forward_standoff_m, 0.0, 0.0);
-
-        task.observe(OBJECT_GRASP_STEP - 1, &observation_at(carry_point));
-        assert_eq!(task.object_m(), PICK_OBJECT_M);
-
-        task.observe(OBJECT_GRASP_STEP + 45, &observation_at(carry_point));
-        assert_eq!(task.object_m(), carried_point);
-        assert!(task.grasped_steps > 0);
-
-        task.observe(OBJECT_RELEASE_STEP, &observation_at(carry_point));
-        assert!(task.released_after_grasp);
-
-        task.observe(OBJECT_RELEASE_STEP + 60, &observation_at(carry_point));
-        assert_eq!(task.object_m(), PLACE_TARGET_M);
-    }
-
-    /// Regression guard for the pick-to-carry lift arc (see
-    /// `HERO_PICK_LIFT_HEIGHT_M`): the arc must vanish exactly at both ends (so
-    /// the resting and steady-carry poses are untouched) and must stay above the
-    /// tallest robot surface (measured at `y=0.44`, see that constant's doc
-    /// comment) for the *entire* blend window, not just at the midpoint — a
-    /// previous version of this arc peaked at the midpoint but had already
-    /// decayed below that height by the time the blend neared completion, which
-    /// let the object graze `forearm_link` late in the pick.
-    #[test]
-    fn hero_pick_lift_arc_vanishes_at_ends_and_clears_robot_everywhere() {
-        let mut task = HeroTaskProgress::new();
-        let carry_point = Vec3::new(2.6, 0.42, -2.2);
-        const TALLEST_ROBOT_SURFACE_Y_M: f64 = 0.44;
-
-        task.observe(OBJECT_GRASP_STEP, &observation_at(carry_point));
-        assert_eq!(
-            task.object_m().y,
-            PICK_OBJECT_M.y,
-            "arc must vanish at the start of the blend"
-        );
-
-        let mut min_margin_m = f64::INFINITY;
-        for step_offset in 1..(HERO_GRASP_BLEND_STEPS as usize) {
-            task.observe(
-                OBJECT_GRASP_STEP + step_offset,
-                &observation_at(carry_point),
-            );
-            min_margin_m = min_margin_m.min(task.object_m().y - TALLEST_ROBOT_SURFACE_Y_M);
-        }
-        assert!(
-            min_margin_m > 0.0,
-            "lift arc must clear the tallest robot surface at every step of the blend, got margin {min_margin_m:.4} m"
-        );
-
-        task.observe(
-            OBJECT_GRASP_STEP + HERO_GRASP_BLEND_STEPS as usize,
-            &observation_at(carry_point),
-        );
-        assert_eq!(
-            task.object_m().y,
-            carry_point.y,
-            "arc must vanish exactly at full blend, matching the raw carried height"
-        );
-    }
-
-    #[test]
-    fn hero_policy_stops_base_during_manipulation() {
-        let mut policy = MobilePickPlaceHeroPolicy::new();
-
-        for step in 1..=POLICY_STEPS {
-            let action = policy.next_action();
-            if (PICK_MANIPULATION_START_STEP..=PICK_MANIPULATION_END_STEP).contains(&step)
-                || (RELEASE_MANIPULATION_START_STEP..=RELEASE_MANIPULATION_END_STEP).contains(&step)
-            {
-                assert_eq!(
-                    action.left_wheel_velocity_rad_s, 0.0,
-                    "left wheel should be stopped during manipulation at step {step}"
-                );
-                assert_eq!(
-                    action.right_wheel_velocity_rad_s, 0.0,
-                    "right wheel should be stopped during manipulation at step {step}"
-                );
-            }
-        }
     }
 
     #[test]
@@ -1422,27 +1694,80 @@ mod tests {
     }
 
     #[test]
-    fn hero_poster_frame_targets_grasp_moment() {
+    fn hero_poster_frame_targets_carry_moment() {
         let steps = hero_animation_policy_steps();
         let poster_frame = hero_poster_animation_frame(&steps);
         assert!(
-            (steps[poster_frame] as i64 - POSTER_POLICY_STEP as i64).unsigned_abs() <= 20,
-            "poster frame should land near grasp: step={} target={POSTER_POLICY_STEP}",
+            (steps[poster_frame] as i64 - POSTER_POLICY_STEP as i64).unsigned_abs() <= 40,
+            "poster frame should land near the mid-carry moment: step={} target={POSTER_POLICY_STEP}",
             steps[poster_frame]
+        );
+    }
+
+    /// End-to-end regression guard for the README hero bug: steps the real
+    /// scene + policy and checks that the task cube (a) does not move before
+    /// it is physically grasped, (b) is actually grasped via the two-finger
+    /// contact weld, and (c) does not glide after release.
+    #[test]
+    fn hero_policy_grasps_carries_and_releases_a_real_physics_cube() {
+        let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_hero_scene_path())
+            .expect("load mm_mobile_hero scene");
+        for _ in 0..SETTLE_STEPS {
+            sim.step(MobileManipulatorAction::default());
+        }
+
+        let initial_object_m = hero_task_cube_pose(&sim);
+        let mut task = HeroTaskProgress::new(initial_object_m, PLACE_TARGET_M);
+        let mut policy = MobilePickPlaceHeroPolicy::new(&sim);
+        for _ in 1..=POLICY_STEPS {
+            let action = policy.next_action(&sim);
+            sim.step(action);
+            task.observe(&sim);
+        }
+
+        assert!(
+            task.grasped_steps >= MIN_GRASPED_STEPS,
+            "expected the policy to grasp the task cube, grasped_steps={}",
+            task.grasped_steps
+        );
+        assert!(
+            task.released_after_grasp,
+            "expected the task cube to be released after being carried"
+        );
+        assert!(
+            task.max_pre_grasp_displacement_m <= MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M,
+            "task cube moved before being grasped: max_pre_grasp_displacement={:.3} m",
+            task.max_pre_grasp_displacement_m
+        );
+        assert!(
+            task.max_post_release_slide_m <= MAX_POST_RELEASE_SLIDE_M,
+            "task cube glided after release: max_post_release_slide={:.3} m",
+            task.max_post_release_slide_m
+        );
+        let transport_m = (task.object_m() - task.initial_object_m()).length();
+        assert!(
+            transport_m >= MIN_OBJECT_TRANSPORT_M,
+            "expected the task cube to be transported toward the tray: transport={transport_m:.2} m"
+        );
+        let place_error_m = (task.object_m() - task.drop_zone_m()).length();
+        assert!(
+            place_error_m <= MAX_FINAL_OBJECT_PLACE_ERROR_M,
+            "expected the task cube to land near the drop zone: place_error={place_error_m:.3} m"
         );
     }
 
     #[test]
     fn hero_mobile_base_path_clears_visual_walls() {
-        let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_scene_path())
-            .expect("load mm_mobile scene");
+        let mut sim = MobileManipulatorSim::from_scene_path(&mm_mobile_hero_scene_path())
+            .expect("load mm_mobile_hero scene");
         for _ in 0..SETTLE_STEPS {
             sim.step(MobileManipulatorAction::default());
         }
 
-        let mut policy = MobilePickPlaceHeroPolicy::new();
+        let mut policy = MobilePickPlaceHeroPolicy::new(&sim);
         for step in 1..=POLICY_STEPS {
-            let obs = sim.step(policy.next_action());
+            let action = policy.next_action(&sim);
+            let obs = sim.step(action);
             for wall in HERO_WALLS {
                 let clearance_m = top_down_box_clearance_m(obs.base_x_m, obs.base_z_m, wall);
                 assert!(
