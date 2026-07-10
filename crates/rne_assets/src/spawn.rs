@@ -6,7 +6,7 @@ use crate::scene::{ObstacleBodyType, SceneAsset, SceneObstacleAsset};
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
+use rne_physics::{Collider, ColliderShape, PhysicsMaterial, RigidBody, RigidBodyType};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
@@ -364,6 +364,10 @@ fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Ent
             shape: ColliderShape::Cuboid {
                 half_extents_m: vec3_from_array(obstacle.half_extents_m),
             },
+            material: PhysicsMaterial {
+                friction: obstacle.friction.unwrap_or_else(|| PhysicsMaterial::default().friction),
+                ..PhysicsMaterial::default()
+            },
             ..Collider::default()
         },
         Transform3::from_translation_rotation(
@@ -588,6 +592,46 @@ ray_count = 64
         assert!(names.iter(&world).any(|name| name.0 == "front_wall"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn obstacle_friction_field_overrides_collider_material() {
+        use crate::scene::{parse_scene_asset, ObstacleBodyType};
+        use rne_physics::{Collider, PhysicsMaterial};
+
+        let text = r#"
+[[obstacles]]
+name = "slick_cube"
+translation_m = [0.5, 0.4, 0.0]
+half_extents_m = [0.03, 0.03, 0.03]
+body_type = "dynamic"
+mass_kg = 0.05
+friction = 0.02
+"#;
+        let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
+        assert_eq!(scene.obstacles[0].body_type, ObstacleBodyType::Dynamic);
+        assert_eq!(scene.obstacles[0].friction, Some(0.02));
+
+        let mut world = World::new();
+        let entity = super::spawn_scene_obstacle(&mut world, &scene.obstacles[0]);
+        let collider = world.get::<Collider>(entity).expect("collider");
+        assert!((collider.material.friction - 0.02).abs() < f32::EPSILON);
+
+        // An obstacle with no `friction` key keeps the engine default.
+        let default_text = r#"
+[[obstacles]]
+name = "plain_cube"
+translation_m = [0.0, 0.4, 0.0]
+half_extents_m = [0.03, 0.03, 0.03]
+"#;
+        let default_scene = parse_scene_asset(default_text, Path::new("scene.toml")).unwrap();
+        assert_eq!(default_scene.obstacles[0].friction, None);
+        let default_entity = super::spawn_scene_obstacle(&mut world, &default_scene.obstacles[0]);
+        let default_collider = world.get::<Collider>(default_entity).expect("collider");
+        assert!(
+            (default_collider.material.friction - PhysicsMaterial::default().friction).abs()
+                < f32::EPSILON
+        );
     }
 
     #[test]
