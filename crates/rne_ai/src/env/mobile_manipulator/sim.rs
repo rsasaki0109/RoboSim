@@ -311,12 +311,34 @@ const LIFT_TARGET_MAX_M: f64 = 0.5;
 /// Constraint solver iterations for the lift robot's world. Its tall jointed chain
 /// swings chaotically at Rapier's default (4); 16 holds the arm stable.
 const LIFT_SOLVER_ITERATIONS: usize = 16;
-/// Position stiffness/damping for the lift robot's arm revolute joints. A plain
+/// Position stiffness/damping for the arm revolute joints while a velocity command
+/// is integrating (all robots), and at all times on the fixed-base robots. A plain
 /// velocity motor (gain 1.0) is too weak to move or hold the heavy arm, so the arm
 /// joints are position (spring-damper) motors that drive to a commanded angle and
-/// hold it. Stable now that the column geometry settles the arm straight.
+/// hold it. Stable now that the column geometry settles the arm straight. On the
+/// mobile robot an UNCOMMANDED joint switches to the much stiffer
+/// [`MOBILE_ARM_HOLD_STIFFNESS`] hold instead (see `arm_motor_constants`).
 const ARM_MOTOR_STIFFNESS: f64 = 400.0;
 const ARM_MOTOR_DAMPING: f64 = 60.0;
+/// Extra-stiff position hold for the MOBILE robot's shoulder/elbow while a joint
+/// has no velocity command (`mm_mobile` only; see `arm_motor_constants`).
+/// At the tracking stiffness of 400 a base yaw turn back-drives the held arm by
+/// up to ~0.30 rad (measured by `mobile_base_motion_barely_back_drives_held_arm`):
+/// like the fingers (see [`FINGER_MOTOR_STIFFNESS`]), the motor spring's torque
+/// scales with the joint's effective angular inertia, and the base's yaw
+/// acceleration couples the full inertia of the outboard arm chain into the
+/// joint, so 400 in acceleration units is far too soft to resist it — the
+/// swinging arm bulldozed tabletop objects during driving approaches. 4000
+/// holds the same disturbance to under 0.04 rad; pushing further (8000) makes
+/// the sway WORSE because the restoring torque saturates the
+/// [`ARM_MOTOR_MAX_FORCE`] cap and the overdriven spring rings against it.
+/// Applied only at zero command so every velocity-commanded trajectory (and
+/// every fixed-base robot, which has no base motion to back-drive its arm)
+/// keeps the original 400/60 tracking dynamics it was tuned against.
+const MOBILE_ARM_HOLD_STIFFNESS: f64 = 4000.0;
+/// Damping for [`MOBILE_ARM_HOLD_STIFFNESS`] (≈ critical in acceleration
+/// units: 2·√4000 ≈ 126).
+const MOBILE_ARM_HOLD_DAMPING: f64 = 127.0;
 /// Extra stiffness when writing absolute lift-arm joint targets (direct IK hold).
 const ARM_DIRECT_TARGET_STIFFNESS: f64 = 1200.0;
 const ARM_DIRECT_TARGET_DAMPING: f64 = 100.0;
@@ -1493,8 +1515,9 @@ impl MobileManipulatorSim {
                     let is_finger =
                         joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
                     if !is_finger {
-                        motor.stiffness = ARM_MOTOR_STIFFNESS;
-                        motor.gain = ARM_MOTOR_DAMPING;
+                        let (stiffness, damping) = arm_motor_constants(self.mobile_base, velocity);
+                        motor.stiffness = stiffness;
+                        motor.gain = damping;
                     }
                     let mut target = (motor.target_position + velocity * dt_s)
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
@@ -1671,8 +1694,11 @@ impl MobileManipulatorSim {
             let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) else {
                 continue;
             };
-            motor.stiffness = ARM_MOTOR_STIFFNESS;
-            motor.gain = ARM_MOTOR_DAMPING;
+            // Initial state is an uncommanded hold; `apply_action` re-selects the
+            // constants every step from the live per-joint command.
+            let (stiffness, damping) = arm_motor_constants(self.mobile_base, 0.0);
+            motor.stiffness = stiffness;
+            motor.gain = damping;
             motor.target_position = 0.0;
             motor.max_force = ARM_MOTOR_MAX_FORCE;
         }
@@ -1857,6 +1883,20 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
 
 fn z_rotation_rad(rotation: Quat) -> f64 {
     2.0 * f64::atan2(rotation.z, rotation.w)
+}
+
+/// Selects the position-motor spring constants for a shoulder/elbow joint from the
+/// robot kind and the joint's current velocity command: the mobile robot's arm gets
+/// the extra-stiff [`MOBILE_ARM_HOLD_STIFFNESS`] hold while uncommanded (so base
+/// motion cannot back-drive the held pose — see that constant's doc comment), and
+/// every commanded move (and every fixed-base robot, whose arm nothing back-drives)
+/// keeps the original [`ARM_MOTOR_STIFFNESS`] tracking dynamics.
+fn arm_motor_constants(mobile_base: bool, velocity_command: f64) -> (f64, f64) {
+    if mobile_base && velocity_command == 0.0 {
+        (MOBILE_ARM_HOLD_STIFFNESS, MOBILE_ARM_HOLD_DAMPING)
+    } else {
+        (ARM_MOTOR_STIFFNESS, ARM_MOTOR_DAMPING)
+    }
 }
 
 /// Cubic ease-in/ease-out over `[0, 1]`, clamped at the ends. Used to animate the
@@ -2243,6 +2283,73 @@ mod tests {
         assert!(
             yaw_end > yaw_start + 0.2,
             "positive twist yaw rate increases observed base yaw in sim, start={yaw_start:.3} end={yaw_end:.3}"
+        );
+    }
+
+    /// Runs `steps` ticks of the given base-only action (zero arm command) on a
+    /// settled `mm_mobile` and returns the largest deviation of the shoulder or
+    /// elbow joint from its settled hold angle (rad).
+    fn held_arm_max_deviation_rad(
+        action_for_step: impl Fn(u64) -> MobileManipulatorAction,
+        steps: u64,
+    ) -> f64 {
+        let mut sim = MobileManipulatorSim::new_mm_mobile();
+        for _ in 0..80 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        let settled = sim.observe();
+        let mut max_deviation_rad = 0.0_f64;
+        for step in 0..steps {
+            let obs = sim.step(action_for_step(step));
+            max_deviation_rad = max_deviation_rad
+                .max((obs.shoulder_position_rad - settled.shoulder_position_rad).abs())
+                .max((obs.elbow_position_rad - settled.elbow_position_rad).abs());
+        }
+        max_deviation_rad
+    }
+
+    /// Guards the mobile arm's stiff position hold (see
+    /// [`MOBILE_ARM_HOLD_STIFFNESS`]): base motion alone must not back-drive the
+    /// uncommanded shoulder/elbow. At the old shared 400/60 spring constants a
+    /// pure yaw turn back-drove the held joints by up to ~0.30 rad (and a
+    /// driving turn by ~0.15 rad), and the swinging arm bulldozed tabletop
+    /// objects during approaches (see example 32's
+    /// `MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M`). The stiff hold measures ~0.034
+    /// rad on both maneuvers; 0.08 leaves >2x headroom without letting the old
+    /// failure mode anywhere near back in.
+    #[test]
+    fn mobile_base_motion_barely_back_drives_held_arm() {
+        const MAX_HELD_ARM_DEVIATION_RAD: f64 = 0.08;
+
+        // Pure in-place yaw turn.
+        let pure_yaw_deviation_rad = held_arm_max_deviation_rad(
+            |_| MobileManipulatorAction {
+                left_wheel_velocity_rad_s: -1.0,
+                right_wheel_velocity_rad_s: 1.0,
+                ..MobileManipulatorAction::default()
+            },
+            240,
+        );
+        assert!(
+            pure_yaw_deviation_rad < MAX_HELD_ARM_DEVIATION_RAD,
+            "base yaw turn back-drove the held arm: max deviation {pure_yaw_deviation_rad:.3} rad"
+        );
+
+        // Forward drive with a sustained turn, like the hero pick approach.
+        let drive_turn_deviation_rad = held_arm_max_deviation_rad(
+            |_| {
+                let (left, right) = crate::mm_mobile_twist_to_wheel_velocities(0.4, 0.6);
+                MobileManipulatorAction {
+                    left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),
+                    right_wheel_velocity_rad_s: right.clamp(-3.0, 3.0),
+                    ..MobileManipulatorAction::default()
+                }
+            },
+            240,
+        );
+        assert!(
+            drive_turn_deviation_rad < MAX_HELD_ARM_DEVIATION_RAD,
+            "driving turn back-drove the held arm: max deviation {drive_turn_deviation_rad:.3} rad"
         );
     }
 

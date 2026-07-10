@@ -6,6 +6,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **`mm_mobile` arm servo sway**: base motion alone (a yaw turn, or a driving
+  turn like the hero pick approach) back-drove the uncommanded shoulder/elbow
+  position hold by up to ~0.30 rad — the base's yaw acceleration couples the
+  outboard arm chain's full inertia into the joints, and the shared 400/60
+  spring constants (tuned for command tracking) are far too soft to resist it,
+  so the swinging arm bulldozed tabletop objects during driving approaches.
+  The mobile robot's shoulder/elbow now switch to a near-critically-damped
+  4000/127 position hold while uncommanded (velocity-commanded moves, and the
+  fixed-base robots, keep the original tracking dynamics), cutting the
+  back-drive to ~0.034 rad. The hero rollout's pre-grasp cube nudge and its
+  regression bound tighten accordingly.
+
 - **README hero capture**: the hero GIF's task cube was a render-only decoration
   keyframe-lerped into the gripper at a hardcoded step — it visibly flew ~1.5 m
   through the air into a gripper that never approached it, and slid ~0.74 m back

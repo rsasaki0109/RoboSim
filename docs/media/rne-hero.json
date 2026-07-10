@@ -1,6 +1,6 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 2487345,
+  "byte_size": 2356166,
   "encode": {
     "animation_frames": 100,
     "bayer_scale": 4,
@@ -27,54 +27,54 @@
   ],
   "policy_steps": 2800,
   "poster_path": "rne-hero.png",
-  "poster_policy_step": 1200,
+  "poster_policy_step": 800,
   "schema_version": 2,
   "settle_steps": 120,
-  "sha256": "sha256:4a062e91a33b78fede508944cefff616f8b2d2023a554384cfcd2c0ccb79f341",
+  "sha256": "sha256:6c77fa79b2ac2950fe6969ec31848b610c69d602140cca912d04a0e9396b8258",
   "simulation": {
     "animation_frame_count": 100,
-    "base_travel_m": 2.430745,
-    "ee_travel_m": 2.606157,
+    "base_travel_m": 2.385024,
+    "ee_travel_m": 2.524434,
     "final_base_m": [
-      1.835769,
+      1.797396,
       0.25,
-      -1.593259
+      -1.567706
     ],
     "final_ee_m": [
-      2.213814,
-      0.400031,
-      -1.920456
+      2.180631,
+      0.400065,
+      -1.889022
     ],
-    "final_ee_target_error_m": 0.010278,
+    "final_ee_target_error_m": 0.000376,
     "final_object_m": [
-      2.525632,
+      2.533036,
       0.333723,
-      -2.303649
+      -2.275172
     ],
-    "final_object_place_error_m": 0.061919,
-    "first_last_frame_delta_ratio": 0.384301,
-    "grasped_steps": 1089,
+    "final_object_place_error_m": 0.091042,
+    "first_last_frame_delta_ratio": 0.386749,
+    "grasped_steps": 978,
     "hold_frame_count": 10,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
     "max_final_object_place_error_m": 0.2,
     "max_hold_frame_delta_ratio": 0.0,
     "max_hold_frame_delta_ratio_threshold": 0.02,
-    "max_post_release_slide_m": 0.02033,
+    "max_post_release_slide_m": 0.012751,
     "max_post_release_slide_m_threshold": 0.15,
-    "max_pre_grasp_object_displacement_m": 0.181452,
-    "max_pre_grasp_object_displacement_m_threshold": 0.2,
+    "max_pre_grasp_object_displacement_m": 0.064088,
+    "max_pre_grasp_object_displacement_m_threshold": 0.13,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.006949,
+    "min_consecutive_frame_delta_ratio": 0.005786,
     "min_consecutive_frame_delta_ratio_threshold": 0.0025,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,
     "min_object_transport_m": 0.9,
-    "object_transport_m": 2.447645,
-    "poster_policy_step": 1200,
+    "object_transport_m": 2.423398,
+    "poster_policy_step": 800,
     "released_after_grasp": true,
-    "trajectory_digest": "0xa048e09d313b174c"
+    "trajectory_digest": "0xf56e837aa18c94c0"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
