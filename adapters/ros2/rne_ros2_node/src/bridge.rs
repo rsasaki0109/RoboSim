@@ -606,7 +606,7 @@ fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> ArmTr
     let (Some(shoulder_idx), Some(elbow_idx)) = (shoulder_idx, elbow_idx) else {
         return ArmTrajectoryCommand::Empty;
     };
-    let waypoints = msg
+    let waypoints: Vec<(f64, f64)> = msg
         .points
         .iter()
         .filter_map(|point| {
