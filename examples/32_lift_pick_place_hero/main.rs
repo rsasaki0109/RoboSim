@@ -96,10 +96,14 @@ const PLACE_TARGET_M: Vec3 = Vec3::new(2.50, 0.335, -2.36);
 /// from the tray-center target: steering directly at the tray center would
 /// land the cube short of it.
 const HERO_CARRY_AIM_M: Vec3 = Vec3::new(2.59, 0.385, -2.28);
-const POSTER_POLICY_STEP: usize = 1200;
+/// Policy step the reduced-motion poster PNG is rendered at. Chosen mid-carry
+/// (roughly halfway between the grasp at ~step 311 and the release at ~step
+/// 1289) so the still shows the cube clearly held in the gripper; later steps
+/// park the robot at the tray with the cube hidden behind the goal marker.
+const POSTER_POLICY_STEP: usize = 800;
 const MIN_OBJECT_TRANSPORT_M: f64 = 0.9;
 /// Maximum 3D distance from the task cube's final resting pose to
-/// [`PLACE_TARGET_M`] (m). Measured 0.062 m on the deterministic rollout
+/// [`PLACE_TARGET_M`] (m). Measured 0.091 m on the deterministic rollout
 /// (the release gate drops the cube directly over the tray and it slides
 /// under 0.05 m — see [`MAX_POST_RELEASE_SLIDE_M`]).
 const MAX_FINAL_OBJECT_PLACE_ERROR_M: f64 = 0.20;

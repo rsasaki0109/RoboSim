@@ -321,7 +321,7 @@ const LIFT_SOLVER_ITERATIONS: usize = 16;
 const ARM_MOTOR_STIFFNESS: f64 = 400.0;
 const ARM_MOTOR_DAMPING: f64 = 60.0;
 /// Extra-stiff position hold for the MOBILE robot's shoulder/elbow while a joint
-/// has no velocity command (`mm_mobile` only; see `arm_hold_motor_constants`).
+/// has no velocity command (`mm_mobile` only; see `arm_motor_constants`).
 /// At the tracking stiffness of 400 a base yaw turn back-drives the held arm by
 /// up to ~0.30 rad (measured by `mobile_base_motion_barely_back_drives_held_arm`):
 /// like the fingers (see [`FINGER_MOTOR_STIFFNESS`]), the motor spring's torque
