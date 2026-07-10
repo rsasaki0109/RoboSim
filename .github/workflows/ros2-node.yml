@@ -54,7 +54,8 @@ jobs:
           sudo apt-get install -y \
             ros-jazzy-rosidl-generator-rs \
             ros-jazzy-test-msgs \
-            ros-jazzy-rclpy
+            ros-jazzy-rclpy \
+            ros-jazzy-simulation-interfaces
 
       - name: Smoke test rne_ros2_node
         run: ./adapters/ros2/rne_ros2_node/smoke_test.sh
