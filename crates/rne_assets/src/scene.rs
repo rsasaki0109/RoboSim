@@ -40,6 +40,15 @@ pub struct SceneObstacleAsset {
     /// Mass in kilograms when `body_type = "dynamic"`.
     #[serde(default = "default_obstacle_mass_kg")]
     pub mass_kg: f64,
+    /// Coulomb friction coefficient of the obstacle's collider surface.
+    ///
+    /// When unset, the spawned collider keeps the engine's default material
+    /// friction (see [`rne_physics::PhysicsMaterial`]). Lets a scene author
+    /// dial down friction on a specific object (e.g. to test that a
+    /// friction-based grasp actually slips on a low-friction surface) without
+    /// touching every other obstacle in the scene.
+    #[serde(default)]
+    pub friction: Option<f32>,
 }
 
 /// Obstacle rigid-body type for scene spawn.

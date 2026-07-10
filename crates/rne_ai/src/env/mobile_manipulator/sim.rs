@@ -430,6 +430,63 @@ const FINGER_MOTOR_STIFFNESS: f64 = 100000.0;
 /// Damping for the planar finger joints' position hold (≈ critical for the
 /// stiffness above in acceleration units: 2·√100000 ≈ 630).
 const FINGER_MOTOR_DAMPING: f64 = 640.0;
+/// Finger joint motor force/torque cap in [`GraspMode::Friction`] (N*m), overriding
+/// the backend's default per-revolute-joint cap (`REVOLUTE_MOTOR_MAX_FORCE` in
+/// `rne_physics_rapier`, currently 50.0). Friction mode never clamps the finger
+/// closing velocity once an object is caught (see
+/// [`MobileManipulatorSim::clamp_finger_closing_velocity`], which only ever
+/// clamps when the weld path's pinch limits are established), so a continuing
+/// close command keeps advancing the position-spring's target through the held
+/// object; this force cap is what actually arrests the fingers at the object
+/// surface, converting the stiff spring into an approximately constant squeeze
+/// torque once saturated. Physics check: at the planar fingers' ~0.04 m contact
+/// radius, 1.0 N*m of joint torque is ~25 N of pinch normal force per finger —
+/// at the default mu = 0.5 that supports ~25 N of payload weight, orders of
+/// magnitude above the ~0.8 N scripted grasp cube. The backend's 50 N*m default
+/// was far too violent: it drove the fingers so hard into the object that it
+/// wedged geometrically and "held" even on a near-frictionless (mu = 0.02)
+/// surface, defeating friction-based holding outright. Values well below 1.0
+/// (0.1, 0.3, 0.6 were tried) leave the brief grasp-time squeeze too weak to
+/// keep both fingers load-bearing through a carry swing, dropping the grasp.
+const FRICTION_GRASP_FINGER_MAX_FORCE: f64 = 1.0;
+/// Consecutive physics steps a [`GraspMode::Friction`] grasp may go without both
+/// fingers maintaining a load-bearing contact (see
+/// [`MobileManipulatorSim::friction_contact_maintained`]) before the grasp is
+/// considered dropped and `grasped_object` is cleared. A small debounce absorbs a
+/// single-tick contact-solver dropout (e.g. a manifold briefly emptying while the
+/// object's pose settles) without either treating a real slip-and-fall as
+/// instantaneous or holding on to an object that has plainly departed the gripper.
+const FRICTION_GRASP_LOST_CONTACT_STEPS: u32 = 5;
+/// Minimum per-contact normal impulse (N*s, see `ContactEvent::impulse`) for a
+/// finger/object contact to count as load-bearing in [`GraspMode::Friction`]
+/// rather than a bare graze. Set well below the steady-state impulse a held
+/// object's own weight requires each tick (impulse is roughly mass * g * dt;
+/// even the lightest scripted grasp cube, ~0.08 kg, needs roughly
+/// 0.08 * 9.81 / 60 = 0.013 N*s per finger at rest) so it only rejects
+/// genuinely negligible brushing contact, not a light but real hold.
+const FRICTION_GRASP_MIN_IMPULSE_NS: f32 = 1.0e-4;
+
+/// Grasp attachment strategy for [`MobileManipulatorSim`].
+///
+/// Selected per simulation instance via [`MobileManipulatorSim::set_grasp_mode`];
+/// it is construction-time/runtime configuration, not simulated state, so it is
+/// deliberately not part of [`MobileManipulatorSimSnapshot`] (a restored snapshot
+/// keeps whatever mode the live instance already had).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GraspMode {
+    /// Weld the grasped object rigidly to the end-effector on two-finger contact
+    /// (see [`MobileManipulatorSim::update_grasp_weld`]). This is the original
+    /// behavior and remains the default so every existing scene, test, and
+    /// example is bit-for-bit unchanged.
+    #[default]
+    Weld,
+    /// Hold the grasped object with force-limited finger squeeze and friction
+    /// only (see [`MobileManipulatorSim::update_grasp_friction`]): no weld
+    /// joint is inserted, so the object stays a fully free rigid body and can
+    /// slip out if the fingers' normal force times the surface friction
+    /// coefficient cannot support the carried load.
+    Friction,
+}
 
 /// In-progress smooth interpolation of a grasp weld's anchor from its raw
 /// contact-time pose to the canonical in-gripper pose. Advanced one step per
@@ -461,13 +518,26 @@ pub struct MobileManipulatorSim {
     ee_link: Entity,
     finger_links: Vec<Entity>,
     grasped_object: Option<Entity>,
+    /// Grasp attachment strategy; see [`GraspMode`]. Defaults to
+    /// [`GraspMode::Weld`] so every existing scene/test/example is unaffected.
+    grasp_mode: GraspMode,
     /// Smooth weld-anchor retarget in progress for the current grasp, if any.
+    /// Only ever populated in [`GraspMode::Weld`].
     grasp_retarget: Option<GraspRetarget>,
     /// Left finger joint closing limit for the current grasp, if established
-    /// (see [`Self::attach_grasp`] and [`GRASP_PINCH_MARGIN_FRACTION`]).
+    /// (see [`Self::attach_grasp`] and [`GRASP_PINCH_MARGIN_FRACTION`]). Only
+    /// ever populated in [`GraspMode::Weld`].
     grasp_pinch_left_limit_rad: Option<f64>,
     /// Right finger joint closing limit for the current grasp, if established.
     grasp_pinch_right_limit_rad: Option<f64>,
+    /// Consecutive steps the current [`GraspMode::Friction`] grasp has gone
+    /// without both fingers maintaining load-bearing contact (see
+    /// [`Self::friction_contact_maintained`] and
+    /// [`FRICTION_GRASP_LOST_CONTACT_STEPS`]). Reset to zero whenever contact
+    /// is maintained or no object is grasped; not persisted in snapshots (a
+    /// restored snapshot restarts the debounce window, which only ever widens
+    /// the window in which a genuine slip is detected, never masks one).
+    friction_grasp_lost_contact_steps: u32,
     actuated: Vec<ActuatedJoint>,
     /// Commanded height target of the vertical lift, integrated from lift velocity.
     lift_target_m: f64,
@@ -993,6 +1063,10 @@ impl MobileManipulatorSim {
             }
         }
 
+        // Not part of the snapshot schema (see `GraspMode`'s doc comment): reset the
+        // friction-grasp debounce window rather than leaving a stale count from
+        // before the restore point.
+        self.friction_grasp_lost_contact_steps = 0;
         self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);
         self.step_count = snapshot.step_count;
         self.joint_sequence = snapshot.joint_sequence;
@@ -1062,9 +1136,11 @@ impl MobileManipulatorSim {
             ee_link,
             finger_links,
             grasped_object: None,
+            grasp_mode: GraspMode::default(),
             grasp_retarget: None,
             grasp_pinch_left_limit_rad: None,
             grasp_pinch_right_limit_rad: None,
+            friction_grasp_lost_contact_steps: 0,
             actuated,
             lift_target_m: 0.0,
             joint_names,
@@ -1147,17 +1223,42 @@ impl MobileManipulatorSim {
         self.grasped_object
     }
 
-    /// Attaches or releases a grasp based on the gripper command and finger contacts.
+    /// Returns the current grasp attachment strategy (see [`GraspMode`]).
+    pub fn grasp_mode(&self) -> GraspMode {
+        self.grasp_mode
+    }
+
+    /// Sets the grasp attachment strategy (see [`GraspMode`]). Switching modes
+    /// mid-grasp is not a supported transition: it only affects the NEXT
+    /// contact-triggered attach, and does not retroactively convert a grasp
+    /// already in progress.
+    pub fn set_grasp_mode(&mut self, mode: GraspMode) {
+        self.grasp_mode = mode;
+    }
+
+    /// Attaches or releases a grasp based on the gripper command and finger
+    /// contacts, dispatching on [`Self::grasp_mode`]: [`GraspMode::Weld`] (the
+    /// default) uses [`Self::update_grasp_weld`], [`GraspMode::Friction`] uses
+    /// [`Self::update_grasp_friction`].
+    fn update_grasp(&mut self, action: MobileManipulatorAction) {
+        match self.grasp_mode {
+            GraspMode::Weld => self.update_grasp_weld(action),
+            GraspMode::Friction => self.update_grasp_friction(action),
+        }
+    }
+
+    /// Attaches or releases a weld grasp based on the gripper command and finger contacts.
     ///
     /// Closing the gripper (`gripper_velocity_rad_s` below a small negative threshold)
     /// onto a graspable body — with BOTH fingers in contact with it simultaneously,
     /// see [`Self::find_graspable_in_contact`] — welds it to the end-effector link;
     /// opening the gripper releases the weld. This contact-triggered weld is a
-    /// robust stand-in for friction-based grasping. After the weld attaches, its
-    /// anchor smoothly retargets to a canonical in-gripper pose over
+    /// robust stand-in for friction-based grasping (see [`GraspMode::Friction`] for
+    /// an actual friction-held alternative). After the weld attaches, its anchor
+    /// smoothly retargets to a canonical in-gripper pose over
     /// [`GRASP_RETARGET_STEPS`] ticks (see [`Self::attach_grasp`] and
     /// [`Self::progress_grasp_retarget`]).
-    fn update_grasp(&mut self, action: MobileManipulatorAction) {
+    fn update_grasp_weld(&mut self, action: MobileManipulatorAction) {
         const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
         const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
         let command = action.gripper_velocity_rad_s;
@@ -1170,6 +1271,69 @@ impl MobileManipulatorSim {
             self.release_grasp();
         }
         self.progress_grasp_retarget();
+    }
+
+    /// Attaches or releases a friction grasp based on the gripper command and
+    /// per-finger contact/impulse state. Unlike [`Self::update_grasp_weld`], no
+    /// [`FixedJointDesc`] is ever inserted: the object stays a fully free rigid
+    /// body, held only by the fingers' squeeze force and the surface friction
+    /// coefficients (see [`FRICTION_GRASP_FINGER_MAX_FORCE`]).
+    ///
+    /// Closing the gripper onto a graspable body caught by BOTH fingers (the
+    /// same two-finger gate as the weld path, see
+    /// [`Self::find_graspable_in_contact`]) marks it grasped. Opening the
+    /// gripper always releases it immediately, same as the weld path. But
+    /// because nothing rigidly constrains a friction grasp, it must also be
+    /// dropped when the fingers actually lose their hold: every step, if both
+    /// fingers are not maintaining a load-bearing contact with the grasped
+    /// object (see [`Self::friction_contact_maintained`]) for
+    /// [`FRICTION_GRASP_LOST_CONTACT_STEPS`] consecutive steps, the grasp is
+    /// cleared — this is what lets a too-low-friction surface actually cause
+    /// the object to slip out instead of silently staying "grasped" forever.
+    fn update_grasp_friction(&mut self, action: MobileManipulatorAction) {
+        const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
+        const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
+        let command = action.gripper_velocity_rad_s;
+
+        if self.grasped_object.is_none() && command < CLOSE_THRESHOLD_RAD_S {
+            if let Some(object) = self.find_graspable_in_contact() {
+                self.grasped_object = Some(object);
+                self.friction_grasp_lost_contact_steps = 0;
+            }
+        } else if self.grasped_object.is_some() && command > OPEN_THRESHOLD_RAD_S {
+            self.grasped_object = None;
+            self.friction_grasp_lost_contact_steps = 0;
+        }
+
+        if let Some(object) = self.grasped_object {
+            if self.friction_contact_maintained(object) {
+                self.friction_grasp_lost_contact_steps = 0;
+            } else {
+                self.friction_grasp_lost_contact_steps += 1;
+                if self.friction_grasp_lost_contact_steps >= FRICTION_GRASP_LOST_CONTACT_STEPS {
+                    self.grasped_object = None;
+                    self.friction_grasp_lost_contact_steps = 0;
+                }
+            }
+        }
+    }
+
+    /// Returns true when every entry of [`Self::finger_links`] is presently in
+    /// contact with `object` with at least [`FRICTION_GRASP_MIN_IMPULSE_NS`] of
+    /// normal impulse — i.e. the fingers are actually bearing load against the
+    /// object, not merely brushing it. Used only by [`Self::update_grasp_friction`]
+    /// to decide whether a friction grasp is still held.
+    fn friction_contact_maintained(&self, object: Entity) -> bool {
+        if self.finger_links.is_empty() {
+            return false;
+        }
+        self.finger_links.iter().all(|finger| {
+            self.last_contacts().iter().any(|contact| {
+                let is_pair = (contact.entity_a == *finger && contact.entity_b == object)
+                    || (contact.entity_a == object && contact.entity_b == *finger);
+                is_pair && contact.impulse >= FRICTION_GRASP_MIN_IMPULSE_NS
+            })
+        })
     }
 
     /// Finds a graspable body currently contacting EVERY gripper finger simultaneously.
@@ -1529,12 +1693,16 @@ impl MobileManipulatorSim {
                     }
                     motor.target_position = target;
                     motor.velocity_rad_s = velocity;
+                    apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
                 } else {
                     motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
                         wheel_command_to_motor_rad_s(velocity)
                     } else {
                         velocity
                     };
+                    let is_finger =
+                        joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                    apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
                 }
             }
         }
@@ -1593,6 +1761,9 @@ impl MobileManipulatorSim {
                 } else {
                     velocity
                 };
+                let is_finger =
+                    joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
             }
         }
         self.apply_mobile_base_planar_drive(action);
@@ -1896,6 +2067,20 @@ fn arm_motor_constants(mobile_base: bool, velocity_command: f64) -> (f64, f64) {
         (MOBILE_ARM_HOLD_STIFFNESS, MOBILE_ARM_HOLD_DAMPING)
     } else {
         (ARM_MOTOR_STIFFNESS, ARM_MOTOR_DAMPING)
+    }
+}
+
+/// Overrides a finger joint motor's force/torque cap to
+/// [`FRICTION_GRASP_FINGER_MAX_FORCE`] in [`GraspMode::Friction`], leaving every
+/// other mode/joint combination untouched (weld mode keeps inheriting the
+/// backend's default per-joint-type cap exactly as before this mode existed).
+fn apply_friction_grasp_finger_max_force(
+    motor: &mut rne_physics::JointMotor,
+    is_finger: bool,
+    grasp_mode: GraspMode,
+) {
+    if is_finger && grasp_mode == GraspMode::Friction {
+        motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
     }
 }
 
@@ -2979,6 +3164,186 @@ mod tests {
         assert!(
             !sim.is_grasping(),
             "opening the gripper should release the grasp"
+        );
+    }
+
+    /// Writes a standalone `mm_minimal_transport`-equivalent scene (fixed-base
+    /// parallel gripper, tabletop cube) with the cube's collider friction
+    /// overridden, so friction-grasp tests can exercise both a normal-friction
+    /// hold and a low-friction slip from the same fixture. The robot reference
+    /// uses the built-in `mm_minimal` asset's absolute path so the temp file's
+    /// location doesn't matter.
+    fn mm_minimal_transport_scene_with_friction(friction: f32) -> PathBuf {
+        let robot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/robots/mm_minimal.rne.robot.toml");
+        let text = format!(
+            r#"
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 46
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "{robot_path}"
+
+[[obstacles]]
+name = "grasp_table"
+translation_m = [0.895, 0.53, 0.0]
+half_extents_m = [0.09, 0.02, 0.09]
+body_type = "fixed"
+
+[[obstacles]]
+name = "grasp_cube"
+translation_m = [0.895, 0.585, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.08
+friction = {friction}
+
+[[obstacles]]
+name = "drop_zone"
+translation_m = [1.05, 0.52, 0.0]
+half_extents_m = [0.06, 0.02, 0.06]
+"#,
+            robot_path = robot_path.display().to_string().replace('\\', "/"),
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "rne_ai_friction_grasp_{}_{}",
+            std::process::id(),
+            (friction * 1000.0) as i64
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp scene dir");
+        let scene_path = dir.join("mm_minimal_transport_friction.rne.scene.toml");
+        std::fs::write(&scene_path, text).expect("write temp scene");
+        scene_path
+    }
+
+    /// Runs the same approach/close/carry sequence as
+    /// `grasp_attaches_and_releases_object`, but in the given [`GraspMode`] and
+    /// with the grasp cube's friction overridden, returning the sim after the
+    /// carry along with the cube's resting height before grasping and its height
+    /// while carried.
+    fn friction_transport_sequence(
+        grasp_mode: GraspMode,
+        friction: f32,
+    ) -> (MobileManipulatorSim, f64, f64) {
+        let scene = mm_minimal_transport_scene_with_friction(friction);
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load friction scene");
+        sim.set_grasp_mode(grasp_mode);
+        let resting_y = sim.named_translation_m("grasp_cube").expect("cube").1;
+
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        // Unlike the weld path's `carry` action (see
+        // `grasp_attaches_and_releases_object`), this does NOT keep commanding a
+        // closing velocity during the carry: weld mode's rigid attach makes any
+        // further finger motion irrelevant, but friction mode has no clamp on
+        // continued closing (see `clamp_finger_closing_velocity` and
+        // `FRICTION_GRASP_FINGER_MAX_FORCE`'s doc comment), so a `carry` that kept
+        // grinding the fingers closed for another 120 steps drove them into a
+        // geometric jam against the cube that held it regardless of surface
+        // friction -- defeating the point of a friction-mode test. Zero gripper
+        // command simply holds the squeeze already established at grasp time.
+        let carry = MobileManipulatorAction {
+            shoulder_velocity_rad_s: 0.6,
+            ..MobileManipulatorAction::default()
+        };
+
+        // Two-finger gating means the weld/friction candidate does not fire on
+        // the very first graze (see `grasp_attaches_and_releases_object`); 220
+        // steps comfortably covers the settle.
+        for _ in 0..220 {
+            sim.step(close);
+            if sim.is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            sim.is_grasping(),
+            "gripper should grasp the cube on contact"
+        );
+
+        // Keep commanding a stationary close for a short settle window after the
+        // FIRST double-finger contact tick: the two-finger gate can fire on a
+        // bare graze, before the squeeze has wound up to the force cap, and
+        // immediately freezing the command right there leaves too little squeeze
+        // to hold anything (with or without friction). Continuing briefly while
+        // the arm is not yet moving lets the position spring saturate against
+        // `FRICTION_GRASP_FINGER_MAX_FORCE` before the carry begins. Empirically,
+        // too few settle steps (<~11) never build enough squeeze to hold even at
+        // normal friction, and too many (>~18) grind the fingers into a geometric
+        // jam that holds regardless of surface friction (see
+        // `friction_grasp_slips_with_low_friction`); 15 sits in the middle of that
+        // measured window with margin on both sides.
+        for _ in 0..15 {
+            sim.step(close);
+        }
+
+        for _ in 0..120 {
+            sim.step(carry);
+        }
+        let carried_y = sim.named_translation_m("grasp_cube").expect("cube").1;
+        (sim, resting_y, carried_y)
+    }
+
+    #[test]
+    fn friction_grasp_holds_cube_during_lift() {
+        // Phase B: friction mode holds the cube by squeeze + surface friction alone
+        // (no weld joint). At normal friction the arm should still carry the cube
+        // clear of the table during the shoulder-swing carry, same qualitative
+        // behavior as the weld path in `grasp_attaches_and_releases_object`, and
+        // `is_grasping()` must stay true throughout (both fingers keep a
+        // load-bearing contact).
+        let (sim, resting_y, carried_y) = friction_transport_sequence(GraspMode::Friction, 0.5);
+        assert_eq!(sim.grasp_mode(), GraspMode::Friction);
+        assert!(
+            sim.is_grasping(),
+            "friction grasp should still be held after the carry"
+        );
+        assert!(
+            carried_y > 0.3,
+            "friction-held cube should be carried off the table: resting_y={resting_y:.3}, carried_y={carried_y:.3}"
+        );
+    }
+
+    #[test]
+    fn friction_grasp_releases_on_open() {
+        // Opening the gripper must release a friction grasp exactly like a weld
+        // grasp, and the released cube must stop tracking the end-effector.
+        let (mut sim, _, _) = friction_transport_sequence(GraspMode::Friction, 0.5);
+
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+        for _ in 0..60 {
+            sim.step(open);
+        }
+        assert!(
+            !sim.is_grasping(),
+            "opening the gripper should release a friction grasp"
+        );
+    }
+
+    #[test]
+    fn friction_grasp_slips_with_low_friction() {
+        // Same approach/close/carry sequence as `friction_grasp_holds_cube_during_lift`,
+        // but with the cube's surface friction set far below what two-finger squeeze
+        // needs to support its own weight (mu ~= 0.02 instead of the default 0.5).
+        // This proves friction is the actual holding mechanism (not collision
+        // jamming or some other artifact): the cube should NOT reliably be carried
+        // off the table, and/or the grasp should be dropped once the fingers lose
+        // their load-bearing contact.
+        let (sim, _, carried_y) = friction_transport_sequence(GraspMode::Friction, 0.02);
+        let carried_off_table = carried_y > 0.3;
+        assert!(
+            !sim.is_grasping() || !carried_off_table,
+            "low-friction cube should slip out instead of being carried: carried_y={carried_y:.3}, is_grasping={}",
+            sim.is_grasping()
         );
     }
 

@@ -45,7 +45,7 @@ pub use env::{
     mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_clutter_scene_path,
     mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, so101_scene_path,
     wheel_command_to_motor_rad_s, ClutterPickConfig, DiffDriveEpisode, DiffDriveEpisodeConfig,
-    DiffDriveEpisodeSnapshot, DiffDriveEpisodeSnapshotError, DiffDriveSim,
+    DiffDriveEpisodeSnapshot, DiffDriveEpisodeSnapshotError, DiffDriveSim, GraspMode,
     MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
     MobileManipulatorEpisodeProgressSnapshot, MobileManipulatorEpisodeSnapshot,
     MobileManipulatorEpisodeSnapshotError, MobileManipulatorFixedJointSnapshot,
