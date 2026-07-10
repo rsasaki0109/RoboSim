@@ -365,7 +365,9 @@ fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Ent
                 half_extents_m: vec3_from_array(obstacle.half_extents_m),
             },
             material: PhysicsMaterial {
-                friction: obstacle.friction.unwrap_or_else(|| PhysicsMaterial::default().friction),
+                friction: obstacle
+                    .friction
+                    .unwrap_or_else(|| PhysicsMaterial::default().friction),
                 ..PhysicsMaterial::default()
             },
             ..Collider::default()

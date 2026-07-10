@@ -17,11 +17,11 @@ pub use episode::{
 pub use sim::{
     mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_clutter_scene_path,
     mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
-    mm_mobile_clutter_scene_path, mm_mobile_scene_path, MobileManipulatorFixedJointSnapshot,
-    MobileManipulatorFrameSnapshot, MobileManipulatorJointMotorSnapshot,
-    MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
-    MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
-    MobileManipulatorTransformSnapshot,
+    mm_mobile_clutter_scene_path, mm_mobile_scene_path, GraspMode,
+    MobileManipulatorFixedJointSnapshot, MobileManipulatorFrameSnapshot,
+    MobileManipulatorJointMotorSnapshot, MobileManipulatorRigidBodySnapshot,
+    MobileManipulatorSensorStateSnapshot, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    MobileManipulatorSimSnapshotError, MobileManipulatorTransformSnapshot,
 };
 pub use vectorized::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
