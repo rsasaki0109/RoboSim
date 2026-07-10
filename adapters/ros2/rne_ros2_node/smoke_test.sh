@@ -264,8 +264,8 @@ LIFT_JOINT_WIDTH=$(
     | grep -c '_joint' \
     || true
 )
-if [[ "$LIFT_JOINT_WIDTH" -lt 6 ]]; then
-  echo "expected mm_lift /joint_states to include 6 joints, got count=${LIFT_JOINT_WIDTH}" >&2
+if [[ "$LIFT_JOINT_WIDTH" -lt 5 ]]; then
+  echo "expected mm_lift /joint_states to include 5 joints, got count=${LIFT_JOINT_WIDTH}" >&2
   exit 1
 fi
 

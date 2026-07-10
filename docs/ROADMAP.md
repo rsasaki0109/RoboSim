@@ -34,7 +34,7 @@ Three long-running pillars steer the next releases alongside the phased goals ab
 | Physics | Wire URDF prismatic joints to Rapier (carried-over architecture gap) |
 | Scene diversity | Domain randomization + curriculum over clutter layouts |
 | DevEx | Fix `xtask` `run_step` on Windows: `cmd /C` strips the leading quote of the venv python path, so the RL smoke stage's pip steps fail locally (Linux CI unaffected; reproduces on main) |
-| CI | ROS 2 jobs (`rne_ros2_node`, `rne_ros2_bridge`) are red on the runner: `simulation_interfaces` package missing from crates.io / the Python env — runner provisioning issue, predates v0.13 |
+| CI | ~~ROS 2 jobs (`rne_ros2_node`, `rne_ros2_bridge`) are red on the runner: `simulation_interfaces` package missing~~ **Done**: both workflows now apt-install `ros-jazzy-simulation-interfaces` (Python msgs for the bridge, `share/*/rust` crate patched in by `generate_cargo_config.sh` for the node) |
 
 ### Known platform notes (carried forward)
 

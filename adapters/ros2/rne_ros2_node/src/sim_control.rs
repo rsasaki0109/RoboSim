@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use rne_ai::{
-    DiffDriveObservation, DiffDriveSim, MobileManipulatorAction, MobileManipulatorObservation,
-    MobileManipulatorSim, MmLiftJointTarget,
+    DiffDriveObservation, DiffDriveSim, MmLiftJointTarget, MobileManipulatorAction,
+    MobileManipulatorObservation, MobileManipulatorSim,
 };
 use rne_data::{ImageRgb8, JointState, PointCloud};
 use rne_math::Vec3;
@@ -130,7 +130,10 @@ fn arm_velocity_toward(target: f64, current: f64) -> f64 {
     )
 }
 
-fn lift_arm_waypoint_reached(target: MmLiftJointTarget, obs: &MobileManipulatorObservation) -> bool {
+fn lift_arm_waypoint_reached(
+    target: MmLiftJointTarget,
+    obs: &MobileManipulatorObservation,
+) -> bool {
     (target.lift_m - obs.lift_position_m).abs() < LIFT_WAYPOINT_TOLERANCE_M
         && (target.shoulder_rad - obs.shoulder_position_rad).abs() < ARM_WAYPOINT_TOLERANCE_RAD
         && (target.elbow_rad - obs.elbow_position_rad).abs() < ARM_WAYPOINT_TOLERANCE_RAD
@@ -145,11 +148,6 @@ pub struct BridgeSim {
 }
 
 impl BridgeSim {
-    /// Creates a bridge simulation in the playing state.
-    pub fn new() -> Self {
-        Self::with_mode(bridge_mode_from_env())
-    }
-
     /// Creates a bridge simulation for an explicit backend mode.
     pub fn with_mode(mode: BridgeMode) -> Self {
         let backend = match mode {
@@ -183,14 +181,10 @@ impl BridgeSim {
             }
             BridgeMode::MmLift => {
                 let scene_path = default_mm_lift_scene_path();
-                let mut sim = MobileManipulatorSim::from_scene_path(&scene_path).unwrap_or_else(
-                    |err| {
-                        panic!(
-                            "load ROS 2 mm_lift scene {}: {err}",
-                            scene_path.display()
-                        )
-                    },
-                );
+                let mut sim =
+                    MobileManipulatorSim::from_scene_path(&scene_path).unwrap_or_else(|err| {
+                        panic!("load ROS 2 mm_lift scene {}: {err}", scene_path.display())
+                    });
                 let obs = sim.reset();
                 SimBackend::MobileManipulator {
                     sim,
@@ -328,32 +322,6 @@ impl BridgeSim {
         lift_arm_trajectory.clear();
     }
 
-    fn clear_revolute_arm_targets(backend: &mut SimBackend) {
-        let SimBackend::MobileManipulator {
-            arm_target,
-            arm_trajectory,
-            ..
-        } = backend
-        else {
-            return;
-        };
-        *arm_target = None;
-        arm_trajectory.clear();
-    }
-
-    fn clear_lift_arm_targets(backend: &mut SimBackend) {
-        let SimBackend::MobileManipulator {
-            lift_arm_target,
-            lift_arm_trajectory,
-            ..
-        } = backend
-        else {
-            return;
-        };
-        *lift_arm_target = None;
-        lift_arm_trajectory.clear();
-    }
-
     /// Applies arm joint velocity targets by joint name (mobile manipulator mode only).
     ///
     /// A velocity command cancels any active position target.
@@ -387,19 +355,6 @@ impl BridgeSim {
         let SimBackend::MobileManipulator {
             arm_target,
             arm_trajectory,
-            ..
-        } = &mut self.backend
-        else {
-            return;
-        };
-        Self::clear_lift_arm_targets(&mut self.backend);
-        *arm_target = Some((shoulder_position_rad, elbow_position_rad));
-        arm_trajectory.clear();
-    }
-
-    /// Sets lift + shoulder + elbow joint position targets on the `mm_lift` robot.
-    pub fn set_lift_arm_joint_positions(&mut self, target: MmLiftJointTarget) {
-        let SimBackend::MobileManipulator {
             lift_arm_target,
             lift_arm_trajectory,
             ..
@@ -407,7 +362,26 @@ impl BridgeSim {
         else {
             return;
         };
-        Self::clear_revolute_arm_targets(&mut self.backend);
+        *lift_arm_target = None;
+        lift_arm_trajectory.clear();
+        *arm_target = Some((shoulder_position_rad, elbow_position_rad));
+        arm_trajectory.clear();
+    }
+
+    /// Sets lift + shoulder + elbow joint position targets on the `mm_lift` robot.
+    pub fn set_lift_arm_joint_positions(&mut self, target: MmLiftJointTarget) {
+        let SimBackend::MobileManipulator {
+            arm_target,
+            arm_trajectory,
+            lift_arm_target,
+            lift_arm_trajectory,
+            ..
+        } = &mut self.backend
+        else {
+            return;
+        };
+        *arm_target = None;
+        arm_trajectory.clear();
         *lift_arm_target = Some(target);
         lift_arm_trajectory.clear();
     }
@@ -418,12 +392,15 @@ impl BridgeSim {
         let SimBackend::MobileManipulator {
             arm_target,
             arm_trajectory,
+            lift_arm_target,
+            lift_arm_trajectory,
             ..
         } = &mut self.backend
         else {
             return;
         };
-        Self::clear_lift_arm_targets(&mut self.backend);
+        *lift_arm_target = None;
+        lift_arm_trajectory.clear();
         let mut queue: std::collections::VecDeque<(f64, f64)> = waypoints.into();
         *arm_target = queue.pop_front();
         *arm_trajectory = queue;
@@ -432,6 +409,8 @@ impl BridgeSim {
     /// Queues lift + shoulder + elbow waypoints visited via direct position motors.
     pub fn set_lift_arm_trajectory(&mut self, waypoints: Vec<MmLiftJointTarget>) {
         let SimBackend::MobileManipulator {
+            arm_target,
+            arm_trajectory,
             lift_arm_target,
             lift_arm_trajectory,
             ..
@@ -439,7 +418,8 @@ impl BridgeSim {
         else {
             return;
         };
-        Self::clear_revolute_arm_targets(&mut self.backend);
+        *arm_target = None;
+        arm_trajectory.clear();
         let mut queue: std::collections::VecDeque<MmLiftJointTarget> = waypoints.into();
         *lift_arm_target = queue.pop_front();
         *lift_arm_trajectory = queue;
@@ -570,7 +550,7 @@ impl BridgeSim {
                     action.gripper_velocity_rad_s = command.gripper_velocity_rad_s;
                     *obs = sim.step(action);
 
-                    if lift_arm_waypoint_reached(*target, obs) {
+                    if lift_arm_waypoint_reached(target, obs) {
                         if let Some(next) = lift_arm_trajectory.pop_front() {
                             *lift_arm_target = Some(next);
                         }
@@ -710,14 +690,15 @@ mod tests {
     }
 
     #[test]
-    fn mobile_manipulator_publishes_four_joints() {
+    fn mobile_manipulator_publishes_wheel_arm_and_finger_joints() {
         let mut bridge = BridgeSim::with_mode(BridgeMode::MobileManipulator);
         bridge.step_if_playing(StepFallback {
             wheel_velocity_rad_s: 6.0,
             ..StepFallback::default()
         });
+        // mm_mobile actuates 2 wheels + shoulder + elbow + 2 gripper fingers.
         let frame = bridge.frame();
-        assert_eq!(frame.joint_state.names.len(), 4);
+        assert_eq!(frame.joint_state.names.len(), 6);
         assert!(frame
             .joint_state
             .names
@@ -729,10 +710,11 @@ mod tests {
     fn mm_lift_publishes_lift_and_arm_joints() {
         let mut bridge = BridgeSim::with_mode(BridgeMode::MmLift);
         bridge.step_if_playing(StepFallback::default());
+        // mm_lift actuates lift + shoulder + elbow + 2 gripper fingers.
         let snapshot = bridge.snapshot();
         assert!(snapshot.has_lift_joint);
         assert!(snapshot.has_shoulder_joint);
-        assert!(snapshot.joint_count >= 6);
+        assert!(snapshot.joint_count >= 5);
     }
 
     #[test]

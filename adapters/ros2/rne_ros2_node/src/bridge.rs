@@ -40,7 +40,8 @@ const MIN_FORWARD_X_M: f64 = 0.8;
 const MIN_LIDAR_HITS: usize = 8;
 const MIN_MOBILE_BASE_MOTION_M: f64 = 0.15;
 const MIN_MOBILE_JOINTS: usize = 4;
-const MIN_LIFT_JOINTS: usize = 6;
+/// mm_lift actuates lift + shoulder + elbow + 2 gripper fingers.
+const MIN_LIFT_JOINTS: usize = 5;
 const MIN_WRIST_CAMERA_PIXELS: usize = 64 * 48 * 4;
 
 /// Parsed `/arm_joint_trajectory` command for revolute or lift-arm chains.
@@ -505,16 +506,14 @@ fn register_manipulator_subscribers(
     let arm_joint_trajectory = node
         .create_subscription(
             "/arm_joint_trajectory",
-            move |msg: trajectory_msgs::msg::JointTrajectory| {
-                match arm_trajectory_from_msg(&msg) {
-                    ArmTrajectoryCommand::Revolute(waypoints) => {
-                        trajectory_bridge.with_sim(|sim| sim.set_arm_trajectory(waypoints));
-                    }
-                    ArmTrajectoryCommand::LiftArm(waypoints) => {
-                        trajectory_bridge.with_sim(|sim| sim.set_lift_arm_trajectory(waypoints));
-                    }
-                    ArmTrajectoryCommand::Empty => {}
+            move |msg: trajectory_msgs::msg::JointTrajectory| match arm_trajectory_from_msg(&msg) {
+                ArmTrajectoryCommand::Revolute(waypoints) => {
+                    trajectory_bridge.with_sim(|sim| sim.set_arm_trajectory(waypoints));
                 }
+                ArmTrajectoryCommand::LiftArm(waypoints) => {
+                    trajectory_bridge.with_sim(|sim| sim.set_lift_arm_trajectory(waypoints));
+                }
+                ArmTrajectoryCommand::Empty => {}
             },
         )
         .context("create /arm_joint_trajectory subscription")?;
@@ -557,7 +556,9 @@ fn arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<
 }
 
 /// Extracts lift + shoulder + elbow targets when all three joints are present.
-fn lift_arm_positions_from_joint_state(msg: &sensor_msgs::msg::JointState) -> Option<MmLiftJointTarget> {
+fn lift_arm_positions_from_joint_state(
+    msg: &sensor_msgs::msg::JointState,
+) -> Option<MmLiftJointTarget> {
     let mut lift_m = None;
     let mut shoulder_rad = None;
     let mut elbow_rad = None;
@@ -585,7 +586,7 @@ fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> ArmTr
     if let (Some(lift_idx), Some(shoulder_idx), Some(elbow_idx)) =
         (lift_idx, shoulder_idx, elbow_idx)
     {
-        let waypoints = msg
+        let waypoints: Vec<MmLiftJointTarget> = msg
             .points
             .iter()
             .filter_map(|point| {
@@ -606,7 +607,7 @@ fn arm_trajectory_from_msg(msg: &trajectory_msgs::msg::JointTrajectory) -> ArmTr
     let (Some(shoulder_idx), Some(elbow_idx)) = (shoulder_idx, elbow_idx) else {
         return ArmTrajectoryCommand::Empty;
     };
-    let waypoints = msg
+    let waypoints: Vec<(f64, f64)> = msg
         .points
         .iter()
         .filter_map(|point| {
