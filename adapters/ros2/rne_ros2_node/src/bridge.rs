@@ -40,7 +40,8 @@ const MIN_FORWARD_X_M: f64 = 0.8;
 const MIN_LIDAR_HITS: usize = 8;
 const MIN_MOBILE_BASE_MOTION_M: f64 = 0.15;
 const MIN_MOBILE_JOINTS: usize = 4;
-const MIN_LIFT_JOINTS: usize = 6;
+/// mm_lift actuates lift + shoulder + elbow + 2 gripper fingers.
+const MIN_LIFT_JOINTS: usize = 5;
 const MIN_WRIST_CAMERA_PIXELS: usize = 64 * 48 * 4;
 
 /// Parsed `/arm_joint_trajectory` command for revolute or lift-arm chains.

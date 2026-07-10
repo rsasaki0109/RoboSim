@@ -148,11 +148,6 @@ pub struct BridgeSim {
 }
 
 impl BridgeSim {
-    /// Creates a bridge simulation in the playing state.
-    pub fn new() -> Self {
-        Self::with_mode(bridge_mode_from_env())
-    }
-
     /// Creates a bridge simulation for an explicit backend mode.
     pub fn with_mode(mode: BridgeMode) -> Self {
         let backend = match mode {
@@ -695,14 +690,15 @@ mod tests {
     }
 
     #[test]
-    fn mobile_manipulator_publishes_four_joints() {
+    fn mobile_manipulator_publishes_wheel_arm_and_finger_joints() {
         let mut bridge = BridgeSim::with_mode(BridgeMode::MobileManipulator);
         bridge.step_if_playing(StepFallback {
             wheel_velocity_rad_s: 6.0,
             ..StepFallback::default()
         });
+        // mm_mobile actuates 2 wheels + shoulder + elbow + 2 gripper fingers.
         let frame = bridge.frame();
-        assert_eq!(frame.joint_state.names.len(), 4);
+        assert_eq!(frame.joint_state.names.len(), 6);
         assert!(frame
             .joint_state
             .names
@@ -714,10 +710,11 @@ mod tests {
     fn mm_lift_publishes_lift_and_arm_joints() {
         let mut bridge = BridgeSim::with_mode(BridgeMode::MmLift);
         bridge.step_if_playing(StepFallback::default());
+        // mm_lift actuates lift + shoulder + elbow + 2 gripper fingers.
         let snapshot = bridge.snapshot();
         assert!(snapshot.has_lift_joint);
         assert!(snapshot.has_shoulder_joint);
-        assert!(snapshot.joint_count >= 6);
+        assert!(snapshot.joint_count >= 5);
     }
 
     #[test]
