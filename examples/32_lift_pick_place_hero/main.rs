@@ -58,7 +58,7 @@ const MIN_BASE_TRAVEL_M: f64 = 0.20;
 const MIN_EE_TRAVEL_M: f64 = 0.15;
 /// Kept at or under 0.05 m: `xtask hero-media-check` rejects a looser
 /// threshold outright (an anti-threshold-creep meta-guard). The deterministic
-/// rollout measures 0.010 m against [`REACH_TARGET_M`], so this has 5x
+/// rollout measures 0.002 m against [`REACH_TARGET_M`], so this has ample
 /// headroom; a trajectory change that shifts the endpoint should re-measure
 /// `REACH_TARGET_M` rather than loosen this bound.
 const MAX_FINAL_EE_TARGET_ERROR_M: f64 = 0.05;
@@ -109,12 +109,14 @@ const MIN_GRASPED_STEPS: usize = 12;
 /// this rewrite fixes: the cube used to fly ~1.5 m through the air into the
 /// gripper because it was a render-only keyframe, not a physics body. Now that
 /// it is a real dynamic obstacle, it must not move at all until the two-finger
-/// weld actually grasps it — except for small jostles from the same arm sway
-/// noted above (an early, non-simultaneous finger contact can nudge the cube
-/// a few centimeters across the — deliberately oversized, see
-/// `hero_pick_table`'s scene comment — pick table before the two-finger gate
-/// catches a clean grasp); this is a real contact nudge, not a teleport.
-const MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M: f64 = 0.20;
+/// weld actually grasps it — except for the small real contact nudge of the
+/// closing fingers seating the cube into the pocket during the final creep
+/// (measured 0.064 m on the deterministic rollout; this bound keeps ~2x
+/// headroom). Before the mobile arm's stiff uncommanded position hold (see
+/// `MOBILE_ARM_HOLD_STIFFNESS` in `rne_ai::env::mobile_manipulator::sim`)
+/// the servo sway swept a single finger across the cube during the approach
+/// and shoved it up to 0.181 m; do not loosen this bound back toward that.
+const MAX_PRE_GRASP_OBJECT_DISPLACEMENT_M: f64 = 0.13;
 /// Maximum horizontal distance the task cube slides after release (m).
 /// Regression guard for the other half of the same bug: on release the old
 /// keyframed cube snapped/slid ~0.74 m back to the place target. A dropped
@@ -187,35 +189,37 @@ struct HeroSampleSegment {
 }
 
 // Dense sampling windows are sized from `--trace` output: the two-finger
-// grasp fires at policy step ~609, the observation-gated release fires at
-// ~1698 (the cube drops onto the tray and is fully settled by ~1850), and
-// `POLICY_STEPS` includes fallback budget past that (see
-// `HERO_CARRY_STEPS`).
+// grasp fires at policy step ~311 (the pocket-depth approach reaches the
+// cube much earlier now that the sway-damped arm no longer needs a long
+// hold-and-wait — see `HERO_APPROACH_HOLD_DISTANCE_M`), the
+// observation-gated release fires at ~1290 (the cube drops onto the tray
+// and is fully settled by ~1450), and `POLICY_STEPS` includes fallback
+// budget past that (see `HERO_CARRY_STEPS`).
 const HERO_SAMPLE_SEGMENTS: [HeroSampleSegment; 5] = [
     HeroSampleSegment {
         step_start: 0,
-        step_end: 500,
-        frame_count: 10,
+        step_end: 200,
+        frame_count: 6,
     },
     HeroSampleSegment {
-        step_start: 500,
-        step_end: 800,
+        step_start: 200,
+        step_end: 500,
         frame_count: 18,
     },
     HeroSampleSegment {
-        step_start: 800,
-        step_end: 1600,
+        step_start: 500,
+        step_end: 1150,
+        frame_count: 24,
+    },
+    HeroSampleSegment {
+        step_start: 1150,
+        step_end: 1500,
         frame_count: 26,
     },
     HeroSampleSegment {
-        step_start: 1600,
-        step_end: 1900,
-        frame_count: 26,
-    },
-    HeroSampleSegment {
-        step_start: 1900,
+        step_start: 1500,
         step_end: POLICY_STEPS,
-        frame_count: 20,
+        frame_count: 26,
     },
 ];
 
@@ -973,29 +977,30 @@ fn mix_digest_u64(digest: &mut u64, value: u64) {
 /// end-effector pose (from `--smoke` output) rather than [`PLACE_TARGET_M`]
 /// itself: the end-effector (the elbow pivot, not the gripper) never sits
 /// exactly at the place target even in a perfect run, and — per the note
-/// on [`MAX_FINAL_OBJECT_PLACE_ERROR_M`] — the arm's own sway means the
-/// exact final pose is this rollout's, not a value chosen in advance.
-const REACH_TARGET_M: Vec3 = Vec3::new(2.21, 0.40, -1.93);
+/// on [`MAX_FINAL_OBJECT_PLACE_ERROR_M`] — the exact final pose is this
+/// rollout's, not a value chosen in advance. Re-measured after the mobile
+/// arm's stiff uncommanded position hold (see `MOBILE_ARM_HOLD_STIFFNESS` in
+/// `rne_ai::env::mobile_manipulator::sim`) and the pocket-depth approach
+/// (see [`HERO_APPROACH_HOLD_DISTANCE_M`]) shifted the endpoint by ~0.05 m.
+const REACH_TARGET_M: Vec3 = Vec3::new(2.181, 0.400, -1.889);
 
-// Note on a real dynamics quirk this policy works around in several places
-// (see `HERO_APPROACH_HOLD_DISTANCE_M` and
-// `HERO_CARRY_STANDOFF_ARRIVAL_TOLERANCE_M`): the arm's shoulder/elbow
-// are held by a position spring/damper motor (see
-// `configure_arm_position_motors` in `rne_ai::env::mobile_manipulator::sim`)
-// that is never actuated by this policy, yet tracing a long straight-line
-// base approach at constant speed showed the actual joint angles swinging
-// by several tenths of a radian in a slow, non-decaying sway — present from
-// the very first driven step, i.e. excited by the base's own kinematic
-// motion rather than by turning or contact. Projected through the ~0.9 m
-// arm reach, that sway moves the gripper (and, once welded, the carried
-// object) by far more than the ~0.08 m finger pocket or the release
-// tolerance. An outer proportional velocity correction feeding the
-// shoulder/elbow back toward zero was tried and made the sway WORSE (it
-// interacts badly with the existing spring dynamics rather than damping
-// them), so instead of fighting the sway, both the approach and the carry
-// stop actively steering once close and let the sway itself carry the
-// gripper/object through the relevant contact or release gate — many
-// chances across sway cycles instead of one precise pass.
+// Note on a real dynamics quirk this policy HISTORICALLY worked around in
+// several places (see `HERO_APPROACH_HOLD_DISTANCE_M` and
+// `HERO_CARRY_STANDOFF_ARRIVAL_TOLERANCE_M`): the arm's shoulder/elbow are
+// held by a position spring/damper motor (see `configure_arm_position_motors`
+// in `rne_ai::env::mobile_manipulator::sim`) that is never actuated by this
+// policy, and at the old shared 400/60 spring constants the base's own motion
+// back-drove the held joints by several tenths of a radian in a slow,
+// non-decaying sway. Projected through the ~0.9 m arm reach, that sway moved
+// the gripper (and, once welded, the carried object) by far more than the
+// ~0.08 m finger pocket or the release tolerance, so the approach and carry
+// were built to stop steering early and let the sway itself carry the
+// gripper/object through the relevant gate. The sway is now damped at its
+// source — the mobile arm switches to a much stiffer position hold while
+// uncommanded (see `MOBILE_ARM_HOLD_STIFFNESS`), holding the joints to ~0.03
+// rad under the same maneuvers — so the approach drives to true pocket depth
+// (the firm gripper no longer sweeps across the cube) while the carry keeps
+// its stop-and-settle structure, which remains correct with a steadier arm.
 
 /// Base forward speed cap while approaching the pick object (m/s).
 const HERO_APPROACH_SPEED_M_S: f64 = 0.15;
@@ -1014,21 +1019,21 @@ const HERO_CLOSE_GRIPPER_DISTANCE_M: f64 = 0.12;
 /// Gripper-mount-to-object distance (m) below which the approach stops
 /// driving the base forward and just holds position while the fingers close.
 ///
-/// Wider than [`HERO_CLOSE_GRIPPER_DISTANCE_M`] on purpose: the arm's
-/// position-held shoulder/elbow servo does not sit perfectly still even with
-/// zero commanded velocity and a stationary base — it rings slowly (an
-/// underdamped several-tenths-of-a-radian sway measured while tracing a long
-/// straight-line approach at constant speed, present from the very first
-/// driven step, i.e. excited by the base's own kinematic translation, not by
-/// any rotation or contact event). That sway is large enough, relative to
-/// the ~0.08 m finger pocket, that a single fly-by pass through the object's
-/// position is a coin flip for whether both fingers happen to be
-/// symmetrically placed at that instant. Stopping the base with the gripper
-/// merely NEAR (not already touching) the object, then holding there for the
-/// rest of the approach budget, lets that same sway carry the gripper back
-/// and forth across the object's position many times while the fingers
-/// continuously re-attempt closing — many chances instead of one.
-const HERO_APPROACH_HOLD_DISTANCE_M: f64 = 0.18;
+/// Narrower than [`HERO_CLOSE_GRIPPER_DISTANCE_M`]: the mount box's half-depth
+/// (0.03 m) plus the 0.07 m cube's half-width is ~0.065 m, so holding at 0.07
+/// parks the cube fully inside the finger pocket with its near face at the
+/// mount, and the fingers (already closing since the 0.12 m gate) finish the
+/// two-sided pinch against a stationary target. This USED to be 0.18 m — the
+/// uncommanded shoulder/elbow servo swayed by several tenths of a radian under
+/// the base's own motion, so the approach parked the gripper NEAR the cube and
+/// let the sway sweep it back and forth across the pocket, taking many chances
+/// at a symmetric two-finger close instead of one. Now that the mobile arm's
+/// position hold is stiff while uncommanded (see `MOBILE_ARM_HOLD_STIFFNESS`
+/// in `rne_ai::env::mobile_manipulator::sim`), the gripper genuinely stays put
+/// (±0.02 rad traced over the whole approach), so parking 0.18 m out means the
+/// fingers never reach the cube at all; the firm arm makes the straight
+/// nose-on creep to pocket depth deterministic instead of a bulldozing risk.
+const HERO_APPROACH_HOLD_DISTANCE_M: f64 = 0.07;
 /// Parallel-gripper opening metric at rest; once closing has started (metric
 /// below this), keep issuing close even if a contact transient nudges the
 /// mount-to-object distance back above [`HERO_CLOSE_GRIPPER_DISTANCE_M`].
