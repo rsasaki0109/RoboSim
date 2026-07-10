@@ -4,6 +4,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **README hero capture**: the hero GIF's task cube was a render-only decoration
+  keyframe-lerped into the gripper at a hardcoded step — it visibly flew ~1.5 m
+  through the air into a gripper that never approached it, and slid ~0.74 m back
+  to the place target after release. The cube is now a real dynamic body in a new
+  `mm_mobile_hero` scene (physical pick table + place tray), picked by the actual
+  two-finger contact-gated grasp weld via an observation-gated approach → grasp →
+  retreat → carry → release policy, and dropped onto the tray by physics. New
+  smoke regression guards: pre-grasp object displacement, post-release slide,
+  real `is_grasping()` grasp duration.
+
 ## [0.13.0] - 2026-07-06
 
 ### Added

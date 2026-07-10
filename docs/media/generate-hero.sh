@@ -58,7 +58,7 @@ payload = {
     "source": {
         "kind": "wgpu_simulation",
         "generator": "examples/32_lift_pick_place_hero",
-        "scene": "assets/scenes/mm_mobile.rne.scene.toml",
+        "scene": "assets/scenes/mm_mobile_hero.rne.scene.toml",
         "policy": "MobilePickPlaceHeroPolicy",
         "physics": "MobileManipulatorSim/Rapier",
     },
@@ -80,8 +80,8 @@ payload = {
     "byte_size": gif["byte_size"],
     "sha256": gif["sha256"],
     "settle_steps": 120,
-    "policy_steps": 680,
-    "poster_policy_step": simulation.get("poster_policy_step", 355),
+    "policy_steps": 2800,
+    "poster_policy_step": simulation.get("poster_policy_step", 1200),
     "overlays": [
         "house_context",
         "base_path",

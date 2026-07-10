@@ -1,6 +1,6 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 2448745,
+  "byte_size": 2487345,
   "encode": {
     "animation_frames": 100,
     "bayer_scale": 4,
@@ -25,59 +25,63 @@
     "drop_tray",
     "drop_zone"
   ],
-  "policy_steps": 680,
+  "policy_steps": 2800,
   "poster_path": "rne-hero.png",
-  "poster_policy_step": 480,
+  "poster_policy_step": 1200,
   "schema_version": 2,
   "settle_steps": 120,
-  "sha256": "sha256:7a3011e071b40bc20dabbfe1b097efd781fcd1ce52270e9ab502d469c3fb9b0b",
+  "sha256": "sha256:4a062e91a33b78fede508944cefff616f8b2d2023a554384cfcd2c0ccb79f341",
   "simulation": {
     "animation_frame_count": 100,
-    "base_travel_m": 3.425542,
-    "ee_travel_m": 3.201515,
+    "base_travel_m": 2.430745,
+    "ee_travel_m": 2.606157,
     "final_base_m": [
-      2.957091,
+      1.835769,
       0.25,
-      -1.729147
+      -1.593259
     ],
     "final_ee_m": [
-      2.78546,
-      0.399738,
-      -2.198768
+      2.213814,
+      0.400031,
+      -1.920456
     ],
-    "final_ee_target_error_m": 0.026989,
+    "final_ee_target_error_m": 0.010278,
     "final_object_m": [
-      2.17,
-      0.4,
-      -2.48
+      2.525632,
+      0.333723,
+      -2.303649
     ],
-    "final_object_place_error_m": 0.0,
-    "first_last_frame_delta_ratio": 0.408268,
-    "grasped_steps": 310,
+    "final_object_place_error_m": 0.061919,
+    "first_last_frame_delta_ratio": 0.384301,
+    "grasped_steps": 1089,
     "hold_frame_count": 10,
     "max_base_height_error_m": 0.0,
     "max_final_ee_target_error_m": 0.05,
     "max_final_object_place_error_m": 0.2,
     "max_hold_frame_delta_ratio": 0.0,
     "max_hold_frame_delta_ratio_threshold": 0.02,
+    "max_post_release_slide_m": 0.02033,
+    "max_post_release_slide_m_threshold": 0.15,
+    "max_pre_grasp_object_displacement_m": 0.181452,
+    "max_pre_grasp_object_displacement_m_threshold": 0.2,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.007431,
+    "min_consecutive_frame_delta_ratio": 0.006949,
     "min_consecutive_frame_delta_ratio_threshold": 0.0025,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,
-    "min_object_transport_m": 0.35,
-    "object_transport_m": 1.745537,
-    "poster_policy_step": 480,
+    "min_object_transport_m": 0.9,
+    "object_transport_m": 2.447645,
+    "poster_policy_step": 1200,
     "released_after_grasp": true,
-    "trajectory_digest": "0xa6abd240e6dd1a2b"
+    "trajectory_digest": "0xa048e09d313b174c"
   },
   "source": {
     "generator": "examples/32_lift_pick_place_hero",
     "kind": "wgpu_simulation",
     "physics": "MobileManipulatorSim/Rapier",
     "policy": "MobilePickPlaceHeroPolicy",
-    "scene": "assets/scenes/mm_mobile.rne.scene.toml"
+    "scene": "assets/scenes/mm_mobile_hero.rne.scene.toml"
   },
   "width": 960
 }
