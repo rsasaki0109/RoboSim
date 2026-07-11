@@ -1,9 +1,13 @@
 //! Headless simulation for scenes that spawn URDF articulation robots.
 
+mod humanoid_episode;
 mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
 
+pub use humanoid_episode::{
+    HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
+};
 pub use lekiwi_drive::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
