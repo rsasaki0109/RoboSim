@@ -113,11 +113,33 @@ pub fn spawn_urdf_robot_with_config(
         link_defs.insert(link.name.clone(), link.clone());
     }
 
-    let base_link = links
-        .get("base_link")
-        .copied()
-        .or_else(|| links.values().copied().next())
-        .ok_or_else(|| UrdfSpawnError::InvalidGraph("no links".into()))?;
+    let child_links: std::collections::HashSet<&str> = urdf
+        .joints
+        .iter()
+        .map(|joint| joint.child.as_str())
+        .collect();
+    let mut root_names: Vec<&str> = urdf
+        .links
+        .iter()
+        .map(|link| link.name.as_str())
+        .filter(|name| !child_links.contains(name))
+        .collect();
+    root_names.sort_unstable();
+    let root_name = match root_names.as_slice() {
+        [root] => *root,
+        [] => {
+            return Err(UrdfSpawnError::InvalidGraph(
+                "no root link (joint graph contains a cycle)".into(),
+            ));
+        }
+        roots => {
+            return Err(UrdfSpawnError::InvalidGraph(format!(
+                "multiple root links: {}",
+                roots.join(", ")
+            )));
+        }
+    };
+    let base_link = links[root_name];
 
     world.entity_mut(base_link).insert(Transform3::IDENTITY);
 

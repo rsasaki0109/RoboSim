@@ -175,6 +175,11 @@ impl UrdfSceneSim {
         humanoid_scene_path()
     }
 
+    /// Vendored official Unitree Go2 scene path.
+    pub fn unitree_go2_scene_path() -> PathBuf {
+        unitree_go2_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -207,6 +212,13 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Returns a named URDF link's world translation in meters.
+    pub fn link_translation_m(&self, link_name: &str) -> Option<(f64, f64, f64)> {
+        let entity = find_link_by_name(&self.world, link_name)?;
+        let translation = world_transform_of(&self.world, entity).translation;
+        Some((translation.x, translation.y, translation.z))
     }
 
     /// Applies a diff-drive wheel action and steps one simulation tick.
@@ -413,6 +425,11 @@ pub fn humanoid_scene_path() -> PathBuf {
     assets_scene_path("rne_humanoid.rne.scene.toml")
 }
 
+/// Vendored official Unitree Go2 scene path.
+pub fn unitree_go2_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +551,19 @@ mod tests {
             base_y_m > 0.70,
             "position-held humanoid should remain upright, y={base_y_m} m"
         );
+    }
+
+    #[test]
+    fn official_unitree_go2_urdf_spawns_with_twelve_motors() {
+        let scene_path = unitree_go2_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn Unitree Go2");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(80.0, 12.0, 23.7);
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        assert!((sim.observe().base_y_m - 0.36).abs() < 1.0e-9);
+        assert!(!sim.mesh_package_roots().is_empty());
     }
 
     #[test]

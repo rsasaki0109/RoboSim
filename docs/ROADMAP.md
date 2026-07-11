@@ -38,6 +38,11 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 | D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Done: 12-DoF URDF, force-limited standing, bilateral foot loads, balance action/observation/reward episode, exact replay test, and example 37 |
 | E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Pending |
 
+Official robot-model integration has started with Unitree Go2: the upstream
+BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
+reproducibly converted for RNE's mesh loader, and example 38 generates a real
+wgpu GIF for the README. Unitree G1 is the next model target.
+
 | Pillar | Meaning | Status |
 |--------|---------|--------|
 | Browser-native visualization | The engine's own wgpu renderer running in the browser (wasm32, WebGPU/WebGL2) — no parallel JS rendering stack | MVP shipped (`feat/web-viewer`, `web/rne_web_viewer`) |
