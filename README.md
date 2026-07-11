@@ -48,6 +48,10 @@ cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
 cargo run -p unitree_g1_gif --example 39_unitree_g1_gif
 ```
 
+The G1 integration also includes a headless dynamic balance episode with
+primitive foot contacts, deterministic reset/replay, observations, actions,
+and reward through `UnitreeG1Episode`.
+
 - ROS2 is supported as an adapter, not required as the engine core.
 - Run headless in CI or render interactively with wgpu.
 - Build robots from Robot/Sensor/Actuator entities.

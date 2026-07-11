@@ -45,6 +45,8 @@ wgpu GIF for the README. The same path now covers the official Unitree G1
 23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
 G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.
+Its deterministic balance episode exposes pelvis pose, bilateral foot loads,
+progress, four low-dimensional controls, and an upright/load-balance reward.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

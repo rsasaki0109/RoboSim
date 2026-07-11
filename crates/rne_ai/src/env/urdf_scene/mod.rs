@@ -4,6 +4,7 @@ mod humanoid_episode;
 mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
+mod unitree_g1_episode;
 
 pub use humanoid_episode::{
     HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
@@ -16,6 +17,9 @@ pub use lekiwi_drive::{
 pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
 pub use quadruped_episode::{
     QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
+};
+pub use unitree_g1_episode::{
+    UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
