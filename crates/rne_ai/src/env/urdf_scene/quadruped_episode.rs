@@ -1,5 +1,5 @@
 use super::{quadruped_scene_path, quadruped_trot_targets, UrdfSceneSim, QUADRUPED_FOOT_LINKS};
-use crate::{Episode, EpisodeStep};
+use crate::{DeterministicRng, Episode, EpisodeStep};
 use rne_assets::AssetError;
 use std::path::PathBuf;
 
@@ -13,6 +13,8 @@ pub struct QuadrupedEpisodeConfig {
     pub scene_path: PathBuf,
     /// Maximum controlled physics steps before truncation.
     pub max_steps: u64,
+    /// Explicit seed for deterministic gait-phase variation across resets.
+    pub rng_seed: u64,
 }
 
 impl Default for QuadrupedEpisodeConfig {
@@ -20,6 +22,7 @@ impl Default for QuadrupedEpisodeConfig {
         Self {
             scene_path: quadruped_scene_path(),
             max_steps: 600,
+            rng_seed: 1501,
         }
     }
 }
@@ -37,7 +40,7 @@ impl Default for QuadrupedAction {
     fn default() -> Self {
         Self {
             stride_scale: 1.0,
-            knee_lift_scale: 1.0,
+            knee_lift_scale: 1.25,
         }
     }
 }
@@ -57,6 +60,8 @@ pub struct QuadrupedObservation {
     pub foot_impulses_ns: [f64; 4],
     /// Normalized progress through the current episode in `[0, 1]`.
     pub progress: f64,
+    /// Normalized gait phase in `[0, 1)`.
+    pub gait_phase: f64,
 }
 
 /// Deterministic quadruped locomotion episode using the built-in URDF scene.
@@ -66,6 +71,8 @@ pub struct QuadrupedEpisode {
     episode_index: u32,
     step_in_episode: u64,
     previous_x_m: f64,
+    rng: DeterministicRng,
+    gait_phase_offset_steps: u64,
 }
 
 impl QuadrupedEpisode {
@@ -74,12 +81,16 @@ impl QuadrupedEpisode {
         let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
         settle_standing(&mut sim);
         let previous_x_m = sim.observe().base_x_m;
+        let mut rng = DeterministicRng::new(config.rng_seed);
+        let gait_phase_offset_steps = rng.next_u64() % 90;
         Ok(Self {
             config,
             sim,
             episode_index: 0,
             step_in_episode: 0,
             previous_x_m,
+            rng,
+            gait_phase_offset_steps,
         })
     }
 
@@ -94,6 +105,7 @@ impl QuadrupedEpisode {
                 .map(|foot| self.sim.link_contact_impulse_ns(foot)),
             progress: (self.step_in_episode as f64 / self.config.max_steps.max(1) as f64)
                 .clamp(0.0, 1.0),
+            gait_phase: ((self.step_in_episode + self.gait_phase_offset_steps) % 90) as f64 / 90.0,
         }
     }
 }
@@ -109,6 +121,7 @@ impl Episode for QuadrupedEpisode {
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;
         self.previous_x_m = self.sim.observe().base_x_m;
+        self.gait_phase_offset_steps = self.rng.next_u64() % 90;
         EpisodeStep {
             observation: self.observation(),
             reward: 0.0,
@@ -120,7 +133,10 @@ impl Episode for QuadrupedEpisode {
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let stride_scale = action.stride_scale.clamp(0.0, 1.5);
         let knee_lift_scale = action.knee_lift_scale.clamp(0.0, 1.5);
-        let mut targets = quadruped_trot_targets(self.step_in_episode);
+        let mut targets = quadruped_trot_targets(
+            self.step_in_episode
+                .wrapping_add(self.gait_phase_offset_steps),
+        );
         for target in &mut targets {
             if target.link_name.ends_with("_thigh") {
                 target.position *= stride_scale;
@@ -190,5 +206,23 @@ mod tests {
             "default gait should earn forward progress reward, got {total_reward}"
         );
         assert!(final_step.observation.base_y_m > FALLEN_BASE_HEIGHT_M);
+    }
+
+    #[test]
+    fn reset_phase_sequence_is_seeded_and_repeatable() {
+        fn phases(seed: u64) -> Vec<f64> {
+            let config = QuadrupedEpisodeConfig {
+                max_steps: 1,
+                rng_seed: seed,
+                ..QuadrupedEpisodeConfig::default()
+            };
+            let mut episode = QuadrupedEpisode::new(config).expect("episode");
+            (0..4)
+                .map(|_| episode.reset().observation.gait_phase)
+                .collect()
+        }
+
+        assert_eq!(phases(7), phases(7));
+        assert_ne!(phases(7), phases(8));
     }
 }
