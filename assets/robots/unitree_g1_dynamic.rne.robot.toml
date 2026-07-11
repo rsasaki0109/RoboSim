@@ -1,0 +1,11 @@
+kind = "urdf"
+model_name = "unitree_g1_23dof_dynamic"
+
+[urdf]
+path = "g1_description/g1_23dof.urdf"
+base_body_type = "dynamic"
+initial_translation_m = [0.0, 0.82, 0.0]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true
+collisions = true
+mesh_collisions = false

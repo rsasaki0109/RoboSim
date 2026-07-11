@@ -43,6 +43,8 @@ BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
 reproducibly converted for RNE's mesh loader, and example 38 generates a real
 wgpu GIF for the README. The same path now covers the official Unitree G1
 23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
+G1 also has a dynamic standing scene that retains the official primitive foot
+and leg contacts while excluding unstable mesh-AABB collision approximations.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

@@ -7,3 +7,5 @@
 
 The 23-DoF URDF and the 29 STL files it references are vendored unchanged.
 RNE applies the Z-up to Y-up conversion in `unitree_g1.rne.robot.toml`.
+The fixed-base media scene disables collision; the dynamic standing scene keeps
+primitive contacts while excluding mesh-AABB approximations through asset settings.

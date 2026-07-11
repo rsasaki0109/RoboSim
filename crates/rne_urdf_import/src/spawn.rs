@@ -1,6 +1,6 @@
 //! Spawn RNE entities from parsed URDF.
 
-use crate::geometry::{collider_from_link, visual_from_element};
+use crate::geometry::{collider_from_link_with_meshes, visual_from_element};
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
@@ -19,6 +19,8 @@ pub struct UrdfSpawnConfig {
     pub attach_physics: bool,
     /// When true, URDF collision geometry is attached to link entities.
     pub attach_colliders: bool,
+    /// When true, mesh collision geometry is approximated by AABB colliders.
+    pub attach_mesh_colliders: bool,
     /// Rigid body type applied to the base link.
     pub base_body_type: RigidBodyType,
     /// Default RGBA color for visual elements.
@@ -34,6 +36,7 @@ impl Default for UrdfSpawnConfig {
         Self {
             attach_physics: true,
             attach_colliders: true,
+            attach_mesh_colliders: true,
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
             mesh_assets_root: None,
@@ -219,7 +222,9 @@ fn attach_link_geometry(
     let assets_root = config.mesh_assets_root.as_deref();
 
     if config.attach_colliders {
-        if let Some(collider) = collider_from_link(link, assets_root) {
+        if let Some(collider) =
+            collider_from_link_with_meshes(link, assets_root, config.attach_mesh_colliders)
+        {
             world.entity_mut(entity).insert(collider);
             counts.colliders += 1;
         }

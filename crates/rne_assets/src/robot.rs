@@ -195,6 +195,9 @@ pub struct UrdfRobotAsset {
     /// When true, collision geometry from the URDF is spawned.
     #[serde(default = "default_true")]
     pub collisions: bool,
+    /// When true, mesh collision geometry is approximated by AABB colliders.
+    #[serde(default = "default_true")]
+    pub mesh_collisions: bool,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -236,6 +239,7 @@ impl UrdfRobotAsset {
         UrdfSpawnConfig {
             base_body_type: self.base_body_type.into(),
             attach_colliders: self.collisions,
+            attach_mesh_colliders: self.mesh_collisions,
             ..UrdfSpawnConfig::default()
         }
     }
@@ -429,12 +433,14 @@ base_body_type = "dynamic"
 initial_translation_m = [0.0, 0.25, 0.0]
 articulation = true
 collisions = false
+mesh_collisions = false
 "#;
         let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
         let urdf = asset.urdf.expect("urdf section");
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Dynamic);
         assert!(urdf.articulation);
         assert!(!urdf.collisions);
+        assert!(!urdf.mesh_collisions);
         assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
     }
 
@@ -446,6 +452,7 @@ collisions = false
         assert_eq!(urdf.path, "minimal_diff_drive.urdf");
         assert!(!urdf.articulation);
         assert!(urdf.collisions);
+        assert!(urdf.mesh_collisions);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
     }
 

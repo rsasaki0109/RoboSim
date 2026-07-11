@@ -185,6 +185,11 @@ impl UrdfSceneSim {
         unitree_g1_scene_path()
     }
 
+    /// Vendored official Unitree G1 dynamic standing scene path.
+    pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
+        unitree_g1_dynamic_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -440,6 +445,11 @@ pub fn unitree_g1_scene_path() -> PathBuf {
     assets_scene_path("unitree_g1.rne.scene.toml")
 }
 
+/// Vendored official Unitree G1 scene using primitive-only collision geometry.
+pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1_dynamic.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +597,48 @@ mod tests {
         }
         assert!((sim.observe().base_y_m - 0.80).abs() < 1.0e-9);
         assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_g1_dynamic_scene_contacts_ground_without_exploding() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("spawn dynamic Unitree G1");
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        let targets = [
+            UrdfJointPositionTarget {
+                link_name: "left_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_ankle_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_ankle_pitch_link",
+                position: -0.18,
+            },
+        ];
+        for _ in 0..240 {
+            sim.step_joint_position_targets(&targets);
+        }
+        let observation = sim.observe();
+        assert!(observation.base_y_m.is_finite());
+        assert!(observation.base_y_m > 0.35, "G1 fell: {observation:?}");
+        let foot_impulse_ns = sim.link_contact_impulse_ns("left_ankle_roll_link")
+            + sim.link_contact_impulse_ns("right_ankle_roll_link");
+        assert!(foot_impulse_ns > 0.0, "G1 feet should contact the ground");
     }
 
     #[test]
