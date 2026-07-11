@@ -180,6 +180,11 @@ impl UrdfSceneSim {
         unitree_go2_scene_path()
     }
 
+    /// Vendored official Unitree G1 23-DoF scene path.
+    pub fn unitree_g1_scene_path() -> PathBuf {
+        unitree_g1_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -430,6 +435,11 @@ pub fn unitree_go2_scene_path() -> PathBuf {
     assets_scene_path("unitree_go2.rne.scene.toml")
 }
 
+/// Vendored official Unitree G1 23-DoF scene path.
+pub fn unitree_g1_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +573,19 @@ mod tests {
             sim.step_joint_position_targets(&[]);
         }
         assert!((sim.observe().base_y_m - 0.36).abs() < 1.0e-9);
+        assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_g1_urdf_spawns_with_twenty_three_motors() {
+        let scene_path = unitree_g1_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn Unitree G1");
+        assert_eq!(sim.observe().actuated_joint_count, 23);
+        sim.configure_position_motors(80.0, 12.0, 60.0);
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        assert!((sim.observe().base_y_m - 0.80).abs() < 1.0e-9);
         assert!(!sim.mesh_package_roots().is_empty());
     }
 

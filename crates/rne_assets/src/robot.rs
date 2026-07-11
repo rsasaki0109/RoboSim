@@ -192,6 +192,9 @@ pub struct UrdfRobotAsset {
     /// When true, Rapier revolute joints and velocity motors are attached.
     #[serde(default)]
     pub articulation: bool,
+    /// When true, collision geometry from the URDF is spawned.
+    #[serde(default = "default_true")]
+    pub collisions: bool,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -232,6 +235,7 @@ impl UrdfRobotAsset {
     pub fn to_spawn_config(&self) -> UrdfSpawnConfig {
         UrdfSpawnConfig {
             base_body_type: self.base_body_type.into(),
+            attach_colliders: self.collisions,
             ..UrdfSpawnConfig::default()
         }
     }
@@ -350,6 +354,10 @@ fn default_initial_rotation_rpy() -> [f64; 3] {
     [0.0, 0.0, 0.0]
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_lidar_enabled() -> bool {
     true
 }
@@ -420,11 +428,13 @@ path = "mm_mobile.urdf"
 base_body_type = "dynamic"
 initial_translation_m = [0.0, 0.25, 0.0]
 articulation = true
+collisions = false
 "#;
         let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
         let urdf = asset.urdf.expect("urdf section");
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Dynamic);
         assert!(urdf.articulation);
+        assert!(!urdf.collisions);
         assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
     }
 
@@ -435,6 +445,7 @@ articulation = true
         let urdf = asset.urdf.unwrap();
         assert_eq!(urdf.path, "minimal_diff_drive.urdf");
         assert!(!urdf.articulation);
+        assert!(urdf.collisions);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
     }
 

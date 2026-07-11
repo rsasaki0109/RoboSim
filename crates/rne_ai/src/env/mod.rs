@@ -29,9 +29,9 @@ pub use mobile_manipulator::{
 pub use urdf_scene::{
     cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, quadruped_scene_path,
-    quadruped_trot_targets, so101_scene_path, unitree_go2_scene_path, HumanoidAction,
-    HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation, QuadrupedAction, QuadrupedEpisode,
-    QuadrupedEpisodeConfig, QuadrupedObservation, UrdfArmAction, UrdfCartAction,
+    quadruped_trot_targets, so101_scene_path, unitree_g1_scene_path, unitree_go2_scene_path,
+    HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation, QuadrupedAction,
+    QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation, UrdfArmAction, UrdfCartAction,
     UrdfJointPositionTarget, UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,

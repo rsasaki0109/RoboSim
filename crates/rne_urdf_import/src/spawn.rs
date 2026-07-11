@@ -17,6 +17,8 @@ use thiserror::Error;
 pub struct UrdfSpawnConfig {
     /// When true, links with collision geometry receive rigid bodies.
     pub attach_physics: bool,
+    /// When true, URDF collision geometry is attached to link entities.
+    pub attach_colliders: bool,
     /// Rigid body type applied to the base link.
     pub base_body_type: RigidBodyType,
     /// Default RGBA color for visual elements.
@@ -31,6 +33,7 @@ impl Default for UrdfSpawnConfig {
     fn default() -> Self {
         Self {
             attach_physics: true,
+            attach_colliders: true,
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
             mesh_assets_root: None,
@@ -215,22 +218,26 @@ fn attach_link_geometry(
     };
     let assets_root = config.mesh_assets_root.as_deref();
 
-    if let Some(collider) = collider_from_link(link, assets_root) {
-        world.entity_mut(entity).insert(collider);
-        counts.colliders += 1;
-
-        if config.attach_physics {
-            let body_type = if is_base_link {
-                config.base_body_type
-            } else {
-                RigidBodyType::Dynamic
-            };
-            world.entity_mut(entity).insert(RigidBody {
-                body_type,
-                mass_kg: if is_base_link { 5.0 } else { 1.0 },
-                ..RigidBody::default()
-            });
+    if config.attach_colliders {
+        if let Some(collider) = collider_from_link(link, assets_root) {
+            world.entity_mut(entity).insert(collider);
+            counts.colliders += 1;
         }
+    }
+
+    // A URDF link can legitimately have inertia and joints without collision geometry.
+    // It still needs a rigid body so an articulated visual-only root can anchor its tree.
+    if config.attach_physics {
+        let body_type = if is_base_link {
+            config.base_body_type
+        } else {
+            RigidBodyType::Dynamic
+        };
+        world.entity_mut(entity).insert(RigidBody {
+            body_type,
+            mass_kg: if is_base_link { 5.0 } else { 1.0 },
+            ..RigidBody::default()
+        });
     }
 
     counts.visuals += attach_link_visuals(world, entity, link, config.visual_color_rgba);
