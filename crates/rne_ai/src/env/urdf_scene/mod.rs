@@ -7,6 +7,7 @@ mod quadruped_episode;
 mod unitree_g1_episode;
 mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
+mod unitree_go2_gait;
 
 pub use humanoid_episode::{
     HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
@@ -27,6 +28,7 @@ pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
 pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
+pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -652,6 +654,41 @@ mod tests {
             .map(|foot| sim.link_contact_impulse_ns(foot))
             .sum();
         assert!(load > 0.0, "Go2 feet should contact the ground");
+    }
+
+    #[test]
+    fn official_unitree_go2_dynamic_trot_remains_upright() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("spawn trotting Unitree Go2");
+        sim.configure_position_motors(180.0, 18.0, 23.7);
+        let stand = unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+            },
+        );
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
+        let initial = sim.observe();
+        for step in 0..120 {
+            sim.step_joint_position_targets(&unitree_go2_trot_targets(
+                step,
+                UnitreeGo2GaitCommand::default(),
+            ));
+        }
+        let observation = sim.observe();
+        assert!(
+            observation.base_y_m > 0.18,
+            "Go2 trot fell: {observation:?}"
+        );
+        assert!(observation.base_x_m.is_finite());
+        assert!(
+            (observation.base_x_m - initial.base_x_m).abs() > 0.01,
+            "Go2 trot should translate through contact: {observation:?}"
+        );
     }
 
     #[test]

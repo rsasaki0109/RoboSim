@@ -27,7 +27,7 @@
 | 3D mobile manipulator hero | `cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero` | Steps the real lift pick-place simulation and renders README GIF/PNG media via wgpu |
 | Quadruped standing | `cargo run -p quadruped_stand --example 36_quadruped_stand` | Headless 12-DoF URDF standing controller with four-foot contact impulses |
 | Humanoid standing | `cargo run -p humanoid_stand --example 37_humanoid_stand` | Headless 12-DoF humanoid balance smoke with left/right foot loads |
-| Unitree Go2 GIF | `cargo run -p unitree_go2_gif --example 38_unitree_go2_gif` | Loads the official Go2 URDF, steps 12 force-limited joints, and renders README GIF/PNG media |
+| Unitree Go2 GIF | `cargo run -p unitree_go2_gif --example 38_unitree_go2_gif` | Settles the official dynamic Go2 multibody, steps a diagonal contact trot, and renders README GIF/PNG media |
 | Unitree G1 GIF | `cargo run -p unitree_g1_gif --example 39_unitree_g1_gif` | Settles the official dynamic G1 multibody, steps its contact gait, and renders README GIF/PNG media |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |

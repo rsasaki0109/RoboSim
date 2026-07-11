@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_go2_scene_path, UrdfJointPositionTarget, UrdfSceneSim,
+    build_visual_render_scene, unitree_go2_dynamic_scene_path, unitree_go2_trot_targets,
+    UnitreeGo2GaitCommand, UrdfSceneSim,
 };
 use rne_math::Vec3;
 use rne_render::{Camera, MeshRenderCache, RenderBackend, VisualShape};
@@ -14,7 +15,7 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 360;
 const FRAME_COUNT: usize = 36;
-const STEPS_PER_FRAME: u64 = 5;
+const STEPS_PER_FRAME: u64 = 3;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
 
 fn main() {
@@ -27,10 +28,19 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create Go2 frame directory");
 
-    let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_scene_path()).expect("load Go2");
-    sim.configure_position_motors(80.0, 12.0, 23.7);
+    let mut sim =
+        UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path()).expect("load dynamic Go2");
+    sim.configure_position_motors(180.0, 18.0, 23.7);
+    let stand = unitree_go2_trot_targets(
+        0,
+        UnitreeGo2GaitCommand {
+            stride_rad: 0.0,
+            foot_lift_rad: 0.0,
+            cycle_steps: 90,
+        },
+    );
     for _ in 0..120 {
-        sim.step_joint_position_targets(&go2_targets(0));
+        sim.step_joint_position_targets(&stand);
     }
     println!("Go2 settled observation: {:?}", sim.observe());
 
@@ -43,9 +53,15 @@ fn main() {
     for frame in 0..FRAME_COUNT {
         for substep in 0..STEPS_PER_FRAME {
             let step = frame as u64 * STEPS_PER_FRAME + substep;
-            sim.step_joint_position_targets(&go2_targets(step));
+            sim.step_joint_position_targets(&unitree_go2_trot_targets(
+                step,
+                UnitreeGo2GaitCommand::default(),
+            ));
         }
         let mut scene = build_visual_render_scene(sim.world());
+        scene
+            .items
+            .retain(|item| !matches!(item.shape, VisualShape::Box { .. }));
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official Go2 meshes");
@@ -64,8 +80,8 @@ fn main() {
         let orbit = CameraOrbit {
             focus: Vec3::new(obs.base_x_m, obs.base_y_m, obs.base_z_m),
             yaw_rad: -0.82 + frame as f64 * 0.006,
-            pitch_rad: 0.16,
-            distance_m: 1.15,
+            pitch_rad: 1.05,
+            distance_m: 1.10,
         };
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -99,39 +115,6 @@ fn main() {
         "rendered official Unitree Go2 media to {}",
         gif_path.display()
     );
-}
-
-fn go2_targets(step: u64) -> [UrdfJointPositionTarget<'static>; 12] {
-    let phase = step as f64 * std::f64::consts::TAU / 60.0;
-    let a = phase.sin();
-    let b = -a;
-    let leg = |prefix: &'static str, wave: f64| {
-        let (hip, thigh, calf) = match prefix {
-            "FL" => ("FL_hip", "FL_thigh", "FL_calf"),
-            "FR" => ("FR_hip", "FR_thigh", "FR_calf"),
-            "RL" => ("RL_hip", "RL_thigh", "RL_calf"),
-            _ => ("RR_hip", "RR_thigh", "RR_calf"),
-        };
-        [
-            target(hip, 0.0),
-            target(thigh, 0.8 + 0.22 * wave),
-            target(calf, -1.5 - 0.30 * wave.max(0.0)),
-        ]
-    };
-    let fl = leg("FL", a);
-    let fr = leg("FR", b);
-    let rl = leg("RL", b);
-    let rr = leg("RR", a);
-    [
-        fl[0], fl[1], fl[2], fr[0], fr[1], fr[2], rl[0], rl[1], rl[2], rr[0], rr[1], rr[2],
-    ]
-}
-
-fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'static> {
-    UrdfJointPositionTarget {
-        link_name,
-        position,
-    }
 }
 
 fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {

@@ -23,10 +23,10 @@ embodied AI, synthetic sensor data, and policy evaluation.
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-go2.png">
-    <img src="docs/media/unitree-go2.gif" alt="Official Unitree Go2 URDF stepping with force-limited joints in RNE" width="800">
+    <img src="docs/media/unitree-go2.gif" alt="Official Unitree Go2 URDF trotting dynamically with multibody physics in RNE" width="800">
   </picture>
   <br>
-  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline, with 12 force-limited joint motors stepped by Rapier and rendered offscreen by wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline. After standing settle, its dynamic multibody drives a diagonal-pair trot through 12 force-limited joints and primitive foot contacts, rendered offscreen by wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
