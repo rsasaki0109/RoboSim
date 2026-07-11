@@ -33,6 +33,9 @@ embodied AI, synthetic sensor data, and policy evaluation.
 cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
 ```
 
+Go2 also has a dynamic multibody scene with self-collision filtering and a
+headless four-foot standing/contact test.
+
 ## Official Unitree G1 URDF
 
 <p align="center">

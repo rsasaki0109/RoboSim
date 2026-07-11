@@ -41,7 +41,8 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
 reproducibly converted for RNE's mesh loader, and example 38 generates a real
-wgpu GIF for the README. The same path now covers the official Unitree G1
+wgpu GIF for the README. Go2 now also has a dynamic multibody scene with a
+four-foot standing/contact test. The same path covers the official Unitree G1
 23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
 G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.

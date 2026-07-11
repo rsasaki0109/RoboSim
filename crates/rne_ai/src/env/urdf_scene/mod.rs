@@ -190,6 +190,11 @@ impl UrdfSceneSim {
         unitree_go2_scene_path()
     }
 
+    /// Vendored official Unitree Go2 dynamic multibody scene path.
+    pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
+        unitree_go2_dynamic_scene_path()
+    }
+
     /// Vendored official Unitree G1 23-DoF scene path.
     pub fn unitree_g1_scene_path() -> PathBuf {
         unitree_g1_scene_path()
@@ -450,6 +455,11 @@ pub fn unitree_go2_scene_path() -> PathBuf {
     assets_scene_path("unitree_go2.rne.scene.toml")
 }
 
+/// Vendored official Unitree Go2 dynamic multibody scene path.
+pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2_dynamic.rne.scene.toml")
+}
+
 /// Vendored official Unitree G1 23-DoF scene path.
 pub fn unitree_g1_scene_path() -> PathBuf {
     assets_scene_path("unitree_g1.rne.scene.toml")
@@ -594,6 +604,54 @@ mod tests {
         }
         assert!((sim.observe().base_y_m - 0.36).abs() < 1.0e-9);
         assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_go2_dynamic_multibody_stands_on_four_feet() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("spawn dynamic Unitree Go2");
+        sim.configure_position_motors(180.0, 18.0, 23.7);
+        let legs = ["FL", "FR", "RL", "RR"];
+        for _ in 0..180 {
+            let mut targets = Vec::with_capacity(12);
+            for leg in legs {
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_hip",
+                        "FR" => "FR_hip",
+                        "RL" => "RL_hip",
+                        _ => "RR_hip",
+                    },
+                    position: 0.0,
+                });
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_thigh",
+                        "FR" => "FR_thigh",
+                        "RL" => "RL_thigh",
+                        _ => "RR_thigh",
+                    },
+                    position: 0.8,
+                });
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_calf",
+                        "FR" => "FR_calf",
+                        "RL" => "RL_calf",
+                        _ => "RR_calf",
+                    },
+                    position: -1.5,
+                });
+            }
+            sim.step_joint_position_targets(&targets);
+        }
+        let observation = sim.observe();
+        assert!(observation.base_y_m > 0.18, "Go2 fell: {observation:?}");
+        let load: f64 = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+            .iter()
+            .map(|foot| sim.link_contact_impulse_ns(foot))
+            .sum();
+        assert!(load > 0.0, "Go2 feet should contact the ground");
     }
 
     #[test]
