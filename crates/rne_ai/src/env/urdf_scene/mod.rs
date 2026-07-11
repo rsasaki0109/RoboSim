@@ -49,6 +49,15 @@ pub struct UrdfArmAction {
     pub shoulder_pan_velocity_rad_s: f64,
 }
 
+/// Position target for a named actuated URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointPositionTarget<'a> {
+    /// Child link name whose articulation joint owns the motor.
+    pub link_name: &'a str,
+    /// Desired revolute angle in radians or prismatic displacement in meters.
+    pub position: f64,
+}
+
 /// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
 pub struct UrdfSceneSim {
     world: World,
@@ -240,6 +249,45 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Applies named joint position targets and steps one simulation tick.
+    ///
+    /// Unknown link names and links without a [`JointMotor`] are ignored, which
+    /// lets a controller send a stable superset of targets across related URDF
+    /// variants. Motors retain their existing force, stiffness, and damping.
+    pub fn step_joint_position_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.target_position = target.position;
+                motor.velocity_rad_s = 0.0;
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Returns the summed normal contact impulse for a named link in N·s.
+    ///
+    /// This is intended for deterministic foot-contact observations. It returns
+    /// zero when the link is absent, has no contact, or contacts have not yet
+    /// been produced by a physics step.
+    pub fn link_contact_impulse_ns(&self, link_name: &str) -> f64 {
+        let Some(link) = find_link_by_name(&self.world, link_name) else {
+            return 0.0;
+        };
+        self.backend
+            .contacts(self.physics_world)
+            .map(|contacts| {
+                contacts
+                    .iter()
+                    .filter(|contact| contact.entity_a == link || contact.entity_b == link)
+                    .map(|contact| f64::from(contact.impulse))
+                    .sum()
+            })
+            .unwrap_or(0.0)
+    }
+
     /// Returns the latest observation.
     pub fn observe(&self) -> UrdfSceneObservation {
         let base = world_transform_of(&self.world, self.base_link);
@@ -323,6 +371,38 @@ mod tests {
         assert!(!sim.mesh_package_roots().is_empty());
         let obs = sim.observe();
         assert!(obs.base_y_m >= 0.0);
+    }
+
+    #[test]
+    fn named_joint_position_target_updates_motor() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        sim.step_joint_position_targets(&[UrdfJointPositionTarget {
+            link_name: "shoulder_link",
+            position: 0.35,
+        }]);
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        let motor = sim
+            .world()
+            .get::<JointMotor>(shoulder)
+            .expect("shoulder motor");
+        assert_eq!(motor.target_position, 0.35);
+        assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn named_link_contact_impulse_reports_wheel_ground_load() {
+        let scene_path = cart_minimal_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn cart");
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        let left_impulse_ns = sim.link_contact_impulse_ns("left_wheel");
+        assert!(
+            left_impulse_ns > 0.0,
+            "settled wheel should report ground-contact impulse, got {left_impulse_ns} N·s"
+        );
+        assert_eq!(sim.link_contact_impulse_ns("missing_foot"), 0.0);
     }
 
     #[test]

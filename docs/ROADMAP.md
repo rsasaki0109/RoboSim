@@ -24,6 +24,20 @@ scene/trajectory designed to clear the tabletop without a rigid attachment.
 
 Three long-running pillars steer the next releases alongside the phased goals above:
 
+## v0.15 goal: legged robots
+
+Build one shared legged-control foundation, validate it on a quadruped first,
+then reuse the same articulation, contact, observation, and policy interfaces
+for a humanoid. Core crates remain robot-native and ROS2-free.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | URDF / Physics | Generic named joint-position targets and per-link contact impulse observations for URDF articulations | In progress (`UrdfSceneSim::step_joint_position_targets`, `link_contact_impulse_ns`) |
+| B | Quadruped | Vendored 12-DoF quadruped URDF, deterministic standing controller, four-foot contact test, headless example | Pending |
+| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | Pending |
+| D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Pending |
+| E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Pending |
+
 | Pillar | Meaning | Status |
 |--------|---------|--------|
 | Browser-native visualization | The engine's own wgpu renderer running in the browser (wasm32, WebGPU/WebGL2) — no parallel JS rendering stack | MVP shipped (`feat/web-viewer`, `web/rne_web_viewer`) |
