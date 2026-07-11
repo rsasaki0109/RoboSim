@@ -155,6 +155,11 @@ impl UrdfSceneSim {
         lekiwi_so101_scene_path()
     }
 
+    /// Built-in 12-DoF RNE quadruped scene path.
+    pub fn quadruped_scene_path() -> PathBuf {
+        quadruped_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -267,6 +272,31 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Configures every actuated joint as a force-limited position motor.
+    ///
+    /// `stiffness` and `damping` use the backend-neutral [`JointMotor`] gains;
+    /// `max_force` is expressed in N for prismatic joints and N·m for revolute
+    /// joints. This is a one-time setup helper for legged standing controllers.
+    pub fn configure_position_motors(&mut self, stiffness: f64, damping: f64, max_force: f64) {
+        let motor_entities: Vec<_> = self
+            .world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                self.world
+                    .get::<JointMotor>(entity_ref.id())
+                    .is_some()
+                    .then_some(entity_ref.id())
+            })
+            .collect();
+        for entity in motor_entities {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.stiffness = stiffness;
+                motor.gain = damping;
+                motor.max_force = max_force;
+            }
+        }
+    }
+
     /// Returns the summed normal contact impulse for a named link in N·s.
     ///
     /// This is intended for deterministic foot-contact observations. It returns
@@ -358,6 +388,11 @@ pub fn lekiwi_so101_scene_path() -> PathBuf {
     assets_scene_path("lekiwi_so101.rne.scene.toml")
 }
 
+/// Built-in 12-DoF RNE quadruped scene path.
+pub fn quadruped_scene_path() -> PathBuf {
+    assets_scene_path("rne_quadruped.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +438,29 @@ mod tests {
             "settled wheel should report ground-contact impulse, got {left_impulse_ns} N·s"
         );
         assert_eq!(sim.link_contact_impulse_ns("missing_foot"), 0.0);
+    }
+
+    #[test]
+    fn quadruped_spawns_with_twelve_motors_and_four_loaded_feet() {
+        let scene_path = quadruped_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn quadruped");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(1200.0, 70.0, 40.0);
+        for _ in 0..90 {
+            sim.step_joint_position_targets(&[]);
+        }
+        for foot in ["fl_foot", "fr_foot", "rl_foot", "rr_foot"] {
+            let impulse_ns = sim.link_contact_impulse_ns(foot);
+            assert!(
+                impulse_ns > 0.0,
+                "standing quadruped foot `{foot}` should bear load, got {impulse_ns} N·s"
+            );
+        }
+        let base_y_m = sim.observe().base_y_m;
+        assert!(
+            base_y_m > 0.35,
+            "position-held quadruped should keep its body above ground, y={base_y_m} m"
+        );
     }
 
     #[test]

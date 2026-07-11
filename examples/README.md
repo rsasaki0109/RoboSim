@@ -25,6 +25,7 @@
 | Mobile manipulator arm | `cargo run -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke` | URDF 2-DOF arm articulation under Rapier (Phase A) |
 | Mobile manipulator reach | `cargo run -p mobile_manipulator_reach --example 21_mobile_manipulator_reach -- --smoke` | `MobileManipulatorSim` open-loop reach + DataBus joint state |
 | 3D mobile manipulator hero | `cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero` | Steps the real lift pick-place simulation and renders README GIF/PNG media via wgpu |
+| Quadruped standing | `cargo run -p quadruped_stand --example 36_quadruped_stand` | Headless 12-DoF URDF standing controller with four-foot contact impulses |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
