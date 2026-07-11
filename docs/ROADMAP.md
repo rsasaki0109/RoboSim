@@ -55,6 +55,8 @@ selectable per URDF asset; G1 uses it for real dynamic standing, balance replay,
 and a settle-then-gait rollout without destabilizing existing impulse-joint robots.
 Only actuated links and their ancestors enter the multibody, keeping fixed visual
 accessories out of the solver while preserving them in the rendered URDF hierarchy.
+The G1 gait now widens its support stance and advances in positive X after a
+standing settle, with bounded height and yaw verified by a headless rollout.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

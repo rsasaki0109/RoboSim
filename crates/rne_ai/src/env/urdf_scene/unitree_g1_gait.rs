@@ -58,14 +58,14 @@ pub fn unitree_g1_gait_targets(
         };
         [
             target(hip_pitch, -0.18 + stride * wave),
-            target(hip_roll, 0.0),
+            target(hip_roll, if side == "left" { 0.05 } else { -0.05 }),
             target(hip_yaw, 0.0),
             target(knee, 0.36 + lift * swing_lift),
             target(
                 ankle_pitch,
                 -0.18 - 0.45 * stride * wave - 0.5 * lift * swing_lift,
             ),
-            target(ankle_roll, 0.0),
+            target(ankle_roll, if side == "left" { -0.03 } else { 0.03 }),
         ]
     };
     let l = leg("left", left, left_lift);

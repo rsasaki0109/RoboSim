@@ -648,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn official_unitree_g1_scripted_gait_remains_finite() {
+    fn official_unitree_g1_scripted_gait_advances_without_falling() {
         let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
             .expect("spawn walking Unitree G1");
         let pelvis = sim
@@ -704,7 +704,15 @@ mod tests {
         }
         let observation = sim.observe();
         assert!(observation.base_x_m.is_finite());
+        assert!(
+            observation.base_x_m > 0.005,
+            "G1 did not advance: {observation:?}"
+        );
         assert!(observation.base_y_m > 0.35, "G1 gait fell: {observation:?}");
+        assert!(
+            observation.base_yaw_rad.abs() < 1.2,
+            "G1 yaw drifted: {observation:?}"
+        );
     }
 
     #[test]
