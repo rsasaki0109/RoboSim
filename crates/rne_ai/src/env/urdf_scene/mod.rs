@@ -166,6 +166,11 @@ impl UrdfSceneSim {
         quadruped_scene_path()
     }
 
+    /// Built-in 12-DoF RNE humanoid scene path.
+    pub fn humanoid_scene_path() -> PathBuf {
+        humanoid_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -399,6 +404,11 @@ pub fn quadruped_scene_path() -> PathBuf {
     assets_scene_path("rne_quadruped.rne.scene.toml")
 }
 
+/// Built-in 12-DoF RNE humanoid scene path.
+pub fn humanoid_scene_path() -> PathBuf {
+    assets_scene_path("rne_humanoid.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,6 +506,29 @@ mod tests {
             first.base_y_m > 0.35,
             "trot should keep the body standing, y={} m",
             first.base_y_m
+        );
+    }
+
+    #[test]
+    fn humanoid_spawns_with_twelve_motors_and_two_loaded_feet() {
+        let scene_path = humanoid_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn humanoid");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(1800.0, 85.0, 80.0);
+        for _ in 0..180 {
+            sim.step_joint_position_targets(&[]);
+        }
+        for foot in ["left_foot", "right_foot"] {
+            let impulse_ns = sim.link_contact_impulse_ns(foot);
+            assert!(
+                impulse_ns > 0.0,
+                "standing humanoid foot `{foot}` should bear load, got {impulse_ns} N·s"
+            );
+        }
+        let base_y_m = sim.observe().base_y_m;
+        assert!(
+            base_y_m > 0.70,
+            "position-held humanoid should remain upright, y={base_y_m} m"
         );
     }
 

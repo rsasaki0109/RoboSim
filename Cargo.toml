@@ -53,6 +53,7 @@ members = [
   "examples/34_mobile_clutter_pick_place_e2e",
   "examples/35_external_urdf",
   "examples/36_quadruped_stand",
+  "examples/37_humanoid_stand",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

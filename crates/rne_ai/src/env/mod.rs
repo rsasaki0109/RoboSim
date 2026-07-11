@@ -27,7 +27,7 @@ pub use mobile_manipulator::{
     MM_MOBILE_WHEEL_RADIUS_M,
 };
 pub use urdf_scene::{
-    cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
+    cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, quadruped_scene_path,
     quadruped_trot_targets, so101_scene_path, QuadrupedAction, QuadrupedEpisode,
     QuadrupedEpisodeConfig, QuadrupedObservation, UrdfArmAction, UrdfCartAction,
