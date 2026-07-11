@@ -9,3 +9,4 @@ initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
 articulation = true
 collisions = true
 mesh_collisions = false
+self_collisions = false

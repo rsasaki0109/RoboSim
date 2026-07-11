@@ -49,6 +49,9 @@ Its deterministic balance episode exposes pelvis pose, bilateral foot loads,
 progress, four low-dimensional controls, and an upright/load-balance reward.
 A bounded, periodic G1 gait generator now supplies asymmetric stance/swing leg
 trajectories and arm counter-swing; translating contact locomotion remains next.
+Backend-neutral collision groups can now disable same-robot link contacts while
+preserving environment contacts. Full dynamic G1 requires multibody articulation;
+the current independent-body impulse-joint chain is not stable at 23 DoF.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

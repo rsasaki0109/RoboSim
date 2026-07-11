@@ -198,6 +198,9 @@ pub struct UrdfRobotAsset {
     /// When true, mesh collision geometry is approximated by AABB colliders.
     #[serde(default = "default_true")]
     pub mesh_collisions: bool,
+    /// When true, links belonging to this robot collide with one another.
+    #[serde(default = "default_true")]
+    pub self_collisions: bool,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -240,6 +243,7 @@ impl UrdfRobotAsset {
             base_body_type: self.base_body_type.into(),
             attach_colliders: self.collisions,
             attach_mesh_colliders: self.mesh_collisions,
+            self_collisions: self.self_collisions,
             ..UrdfSpawnConfig::default()
         }
     }
@@ -434,6 +438,7 @@ initial_translation_m = [0.0, 0.25, 0.0]
 articulation = true
 collisions = false
 mesh_collisions = false
+self_collisions = false
 "#;
         let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
         let urdf = asset.urdf.expect("urdf section");
@@ -441,6 +446,7 @@ mesh_collisions = false
         assert!(urdf.articulation);
         assert!(!urdf.collisions);
         assert!(!urdf.mesh_collisions);
+        assert!(!urdf.self_collisions);
         assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
     }
 
@@ -453,6 +459,7 @@ mesh_collisions = false
         assert!(!urdf.articulation);
         assert!(urdf.collisions);
         assert!(urdf.mesh_collisions);
+        assert!(urdf.self_collisions);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
     }
 

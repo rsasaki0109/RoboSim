@@ -167,6 +167,16 @@ impl PhysicsBackend for RapierBackend {
                     .position(transform_to_isometry(&collider.local_offset))
                     .friction(collider.material.friction)
                     .restitution(collider.material.restitution)
+                    .collision_groups({
+                        let groups = world
+                            .get::<rne_physics::CollisionGroups>(entity)
+                            .copied()
+                            .unwrap_or_default();
+                        InteractionGroups::new(
+                            Group::from_bits_truncate(groups.memberships),
+                            Group::from_bits_truncate(groups.filter),
+                        )
+                    })
                     .build(),
                 body_handle,
                 &mut state.bodies,
@@ -541,7 +551,7 @@ mod tests {
     use approx::assert_relative_eq;
     use rne_ecs::spawn_named;
     use rne_math::Quat;
-    use rne_physics::{hash_physics_state, ColliderShape};
+    use rne_physics::{hash_physics_state, ColliderShape, CollisionGroups};
 
     fn fixed_step() -> SimDuration {
         SimDuration::from_hertz(rne_math::Hertz::new(60.0))
@@ -597,6 +607,28 @@ mod tests {
             .y;
         assert!(y < 5.0, "cube should fall from initial height, y={y}");
         assert!(y > 0.0, "cube should rest above ground, y={y}");
+    }
+
+    #[test]
+    fn collision_groups_disable_same_group_contacts() {
+        let (mut backend, physics_world, mut world, ground, cube) = setup_world();
+        let groups = CollisionGroups::without_self_collision(1);
+        world.entity_mut(ground).insert(groups);
+        world.entity_mut(cube).insert(groups);
+
+        for _ in 0..90 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+        }
+
+        let y = world
+            .get::<Transform3>(cube)
+            .expect("cube transform")
+            .translation
+            .y;
+        assert!(
+            y < 0.0,
+            "same-group filtering should let cube pass through ground, y={y}"
+        );
     }
 
     #[test]
