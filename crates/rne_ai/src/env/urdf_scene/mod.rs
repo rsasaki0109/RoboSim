@@ -2,6 +2,7 @@
 
 mod lekiwi_drive;
 mod quadruped;
+mod quadruped_episode;
 
 pub use lekiwi_drive::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
@@ -9,6 +10,9 @@ pub use lekiwi_drive::{
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
 };
 pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
+pub use quadruped_episode::{
+    QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
+};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};

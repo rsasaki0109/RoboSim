@@ -34,7 +34,7 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 |-------|------|-------------|--------|
 | A | URDF / Physics | Generic named joint-position targets and per-link contact impulse observations for URDF articulations | In progress (`UrdfSceneSim::step_joint_position_targets`, `link_contact_impulse_ns`) |
 | B | Quadruped | Vendored 12-DoF quadruped URDF, deterministic standing controller, four-foot contact test, headless example | Done (`rne_quadruped`, example 36; 12 motors and four loaded feet validated headlessly) |
-| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | In progress: reusable diagonal-pair trot targets and exact replay test; stable stepping achieved, forward-speed tuning and episode API remain |
+| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | In progress: action/observation/reward episode, four-foot impulses, exact action replay, stable positive-X trot (~1.1 cm / 360 ticks); seeded reset variation and forward-speed tuning remain |
 | D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Pending |
 | E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Pending |
 

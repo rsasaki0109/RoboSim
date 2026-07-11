@@ -14,9 +14,9 @@ pub fn quadruped_trot_targets(step: u64) -> [UrdfJointPositionTarget<'static>; 1
     let leg_target = |offset: f64| {
         let p = (phase + offset).fract();
         if p < 0.8 {
-            (0.45 - 0.9 * (p / 0.8), 0.0)
+            (-0.45 + 0.9 * (p / 0.8), 0.0)
         } else {
-            (-0.45 + 0.9 * ((p - 0.8) / 0.2), -0.8)
+            (0.45 - 0.9 * ((p - 0.8) / 0.2), 0.8)
         }
     };
     let a = leg_target(0.0);
