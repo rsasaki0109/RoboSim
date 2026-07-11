@@ -5,6 +5,7 @@ mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
 mod unitree_g1_episode;
+mod unitree_g1_gait;
 
 pub use humanoid_episode::{
     HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
@@ -21,6 +22,7 @@ pub use quadruped_episode::{
 pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
+pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -643,6 +645,37 @@ mod tests {
         let foot_impulse_ns = sim.link_contact_impulse_ns("left_ankle_roll_link")
             + sim.link_contact_impulse_ns("right_ankle_roll_link");
         assert!(foot_impulse_ns > 0.0, "G1 feet should contact the ground");
+    }
+
+    #[test]
+    fn official_unitree_g1_scripted_gait_remains_finite() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("spawn walking Unitree G1");
+        let pelvis = sim
+            .world()
+            .iter_entities()
+            .find(|entity| {
+                sim.world()
+                    .get::<Link>(entity.id())
+                    .is_some_and(|link| link.name == "pelvis")
+            })
+            .expect("G1 pelvis")
+            .id();
+        assert_eq!(
+            sim.world()
+                .get::<rne_physics::RigidBody>(pelvis)
+                .expect("pelvis body")
+                .body_type,
+            rne_physics::RigidBodyType::Dynamic
+        );
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        let command = UnitreeG1GaitCommand::default();
+        for step in 0..360 {
+            sim.step_joint_position_targets(&unitree_g1_gait_targets(step, command));
+        }
+        let observation = sim.observe();
+        assert!(observation.base_x_m.is_finite());
+        assert!(observation.base_y_m > 0.35, "G1 gait fell: {observation:?}");
     }
 
     #[test]

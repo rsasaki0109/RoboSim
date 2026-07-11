@@ -47,6 +47,8 @@ G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.
 Its deterministic balance episode exposes pelvis pose, bilateral foot loads,
 progress, four low-dimensional controls, and an upright/load-balance reward.
+A bounded, periodic G1 gait generator now supplies asymmetric stance/swing leg
+trajectories and arm counter-swing; translating contact locomotion remains next.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|
