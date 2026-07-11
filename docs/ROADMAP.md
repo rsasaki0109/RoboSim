@@ -57,6 +57,9 @@ Only actuated links and their ancestors enter the multibody, keeping fixed visua
 accessories out of the solver while preserving them in the rendered URDF hierarchy.
 The G1 gait now widens its support stance and advances in positive X after a
 standing settle, with bounded height and yaw verified by a headless rollout.
+`UnitreeG1GaitEpisode` exposes stride, foot-lift, and yaw-correction actions;
+forward delta, gait phase, bilateral contacts, and pose observations; and a
+forward/upright reward whose short rollouts replay exactly.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

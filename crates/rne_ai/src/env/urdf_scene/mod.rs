@@ -6,6 +6,7 @@ mod quadruped;
 mod quadruped_episode;
 mod unitree_g1_episode;
 mod unitree_g1_gait;
+mod unitree_g1_gait_episode;
 
 pub use humanoid_episode::{
     HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
@@ -23,6 +24,9 @@ pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
 pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
+pub use unitree_g1_gait_episode::{
+    UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
+};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
