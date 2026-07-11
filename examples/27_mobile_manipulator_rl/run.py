@@ -85,6 +85,7 @@ class MobileManipulatorPlaceEnv(_Base):
 
     def reset(self, *, seed=None, options=None):
         step = self._episode.reset()
+        self._episode.set_grasp_mode("friction")
         return self._wrap_obs(_observation_to_list(step.observation)), {}
 
     def step(self, action):
@@ -113,6 +114,7 @@ def run_scripted_place(env) -> bool:
     """IK clutter pick-place rollout; returns True if the episode terminates."""
     policy = rne_py.IkClutterPickPlacePolicy()
     step = env._episode.reset()
+    env._episode.set_grasp_mode("friction")
     for _ in range(policy.total_steps()):
         left, right, shoulder, elbow, gripper, lift = policy.act(step.observation)
         step = env._episode.step(

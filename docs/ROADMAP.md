@@ -12,8 +12,13 @@ the weld *look* like a grasp, then replace it with physical friction-based grasp
 |-------|------|-------------|--------|
 | A | Manipulation | Weld visual realism: two-finger contact gating (no single-finger graze capture), smooth weld-anchor retarget to a canonical in-gripper pose (centered between finger pads, folds in the 2 cm seat lift — no teleports), fingers pinch to the object surface | Done (PR #35, fixes #39/#40/#41; README hero rebuilt on real physics PR #42; mm_mobile uncommanded-arm hold damping PR #43) |
 | B | Physics | Friction-based grasp core: force-limited finger position motors + friction-cone holding, weld removed for graspable objects. **Risk**: reintroduces contact-history sensitivity — the v0.13 settle fixes (stable equilibria, kinematic base) are the prerequisite that makes this attemptable. Validate cross-platform from day one (temp linux workflow loop) | Core done (`feat/friction-grasp-core`): opt-in `GraspMode::Friction` on `MobileManipulatorSim` (weld stays the default, hero digest bit-for-bit unchanged), `ContactEvent::impulse` from Rapier's solver, per-obstacle `friction` in scene TOML, hold/release/low-friction-slip tests on `mm_minimal` |
-| C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | Pending |
+| C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | In progress: bounded continued-close pinch target complete; fixed-base example 33 and its policy E2E run in friction mode; Python RL clutter/place rollouts select friction after reset; mobile example 34 validates friction grasp acquisition while full mobile friction placement remains |
 | D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | Pending |
+
+The remaining mobile friction-place gap is deferred to v0.15: `mm_mobile` has
+no vertical lift, while its v0.13 policy drags a welded cube across the table.
+A physical-grasp replacement needs a lift-capable mobile manipulator or a task
+scene/trajectory designed to clear the tabletop without a rigid attachment.
 
 ### Direction pillars (v0.14+)
 

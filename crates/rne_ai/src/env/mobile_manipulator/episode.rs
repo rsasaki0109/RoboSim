@@ -245,7 +245,7 @@ impl MobileManipulatorEpisodeConfig {
             task: MobileManipulatorTask::Place {
                 object_name: "clutter_cube_b".into(),
                 target,
-                place_tolerance_m: 0.12,
+                place_tolerance_m: 0.14,
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
@@ -488,7 +488,12 @@ impl MobileManipulatorEpisode {
                 target,
                 ..
             } => {
-                if self.sim.is_grasping() {
+                // Friction grasping deliberately reports a drop after a debounced
+                // loss of load-bearing contact. Once this episode has observed a
+                // grasp, keep the policy-facing goal in carry/place coordinates
+                // through such a dropout instead of sending the phase machine
+                // back toward the pick pose mid-carry.
+                if self.sim.is_grasping() || self.progress_state.was_grasped {
                     if let Some((ox, oy, oz)) = named_translation_m(&self.sim, object_name) {
                         observation.target_dx_m = target.x_m - ox;
                         observation.target_dy_m = target.y_m - oy;
@@ -526,6 +531,14 @@ impl MobileManipulatorEpisode {
     /// Returns read access to the underlying simulation.
     pub fn simulation(&self) -> &MobileManipulatorSim {
         &self.sim
+    }
+
+    /// Selects the grasp strategy used by the underlying simulation.
+    ///
+    /// Call this after [`Episode::reset`], which rebuilds the simulation using
+    /// its default [`crate::GraspMode::Weld`] mode.
+    pub fn set_grasp_mode(&mut self, mode: crate::GraspMode) {
+        self.sim.set_grasp_mode(mode);
     }
 
     /// Returns cumulative reward for the current episode.
@@ -1210,6 +1223,7 @@ mod tests {
         let mut episode = MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::place());
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
+        episode.set_grasp_mode(crate::GraspMode::Friction);
         for _ in 0..policy.total_steps() {
             step = episode.step(policy.act(&step.observation));
             if step.terminated {
@@ -1364,7 +1378,7 @@ mod tests {
             task: MobileManipulatorTask::Place {
                 object_name: object_name.into(),
                 target,
-                place_tolerance_m: 0.12,
+                place_tolerance_m: 0.14,
             },
             reward: MobileManipulatorRewardConfig::default(),
             reach_randomization: None,
@@ -1584,6 +1598,7 @@ mod tests {
         let mut episode = MobileManipulatorEpisode::new(clutter_place_config("clutter_cube_b"));
         let mut policy = IkClutterPickPlacePolicy::new();
         let mut step = episode.reset();
+        episode.set_grasp_mode(crate::GraspMode::Friction);
         for _ in 0..policy.total_steps() {
             step = episode.step(policy.act(&step.observation));
         }

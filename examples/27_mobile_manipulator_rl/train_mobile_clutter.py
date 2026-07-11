@@ -199,6 +199,7 @@ class MobileClutterPolicy:
 def rollout_metrics(params):
     episode = rne_py.MobileManipulatorEpisode(TASK)
     step = episode.reset()
+    episode.set_grasp_mode("friction")
     policy = MobileClutterPolicy(params)
     grasped = False
     placed = False
@@ -263,6 +264,7 @@ def ik_policy_metrics():
     policy = rne_py.IkMobileClutterPickPlacePolicy()
     episode = rne_py.MobileManipulatorEpisode(TASK)
     step = episode.reset()
+    episode.set_grasp_mode("friction")
     grasped = False
     placed = False
     for _ in range(policy.total_steps()):
