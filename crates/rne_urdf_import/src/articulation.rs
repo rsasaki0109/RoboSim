@@ -6,7 +6,8 @@ use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
 use rne_physics::{
-    FixedJointDesc, JointMotor, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    FixedJointDesc, JointMotor, MultibodyLink, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    RigidBodyType,
 };
 
 /// Configuration for [`attach_urdf_articulation`].
@@ -16,6 +17,8 @@ pub struct UrdfArticulationConfig {
     pub base_body_type: RigidBodyType,
     /// Maximum motor force applied to each created revolute joint.
     pub motor_max_force: f32,
+    /// When true, links are wired as one reduced-coordinate multibody.
+    pub multibody: bool,
 }
 
 impl Default for UrdfArticulationConfig {
@@ -23,6 +26,7 @@ impl Default for UrdfArticulationConfig {
         Self {
             base_body_type: RigidBodyType::Fixed,
             motor_max_force: 50.0,
+            multibody: false,
         }
     }
 }
@@ -48,6 +52,11 @@ pub fn attach_urdf_articulation(
     spawned: &SpawnedUrdfRobot,
     config: UrdfArticulationConfig,
 ) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
+    if config.multibody {
+        for entity in spawned.links.values() {
+            world.entity_mut(*entity).insert(MultibodyLink);
+        }
+    }
     if let Some(mut base_body) = world.get_mut::<RigidBody>(spawned.base_link) {
         base_body.body_type = config.base_body_type;
     }

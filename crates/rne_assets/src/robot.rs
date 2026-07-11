@@ -201,6 +201,9 @@ pub struct UrdfRobotAsset {
     /// When true, links belonging to this robot collide with one another.
     #[serde(default = "default_true")]
     pub self_collisions: bool,
+    /// When true, the backend uses reduced-coordinate multibody joints.
+    #[serde(default)]
+    pub multibody: bool,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -252,6 +255,7 @@ impl UrdfRobotAsset {
     pub fn to_articulation_config(&self) -> UrdfArticulationConfig {
         UrdfArticulationConfig {
             base_body_type: self.base_body_type.into(),
+            multibody: self.multibody,
             ..UrdfArticulationConfig::default()
         }
     }
@@ -439,6 +443,7 @@ articulation = true
 collisions = false
 mesh_collisions = false
 self_collisions = false
+multibody = true
 "#;
         let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
         let urdf = asset.urdf.expect("urdf section");
@@ -447,6 +452,7 @@ self_collisions = false
         assert!(!urdf.collisions);
         assert!(!urdf.mesh_collisions);
         assert!(!urdf.self_collisions);
+        assert!(urdf.multibody);
         assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
     }
 
@@ -460,6 +466,7 @@ self_collisions = false
         assert!(urdf.collisions);
         assert!(urdf.mesh_collisions);
         assert!(urdf.self_collisions);
+        assert!(!urdf.multibody);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
     }
 

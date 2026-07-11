@@ -219,6 +219,13 @@ pub struct FixedJointDesc {
     pub relative_rotation: Quat,
 }
 
+/// Marks a rigid body and its joint as part of a reduced-coordinate multibody.
+///
+/// Backends that support multibodies use this instead of an impulse joint. The
+/// marker may also be placed on the root so it is simulated without a collider.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MultibodyLink;
+
 /// Velocity motor command applied to a joint before each physics step.
 ///
 /// The value is interpreted as an angular velocity (rad/s) for revolute joints

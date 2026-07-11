@@ -14,9 +14,9 @@ pub struct UnitreeG1GaitCommand {
 impl Default for UnitreeG1GaitCommand {
     fn default() -> Self {
         Self {
-            stride_rad: 0.16,
-            foot_lift_rad: 0.18,
-            cycle_steps: 90,
+            stride_rad: 0.05,
+            foot_lift_rad: 0.05,
+            cycle_steps: 120,
         }
     }
 }

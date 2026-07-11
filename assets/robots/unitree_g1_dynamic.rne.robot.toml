@@ -10,3 +10,4 @@ articulation = true
 collisions = true
 mesh_collisions = false
 self_collisions = false
+multibody = true

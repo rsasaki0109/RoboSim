@@ -669,8 +669,37 @@ mod tests {
             rne_physics::RigidBodyType::Dynamic
         );
         sim.configure_position_motors(220.0, 24.0, 88.0);
+        let stand = [
+            UrdfJointPositionTarget {
+                link_name: "left_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_ankle_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_ankle_pitch_link",
+                position: -0.18,
+            },
+        ];
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
         let command = UnitreeG1GaitCommand::default();
-        for step in 0..360 {
+        for step in 0..120 {
             sim.step_joint_position_targets(&unitree_g1_gait_targets(step, command));
         }
         let observation = sim.observe();

@@ -50,8 +50,9 @@ progress, four low-dimensional controls, and an upright/load-balance reward.
 A bounded, periodic G1 gait generator now supplies asymmetric stance/swing leg
 trajectories and arm counter-swing; translating contact locomotion remains next.
 Backend-neutral collision groups can now disable same-robot link contacts while
-preserving environment contacts. Full dynamic G1 requires multibody articulation;
-the current independent-body impulse-joint chain is not stable at 23 DoF.
+preserving environment contacts. Reduced-coordinate multibody articulation is now
+selectable per URDF asset; G1 uses it for real dynamic standing, balance replay,
+and a settle-then-gait rollout without destabilizing existing impulse-joint robots.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|
