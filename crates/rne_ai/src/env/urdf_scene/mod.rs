@@ -1,12 +1,14 @@
 //! Headless simulation for scenes that spawn URDF articulation robots.
 
 mod lekiwi_drive;
+mod quadruped;
 
 pub use lekiwi_drive::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
 };
+pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
@@ -460,6 +462,36 @@ mod tests {
         assert!(
             base_y_m > 0.35,
             "position-held quadruped should keep its body above ground, y={base_y_m} m"
+        );
+    }
+
+    #[test]
+    fn quadruped_trot_is_stable_and_deterministic() {
+        fn rollout() -> UrdfSceneObservation {
+            let mut sim =
+                UrdfSceneSim::from_scene_path(&quadruped_scene_path()).expect("spawn quadruped");
+            sim.configure_position_motors(1200.0, 70.0, 40.0);
+            for _ in 0..180 {
+                sim.step_joint_position_targets(&[]);
+            }
+            for step in 0..360 {
+                sim.step_joint_position_targets(&quadruped_trot_targets(step));
+            }
+            sim.observe()
+        }
+
+        let first = rollout();
+        let second = rollout();
+        assert_eq!(first, second, "identical trot rollouts must replay exactly");
+        assert!(
+            first.base_x_m.abs() > 0.005,
+            "trot should produce measurable planar motion, x={} m",
+            first.base_x_m
+        );
+        assert!(
+            first.base_y_m > 0.35,
+            "trot should keep the body standing, y={} m",
+            first.base_y_m
         );
     }
 
