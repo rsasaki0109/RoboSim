@@ -53,6 +53,8 @@ Backend-neutral collision groups can now disable same-robot link contacts while
 preserving environment contacts. Reduced-coordinate multibody articulation is now
 selectable per URDF asset; G1 uses it for real dynamic standing, balance replay,
 and a settle-then-gait rollout without destabilizing existing impulse-joint robots.
+Only actuated links and their ancestors enter the multibody, keeping fixed visual
+accessories out of the solver while preserving them in the rendered URDF hierarchy.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

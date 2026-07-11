@@ -9,6 +9,7 @@ use rne_physics::{
     FixedJointDesc, JointMotor, MultibodyLink, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
     RigidBodyType,
 };
+use std::collections::HashSet;
 
 /// Configuration for [`attach_urdf_articulation`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -52,9 +53,16 @@ pub fn attach_urdf_articulation(
     spawned: &SpawnedUrdfRobot,
     config: UrdfArticulationConfig,
 ) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
+    let multibody_links = if config.multibody {
+        multibody_link_names(urdf, spawned)
+    } else {
+        HashSet::new()
+    };
     if config.multibody {
-        for entity in spawned.links.values() {
-            world.entity_mut(*entity).insert(MultibodyLink);
+        for name in &multibody_links {
+            if let Some(entity) = spawned.links.get(name) {
+                world.entity_mut(*entity).insert(MultibodyLink);
+            }
         }
     }
     if let Some(mut base_body) = world.get_mut::<RigidBody>(spawned.base_link) {
@@ -65,6 +73,9 @@ pub fn attach_urdf_articulation(
     let mut prismatic_joints = 0_usize;
     let mut fixed_joints = 0_usize;
     for joint in &urdf.joints {
+        if config.multibody && !multibody_links.contains(&joint.child) {
+            continue;
+        }
         let parent = *spawned
             .links
             .get(&joint.parent)
@@ -122,6 +133,36 @@ pub fn attach_urdf_articulation(
         prismatic_joints,
         fixed_joints,
     })
+}
+
+fn multibody_link_names(urdf: &UrdfRobot, spawned: &SpawnedUrdfRobot) -> HashSet<String> {
+    let mut names: HashSet<String> = urdf
+        .joints
+        .iter()
+        .filter(|joint| joint.joint_type != UrdfJointType::Fixed)
+        .flat_map(|joint| [joint.parent.clone(), joint.child.clone()])
+        .collect();
+    if let Some((root_name, _)) = spawned
+        .links
+        .iter()
+        .find(|(_, entity)| **entity == spawned.base_link)
+    {
+        names.insert(root_name.clone());
+    }
+
+    loop {
+        let parents: Vec<String> = urdf
+            .joints
+            .iter()
+            .filter(|joint| names.contains(&joint.child) && !names.contains(&joint.parent))
+            .map(|joint| joint.parent.clone())
+            .collect();
+        if parents.is_empty() {
+            break;
+        }
+        names.extend(parents);
+    }
+    names
 }
 
 fn ensure_dynamic_link(world: &mut World, entity: Entity) {
