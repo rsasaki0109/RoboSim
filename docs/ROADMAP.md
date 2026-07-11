@@ -60,6 +60,8 @@ standing settle, with bounded height and yaw verified by a headless rollout.
 `UnitreeG1GaitEpisode` exposes stride, foot-lift, and yaw-correction actions;
 forward delta, gait phase, bilateral contacts, and pose observations; and a
 forward/upright reward whose short rollouts replay exactly.
+Example 39 and the README media now capture that dynamic multibody gait after
+standing settle instead of animating the former fixed-base showcase.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

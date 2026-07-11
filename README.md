@@ -38,10 +38,10 @@ cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1.png">
-    <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 23-DoF URDF moving its force-limited joints in RNE" width="600">
+    <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 23-DoF URDF walking dynamically with multibody physics in RNE" width="600">
   </picture>
   <br>
-  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. Its articulated, fixed-base showcase drives all 23 force-limited joint motors through Rapier and renders offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody drives all 23 force-limited joints against primitive foot contacts and renders offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash

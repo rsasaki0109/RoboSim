@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_scene_path, UrdfJointPositionTarget, UrdfSceneSim,
+    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
+    UnitreeG1GaitCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
 use rne_math::Vec3;
 use rne_render::{Camera, MeshRenderCache, RenderBackend, VisualShape};
@@ -14,7 +15,7 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
 const FRAME_COUNT: usize = 36;
-const STEPS_PER_FRAME: u64 = 5;
+const STEPS_PER_FRAME: u64 = 3;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
 
 fn main() {
@@ -27,10 +28,12 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create G1 frame directory");
 
-    let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_scene_path()).expect("load G1");
-    sim.configure_position_motors(55.0, 10.0, 88.0);
+    let mut sim =
+        UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path()).expect("load dynamic G1");
+    sim.configure_position_motors(220.0, 24.0, 88.0);
+    let stand = standing_targets();
     for _ in 0..120 {
-        sim.step_joint_position_targets(&g1_targets(0));
+        sim.step_joint_position_targets(&stand);
     }
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
@@ -41,9 +44,16 @@ fn main() {
 
     for frame in 0..FRAME_COUNT {
         for substep in 0..STEPS_PER_FRAME {
-            sim.step_joint_position_targets(&g1_targets(frame as u64 * STEPS_PER_FRAME + substep));
+            let step = frame as u64 * STEPS_PER_FRAME + substep;
+            sim.step_joint_position_targets(&unitree_g1_gait_targets(
+                step,
+                UnitreeG1GaitCommand::default(),
+            ));
         }
         let mut scene = build_visual_render_scene(sim.world());
+        scene.items.retain(|item| {
+            !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
+        });
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 meshes");
@@ -90,34 +100,14 @@ fn main() {
     );
 }
 
-fn g1_targets(step: u64) -> [UrdfJointPositionTarget<'static>; 23] {
-    let phase = step as f64 * std::f64::consts::TAU / 90.0;
-    let sway = phase.sin();
-    let wave = (phase + 0.5).sin();
+fn standing_targets() -> [UrdfJointPositionTarget<'static>; 6] {
     [
-        target("left_hip_pitch_link", -0.18 + 0.04 * sway),
-        target("left_hip_roll_link", 0.03 * sway),
-        target("left_hip_yaw_link", 0.0),
+        target("left_hip_pitch_link", -0.18),
         target("left_knee_link", 0.36),
         target("left_ankle_pitch_link", -0.18),
-        target("left_ankle_roll_link", 0.0),
-        target("right_hip_pitch_link", -0.18 - 0.04 * sway),
-        target("right_hip_roll_link", 0.03 * sway),
-        target("right_hip_yaw_link", 0.0),
+        target("right_hip_pitch_link", -0.18),
         target("right_knee_link", 0.36),
         target("right_ankle_pitch_link", -0.18),
-        target("right_ankle_roll_link", 0.0),
-        target("torso_link", 0.10 * sway),
-        target("left_shoulder_pitch_link", 0.18 * wave),
-        target("left_shoulder_roll_link", 0.28 + 0.12 * sway),
-        target("left_shoulder_yaw_link", 0.0),
-        target("left_elbow_link", 0.42 + 0.20 * wave),
-        target("left_wrist_roll_rubber_hand", 0.25 * sway),
-        target("right_shoulder_pitch_link", -0.18 * wave),
-        target("right_shoulder_roll_link", -0.28 + 0.12 * sway),
-        target("right_shoulder_yaw_link", 0.0),
-        target("right_elbow_link", 0.42 - 0.20 * wave),
-        target("right_wrist_roll_rubber_hand", -0.25 * sway),
     ]
 }
 
