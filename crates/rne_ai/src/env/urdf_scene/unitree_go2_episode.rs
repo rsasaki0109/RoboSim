@@ -59,6 +59,14 @@ pub struct UnitreeGo2Observation {
     pub base_z_m: f64,
     /// Base yaw in radians.
     pub base_yaw_rad: f64,
+    /// Base pitch in radians, including the URDF-to-world basis rotation.
+    pub base_pitch_rad: f64,
+    /// Base roll in radians, including the URDF-to-world basis rotation.
+    pub base_roll_rad: f64,
+    /// Base linear velocity in meters per second.
+    pub base_linear_velocity_m_s: [f64; 3],
+    /// Base angular velocity in radians per second.
+    pub base_angular_velocity_rad_s: [f64; 3],
     /// Planar displacement during the latest step in meters.
     pub locomotion_delta_m: f64,
     /// Front-left foot contact impulse in N·s.
@@ -103,6 +111,18 @@ impl UnitreeGo2Episode {
             base_y_m: base.base_y_m,
             base_z_m: base.base_z_m,
             base_yaw_rad: base.base_yaw_rad,
+            base_pitch_rad: base.base_pitch_rad,
+            base_roll_rad: base.base_roll_rad,
+            base_linear_velocity_m_s: [
+                base.base_linear_velocity_x_m_s,
+                base.base_linear_velocity_y_m_s,
+                base.base_linear_velocity_z_m_s,
+            ],
+            base_angular_velocity_rad_s: [
+                base.base_angular_velocity_x_rad_s,
+                base.base_angular_velocity_y_rad_s,
+                base.base_angular_velocity_z_rad_s,
+            ],
             locomotion_delta_m,
             fl_foot_impulse_ns: self.sim.link_contact_impulse_ns("FL_foot"),
             fr_foot_impulse_ns: self.sim.link_contact_impulse_ns("FR_foot"),

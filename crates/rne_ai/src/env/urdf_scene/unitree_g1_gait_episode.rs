@@ -65,6 +65,14 @@ pub struct UnitreeG1GaitObservation {
     pub base_z_m: f64,
     /// Pelvis yaw in radians.
     pub base_yaw_rad: f64,
+    /// Pelvis pitch in radians, including the URDF-to-world basis rotation.
+    pub base_pitch_rad: f64,
+    /// Pelvis roll in radians, including the URDF-to-world basis rotation.
+    pub base_roll_rad: f64,
+    /// Pelvis linear velocity in meters per second.
+    pub base_linear_velocity_m_s: [f64; 3],
+    /// Pelvis angular velocity in radians per second.
+    pub base_angular_velocity_rad_s: [f64; 3],
     /// Left-foot normal contact impulse in N·s.
     pub left_foot_impulse_ns: f64,
     /// Right-foot normal contact impulse in N·s.
@@ -104,6 +112,18 @@ impl UnitreeG1GaitEpisode {
             base_y_m: base.base_y_m,
             base_z_m: base.base_z_m,
             base_yaw_rad: base.base_yaw_rad,
+            base_pitch_rad: base.base_pitch_rad,
+            base_roll_rad: base.base_roll_rad,
+            base_linear_velocity_m_s: [
+                base.base_linear_velocity_x_m_s,
+                base.base_linear_velocity_y_m_s,
+                base.base_linear_velocity_z_m_s,
+            ],
+            base_angular_velocity_rad_s: [
+                base.base_angular_velocity_x_rad_s,
+                base.base_angular_velocity_y_rad_s,
+                base.base_angular_velocity_z_rad_s,
+            ],
             left_foot_impulse_ns: self.sim.link_contact_impulse_ns("left_ankle_roll_link"),
             right_foot_impulse_ns: self.sim.link_contact_impulse_ns("right_ankle_roll_link"),
             gait_phase: (self.step_in_episode % self.config.cycle_steps.max(1)) as f64

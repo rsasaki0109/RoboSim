@@ -47,6 +47,8 @@ captures that contact-driven motion. The same path covers the official Unitree G
 23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
 `UnitreeGo2Episode` adds bounded stride/lift actions, planar locomotion delta,
 four-foot contact observations, gait phase, and exact short-rollout replay.
+Generic URDF observations and both official gait episodes now expose Y-up
+roll/pitch plus base linear and angular velocities for policy state estimation.
 G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.
 Its deterministic balance episode exposes pelvis pose, bilateral foot loads,

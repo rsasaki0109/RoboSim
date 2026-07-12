@@ -37,8 +37,8 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{Entity, World};
-use rne_math::{yaw_rad, Hertz};
-use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
+use rne_math::{y_up_euler_rad, Hertz};
+use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
 use rne_world::world_transform_of;
@@ -55,6 +55,22 @@ pub struct UrdfSceneObservation {
     pub base_z_m: f64,
     /// Base yaw in radians (Y-up world).
     pub base_yaw_rad: f64,
+    /// Base pitch about the world/local X axis in radians.
+    pub base_pitch_rad: f64,
+    /// Base roll about the world/local Z axis in radians.
+    pub base_roll_rad: f64,
+    /// Base linear velocity along X in meters per second.
+    pub base_linear_velocity_x_m_s: f64,
+    /// Base linear velocity along Y in meters per second.
+    pub base_linear_velocity_y_m_s: f64,
+    /// Base linear velocity along Z in meters per second.
+    pub base_linear_velocity_z_m_s: f64,
+    /// Base angular velocity about X in radians per second.
+    pub base_angular_velocity_x_rad_s: f64,
+    /// Base angular velocity about Y in radians per second.
+    pub base_angular_velocity_y_rad_s: f64,
+    /// Base angular velocity about Z in radians per second.
+    pub base_angular_velocity_z_rad_s: f64,
     /// Number of revolute / continuous joints with motors in the scene.
     pub actuated_joint_count: usize,
 }
@@ -379,11 +395,25 @@ impl UrdfSceneSim {
     /// Returns the latest observation.
     pub fn observe(&self) -> UrdfSceneObservation {
         let base = world_transform_of(&self.world, self.base_link);
+        let (base_yaw_rad, base_pitch_rad, base_roll_rad) = y_up_euler_rad(base.rotation);
+        let body = self
+            .world
+            .get::<RigidBody>(self.base_link)
+            .copied()
+            .unwrap_or_default();
         UrdfSceneObservation {
             base_x_m: base.translation.x,
             base_y_m: base.translation.y,
             base_z_m: base.translation.z,
-            base_yaw_rad: yaw_rad(base.rotation),
+            base_yaw_rad,
+            base_pitch_rad,
+            base_roll_rad,
+            base_linear_velocity_x_m_s: body.linear_velocity_m_s.x,
+            base_linear_velocity_y_m_s: body.linear_velocity_m_s.y,
+            base_linear_velocity_z_m_s: body.linear_velocity_m_s.z,
+            base_angular_velocity_x_rad_s: body.angular_velocity_rad_s.x,
+            base_angular_velocity_y_rad_s: body.angular_velocity_rad_s.y,
+            base_angular_velocity_z_rad_s: body.angular_velocity_rad_s.z,
             actuated_joint_count: self.actuated_joint_count,
         }
     }
@@ -479,6 +509,32 @@ pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observation_exposes_finite_base_orientation_and_velocity() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&cart_minimal_scene_path()).expect("spawn observed cart");
+        for _ in 0..5 {
+            sim.step_cart(UrdfCartAction {
+                left_velocity_rad_s: 2.0,
+                right_velocity_rad_s: 2.0,
+            });
+        }
+        let observation = sim.observe();
+        for value in [
+            observation.base_yaw_rad,
+            observation.base_pitch_rad,
+            observation.base_roll_rad,
+            observation.base_linear_velocity_x_m_s,
+            observation.base_linear_velocity_y_m_s,
+            observation.base_linear_velocity_z_m_s,
+            observation.base_angular_velocity_x_rad_s,
+            observation.base_angular_velocity_y_rad_s,
+            observation.base_angular_velocity_z_rad_s,
+        ] {
+            assert!(value.is_finite());
+        }
+    }
 
     #[test]
     fn so101_urdf_parses_and_spawns_from_scene() {
