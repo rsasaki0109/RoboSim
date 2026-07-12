@@ -49,6 +49,8 @@ captures that contact-driven motion. The same path covers the official Unitree G
 four-foot contact observations, gait phase, and exact short-rollout replay.
 Generic URDF observations and both official gait episodes now expose Y-up
 roll/pitch plus base linear and angular velocities for policy state estimation.
+They also expose yaw/pitch/roll relative to the scene-load base orientation,
+removing each URDF's fixed basis conversion from upright-policy inputs.
 G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.
 Its deterministic balance episode exposes pelvis pose, bilateral foot loads,

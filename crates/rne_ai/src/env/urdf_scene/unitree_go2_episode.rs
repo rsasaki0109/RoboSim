@@ -67,6 +67,12 @@ pub struct UnitreeGo2Observation {
     pub base_linear_velocity_m_s: [f64; 3],
     /// Base angular velocity in radians per second.
     pub base_angular_velocity_rad_s: [f64; 3],
+    /// Base yaw relative to the loaded upright pose in radians.
+    pub base_relative_yaw_rad: f64,
+    /// Base pitch relative to the loaded upright pose in radians.
+    pub base_relative_pitch_rad: f64,
+    /// Base roll relative to the loaded upright pose in radians.
+    pub base_relative_roll_rad: f64,
     /// Planar displacement during the latest step in meters.
     pub locomotion_delta_m: f64,
     /// Front-left foot contact impulse in N·s.
@@ -123,6 +129,9 @@ impl UnitreeGo2Episode {
                 base.base_angular_velocity_y_rad_s,
                 base.base_angular_velocity_z_rad_s,
             ],
+            base_relative_yaw_rad: base.base_relative_yaw_rad,
+            base_relative_pitch_rad: base.base_relative_pitch_rad,
+            base_relative_roll_rad: base.base_relative_roll_rad,
             locomotion_delta_m,
             fl_foot_impulse_ns: self.sim.link_contact_impulse_ns("FL_foot"),
             fr_foot_impulse_ns: self.sim.link_contact_impulse_ns("FR_foot"),

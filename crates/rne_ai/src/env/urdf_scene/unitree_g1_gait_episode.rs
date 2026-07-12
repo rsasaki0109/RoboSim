@@ -73,6 +73,12 @@ pub struct UnitreeG1GaitObservation {
     pub base_linear_velocity_m_s: [f64; 3],
     /// Pelvis angular velocity in radians per second.
     pub base_angular_velocity_rad_s: [f64; 3],
+    /// Pelvis yaw relative to the loaded upright pose in radians.
+    pub base_relative_yaw_rad: f64,
+    /// Pelvis pitch relative to the loaded upright pose in radians.
+    pub base_relative_pitch_rad: f64,
+    /// Pelvis roll relative to the loaded upright pose in radians.
+    pub base_relative_roll_rad: f64,
     /// Left-foot normal contact impulse in N·s.
     pub left_foot_impulse_ns: f64,
     /// Right-foot normal contact impulse in N·s.
@@ -124,6 +130,9 @@ impl UnitreeG1GaitEpisode {
                 base.base_angular_velocity_y_rad_s,
                 base.base_angular_velocity_z_rad_s,
             ],
+            base_relative_yaw_rad: base.base_relative_yaw_rad,
+            base_relative_pitch_rad: base.base_relative_pitch_rad,
+            base_relative_roll_rad: base.base_relative_roll_rad,
             left_foot_impulse_ns: self.sim.link_contact_impulse_ns("left_ankle_roll_link"),
             right_foot_impulse_ns: self.sim.link_contact_impulse_ns("right_ankle_roll_link"),
             gait_phase: (self.step_in_episode % self.config.cycle_steps.max(1)) as f64
@@ -170,7 +179,7 @@ impl Episode for UnitreeG1GaitEpisode {
         let height_error_m = (observation.base_y_m - NOMINAL_HEIGHT_M).abs();
         let reward = 0.5 + 100.0 * forward_delta_m
             - 2.0 * height_error_m
-            - 0.1 * observation.base_yaw_rad.abs()
+            - 0.1 * observation.base_relative_yaw_rad.abs()
             - 0.2 * observation.base_z_m.abs()
             - if fallen { 10.0 } else { 0.0 };
         EpisodeStep {

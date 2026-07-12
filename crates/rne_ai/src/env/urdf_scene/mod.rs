@@ -37,7 +37,7 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{Entity, World};
-use rne_math::{y_up_euler_rad, Hertz};
+use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
@@ -71,6 +71,12 @@ pub struct UrdfSceneObservation {
     pub base_angular_velocity_y_rad_s: f64,
     /// Base angular velocity about Z in radians per second.
     pub base_angular_velocity_z_rad_s: f64,
+    /// Base yaw relative to its scene-load orientation in radians.
+    pub base_relative_yaw_rad: f64,
+    /// Base pitch relative to its scene-load orientation in radians.
+    pub base_relative_pitch_rad: f64,
+    /// Base roll relative to its scene-load orientation in radians.
+    pub base_relative_roll_rad: f64,
     /// Number of revolute / continuous joints with motors in the scene.
     pub actuated_joint_count: usize,
 }
@@ -109,6 +115,7 @@ pub struct UrdfSceneSim {
     mesh_package_roots: Vec<PathBuf>,
     world_seed: u64,
     base_link: Entity,
+    base_reference_rotation: Quat,
     left_wheel: Option<Entity>,
     right_wheel: Option<Entity>,
     kiwi_wheels: [Option<Entity>; 3],
@@ -134,6 +141,7 @@ impl UrdfSceneSim {
         })?;
 
         let base_link = first_robot.base_link;
+        let base_reference_rotation = world_transform_of(&world, base_link).rotation;
         let left_wheel = find_link_by_name(&world, "left_wheel");
         let right_wheel = find_link_by_name(&world, "right_wheel");
         let kiwi_wheels = [
@@ -163,6 +171,7 @@ impl UrdfSceneSim {
             mesh_package_roots: mesh_roots,
             world_seed,
             base_link,
+            base_reference_rotation,
             left_wheel,
             right_wheel,
             kiwi_wheels,
@@ -396,6 +405,9 @@ impl UrdfSceneSim {
     pub fn observe(&self) -> UrdfSceneObservation {
         let base = world_transform_of(&self.world, self.base_link);
         let (base_yaw_rad, base_pitch_rad, base_roll_rad) = y_up_euler_rad(base.rotation);
+        let relative_rotation = self.base_reference_rotation.conjugate() * base.rotation;
+        let (base_relative_yaw_rad, base_relative_pitch_rad, base_relative_roll_rad) =
+            y_up_euler_rad(relative_rotation);
         let body = self
             .world
             .get::<RigidBody>(self.base_link)
@@ -414,6 +426,9 @@ impl UrdfSceneSim {
             base_angular_velocity_x_rad_s: body.angular_velocity_rad_s.x,
             base_angular_velocity_y_rad_s: body.angular_velocity_rad_s.y,
             base_angular_velocity_z_rad_s: body.angular_velocity_rad_s.z,
+            base_relative_yaw_rad,
+            base_relative_pitch_rad,
+            base_relative_roll_rad,
             actuated_joint_count: self.actuated_joint_count,
         }
     }
@@ -514,6 +529,10 @@ mod tests {
     fn observation_exposes_finite_base_orientation_and_velocity() {
         let mut sim =
             UrdfSceneSim::from_scene_path(&cart_minimal_scene_path()).expect("spawn observed cart");
+        let initial = sim.observe();
+        assert_eq!(initial.base_relative_yaw_rad, 0.0);
+        assert_eq!(initial.base_relative_pitch_rad, 0.0);
+        assert_eq!(initial.base_relative_roll_rad, 0.0);
         for _ in 0..5 {
             sim.step_cart(UrdfCartAction {
                 left_velocity_rad_s: 2.0,
@@ -531,6 +550,9 @@ mod tests {
             observation.base_angular_velocity_x_rad_s,
             observation.base_angular_velocity_y_rad_s,
             observation.base_angular_velocity_z_rad_s,
+            observation.base_relative_yaw_rad,
+            observation.base_relative_pitch_rad,
+            observation.base_relative_roll_rad,
         ] {
             assert!(value.is_finite());
         }
