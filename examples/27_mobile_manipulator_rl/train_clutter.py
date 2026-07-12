@@ -85,6 +85,7 @@ def act(params, obs, step_idx):
 def rollout_metrics(params):
     episode = rne_py.MobileManipulatorEpisode(TASK)
     step = episode.reset()
+    episode.set_grasp_mode("friction")
     grasped = False
     placed = False
     for step_idx in range(EPISODE_STEPS):
@@ -144,10 +145,11 @@ def replay_best(params):
 
 
 def ik_policy_grasps() -> bool:
-    """Reference grasp check using the Rust IK clutter policy (two-finger weld)."""
+    """Reference grasp check using the Rust IK clutter policy in friction mode."""
     policy = rne_py.IkClutterPickPlacePolicy()
     episode = rne_py.MobileManipulatorEpisode(TASK)
     step = episode.reset()
+    episode.set_grasp_mode("friction")
     for _ in range(policy.total_steps()):
         left, right, shoulder, elbow, gripper, lift = policy.act(step.observation)
         step = episode.step(left, right, shoulder, elbow, gripper, lift)

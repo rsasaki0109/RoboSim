@@ -1,18 +1,44 @@
 //! Headless simulation for scenes that spawn URDF articulation robots.
 
+mod humanoid_episode;
 mod lekiwi_drive;
+mod quadruped;
+mod quadruped_episode;
+mod unitree_g1_episode;
+mod unitree_g1_gait;
+mod unitree_g1_gait_episode;
+mod unitree_go2_episode;
+mod unitree_go2_gait;
 
+pub use humanoid_episode::{
+    HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
+};
 pub use lekiwi_drive::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
 };
+pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
+pub use quadruped_episode::{
+    QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
+};
+pub use unitree_g1_episode::{
+    UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
+};
+pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
+pub use unitree_g1_gait_episode::{
+    UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
+};
+pub use unitree_go2_episode::{
+    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+};
+pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{Entity, World};
-use rne_math::{yaw_rad, Hertz};
-use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
+use rne_math::{y_up_euler_rad, Hertz, Quat};
+use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
 use rne_world::world_transform_of;
@@ -29,6 +55,28 @@ pub struct UrdfSceneObservation {
     pub base_z_m: f64,
     /// Base yaw in radians (Y-up world).
     pub base_yaw_rad: f64,
+    /// Base pitch about the world/local X axis in radians.
+    pub base_pitch_rad: f64,
+    /// Base roll about the world/local Z axis in radians.
+    pub base_roll_rad: f64,
+    /// Base linear velocity along X in meters per second.
+    pub base_linear_velocity_x_m_s: f64,
+    /// Base linear velocity along Y in meters per second.
+    pub base_linear_velocity_y_m_s: f64,
+    /// Base linear velocity along Z in meters per second.
+    pub base_linear_velocity_z_m_s: f64,
+    /// Base angular velocity about X in radians per second.
+    pub base_angular_velocity_x_rad_s: f64,
+    /// Base angular velocity about Y in radians per second.
+    pub base_angular_velocity_y_rad_s: f64,
+    /// Base angular velocity about Z in radians per second.
+    pub base_angular_velocity_z_rad_s: f64,
+    /// Base yaw relative to its scene-load orientation in radians.
+    pub base_relative_yaw_rad: f64,
+    /// Base pitch relative to its scene-load orientation in radians.
+    pub base_relative_pitch_rad: f64,
+    /// Base roll relative to its scene-load orientation in radians.
+    pub base_relative_roll_rad: f64,
     /// Number of revolute / continuous joints with motors in the scene.
     pub actuated_joint_count: usize,
 }
@@ -49,6 +97,15 @@ pub struct UrdfArmAction {
     pub shoulder_pan_velocity_rad_s: f64,
 }
 
+/// Position target for a named actuated URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointPositionTarget<'a> {
+    /// Child link name whose articulation joint owns the motor.
+    pub link_name: &'a str,
+    /// Desired revolute angle in radians or prismatic displacement in meters.
+    pub position: f64,
+}
+
 /// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
 pub struct UrdfSceneSim {
     world: World,
@@ -58,6 +115,7 @@ pub struct UrdfSceneSim {
     mesh_package_roots: Vec<PathBuf>,
     world_seed: u64,
     base_link: Entity,
+    base_reference_rotation: Quat,
     left_wheel: Option<Entity>,
     right_wheel: Option<Entity>,
     kiwi_wheels: [Option<Entity>; 3],
@@ -83,6 +141,7 @@ impl UrdfSceneSim {
         })?;
 
         let base_link = first_robot.base_link;
+        let base_reference_rotation = world_transform_of(&world, base_link).rotation;
         let left_wheel = find_link_by_name(&world, "left_wheel");
         let right_wheel = find_link_by_name(&world, "right_wheel");
         let kiwi_wheels = [
@@ -112,6 +171,7 @@ impl UrdfSceneSim {
             mesh_package_roots: mesh_roots,
             world_seed,
             base_link,
+            base_reference_rotation,
             left_wheel,
             right_wheel,
             kiwi_wheels,
@@ -146,6 +206,36 @@ impl UrdfSceneSim {
         lekiwi_so101_scene_path()
     }
 
+    /// Built-in 12-DoF RNE quadruped scene path.
+    pub fn quadruped_scene_path() -> PathBuf {
+        quadruped_scene_path()
+    }
+
+    /// Built-in 12-DoF RNE humanoid scene path.
+    pub fn humanoid_scene_path() -> PathBuf {
+        humanoid_scene_path()
+    }
+
+    /// Vendored official Unitree Go2 scene path.
+    pub fn unitree_go2_scene_path() -> PathBuf {
+        unitree_go2_scene_path()
+    }
+
+    /// Vendored official Unitree Go2 dynamic multibody scene path.
+    pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
+        unitree_go2_dynamic_scene_path()
+    }
+
+    /// Vendored official Unitree G1 23-DoF scene path.
+    pub fn unitree_g1_scene_path() -> PathBuf {
+        unitree_g1_scene_path()
+    }
+
+    /// Vendored official Unitree G1 dynamic standing scene path.
+    pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
+        unitree_g1_dynamic_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -178,6 +268,13 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Returns a named URDF link's world translation in meters.
+    pub fn link_translation_m(&self, link_name: &str) -> Option<(f64, f64, f64)> {
+        let entity = find_link_by_name(&self.world, link_name)?;
+        let translation = world_transform_of(&self.world, entity).translation;
+        Some((translation.x, translation.y, translation.z))
     }
 
     /// Applies a diff-drive wheel action and steps one simulation tick.
@@ -240,14 +337,98 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Applies named joint position targets and steps one simulation tick.
+    ///
+    /// Unknown link names and links without a [`JointMotor`] are ignored, which
+    /// lets a controller send a stable superset of targets across related URDF
+    /// variants. Motors retain their existing force, stiffness, and damping.
+    pub fn step_joint_position_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.target_position = target.position;
+                motor.velocity_rad_s = 0.0;
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Configures every actuated joint as a force-limited position motor.
+    ///
+    /// `stiffness` and `damping` use the backend-neutral [`JointMotor`] gains;
+    /// `max_force` is expressed in N for prismatic joints and N·m for revolute
+    /// joints. This is a one-time setup helper for legged standing controllers.
+    pub fn configure_position_motors(&mut self, stiffness: f64, damping: f64, max_force: f64) {
+        let motor_entities: Vec<_> = self
+            .world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                self.world
+                    .get::<JointMotor>(entity_ref.id())
+                    .is_some()
+                    .then_some(entity_ref.id())
+            })
+            .collect();
+        for entity in motor_entities {
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.stiffness = stiffness;
+                motor.gain = damping;
+                motor.max_force = max_force;
+            }
+        }
+    }
+
+    /// Returns the summed normal contact impulse for a named link in N·s.
+    ///
+    /// This is intended for deterministic foot-contact observations. It returns
+    /// zero when the link is absent, has no contact, or contacts have not yet
+    /// been produced by a physics step.
+    pub fn link_contact_impulse_ns(&self, link_name: &str) -> f64 {
+        let Some(link) = find_link_by_name(&self.world, link_name) else {
+            return 0.0;
+        };
+        self.backend
+            .contacts(self.physics_world)
+            .map(|contacts| {
+                contacts
+                    .iter()
+                    .filter(|contact| contact.entity_a == link || contact.entity_b == link)
+                    .map(|contact| f64::from(contact.impulse))
+                    .sum()
+            })
+            .unwrap_or(0.0)
+    }
+
     /// Returns the latest observation.
     pub fn observe(&self) -> UrdfSceneObservation {
         let base = world_transform_of(&self.world, self.base_link);
+        let (base_yaw_rad, base_pitch_rad, base_roll_rad) = y_up_euler_rad(base.rotation);
+        let relative_rotation = self.base_reference_rotation.conjugate() * base.rotation;
+        let (base_relative_yaw_rad, base_relative_pitch_rad, base_relative_roll_rad) =
+            y_up_euler_rad(relative_rotation);
+        let body = self
+            .world
+            .get::<RigidBody>(self.base_link)
+            .copied()
+            .unwrap_or_default();
         UrdfSceneObservation {
             base_x_m: base.translation.x,
             base_y_m: base.translation.y,
             base_z_m: base.translation.z,
-            base_yaw_rad: yaw_rad(base.rotation),
+            base_yaw_rad,
+            base_pitch_rad,
+            base_roll_rad,
+            base_linear_velocity_x_m_s: body.linear_velocity_m_s.x,
+            base_linear_velocity_y_m_s: body.linear_velocity_m_s.y,
+            base_linear_velocity_z_m_s: body.linear_velocity_m_s.z,
+            base_angular_velocity_x_rad_s: body.angular_velocity_rad_s.x,
+            base_angular_velocity_y_rad_s: body.angular_velocity_rad_s.y,
+            base_angular_velocity_z_rad_s: body.angular_velocity_rad_s.z,
+            base_relative_yaw_rad,
+            base_relative_pitch_rad,
+            base_relative_roll_rad,
             actuated_joint_count: self.actuated_joint_count,
         }
     }
@@ -310,9 +491,72 @@ pub fn lekiwi_so101_scene_path() -> PathBuf {
     assets_scene_path("lekiwi_so101.rne.scene.toml")
 }
 
+/// Built-in 12-DoF RNE quadruped scene path.
+pub fn quadruped_scene_path() -> PathBuf {
+    assets_scene_path("rne_quadruped.rne.scene.toml")
+}
+
+/// Built-in 12-DoF RNE humanoid scene path.
+pub fn humanoid_scene_path() -> PathBuf {
+    assets_scene_path("rne_humanoid.rne.scene.toml")
+}
+
+/// Vendored official Unitree Go2 scene path.
+pub fn unitree_go2_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2.rne.scene.toml")
+}
+
+/// Vendored official Unitree Go2 dynamic multibody scene path.
+pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2_dynamic.rne.scene.toml")
+}
+
+/// Vendored official Unitree G1 23-DoF scene path.
+pub fn unitree_g1_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1.rne.scene.toml")
+}
+
+/// Vendored official Unitree G1 scene using primitive-only collision geometry.
+pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1_dynamic.rne.scene.toml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observation_exposes_finite_base_orientation_and_velocity() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&cart_minimal_scene_path()).expect("spawn observed cart");
+        let initial = sim.observe();
+        assert_eq!(initial.base_relative_yaw_rad, 0.0);
+        assert_eq!(initial.base_relative_pitch_rad, 0.0);
+        assert_eq!(initial.base_relative_roll_rad, 0.0);
+        for _ in 0..5 {
+            sim.step_cart(UrdfCartAction {
+                left_velocity_rad_s: 2.0,
+                right_velocity_rad_s: 2.0,
+            });
+        }
+        let observation = sim.observe();
+        for value in [
+            observation.base_yaw_rad,
+            observation.base_pitch_rad,
+            observation.base_roll_rad,
+            observation.base_linear_velocity_x_m_s,
+            observation.base_linear_velocity_y_m_s,
+            observation.base_linear_velocity_z_m_s,
+            observation.base_angular_velocity_x_rad_s,
+            observation.base_angular_velocity_y_rad_s,
+            observation.base_angular_velocity_z_rad_s,
+            observation.base_relative_yaw_rad,
+            observation.base_relative_pitch_rad,
+            observation.base_relative_roll_rad,
+        ] {
+            assert!(value.is_finite());
+        }
+    }
 
     #[test]
     fn so101_urdf_parses_and_spawns_from_scene() {
@@ -323,6 +567,333 @@ mod tests {
         assert!(!sim.mesh_package_roots().is_empty());
         let obs = sim.observe();
         assert!(obs.base_y_m >= 0.0);
+    }
+
+    #[test]
+    fn named_joint_position_target_updates_motor() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        sim.step_joint_position_targets(&[UrdfJointPositionTarget {
+            link_name: "shoulder_link",
+            position: 0.35,
+        }]);
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        let motor = sim
+            .world()
+            .get::<JointMotor>(shoulder)
+            .expect("shoulder motor");
+        assert_eq!(motor.target_position, 0.35);
+        assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn named_link_contact_impulse_reports_wheel_ground_load() {
+        let scene_path = cart_minimal_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn cart");
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        let left_impulse_ns = sim.link_contact_impulse_ns("left_wheel");
+        assert!(
+            left_impulse_ns > 0.0,
+            "settled wheel should report ground-contact impulse, got {left_impulse_ns} N·s"
+        );
+        assert_eq!(sim.link_contact_impulse_ns("missing_foot"), 0.0);
+    }
+
+    #[test]
+    fn quadruped_spawns_with_twelve_motors_and_four_loaded_feet() {
+        let scene_path = quadruped_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn quadruped");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(1200.0, 70.0, 40.0);
+        for _ in 0..90 {
+            sim.step_joint_position_targets(&[]);
+        }
+        for foot in ["fl_foot", "fr_foot", "rl_foot", "rr_foot"] {
+            let impulse_ns = sim.link_contact_impulse_ns(foot);
+            assert!(
+                impulse_ns > 0.0,
+                "standing quadruped foot `{foot}` should bear load, got {impulse_ns} N·s"
+            );
+        }
+        let base_y_m = sim.observe().base_y_m;
+        assert!(
+            base_y_m > 0.35,
+            "position-held quadruped should keep its body above ground, y={base_y_m} m"
+        );
+    }
+
+    #[test]
+    fn quadruped_trot_is_stable_and_deterministic() {
+        fn rollout() -> UrdfSceneObservation {
+            let mut sim =
+                UrdfSceneSim::from_scene_path(&quadruped_scene_path()).expect("spawn quadruped");
+            sim.configure_position_motors(1200.0, 70.0, 40.0);
+            for _ in 0..180 {
+                sim.step_joint_position_targets(&[]);
+            }
+            for step in 0..360 {
+                sim.step_joint_position_targets(&quadruped_trot_targets(step));
+            }
+            sim.observe()
+        }
+
+        let first = rollout();
+        let second = rollout();
+        assert_eq!(first, second, "identical trot rollouts must replay exactly");
+        assert!(
+            first.base_x_m.abs() > 0.005,
+            "trot should produce measurable planar motion, x={} m",
+            first.base_x_m
+        );
+        assert!(
+            first.base_y_m > 0.35,
+            "trot should keep the body standing, y={} m",
+            first.base_y_m
+        );
+    }
+
+    #[test]
+    fn humanoid_spawns_with_twelve_motors_and_two_loaded_feet() {
+        let scene_path = humanoid_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn humanoid");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(1800.0, 85.0, 80.0);
+        for _ in 0..180 {
+            sim.step_joint_position_targets(&[]);
+        }
+        for foot in ["left_foot", "right_foot"] {
+            let impulse_ns = sim.link_contact_impulse_ns(foot);
+            assert!(
+                impulse_ns > 0.0,
+                "standing humanoid foot `{foot}` should bear load, got {impulse_ns} N·s"
+            );
+        }
+        let base_y_m = sim.observe().base_y_m;
+        assert!(
+            base_y_m > 0.70,
+            "position-held humanoid should remain upright, y={base_y_m} m"
+        );
+    }
+
+    #[test]
+    fn official_unitree_go2_urdf_spawns_with_twelve_motors() {
+        let scene_path = unitree_go2_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn Unitree Go2");
+        assert_eq!(sim.observe().actuated_joint_count, 12);
+        sim.configure_position_motors(80.0, 12.0, 23.7);
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        assert!((sim.observe().base_y_m - 0.36).abs() < 1.0e-9);
+        assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_go2_dynamic_multibody_stands_on_four_feet() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("spawn dynamic Unitree Go2");
+        sim.configure_position_motors(180.0, 18.0, 23.7);
+        let legs = ["FL", "FR", "RL", "RR"];
+        for _ in 0..180 {
+            let mut targets = Vec::with_capacity(12);
+            for leg in legs {
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_hip",
+                        "FR" => "FR_hip",
+                        "RL" => "RL_hip",
+                        _ => "RR_hip",
+                    },
+                    position: 0.0,
+                });
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_thigh",
+                        "FR" => "FR_thigh",
+                        "RL" => "RL_thigh",
+                        _ => "RR_thigh",
+                    },
+                    position: 0.8,
+                });
+                targets.push(UrdfJointPositionTarget {
+                    link_name: match leg {
+                        "FL" => "FL_calf",
+                        "FR" => "FR_calf",
+                        "RL" => "RL_calf",
+                        _ => "RR_calf",
+                    },
+                    position: -1.5,
+                });
+            }
+            sim.step_joint_position_targets(&targets);
+        }
+        let observation = sim.observe();
+        assert!(observation.base_y_m > 0.18, "Go2 fell: {observation:?}");
+        let load: f64 = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+            .iter()
+            .map(|foot| sim.link_contact_impulse_ns(foot))
+            .sum();
+        assert!(load > 0.0, "Go2 feet should contact the ground");
+    }
+
+    #[test]
+    fn official_unitree_go2_dynamic_trot_remains_upright() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("spawn trotting Unitree Go2");
+        sim.configure_position_motors(180.0, 18.0, 23.7);
+        let stand = unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+            },
+        );
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
+        let initial = sim.observe();
+        for step in 0..120 {
+            sim.step_joint_position_targets(&unitree_go2_trot_targets(
+                step,
+                UnitreeGo2GaitCommand::default(),
+            ));
+        }
+        let observation = sim.observe();
+        assert!(
+            observation.base_y_m > 0.18,
+            "Go2 trot fell: {observation:?}"
+        );
+        assert!(observation.base_x_m.is_finite());
+        assert!(
+            (observation.base_x_m - initial.base_x_m).abs() > 0.01,
+            "Go2 trot should translate through contact: {observation:?}"
+        );
+    }
+
+    #[test]
+    fn official_unitree_g1_urdf_spawns_with_twenty_three_motors() {
+        let scene_path = unitree_g1_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn Unitree G1");
+        assert_eq!(sim.observe().actuated_joint_count, 23);
+        sim.configure_position_motors(80.0, 12.0, 60.0);
+        for _ in 0..30 {
+            sim.step_joint_position_targets(&[]);
+        }
+        assert!((sim.observe().base_y_m - 0.80).abs() < 1.0e-9);
+        assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_g1_dynamic_scene_contacts_ground_without_exploding() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("spawn dynamic Unitree G1");
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        let targets = [
+            UrdfJointPositionTarget {
+                link_name: "left_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_ankle_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_ankle_pitch_link",
+                position: -0.18,
+            },
+        ];
+        for _ in 0..240 {
+            sim.step_joint_position_targets(&targets);
+        }
+        let observation = sim.observe();
+        assert!(observation.base_y_m.is_finite());
+        assert!(observation.base_y_m > 0.35, "G1 fell: {observation:?}");
+        let foot_impulse_ns = sim.link_contact_impulse_ns("left_ankle_roll_link")
+            + sim.link_contact_impulse_ns("right_ankle_roll_link");
+        assert!(foot_impulse_ns > 0.0, "G1 feet should contact the ground");
+    }
+
+    #[test]
+    fn official_unitree_g1_scripted_gait_advances_without_falling() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("spawn walking Unitree G1");
+        let pelvis = sim
+            .world()
+            .iter_entities()
+            .find(|entity| {
+                sim.world()
+                    .get::<Link>(entity.id())
+                    .is_some_and(|link| link.name == "pelvis")
+            })
+            .expect("G1 pelvis")
+            .id();
+        assert_eq!(
+            sim.world()
+                .get::<rne_physics::RigidBody>(pelvis)
+                .expect("pelvis body")
+                .body_type,
+            rne_physics::RigidBodyType::Dynamic
+        );
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        let stand = [
+            UrdfJointPositionTarget {
+                link_name: "left_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "left_ankle_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_hip_pitch_link",
+                position: -0.18,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_knee_link",
+                position: 0.36,
+            },
+            UrdfJointPositionTarget {
+                link_name: "right_ankle_pitch_link",
+                position: -0.18,
+            },
+        ];
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
+        let command = UnitreeG1GaitCommand::default();
+        for step in 0..120 {
+            sim.step_joint_position_targets(&unitree_g1_gait_targets(step, command));
+        }
+        let observation = sim.observe();
+        assert!(observation.base_x_m.is_finite());
+        assert!(
+            observation.base_x_m > 0.005,
+            "G1 did not advance: {observation:?}"
+        );
+        assert!(observation.base_y_m > 0.35, "G1 gait fell: {observation:?}");
+        assert!(
+            observation.base_yaw_rad.abs() < 1.2,
+            "G1 yaw drifted: {observation:?}"
+        );
     }
 
     #[test]

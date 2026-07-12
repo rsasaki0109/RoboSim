@@ -118,6 +118,37 @@ impl Collider {
     }
 }
 
+/// Pairwise collider filtering masks.
+///
+/// Two colliders interact when each collider's membership overlaps the other
+/// collider's filter. Missing components are treated as [`Self::default`].
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollisionGroups {
+    /// Groups this collider belongs to.
+    pub memberships: u32,
+    /// Groups this collider accepts interactions from.
+    pub filter: u32,
+}
+
+impl Default for CollisionGroups {
+    fn default() -> Self {
+        Self {
+            memberships: u32::MAX,
+            filter: u32::MAX,
+        }
+    }
+}
+
+impl CollisionGroups {
+    /// Creates masks that disable interactions with colliders in the same group.
+    pub const fn without_self_collision(group_bit: u32) -> Self {
+        Self {
+            memberships: group_bit,
+            filter: !group_bit,
+        }
+    }
+}
+
 /// Physical surface material.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PhysicsMaterial {
@@ -187,6 +218,13 @@ pub struct FixedJointDesc {
     /// Orientation of the child frame relative to the parent frame.
     pub relative_rotation: Quat,
 }
+
+/// Marks a rigid body and its joint as part of a reduced-coordinate multibody.
+///
+/// Backends that support multibodies use this instead of an impulse joint. The
+/// marker may also be placed on the root so it is simulated without a collider.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MultibodyLink;
 
 /// Velocity motor command applied to a joint before each physics step.
 ///

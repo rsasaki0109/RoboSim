@@ -27,9 +27,17 @@ pub use mobile_manipulator::{
     MM_MOBILE_WHEEL_RADIUS_M,
 };
 pub use urdf_scene::{
-    cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
-    lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, so101_scene_path,
-    UrdfArmAction, UrdfCartAction, UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim,
-    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
-    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+    cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
+    lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, quadruped_scene_path,
+    quadruped_trot_targets, so101_scene_path, unitree_g1_dynamic_scene_path,
+    unitree_g1_gait_targets, unitree_g1_scene_path, unitree_go2_dynamic_scene_path,
+    unitree_go2_scene_path, unitree_go2_trot_targets, HumanoidAction, HumanoidEpisode,
+    HumanoidEpisodeConfig, HumanoidObservation, QuadrupedAction, QuadrupedEpisode,
+    QuadrupedEpisodeConfig, QuadrupedObservation, UnitreeG1Action, UnitreeG1Episode,
+    UnitreeG1EpisodeConfig, UnitreeG1GaitAction, UnitreeG1GaitCommand, UnitreeG1GaitEpisode,
+    UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation, UnitreeG1Observation, UnitreeGo2Action,
+    UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2GaitCommand, UnitreeGo2Observation,
+    UrdfArmAction, UrdfCartAction, UrdfJointPositionTarget, UrdfKiwiAction, UrdfSceneObservation,
+    UrdfSceneSim, LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,
 };

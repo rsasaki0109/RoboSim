@@ -19,6 +19,21 @@ All notable changes to Robot Native Engine are documented in this file.
   (`impulse`, N·s per step), and scene TOML obstacles accept an optional
   `friction` coefficient override — used by the new tests to prove a µ=0.02
   cube slips out of the same grasp that carries a µ=0.5 cube.
+- **Friction-grasp task migration (v0.14 Phase C)**: continued-close policies
+  now converge on a bounded 15-step pinch target instead of winding the finger
+  springs into a geometric jam. The fixed-base clutter policy/E2E and Python RL
+  clutter/place rollouts select friction mode after reset; policy observations
+  remain in carry/place coordinates across the friction grasp's debounced drop
+  semantics. Weld remains available for scripted regression trajectories.
+
+### Known limitations
+
+- **Mobile friction placement**: `mm_mobile` can acquire a physical friction
+  grasp, but its planar arm has no vertical lift. The existing mobile place
+  policy relies on a weld to drag the cube along the long tabletop before it
+  falls clear; a free friction-held cube loses contact during that maneuver.
+  Example 34 therefore validates friction grasp acquisition while its complete
+  transport/place trajectory remains a v0.15 robot/scene redesign task.
 
 ### Fixed
 

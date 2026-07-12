@@ -432,11 +432,12 @@ const FINGER_MOTOR_STIFFNESS: f64 = 100000.0;
 const FINGER_MOTOR_DAMPING: f64 = 640.0;
 /// Finger joint motor force/torque cap in [`GraspMode::Friction`] (N*m), overriding
 /// the backend's default per-revolute-joint cap (`REVOLUTE_MOTOR_MAX_FORCE` in
-/// `rne_physics_rapier`, currently 50.0). Friction mode never clamps the finger
-/// closing velocity once an object is caught (see
-/// [`MobileManipulatorSim::clamp_finger_closing_velocity`], which only ever
-/// clamps when the weld path's pinch limits are established), so a continuing
-/// close command keeps advancing the position-spring's target through the held
+/// `rne_physics_rapier`, currently 50.0). Before the pinch limits established by
+/// [`MobileManipulatorSim::establish_friction_pinch_limits`] existed, friction mode
+/// never clamped the finger closing velocity once an object was caught (see
+/// [`MobileManipulatorSim::clamp_finger_closing_velocity`], which used to only ever
+/// clamp when the weld path's pinch limits were established), so a continuing
+/// close command kept advancing the position-spring's target through the held
 /// object; this force cap is what actually arrests the fingers at the object
 /// surface, converting the stiff spring into an approximately constant squeeze
 /// torque once saturated. Physics check: at the planar fingers' ~0.04 m contact
@@ -449,6 +450,34 @@ const FINGER_MOTOR_DAMPING: f64 = 640.0;
 /// (0.1, 0.3, 0.6 were tried) leave the brief grasp-time squeeze too weak to
 /// keep both fingers load-bearing through a carry swing, dropping the grasp.
 const FRICTION_GRASP_FINGER_MAX_FORCE: f64 = 1.0;
+/// Magnitude of extra closing travel (rad) the LEFT finger joint may advance past
+/// its angle at the moment a [`GraspMode::Friction`] grasp is caught, before
+/// the friction motor-target clamp arrests further closing
+/// (see [`MobileManipulatorSim::establish_friction_pinch_limits`]).
+///
+/// v0.14 Phase C step C1: before this existed, a policy that kept commanding
+/// "close" through an entire carry (rather than dropping to zero right after the
+/// two-finger gate fires, as the `friction_transport_sequence` test helper
+/// deliberately does — see its doc comment) drove the finger position-spring
+/// target arbitrarily far past the object surface. [`FRICTION_GRASP_FINGER_MAX_FORCE`]
+/// alone arrests the resulting TORQUE, but not the commanded ANGLE, so the spring
+/// stayed fully saturated indefinitely and eventually wedged the fingers into a
+/// friction-independent geometric jam (see that helper's doc comment on the
+/// roughly 18-step jam threshold) — this budget stops the commanded target itself once
+/// the good squeeze is reached.
+///
+/// The budget is exactly the target travel produced by the proven-good 15-step
+/// settle used by `friction_transport_sequence`: 2.5 rad/s * (1/60) s * 15 =
+/// 0.625 rad. Clamping the spring target to that travel makes continued-close
+/// converge on the same squeeze as settle-then-hold. The actual finger angles may
+/// remain asymmetric because the free object re-centers and rotates under load.
+/// NOT the same constant as the weld path's [`GRASP_PINCH_MARGIN_MAX_RAD`] (0.08
+/// rad): weld rigidly attaches the object on contact so only a small residual
+/// correction is ever needed there, but a friction grasp keeps driving a still-free
+/// object through real, much larger travel as it settles into the squeeze.
+const FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD: f64 = 0.625;
+/// Right-finger counterpart of [`FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD`].
+const FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD: f64 = 0.625;
 /// Consecutive physics steps a [`GraspMode::Friction`] grasp may go without both
 /// fingers maintaining a load-bearing contact (see
 /// [`MobileManipulatorSim::friction_contact_maintained`]) before the grasp is
@@ -524,12 +553,36 @@ pub struct MobileManipulatorSim {
     /// Smooth weld-anchor retarget in progress for the current grasp, if any.
     /// Only ever populated in [`GraspMode::Weld`].
     grasp_retarget: Option<GraspRetarget>,
-    /// Left finger joint closing limit for the current grasp, if established
-    /// (see [`Self::attach_grasp`] and [`GRASP_PINCH_MARGIN_FRACTION`]). Only
-    /// ever populated in [`GraspMode::Weld`].
+    /// Left finger joint closing limit for the current grasp, if established.
+    /// Populated by [`Self::attach_grasp`] (see [`GRASP_PINCH_MARGIN_FRACTION`])
+    /// in [`GraspMode::Weld`], or by [`Self::establish_friction_pinch_limits`]
+    /// (see [`FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD`]) in [`GraspMode::Friction`];
+    /// [`Self::clamp_finger_closing_velocity`] enforces it identically either way.
     grasp_pinch_left_limit_rad: Option<f64>,
     /// Right finger joint closing limit for the current grasp, if established.
+    /// See [`Self::grasp_pinch_left_limit_rad`].
     grasp_pinch_right_limit_rad: Option<f64>,
+    /// The object [`Self::establish_friction_pinch_limits`] last established
+    /// [`Self::grasp_pinch_left_limit_rad`]/[`Self::grasp_pinch_right_limit_rad`]
+    /// for, in [`GraspMode::Friction`]. Only ever populated in that mode.
+    ///
+    /// The two-finger contact gate ([`Self::friction_contact_maintained`]) can
+    /// legitimately flap for a tick or two right as a grasp's squeeze is still
+    /// ramping up — briefly dropping below [`FRICTION_GRASP_MIN_IMPULSE_NS`] on
+    /// one finger and tripping [`FRICTION_GRASP_LOST_CONTACT_STEPS`] — and
+    /// immediately re-catch the SAME object the very next tick. Re-establishing
+    /// a fresh pinch budget from that already-more-advanced position on every
+    /// such flap would silently ratchet the allowed travel outward each time,
+    /// defeating the whole point of a bounded budget (measured empirically:
+    /// without this guard, [`Self::update_grasp_friction`] re-established limits
+    /// several times within a single settle window, each time from further
+    /// along, reproducing the exact friction-independent jam this mechanism
+    /// exists to prevent). Comparing against the previously-established-for
+    /// object lets one same-object re-catch keep its existing (tighter) limits.
+    /// Further re-catches are suppressed until an explicit open command clears
+    /// the grasp, so a genuinely slipping object cannot remain logically grasped
+    /// through an unlimited series of contact flaps.
+    friction_grasp_pinch_established_for: Option<Entity>,
     /// Consecutive steps the current [`GraspMode::Friction`] grasp has gone
     /// without both fingers maintaining load-bearing contact (see
     /// [`Self::friction_contact_maintained`] and
@@ -538,6 +591,9 @@ pub struct MobileManipulatorSim {
     /// restored snapshot restarts the debounce window, which only ever widens
     /// the window in which a genuine slip is detected, never masks one).
     friction_grasp_lost_contact_steps: u32,
+    /// Whether the current friction pinch budget has already been used for one
+    /// same-object re-catch after a debounced contact flap.
+    friction_grasp_recatch_used: bool,
     actuated: Vec<ActuatedJoint>,
     /// Commanded height target of the vertical lift, integrated from lift velocity.
     lift_target_m: f64,
@@ -1062,11 +1118,31 @@ impl MobileManipulatorSim {
                 self.grasp_pinch_right_limit_rad = None;
             }
         }
+        // `grasp_retarget` (and the pinch limits riding on it above) is only ever
+        // populated in `GraspMode::Weld` (see its doc comment), so the `None` arm
+        // above always fires for a `GraspMode::Friction` snapshot and just cleared
+        // the friction pinch limits regardless of whether a friction grasp is
+        // still active. Re-establish them from the just-restored finger
+        // positions when one is, so a snapshot round-trip mid-carry does not
+        // silently drop back to the unclamped, jam-prone continued-close
+        // behavior this step exists to fix; this is not part of the snapshot
+        // schema itself (like `grasp_mode` and `friction_grasp_lost_contact_steps`
+        // below), only recomputed from state the schema already carries
+        // (`grasped_object_index` and the restored joint transforms).
+        if self.grasp_mode == GraspMode::Friction {
+            if let Some(object) = self.grasped_object {
+                self.establish_friction_pinch_limits();
+                self.friction_grasp_pinch_established_for = Some(object);
+            } else {
+                self.clear_friction_pinch_limits();
+            }
+        }
 
         // Not part of the snapshot schema (see `GraspMode`'s doc comment): reset the
         // friction-grasp debounce window rather than leaving a stale count from
         // before the restore point.
         self.friction_grasp_lost_contact_steps = 0;
+        self.friction_grasp_recatch_used = false;
         self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);
         self.step_count = snapshot.step_count;
         self.joint_sequence = snapshot.joint_sequence;
@@ -1140,7 +1216,9 @@ impl MobileManipulatorSim {
             grasp_retarget: None,
             grasp_pinch_left_limit_rad: None,
             grasp_pinch_right_limit_rad: None,
+            friction_grasp_pinch_established_for: None,
             friction_grasp_lost_contact_steps: 0,
+            friction_grasp_recatch_used: false,
             actuated,
             lift_target_m: 0.0,
             joint_names,
@@ -1281,28 +1359,52 @@ impl MobileManipulatorSim {
     ///
     /// Closing the gripper onto a graspable body caught by BOTH fingers (the
     /// same two-finger gate as the weld path, see
-    /// [`Self::find_graspable_in_contact`]) marks it grasped. Opening the
-    /// gripper always releases it immediately, same as the weld path. But
+    /// [`Self::find_graspable_in_contact`]) marks it grasped and establishes
+    /// finger pinch-close limits (see [`Self::establish_friction_pinch_limits`])
+    /// so a policy that keeps commanding "close" through the whole carry (rather
+    /// than dropping to zero right after the gate fires) converges on the same
+    /// bounded squeeze instead of grinding indefinitely into a
+    /// friction-independent geometric jam. Opening the gripper always releases
+    /// it immediately, same as the weld path, and clears those limits. But
     /// because nothing rigidly constrains a friction grasp, it must also be
     /// dropped when the fingers actually lose their hold: every step, if both
     /// fingers are not maintaining a load-bearing contact with the grasped
     /// object (see [`Self::friction_contact_maintained`]) for
     /// [`FRICTION_GRASP_LOST_CONTACT_STEPS`] consecutive steps, the grasp is
-    /// cleared — this is what lets a too-low-friction surface actually cause
-    /// the object to slip out instead of silently staying "grasped" forever.
+    /// cleared — this is what lets a too-low-friction surface actually cause the
+    /// object to slip out instead of silently staying "grasped" forever. That
+    /// drop deliberately leaves the pinch limits in place (see
+    /// [`Self::friction_grasp_pinch_established_for`]): the same object being
+    /// re-caught once (a brief contact-detection flap, not a real slip) with its
+    /// existing budget instead of getting a wider one measured from the
+    /// meanwhile-more-advanced finger position. Only an explicit open command
+    /// clears the budget and re-catch guard outright.
     fn update_grasp_friction(&mut self, action: MobileManipulatorAction) {
         const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
         const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
         let command = action.gripper_velocity_rad_s;
 
-        if self.grasped_object.is_none() && command < CLOSE_THRESHOLD_RAD_S {
+        if command > OPEN_THRESHOLD_RAD_S {
+            self.grasped_object = None;
+            self.friction_grasp_lost_contact_steps = 0;
+            self.friction_grasp_recatch_used = false;
+            self.clear_friction_pinch_limits();
+        } else if self.grasped_object.is_none()
+            && command < CLOSE_THRESHOLD_RAD_S
+            && (self.friction_grasp_pinch_established_for.is_none()
+                || !self.friction_grasp_recatch_used)
+        {
             if let Some(object) = self.find_graspable_in_contact() {
                 self.grasped_object = Some(object);
                 self.friction_grasp_lost_contact_steps = 0;
+                if self.friction_grasp_pinch_established_for == Some(object) {
+                    self.friction_grasp_recatch_used = true;
+                } else {
+                    self.establish_friction_pinch_limits();
+                    self.friction_grasp_pinch_established_for = Some(object);
+                    self.friction_grasp_recatch_used = false;
+                }
             }
-        } else if self.grasped_object.is_some() && command > OPEN_THRESHOLD_RAD_S {
-            self.grasped_object = None;
-            self.friction_grasp_lost_contact_steps = 0;
         }
 
         if let Some(object) = self.grasped_object {
@@ -1313,6 +1415,9 @@ impl MobileManipulatorSim {
                 if self.friction_grasp_lost_contact_steps >= FRICTION_GRASP_LOST_CONTACT_STEPS {
                     self.grasped_object = None;
                     self.friction_grasp_lost_contact_steps = 0;
+                    // Deliberately NOT `clear_friction_pinch_limits()` here; see
+                    // the doc comment above and on
+                    // `Self::friction_grasp_pinch_established_for`.
                 }
             }
         }
@@ -1545,6 +1650,38 @@ impl MobileManipulatorSim {
         (GRASP_PINCH_MARGIN_FRACTION * half_width_m / arm_m).clamp(0.0, GRASP_PINCH_MARGIN_MAX_RAD)
     }
 
+    /// Records the per-finger joint angle beyond which future closing commands are
+    /// clamped for a newly caught [`GraspMode::Friction`] grasp (see
+    /// [`Self::clamp_finger_closing_velocity`]), mirroring
+    /// [`Self::establish_pinch_limits`]'s role in the weld path but sized from
+    /// [`FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD`] / [`FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD`]
+    /// (measured finger travel) instead of [`Self::pinch_close_budget_rad`]'s
+    /// object-geometry scaling — see those constants' doc comments for why
+    /// friction mode needs a much larger, empirically tuned budget. Called only
+    /// from [`Self::update_grasp_friction`] and (to keep a live friction grasp's
+    /// clamp engaged) [`Self::restore_snapshot`]; never touches
+    /// [`Self::grasp_retarget`] or anything else the weld path owns.
+    fn establish_friction_pinch_limits(&mut self) {
+        let left_rad = self.joint_position_rad("left_finger_joint");
+        let right_rad = self.joint_position_rad("right_finger_joint");
+        // Left closes by decreasing its angle, right by increasing (see
+        // `velocity_for_joint`), matching `establish_pinch_limits`.
+        self.grasp_pinch_left_limit_rad = Some(left_rad - FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD);
+        self.grasp_pinch_right_limit_rad = Some(right_rad + FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD);
+    }
+
+    /// Clears the finger pinch-close limits established by
+    /// [`Self::establish_friction_pinch_limits`] (and the object identity they
+    /// were established for), letting the fingers close freely again and
+    /// guaranteeing the next catch — of any object — gets a fresh budget (e.g.
+    /// so a retried grasp attempt after an explicit release is not clamped by
+    /// the previous grasp's stale limit). Safe to call when nothing is grasped.
+    fn clear_friction_pinch_limits(&mut self) {
+        self.grasp_pinch_left_limit_rad = None;
+        self.grasp_pinch_right_limit_rad = None;
+        self.friction_grasp_pinch_established_for = None;
+    }
+
     /// Clamps a commanded finger-joint velocity so a continuing "close" command
     /// cannot drive the finger past its pinch limit once an object is grasped
     /// (fixes fingers visually closing through the held object or, without any
@@ -1641,17 +1778,30 @@ impl MobileManipulatorSim {
         // covered `mm_minimal` too).
         let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
 
+        // Copied out ahead of the loop (rather than read through `self` inside
+        // it) so `clamp_friction_finger_target` can be called while a joint's
+        // `JointMotor` is already mutably borrowed out of `self.world` below.
+        let grasp_mode = self.grasp_mode;
+        let pinch_left_limit_rad = self.grasp_pinch_left_limit_rad;
+        let pinch_right_limit_rad = self.grasp_pinch_right_limit_rad;
+
         for (index, (joint, joint_name)) in self
             .actuated
             .iter()
             .zip(self.joint_names.iter())
             .enumerate()
         {
-            let velocity = self.clamp_finger_closing_velocity(
-                joint_name,
-                velocity_for_joint(joint_name, action),
-                dt_s,
-            );
+            let commanded_velocity = velocity_for_joint(joint_name, action);
+            // Friction grasping clamps the integrated motor target below.  Do not
+            // additionally apply the weld path's actual-position-based velocity
+            // clamp: a free object can back-drive a finger away from its limit,
+            // which makes that clamp repeatedly reopen the closing budget and
+            // ratchet the spring target into a geometric jam.
+            let mut velocity = if self.grasp_mode == GraspMode::Friction {
+                commanded_velocity
+            } else {
+                self.clamp_finger_closing_velocity(joint_name, commanded_velocity, dt_s)
+            };
             // Anti-windup lead for the mobile arm: without it the integrated angle
             // target runs several radians ahead of the lagging joint during long
             // moves, and the spring then drags the joint far past the commanded
@@ -1690,6 +1840,38 @@ impl MobileManipulatorSim {
                             position_rad - ARM_TARGET_LEAD_RAD,
                             position_rad + ARM_TARGET_LEAD_RAD,
                         );
+                    }
+                    if is_finger {
+                        let uncapped_target = target;
+                        target = clamp_friction_finger_target(
+                            grasp_mode,
+                            pinch_left_limit_rad,
+                            pinch_right_limit_rad,
+                            joint_name,
+                            target,
+                        );
+                        if target != uncapped_target {
+                            // The friction pinch budget is exhausted this tick: zero
+                            // the velocity feedforward too, not just the target. A
+                            // continuing close command otherwise keeps
+                            // `clamp_finger_closing_velocity`'s smooth, asymptotic
+                            // slowdown feeding a large residual velocity right up
+                            // until `current_actual` exactly reaches the limit (which
+                            // real contact oscillation may never let it do cleanly),
+                            // so `motor.velocity_rad_s` stays substantially non-zero
+                            // indefinitely. Measured empirically: that lingering
+                            // feedforward sustains the grasp at the SAME strength
+                            // regardless of the object's own friction coefficient
+                            // (`friction_grasp_continued_close_still_slips_at_low_friction`
+                            // still held the cube at mu = 0.02 without this cutoff) —
+                            // i.e. it was the robot arm's own motor bias holding the
+                            // object, not surface friction. Cutting the feedforward the
+                            // instant the target caps leaves only the position
+                            // spring's (still force-capped) restoring force, matching
+                            // the same passive-hold mechanism a zero `gripper_velocity_rad_s`
+                            // carry already relied on.
+                            velocity = 0.0;
+                        }
                     }
                     motor.target_position = target;
                     motor.velocity_rad_s = velocity;
@@ -2081,6 +2263,48 @@ fn apply_friction_grasp_finger_max_force(
 ) {
     if is_finger && grasp_mode == GraspMode::Friction {
         motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
+    }
+}
+
+/// Clamps a finger joint's motor spring TARGET (not just the commanded
+/// velocity, see [`MobileManipulatorSim::clamp_finger_closing_velocity`]) to the
+/// established [`GraspMode::Friction`] pinch limit. A no-op in
+/// [`GraspMode::Weld`] (returns `target` unchanged) or when no limit is
+/// established for `joint_name`, so this can never affect the weld path's
+/// behavior.
+///
+/// The velocity clamp alone is not sufficient in friction mode: by the time a
+/// friction grasp's pinch limits are established (right after the two-finger
+/// gate fires), the finger's motor target has typically already wound up far
+/// past the finger's actual joint angle from the preceding continuous-close
+/// approach — the spring is force-capped (see [`FRICTION_GRASP_FINGER_MAX_FORCE`]),
+/// so actual position lags the integrated target by a large, persistent
+/// margin, the same kind of windup the arm's own anti-windup lead
+/// (`windup_position_rad`/`ARM_TARGET_LEAD_RAD` in
+/// [`MobileManipulatorSim::apply_action`]) exists to bound for the
+/// shoulder/elbow joints. Clamping only future velocity increments cannot
+/// retract that pre-existing windup, so the fingers keep creeping toward the
+/// stale, far-away target under the same saturated force regardless of the
+/// velocity clamp — reproducing the exact friction-independent geometric jam
+/// this step exists to prevent (confirmed empirically: without this target
+/// clamp, `friction_grasp_continued_close_still_slips_at_low_friction` still
+/// jammed the cube in place at mu = 0.02). Directly pinning the target itself
+/// removes the windup, so the velocity clamp's `remaining` calculation (based
+/// on the now-converging actual position) becomes meaningful.
+fn clamp_friction_finger_target(
+    grasp_mode: GraspMode,
+    pinch_left_limit_rad: Option<f64>,
+    pinch_right_limit_rad: Option<f64>,
+    joint_name: &str,
+    target: f64,
+) -> f64 {
+    if grasp_mode != GraspMode::Friction {
+        return target;
+    }
+    match joint_name {
+        "left_finger_joint" => pinch_left_limit_rad.map_or(target, |limit| target.max(limit)),
+        "right_finger_joint" => pinch_right_limit_rad.map_or(target, |limit| target.min(limit)),
+        _ => target,
     }
 }
 
@@ -3229,6 +3453,20 @@ half_extents_m = [0.06, 0.02, 0.06]
         grasp_mode: GraspMode,
         friction: f32,
     ) -> (MobileManipulatorSim, f64, f64) {
+        friction_transport_sequence_ex(grasp_mode, friction, false)
+    }
+
+    /// Same as [`friction_transport_sequence`], with an added `continued_close`
+    /// switch: when true, the carry action keeps commanding
+    /// `gripper_velocity_rad_s = -2.5` (the same rate as the initial close) for
+    /// the whole carry instead of dropping to zero, exercising the v0.14 Phase C
+    /// step C1 pinch limits (see [`FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD`]) that
+    /// make that safe in [`GraspMode::Friction`].
+    fn friction_transport_sequence_ex(
+        grasp_mode: GraspMode,
+        friction: f32,
+        continued_close: bool,
+    ) -> (MobileManipulatorSim, f64, f64) {
         let scene = mm_minimal_transport_scene_with_friction(friction);
         let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load friction scene");
         sim.set_grasp_mode(grasp_mode);
@@ -3240,15 +3478,18 @@ half_extents_m = [0.06, 0.02, 0.06]
         };
         // Unlike the weld path's `carry` action (see
         // `grasp_attaches_and_releases_object`), this does NOT keep commanding a
-        // closing velocity during the carry: weld mode's rigid attach makes any
-        // further finger motion irrelevant, but friction mode has no clamp on
-        // continued closing (see `clamp_finger_closing_velocity` and
-        // `FRICTION_GRASP_FINGER_MAX_FORCE`'s doc comment), so a `carry` that kept
-        // grinding the fingers closed for another 120 steps drove them into a
-        // geometric jam against the cube that held it regardless of surface
-        // friction -- defeating the point of a friction-mode test. Zero gripper
-        // command simply holds the squeeze already established at grasp time.
+        // closing velocity during the carry by default: weld mode's rigid attach
+        // makes any further finger motion irrelevant, and before the pinch limits
+        // this step (v0.14 Phase C step C1) added to `GraspMode::Friction`, a
+        // `carry` that kept grinding the fingers closed for another 120 steps
+        // drove them into a geometric jam against the cube that held it
+        // regardless of surface friction -- defeating the point of a
+        // friction-mode test. `continued_close` opts back into exactly that
+        // continued-close carry to prove the new pinch limits make it safe (see
+        // `friction_grasp_continued_close_holds_at_normal_friction` and
+        // `friction_grasp_continued_close_still_slips_at_low_friction`).
         let carry = MobileManipulatorAction {
+            gripper_velocity_rad_s: if continued_close { -2.5 } else { 0.0 },
             shoulder_velocity_rad_s: 0.6,
             ..MobileManipulatorAction::default()
         };
@@ -3344,6 +3585,109 @@ half_extents_m = [0.06, 0.02, 0.06]
             !sim.is_grasping() || !carried_off_table,
             "low-friction cube should slip out instead of being carried: carried_y={carried_y:.3}, is_grasping={}",
             sim.is_grasping()
+        );
+    }
+
+    #[test]
+    fn friction_grasp_continued_close_holds_at_normal_friction() {
+        // v0.14 Phase C step C1: a real policy (e.g. IkClutterPickPlacePolicy)
+        // holds `gripper_velocity_rad_s < 0` for the whole carry, not just a
+        // short settle window. Unlike `friction_grasp_holds_cube_during_lift`
+        // (which zeros the gripper command for the carry), this keeps commanding
+        // -2.5 rad/s for all 120 carry steps too. Before the pinch limits added
+        // in this step, that commanded target ran unclamped and either failed to
+        // hold or (worse) jammed regardless of friction; with them, the fingers
+        // should converge on the same bounded squeeze and the grasp should still
+        // be held at normal friction (mu = 0.5).
+        let (sim, resting_y, carried_y) =
+            friction_transport_sequence_ex(GraspMode::Friction, 0.5, true);
+        assert!(
+            sim.is_grasping(),
+            "continued-close friction grasp should still be held after the carry"
+        );
+        assert!(
+            carried_y > 0.3,
+            "continued-close friction-held cube should be carried off the table: resting_y={resting_y:.3}, carried_y={carried_y:.3}"
+        );
+    }
+
+    #[test]
+    fn friction_grasp_continued_close_still_slips_at_low_friction() {
+        // Acceptance test for v0.14 Phase C step C1: the whole point of the
+        // finger pinch limits is that a continued-close command converges on the
+        // SAME bounded squeeze a short settle-then-hold would reach, not a
+        // friction-independent geometric jam. Proving that requires showing the
+        // failure mode still exists when it should: at very low friction
+        // (mu = 0.02) a continued-close carry must still let the cube slip,
+        // exactly like `friction_grasp_slips_with_low_friction`'s zero-command
+        // carry. If this fails, the pinch budget is too generous (or the clamp
+        // is not engaging) and continued closing is jamming the cube in place
+        // regardless of surface friction again.
+        let (sim, _, carried_y) = friction_transport_sequence_ex(GraspMode::Friction, 0.02, true);
+        let carried_off_table = carried_y > 0.3;
+        assert!(
+            !sim.is_grasping() || !carried_off_table,
+            "continued-close low-friction cube should still slip out instead of jamming: carried_y={carried_y:.3}, is_grasping={}",
+            sim.is_grasping()
+        );
+    }
+
+    #[test]
+    fn friction_grasp_can_retry_after_release() {
+        // Once a friction grasp releases, its pinch limits must be cleared (see
+        // `clear_friction_pinch_limits`) so a retried close attempt is not
+        // clamped by the previous grasp's now-stale limit. Grasp and squeeze
+        // with the gripper held stationary (no carry, so the cube stays exactly
+        // where the fingers can reach it), open to release, then close again and
+        // confirm the gripper can re-catch the cube rather than being stuck
+        // unable to advance the fingers any further.
+        let scene = mm_minimal_transport_scene_with_friction(0.5);
+        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load friction scene");
+        sim.set_grasp_mode(GraspMode::Friction);
+
+        let close = MobileManipulatorAction {
+            gripper_velocity_rad_s: -2.5,
+            ..MobileManipulatorAction::default()
+        };
+        for _ in 0..220 {
+            sim.step(close);
+            if sim.is_grasping() {
+                break;
+            }
+        }
+        assert!(
+            sim.is_grasping(),
+            "gripper should grasp the cube on contact"
+        );
+        // Keep closing well past the pinch limit so it is actually engaged
+        // (clamping further advance) before releasing.
+        for _ in 0..30 {
+            sim.step(close);
+        }
+
+        let open = MobileManipulatorAction {
+            gripper_velocity_rad_s: 3.0,
+            ..MobileManipulatorAction::default()
+        };
+        for _ in 0..60 {
+            sim.step(open);
+        }
+        assert!(
+            !sim.is_grasping(),
+            "opening the gripper should release the friction grasp"
+        );
+
+        let mut regrasped = false;
+        for _ in 0..220 {
+            sim.step(close);
+            if sim.is_grasping() {
+                regrasped = true;
+                break;
+            }
+        }
+        assert!(
+            regrasped,
+            "a friction grasp should be retryable after releasing, not stuck at a stale pinch limit"
         );
     }
 

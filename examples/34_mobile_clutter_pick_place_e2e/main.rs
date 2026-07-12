@@ -5,7 +5,7 @@
 //! on the ground target and terminates the episode.
 
 use rne_ai::{
-    mm_mobile_clutter_place_target, mm_mobile_clutter_scene_path, Episode,
+    mm_mobile_clutter_place_target, mm_mobile_clutter_scene_path, Episode, GraspMode,
     IkMobileClutterPickPlacePolicy, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
     MobileManipulatorRewardConfig, MobileManipulatorTask, Policy,
 };
@@ -32,6 +32,7 @@ fn run_mobile_clutter(episode: &mut MobileManipulatorEpisode) -> (bool, bool) {
     let mut policy = IkMobileClutterPickPlacePolicy::new();
     let total_steps = policy.total_steps();
     let mut step = episode.reset();
+    episode.set_grasp_mode(GraspMode::Friction);
     let mut grasped = false;
     for _ in 0..total_steps {
         step = episode.step(policy.act(&step.observation));

@@ -1,10 +1,10 @@
 //! Spawn RNE entities from parsed URDF.
 
-use crate::geometry::{collider_from_link, visual_from_element};
+use crate::geometry::{collider_from_link_with_meshes, visual_from_element};
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
-use rne_physics::{RigidBody, RigidBodyType};
+use rne_physics::{CollisionGroups, RigidBody, RigidBodyType};
 use rne_render::{LinkVisuals, Visual};
 use rne_robot::{Joint, JointKind, JointLimits, Link, Robot, RobotId};
 use rne_world::Transform3;
@@ -17,6 +17,12 @@ use thiserror::Error;
 pub struct UrdfSpawnConfig {
     /// When true, links with collision geometry receive rigid bodies.
     pub attach_physics: bool,
+    /// When true, URDF collision geometry is attached to link entities.
+    pub attach_colliders: bool,
+    /// When true, mesh collision geometry is approximated by AABB colliders.
+    pub attach_mesh_colliders: bool,
+    /// When false, colliders spawned for this robot do not collide with each other.
+    pub self_collisions: bool,
     /// Rigid body type applied to the base link.
     pub base_body_type: RigidBodyType,
     /// Default RGBA color for visual elements.
@@ -31,6 +37,9 @@ impl Default for UrdfSpawnConfig {
     fn default() -> Self {
         Self {
             attach_physics: true,
+            attach_colliders: true,
+            attach_mesh_colliders: true,
+            self_collisions: true,
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
             mesh_assets_root: None,
@@ -113,11 +122,33 @@ pub fn spawn_urdf_robot_with_config(
         link_defs.insert(link.name.clone(), link.clone());
     }
 
-    let base_link = links
-        .get("base_link")
-        .copied()
-        .or_else(|| links.values().copied().next())
-        .ok_or_else(|| UrdfSpawnError::InvalidGraph("no links".into()))?;
+    let child_links: std::collections::HashSet<&str> = urdf
+        .joints
+        .iter()
+        .map(|joint| joint.child.as_str())
+        .collect();
+    let mut root_names: Vec<&str> = urdf
+        .links
+        .iter()
+        .map(|link| link.name.as_str())
+        .filter(|name| !child_links.contains(name))
+        .collect();
+    root_names.sort_unstable();
+    let root_name = match root_names.as_slice() {
+        [root] => *root,
+        [] => {
+            return Err(UrdfSpawnError::InvalidGraph(
+                "no root link (joint graph contains a cycle)".into(),
+            ));
+        }
+        roots => {
+            return Err(UrdfSpawnError::InvalidGraph(format!(
+                "multiple root links: {}",
+                roots.join(", ")
+            )));
+        }
+    };
+    let base_link = links[root_name];
 
     world.entity_mut(base_link).insert(Transform3::IDENTITY);
 
@@ -193,22 +224,33 @@ fn attach_link_geometry(
     };
     let assets_root = config.mesh_assets_root.as_deref();
 
-    if let Some(collider) = collider_from_link(link, assets_root) {
-        world.entity_mut(entity).insert(collider);
-        counts.colliders += 1;
-
-        if config.attach_physics {
-            let body_type = if is_base_link {
-                config.base_body_type
-            } else {
-                RigidBodyType::Dynamic
-            };
-            world.entity_mut(entity).insert(RigidBody {
-                body_type,
-                mass_kg: if is_base_link { 5.0 } else { 1.0 },
-                ..RigidBody::default()
-            });
+    if config.attach_colliders {
+        if let Some(collider) =
+            collider_from_link_with_meshes(link, assets_root, config.attach_mesh_colliders)
+        {
+            world.entity_mut(entity).insert(collider);
+            counts.colliders += 1;
         }
+        if counts.colliders > 0 && !config.self_collisions {
+            world
+                .entity_mut(entity)
+                .insert(CollisionGroups::without_self_collision(1));
+        }
+    }
+
+    // A URDF link can legitimately have inertia and joints without collision geometry.
+    // It still needs a rigid body so an articulated visual-only root can anchor its tree.
+    if config.attach_physics {
+        let body_type = if is_base_link {
+            config.base_body_type
+        } else {
+            RigidBodyType::Dynamic
+        };
+        world.entity_mut(entity).insert(RigidBody {
+            body_type,
+            mass_kg: if is_base_link { 5.0 } else { 1.0 },
+            ..RigidBody::default()
+        });
     }
 
     counts.visuals += attach_link_visuals(world, entity, link, config.visual_color_rgba);

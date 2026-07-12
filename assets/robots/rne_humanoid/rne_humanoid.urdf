@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<robot name="rne_humanoid">
+  <link name="base_link">
+    <visual><origin xyz="0 0.05 0"/><geometry><box size="0.24 0.42 0.34"/></geometry></visual>
+    <collision><origin xyz="0 0.05 0"/><geometry><box size="0.24 0.42 0.34"/></geometry></collision>
+  </link>
+
+  <!-- Left leg: hip roll, hip pitch, knee pitch. -->
+  <link name="left_hip"/>
+  <link name="left_thigh">
+    <visual><origin xyz="0 -0.18 0"/><geometry><box size="0.09 0.36 0.09"/></geometry></visual>
+    <collision><origin xyz="0 -0.18 0"/><geometry><box size="0.09 0.36 0.09"/></geometry></collision>
+  </link>
+  <link name="left_foot">
+    <visual><origin xyz="0 -0.18 0"/><geometry><box size="0.08 0.36 0.08"/></geometry></visual>
+    <collision><origin xyz="0 -0.18 0"/><geometry><box size="0.08 0.36 0.08"/></geometry></collision>
+    <collision><origin xyz="0.05 -0.385 0"/><geometry><box size="0.24 0.05 0.14"/></geometry></collision>
+  </link>
+  <joint name="left_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="left_hip"/><origin xyz="0 -0.20 0.11"/><axis xyz="1 0 0"/><limit lower="-0.5" upper="0.5" effort="80" velocity="5"/>
+  </joint>
+  <joint name="left_hip_pitch_joint" type="revolute">
+    <parent link="left_hip"/><child link="left_thigh"/><axis xyz="0 0 1"/><limit lower="-1.0" upper="1.0" effort="80" velocity="5"/>
+  </joint>
+  <joint name="left_knee_joint" type="revolute">
+    <parent link="left_thigh"/><child link="left_foot"/><origin xyz="0 -0.36 0"/><axis xyz="0 0 1"/><limit lower="-0.1" upper="1.4" effort="80" velocity="5"/>
+  </joint>
+
+  <!-- Right leg. -->
+  <link name="right_hip"/>
+  <link name="right_thigh">
+    <visual><origin xyz="0 -0.18 0"/><geometry><box size="0.09 0.36 0.09"/></geometry></visual>
+    <collision><origin xyz="0 -0.18 0"/><geometry><box size="0.09 0.36 0.09"/></geometry></collision>
+  </link>
+  <link name="right_foot">
+    <visual><origin xyz="0 -0.18 0"/><geometry><box size="0.08 0.36 0.08"/></geometry></visual>
+    <collision><origin xyz="0 -0.18 0"/><geometry><box size="0.08 0.36 0.08"/></geometry></collision>
+    <collision><origin xyz="0.05 -0.385 0"/><geometry><box size="0.24 0.05 0.14"/></geometry></collision>
+  </link>
+  <joint name="right_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="right_hip"/><origin xyz="0 -0.20 -0.11"/><axis xyz="1 0 0"/><limit lower="-0.5" upper="0.5" effort="80" velocity="5"/>
+  </joint>
+  <joint name="right_hip_pitch_joint" type="revolute">
+    <parent link="right_hip"/><child link="right_thigh"/><axis xyz="0 0 1"/><limit lower="-1.0" upper="1.0" effort="80" velocity="5"/>
+  </joint>
+  <joint name="right_knee_joint" type="revolute">
+    <parent link="right_thigh"/><child link="right_foot"/><origin xyz="0 -0.36 0"/><axis xyz="0 0 1"/><limit lower="-0.1" upper="1.4" effort="80" velocity="5"/>
+  </joint>
+
+  <!-- Arms provide the upper-body DoFs reused by later balance policies. -->
+  <link name="left_upper_arm"><visual><origin xyz="0 -0.14 0"/><geometry><box size="0.07 0.28 0.07"/></geometry></visual></link>
+  <link name="left_forearm"><visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual></link>
+  <link name="left_hand"><visual><geometry><box size="0.09 0.12 0.05"/></geometry></visual></link>
+  <joint name="left_shoulder_roll_joint" type="revolute"><parent link="base_link"/><child link="left_upper_arm"/><origin xyz="0 0.20 0.22"/><axis xyz="1 0 0"/><limit lower="-1.5" upper="1.5" effort="30" velocity="6"/></joint>
+  <joint name="left_shoulder_pitch_joint" type="revolute"><parent link="left_upper_arm"/><child link="left_forearm"/><origin xyz="0 -0.28 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="30" velocity="6"/></joint>
+  <joint name="left_elbow_joint" type="revolute"><parent link="left_forearm"/><child link="left_hand"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="0" upper="1.5" effort="20" velocity="6"/></joint>
+
+  <link name="right_upper_arm"><visual><origin xyz="0 -0.14 0"/><geometry><box size="0.07 0.28 0.07"/></geometry></visual></link>
+  <link name="right_forearm"><visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual></link>
+  <link name="right_hand"><visual><geometry><box size="0.09 0.12 0.05"/></geometry></visual></link>
+  <joint name="right_shoulder_roll_joint" type="revolute"><parent link="base_link"/><child link="right_upper_arm"/><origin xyz="0 0.20 -0.22"/><axis xyz="1 0 0"/><limit lower="-1.5" upper="1.5" effort="30" velocity="6"/></joint>
+  <joint name="right_shoulder_pitch_joint" type="revolute"><parent link="right_upper_arm"/><child link="right_forearm"/><origin xyz="0 -0.28 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="30" velocity="6"/></joint>
+  <joint name="right_elbow_joint" type="revolute"><parent link="right_forearm"/><child link="right_hand"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="0" upper="1.5" effort="20" velocity="6"/></joint>
+</robot>

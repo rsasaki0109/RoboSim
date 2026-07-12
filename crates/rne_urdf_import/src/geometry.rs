@@ -52,17 +52,34 @@ pub fn collider_from_element(
 ///
 /// Multiple primitives or mesh AABBs are unioned into one axis-aligned cuboid.
 pub fn collider_from_link(link: &UrdfLink, assets_root: Option<&Path>) -> Option<Collider> {
-    if link.collisions.is_empty() {
+    collider_from_link_with_meshes(link, assets_root, true)
+}
+
+/// Builds a single collider for a link, optionally excluding mesh collision geometry.
+///
+/// Primitive-only collision is useful for imported robots whose visual-quality
+/// collision meshes would otherwise be approximated by overlapping AABBs.
+pub fn collider_from_link_with_meshes(
+    link: &UrdfLink,
+    assets_root: Option<&Path>,
+    include_meshes: bool,
+) -> Option<Collider> {
+    let collisions: Vec<_> = link
+        .collisions
+        .iter()
+        .filter(|element| include_meshes || !matches!(element.geometry, UrdfGeometry::Mesh { .. }))
+        .collect();
+    if collisions.is_empty() {
         return None;
     }
-    if link.collisions.len() == 1 {
-        return collider_from_element(&link.collisions[0], assets_root);
+    if collisions.len() == 1 {
+        return collider_from_element(collisions[0], assets_root);
     }
 
     let mut bounds: Option<(Vec3, Vec3)> = None;
     let mut material = Default::default();
 
-    for element in &link.collisions {
+    for element in collisions {
         let collider = collider_from_element(element, assets_root)?;
         material = collider.material;
         let (min, max) = collider_local_aabb(&collider)?;

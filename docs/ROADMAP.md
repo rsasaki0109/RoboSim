@@ -12,12 +12,66 @@ the weld *look* like a grasp, then replace it with physical friction-based grasp
 |-------|------|-------------|--------|
 | A | Manipulation | Weld visual realism: two-finger contact gating (no single-finger graze capture), smooth weld-anchor retarget to a canonical in-gripper pose (centered between finger pads, folds in the 2 cm seat lift — no teleports), fingers pinch to the object surface | Done (PR #35, fixes #39/#40/#41; README hero rebuilt on real physics PR #42; mm_mobile uncommanded-arm hold damping PR #43) |
 | B | Physics | Friction-based grasp core: force-limited finger position motors + friction-cone holding, weld removed for graspable objects. **Risk**: reintroduces contact-history sensitivity — the v0.13 settle fixes (stable equilibria, kinematic base) are the prerequisite that makes this attemptable. Validate cross-platform from day one (temp linux workflow loop) | Core done (`feat/friction-grasp-core`): opt-in `GraspMode::Friction` on `MobileManipulatorSim` (weld stays the default, hero digest bit-for-bit unchanged), `ContactEvent::impulse` from Rapier's solver, per-obstacle `friction` in scene TOML, hold/release/low-friction-slip tests on `mm_minimal` |
-| C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | Pending |
+| C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | In progress: bounded continued-close pinch target complete; fixed-base example 33 and its policy E2E run in friction mode; Python RL clutter/place rollouts select friction after reset; mobile example 34 validates friction grasp acquisition while full mobile friction placement remains |
 | D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | Pending |
+
+The remaining mobile friction-place gap is deferred to v0.15: `mm_mobile` has
+no vertical lift, while its v0.13 policy drags a welded cube across the table.
+A physical-grasp replacement needs a lift-capable mobile manipulator or a task
+scene/trajectory designed to clear the tabletop without a rigid attachment.
 
 ### Direction pillars (v0.14+)
 
 Three long-running pillars steer the next releases alongside the phased goals above:
+
+## v0.15 goal: legged robots
+
+Build one shared legged-control foundation, validate it on a quadruped first,
+then reuse the same articulation, contact, observation, and policy interfaces
+for a humanoid. Core crates remain robot-native and ROS2-free.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | URDF / Physics | Generic named joint-position targets and per-link contact impulse observations for URDF articulations | In progress (`UrdfSceneSim::step_joint_position_targets`, `link_contact_impulse_ns`) |
+| B | Quadruped | Vendored 12-DoF quadruped URDF, deterministic standing controller, four-foot contact test, headless example | Done (`rne_quadruped`, example 36; 12 motors and four loaded feet validated headlessly) |
+| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | In progress: seeded gait-phase resets, action/observation/reward episode, four-foot impulses, exact action replay, stable positive-X trot; broader gait-speed optimization remains |
+| D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Done: 12-DoF URDF, force-limited standing, bilateral foot loads, balance action/observation/reward episode, exact replay test, and example 37 |
+| E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Pending |
+
+Official robot-model integration has started with Unitree Go2: the upstream
+BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
+reproducibly converted for RNE's mesh loader, and example 38 generates a real
+wgpu GIF for the README. Go2 now also has a dynamic multibody scene with a
+four-foot standing/contact test and bounded diagonal-pair trot; example 38 now
+captures that contact-driven motion. The same path covers the official Unitree G1
+23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
+`UnitreeGo2Episode` adds bounded stride/lift actions, planar locomotion delta,
+four-foot contact observations, gait phase, and exact short-rollout replay.
+Generic URDF observations and both official gait episodes now expose Y-up
+roll/pitch plus base linear and angular velocities for policy state estimation.
+They also expose yaw/pitch/roll relative to the scene-load base orientation,
+removing each URDF's fixed basis conversion from upright-policy inputs.
+G1 and Go2 gait termination now combines minimum base height with a configurable
+relative-tilt limit, and both rewards penalize pitch/roll departure from upright.
+G1 also has a dynamic standing scene that retains the official primitive foot
+and leg contacts while excluding unstable mesh-AABB collision approximations.
+Its deterministic balance episode exposes pelvis pose, bilateral foot loads,
+progress, four low-dimensional controls, and an upright/load-balance reward.
+A bounded, periodic G1 gait generator now supplies asymmetric stance/swing leg
+trajectories and arm counter-swing; translating contact locomotion remains next.
+Backend-neutral collision groups can now disable same-robot link contacts while
+preserving environment contacts. Reduced-coordinate multibody articulation is now
+selectable per URDF asset; G1 uses it for real dynamic standing, balance replay,
+and a settle-then-gait rollout without destabilizing existing impulse-joint robots.
+Only actuated links and their ancestors enter the multibody, keeping fixed visual
+accessories out of the solver while preserving them in the rendered URDF hierarchy.
+The G1 gait now widens its support stance and advances in positive X after a
+standing settle, with bounded height and yaw verified by a headless rollout.
+`UnitreeG1GaitEpisode` exposes stride, foot-lift, and yaw-correction actions;
+forward delta, gait phase, bilateral contacts, and pose observations; and a
+forward/upright reward whose short rollouts replay exactly.
+Example 39 and the README media now capture that dynamic multibody gait after
+standing settle instead of animating the former fixed-base showcase.
 
 | Pillar | Meaning | Status |
 |--------|---------|--------|

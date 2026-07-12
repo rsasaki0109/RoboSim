@@ -1,0 +1,9 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2001
+
+[ground]
+enabled = false
+
+[[robots]]
+path = "../robots/unitree_g1.rne.robot.toml"

@@ -4,8 +4,8 @@ mod sim;
 
 use pyo3::prelude::*;
 use rne_ai::{
-    DiffDriveEpisodeConfig, Episode, IkClutterPickPlacePolicy, IkMobileClutterPickPlacePolicy,
-    Policy,
+    DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
+    IkMobileClutterPickPlacePolicy, Policy,
 };
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
@@ -820,6 +820,22 @@ impl PyMobileManipulatorEpisode {
 
     fn reset(&mut self) -> PyMmStepResult {
         self.inner.reset().into()
+    }
+
+    /// Selects `"weld"` or `"friction"` grasping for the current episode.
+    /// Call after `reset()`, which restores the default weld mode.
+    fn set_grasp_mode(&mut self, mode: &str) -> PyResult<()> {
+        let mode = match mode {
+            "weld" => GraspMode::Weld,
+            "friction" => GraspMode::Friction,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "grasp mode must be 'weld' or 'friction'",
+                ));
+            }
+        };
+        self.inner.set_grasp_mode(mode);
+        Ok(())
     }
 
     #[pyo3(signature = (

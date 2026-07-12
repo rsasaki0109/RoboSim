@@ -8,6 +8,14 @@ pub fn yaw_rad(rotation: Quat) -> f64 {
     rotation.to_euler(glam::EulerRot::YXZ).0
 }
 
+/// Y-up yaw, pitch, and roll angles in radians extracted from a quaternion.
+///
+/// Rotations are decomposed in Y-X-Z order and returned as
+/// `(yaw_y_rad, pitch_x_rad, roll_z_rad)`.
+pub fn y_up_euler_rad(rotation: Quat) -> (f64, f64, f64) {
+    rotation.to_euler(glam::EulerRot::YXZ)
+}
+
 /// Local transform with translation, rotation, and scale.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transform3 {

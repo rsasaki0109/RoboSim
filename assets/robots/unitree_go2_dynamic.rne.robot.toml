@@ -1,0 +1,11 @@
+kind = "urdf"
+model_name = "unitree_go2_dynamic"
+
+[urdf]
+path = "go2_description/go2_description.rne.urdf"
+base_body_type = "dynamic"
+initial_translation_m = [0.0, 0.36, 0.0]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true
+self_collisions = false
+multibody = true

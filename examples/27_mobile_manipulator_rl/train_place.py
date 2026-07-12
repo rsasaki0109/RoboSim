@@ -37,6 +37,7 @@ def rollout(params):
     release_t = int(max(0.0, min(1.0, release_frac)) * EPISODE_STEPS)
     episode = rne_py.MobileManipulatorEpisode("transport")
     episode.reset()
+    episode.set_grasp_mode("friction")
     for t in range(EPISODE_STEPS):
         gripper = -2.5 if t < release_t else 3.0
         # Two-finger weld gating: hold the arm still while the fingers close.

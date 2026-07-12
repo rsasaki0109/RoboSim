@@ -1,0 +1,12 @@
+[package]
+name = "humanoid_stand"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+
+[[example]]
+name = "37_humanoid_stand"
+path = "main.rs"

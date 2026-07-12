@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<robot name="rne_quadruped">
+  <link name="base_link">
+    <visual><geometry><box size="0.62 0.14 0.34"/></geometry></visual>
+    <collision><geometry><box size="0.62 0.14 0.34"/></geometry></collision>
+  </link>
+
+  <!-- Front-left leg. URDF coordinates follow RNE's Y-up world. -->
+  <link name="fl_hip"/>
+  <link name="fl_thigh">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></collision>
+  </link>
+  <link name="fl_foot">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></collision>
+    <collision><origin xyz="0 -0.255 0"/><geometry><box size="0.10 0.03 0.10"/></geometry></collision>
+  </link>
+  <joint name="fl_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="fl_hip"/><origin xyz="0.25 -0.05 0.18"/><axis xyz="1 0 0"/><limit lower="-0.6" upper="0.6" effort="40" velocity="6"/>
+  </joint>
+  <joint name="fl_hip_pitch_joint" type="revolute">
+    <parent link="fl_hip"/><child link="fl_thigh"/><axis xyz="0 0 1"/><limit lower="-1.2" upper="1.2" effort="40" velocity="6"/>
+  </joint>
+  <joint name="fl_knee_joint" type="revolute">
+    <parent link="fl_thigh"/><child link="fl_foot"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="40" velocity="6"/>
+  </joint>
+
+  <!-- Front-right leg. -->
+  <link name="fr_hip"/>
+  <link name="fr_thigh">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></collision>
+  </link>
+  <link name="fr_foot">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></collision>
+    <collision><origin xyz="0 -0.255 0"/><geometry><box size="0.10 0.03 0.10"/></geometry></collision>
+  </link>
+  <joint name="fr_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="fr_hip"/><origin xyz="0.25 -0.05 -0.18"/><axis xyz="1 0 0"/><limit lower="-0.6" upper="0.6" effort="40" velocity="6"/>
+  </joint>
+  <joint name="fr_hip_pitch_joint" type="revolute">
+    <parent link="fr_hip"/><child link="fr_thigh"/><axis xyz="0 0 1"/><limit lower="-1.2" upper="1.2" effort="40" velocity="6"/>
+  </joint>
+  <joint name="fr_knee_joint" type="revolute">
+    <parent link="fr_thigh"/><child link="fr_foot"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="40" velocity="6"/>
+  </joint>
+
+  <!-- Rear-left leg. -->
+  <link name="rl_hip"/>
+  <link name="rl_thigh">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></collision>
+  </link>
+  <link name="rl_foot">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></collision>
+    <collision><origin xyz="0 -0.255 0"/><geometry><box size="0.10 0.03 0.10"/></geometry></collision>
+  </link>
+  <joint name="rl_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="rl_hip"/><origin xyz="-0.25 -0.05 0.18"/><axis xyz="1 0 0"/><limit lower="-0.6" upper="0.6" effort="40" velocity="6"/>
+  </joint>
+  <joint name="rl_hip_pitch_joint" type="revolute">
+    <parent link="rl_hip"/><child link="rl_thigh"/><axis xyz="0 0 1"/><limit lower="-1.2" upper="1.2" effort="40" velocity="6"/>
+  </joint>
+  <joint name="rl_knee_joint" type="revolute">
+    <parent link="rl_thigh"/><child link="rl_foot"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="40" velocity="6"/>
+  </joint>
+
+  <!-- Rear-right leg. -->
+  <link name="rr_hip"/>
+  <link name="rr_thigh">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.07 0.24 0.07"/></geometry></collision>
+  </link>
+  <link name="rr_foot">
+    <visual><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></visual>
+    <collision><origin xyz="0 -0.12 0"/><geometry><box size="0.06 0.24 0.06"/></geometry></collision>
+    <collision><origin xyz="0 -0.255 0"/><geometry><box size="0.10 0.03 0.10"/></geometry></collision>
+  </link>
+  <joint name="rr_hip_roll_joint" type="revolute">
+    <parent link="base_link"/><child link="rr_hip"/><origin xyz="-0.25 -0.05 -0.18"/><axis xyz="1 0 0"/><limit lower="-0.6" upper="0.6" effort="40" velocity="6"/>
+  </joint>
+  <joint name="rr_hip_pitch_joint" type="revolute">
+    <parent link="rr_hip"/><child link="rr_thigh"/><axis xyz="0 0 1"/><limit lower="-1.2" upper="1.2" effort="40" velocity="6"/>
+  </joint>
+  <joint name="rr_knee_joint" type="revolute">
+    <parent link="rr_thigh"/><child link="rr_foot"/><origin xyz="0 -0.24 0"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="40" velocity="6"/>
+  </joint>
+</robot>

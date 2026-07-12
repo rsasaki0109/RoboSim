@@ -18,6 +18,47 @@ headless CI, and real wgpu rendering.
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
 embodied AI, synthetic sensor data, and policy evaluation.
 
+## Official Unitree Go2 URDF
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-go2.png">
+    <img src="docs/media/unitree-go2.gif" alt="Official Unitree Go2 URDF trotting dynamically with multibody physics in RNE" width="800">
+  </picture>
+  <br>
+  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline. After standing settle, its dynamic multibody drives a diagonal-pair trot through 12 force-limited joints and primitive foot contacts, rendered offscreen by wgpu. The fixed camera and stationary checker floor make its world-space motion visible. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+</p>
+
+```bash
+cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
+```
+
+Go2 also has a dynamic multibody scene with self-collision filtering and a
+headless four-foot standing/contact test. `UnitreeGo2Episode` exposes stride
+and lift actions, four-foot loads and gait phase, and a locomotion/upright reward.
+
+## Official Unitree G1 URDF
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1.png">
+    <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 23-DoF URDF walking dynamically with multibody physics in RNE" width="600">
+  </picture>
+  <br>
+  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody drives all 23 force-limited joints against primitive foot contacts and renders offscreen with wgpu. The camera stays fixed while a stationary checker floor provides a world-space motion reference. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+</p>
+
+```bash
+cargo run -p unitree_g1_gif --example 39_unitree_g1_gif
+```
+
+The G1 integration also includes a headless dynamic balance episode with
+primitive foot contacts, deterministic reset/replay, observations, actions,
+and reward through `UnitreeG1Episode`. Its 23-DoF dynamic scene uses Rapier's
+reduced-coordinate multibody solver while existing robots retain impulse joints.
+`UnitreeG1GaitEpisode` adds stride/lift/yaw actions, gait-phase and contact
+observations, and a forward/upright reward with exact deterministic replay.
+
 - ROS2 is supported as an adapter, not required as the engine core.
 - Run headless in CI or render interactively with wgpu.
 - Build robots from Robot/Sensor/Actuator entities.

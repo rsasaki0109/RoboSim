@@ -13,9 +13,9 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsCapability,
-    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
-    RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ContactEvent, FixedJointDesc, JointMotor, MultibodyLink, PhysicsBackend,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
+    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -44,6 +44,7 @@ struct RapierWorldState {
     body_to_entity: HashMap<RigidBodyHandle, Entity>,
     collider_to_entity: HashMap<ColliderHandle, Entity>,
     entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
+    entity_to_multibody_joint: HashMap<Entity, MultibodyJointHandle>,
     contacts: Vec<ContactEvent>,
 }
 
@@ -112,6 +113,7 @@ impl PhysicsBackend for RapierBackend {
                 body_to_entity: HashMap::new(),
                 collider_to_entity: HashMap::new(),
                 entity_to_joint: HashMap::new(),
+                entity_to_multibody_joint: HashMap::new(),
                 contacts: Vec::new(),
             },
         );
@@ -134,9 +136,10 @@ impl PhysicsBackend for RapierBackend {
             let Some(rigid_body) = world.get::<RigidBody>(entity) else {
                 continue;
             };
-            let Some(collider) = world.get::<Collider>(entity) else {
+            let collider = world.get::<Collider>(entity);
+            if collider.is_none() && world.get::<MultibodyLink>(entity).is_none() {
                 continue;
-            };
+            }
 
             let isometry = transform_to_isometry(&transform);
 
@@ -162,19 +165,30 @@ impl PhysicsBackend for RapierBackend {
             }
 
             let body_handle = state.bodies.insert(builder.build());
-            let collider_handle = state.colliders.insert_with_parent(
-                ColliderBuilder::new(shape_to_shared(collider.shape))
-                    .position(transform_to_isometry(&collider.local_offset))
-                    .friction(collider.material.friction)
-                    .restitution(collider.material.restitution)
-                    .build(),
-                body_handle,
-                &mut state.bodies,
-            );
-
             state.entity_to_body.insert(entity, body_handle);
             state.body_to_entity.insert(body_handle, entity);
-            state.collider_to_entity.insert(collider_handle, entity);
+            if let Some(collider) = collider {
+                let collider_handle = state.colliders.insert_with_parent(
+                    ColliderBuilder::new(shape_to_shared(collider.shape))
+                        .position(transform_to_isometry(&collider.local_offset))
+                        .friction(collider.material.friction)
+                        .restitution(collider.material.restitution)
+                        .collision_groups({
+                            let groups = world
+                                .get::<rne_physics::CollisionGroups>(entity)
+                                .copied()
+                                .unwrap_or_default();
+                            InteractionGroups::new(
+                                Group::from_bits_truncate(groups.memberships),
+                                Group::from_bits_truncate(groups.filter),
+                            )
+                        })
+                        .build(),
+                    body_handle,
+                    &mut state.bodies,
+                );
+                state.collider_to_entity.insert(collider_handle, entity);
+            }
         }
 
         sync_joints_from_ecs(world, state)?;
@@ -397,9 +411,23 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
             state.impulse_joints.remove(handle, true);
         }
     }
+    let mut detached_multibody: Vec<Entity> = state
+        .entity_to_multibody_joint
+        .keys()
+        .copied()
+        .filter(|entity| !has_joint_desc(world, *entity))
+        .collect();
+    detached_multibody.sort_unstable();
+    for entity in detached_multibody {
+        if let Some(handle) = state.entity_to_multibody_joint.remove(&entity) {
+            state.multibody_joints.remove(handle, true);
+        }
+    }
 
     for entity in sorted_entities(world) {
-        if state.entity_to_joint.contains_key(&entity) {
+        if state.entity_to_joint.contains_key(&entity)
+            || state.entity_to_multibody_joint.contains_key(&entity)
+        {
             continue;
         }
 
@@ -454,6 +482,26 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
             continue;
         };
 
+        if world.get::<MultibodyLink>(entity).is_some() {
+            let Some(handle) = state
+                .multibody_joints
+                .insert(parent_body, child_body, joint, true)
+            else {
+                continue;
+            };
+            if let (Some(motor_axis), Some((multibody, link_id))) =
+                (motor_axis, state.multibody_joints.get_mut(handle))
+            {
+                if let Some(link) = multibody.link_mut(link_id) {
+                    link.joint
+                        .data
+                        .set_motor_max_force(motor_axis, motor_max_force(motor_axis));
+                }
+            }
+            state.entity_to_multibody_joint.insert(entity, handle);
+            continue;
+        }
+
         let handle = state
             .impulse_joints
             .insert(parent_body, child_body, joint, true);
@@ -492,6 +540,32 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         // A per-motor force override takes precedence over the per-joint-type cap.
         if motor.max_force > 0.0 {
             joint.data.set_motor_max_force(axis, motor.max_force as f32);
+        }
+    }
+    for (entity, joint_handle) in &state.entity_to_multibody_joint {
+        let Some(motor) = world.get::<JointMotor>(*entity) else {
+            continue;
+        };
+        let Some(axis) = motor_axis_for_entity(world, *entity) else {
+            continue;
+        };
+        let Some((multibody, link_id)) = state.multibody_joints.get_mut(*joint_handle) else {
+            continue;
+        };
+        let Some(link) = multibody.link_mut(link_id) else {
+            continue;
+        };
+        link.joint.data.set_motor(
+            axis,
+            motor.target_position as f32,
+            motor.velocity_rad_s as f32,
+            motor.stiffness as f32,
+            motor.gain as f32,
+        );
+        if motor.max_force > 0.0 {
+            link.joint
+                .data
+                .set_motor_max_force(axis, motor.max_force as f32);
         }
     }
 }
@@ -541,7 +615,7 @@ mod tests {
     use approx::assert_relative_eq;
     use rne_ecs::spawn_named;
     use rne_math::Quat;
-    use rne_physics::{hash_physics_state, ColliderShape};
+    use rne_physics::{hash_physics_state, ColliderShape, CollisionGroups};
 
     fn fixed_step() -> SimDuration {
         SimDuration::from_hertz(rne_math::Hertz::new(60.0))
@@ -597,6 +671,28 @@ mod tests {
             .y;
         assert!(y < 5.0, "cube should fall from initial height, y={y}");
         assert!(y > 0.0, "cube should rest above ground, y={y}");
+    }
+
+    #[test]
+    fn collision_groups_disable_same_group_contacts() {
+        let (mut backend, physics_world, mut world, ground, cube) = setup_world();
+        let groups = CollisionGroups::without_self_collision(1);
+        world.entity_mut(ground).insert(groups);
+        world.entity_mut(cube).insert(groups);
+
+        for _ in 0..90 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+        }
+
+        let y = world
+            .get::<Transform3>(cube)
+            .expect("cube transform")
+            .translation
+            .y;
+        assert!(
+            y < 0.0,
+            "same-group filtering should let cube pass through ground, y={y}"
+        );
     }
 
     #[test]
@@ -779,7 +875,7 @@ mod tests {
     /// joint whose motor commands an upward velocity, and returns the mass's
     /// final height. Higher `gain` lets the motor track that target more
     /// stiffly against gravity, up to the backend force cap.
-    fn lift_displacement(gain: f64) -> f64 {
+    fn lift_displacement(gain: f64, multibody: bool) -> f64 {
         let mut backend = RapierBackend::new();
         let physics_world = backend
             .create_world(PhysicsWorldDesc::default())
@@ -816,6 +912,10 @@ mod tests {
                 ..JointMotor::default()
             },
         ));
+        if multibody {
+            world.entity_mut(anchor).insert(MultibodyLink);
+            world.entity_mut(mass).insert(MultibodyLink);
+        }
 
         let dt = fixed_step();
         for _ in 0..120 {
@@ -829,8 +929,8 @@ mod tests {
     fn motor_gain_lifts_mass_against_gravity() {
         // A unit gain produces a force too weak to hold ~9.81 N of weight, so the
         // mass sags below where a strong gain (force-capped above gravity) lifts it.
-        let weak = lift_displacement(1.0);
-        let strong = lift_displacement(40.0);
+        let weak = lift_displacement(1.0, false);
+        let strong = lift_displacement(40.0, false);
 
         assert!(
             strong > weak + 0.2,
@@ -839,6 +939,15 @@ mod tests {
         assert!(
             strong > 0.5,
             "high-gain motor should raise the mass against gravity, displacement={strong}"
+        );
+    }
+
+    #[test]
+    fn multibody_motor_lifts_mass_against_gravity() {
+        let displacement = lift_displacement(40.0, true);
+        assert!(
+            displacement > 0.5,
+            "multibody motor should lift its child, displacement={displacement}"
         );
     }
 }
