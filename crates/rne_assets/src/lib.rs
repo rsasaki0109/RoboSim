@@ -20,7 +20,8 @@ pub use robot::{
     VisualsRobotAsset, WristCameraRobotAsset,
 };
 pub use scene::{
-    load_scene_asset, parse_scene_asset, parse_scene_robots, SceneAsset, SceneObstacleAsset,
+    load_scene_asset, parse_scene_asset, parse_scene_robots, SceneAsset, SceneCollisionAsset,
+    SceneObjectAsset, SceneObstacleAsset, SceneVisualAsset,
 };
 pub use spawn::{
     load_and_spawn_scene, spawn_robot_asset, spawn_robot_asset_with_sources, spawn_scene,

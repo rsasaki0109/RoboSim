@@ -100,6 +100,26 @@ collision, ROS 2 sim-control parity (incl. `/lift_command`), and sim-captured RE
 
 Architecture docs live under [docs/architecture/](docs/architecture/000_overview.md).
 
+### World assets
+
+Scene TOML can load named environment objects independently from robots. Visuals may be
+boxes, spheres, or scene-relative STL meshes; collision can use a separate box or sphere.
+Objects also carry transforms, fixed/dynamic body type, mass, friction, and restitution.
+
+```toml
+[[objects]]
+name = "inspection_station"
+translation_m = [1.0, 0.59, -0.3]
+visual = { shape = "mesh", path = "world/station.stl", scale = [1.0, 1.0, 1.0] }
+collision = { shape = "box", size_m = [0.22, 1.18, 0.22] }
+body_type = "fixed"
+friction = 0.7
+```
+
+Environment mesh files are validated, included in hot-reload dependency tracking, and
+resolved relative to the `.rne.scene.toml` file. The G1 inspection station above is loaded
+from `assets/scenes/unitree_g1_dynamic.rne.scene.toml` using this schema.
+
 ### Python policy example
 
 ```bash

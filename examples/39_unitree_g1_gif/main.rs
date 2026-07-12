@@ -55,7 +55,6 @@ fn main() {
             !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
         });
         append_checker_floor(&mut scene, start.base_x_m, start.base_z_m, 0.10);
-        append_inspection_station(&mut scene, start.base_x_m, start.base_z_m);
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 meshes");
@@ -99,40 +98,6 @@ fn main() {
         "rendered official Unitree G1 media to {}",
         gif_path.display()
     );
-}
-
-fn append_inspection_station(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64) {
-    append_box(
-        scene,
-        Vec3::new(center_x_m + 1.00, 0.59, center_z_m - 0.30),
-        Vec3::new(0.22, 1.18, 0.22),
-        [0.12, 0.16, 0.22, 1.0],
-    );
-    append_box(
-        scene,
-        Vec3::new(center_x_m + 0.95, 1.08, center_z_m - 0.30),
-        Vec3::new(0.025, 0.25, 0.16),
-        [0.06, 0.30, 0.38, 1.0],
-    );
-    append_box(
-        scene,
-        Vec3::new(center_x_m + 0.93, 1.11, center_z_m - 0.30),
-        Vec3::new(0.018, 0.055, 0.055),
-        [0.10, 0.95, 0.45, 1.0],
-    );
-}
-
-fn append_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color: [f32; 4]) {
-    scene.items.push(RenderSceneItem {
-        transform: Transform3 {
-            translation,
-            rotation: rne_math::Quat::IDENTITY,
-            scale: size_m,
-        },
-        shape: VisualShape::Box { size_m: Vec3::ONE },
-        color_rgba: color,
-        mesh: None,
-    });
 }
 
 fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {

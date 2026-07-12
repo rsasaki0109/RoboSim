@@ -22,6 +22,89 @@ pub struct SceneAsset {
     /// Fixed obstacles spawned as cuboid colliders.
     #[serde(default)]
     pub obstacles: Vec<SceneObstacleAsset>,
+    /// Named environment objects with independent visual and collision shapes.
+    #[serde(default)]
+    pub objects: Vec<SceneObjectAsset>,
+}
+
+/// Named environment object loaded from a scene asset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneObjectAsset {
+    /// Entity name used for task lookup and spawning.
+    pub name: String,
+    /// Object origin translation in meters.
+    #[serde(default)]
+    pub translation_m: [f64; 3],
+    /// Object roll, pitch, and yaw in radians.
+    #[serde(default)]
+    pub rotation_rpy_rad: [f64; 3],
+    /// Physics body type (`fixed` or `dynamic`).
+    #[serde(default)]
+    pub body_type: ObstacleBodyType,
+    /// Mass in kilograms for dynamic objects.
+    #[serde(default = "default_obstacle_mass_kg")]
+    pub mass_kg: f64,
+    /// Coulomb friction coefficient.
+    #[serde(default)]
+    pub friction: Option<f32>,
+    /// Coefficient of restitution.
+    #[serde(default)]
+    pub restitution: Option<f32>,
+    /// Optional render shape. Objects may be collision-only.
+    #[serde(default)]
+    pub visual: Option<SceneVisualAsset>,
+    /// Optional physics shape. Objects may be visual-only task markers.
+    #[serde(default)]
+    pub collision: Option<SceneCollisionAsset>,
+}
+
+/// Render shape for a scene environment object.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum SceneVisualAsset {
+    /// Solid box with full extents in meters.
+    Box {
+        /// Full box size in meters.
+        size_m: [f64; 3],
+        /// Linear RGBA color.
+        #[serde(default = "default_object_color")]
+        color_rgba: [f32; 4],
+    },
+    /// Solid sphere.
+    Sphere {
+        /// Sphere radius in meters.
+        radius_m: f64,
+        /// Linear RGBA color.
+        #[serde(default = "default_object_color")]
+        color_rgba: [f32; 4],
+    },
+    /// External STL mesh resolved relative to the scene file.
+    Mesh {
+        /// Mesh path or package URI.
+        path: String,
+        /// Non-uniform mesh scale.
+        #[serde(default = "default_object_scale")]
+        scale: [f64; 3],
+        /// Linear RGBA tint.
+        #[serde(default = "default_object_color")]
+        color_rgba: [f32; 4],
+    },
+}
+
+/// Physics collision shape for a scene environment object.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum SceneCollisionAsset {
+    /// Cuboid collider with full extents in meters.
+    Box {
+        /// Full collider size in meters.
+        size_m: [f64; 3],
+    },
+    /// Sphere collider.
+    Sphere {
+        /// Sphere radius in meters.
+        radius_m: f64,
+    },
 }
 
 /// Fixed cuboid obstacle in a scene asset.
@@ -64,6 +147,14 @@ pub enum ObstacleBodyType {
 
 fn default_obstacle_mass_kg() -> f64 {
     0.08
+}
+
+fn default_object_color() -> [f32; 4] {
+    [0.55, 0.58, 0.62, 1.0]
+}
+
+fn default_object_scale() -> [f64; 3] {
+    [1.0, 1.0, 1.0]
 }
 
 /// World configuration stored in a scene asset.
@@ -281,6 +372,7 @@ mod tests {
         assert!(scene.ground.enabled);
         assert_eq!(scene.robots.len(), 1);
         assert!(scene.obstacles.is_empty());
+        assert!(scene.objects.is_empty());
     }
 
     #[test]
@@ -358,6 +450,32 @@ mass_kg = 0.05
         let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
         assert_eq!(scene.obstacles[0].body_type, ObstacleBodyType::Dynamic);
         assert!((scene.obstacles[0].mass_kg - 0.05).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parses_environment_objects_with_separate_visual_and_collision() {
+        let text = r#"
+[[objects]]
+name = "inspection_panel"
+translation_m = [1.0, 0.8, -0.3]
+rotation_rpy_rad = [0.0, 0.2, 0.0]
+visual = { shape = "mesh", path = "world/panel.stl", scale = [0.5, 0.5, 0.5], color_rgba = [0.1, 0.8, 0.4, 1.0] }
+collision = { shape = "box", size_m = [0.2, 0.8, 0.2] }
+friction = 0.7
+restitution = 0.1
+"#;
+        let scene = parse_scene_asset(text, Path::new("scene.toml")).unwrap();
+        assert_eq!(scene.objects.len(), 1);
+        assert!(matches!(
+            scene.objects[0].visual,
+            Some(SceneVisualAsset::Mesh { .. })
+        ));
+        assert_eq!(
+            scene.objects[0].collision,
+            Some(SceneCollisionAsset::Box {
+                size_m: [0.2, 0.8, 0.2]
+            })
+        );
     }
 
     #[test]

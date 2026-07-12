@@ -2,11 +2,15 @@
 
 use crate::error::AssetError;
 use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
-use crate::scene::{ObstacleBodyType, SceneAsset, SceneObstacleAsset};
+use crate::scene::{
+    ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneObjectAsset, SceneObstacleAsset,
+    SceneVisualAsset,
+};
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{Collider, ColliderShape, PhysicsMaterial, RigidBody, RigidBodyType};
+use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
@@ -260,6 +264,9 @@ pub fn spawn_scene_with_sources(
     for obstacle in &scene.obstacles {
         spawn_scene_obstacle(world, obstacle);
     }
+    for object in &scene.objects {
+        spawn_scene_object(world, object);
+    }
 
     let mut spawned_robots = Vec::new();
     let mut lidar_mounts = Vec::new();
@@ -377,6 +384,76 @@ fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Ent
             Quat::IDENTITY,
         ),
     ));
+    entity
+}
+
+fn spawn_scene_object(world: &mut World, object: &SceneObjectAsset) -> Entity {
+    let entity = spawn_named(world, &object.name);
+    let body_type = match object.body_type {
+        ObstacleBodyType::Fixed => RigidBodyType::Fixed,
+        ObstacleBodyType::Dynamic => RigidBodyType::Dynamic,
+    };
+    let rotation = quat_from_rpy(object.rotation_rpy_rad);
+    world.entity_mut(entity).insert((
+        RigidBody {
+            body_type,
+            mass_kg: object.mass_kg,
+            ..RigidBody::default()
+        },
+        Transform3::from_translation_rotation(vec3_from_array(object.translation_m), rotation),
+    ));
+
+    if let Some(collision) = object.collision {
+        let shape = match collision {
+            SceneCollisionAsset::Box { size_m } => ColliderShape::Cuboid {
+                half_extents_m: vec3_from_array(size_m) * 0.5,
+            },
+            SceneCollisionAsset::Sphere { radius_m } => ColliderShape::Sphere { radius_m },
+        };
+        let defaults = PhysicsMaterial::default();
+        world.entity_mut(entity).insert(Collider {
+            shape,
+            material: PhysicsMaterial {
+                friction: object.friction.unwrap_or(defaults.friction),
+                restitution: object.restitution.unwrap_or(defaults.restitution),
+            },
+            ..Collider::default()
+        });
+    }
+
+    if let Some(visual) = &object.visual {
+        let (shape, color_rgba) = match visual {
+            SceneVisualAsset::Box { size_m, color_rgba } => (
+                VisualShape::Box {
+                    size_m: vec3_from_array(*size_m),
+                },
+                *color_rgba,
+            ),
+            SceneVisualAsset::Sphere {
+                radius_m,
+                color_rgba,
+            } => (
+                VisualShape::Sphere {
+                    radius_m: *radius_m,
+                },
+                *color_rgba,
+            ),
+            SceneVisualAsset::Mesh {
+                path,
+                scale,
+                color_rgba,
+            } => (
+                VisualShape::Mesh {
+                    path: path.clone(),
+                    scale: vec3_from_array(*scale),
+                },
+                *color_rgba,
+            ),
+        };
+        world
+            .entity_mut(entity)
+            .insert(Visual::new(shape, color_rgba));
+    }
     entity
 }
 
@@ -522,10 +599,11 @@ mod tests {
     use super::collect_robot_links;
     use crate::{load_and_spawn_scene, spawn_robot_asset};
     use rne_ecs::World;
+    use rne_math::{Quat, Vec3};
     use rne_physics::RigidBody;
     use rne_robot::Link;
     use rne_sensor::Sensor;
-    use rne_world::{WorldEntity, WorldRandom};
+    use rne_world::{Transform3, WorldEntity, WorldRandom};
     use std::path::Path;
 
     #[test]
@@ -634,6 +712,39 @@ half_extents_m = [0.03, 0.03, 0.03]
             (default_collider.material.friction - PhysicsMaterial::default().friction).abs()
                 < f32::EPSILON
         );
+    }
+
+    #[test]
+    fn environment_object_spawns_visual_collision_and_material() {
+        use crate::scene::parse_scene_asset;
+        use rne_physics::Collider;
+        use rne_render::{Visual, VisualShape};
+
+        let scene = parse_scene_asset(
+            r#"
+[[objects]]
+name = "workbench"
+translation_m = [1.0, 0.5, -0.25]
+rotation_rpy_rad = [0.0, 0.5, 0.0]
+body_type = "fixed"
+friction = 0.8
+restitution = 0.1
+visual = { shape = "box", size_m = [1.0, 1.0, 0.5], color_rgba = [0.1, 0.2, 0.3, 1.0] }
+collision = { shape = "box", size_m = [1.0, 1.0, 0.5] }
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+        let mut world = World::new();
+        let entity = super::spawn_scene_object(&mut world, &scene.objects[0]);
+        let visual = world.get::<Visual>(entity).expect("visual");
+        assert!(matches!(visual.shape, VisualShape::Box { .. }));
+        let collider = world.get::<Collider>(entity).expect("collider");
+        assert!((collider.material.friction - 0.8).abs() < f32::EPSILON);
+        assert!((collider.material.restitution - 0.1).abs() < f32::EPSILON);
+        let transform = world.get::<Transform3>(entity).expect("transform");
+        assert_eq!(transform.translation, Vec3::new(1.0, 0.5, -0.25));
+        assert_ne!(transform.rotation, Quat::IDENTITY);
     }
 
     #[test]

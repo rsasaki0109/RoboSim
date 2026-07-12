@@ -7,3 +7,21 @@ enabled = true
 
 [[robots]]
 path = "../robots/unitree_g1_dynamic.rne.robot.toml"
+
+[[objects]]
+name = "inspection_station"
+translation_m = [1.0, 0.59, -0.3]
+visual = { shape = "box", size_m = [0.22, 1.18, 0.22], color_rgba = [0.12, 0.16, 0.22, 1.0] }
+collision = { shape = "box", size_m = [0.22, 1.18, 0.22] }
+friction = 0.7
+
+[[objects]]
+name = "inspection_display"
+translation_m = [0.95, 1.08, -0.3]
+visual = { shape = "box", size_m = [0.025, 0.25, 0.16], color_rgba = [0.06, 0.30, 0.38, 1.0] }
+collision = { shape = "box", size_m = [0.025, 0.25, 0.16] }
+
+[[objects]]
+name = "inspection_status_light"
+translation_m = [0.93, 1.11, -0.3]
+visual = { shape = "box", size_m = [0.018, 0.055, 0.055], color_rgba = [0.10, 0.95, 0.45, 1.0] }

@@ -3,6 +3,7 @@
 use crate::robot::{load_robot_asset, RobotAsset, RobotKind};
 use crate::scene::{
     load_scene_asset, load_scene_robots, parse_scene_asset, parse_scene_robots, SceneAsset,
+    SceneVisualAsset,
 };
 use crate::spawn::load_and_spawn_scene;
 use crate::AssetError;
@@ -72,12 +73,37 @@ pub fn load_scene_bundle(scene_path: &Path) -> Result<SceneAssetBundle, AssetErr
     let scene = load_scene_asset(scene_path)?;
     let robots = load_scene_robots(scene_path, &scene)?;
     validate_scene_bundle_robots(scene_path, &robots)?;
+    validate_scene_object_references(scene_path, &scene)?;
 
     Ok(SceneAssetBundle {
         scene_path: scene_path.to_path_buf(),
         scene,
         robots,
     })
+}
+
+fn validate_scene_object_references(
+    scene_path: &Path,
+    scene: &SceneAsset,
+) -> Result<(), AssetError> {
+    let base_dir = scene_path.parent().unwrap_or_else(|| Path::new("."));
+    for object in &scene.objects {
+        let Some(SceneVisualAsset::Mesh { path, .. }) = &object.visual else {
+            continue;
+        };
+        let mesh_path = rne_render::resolve_package_uri(path, base_dir);
+        if !mesh_path.is_file() {
+            return Err(AssetError::invalid(
+                scene_path.display().to_string(),
+                format!(
+                    "environment object `{}` mesh not found: {}",
+                    object.name,
+                    mesh_path.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parses a scene bundle from in-memory TOML and referenced robot asset text.
@@ -162,7 +188,12 @@ pub fn validate_robot_references_with_sources(
 
 /// Returns package roots used to resolve mesh URIs for a scene bundle.
 pub fn mesh_package_roots(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
+    let mut roots = bundle
+        .scene_path
+        .parent()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect::<Vec<_>>();
     for (robot_path, robot) in &bundle.robots {
         let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(visuals) = &robot.visuals {
@@ -215,6 +246,12 @@ pub fn inspect_asset(path: &Path) -> Result<String, AssetError> {
 /// Returns all on-disk files that should trigger a scene reload when changed.
 pub fn scene_dependency_paths(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
     let mut paths = vec![bundle.scene_path.clone()];
+    let scene_dir = bundle.scene_path.parent().unwrap_or_else(|| Path::new("."));
+    for object in &bundle.scene.objects {
+        if let Some(SceneVisualAsset::Mesh { path, .. }) = &object.visual {
+            paths.push(rne_render::resolve_package_uri(path, scene_dir));
+        }
+    }
     for (robot_path, robot) in &bundle.robots {
         paths.push(robot_path.clone());
         let base_dir = robot_path.parent().unwrap_or_else(|| Path::new("."));
@@ -303,6 +340,7 @@ fn format_scene_report(bundle: &SceneAssetBundle) -> String {
         ),
         format!("ground: enabled={}", bundle.scene.ground.enabled),
         format!("robots: {}", bundle.robots.len()),
+        format!("environment objects: {}", bundle.scene.objects.len()),
     ];
 
     for (path, robot) in &bundle.robots {
