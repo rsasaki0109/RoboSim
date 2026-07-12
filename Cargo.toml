@@ -56,6 +56,7 @@ members = [
   "examples/37_humanoid_stand",
   "examples/38_unitree_go2_gif",
   "examples/39_unitree_g1_gif",
+  "examples/40_unitree_g1_factory_inspection",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

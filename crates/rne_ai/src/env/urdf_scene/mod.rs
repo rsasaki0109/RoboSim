@@ -8,6 +8,7 @@ mod unitree_g1_episode;
 mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
 mod unitree_g1_inspection;
+mod unitree_g1_inspection_episode;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
 
@@ -31,6 +32,10 @@ pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
 pub use unitree_g1_inspection::unitree_g1_inspection_targets;
+pub use unitree_g1_inspection_episode::{
+    UnitreeG1InspectionAction, UnitreeG1InspectionEpisode, UnitreeG1InspectionEpisodeConfig,
+    UnitreeG1InspectionObservation,
+};
 pub use unitree_go2_episode::{
     UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
@@ -38,12 +43,12 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
-use rne_ecs::{Entity, World};
+use rne_ecs::{Entity, Name, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
-use rne_world::world_transform_of;
+use rne_world::{world_transform_of, TaskMarker};
 use std::path::{Path, PathBuf};
 
 /// Observation for a generic URDF scene simulation.
@@ -238,6 +243,11 @@ impl UrdfSceneSim {
         unitree_g1_dynamic_scene_path()
     }
 
+    /// Built-in Unitree G1 factory inspection scene path.
+    pub fn unitree_g1_factory_scene_path() -> PathBuf {
+        unitree_g1_factory_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -270,6 +280,24 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Returns a named task marker's world translation and interaction radius.
+    pub fn task_marker(&self, name: &str) -> Option<(f64, f64, f64, f64)> {
+        for entity_ref in self.world.iter_entities() {
+            let entity = entity_ref.id();
+            if self
+                .world
+                .get::<Name>(entity)
+                .is_none_or(|entity_name| entity_name.0 != name)
+            {
+                continue;
+            }
+            let marker = self.world.get::<TaskMarker>(entity)?;
+            let translation = world_transform_of(&self.world, entity).translation;
+            return Some((translation.x, translation.y, translation.z, marker.radius_m));
+        }
+        None
     }
 
     /// Returns a named URDF link's world translation in meters.
@@ -521,6 +549,11 @@ pub fn unitree_g1_scene_path() -> PathBuf {
 /// Vendored official Unitree G1 scene using primitive-only collision geometry.
 pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
     assets_scene_path("unitree_g1_dynamic.rne.scene.toml")
+}
+
+/// Vendored official Unitree G1 factory inspection scene path.
+pub fn unitree_g1_factory_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1_factory.rne.scene.toml")
 }
 
 #[cfg(test)]

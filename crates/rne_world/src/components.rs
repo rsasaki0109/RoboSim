@@ -34,6 +34,15 @@ pub struct Gravity {
     pub vector_m_s2: Vec3,
 }
 
+/// Named semantic location in a world used by tasks, policies, and episodes.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TaskMarker {
+    /// Application-defined marker kind, such as `inspection` or `drop_zone`.
+    pub kind: String,
+    /// Success or interaction radius around the marker in meters.
+    pub radius_m: f64,
+}
+
 impl Default for Gravity {
     fn default() -> Self {
         Self {

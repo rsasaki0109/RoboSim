@@ -1,0 +1,51 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2003
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/unitree_g1_dynamic.rne.robot.toml"
+
+[[objects]]
+name = "inspection_station"
+translation_m = [1.0, 0.59, -0.3]
+visual = { shape = "box", size_m = [0.22, 1.18, 0.22], color_rgba = [0.12, 0.16, 0.22, 1.0] }
+collision = { shape = "box", size_m = [0.22, 1.18, 0.22] }
+friction = 0.7
+
+[[objects]]
+name = "inspection_display"
+translation_m = [0.95, 1.08, -0.3]
+visual = { shape = "box", size_m = [0.025, 0.25, 0.16], color_rgba = [0.06, 0.30, 0.38, 1.0] }
+collision = { shape = "box", size_m = [0.025, 0.25, 0.16] }
+
+[[objects]]
+name = "inspection_status_light"
+translation_m = [0.93, 1.11, -0.3]
+visual = { shape = "box", size_m = [0.018, 0.055, 0.055], color_rgba = [0.10, 0.95, 0.45, 1.0] }
+
+[[objects]]
+name = "parts_shelf"
+translation_m = [-0.70, 0.65, -0.55]
+visual = { shape = "box", size_m = [0.28, 1.30, 0.90], color_rgba = [0.20, 0.24, 0.30, 1.0] }
+collision = { shape = "box", size_m = [0.28, 1.30, 0.90] }
+
+[[objects]]
+name = "safety_barrier"
+translation_m = [0.15, 0.25, 0.72]
+visual = { shape = "box", size_m = [1.60, 0.50, 0.08], color_rgba = [0.92, 0.58, 0.08, 1.0] }
+collision = { shape = "box", size_m = [1.60, 0.50, 0.08] }
+
+[[objects]]
+name = "factory_back_wall"
+translation_m = [0.0, 1.0, -1.15]
+visual = { shape = "box", size_m = [3.2, 2.0, 0.08], color_rgba = [0.18, 0.22, 0.28, 1.0] }
+collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
+
+[[task_markers]]
+name = "inspection_panel_check"
+kind = "inspection"
+translation_m = [0.72, 0.0, -0.30]
+radius_m = 0.85

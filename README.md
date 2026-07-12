@@ -118,7 +118,27 @@ friction = 0.7
 
 Environment mesh files are validated, included in hot-reload dependency tracking, and
 resolved relative to the `.rne.scene.toml` file. The G1 inspection station above is loaded
-from `assets/scenes/unitree_g1_dynamic.rne.scene.toml` using this schema.
+from `assets/scenes/unitree_g1_factory.rne.scene.toml` using this schema.
+
+Named task locations are loaded into the ECS as `TaskMarker` components so policies and
+episodes can discover goals without hard-coded coordinates:
+
+```toml
+[[task_markers]]
+name = "inspection_panel_check"
+kind = "inspection"
+translation_m = [0.72, 0.0, -0.30]
+radius_m = 0.45
+```
+
+`assets/scenes/unitree_g1_factory.rne.scene.toml` demonstrates a complete factory cell
+with a shelf, safety barrier, back wall, inspection equipment, and semantic inspection goal.
+`UnitreeG1InspectionEpisode` consumes that named marker directly and exposes marker distance,
+interaction radius, gesture progress, success termination, and a deterministic task reward.
+
+```bash
+cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection
+```
 
 ### Python policy example
 

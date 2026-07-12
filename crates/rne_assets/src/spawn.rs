@@ -4,7 +4,7 @@ use crate::error::AssetError;
 use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
 use crate::scene::{
     ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneObjectAsset, SceneObstacleAsset,
-    SceneVisualAsset,
+    SceneTaskMarkerAsset, SceneVisualAsset,
 };
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
@@ -17,7 +17,9 @@ use rne_urdf_import::{
     attach_urdf_articulation, attach_urdf_visuals, parse_urdf, parse_urdf_file,
     spawn_urdf_robot_with_config, UrdfRobot,
 };
-use rne_world::{spawn_world, world_transform_of, Gravity, Transform3, WorldEntity, WorldRandom};
+use rne_world::{
+    spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -267,6 +269,9 @@ pub fn spawn_scene_with_sources(
     for object in &scene.objects {
         spawn_scene_object(world, object);
     }
+    for marker in &scene.task_markers {
+        spawn_scene_task_marker(world, marker);
+    }
 
     let mut spawned_robots = Vec::new();
     let mut lidar_mounts = Vec::new();
@@ -302,6 +307,21 @@ pub fn spawn_scene_with_sources(
         lidar_mounts,
         wrist_camera_mounts,
     })
+}
+
+fn spawn_scene_task_marker(world: &mut World, marker: &SceneTaskMarkerAsset) -> Entity {
+    let entity = spawn_named(world, &marker.name);
+    world.entity_mut(entity).insert((
+        TaskMarker {
+            kind: marker.kind.clone(),
+            radius_m: marker.radius_m,
+        },
+        Transform3::from_translation_rotation(
+            vec3_from_array(marker.translation_m),
+            Quat::IDENTITY,
+        ),
+    ));
+    entity
 }
 
 /// Loads and spawns a scene file and its referenced robot assets.
@@ -745,6 +765,30 @@ collision = { shape = "box", size_m = [1.0, 1.0, 0.5] }
         let transform = world.get::<Transform3>(entity).expect("transform");
         assert_eq!(transform.translation, Vec3::new(1.0, 0.5, -0.25));
         assert_ne!(transform.rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn task_marker_spawns_semantic_world_location() {
+        let marker = crate::scene::SceneTaskMarkerAsset {
+            name: "inspection_a".into(),
+            kind: "inspection".into(),
+            translation_m: [0.8, 0.0, -0.3],
+            radius_m: 0.4,
+        };
+        let mut world = World::new();
+        let entity = super::spawn_scene_task_marker(&mut world, &marker);
+        let component = world
+            .get::<rne_world::TaskMarker>(entity)
+            .expect("task marker");
+        assert_eq!(component.kind, "inspection");
+        assert_eq!(component.radius_m, 0.4);
+        assert_eq!(
+            world
+                .get::<Transform3>(entity)
+                .expect("transform")
+                .translation,
+            Vec3::new(0.8, 0.0, -0.3)
+        );
     }
 
     #[test]

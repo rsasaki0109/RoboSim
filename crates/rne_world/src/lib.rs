@@ -8,7 +8,7 @@ pub mod resources;
 pub mod systems;
 pub mod transform;
 
-pub use components::{spawn_world, GlobalTransform3, Gravity, Transform3, WorldEntity};
+pub use components::{spawn_world, GlobalTransform3, Gravity, TaskMarker, Transform3, WorldEntity};
 pub use frame_graph::{FrameEdge, FrameGraph, FrameId, FrameNode};
 pub use resources::{
     RandomStreamId, WorldRandom, WorldRandomSnapshot, WORLD_RANDOM_STREAM_VERSION,

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_inspection_targets,
+    build_visual_render_scene, unitree_g1_factory_scene_path, unitree_g1_inspection_targets,
     UrdfJointPositionTarget, UrdfSceneSim,
 };
 use rne_math::{Transform3, Vec3};
@@ -31,7 +31,8 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create G1 frame directory");
 
     let mut sim =
-        UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path()).expect("load dynamic G1");
+        UrdfSceneSim::from_scene_path(&unitree_g1_factory_scene_path()).expect("load factory G1");
+    assert!(sim.task_marker("inspection_panel_check").is_some());
     sim.configure_position_motors(220.0, 24.0, 88.0);
     let stand = standing_targets();
     for _ in 0..120 {

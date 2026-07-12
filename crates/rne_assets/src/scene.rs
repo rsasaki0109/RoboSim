@@ -25,6 +25,27 @@ pub struct SceneAsset {
     /// Named environment objects with independent visual and collision shapes.
     #[serde(default)]
     pub objects: Vec<SceneObjectAsset>,
+    /// Named semantic task locations spawned without physics or visuals.
+    #[serde(default)]
+    pub task_markers: Vec<SceneTaskMarkerAsset>,
+}
+
+/// Semantic task location stored in a scene asset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneTaskMarkerAsset {
+    /// Entity name used for deterministic lookup.
+    pub name: String,
+    /// Application-defined marker kind.
+    pub kind: String,
+    /// Marker center translation in meters.
+    pub translation_m: [f64; 3],
+    /// Success or interaction radius in meters.
+    #[serde(default = "default_task_marker_radius_m")]
+    pub radius_m: f64,
+}
+
+fn default_task_marker_radius_m() -> f64 {
+    0.25
 }
 
 /// Named environment object loaded from a scene asset.
@@ -373,6 +394,7 @@ mod tests {
         assert_eq!(scene.robots.len(), 1);
         assert!(scene.obstacles.is_empty());
         assert!(scene.objects.is_empty());
+        assert!(scene.task_markers.is_empty());
     }
 
     #[test]
@@ -476,6 +498,24 @@ restitution = 0.1
                 size_m: [0.2, 0.8, 0.2]
             })
         );
+    }
+
+    #[test]
+    fn parses_named_task_marker() {
+        let scene = parse_scene_asset(
+            r#"
+[[task_markers]]
+name = "panel_a_check"
+kind = "inspection"
+translation_m = [0.8, 0.0, -0.3]
+radius_m = 0.4
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+        assert_eq!(scene.task_markers[0].name, "panel_a_check");
+        assert_eq!(scene.task_markers[0].kind, "inspection");
+        assert_eq!(scene.task_markers[0].radius_m, 0.4);
     }
 
     #[test]
