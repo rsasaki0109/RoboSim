@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
-    UnitreeG1GaitCommand, UrdfJointPositionTarget, UrdfSceneSim,
+    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_inspection_targets,
+    UrdfJointPositionTarget, UrdfSceneSim,
 };
 use rne_math::{Transform3, Vec3};
 use rne_render::{
@@ -48,16 +48,14 @@ fn main() {
     for frame in 0..FRAME_COUNT {
         for substep in 0..STEPS_PER_FRAME {
             let step = frame as u64 * STEPS_PER_FRAME + substep;
-            sim.step_joint_position_targets(&unitree_g1_gait_targets(
-                step,
-                UnitreeG1GaitCommand::default(),
-            ));
+            sim.step_joint_position_targets(&unitree_g1_inspection_targets(step));
         }
         let mut scene = build_visual_render_scene(sim.world());
         scene.items.retain(|item| {
             !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
         });
         append_checker_floor(&mut scene, start.base_x_m, start.base_z_m, 0.10);
+        append_inspection_station(&mut scene, start.base_x_m, start.base_z_m);
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 meshes");
@@ -92,7 +90,7 @@ fn main() {
 
     let gif_path = media_dir.join("unitree-g1.gif");
     build_gif(&frames_dir, &gif_path).expect("encode G1 gif");
-    image::open(frames_dir.join("frame-009.png"))
+    image::open(frames_dir.join("frame-030.png"))
         .expect("read poster frame")
         .save(media_dir.join("unitree-g1.png"))
         .expect("write G1 poster");
@@ -101,6 +99,40 @@ fn main() {
         "rendered official Unitree G1 media to {}",
         gif_path.display()
     );
+}
+
+fn append_inspection_station(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64) {
+    append_box(
+        scene,
+        Vec3::new(center_x_m + 1.00, 0.59, center_z_m - 0.30),
+        Vec3::new(0.22, 1.18, 0.22),
+        [0.12, 0.16, 0.22, 1.0],
+    );
+    append_box(
+        scene,
+        Vec3::new(center_x_m + 0.95, 1.08, center_z_m - 0.30),
+        Vec3::new(0.025, 0.25, 0.16),
+        [0.06, 0.30, 0.38, 1.0],
+    );
+    append_box(
+        scene,
+        Vec3::new(center_x_m + 0.93, 1.11, center_z_m - 0.30),
+        Vec3::new(0.018, 0.055, 0.055),
+        [0.10, 0.95, 0.45, 1.0],
+    );
+}
+
+fn append_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color: [f32; 4]) {
+    scene.items.push(RenderSceneItem {
+        transform: Transform3 {
+            translation,
+            rotation: rne_math::Quat::IDENTITY,
+            scale: size_m,
+        },
+        shape: VisualShape::Box { size_m: Vec3::ONE },
+        color_rgba: color,
+        mesh: None,
+    });
 }
 
 fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {

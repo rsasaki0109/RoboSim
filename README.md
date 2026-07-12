@@ -42,10 +42,10 @@ and lift actions, four-foot loads and gait phase, and a locomotion/upright rewar
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1.png">
-    <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 23-DoF URDF walking dynamically with multibody physics in RNE" width="600">
+    <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 walking to an inspection station and performing a point-and-confirm task" width="600">
   </picture>
   <br>
-  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody drives all 23 force-limited joints against primitive foot contacts and renders offscreen with wgpu. The camera stays fixed while a stationary checker floor provides a world-space motion reference. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody walks to an equipment station, stops, and performs a point-and-confirm inspection gesture using all force-limited joints against primitive foot contacts. The deterministic task is rendered offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
