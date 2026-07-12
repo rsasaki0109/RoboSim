@@ -45,6 +45,8 @@ wgpu GIF for the README. Go2 now also has a dynamic multibody scene with a
 four-foot standing/contact test and bounded diagonal-pair trot; example 38 now
 captures that contact-driven motion. The same path covers the official Unitree G1
 23-DoF humanoid, including 29 STL meshes and an articulated example 39 capture.
+`UnitreeGo2Episode` adds bounded stride/lift actions, planar locomotion delta,
+four-foot contact observations, gait phase, and exact short-rollout replay.
 G1 also has a dynamic standing scene that retains the official primitive foot
 and leg contacts while excluding unstable mesh-AABB collision approximations.
 Its deterministic balance episode exposes pelvis pose, bilateral foot loads,

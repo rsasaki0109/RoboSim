@@ -34,7 +34,8 @@ cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
 ```
 
 Go2 also has a dynamic multibody scene with self-collision filtering and a
-headless four-foot standing/contact test.
+headless four-foot standing/contact test. `UnitreeGo2Episode` exposes stride
+and lift actions, four-foot loads and gait phase, and a locomotion/upright reward.
 
 ## Official Unitree G1 URDF
 

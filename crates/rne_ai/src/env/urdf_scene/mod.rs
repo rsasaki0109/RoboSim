@@ -7,6 +7,7 @@ mod quadruped_episode;
 mod unitree_g1_episode;
 mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
+mod unitree_go2_episode;
 mod unitree_go2_gait;
 
 pub use humanoid_episode::{
@@ -27,6 +28,9 @@ pub use unitree_g1_episode::{
 pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
 pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
+};
+pub use unitree_go2_episode::{
+    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
 pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
