@@ -1,6 +1,6 @@
 {
   "artifact": "rne_3d_mobile_manipulator_pick_place_hero",
-  "byte_size": 2356166,
+  "byte_size": 2391572,
   "encode": {
     "animation_frames": 100,
     "bayer_scale": 4,
@@ -30,7 +30,7 @@
   "poster_policy_step": 800,
   "schema_version": 2,
   "settle_steps": 120,
-  "sha256": "sha256:6c77fa79b2ac2950fe6969ec31848b610c69d602140cca912d04a0e9396b8258",
+  "sha256": "sha256:a0d1aa865556b654c65c5489b4ec1e1852a6f9064c875377172f52fa50ed462c",
   "simulation": {
     "animation_frame_count": 100,
     "base_travel_m": 2.385024,
@@ -52,7 +52,7 @@
       -2.275172
     ],
     "final_object_place_error_m": 0.091042,
-    "first_last_frame_delta_ratio": 0.386749,
+    "first_last_frame_delta_ratio": 0.38671,
     "grasped_steps": 978,
     "hold_frame_count": 10,
     "max_base_height_error_m": 0.0,
@@ -66,7 +66,7 @@
     "max_pre_grasp_object_displacement_m_threshold": 0.13,
     "min_base_travel_m": 0.2,
     "min_base_yaw_only_dot": 1.0,
-    "min_consecutive_frame_delta_ratio": 0.005786,
+    "min_consecutive_frame_delta_ratio": 0.00681,
     "min_consecutive_frame_delta_ratio_threshold": 0.0025,
     "min_ee_travel_m": 0.15,
     "min_first_last_frame_delta_ratio_threshold": 0.08,
