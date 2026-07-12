@@ -8,8 +8,10 @@ use rne_ai::{
     build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
     UnitreeG1GaitCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
-use rne_math::Vec3;
-use rne_render::{Camera, MeshRenderCache, RenderBackend, VisualShape};
+use rne_math::{Transform3, Vec3};
+use rne_render::{
+    Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
+};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
 const WIDTH: u32 = 640;
@@ -35,6 +37,7 @@ fn main() {
     for _ in 0..120 {
         sim.step_joint_position_targets(&stand);
     }
+    let start = sim.observe();
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
@@ -54,6 +57,7 @@ fn main() {
         scene.items.retain(|item| {
             !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
         });
+        append_checker_floor(&mut scene, start.base_x_m, start.base_z_m, 0.10);
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 meshes");
@@ -68,10 +72,9 @@ fn main() {
                 "expected official G1 mesh visuals, got {meshes}"
             );
         }
-        let obs = sim.observe();
         let orbit = CameraOrbit {
-            focus: Vec3::new(obs.base_x_m, obs.base_y_m + 0.05, obs.base_z_m),
-            yaw_rad: -0.72 + frame as f64 * 0.004,
+            focus: Vec3::new(start.base_x_m, start.base_y_m + 0.05, start.base_z_m),
+            yaw_rad: -0.72,
             pitch_rad: 1.25,
             distance_m: 1.75,
         };
@@ -98,6 +101,32 @@ fn main() {
         "rendered official Unitree G1 media to {}",
         gif_path.display()
     );
+}
+
+fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {
+    for row in -6..=6 {
+        for column in -6..=6 {
+            let color = if (row + column) & 1 == 0 {
+                [0.11, 0.15, 0.21, 1.0]
+            } else {
+                [0.055, 0.075, 0.11, 1.0]
+            };
+            scene.items.push(RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(
+                        center_x_m + column as f64 * tile_m,
+                        -0.008,
+                        center_z_m + row as f64 * tile_m,
+                    ),
+                    rotation: rne_math::Quat::IDENTITY,
+                    scale: Vec3::new(tile_m * 0.96, 0.008, tile_m * 0.96),
+                },
+                shape: VisualShape::Box { size_m: Vec3::ONE },
+                color_rgba: color,
+                mesh: None,
+            });
+        }
+    }
 }
 
 fn standing_targets() -> [UrdfJointPositionTarget<'static>; 6] {

@@ -26,7 +26,7 @@ embodied AI, synthetic sensor data, and policy evaluation.
     <img src="docs/media/unitree-go2.gif" alt="Official Unitree Go2 URDF trotting dynamically with multibody physics in RNE" width="800">
   </picture>
   <br>
-  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline. After standing settle, its dynamic multibody drives a diagonal-pair trot through 12 force-limited joints and primitive foot contacts, rendered offscreen by wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline. After standing settle, its dynamic multibody drives a diagonal-pair trot through 12 force-limited joints and primitive foot contacts, rendered offscreen by wgpu. The fixed camera and stationary checker floor make its world-space motion visible. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
@@ -45,7 +45,7 @@ and lift actions, four-foot loads and gait phase, and a locomotion/upright rewar
     <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 23-DoF URDF walking dynamically with multibody physics in RNE" width="600">
   </picture>
   <br>
-  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody drives all 23 force-limited joints against primitive foot contacts and renders offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody drives all 23 force-limited joints against primitive foot contacts and renders offscreen with wgpu. The camera stays fixed while a stationary checker floor provides a world-space motion reference. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
