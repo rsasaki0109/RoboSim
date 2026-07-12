@@ -63,28 +63,6 @@ observations, and a forward/upright reward with exact deterministic replay.
 - Run headless in CI or render interactively with wgpu.
 - Build robots from Robot/Sensor/Actuator entities.
 - Record and replay deterministic simulation episodes.
-- Manipulate: a lift-equipped arm does real 3D pick-and-place.
-
-## 3D pick-and-place
-
-<p align="center">
-  <img src="docs/media/mm-lift-pickplace.png" alt="The mm_lift robot lifting a grasped cube with its top-down claw" width="480">
-  <br>
-  <sub>The hero above shows the mobile platform navigating a house context; here is the <code>mm_lift</code> arm doing vertical pick-and-place up close.</sub>
-</p>
-
-The `mm_lift` manipulator performs a full vertical pick-and-place: a column-mounted lift
-lowers a top-down claw over a cube on the ground, grasps it (contact-triggered weld), raises
-it, swings the arm to a new spot, and opens to release it. Position-controlled joints hold the
-commanded arm pose and a higher constraint-solver iteration count keeps the tall jointed chain
-stable — all deterministic and headless-testable.
-
-```bash
-# Scripted pick → lift → carry → place (headless)
-cargo run -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place
-# Teleoperate it with wgpu — R / F drive the lift, Q/E/Z/X the arm, C/V the claw
-cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
-```
 
 ## Demo (60 seconds)
 
