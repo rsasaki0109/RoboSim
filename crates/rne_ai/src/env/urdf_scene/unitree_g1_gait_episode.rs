@@ -19,6 +19,8 @@ pub struct UnitreeG1GaitEpisodeConfig {
     pub max_steps: u64,
     /// Simulation steps per gait cycle.
     pub cycle_steps: u64,
+    /// Maximum relative pitch/roll magnitude before termination in radians.
+    pub max_tilt_rad: f64,
 }
 
 impl Default for UnitreeG1GaitEpisodeConfig {
@@ -27,6 +29,7 @@ impl Default for UnitreeG1GaitEpisodeConfig {
             scene_path: unitree_g1_dynamic_scene_path(),
             max_steps: 600,
             cycle_steps: 120,
+            max_tilt_rad: 1.2,
         }
     }
 }
@@ -175,11 +178,15 @@ impl Episode for UnitreeG1GaitEpisode {
 
         let forward_delta_m = self.sim.observe().base_x_m - before_x_m;
         let observation = self.observation(forward_delta_m);
-        let fallen = observation.base_y_m < FALLEN_HEIGHT_M;
+        let tilt_rad = observation
+            .base_relative_pitch_rad
+            .hypot(observation.base_relative_roll_rad);
+        let fallen = observation.base_y_m < FALLEN_HEIGHT_M || tilt_rad > self.config.max_tilt_rad;
         let height_error_m = (observation.base_y_m - NOMINAL_HEIGHT_M).abs();
         let reward = 0.5 + 100.0 * forward_delta_m
             - 2.0 * height_error_m
             - 0.1 * observation.base_relative_yaw_rad.abs()
+            - 0.2 * tilt_rad
             - 0.2 * observation.base_z_m.abs()
             - if fallen { 10.0 } else { 0.0 };
         EpisodeStep {
