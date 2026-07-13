@@ -1,19 +1,77 @@
 //! Render scene helpers for diff-drive simulation.
 
 use rne_data::{DataBus, InMemoryDataBus, PointCloud};
-use rne_ecs::{Entity, Parent, World};
-use rne_math::{yaw_rad, Quat, Vec3};
+use rne_ecs::{Entity, Name, Parent, World};
+use rne_math::{yaw_rad, Quat, Transform3, Vec3};
 use rne_physics::Collider;
-use rne_render::{LinkVisuals, RenderScene, Visual, VisualShape};
+use rne_render::{LinkVisuals, RenderScene, RenderSceneItem, Visual, VisualShape};
 use rne_robot::DiffDriveSpawned;
 use rne_sensor::{Sensor, SensorKind};
-use rne_world::{world_transform_of, Transform3 as WorldTransform3};
+use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3};
 
 const GROUND_COLOR: [f32; 4] = [0.25, 0.28, 0.32, 1.0];
 const BASE_COLOR: [f32; 4] = [0.35, 0.55, 0.95, 1.0];
 const WHEEL_COLOR: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
 const LIDAR_HIT_COLOR: [f32; 4] = [0.15, 0.95, 0.35, 0.85];
 const LIDAR_MOUNT_COLOR: [f32; 4] = [0.95, 0.35, 0.25, 1.0];
+const TASK_MARKER_COLOR: [f32; 4] = [0.10, 0.80, 1.0, 0.95];
+const TASK_MARKER_DOTS: usize = 12;
+
+/// Summary of semantic task-marker rings appended to a render scene.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TaskMarkerOverlayStats {
+    /// Number of task-marker entities visualized.
+    pub marker_count: usize,
+    /// Number of render items appended across all rings.
+    pub render_items: usize,
+}
+
+/// Appends deterministic floor rings for all named [`TaskMarker`] entities.
+///
+/// Markers are sorted by entity name before rendering so externally visible
+/// item ordering does not depend on ECS archetype iteration order.
+pub fn append_task_marker_overlay(
+    scene: &mut RenderScene,
+    world: &World,
+) -> TaskMarkerOverlayStats {
+    let mut markers = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let marker = world.get::<TaskMarker>(entity)?;
+            let name = world.get::<Name>(entity)?.0.clone();
+            let translation = world_transform_of(world, entity).translation;
+            Some((name, translation, marker.radius_m))
+        })
+        .collect::<Vec<_>>();
+    markers.sort_by(|left, right| left.0.cmp(&right.0));
+
+    for (_, center, radius_m) in &markers {
+        let display_radius_m = radius_m.clamp(0.08, 0.50);
+        for dot in 0..TASK_MARKER_DOTS {
+            let angle_rad = std::f64::consts::TAU * dot as f64 / TASK_MARKER_DOTS as f64;
+            scene.items.push(RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(
+                        center.x + display_radius_m * angle_rad.cos(),
+                        center.y + 0.012,
+                        center.z + display_radius_m * angle_rad.sin(),
+                    ),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::splat(0.018),
+                },
+                shape: VisualShape::Sphere { radius_m: 0.5 },
+                color_rgba: TASK_MARKER_COLOR,
+                mesh: None,
+            });
+        }
+    }
+
+    TaskMarkerOverlayStats {
+        marker_count: markers.len(),
+        render_items: markers.len() * TASK_MARKER_DOTS,
+    }
+}
 
 /// Summary of LiDAR markers appended to a render scene.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -297,5 +355,34 @@ mod tests {
             cylinder_items >= 2,
             "expected cylinder wheel visuals, got {cylinder_items}"
         );
+    }
+
+    #[test]
+    fn task_marker_overlay_is_named_and_deterministically_ordered() {
+        let mut world = World::new();
+        world.spawn((
+            Name("z_marker".into()),
+            TaskMarker {
+                kind: "inspection".into(),
+                radius_m: 0.3,
+            },
+            WorldTransform3::from_translation_rotation(Vec3::new(2.0, 0.0, 0.0), Quat::IDENTITY),
+        ));
+        world.spawn((
+            Name("a_marker".into()),
+            TaskMarker {
+                kind: "inspection".into(),
+                radius_m: 0.2,
+            },
+            WorldTransform3::from_translation_rotation(Vec3::new(1.0, 0.0, 0.0), Quat::IDENTITY),
+        ));
+
+        let mut scene = RenderScene::new();
+        let stats = append_task_marker_overlay(&mut scene, &world);
+        assert_eq!(stats.marker_count, 2);
+        assert_eq!(stats.render_items, TASK_MARKER_DOTS * 2);
+        assert_eq!(scene.items.len(), stats.render_items);
+        assert!((scene.items[0].transform.translation.x - 1.2).abs() < 1.0e-9);
+        assert!((scene.items[TASK_MARKER_DOTS].transform.translation.x - 2.3).abs() < 1.0e-9);
     }
 }

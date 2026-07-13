@@ -17,7 +17,7 @@
 | Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
 | Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Multi-robot agent | `cargo run -p multi_robot_agent --example 13_multi_robot_agent` | Two agents, two robots, one shared world |
-| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene asset load, URDF mesh visuals, WASD teleop, orbit camera, asset-defined LiDAR overlay (`L`), live hot reload; `--manipulator` / `--manipulator-mobile` for arm teleop (Q/E/Z/X) |
+| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene asset load, URDF mesh visuals (`--urdf <scene>`), WASD teleop, orbit camera, LiDAR (`L`) and semantic TaskMarker (`M`) overlays, live hot reload; manipulator profiles add arm teleop |
 | Asset hot reload | `cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke` | Validate scene deps and reload on file change |
 | Goal-conditioned agent | `cargo run -p goal_conditioned_agent --example 16_goal_conditioned_agent` | Goal-seeking policy, curriculum, shared-world goal agent |
 | Multi-robot collision | `cargo run -p multi_robot_collision --example 17_multi_robot_collision` | Head-on contact detection from scene asset and built-in scenario |

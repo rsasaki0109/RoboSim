@@ -139,6 +139,8 @@ interaction radius, gesture progress, success termination, and a deterministic t
 
 ```bash
 cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection
+# Inspect any URDF World interactively; press M to toggle TaskMarker rings.
+cargo run -p interactive_viewer --example 14_interactive_viewer -- --urdf assets/scenes/unitree_g1_factory.rne.scene.toml
 ```
 
 ### Python policy example

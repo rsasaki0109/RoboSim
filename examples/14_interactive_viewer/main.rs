@@ -15,6 +15,7 @@
 //! - Left / Right: orbit camera
 //! - Up / Down: zoom camera
 //! - L: toggle LiDAR hit overlay (diff-drive scenes only)
+//! - M: toggle semantic task-marker rings
 //! - P: toggle wrist camera PiP (manipulator profiles only)
 //! - Escape: quit
 //!
@@ -28,14 +29,15 @@
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --cart
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi-so101
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --urdf assets/scenes/unitree_g1_factory.rne.scene.toml
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
 
 use rne_ai::{
-    append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path, mm_lift_scene_path,
-    mm_minimal_scene_path, mm_mobile_scene_path, so101_scene_path, DiffDriveAction, DiffDriveSim,
-    MobileManipulatorAction, MobileManipulatorSim, UrdfArmAction, UrdfCartAction, UrdfKiwiAction,
-    UrdfSceneSim,
+    append_lidar_overlay, append_task_marker_overlay, build_diff_drive_render_scene,
+    build_visual_render_scene, cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
+    mm_lift_scene_path, mm_minimal_scene_path, mm_mobile_scene_path, so101_scene_path,
+    DiffDriveAction, DiffDriveSim, MobileManipulatorAction, MobileManipulatorSim, UrdfArmAction,
+    UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_assets::AssetHotReloader;
 use rne_math::Vec3;
@@ -68,6 +70,7 @@ enum ViewerProfile {
     Cart(PathBuf),
     LeKiwi(PathBuf),
     LeKiwiSo101(PathBuf),
+    Urdf(PathBuf),
 }
 
 enum ViewerSim {
@@ -166,8 +169,8 @@ impl ViewerSim {
         matches!(self, Self::Manipulator(sim) if sim.wrist_camera_enabled())
     }
 
-    fn build_scene(&self, show_lidar: bool) -> rne_render::RenderScene {
-        match self {
+    fn build_scene(&self, show_lidar: bool, show_task_markers: bool) -> rne_render::RenderScene {
+        let mut scene = match self {
             Self::DiffDrive(sim) => {
                 let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
                 if show_lidar {
@@ -177,7 +180,21 @@ impl ViewerSim {
             }
             Self::Manipulator(sim) => build_visual_render_scene(sim.world()),
             Self::UrdfScene(sim) => build_visual_render_scene(sim.world()),
+        };
+        if show_task_markers {
+            match self {
+                Self::DiffDrive(sim) => {
+                    append_task_marker_overlay(&mut scene, sim.world());
+                }
+                Self::Manipulator(sim) => {
+                    append_task_marker_overlay(&mut scene, sim.world());
+                }
+                Self::UrdfScene(sim) => {
+                    append_task_marker_overlay(&mut scene, sim.world());
+                }
+            }
         }
+        scene
     }
 
     fn mesh_roots(&self) -> Vec<PathBuf> {
@@ -282,6 +299,11 @@ fn viewer_profile_from_args() -> ViewerProfile {
     if args.iter().any(|arg| arg == "--lekiwi-so101") {
         return ViewerProfile::LeKiwiSo101(scene_arg.unwrap_or_else(lekiwi_so101_scene_path));
     }
+    if args.iter().any(|arg| arg == "--urdf") {
+        return ViewerProfile::Urdf(
+            scene_arg.unwrap_or_else(|| panic!("--urdf requires a .scene.toml path")),
+        );
+    }
     let scene_path = scene_arg.unwrap_or_else(default_scene_path);
     ViewerProfile::DiffDriveScene(scene_path)
 }
@@ -303,7 +325,8 @@ fn load_sim(profile: &ViewerProfile) -> Result<ViewerSim, String> {
         ViewerProfile::So101(path)
         | ViewerProfile::Cart(path)
         | ViewerProfile::LeKiwi(path)
-        | ViewerProfile::LeKiwiSo101(path) => UrdfSceneSim::from_scene_path(path)
+        | ViewerProfile::LeKiwiSo101(path)
+        | ViewerProfile::Urdf(path) => UrdfSceneSim::from_scene_path(path)
             .map(|sim| ViewerSim::UrdfScene(Box::new(sim)))
             .map_err(|error| error.to_string()),
     }
@@ -319,6 +342,7 @@ fn profile_label(profile: &ViewerProfile) -> String {
         ViewerProfile::Cart(path) => format!("cart_minimal ({})", path.display()),
         ViewerProfile::LeKiwi(path) => format!("lekiwi ({})", path.display()),
         ViewerProfile::LeKiwiSo101(path) => format!("lekiwi_so101 ({})", path.display()),
+        ViewerProfile::Urdf(path) => format!("urdf ({})", path.display()),
     }
 }
 
@@ -345,7 +369,7 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
         }
     };
 
-    let mut scene = sim.build_scene(matches!(profile, ViewerProfile::DiffDriveScene(_)));
+    let mut scene = sim.build_scene(matches!(profile, ViewerProfile::DiffDriveScene(_)), true);
     let mesh_items = count_mesh_items(&scene);
     let mut mesh_cache = MeshRenderCache::new();
     let mesh_roots = sim.mesh_roots();
@@ -523,6 +547,7 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
                 }
             }
         }
+        ViewerProfile::Urdf(_) => {}
     }
 
     let center = (output.color.height / 2 * output.color.width + output.color.width / 2) as usize;
@@ -558,6 +583,7 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
             keys.insert(KeyCode::KeyW);
             keys.insert(KeyCode::KeyQ);
         }
+        ViewerProfile::Urdf(_) => {}
     }
     keys
 }
@@ -573,6 +599,7 @@ struct App {
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
     show_lidar: bool,
+    show_task_markers: bool,
     show_wrist_camera: bool,
     last_hud: String,
 }
@@ -590,6 +617,7 @@ impl App {
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
             show_lidar: true,
+            show_task_markers: true,
             show_wrist_camera: true,
             last_hud: String::new(),
         }
@@ -733,6 +761,17 @@ impl App {
                         }
                     );
                 }
+                if physical == KeyCode::KeyM {
+                    self.show_task_markers = !self.show_task_markers;
+                    println!(
+                        "task marker overlay {}",
+                        if self.show_task_markers {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
                 self.pressed.insert(physical);
             }
             ElementState::Released => {
@@ -761,7 +800,7 @@ impl App {
             self.last_hud = hud;
         }
 
-        let mut scene = sim.build_scene(self.show_lidar);
+        let mut scene = sim.build_scene(self.show_lidar, self.show_task_markers);
         let mesh_roots = sim.mesh_roots();
         let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
         self.mesh_cache

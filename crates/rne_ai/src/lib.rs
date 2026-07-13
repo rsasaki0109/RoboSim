@@ -106,8 +106,8 @@ pub use reach::{
     ReachCurriculumSnapshotError, ReachCurriculumStage, ReachRandomization, ReachTarget,
 };
 pub use render::{
-    append_lidar_overlay, build_diff_drive_render_scene, build_visual_render_scene,
-    LidarOverlayStats,
+    append_lidar_overlay, append_task_marker_overlay, build_diff_drive_render_scene,
+    build_visual_render_scene, LidarOverlayStats, TaskMarkerOverlayStats,
 };
 pub use reward::{DiffDriveRewardConfig, MobileManipulatorRewardConfig, MobileManipulatorTask};
 pub use rng::DeterministicRng;
