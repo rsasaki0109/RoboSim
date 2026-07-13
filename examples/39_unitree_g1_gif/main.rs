@@ -65,6 +65,7 @@ fn main() {
             !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
         });
         append_checker_floor(&mut scene, start.base_x_m, start.base_z_m, 0.10);
+        append_inspection_markers(&mut scene, frame);
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 meshes");
@@ -108,6 +109,44 @@ fn main() {
         "rendered official Unitree G1 media to {}",
         gif_path.display()
     );
+}
+
+fn append_inspection_markers(scene: &mut RenderScene, frame: usize) {
+    const MARKERS_XZ_M: [[f64; 2]; 3] = [[0.20, -0.12], [0.38, -0.22], [0.72, -0.30]];
+    const DOTS_PER_RING: usize = 16;
+    let active_marker = (frame / (STEPS_PER_INSPECTION as usize / STEPS_PER_FRAME as usize))
+        .min(MARKERS_XZ_M.len() - 1);
+
+    for (marker_index, [x_m, z_m]) in MARKERS_XZ_M.into_iter().enumerate() {
+        let color_rgba = if marker_index < active_marker {
+            [0.10, 0.95, 0.45, 1.0]
+        } else if marker_index == active_marker {
+            [0.10, 0.80, 1.0, 1.0]
+        } else {
+            [0.20, 0.32, 0.42, 1.0]
+        };
+        for dot in 0..DOTS_PER_RING {
+            let angle_rad = std::f64::consts::TAU * dot as f64 / DOTS_PER_RING as f64;
+            scene.items.push(RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(
+                        x_m + 0.085 * angle_rad.cos(),
+                        0.012,
+                        z_m + 0.085 * angle_rad.sin(),
+                    ),
+                    rotation: rne_math::Quat::IDENTITY,
+                    scale: Vec3::splat(if marker_index == active_marker {
+                        0.018
+                    } else {
+                        0.012
+                    }),
+                },
+                shape: VisualShape::Sphere { radius_m: 0.5 },
+                color_rgba,
+                mesh: None,
+            });
+        }
+    }
 }
 
 fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {
