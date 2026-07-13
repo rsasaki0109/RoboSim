@@ -10,7 +10,6 @@ rne_math = { path = "../../crates/rne_math" }
 rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu" }
 png = "0.17"
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [[example]]
 name = "42_unitree_g1_dex3_pick_place"

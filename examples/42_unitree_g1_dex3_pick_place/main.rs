@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
+const INSET_WIDTH: u32 = 280;
+const INSET_HEIGHT: u32 = 210;
+const INSET_BORDER: u32 = 4;
 const FRAME_COUNT: usize = 58;
 const STEPS_PER_FRAME: usize = 4;
 const CLEAR_COLOR: [f32; 4] = [0.025, 0.04, 0.07, 1.0];
@@ -68,6 +71,7 @@ fn render_gif() {
     let mut episode = UnitreeG1Dex3Episode::new(Default::default()).expect("G1 Dex3 episode");
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
+    let inset_camera = Camera::new(INSET_WIDTH, INSET_HEIGHT, std::f64::consts::FRAC_PI_6);
     let mesh_roots = episode.simulation().mesh_package_roots().to_vec();
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
     let mut mesh_cache = MeshRenderCache::new();
@@ -85,15 +89,70 @@ fn render_gif() {
         mesh_cache
             .resolve_scene(&mut scene, &mesh_root_refs)
             .expect("resolve official G1 Dex3 meshes");
-        let orbit = CameraOrbit {
-            focus: Vec3::new(0.37, 0.92, 0.20),
+        let overview_orbit = CameraOrbit {
+            focus: Vec3::new(0.25, 0.90, 0.18),
             yaw_rad: 0.78,
             pitch_rad: 1.18,
-            distance_m: 0.68,
+            distance_m: 1.25,
         };
-        let output = backend
-            .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
+        let mut output = backend
+            .render_scene_camera(
+                &camera,
+                &overview_orbit.camera_transform(),
+                &scene,
+                CLEAR_COLOR,
+            )
             .expect("render G1 Dex3 frame");
+        let observation = step.as_ref().expect("episode step").observation;
+        let palm = episode
+            .simulation()
+            .named_translation_m("right_hand_palm_link")
+            .expect("right Dex3 palm");
+        let part = observation.part_position_m;
+        let follow_part = if observation.grasped { 0.70 } else { 0.80 };
+        let inset_focus = Vec3::new(
+            palm.0 * (1.0 - follow_part) + part[0] * follow_part,
+            palm.1 * (1.0 - follow_part) + part[1] * follow_part,
+            palm.2 * (1.0 - follow_part) + part[2] * follow_part,
+        );
+        let inset_orbit = CameraOrbit {
+            focus: inset_focus,
+            yaw_rad: 0.78,
+            pitch_rad: 1.18,
+            distance_m: 0.38,
+        };
+        let inset_camera_transform = inset_orbit.camera_transform();
+        let marker_offset_m =
+            (inset_camera_transform.translation - inset_focus).normalize_or_zero() * 0.022;
+        let mut inset_scene = scene.clone();
+        inset_scene.items.retain(|item| {
+            matches!(item.shape, VisualShape::Mesh { .. })
+                || (item.transform.scale.x <= 0.05
+                    && item.transform.scale.y <= 0.05
+                    && item.transform.scale.z <= 0.05)
+        });
+        append_contact_markers(
+            &mut inset_scene,
+            episode.simulation(),
+            observation.dual_contact,
+            marker_offset_m,
+        );
+        let inset = backend
+            .render_scene_camera(
+                &inset_camera,
+                &inset_camera_transform,
+                &inset_scene,
+                CLEAR_COLOR,
+            )
+            .expect("render G1 Dex3 contact inset");
+        composite_inset(
+            &mut output.color.rgba8,
+            output.color.width,
+            output.color.height,
+            &inset.color.rgba8,
+            inset.color.width,
+            inset.color.height,
+        );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
             &output.color.rgba8,
@@ -108,12 +167,66 @@ fn render_gif() {
 
     let gif_path = media_dir.join("unitree-g1-dex3.gif");
     build_gif(&frames_dir, &gif_path).expect("encode G1 Dex3 gif");
-    image::open(frames_dir.join("frame-039.png"))
-        .expect("read G1 Dex3 poster")
-        .save(media_dir.join("unitree-g1-dex3.png"))
-        .expect("write G1 Dex3 poster");
+    build_poster(&gif_path, &media_dir.join("unitree-g1-dex3.png"))
+        .expect("extract G1 Dex3 poster");
     let _ = fs::remove_dir_all(&frames_dir);
     println!("rendered G1 Dex3 media to {}", gif_path.display());
+}
+
+fn append_contact_markers(
+    scene: &mut RenderScene,
+    sim: &rne_ai::UrdfSceneSim,
+    dual_contact: bool,
+    marker_offset_m: Vec3,
+) {
+    for (name, idle_color) in [
+        ("right_dex3_thumb_contact_sensor", [1.0, 0.28, 0.06, 1.0]),
+        ("right_dex3_index_contact_sensor", [0.05, 0.62, 1.0, 1.0]),
+    ] {
+        let (x, y, z) = sim
+            .named_translation_m(name)
+            .expect("configured Dex3 contact sensor");
+        scene.items.push(RenderSceneItem {
+            transform: Transform3 {
+                translation: Vec3::new(x, y, z) + marker_offset_m,
+                rotation: rne_math::Quat::IDENTITY,
+                scale: Vec3::splat(0.016),
+            },
+            shape: VisualShape::Sphere { radius_m: 1.0 },
+            color_rgba: if dual_contact {
+                [0.15, 1.0, 0.35, 1.0]
+            } else {
+                idle_color
+            },
+            mesh: None,
+        });
+    }
+}
+
+fn composite_inset(
+    base: &mut [u8],
+    base_width: u32,
+    base_height: u32,
+    inset: &[u8],
+    inset_width: u32,
+    inset_height: u32,
+) {
+    let x0 = base_width - inset_width - INSET_BORDER * 3;
+    let y0 = INSET_BORDER * 3;
+    for y in y0 - INSET_BORDER..y0 + inset_height + INSET_BORDER {
+        for x in x0 - INSET_BORDER..x0 + inset_width + INSET_BORDER {
+            let index = ((y * base_width + x) * 4) as usize;
+            base[index..index + 4].copy_from_slice(&[20, 205, 225, 255]);
+        }
+    }
+    for y in 0..inset_height {
+        let base_start = (((y0 + y) * base_width + x0) * 4) as usize;
+        let inset_start = (y * inset_width * 4) as usize;
+        let byte_count = (inset_width * 4) as usize;
+        base[base_start..base_start + byte_count]
+            .copy_from_slice(&inset[inset_start..inset_start + byte_count]);
+    }
+    debug_assert_eq!(base.len(), (base_width * base_height * 4) as usize);
 }
 
 fn append_checker_floor(scene: &mut RenderScene, tile_m: f64) {
@@ -155,6 +268,27 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
         .success()
         .then_some(())
         .ok_or_else(|| std::io::Error::other("ffmpeg G1 Dex3 gif encode failed"))
+}
+
+fn build_poster(gif_path: &Path, poster_path: &Path) -> std::io::Result<()> {
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            &gif_path.to_string_lossy(),
+            "-vf",
+            "select=eq(n\\,40)",
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            &poster_path.to_string_lossy(),
+        ])
+        .status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| std::io::Error::other("ffmpeg G1 Dex3 poster extraction failed"))
 }
 
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
