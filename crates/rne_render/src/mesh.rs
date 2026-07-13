@@ -81,6 +81,7 @@ fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut indices = Vec::new();
+    let mut missing_normals = false;
     for model in models {
         let mesh = model.mesh;
         let vertex_offset = positions.len() as u32;
@@ -96,6 +97,7 @@ fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
                     .map(|value| [value[0], value[1], value[2]]),
             );
         } else {
+            missing_normals = true;
             normals.resize(positions.len(), [0.0, 0.0, 0.0]);
         }
         indices.extend(mesh.indices.into_iter().map(|index| vertex_offset + index));
@@ -115,7 +117,9 @@ fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
             "OBJ index is out of bounds",
         ));
     }
-    fill_missing_normals(&positions, &indices, &mut normals);
+    if missing_normals {
+        return Ok(mesh_with_flat_normals(&positions, &indices));
+    }
     Ok(TriangleMesh {
         positions,
         normals,
@@ -123,30 +127,32 @@ fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
     })
 }
 
-fn fill_missing_normals(positions: &[[f32; 3]], indices: &[u32], normals: &mut [[f32; 3]]) {
-    if normals
-        .iter()
-        .all(|normal| length_squared(*normal) > f32::EPSILON)
-    {
-        return;
-    }
-    normals.fill([0.0, 0.0, 0.0]);
+fn mesh_with_flat_normals(positions: &[[f32; 3]], indices: &[u32]) -> TriangleMesh {
+    let mut flat_positions = Vec::with_capacity(indices.len());
+    let mut flat_normals = Vec::with_capacity(indices.len());
+    let mut flat_indices = Vec::with_capacity(indices.len());
     for triangle in indices.chunks_exact(3) {
         let a = positions[triangle[0] as usize];
         let b = positions[triangle[1] as usize];
         let c = positions[triangle[2] as usize];
-        let normal = cross(subtract(b, a), subtract(c, a));
-        for index in triangle {
-            add_assign(&mut normals[*index as usize], normal);
-        }
-    }
-    for normal in normals {
-        let length = length_squared(*normal).sqrt();
+        let mut normal = cross(subtract(b, a), subtract(c, a));
+        let length = length_squared(normal).sqrt();
         if length > f32::EPSILON {
-            *normal = [normal[0] / length, normal[1] / length, normal[2] / length];
+            normal = [normal[0] / length, normal[1] / length, normal[2] / length];
         } else {
-            *normal = [0.0, 1.0, 0.0];
+            normal = [0.0, 1.0, 0.0];
         }
+        let base = flat_positions.len() as u32;
+        for position in [a, b, c] {
+            flat_positions.push(position);
+            flat_normals.push(normal);
+        }
+        flat_indices.extend_from_slice(&[base, base + 1, base + 2]);
+    }
+    TriangleMesh {
+        positions: flat_positions,
+        normals: flat_normals,
+        indices: flat_indices,
     }
 }
 
@@ -160,12 +166,6 @@ fn cross(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
         left[2] * right[0] - left[0] * right[2],
         left[0] * right[1] - left[1] * right[0],
     ]
-}
-
-fn add_assign(target: &mut [f32; 3], value: [f32; 3]) {
-    target[0] += value[0];
-    target[1] += value[1];
-    target[2] += value[2];
 }
 
 fn length_squared(value: [f32; 3]) -> f32 {
