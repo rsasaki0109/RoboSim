@@ -102,6 +102,15 @@ fn validate_scene_object_references(
                 ),
             ));
         }
+        rne_render::load_mesh(&mesh_path).map_err(|error| {
+            AssetError::invalid(
+                scene_path.display().to_string(),
+                format!(
+                    "environment object `{}` mesh is invalid: {error}",
+                    object.name
+                ),
+            )
+        })?;
     }
     Ok(())
 }

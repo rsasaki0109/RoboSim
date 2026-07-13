@@ -22,6 +22,26 @@ impl TriangleMesh {
     }
 }
 
+/// Loads a supported triangle mesh based on its file extension.
+///
+/// STL and Wavefront OBJ files are supported. Extension matching is
+/// case-insensitive.
+pub fn load_mesh(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("stl") => load_stl(path),
+        Some("obj") => load_obj(path),
+        _ => Err(invalid_mesh(
+            &path.display().to_string(),
+            "unsupported mesh extension; expected .stl or .obj",
+        )),
+    }
+}
+
 /// Mesh loading error.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum MeshLoadError {
@@ -50,6 +70,106 @@ pub fn load_stl(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
         message: error.to_string(),
     })?;
     load_stl_bytes(path, &bytes)
+}
+
+fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
+    let (models, _) =
+        tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS).map_err(|error| MeshLoadError::Invalid {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+    for model in models {
+        let mesh = model.mesh;
+        let vertex_offset = positions.len() as u32;
+        positions.extend(
+            mesh.positions
+                .chunks_exact(3)
+                .map(|value| [value[0], value[1], value[2]]),
+        );
+        if mesh.normals.len() == mesh.positions.len() {
+            normals.extend(
+                mesh.normals
+                    .chunks_exact(3)
+                    .map(|value| [value[0], value[1], value[2]]),
+            );
+        } else {
+            normals.resize(positions.len(), [0.0, 0.0, 0.0]);
+        }
+        indices.extend(mesh.indices.into_iter().map(|index| vertex_offset + index));
+    }
+    if positions.is_empty() || indices.is_empty() || !indices.len().is_multiple_of(3) {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            "OBJ contains no triangles",
+        ));
+    }
+    if indices
+        .iter()
+        .any(|index| *index as usize >= positions.len())
+    {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            "OBJ index is out of bounds",
+        ));
+    }
+    fill_missing_normals(&positions, &indices, &mut normals);
+    Ok(TriangleMesh {
+        positions,
+        normals,
+        indices,
+    })
+}
+
+fn fill_missing_normals(positions: &[[f32; 3]], indices: &[u32], normals: &mut [[f32; 3]]) {
+    if normals
+        .iter()
+        .all(|normal| length_squared(*normal) > f32::EPSILON)
+    {
+        return;
+    }
+    normals.fill([0.0, 0.0, 0.0]);
+    for triangle in indices.chunks_exact(3) {
+        let a = positions[triangle[0] as usize];
+        let b = positions[triangle[1] as usize];
+        let c = positions[triangle[2] as usize];
+        let normal = cross(subtract(b, a), subtract(c, a));
+        for index in triangle {
+            add_assign(&mut normals[*index as usize], normal);
+        }
+    }
+    for normal in normals {
+        let length = length_squared(*normal).sqrt();
+        if length > f32::EPSILON {
+            *normal = [normal[0] / length, normal[1] / length, normal[2] / length];
+        } else {
+            *normal = [0.0, 1.0, 0.0];
+        }
+    }
+}
+
+fn subtract(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn cross(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn add_assign(target: &mut [f32; 3], value: [f32; 3]) {
+    target[0] += value[0];
+    target[1] += value[1];
+    target[2] += value[2];
+}
+
+fn length_squared(value: [f32; 3]) -> f32 {
+    value[0] * value[0] + value[1] * value[1] + value[2] * value[2]
 }
 
 /// Parses an STL mesh from in-memory bytes.
@@ -243,5 +363,26 @@ endsolid box
             .join("tests/fixtures/mesh_diff_drive/meshes/base_link.stl");
         let mesh = load_stl(&path).expect("load fixture stl");
         assert!(mesh.triangle_count() >= 12);
+    }
+
+    #[test]
+    fn obj_models_merge_and_generate_normals_deterministically() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/two_panels.obj");
+        let first = load_mesh(&path).expect("load OBJ fixture");
+        let second = load_mesh(&path).expect("replay OBJ fixture");
+        assert_eq!(first, second);
+        assert_eq!(first.triangle_count(), 2);
+        assert_eq!(first.positions.len(), 6);
+        assert_eq!(first.normals.len(), first.positions.len());
+        assert!(first
+            .normals
+            .iter()
+            .all(|normal| (length_squared(*normal) - 1.0).abs() < 1.0e-5));
+    }
+
+    #[test]
+    fn generic_mesh_loader_rejects_unknown_extensions() {
+        let error = load_mesh(Path::new("factory.glb")).expect_err("unsupported mesh");
+        assert!(error.to_string().contains("expected .stl or .obj"));
     }
 }

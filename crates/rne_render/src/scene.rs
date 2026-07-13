@@ -1,6 +1,6 @@
 //! Primitive scene description for rendering.
 
-use crate::mesh::{load_stl, MeshLoadError, TriangleMesh};
+use crate::mesh::{load_mesh, MeshLoadError, TriangleMesh};
 use crate::path::resolve_package_uri;
 use crate::visual::VisualShape;
 use rne_math::Transform3 as MathTransform3;
@@ -53,12 +53,12 @@ impl RenderScene {
         }
     }
 
-    /// Loads STL files referenced by mesh visuals in this scene.
+    /// Loads STL or OBJ files referenced by mesh visuals in this scene.
     pub fn resolve_mesh_assets(&mut self, package_root: &Path) -> Result<(), MeshLoadError> {
         self.resolve_mesh_assets_with_roots(&[package_root])
     }
 
-    /// Loads STL files using the first package root that resolves each mesh URI.
+    /// Loads mesh files using the first package root that resolves each mesh URI.
     pub fn resolve_mesh_assets_with_roots(
         &mut self,
         package_roots: &[&Path],
@@ -68,7 +68,7 @@ impl RenderScene {
                 continue;
             };
             let file_path = resolve_mesh_path(path, package_roots)?;
-            item.mesh = Some(Arc::new(load_stl(&file_path)?));
+            item.mesh = Some(Arc::new(load_mesh(&file_path)?));
         }
         Ok(())
     }

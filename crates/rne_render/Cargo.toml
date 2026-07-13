@@ -13,6 +13,7 @@ rne_math = { path = "../rne_math" }
 rne_world = { path = "../rne_world" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tobj = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"

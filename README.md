@@ -103,7 +103,7 @@ Architecture docs live under [docs/architecture/](docs/architecture/000_overview
 ### World assets
 
 Scene TOML can load named environment objects independently from robots. Visuals may be
-boxes, spheres, cylinders, or scene-relative STL meshes; collision can use a separate box,
+boxes, spheres, cylinders, or scene-relative STL/OBJ meshes; collision can use a separate box,
 sphere, or Y-axis capsule.
 Objects also carry transforms, fixed/dynamic body type, mass, friction, and restitution.
 
@@ -129,6 +129,10 @@ collision = { shape = "capsule", half_height_m = 0.37, radius_m = 0.08 }
 Environment mesh files are validated, included in hot-reload dependency tracking, and
 resolved relative to the `.rne.scene.toml` file. The G1 inspection station above is loaded
 from `assets/scenes/unitree_g1_factory.rne.scene.toml` using this schema.
+
+Wavefront OBJ files may contain multiple named objects or groups. RNE triangulates and merges
+them in file order, preserves supplied vertex normals, and deterministically generates normals
+when the source omits them.
 
 Scene validation rejects duplicate object/obstacle/marker names, empty semantic marker kinds,
 non-finite transforms, non-positive visual or collision dimensions, invalid interaction radii,

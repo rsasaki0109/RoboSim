@@ -110,7 +110,7 @@ pub enum SceneVisualAsset {
         #[serde(default = "default_object_color")]
         color_rgba: [f32; 4],
     },
-    /// External STL mesh resolved relative to the scene file.
+    /// External STL or OBJ mesh resolved relative to the scene file.
     Mesh {
         /// Mesh path or package URI.
         path: String,

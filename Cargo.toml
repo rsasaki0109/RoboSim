@@ -85,6 +85,7 @@ rapier3d = "0.22"
 serde = { version = "1", features = ["derive"] }
 smallvec = { version = "1", features = ["serde"] }
 thiserror = "2"
+tobj = { version = "4.0.4", default-features = false }
 toml = "0.8"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }

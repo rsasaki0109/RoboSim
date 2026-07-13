@@ -1,0 +1,10 @@
+o left_panel
+v -1 0 0
+v 0 0 0
+v 0 1 0
+f 1 2 3
+o right_panel
+v 0 0 0
+v 1 0 0
+v 1 1 0
+f 4 5 6

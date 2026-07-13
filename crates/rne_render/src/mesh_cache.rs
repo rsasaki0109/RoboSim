@@ -1,6 +1,6 @@
 //! Cached mesh loading for interactive render loops.
 
-use crate::mesh::{load_stl, MeshLoadError, TriangleMesh};
+use crate::mesh::{load_mesh, MeshLoadError, TriangleMesh};
 use crate::path::resolve_package_uri;
 use crate::scene::RenderScene;
 use crate::visual::VisualShape;
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Reuses loaded STL geometry across frames and scene rebuilds.
+/// Reuses loaded mesh geometry across frames and scene rebuilds.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshRenderCache {
     loaded: HashMap<String, Arc<TriangleMesh>>,
@@ -42,7 +42,7 @@ impl MeshRenderCache {
             }
 
             let file_path = resolve_mesh_path(path, package_roots)?;
-            let mesh = Arc::new(load_stl(&file_path)?);
+            let mesh = Arc::new(load_mesh(&file_path)?);
             self.loaded.insert(path.clone(), mesh.clone());
             item.mesh = Some(mesh);
         }
