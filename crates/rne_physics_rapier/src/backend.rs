@@ -176,6 +176,7 @@ impl PhysicsBackend for RapierBackend {
                         .position(transform_to_isometry(&collider.local_offset))
                         .friction(collider.material.friction)
                         .restitution(collider.material.restitution)
+                        .sensor(collider.sensor)
                         .collision_groups({
                             let groups = world
                                 .get::<rne_physics::CollisionGroups>(entity)
@@ -253,6 +254,24 @@ impl PhysicsBackend for RapierBackend {
                 entity_b,
                 normal,
                 impulse,
+            });
+        }
+
+        for (collider_a, collider_b, intersecting) in state.narrow_phase.intersection_pairs() {
+            if !intersecting {
+                continue;
+            }
+            let Some(entity_a) = state.collider_to_entity.get(&collider_a).copied() else {
+                continue;
+            };
+            let Some(entity_b) = state.collider_to_entity.get(&collider_b).copied() else {
+                continue;
+            };
+            state.contacts.push(ContactEvent {
+                entity_a,
+                entity_b,
+                normal: Vec3::ZERO,
+                impulse: 0.0,
             });
         }
 
@@ -369,7 +388,12 @@ fn sync_entity_collider(
             state.entity_to_collider.insert(entity, handle);
             state.collider_to_entity.insert(handle, entity);
         }
-        (Some(_), Some(_)) => {}
+        (Some(handle), Some(collider)) => {
+            if let Some(existing) = state.colliders.get_mut(handle) {
+                existing.set_sensor(collider.sensor);
+                existing.set_collision_groups(interaction_groups(world, entity));
+            }
+        }
         (Some(handle), None) => {
             state
                 .colliders
@@ -386,16 +410,19 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
         .position(transform_to_isometry(&collider.local_offset))
         .friction(collider.material.friction)
         .restitution(collider.material.restitution)
-        .collision_groups({
-            let groups = world
-                .get::<rne_physics::CollisionGroups>(entity)
-                .copied()
-                .unwrap_or_default();
-            InteractionGroups::new(
-                Group::from_bits_truncate(groups.memberships),
-                Group::from_bits_truncate(groups.filter),
-            )
-        })
+        .sensor(collider.sensor)
+        .collision_groups(interaction_groups(world, entity))
+}
+
+fn interaction_groups(world: &World, entity: Entity) -> InteractionGroups {
+    let groups = world
+        .get::<rne_physics::CollisionGroups>(entity)
+        .copied()
+        .unwrap_or_default();
+    InteractionGroups::new(
+        Group::from_bits_truncate(groups.memberships),
+        Group::from_bits_truncate(groups.filter),
+    )
 }
 
 /// Maximum torque a revolute joint motor may apply.
@@ -744,6 +771,56 @@ mod tests {
             y < 0.0,
             "same-group filtering should let cube pass through ground, y={y}"
         );
+    }
+
+    #[test]
+    fn runtime_sensor_and_collision_group_updates_report_force_free_overlap() {
+        let (mut backend, physics_world, mut world, _, cube) = setup_world();
+        let sensor = spawn_named(&mut world, "sensor");
+        world.entity_mut(sensor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: Vec3::splat(0.5),
+                },
+                sensor: false,
+                ..Collider::default()
+            },
+            Transform3::from_translation_rotation(Vec3::new(0.0, 5.0, 0.0), Quat::IDENTITY),
+        ));
+        let filtered = CollisionGroups::without_self_collision(1);
+        world.entity_mut(sensor).insert(filtered);
+        world.entity_mut(cube).insert(filtered);
+
+        step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+        assert!(backend.contacts(physics_world).unwrap().is_empty());
+
+        world.entity_mut(sensor).insert(CollisionGroups::default());
+        world.entity_mut(cube).insert(CollisionGroups::default());
+        world
+            .get_mut::<Collider>(sensor)
+            .expect("sensor collider")
+            .sensor = true;
+        step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+
+        let overlap = backend
+            .contacts(physics_world)
+            .unwrap()
+            .iter()
+            .find(|contact| {
+                (contact.entity_a == sensor && contact.entity_b == cube)
+                    || (contact.entity_a == cube && contact.entity_b == sensor)
+            })
+            .expect("sensor overlap event");
+        assert_eq!(overlap.impulse, 0.0);
+        assert_eq!(overlap.normal, Vec3::ZERO);
+        let cube_transform = world.get::<Transform3>(cube).expect("cube transform");
+        assert_eq!(cube_transform.translation.x, 0.0);
+        assert_eq!(cube_transform.translation.z, 0.0);
+        assert!(cube_transform.translation.y > 4.99);
     }
 
     #[test]

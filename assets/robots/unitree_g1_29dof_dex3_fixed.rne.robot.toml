@@ -1,0 +1,13 @@
+kind = "urdf"
+model_name = "unitree_g1_29dof_dex3_fixed_base"
+
+[urdf]
+path = "g1_description/g1_29dof_with_hand.urdf"
+base_body_type = "fixed"
+initial_translation_m = [0.0, 0.82, 0.0]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true
+collisions = true
+mesh_collisions = false
+self_collisions = false
+multibody = true

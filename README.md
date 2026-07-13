@@ -52,32 +52,34 @@ and lift actions, four-foot loads and gait phase, and a locomotion/upright rewar
 cargo run -p unitree_g1_gif --example 39_unitree_g1_gif
 ```
 
-### G1 contact-grasp parts handling
+### G1 29-DoF + Dex3-1 two-sided contact grasp
 
 <p align="center">
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-parts.png">
-    <img src="docs/media/unitree-g1-parts.gif" alt="Fixed-base Unitree G1 grasping, lifting, carrying, and placing an inspection part" width="600">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-dex3.png">
+    <img src="docs/media/unitree-g1-dex3.gif" alt="Official 29-DoF Unitree G1 with an articulated Dex3-1 hand pinching, lifting, carrying, and placing a part" width="600">
   </picture>
   <br>
-  <sub>The official 23-DoF G1 articulation performs a deterministic arm-work phase in a dedicated fixed-root cell: a palm-local contact proxy, aligned with the visible fixed rubber hand, must physically touch the hand-sized orange part before a weld grasp is allowed. The part is held inside the palm/finger pocket rather than at the wrist origin, then lifted, stabilized, released, and settled inside the named cyan inspection tray. The walking G1 remains a separate dynamic-root scene.</sub>
+  <sub>The official G1 29-DoF + two Dex3-1 hands load as one 43-joint URDF articulation. In this deterministic fixed-root work cell, the right thumb, index, and middle fingers visibly close around the orange part. Grasp can latch only when independent thumb-tip and index-tip sensor bodies both overlap that part in the same physics step; a one-sided touch is rejected. The arm then lifts and carries the part, opens the hand, and returns the released dynamic body to physics so it settles on the cyan tray. The original 23-DoF walking and dynamic scenes remain separate and unchanged. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
-# Deterministic headless Episode
-cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place
+# Deterministic, headless two-contact Episode
+cargo run -p unitree_g1_dex3_pick_place --example 42_unitree_g1_dex3_pick_place
 # Regenerate the real wgpu GIF and reduced-motion PNG
-cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place -- --gif
+cargo run -p unitree_g1_dex3_pick_place --example 42_unitree_g1_dex3_pick_place -- --gif
 ```
 
-`UnitreeG1PartsEpisode` reports contact, current and historical grasp state, payload height,
-maximum lift height, place-zone distance, phase, and completion. Success requires a real
-contact-gated grasp, a lift above 0.98 m, weld release, and a settled payload inside the named
-`parts_place_zone` moving no faster than 0.05 m/s; exact replay after reset is covered by a
-headless test.
+`UnitreeG1Dex3Episode` reports each fingertip contact, simultaneous dual contact, current and
+historical grasp state, pinch gap, payload pose/speed, maximum lift height, place-zone distance,
+phase, and completion. Success requires a two-sided contact-gated grasp, a lift above 0.98 m,
+release, and a payload settled inside `dex3_place_zone` at no more than 0.05 m/s. Its regression
+test proves that a single fingertip cannot grasp and compares two complete 232-step rollouts for
+exact replay.
 
-The bundled official 23-DoF URDF has fixed rubber-hand meshes and no actuated finger joints,
-so this example models a passive palm grasp rather than claiming an animated finger closure.
+The earlier passive-hand example is still available as
+`cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place` for users of
+the official 23-DoF URDF, whose rubber-hand meshes do not contain actuated finger joints.
 
 The G1 integration also includes a headless dynamic balance episode with
 primitive foot contacts, deterministic reset/replay, observations, actions,

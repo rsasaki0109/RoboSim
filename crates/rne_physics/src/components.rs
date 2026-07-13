@@ -86,6 +86,11 @@ pub struct Collider {
     pub material: PhysicsMaterial,
     /// Pose relative to the entity transform.
     pub local_offset: Transform3,
+    /// Whether this collider reports overlap without applying contact forces.
+    ///
+    /// Sensor overlaps are exposed as zero-impulse [`crate::ContactEvent`] values.
+    #[serde(default)]
+    pub sensor: bool,
 }
 
 impl Default for Collider {
@@ -94,6 +99,7 @@ impl Default for Collider {
             shape: ColliderShape::default(),
             material: PhysicsMaterial::default(),
             local_offset: Transform3::IDENTITY,
+            sensor: false,
         }
     }
 }
@@ -105,6 +111,7 @@ impl Collider {
             shape: ColliderShape::Cuboid { half_extents_m },
             material: PhysicsMaterial::default(),
             local_offset: Transform3::IDENTITY,
+            sensor: false,
         }
     }
 
@@ -114,6 +121,7 @@ impl Collider {
             shape: ColliderShape::Sphere { radius_m },
             material: PhysicsMaterial::default(),
             local_offset: Transform3::IDENTITY,
+            sensor: false,
         }
     }
 }

@@ -1,0 +1,42 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2042
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/unitree_g1_29dof_dex3_fixed.rne.robot.toml"
+
+[[objects]]
+name = "dex3_pick_stand"
+translation_m = [0.289, 0.720, 0.162]
+visual = { shape = "box", size_m = [0.12, 0.116, 0.12], color_rgba = [0.32, 0.38, 0.46, 1.0] }
+collision = { shape = "box", size_m = [0.12, 0.116, 0.12] }
+
+[[objects]]
+name = "dex3_inspection_part"
+translation_m = [0.289, 0.793, 0.162]
+body_type = "dynamic"
+mass_kg = 0.05
+friction = 0.9
+visual = { shape = "box", size_m = [0.030, 0.030, 0.030], color_rgba = [0.95, 0.42, 0.10, 1.0] }
+collision = { shape = "box", size_m = [0.030, 0.030, 0.030] }
+
+[[objects]]
+name = "dex3_inspection_tray"
+translation_m = [0.414, 0.77, 0.207]
+visual = { shape = "box", size_m = [0.16, 0.08, 0.16], color_rgba = [0.08, 0.42, 0.50, 1.0] }
+collision = { shape = "box", size_m = [0.16, 0.08, 0.16] }
+
+[[objects]]
+name = "dex3_factory_back_wall"
+translation_m = [0.0, 1.0, -1.15]
+visual = { shape = "box", size_m = [3.2, 2.0, 0.08], color_rgba = [0.18, 0.22, 0.28, 1.0] }
+collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
+
+[[task_markers]]
+name = "dex3_place_zone"
+kind = "place"
+translation_m = [0.414, 0.81, 0.207]
+radius_m = 0.07

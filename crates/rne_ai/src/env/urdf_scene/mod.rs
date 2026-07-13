@@ -4,6 +4,8 @@ mod humanoid_episode;
 mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
+mod unitree_g1_dex3;
+mod unitree_g1_dex3_episode;
 mod unitree_g1_episode;
 mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
@@ -24,6 +26,11 @@ pub use lekiwi_drive::{
 pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
 pub use quadruped_episode::{
     QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
+};
+pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
+pub use unitree_g1_dex3_episode::{
+    UnitreeG1Dex3Action, UnitreeG1Dex3Episode, UnitreeG1Dex3EpisodeConfig,
+    UnitreeG1Dex3Observation, UnitreeG1Dex3Phase,
 };
 pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
@@ -48,15 +55,15 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
-use rne_ecs::{Entity, Name, World};
+use rne_ecs::{Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsWorldDesc,
-    PhysicsWorldId, RigidBody,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, PhysicsBackend,
+    PhysicsWorldDesc, PhysicsWorldId, RigidBody,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
-use rne_world::{world_transform_of, TaskMarker};
+use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3};
 use std::path::{Path, PathBuf};
 
 /// Observation for a generic URDF scene simulation.
@@ -143,6 +150,17 @@ pub struct UrdfSceneSim {
 impl UrdfSceneSim {
     /// Loads a `.rne.scene.toml` whose primary robot is a URDF articulation.
     pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_solver_iterations(scene_path, 0)
+    }
+
+    /// Loads a URDF scene with an explicit constraint-solver iteration count.
+    ///
+    /// `solver_iterations == 0` selects the backend default. Higher values are
+    /// useful for small articulated fingers and tall chains under contact load.
+    pub fn from_scene_path_with_solver_iterations(
+        scene_path: &Path,
+        solver_iterations: usize,
+    ) -> Result<Self, AssetError> {
         let mut world = World::new();
         let spawned = load_and_spawn_scene(&mut world, scene_path)?;
         let world_seed = world
@@ -175,7 +193,10 @@ impl UrdfSceneSim {
 
         let mut backend = RapierBackend::new();
         let physics_world = backend
-            .create_world(PhysicsWorldDesc::default())
+            .create_world(PhysicsWorldDesc {
+                solver_iterations,
+                ..PhysicsWorldDesc::default()
+            })
             .map_err(|error| asset_physics_error(scene_path, error))?;
 
         let mut sim = Self {
@@ -420,6 +441,63 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Welds a child to a parent only after two distinct named contacts.
+    ///
+    /// Both `first_contact_name` and `second_contact_name` must contact the child
+    /// during the latest physics step. This supports deterministic two-sided
+    /// pinch gates while keeping the attachment parent at a palm or tool frame.
+    pub fn weld_named_child_on_dual_contact_at_parent_anchor(
+        &mut self,
+        parent_name: &str,
+        first_contact_name: &str,
+        second_contact_name: &str,
+        child_name: &str,
+        anchor_parent_m: [f64; 3],
+    ) -> bool {
+        if anchor_parent_m.iter().any(|value| !value.is_finite())
+            || !self.named_child_has_distinct_dual_contact(
+                first_contact_name,
+                second_contact_name,
+                child_name,
+            )
+        {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let Some(child) = find_entity_by_name(&self.world, child_name) else {
+            return false;
+        };
+        self.world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: rne_math::Vec3::new(
+                anchor_parent_m[0],
+                anchor_parent_m[1],
+                anchor_parent_m[2],
+            ),
+            anchor_child_m: rne_math::Vec3::ZERO,
+            relative_rotation: rne_math::Quat::IDENTITY,
+        });
+        true
+    }
+
+    /// Returns whether two distinct named entities both contact a named child.
+    ///
+    /// Contacts must come from the latest physics step. Passing the same entity
+    /// name twice always returns false, which prevents one collider from
+    /// masquerading as a two-sided pinch.
+    pub fn named_child_has_distinct_dual_contact(
+        &self,
+        first_contact_name: &str,
+        second_contact_name: &str,
+        child_name: &str,
+    ) -> bool {
+        first_contact_name != second_contact_name
+            && self.named_entities_in_contact(first_contact_name, child_name)
+            && self.named_entities_in_contact(second_contact_name, child_name)
+    }
+
     /// Releases a named child body previously attached by a fixed joint.
     pub fn release_named_child(&mut self, child_name: &str) -> bool {
         let Some(child) = find_entity_by_name(&self.world, child_name) else {
@@ -479,6 +557,139 @@ impl UrdfSceneSim {
             ),
             ..Collider::default()
         });
+        true
+    }
+
+    /// Sets backend-neutral collision membership and filter masks on a named entity.
+    ///
+    /// Returns false if the entity is missing. The masks take effect on the next
+    /// physics synchronization and can be set before or after adding a collider.
+    pub fn set_named_collision_groups(&mut self, name: &str, groups: CollisionGroups) -> bool {
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        self.world.entity_mut(entity).insert(groups);
+        true
+    }
+
+    /// Enables or disables non-reactive overlap sensing on a named collider.
+    ///
+    /// Sensor overlaps appear in [`Self::named_entities_in_contact`] but do not
+    /// apply contact forces. Returns false if the entity or collider is missing.
+    pub fn set_named_collider_sensor(&mut self, name: &str, sensor: bool) -> bool {
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        let Some(mut collider) = self.world.get_mut::<Collider>(entity) else {
+            return false;
+        };
+        collider.sensor = sensor;
+        true
+    }
+
+    /// Adds an invisible box sensor that follows a named parent entity.
+    ///
+    /// The sensor is a separate fixed physics body, so it does not alter a
+    /// multibody link's mass or inertia. `size_m` contains full X/Y/Z extents
+    /// and `offset_m` is expressed in the parent's local frame.
+    pub fn add_named_child_box_sensor(
+        &mut self,
+        parent_name: &str,
+        sensor_name: &str,
+        size_m: [f64; 3],
+        offset_m: [f64; 3],
+    ) -> bool {
+        if sensor_name.is_empty()
+            || find_entity_by_name(&self.world, sensor_name).is_some()
+            || size_m
+                .iter()
+                .any(|extent_m| !extent_m.is_finite() || *extent_m <= 0.0)
+            || offset_m.iter().any(|value| !value.is_finite())
+        {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let sensor = rne_ecs::spawn_named(&mut self.world, sensor_name);
+        self.world.entity_mut(sensor).insert((
+            Parent(parent),
+            WorldTransform3::from_translation_rotation(
+                rne_math::Vec3::new(offset_m[0], offset_m[1], offset_m[2]),
+                rne_math::Quat::IDENTITY,
+            ),
+            RigidBody {
+                body_type: rne_physics::RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: rne_math::Vec3::new(size_m[0], size_m[1], size_m[2]) * 0.5,
+                },
+                sensor: true,
+                ..Collider::default()
+            },
+        ));
+        true
+    }
+
+    /// Adds an invisible coordinate frame that follows a named parent entity.
+    ///
+    /// The frame has no rigid body or collider, so it cannot change a multibody
+    /// link's mass, inertia, or collision geometry. `offset_m` is expressed in
+    /// the parent's local frame.
+    pub fn add_named_child_frame(
+        &mut self,
+        parent_name: &str,
+        frame_name: &str,
+        offset_m: [f64; 3],
+    ) -> bool {
+        if frame_name.is_empty()
+            || find_entity_by_name(&self.world, frame_name).is_some()
+            || offset_m.iter().any(|value| !value.is_finite())
+        {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let frame = rne_ecs::spawn_named(&mut self.world, frame_name);
+        self.world.entity_mut(frame).insert((
+            Parent(parent),
+            WorldTransform3::from_translation_rotation(
+                rne_math::Vec3::new(offset_m[0], offset_m[1], offset_m[2]),
+                rne_math::Quat::IDENTITY,
+            ),
+        ));
+        true
+    }
+
+    /// Places an unparented named rigid body at a named frame and clears its velocity.
+    ///
+    /// This is intended for deterministic contact-gated grasp followers. The
+    /// body remains dynamic, so callers can stop following it and let physics
+    /// resume naturally on release. Returns false if either entity is missing,
+    /// the body is parented, or it has no rigid-body component.
+    pub fn follow_named_body_to_frame(&mut self, body_name: &str, frame_name: &str) -> bool {
+        let Some(body_entity) = find_entity_by_name(&self.world, body_name) else {
+            return false;
+        };
+        let Some(frame_entity) = find_entity_by_name(&self.world, frame_name) else {
+            return false;
+        };
+        if self.world.get::<Parent>(body_entity).is_some()
+            || self.world.get::<RigidBody>(body_entity).is_none()
+        {
+            return false;
+        }
+        let frame_transform = world_transform_of(&self.world, frame_entity);
+        self.world.entity_mut(body_entity).insert(frame_transform);
+        let mut body = self
+            .world
+            .get_mut::<RigidBody>(body_entity)
+            .expect("rigid body checked above");
+        body.linear_velocity_m_s = rne_math::Vec3::ZERO;
+        body.angular_velocity_rad_s = rne_math::Vec3::ZERO;
         true
     }
 
@@ -583,6 +794,36 @@ impl UrdfSceneSim {
                 motor.max_force = max_force;
             }
         }
+    }
+
+    /// Configures one named actuated link as a force-limited position motor.
+    ///
+    /// `max_force` is expressed in N for prismatic joints and N·m for revolute
+    /// joints. Returns false for a missing link, a non-actuated link, or invalid
+    /// negative/non-finite parameters.
+    pub fn configure_named_position_motor(
+        &mut self,
+        link_name: &str,
+        stiffness: f64,
+        damping: f64,
+        max_force: f64,
+    ) -> bool {
+        if [stiffness, damping, max_force]
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return false;
+        }
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) else {
+            return false;
+        };
+        motor.stiffness = stiffness;
+        motor.gain = damping;
+        motor.max_force = max_force;
+        true
     }
 
     /// Returns the summed normal contact impulse for a named link in N·s.
@@ -743,6 +984,11 @@ pub fn unitree_g1_factory_scene_path() -> PathBuf {
 /// Fixed-base official Unitree G1 parts pick-and-place scene path.
 pub fn unitree_g1_parts_pick_place_scene_path() -> PathBuf {
     assets_scene_path("unitree_g1_parts_pick_place.rne.scene.toml")
+}
+
+/// Fixed-base official Unitree G1 29-DoF scene with dual Dex3-1 hands.
+pub fn unitree_g1_dex3_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1_dex3_pick_place.rne.scene.toml")
 }
 
 #[cfg(test)]
@@ -1008,6 +1254,72 @@ mod tests {
         }
         assert!((sim.observe().base_y_m - 0.80).abs() < 1.0e-9);
         assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_g1_dex3_urdf_spawns_with_forty_three_motors() {
+        let scene_path = unitree_g1_dex3_scene_path();
+        let sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn Unitree G1 with Dex3");
+        assert_eq!(sim.observe().actuated_joint_count, 43);
+        for link_name in [
+            "left_hand_palm_link",
+            "left_hand_thumb_2_link",
+            "left_hand_index_1_link",
+            "right_wrist_pitch_link",
+            "right_wrist_yaw_link",
+            "right_hand_palm_link",
+            "right_hand_thumb_2_link",
+            "right_hand_index_1_link",
+        ] {
+            assert!(
+                sim.link_translation_m(link_name).is_some(),
+                "missing Dex3 link `{link_name}`"
+            );
+        }
+        assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn official_unitree_g1_dex3_fingers_articulate() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dex3_scene_path())
+            .expect("spawn Unitree G1 with Dex3");
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        for _ in 0..20 {
+            sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
+                1.0,
+                0.0,
+                UnitreeG1Dex3HandCommand { closure: 0.0 },
+            ));
+        }
+        let open_thumb = sim
+            .named_transform("right_hand_thumb_2_link")
+            .expect("right thumb tip")
+            .translation;
+        let open_index = sim
+            .named_transform("right_hand_index_1_link")
+            .expect("right index tip")
+            .translation;
+        for _ in 0..40 {
+            sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
+                1.0,
+                0.0,
+                UnitreeG1Dex3HandCommand { closure: 1.0 },
+            ));
+        }
+        let closed_thumb = sim
+            .named_transform("right_hand_thumb_2_link")
+            .expect("right thumb tip")
+            .translation;
+        let closed_index = sim
+            .named_transform("right_hand_index_1_link")
+            .expect("right index tip")
+            .translation;
+        let open_gap_m = open_thumb.distance(open_index);
+        let closed_gap_m = closed_thumb.distance(closed_index);
+        assert!(
+            closed_gap_m < open_gap_m - 0.02,
+            "Dex3 pinch did not close: open={open_gap_m} m closed={closed_gap_m} m"
+        );
     }
 
     #[test]
