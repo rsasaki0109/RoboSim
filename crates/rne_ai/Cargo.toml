@@ -11,6 +11,7 @@ bevy_ecs = { workspace = true }
 rne_assets = { path = "../rne_assets" }
 rne_core = { path = "../rne_core" }
 rne_data = { path = "../rne_data" }
+rne_deformable = { path = "../rne_deformable" }
 rne_ecs = { path = "../rne_ecs" }
 rne_log = { path = "../rne_log" }
 rne_math = { path = "../rne_math" }

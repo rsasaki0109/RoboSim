@@ -1,6 +1,7 @@
 //! ECS components and immutable topology for deformable bodies.
 
 use bevy_ecs::prelude::Component;
+use rne_ecs::Entity;
 use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +107,26 @@ pub struct CableSegment {
 pub struct DeformableVisual {
     /// Linear RGBA surface color.
     pub color_rgba: [f32; 4],
+}
+
+/// One deformable particle anchored in a target entity's local frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeformableAttachmentPoint {
+    /// Particle index in the attached [`DeformableBody`].
+    pub particle: usize,
+    /// Anchor position in the target entity's local frame, in meters.
+    pub target_local_position_m: Vec3,
+}
+
+/// Kinematic attachment from deformable particles to another ECS entity.
+///
+/// Removing this component releases every point without changing authored pins.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct DeformableAttachment {
+    /// Entity whose composed world transform drives the attachment anchors.
+    pub target: Entity,
+    /// Attached points in stable particle-index order.
+    pub points: Vec<DeformableAttachmentPoint>,
 }
 
 /// Deformable topology category.

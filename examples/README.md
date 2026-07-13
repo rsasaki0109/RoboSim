@@ -33,6 +33,7 @@
 | Unitree G1 parts pick-and-place | `cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place` | Contact-gated fixed-base G1 grasp, lift, carry, release, and named-zone tray placement; add `-- --gif` to regenerate README media |
 | XPBD deformable cable | `cargo run -p deformable_cable --example 43_deformable_cable -- --render` | Deterministic pinned cable draping over a sphere with backend-neutral contact and wgpu segment rendering |
 | XPBD deformable cloth | `cargo run -p deformable_cloth --example 44_deformable_cloth -- --render` | Deterministic structural/shear/bending cloth draping over a box with dynamic normals and wgpu mesh updates |
+| Unitree G1 Dex3 cloth handling | `cargo run --release -p unitree_g1_cloth_handling --example 45_unitree_g1_cloth_handling` | Contact-proximity two-point cloth attachment, lift, release, exact replay, and real wgpu GIF capture (`-- --gif`) |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |

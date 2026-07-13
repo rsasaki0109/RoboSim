@@ -9,9 +9,13 @@ pub mod systems;
 
 pub use collision::DeformableCollider;
 pub use components::{
-    CableSegment, CableSpec, ClothSpec, ConstraintKind, DeformableBody, DeformableKind,
-    DeformableMaterial, DeformableSurfaceMesh, DeformableVisual, DistanceConstraint, Particle,
-    PinConstraint, TriangleTopology,
+    CableSegment, CableSpec, ClothSpec, ConstraintKind, DeformableAttachment,
+    DeformableAttachmentPoint, DeformableBody, DeformableKind, DeformableMaterial,
+    DeformableSurfaceMesh, DeformableVisual, DistanceConstraint, Particle, PinConstraint,
+    TriangleTopology,
 };
 pub use resources::{DeformableSolverConfig, DeformableStepError};
-pub use systems::{build_cable, build_cloth, step_deformable, step_deformable_world};
+pub use systems::{
+    build_cable, build_cloth, release_deformable_attachment, step_deformable,
+    step_deformable_world, try_attach_deformable_at_points,
+};

@@ -1,0 +1,49 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2042
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/unitree_g1_29dof_dex3_fixed.rne.robot.toml"
+
+[[objects]]
+name = "cloth_work_stand"
+translation_m = [0.289, 0.720, 0.162]
+visual = { shape = "box", size_m = [0.12, 0.116, 0.12], color_rgba = [0.26, 0.32, 0.40, 1.0] }
+collision = { shape = "box", size_m = [0.12, 0.116, 0.12] }
+friction = 0.75
+
+[[objects]]
+name = "cloth_drop_tray"
+translation_m = [0.414, 0.735, 0.285]
+visual = { shape = "box", size_m = [0.22, 0.02, 0.20], color_rgba = [0.08, 0.42, 0.50, 1.0] }
+collision = { shape = "box", size_m = [0.22, 0.02, 0.20] }
+friction = 0.8
+
+[[objects]]
+name = "cloth_factory_back_wall"
+translation_m = [0.0, 1.0, -1.15]
+visual = { shape = "box", size_m = [3.2, 2.0, 0.08], color_rgba = [0.18, 0.22, 0.28, 1.0] }
+collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
+
+[[deformables]]
+kind = "cloth"
+name = "dex3_handling_cloth"
+origin_m = [0.169, 0.792, 0.062]
+width_direction_m = [0.240, 0.0, 0.0]
+height_direction_m = [0.0, 0.0, 0.200]
+columns = 9
+rows = 7
+total_mass_kg = 0.08
+pin_top_edge = false
+color_rgba = [0.08, 0.58, 0.92, 1.0]
+
+[deformables.material]
+collision_radius_m = 0.006
+structural_compliance_m_n = 0.0000001
+shear_compliance_m_n = 0.0000002
+bending_compliance_m_n = 0.00025
+velocity_retention_per_s = 0.992
+self_collision = false

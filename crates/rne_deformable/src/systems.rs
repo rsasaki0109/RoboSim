@@ -1,9 +1,9 @@
 //! Deterministic deformable builders and XPBD stepping systems.
 
 use crate::{
-    CableSpec, ClothSpec, ConstraintKind, DeformableBody, DeformableCollider, DeformableKind,
-    DeformableMaterial, DeformableSolverConfig, DeformableStepError, DistanceConstraint, Particle,
-    PinConstraint, TriangleTopology,
+    CableSpec, ClothSpec, ConstraintKind, DeformableAttachment, DeformableAttachmentPoint,
+    DeformableBody, DeformableCollider, DeformableKind, DeformableMaterial, DeformableSolverConfig,
+    DeformableStepError, DistanceConstraint, Particle, PinConstraint, TriangleTopology,
 };
 use rne_math::Vec3;
 use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
@@ -692,18 +692,194 @@ pub fn step_deformable_world(
         .map(|(_, collider)| collider)
         .collect::<Vec<_>>();
 
+    let mut attachment_pins = BTreeMap::<u64, Vec<PinConstraint>>::new();
+    let mut attachments = world
+        .query::<(rne_ecs::Entity, &DeformableAttachment)>()
+        .iter(world)
+        .map(|(entity, attachment)| (entity, attachment.clone()))
+        .collect::<Vec<_>>();
+    attachments.sort_by_key(|(entity, _)| entity.to_bits());
+    for (entity, attachment) in attachments {
+        if world.get::<WorldTransform3>(attachment.target).is_none() {
+            return Err(DeformableStepError::InvalidState(format!(
+                "attachment target {:?} has no transform",
+                attachment.target
+            )));
+        }
+        let target = math_transform(rne_world::world_transform_of(world, attachment.target));
+        let mut pins = attachment
+            .points
+            .iter()
+            .map(|point| PinConstraint {
+                particle: point.particle,
+                target_position_m: target.transform_point(point.target_local_position_m),
+            })
+            .collect::<Vec<_>>();
+        pins.sort_by_key(|pin| pin.particle);
+        attachment_pins.insert(entity.to_bits(), pins);
+    }
+
     let mut deformables = world
         .query_filtered::<rne_ecs::Entity, bevy_ecs::query::With<DeformableBody>>()
         .iter(world)
         .collect::<Vec<_>>();
     deformables.sort_by_key(|entity| entity.to_bits());
     for entity in deformables {
+        let nearby_colliders = {
+            let body = world
+                .get::<DeformableBody>(entity)
+                .expect("entity selected by DeformableBody filter");
+            colliders
+                .iter()
+                .copied()
+                .filter(|collider| collider_may_overlap_body(body, collider))
+                .collect::<Vec<_>>()
+        };
         let mut body = world
             .get_mut::<DeformableBody>(entity)
             .expect("entity selected by DeformableBody filter");
-        step_deformable(&mut body, &colliders, gravity_m_s2, dt_s, config)?;
+        let authored_pin_count = body.pin_constraints.len();
+        if let Some(pins) = attachment_pins.get(&entity.to_bits()) {
+            body.pin_constraints.extend_from_slice(pins);
+        }
+        let result = step_deformable(&mut body, &nearby_colliders, gravity_m_s2, dt_s, config);
+        body.pin_constraints.truncate(authored_pin_count);
+        result?;
     }
     Ok(())
+}
+
+fn collider_may_overlap_body(body: &DeformableBody, collider: &DeformableCollider) -> bool {
+    if matches!(collider.shape, ColliderShape::Plane { .. }) {
+        return true;
+    }
+    let center_m = body
+        .particles
+        .iter()
+        .map(|particle| particle.position_m)
+        .sum::<Vec3>()
+        / body.particles.len() as f64;
+    let body_radius_m = body
+        .particles
+        .iter()
+        .map(|particle| particle.position_m.distance(center_m))
+        .fold(0.0_f64, f64::max)
+        + body.material.collision_radius_m;
+    let max_scale = collider
+        .world_transform
+        .scale
+        .abs()
+        .max_element()
+        .max(f64::EPSILON);
+    let collider_radius_m = match collider.shape {
+        ColliderShape::Plane { .. } => f64::INFINITY,
+        ColliderShape::Sphere { radius_m } => radius_m,
+        ColliderShape::Cuboid { half_extents_m } => half_extents_m.length(),
+        ColliderShape::Capsule {
+            half_height_m,
+            radius_m,
+        } => half_height_m + radius_m,
+    } * max_scale;
+    center_m.distance_squared(collider.world_transform.translation)
+        <= (body_radius_m + collider_radius_m).powi(2)
+}
+
+/// Attaches the nearest distinct unpinned particle to every world-space contact point.
+///
+/// The operation is all-or-nothing: it returns `Ok(false)` without changing the
+/// world when any contact point has no particle within `max_distance_m`.
+pub fn try_attach_deformable_at_points(
+    world: &mut rne_ecs::World,
+    deformable: rne_ecs::Entity,
+    target: rne_ecs::Entity,
+    contact_points_world_m: &[Vec3],
+    max_distance_m: f64,
+) -> Result<bool, DeformableStepError> {
+    if deformable == target
+        || contact_points_world_m.is_empty()
+        || contact_points_world_m
+            .iter()
+            .any(|point| !point.is_finite())
+        || !max_distance_m.is_finite()
+        || max_distance_m <= 0.0
+    {
+        return Err(DeformableStepError::InvalidState(
+            "attachment requires distinct entities, finite contacts, and positive range".into(),
+        ));
+    }
+    if world.get::<WorldTransform3>(target).is_none() {
+        return Err(DeformableStepError::InvalidState(
+            "attachment target must have a transform".into(),
+        ));
+    }
+    let body = world.get::<DeformableBody>(deformable).ok_or_else(|| {
+        DeformableStepError::InvalidState("attachment source must be deformable".into())
+    })?;
+    let authored_pins = body
+        .pin_constraints
+        .iter()
+        .map(|pin| pin.particle)
+        .collect::<BTreeSet<_>>();
+    let mut selected = BTreeSet::new();
+    for contact in contact_points_world_m {
+        let nearest = body
+            .particles
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !authored_pins.contains(index) && !selected.contains(index))
+            .map(|(index, particle)| (particle.position_m.distance_squared(*contact), index))
+            .filter(|(distance_squared, _)| *distance_squared <= max_distance_m * max_distance_m)
+            .min_by(|left, right| {
+                left.0
+                    .total_cmp(&right.0)
+                    .then_with(|| left.1.cmp(&right.1))
+            });
+        let Some((_, particle)) = nearest else {
+            return Ok(false);
+        };
+        selected.insert(particle);
+    }
+    let target_math = math_transform(rne_world::world_transform_of(world, target));
+    let inverse_target = target_math.inverse();
+    let body = world
+        .get::<DeformableBody>(deformable)
+        .expect("validated deformable entity");
+    let mut points = selected
+        .into_iter()
+        .map(|particle| DeformableAttachmentPoint {
+            particle,
+            target_local_position_m: inverse_target
+                .transform_point(body.particles[particle].position_m),
+        })
+        .collect::<Vec<_>>();
+    points.sort_by_key(|point| point.particle);
+    world
+        .entity_mut(deformable)
+        .insert(DeformableAttachment { target, points });
+    Ok(true)
+}
+
+fn math_transform(transform: WorldTransform3) -> rne_math::Transform3 {
+    rne_math::Transform3 {
+        translation: transform.translation,
+        rotation: transform.rotation,
+        scale: transform.scale,
+    }
+}
+
+/// Releases every kinematic attachment point on one deformable entity.
+pub fn release_deformable_attachment(
+    world: &mut rne_ecs::World,
+    deformable: rne_ecs::Entity,
+) -> bool {
+    let Ok(mut entity) = world.get_entity_mut(deformable) else {
+        return false;
+    };
+    if entity.get::<DeformableAttachment>().is_none() {
+        return false;
+    }
+    entity.remove::<DeformableAttachment>();
+    true
 }
 
 fn distance_constraint(
@@ -1043,6 +1219,35 @@ mod tests {
     }
 
     #[test]
+    fn collider_broadphase_keeps_nearby_and_infinite_shapes_only() {
+        let body = DeformableBody {
+            kind: DeformableKind::Cable,
+            particles: vec![Particle::dynamic(Vec3::ZERO, 1.0)],
+            distance_constraints: Vec::new(),
+            pin_constraints: Vec::new(),
+            triangles: TriangleTopology::default(),
+            material: DeformableMaterial::default(),
+        };
+        let collider = |shape, translation| DeformableCollider {
+            shape,
+            world_transform: Transform3::from_translation_rotation(translation, Quat::IDENTITY),
+            friction: 0.0,
+        };
+        assert!(collider_may_overlap_body(
+            &body,
+            &collider(ColliderShape::Sphere { radius_m: 0.2 }, Vec3::ZERO)
+        ));
+        assert!(!collider_may_overlap_body(
+            &body,
+            &collider(ColliderShape::Sphere { radius_m: 0.2 }, Vec3::X * 100.0)
+        ));
+        assert!(collider_may_overlap_body(
+            &body,
+            &collider(ColliderShape::Plane { normal: Vec3::Y }, Vec3::Y * 100.0)
+        ));
+    }
+
+    #[test]
     fn cloth_builder_creates_grid_constraints_and_triangles() {
         let cloth = build_cloth(ClothSpec {
             origin_m: Vec3::new(-0.5, 1.0, 0.0),
@@ -1363,5 +1568,116 @@ mod tests {
                 >= 0.21 - 1.0e-10
         );
         assert!(world.get::<RigidBody>(collider).is_some());
+    }
+
+    #[test]
+    fn attachment_follows_target_releases_and_replays() {
+        use rne_world::Transform3 as WorldTransform3;
+
+        let make_world = || {
+            let mut world = rne_ecs::World::new();
+            let target = world.spawn(WorldTransform3::IDENTITY).id();
+            let cloth = build_cloth(ClothSpec {
+                origin_m: Vec3::new(-0.15, 1.0, 0.0),
+                width_direction_m: Vec3::X * 0.3,
+                height_direction_m: Vec3::Z * 0.2,
+                columns: 3,
+                rows: 2,
+                total_mass_kg: 0.06,
+                pin_top_edge: false,
+                material: DeformableMaterial::default(),
+            })
+            .expect("cloth");
+            let contacts = [cloth.particles[0].position_m, cloth.particles[2].position_m];
+            let deformable = world.spawn(cloth).id();
+            assert!(try_attach_deformable_at_points(
+                &mut world, deformable, target, &contacts, 0.001,
+            )
+            .expect("valid attachment"));
+            (world, deformable, target, contacts)
+        };
+        let (mut first, first_body, first_target, contacts) = make_world();
+        let (mut replay, replay_body, replay_target, _) = make_world();
+        for (world, target) in [(&mut first, first_target), (&mut replay, replay_target)] {
+            *world
+                .get_mut::<WorldTransform3>(target)
+                .expect("target transform") =
+                WorldTransform3::from_translation_rotation(Vec3::Y * 0.25, Quat::IDENTITY);
+            step_deformable_world(
+                world,
+                Vec3::ZERO,
+                1.0 / 60.0,
+                DeformableSolverConfig::default(),
+            )
+            .expect("attached step");
+        }
+        let first_state = first
+            .get::<DeformableBody>(first_body)
+            .expect("first cloth");
+        let replay_state = replay
+            .get::<DeformableBody>(replay_body)
+            .expect("replay cloth");
+        assert_eq!(first_state, replay_state);
+        assert_eq!(
+            first_state.particles[0].position_m,
+            contacts[0] + Vec3::Y * 0.25
+        );
+        assert_eq!(
+            first_state.particles[2].position_m,
+            contacts[1] + Vec3::Y * 0.25
+        );
+
+        assert!(release_deformable_attachment(&mut first, first_body));
+        let attached_height = first
+            .get::<DeformableBody>(first_body)
+            .expect("cloth before release")
+            .particles[0]
+            .position_m
+            .y;
+        for _ in 0..60 {
+            step_deformable_world(
+                &mut first,
+                Vec3::new(0.0, -9.81, 0.0),
+                1.0 / 60.0,
+                DeformableSolverConfig::default(),
+            )
+            .expect("released step");
+        }
+        assert!(
+            first
+                .get::<DeformableBody>(first_body)
+                .expect("released cloth")
+                .particles[0]
+                .position_m
+                .y
+                < attached_height
+        );
+    }
+
+    #[test]
+    fn attachment_requires_every_contact_to_reach_a_distinct_particle() {
+        use rne_world::Transform3 as WorldTransform3;
+
+        let mut world = rne_ecs::World::new();
+        let target = world.spawn(WorldTransform3::IDENTITY).id();
+        let deformable = world
+            .spawn(DeformableBody {
+                kind: DeformableKind::Cable,
+                particles: vec![Particle::dynamic(Vec3::ZERO, 1.0)],
+                distance_constraints: Vec::new(),
+                pin_constraints: Vec::new(),
+                triangles: TriangleTopology::default(),
+                material: DeformableMaterial::default(),
+            })
+            .id();
+        assert!(!try_attach_deformable_at_points(
+            &mut world,
+            deformable,
+            target,
+            &[Vec3::ZERO, Vec3::ZERO],
+            0.01,
+        )
+        .expect("valid but unsatisfied attachment"));
+        assert!(world.get::<DeformableAttachment>(deformable).is_none());
     }
 }

@@ -44,6 +44,14 @@ excluded, and rigid colliders are projected once more after pair separation.
 Cloth additionally builds a deterministic triangle-AABB grid and solves
 non-adjacent vertex-triangle contacts with barycentric inverse-mass weighting.
 
+`DeformableAttachment` stores stable particle indices and anchors expressed in
+another ECS entity's local frame. During world stepping those anchors become
+temporary pin constraints, then are removed without changing scene-authored
+pins. Proximity acquisition requires a distinct unpinned particle for every
+contact point and is all-or-nothing; removing the component releases the body.
+This permits deterministic robot manipulation without adding backend handles
+or rigid reaction impulses to deformable state.
+
 Constraint arrays are evaluated in insertion order. Colliders are evaluated in
 caller-provided stable order. Parallel reductions and wall-clock time are not
 used. Every step receives an explicit simulation duration and gravity vector.
@@ -61,6 +69,8 @@ used. Every step receives an explicit simulation duration and gravity vector.
 It must not depend on Rapier, wgpu, ROS2, adapters, or `rne_ai`.
 
 Scene assets may depend on `rne_deformable` to spawn cable and cloth components.
+`rne_ai` may depend on it to sequence robot-driven attachment and fixed-step
+deformable updates after a rigid backend step.
 Render integration consumes extracted CPU geometry; solver state never stores
 GPU handles.
 
@@ -72,9 +82,10 @@ GPU handles.
 4. Rectangular cloth structural/shear/bending constraints and dynamic normals.
 5. Cloth drape scene, headless test, and wgpu example.
 
-Deterministic particle self-collision is an opt-in follow-up layered on the
-same sequential solver. Tearing, deformable-deformable collision, full two-way
-rigid coupling, and robot grasping remain explicit follow-up work.
+Deterministic self-collision and kinematic robot attachment are implemented
+follow-ups layered on the same sequential solver. Tearing,
+deformable-deformable collision, and full two-way rigid coupling remain
+explicit follow-up work.
 
 ## Consequences
 

@@ -55,6 +55,10 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
+use rne_deformable::{
+    release_deformable_attachment, step_deformable_world, try_attach_deformable_at_points,
+    DeformableAttachment, DeformableBody, DeformableSolverConfig, DeformableStepError,
+};
 use rne_ecs::{Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{
@@ -63,7 +67,7 @@ use rne_physics::{
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
-use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3};
+use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3, WorldEntity};
 use std::path::{Path, PathBuf};
 
 /// Observation for a generic URDF scene simulation.
@@ -145,6 +149,7 @@ pub struct UrdfSceneSim {
     actuated_joint_count: usize,
     sim_time: SimTime,
     dt: SimDuration,
+    deformable_solver_config: DeformableSolverConfig,
 }
 
 impl UrdfSceneSim {
@@ -215,6 +220,7 @@ impl UrdfSceneSim {
             actuated_joint_count,
             sim_time: SimTime::default(),
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
+            deformable_solver_config: DeformableSolverConfig::default(),
         };
         sim.backend
             .sync_from_ecs(&mut sim.world, sim.physics_world)
@@ -314,6 +320,87 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Attaches distinct deformable particles near named contact frames to a named target frame.
+    ///
+    /// Returns `Ok(false)` when every name exists but one or more contact frames
+    /// are farther than `max_distance_m` from an available unpinned particle.
+    pub fn try_attach_named_deformable_at_named_points(
+        &mut self,
+        deformable_name: &str,
+        target_name: &str,
+        contact_names: &[&str],
+        max_distance_m: f64,
+    ) -> Result<bool, DeformableStepError> {
+        let deformable = find_entity_by_name(&self.world, deformable_name).ok_or_else(|| {
+            DeformableStepError::InvalidState(format!(
+                "missing deformable entity `{deformable_name}`"
+            ))
+        })?;
+        if self.world.get::<DeformableBody>(deformable).is_none() {
+            return Err(DeformableStepError::InvalidState(format!(
+                "entity `{deformable_name}` is not deformable"
+            )));
+        }
+        let target = find_entity_by_name(&self.world, target_name).ok_or_else(|| {
+            DeformableStepError::InvalidState(format!("missing attachment target `{target_name}`"))
+        })?;
+        let contacts = contact_names
+            .iter()
+            .map(|name| {
+                find_entity_by_name(&self.world, name)
+                    .map(|entity| world_transform_of(&self.world, entity).translation)
+                    .ok_or_else(|| {
+                        DeformableStepError::InvalidState(format!(
+                            "missing attachment contact frame `{name}`"
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        try_attach_deformable_at_points(
+            &mut self.world,
+            deformable,
+            target,
+            &contacts,
+            max_distance_m,
+        )
+    }
+
+    /// Releases all kinematic attachment points from a named deformable entity.
+    pub fn release_named_deformable(&mut self, deformable_name: &str) -> bool {
+        find_entity_by_name(&self.world, deformable_name)
+            .is_some_and(|entity| release_deformable_attachment(&mut self.world, entity))
+    }
+
+    /// Returns whether a named deformable currently has a kinematic attachment.
+    pub fn named_deformable_is_attached(&self, deformable_name: &str) -> bool {
+        find_entity_by_name(&self.world, deformable_name)
+            .is_some_and(|entity| self.world.get::<DeformableAttachment>(entity).is_some())
+    }
+
+    /// Returns the simulation state of a named deformable entity.
+    pub fn named_deformable_body(&self, deformable_name: &str) -> Option<&DeformableBody> {
+        let entity = find_entity_by_name(&self.world, deformable_name)?;
+        self.world.get::<DeformableBody>(entity)
+    }
+
+    /// Configures fixed deformable substeps and constraint iterations for this scene.
+    ///
+    /// Returns false and preserves the previous configuration when either count is zero.
+    pub fn configure_deformable_solver(
+        &mut self,
+        substeps: u32,
+        constraint_iterations: u32,
+    ) -> bool {
+        if substeps == 0 || constraint_iterations == 0 {
+            return false;
+        }
+        self.deformable_solver_config = DeformableSolverConfig {
+            substeps,
+            constraint_iterations,
+        };
+        true
     }
 
     /// Returns a named task marker's world translation and interaction radius.
@@ -1012,6 +1099,18 @@ impl UrdfSceneSim {
             self.dt,
         )
         .expect("urdf scene physics step");
+        let gravity_m_s2 = self
+            .world
+            .iter_entities()
+            .find_map(|entity| entity.get::<WorldEntity>().map(|world| world.gravity_m_s2))
+            .unwrap_or(rne_math::Vec3::new(0.0, -9.81, 0.0));
+        step_deformable_world(
+            &mut self.world,
+            gravity_m_s2,
+            self.dt.as_seconds().value(),
+            self.deformable_solver_config,
+        )
+        .expect("urdf scene deformable step");
         self.sim_time = self.sim_time + self.dt;
     }
 }

@@ -62,6 +62,7 @@ members = [
   "examples/42_unitree_g1_dex3_pick_place",
   "examples/43_deformable_cable",
   "examples/44_deformable_cloth",
+  "examples/45_unitree_g1_cloth_handling",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
