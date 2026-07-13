@@ -130,6 +130,10 @@ Environment mesh files are validated, included in hot-reload dependency tracking
 resolved relative to the `.rne.scene.toml` file. The G1 inspection station above is loaded
 from `assets/scenes/unitree_g1_factory.rne.scene.toml` using this schema.
 
+Scene validation rejects duplicate object/obstacle/marker names, empty semantic marker kinds,
+non-finite transforms, non-positive visual or collision dimensions, invalid interaction radii,
+and non-positive dynamic-body masses before spawning or hot-reloading a World.
+
 Named task locations are loaded into the ECS as `TaskMarker` components so policies and
 episodes can discover goals without hard-coded coordinates:
 

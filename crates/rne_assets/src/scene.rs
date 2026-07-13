@@ -4,6 +4,7 @@ use crate::error::AssetError;
 use crate::robot::RobotAsset;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -264,8 +265,161 @@ pub fn load_scene_asset(path: &Path) -> Result<SceneAsset, AssetError> {
 
 /// Parses scene asset TOML from memory.
 pub fn parse_scene_asset(text: &str, path: &Path) -> Result<SceneAsset, AssetError> {
-    toml::from_str(text)
-        .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))
+    let scene = toml::from_str(text)
+        .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))?;
+    validate_scene_asset(&scene, path)?;
+    Ok(scene)
+}
+
+fn validate_scene_asset(scene: &SceneAsset, path: &Path) -> Result<(), AssetError> {
+    let invalid = |message: String| AssetError::invalid(path.display().to_string(), message);
+    if !scene
+        .world
+        .gravity_m_s2
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Err(invalid("world gravity_m_s2 must be finite".into()));
+    }
+
+    let mut names = HashSet::new();
+    for obstacle in &scene.obstacles {
+        validate_name(&obstacle.name, "obstacle", &mut names).map_err(&invalid)?;
+        validate_finite_vec(
+            &obstacle.translation_m,
+            &format!("obstacle `{}` translation_m", obstacle.name),
+        )
+        .map_err(&invalid)?;
+        validate_positive_vec(
+            &obstacle.half_extents_m,
+            &format!("obstacle `{}` half_extents_m", obstacle.name),
+        )
+        .map_err(&invalid)?;
+        if obstacle.body_type == ObstacleBodyType::Dynamic
+            && (!obstacle.mass_kg.is_finite() || obstacle.mass_kg <= 0.0)
+        {
+            return Err(invalid(format!(
+                "dynamic obstacle `{}` mass_kg must be finite and greater than zero",
+                obstacle.name
+            )));
+        }
+    }
+    for object in &scene.objects {
+        validate_name(&object.name, "object", &mut names).map_err(&invalid)?;
+        validate_finite_vec(
+            &object.translation_m,
+            &format!("object `{}` translation_m", object.name),
+        )
+        .map_err(&invalid)?;
+        validate_finite_vec(
+            &object.rotation_rpy_rad,
+            &format!("object `{}` rotation_rpy_rad", object.name),
+        )
+        .map_err(&invalid)?;
+        if object.body_type == ObstacleBodyType::Dynamic
+            && (!object.mass_kg.is_finite() || object.mass_kg <= 0.0)
+        {
+            return Err(invalid(format!(
+                "dynamic object `{}` mass_kg must be finite and greater than zero",
+                object.name
+            )));
+        }
+        validate_object_shapes(object).map_err(&invalid)?;
+    }
+    for marker in &scene.task_markers {
+        validate_name(&marker.name, "task marker", &mut names).map_err(&invalid)?;
+        if marker.kind.trim().is_empty() {
+            return Err(invalid(format!(
+                "task marker `{}` kind must not be empty",
+                marker.name
+            )));
+        }
+        validate_finite_vec(
+            &marker.translation_m,
+            &format!("task marker `{}` translation_m", marker.name),
+        )
+        .map_err(&invalid)?;
+        if !marker.radius_m.is_finite() || marker.radius_m <= 0.0 {
+            return Err(invalid(format!(
+                "task marker `{}` radius_m must be finite and greater than zero",
+                marker.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_name(name: &str, kind: &str, names: &mut HashSet<String>) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(format!("{kind} name must not be empty"));
+    }
+    if !names.insert(name.to_owned()) {
+        return Err(format!("duplicate scene entity name `{name}`"));
+    }
+    Ok(())
+}
+
+fn validate_finite_vec<const N: usize>(values: &[f64; N], field: &str) -> Result<(), String> {
+    if values.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(format!("{field} must contain only finite values"))
+    }
+}
+
+fn validate_positive_vec<const N: usize>(values: &[f64; N], field: &str) -> Result<(), String> {
+    if values.iter().all(|value| value.is_finite() && *value > 0.0) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{field} must contain finite values greater than zero"
+        ))
+    }
+}
+
+fn validate_object_shapes(object: &SceneObjectAsset) -> Result<(), String> {
+    let positive = |value: f64, field: &str| {
+        if value.is_finite() && value > 0.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "object `{}` {field} must be finite and greater than zero",
+                object.name
+            ))
+        }
+    };
+    match &object.visual {
+        Some(SceneVisualAsset::Box { size_m, .. }) => {
+            validate_positive_vec(size_m, &format!("object `{}` visual size_m", object.name))?
+        }
+        Some(SceneVisualAsset::Sphere { radius_m, .. }) => positive(*radius_m, "visual radius_m")?,
+        Some(SceneVisualAsset::Cylinder {
+            radius_m, length_m, ..
+        }) => {
+            positive(*radius_m, "visual radius_m")?;
+            positive(*length_m, "visual length_m")?;
+        }
+        Some(SceneVisualAsset::Mesh { scale, .. }) => {
+            validate_positive_vec(scale, &format!("object `{}` visual scale", object.name))?
+        }
+        None => {}
+    }
+    match object.collision {
+        Some(SceneCollisionAsset::Box { size_m }) => validate_positive_vec(
+            &size_m,
+            &format!("object `{}` collision size_m", object.name),
+        )?,
+        Some(SceneCollisionAsset::Sphere { radius_m }) => positive(radius_m, "collision radius_m")?,
+        Some(SceneCollisionAsset::Capsule {
+            half_height_m,
+            radius_m,
+        }) => {
+            positive(half_height_m, "collision half_height_m")?;
+            positive(radius_m, "collision radius_m")?;
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 /// Loads all robot assets referenced by a scene file.
@@ -544,6 +698,53 @@ collision = { shape = "capsule", half_height_m = 0.37, radius_m = 0.08 }
                 radius_m: 0.08,
             })
         );
+    }
+
+    #[test]
+    fn rejects_non_positive_environment_dimensions() {
+        let error = parse_scene_asset(
+            r#"
+[[objects]]
+name = "bad_post"
+visual = { shape = "cylinder", radius_m = 0.0, length_m = 0.9 }
+"#,
+            Path::new("scene.toml"),
+        )
+        .expect_err("zero-radius cylinder must be rejected");
+        assert!(error.to_string().contains("visual radius_m"));
+
+        let error = parse_scene_asset(
+            r#"
+[[task_markers]]
+name = "bad_goal"
+kind = "inspection"
+translation_m = [0.0, 0.0, 0.0]
+radius_m = -0.1
+"#,
+            Path::new("scene.toml"),
+        )
+        .expect_err("negative marker radius must be rejected");
+        assert!(error.to_string().contains("radius_m"));
+    }
+
+    #[test]
+    fn rejects_duplicate_scene_entity_names() {
+        let error = parse_scene_asset(
+            r#"
+[[objects]]
+name = "station"
+
+[[task_markers]]
+name = "station"
+kind = "inspection"
+translation_m = [0.0, 0.0, 0.0]
+"#,
+            Path::new("scene.toml"),
+        )
+        .expect_err("duplicate named entities must be rejected");
+        assert!(error
+            .to_string()
+            .contains("duplicate scene entity name `station`"));
     }
 
     #[test]
