@@ -6,8 +6,8 @@ use crate::{
     DeformableStepError, DistanceConstraint, Particle, PinConstraint, TriangleTopology,
 };
 use rne_math::Vec3;
-use rne_physics::{Collider, ColliderShape, RigidBody, RigidBodyType};
-use rne_world::Transform3 as WorldTransform3;
+use rne_physics::{Collider, ColliderShape, RigidBody};
+use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Builds an evenly spaced cable between two world-space endpoints.
@@ -653,11 +653,12 @@ fn deterministic_pair_normal(first: usize, second: usize) -> Vec3 {
     }
 }
 
-/// Advances every deformable ECS component against fixed and kinematic colliders.
+/// Advances every deformable ECS component against sampled rigid colliders.
 ///
 /// Collider and deformable entities are sorted by stable ECS entity bits before
 /// stepping, so externally visible results do not depend on query iteration
-/// order. Dynamic rigid bodies are intentionally excluded by the one-way MVP.
+/// order. Rigid bodies receive no reaction impulse: their current transforms are
+/// sampled as one-way collision boundaries for the deformable solver.
 pub fn step_deformable_world(
     world: &mut rne_ecs::World,
     gravity_m_s2: Vec3,
@@ -665,31 +666,27 @@ pub fn step_deformable_world(
     config: DeformableSolverConfig,
 ) -> Result<(), DeformableStepError> {
     let mut sampled = world
-        .query::<(rne_ecs::Entity, &RigidBody, &Collider, &WorldTransform3)>()
+        .query::<(rne_ecs::Entity, &RigidBody, &Collider)>()
         .iter(world)
-        .filter(|(_, body, collider, _)| {
-            body.body_type != RigidBodyType::Dynamic && !collider.sensor
-        })
-        .map(|(entity, _, collider, transform)| {
-            let world_transform = transform.mul_transform(&collider.local_offset);
-            (
-                entity.to_bits(),
-                DeformableCollider {
-                    shape: collider.shape,
-                    world_transform: rne_math::Transform3 {
-                        translation: world_transform.translation,
-                        rotation: world_transform.rotation,
-                        scale: world_transform.scale,
-                    },
-                    friction: f64::from(collider.material.friction),
-                },
-            )
-        })
+        .filter(|(_, _, collider)| !collider.sensor)
+        .map(|(entity, _, collider)| (entity, *collider))
         .collect::<Vec<_>>();
-    sampled.sort_by_key(|(bits, _)| *bits);
+    sampled.sort_by_key(|(entity, _)| entity.to_bits());
     let colliders = sampled
         .into_iter()
-        .map(|(_, collider)| collider)
+        .map(|(entity, collider)| {
+            let world_transform =
+                world_transform_of(world, entity).mul_transform(&collider.local_offset);
+            DeformableCollider {
+                shape: collider.shape,
+                world_transform: rne_math::Transform3 {
+                    translation: world_transform.translation,
+                    rotation: world_transform.rotation,
+                    scale: world_transform.scale,
+                },
+                friction: f64::from(collider.material.friction),
+            }
+        })
         .collect::<Vec<_>>();
 
     let mut attachment_pins = BTreeMap::<u64, Vec<PinConstraint>>::new();
@@ -839,12 +836,89 @@ pub fn try_attach_deformable_at_points(
         };
         selected.insert(particle);
     }
-    let target_math = math_transform(rne_world::world_transform_of(world, target));
-    let inverse_target = target_math.inverse();
+    attach_selected_particles(world, deformable, target, selected);
+    Ok(true)
+}
+
+/// Attaches one distinct deformable particle overlapping each contact volume.
+///
+/// Contact volumes are evaluated with the deformable material's collision
+/// radius, using the same shape projection as collision response. The operation
+/// is all-or-nothing and returns `Ok(false)` when any volume lacks an available
+/// unpinned particle. This makes a multi-finger grasp depend on actual overlap
+/// rather than distance to an arbitrary frame origin.
+pub fn try_attach_deformable_at_colliders(
+    world: &mut rne_ecs::World,
+    deformable: rne_ecs::Entity,
+    target: rne_ecs::Entity,
+    contact_colliders: &[DeformableCollider],
+) -> Result<bool, DeformableStepError> {
+    if deformable == target || contact_colliders.is_empty() {
+        return Err(DeformableStepError::InvalidState(
+            "attachment requires distinct entities and contact colliders".into(),
+        ));
+    }
+    if world.get::<WorldTransform3>(target).is_none() {
+        return Err(DeformableStepError::InvalidState(
+            "attachment target must have a transform".into(),
+        ));
+    }
+    let body = world.get::<DeformableBody>(deformable).ok_or_else(|| {
+        DeformableStepError::InvalidState("attachment source must be deformable".into())
+    })?;
+    let authored_pins = body
+        .pin_constraints
+        .iter()
+        .map(|pin| pin.particle)
+        .collect::<BTreeSet<_>>();
+    let mut selected = BTreeSet::new();
+    for collider in contact_colliders {
+        let nearest = body
+            .particles
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !authored_pins.contains(index) && !selected.contains(index))
+            .filter(|(_, particle)| {
+                project_particle(
+                    particle.position_m,
+                    body.material.collision_radius_m,
+                    collider,
+                )
+                .is_some()
+            })
+            .map(|(index, particle)| {
+                (
+                    particle
+                        .position_m
+                        .distance_squared(collider.world_transform.translation),
+                    index,
+                )
+            })
+            .min_by(|left, right| {
+                left.0
+                    .total_cmp(&right.0)
+                    .then_with(|| left.1.cmp(&right.1))
+            });
+        let Some((_, particle)) = nearest else {
+            return Ok(false);
+        };
+        selected.insert(particle);
+    }
+    attach_selected_particles(world, deformable, target, selected);
+    Ok(true)
+}
+
+fn attach_selected_particles(
+    world: &mut rne_ecs::World,
+    deformable: rne_ecs::Entity,
+    target: rne_ecs::Entity,
+    selected: BTreeSet<usize>,
+) {
+    let inverse_target = math_transform(world_transform_of(world, target)).inverse();
     let body = world
         .get::<DeformableBody>(deformable)
         .expect("validated deformable entity");
-    let mut points = selected
+    let points = selected
         .into_iter()
         .map(|particle| DeformableAttachmentPoint {
             particle,
@@ -852,11 +926,9 @@ pub fn try_attach_deformable_at_points(
                 .transform_point(body.particles[particle].position_m),
         })
         .collect::<Vec<_>>();
-    points.sort_by_key(|point| point.particle);
     world
         .entity_mut(deformable)
         .insert(DeformableAttachment { target, points });
-    Ok(true)
 }
 
 fn math_transform(transform: WorldTransform3) -> rne_math::Transform3 {
@@ -1527,15 +1599,15 @@ mod tests {
     }
 
     #[test]
-    fn world_step_samples_kinematic_colliders() {
-        use rne_physics::{Collider, RigidBody};
+    fn world_step_samples_dynamic_colliders() {
+        use rne_physics::{Collider, RigidBody, RigidBodyType};
         use rne_world::Transform3 as WorldTransform3;
 
         let mut world = rne_ecs::World::new();
         let collider = world
             .spawn((
                 RigidBody {
-                    body_type: RigidBodyType::Kinematic,
+                    body_type: RigidBodyType::Dynamic,
                     ..RigidBody::default()
                 },
                 Collider::sphere(0.2),
@@ -1679,5 +1751,60 @@ mod tests {
         )
         .expect("valid but unsatisfied attachment"));
         assert!(world.get::<DeformableAttachment>(deformable).is_none());
+    }
+
+    #[test]
+    fn collider_attachment_requires_distinct_particle_overlaps() {
+        use rne_physics::ColliderShape;
+        use rne_world::Transform3 as WorldTransform3;
+
+        let mut world = rne_ecs::World::new();
+        let target = world.spawn(WorldTransform3::IDENTITY).id();
+        let deformable = world
+            .spawn(DeformableBody {
+                kind: DeformableKind::Cable,
+                particles: vec![
+                    Particle::dynamic(Vec3::new(-0.1, 0.0, 0.0), 0.5),
+                    Particle::dynamic(Vec3::new(0.1, 0.0, 0.0), 0.5),
+                ],
+                distance_constraints: Vec::new(),
+                pin_constraints: Vec::new(),
+                triangles: TriangleTopology::default(),
+                material: DeformableMaterial::default(),
+            })
+            .id();
+        let contact = |x| DeformableCollider {
+            shape: ColliderShape::Sphere { radius_m: 0.02 },
+            world_transform: rne_math::Transform3::from_translation_rotation(
+                Vec3::new(x, 0.0, 0.0),
+                rne_math::Quat::IDENTITY,
+            ),
+            friction: 0.5,
+        };
+        assert!(!try_attach_deformable_at_colliders(
+            &mut world,
+            deformable,
+            target,
+            &[contact(-0.1), contact(-0.1)],
+        )
+        .expect("valid unsatisfied dual contact"));
+        assert!(world.get::<DeformableAttachment>(deformable).is_none());
+        assert!(try_attach_deformable_at_colliders(
+            &mut world,
+            deformable,
+            target,
+            &[contact(-0.1), contact(0.1)],
+        )
+        .expect("valid dual contact"));
+        assert_eq!(
+            world
+                .get::<DeformableAttachment>(deformable)
+                .expect("contact attachment")
+                .points
+                .iter()
+                .map(|point| point.particle)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 }

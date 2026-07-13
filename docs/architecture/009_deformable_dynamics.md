@@ -32,7 +32,7 @@ The crate owns:
 - stable state hashing and CPU geometry extraction.
 
 The crate does not own a rigid-body backend, renderer, asset parser, policy, or
-ROS2 integration. Rigid and kinematic collider poses are sampled into plain
+ROS2 integration. Fixed, kinematic, and dynamic collider poses are sampled into plain
 `DeformableCollider` values before a deformable step. The MVP uses one-way
 coupling: rigid bodies affect particles, but particle impulses do not affect
 rigid bodies.
@@ -47,8 +47,10 @@ non-adjacent vertex-triangle contacts with barycentric inverse-mass weighting.
 `DeformableAttachment` stores stable particle indices and anchors expressed in
 another ECS entity's local frame. During world stepping those anchors become
 temporary pin constraints, then are removed without changing scene-authored
-pins. Proximity acquisition requires a distinct unpinned particle for every
-contact point and is all-or-nothing; removing the component releases the body.
+pins. Point-proximity acquisition remains available for generic tools. Contact
+acquisition instead uses the same shape projection as collision response and
+requires a distinct unpinned particle to overlap every supplied collider. Both
+paths are all-or-nothing; removing the component releases the body.
 This permits deterministic robot manipulation without adding backend handles
 or rigid reaction impulses to deformable state.
 
@@ -82,7 +84,8 @@ GPU handles.
 4. Rectangular cloth structural/shear/bending constraints and dynamic normals.
 5. Cloth drape scene, headless test, and wgpu example.
 
-Deterministic self-collision and kinematic robot attachment are implemented
+Deterministic self-collision, sampled moving-link contact, and contact-gated
+robot attachment are implemented
 follow-ups layered on the same sequential solver. Tearing,
 deformable-deformable collision, and full two-way rigid coupling remain
 explicit follow-up work.

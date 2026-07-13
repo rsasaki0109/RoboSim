@@ -17,5 +17,5 @@ pub use components::{
 pub use resources::{DeformableSolverConfig, DeformableStepError};
 pub use systems::{
     build_cable, build_cloth, release_deformable_attachment, step_deformable,
-    step_deformable_world, try_attach_deformable_at_points,
+    step_deformable_world, try_attach_deformable_at_colliders, try_attach_deformable_at_points,
 };

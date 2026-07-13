@@ -151,7 +151,7 @@ cargo run -p deformable_cloth --example 44_deformable_cloth -- --render
     <img src="docs/media/unitree-g1-cloth.gif" alt="Official Unitree G1 with an articulated Dex3 hand pinching, lifting, and releasing a simulated blue cloth" width="600">
   </picture>
   <br>
-  <sub>Real wgpu capture of the official G1 + Dex3 articulation handling a live XPBD cloth. The orange and green probes select distinct nearby cloth particles; acquisition stores their palm-local anchors, the moving hand drives temporary solver pins without backend handles, and opening removes the attachment so gravity and contact take over again. Two headless simulations compare cloth state after every tick before media capture.</sub>
+  <sub>Real wgpu capture of the official G1 + Dex3 articulation handling a live XPBD cloth. Cloth particles collide with the sampled moving finger geometry, and the orange/green fingertip volumes must simultaneously overlap two distinct particles before acquisition stores palm-local anchors. The inactive left arm is fixed before physics initialization, so only the working arm moves. Opening removes the attachment so gravity and contact take over again. Two headless simulations compare cloth state after every tick before media capture.</sub>
 </p>
 
 ```bash
@@ -161,7 +161,7 @@ cargo run --release -p unitree_g1_cloth_handling --example 45_unitree_g1_cloth_h
 cargo run --release -p unitree_g1_cloth_handling --example 45_unitree_g1_cloth_handling -- --gif
 ```
 
-The MVP intentionally uses one-way rigid coupling. Kinematic robot attachments
+The MVP intentionally uses one-way rigid coupling. Sampled robot attachments
 can carry and release selected particles, but tearing, deformable-to-deformable
 collision, and two-way rigid reaction forces remain explicit follow-up work.
 

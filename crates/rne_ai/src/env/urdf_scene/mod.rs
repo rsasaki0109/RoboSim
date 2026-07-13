@@ -56,14 +56,16 @@ pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_deformable::{
-    release_deformable_attachment, step_deformable_world, try_attach_deformable_at_points,
-    DeformableAttachment, DeformableBody, DeformableSolverConfig, DeformableStepError,
+    release_deformable_attachment, step_deformable_world, try_attach_deformable_at_colliders,
+    try_attach_deformable_at_points, DeformableAttachment, DeformableBody, DeformableCollider,
+    DeformableSolverConfig, DeformableStepError,
 };
 use rne_ecs::{Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, PhysicsBackend,
-    PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,
+    PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc,
+    RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
@@ -155,7 +157,7 @@ pub struct UrdfSceneSim {
 impl UrdfSceneSim {
     /// Loads a `.rne.scene.toml` whose primary robot is a URDF articulation.
     pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
-        Self::from_scene_path_with_solver_iterations(scene_path, 0)
+        Self::from_scene_path_with_options(scene_path, 0, &[])
     }
 
     /// Loads a URDF scene with an explicit constraint-solver iteration count.
@@ -165,6 +167,27 @@ impl UrdfSceneSim {
     pub fn from_scene_path_with_solver_iterations(
         scene_path: &Path,
         solver_iterations: usize,
+    ) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_options(scene_path, solver_iterations, &[])
+    }
+
+    /// Loads a URDF scene with selected links fixed before physics initialization.
+    ///
+    /// Fixed links retain their authored transforms and collision geometry but
+    /// are excluded from the articulation joint solver. Every descendant that
+    /// should remain stationary must be listed explicitly. This is intended for
+    /// fixed-base tasks with a deliberately inactive arm or tool chain.
+    pub fn from_scene_path_with_fixed_links(
+        scene_path: &Path,
+        fixed_link_names: &[&str],
+    ) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_options(scene_path, 0, fixed_link_names)
+    }
+
+    fn from_scene_path_with_options(
+        scene_path: &Path,
+        solver_iterations: usize,
+        fixed_link_names: &[&str],
     ) -> Result<Self, AssetError> {
         let mut world = World::new();
         let spawned = load_and_spawn_scene(&mut world, scene_path)?;
@@ -188,6 +211,30 @@ impl UrdfSceneSim {
             find_link_by_name(&world, LEKIWI_DRIVE_WHEEL_LINKS[2]),
         ];
         let shoulder_pan_link = find_link_by_name(&world, "shoulder_link");
+        for link_name in fixed_link_names {
+            let entity =
+                find_link_by_name(&world, link_name).ok_or_else(|| AssetError::Invalid {
+                    path: scene_path.display().to_string(),
+                    message: format!("missing fixed URDF link `{link_name}`"),
+                })?;
+            let mut body =
+                world
+                    .get_mut::<RigidBody>(entity)
+                    .ok_or_else(|| AssetError::Invalid {
+                        path: scene_path.display().to_string(),
+                        message: format!("fixed URDF link `{link_name}` has no rigid body"),
+                    })?;
+            body.body_type = RigidBodyType::Fixed;
+            body.linear_velocity_m_s = rne_math::Vec3::ZERO;
+            body.angular_velocity_rad_s = rne_math::Vec3::ZERO;
+            world
+                .entity_mut(entity)
+                .remove::<RevoluteJointDesc>()
+                .remove::<PrismaticJointDesc>()
+                .remove::<FixedJointDesc>()
+                .remove::<JointMotor>()
+                .remove::<MultibodyLink>();
+        }
         let actuated_joint_count = world
             .iter_entities()
             .filter(|entity_ref| world.get::<JointMotor>(entity_ref.id()).is_some())
@@ -365,6 +412,60 @@ impl UrdfSceneSim {
             &contacts,
             max_distance_m,
         )
+    }
+
+    /// Attaches a named deformable after overlap with every named collider.
+    ///
+    /// Each collider must contain a distinct unpinned deformable particle after
+    /// expanding its surface by the particle collision radius. This is intended
+    /// for contact-gated multi-finger grasps and returns `Ok(false)` until all
+    /// requested contacts are simultaneously satisfied.
+    pub fn try_attach_named_deformable_on_named_collider_contacts(
+        &mut self,
+        deformable_name: &str,
+        target_name: &str,
+        contact_names: &[&str],
+    ) -> Result<bool, DeformableStepError> {
+        let deformable = find_entity_by_name(&self.world, deformable_name).ok_or_else(|| {
+            DeformableStepError::InvalidState(format!(
+                "missing deformable entity `{deformable_name}`"
+            ))
+        })?;
+        if self.world.get::<DeformableBody>(deformable).is_none() {
+            return Err(DeformableStepError::InvalidState(format!(
+                "entity `{deformable_name}` is not deformable"
+            )));
+        }
+        let target = find_entity_by_name(&self.world, target_name).ok_or_else(|| {
+            DeformableStepError::InvalidState(format!("missing attachment target `{target_name}`"))
+        })?;
+        let contacts = contact_names
+            .iter()
+            .map(|name| {
+                let entity = find_entity_by_name(&self.world, name).ok_or_else(|| {
+                    DeformableStepError::InvalidState(format!(
+                        "missing attachment contact collider `{name}`"
+                    ))
+                })?;
+                let collider = self.world.get::<Collider>(entity).ok_or_else(|| {
+                    DeformableStepError::InvalidState(format!(
+                        "attachment contact `{name}` has no collider"
+                    ))
+                })?;
+                let transform =
+                    world_transform_of(&self.world, entity).mul_transform(&collider.local_offset);
+                Ok(DeformableCollider {
+                    shape: collider.shape,
+                    world_transform: rne_math::Transform3 {
+                        translation: transform.translation,
+                        rotation: transform.rotation,
+                        scale: transform.scale,
+                    },
+                    friction: f64::from(collider.material.friction),
+                })
+            })
+            .collect::<Result<Vec<_>, DeformableStepError>>()?;
+        try_attach_deformable_at_colliders(&mut self.world, deformable, target, &contacts)
     }
 
     /// Releases all kinematic attachment points from a named deformable entity.
@@ -1501,6 +1602,27 @@ mod tests {
             );
         }
         assert!(!sim.mesh_package_roots().is_empty());
+    }
+
+    #[test]
+    fn fixed_link_scene_load_removes_inactive_arm_from_joint_solver() {
+        let sim = UrdfSceneSim::from_scene_path_with_fixed_links(
+            &unitree_g1_dex3_scene_path(),
+            &["left_shoulder_pitch_link", "left_shoulder_roll_link"],
+        )
+        .expect("spawn G1 with fixed inactive links");
+        for name in ["left_shoulder_pitch_link", "left_shoulder_roll_link"] {
+            let entity = find_link_by_name(sim.world(), name).expect("fixed G1 link");
+            assert_eq!(
+                sim.world()
+                    .get::<RigidBody>(entity)
+                    .expect("rigid link")
+                    .body_type,
+                RigidBodyType::Fixed
+            );
+            assert!(sim.world().get::<JointMotor>(entity).is_none());
+            assert!(sim.world().get::<MultibodyLink>(entity).is_none());
+        }
     }
 
     #[test]

@@ -16,6 +16,8 @@ const CLOTH_NAME: &str = "dex3_handling_cloth";
 const PALM_NAME: &str = "right_hand_palm_link";
 const THUMB_SENSOR_NAME: &str = "right_dex3_cloth_thumb_probe";
 const INDEX_SENSOR_NAME: &str = "right_dex3_cloth_index_probe";
+const LEFT_PALM_NAME: &str = "left_hand_palm_link";
+const SETTLE_STEPS: u64 = 4;
 const APPROACH_STEPS: u64 = 16;
 const CLOSE_STEPS: u64 = 40;
 const PINCH_STEPS: u64 = 24;
@@ -47,16 +49,38 @@ struct ClothHandlingDemo {
     released: bool,
     initial_center_m: Vec3,
     max_center_y_m: f64,
+    initial_left_palm_m: Vec3,
+    max_left_palm_drift_m: f64,
 }
 
 impl ClothHandlingDemo {
     fn new() -> Self {
         let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/unitree_g1_cloth_handling.rne.scene.toml");
-        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("load G1 cloth scene");
+        let mut sim = UrdfSceneSim::from_scene_path_with_fixed_links(
+            &scene_path,
+            &[
+                "left_shoulder_pitch_link",
+                "left_shoulder_roll_link",
+                "left_shoulder_yaw_link",
+                "left_elbow_link",
+                "left_wrist_roll_link",
+                "left_wrist_pitch_link",
+                "left_wrist_yaw_link",
+                "left_hand_palm_link",
+                "left_hand_thumb_0_link",
+                "left_hand_thumb_1_link",
+                "left_hand_thumb_2_link",
+                "left_hand_middle_0_link",
+                "left_hand_middle_1_link",
+                "left_hand_index_0_link",
+                "left_hand_index_1_link",
+            ],
+        )
+        .expect("load G1 cloth scene with inactive left arm fixed");
         assert!(sim.configure_deformable_solver(2, 4));
         configure_dex3(&mut sim);
-        for _ in 0..4 {
+        for _ in 0..SETTLE_STEPS {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 0.0,
                 0.0,
@@ -64,6 +88,7 @@ impl ClothHandlingDemo {
             ));
         }
         let initial_center_m = cloth_center_m(&sim);
+        let initial_left_palm_m = named_position_m(&sim, LEFT_PALM_NAME);
         Self {
             sim,
             step: 0,
@@ -71,6 +96,8 @@ impl ClothHandlingDemo {
             released: false,
             initial_center_m,
             max_center_y_m: initial_center_m.y,
+            initial_left_palm_m,
+            max_left_palm_drift_m: 0.0,
         }
     }
 
@@ -88,16 +115,18 @@ impl ClothHandlingDemo {
         if !self.was_attached && closure >= 0.72 {
             self.was_attached = self
                 .sim
-                .try_attach_named_deformable_at_named_points(
+                .try_attach_named_deformable_on_named_collider_contacts(
                     CLOTH_NAME,
                     PALM_NAME,
                     &[THUMB_SENSOR_NAME, INDEX_SENSOR_NAME],
-                    0.055,
                 )
-                .expect("valid Dex3 cloth proximity grasp");
+                .expect("valid Dex3 cloth contact grasp");
         }
         self.step += 1;
         self.max_center_y_m = self.max_center_y_m.max(cloth_center_m(&self.sim).y);
+        self.max_left_palm_drift_m = self
+            .max_left_palm_drift_m
+            .max(named_position_m(&self.sim, LEFT_PALM_NAME).distance(self.initial_left_palm_m));
     }
 
     fn finish_assertions(&self) {
@@ -116,19 +145,17 @@ impl ClothHandlingDemo {
             final_center.y,
             self.max_center_y_m
         );
+        assert!(
+            self.max_left_palm_drift_m <= 0.06,
+            "inactive left hand must remain still: drift={:.4}m",
+            self.max_left_palm_drift_m
+        );
     }
 }
 
 fn configure_dex3(sim: &mut UrdfSceneSim) {
     sim.configure_position_motors(220.0, 24.0, 88.0);
     for (name, max_force_nm) in [
-        ("left_hand_thumb_0_link", 2.45),
-        ("left_hand_thumb_1_link", 1.4),
-        ("left_hand_thumb_2_link", 1.4),
-        ("left_hand_middle_0_link", 1.4),
-        ("left_hand_middle_1_link", 1.4),
-        ("left_hand_index_0_link", 1.4),
-        ("left_hand_index_1_link", 1.4),
         ("right_hand_thumb_0_link", 2.45),
         ("right_hand_thumb_1_link", 1.4),
         ("right_hand_thumb_2_link", 1.4),
@@ -186,6 +213,11 @@ fn cloth_center_m(sim: &UrdfSceneSim) -> Vec3 {
         .map(|particle| particle.position_m)
         .sum::<Vec3>()
         / body.particles.len() as f64
+}
+
+fn named_position_m(sim: &UrdfSceneSim, name: &str) -> Vec3 {
+    let (x, y, z) = sim.named_translation_m(name).expect("named scene position");
+    Vec3::new(x, y, z)
 }
 
 fn run_headless() {
