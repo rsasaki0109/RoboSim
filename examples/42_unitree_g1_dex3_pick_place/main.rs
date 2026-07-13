@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
-const INSET_WIDTH: u32 = 280;
-const INSET_HEIGHT: u32 = 210;
+const INSET_WIDTH: u32 = 300;
+const INSET_HEIGHT: u32 = 225;
 const INSET_BORDER: u32 = 4;
 const FRAME_COUNT: usize = 58;
 const STEPS_PER_FRAME: usize = 4;
@@ -36,11 +36,15 @@ fn run_headless() {
         total_reward += step.reward;
         if last_phase != Some(step.observation.phase) || step.is_done() {
             println!(
-                "step {:3}: phase={:?} height={:.3}m gap={:.3}m dual={} grasped={} placed={}",
+                "step {:3}: phase={:?} height={:.3}m gap={:.3}m span={:.3}m center={:.3}m opposition={:.2} stable={} dual={} grasped={} placed={}",
                 episode.step_in_episode(),
                 step.observation.phase,
                 step.observation.part_position_m[1],
                 step.observation.pinch_gap_m,
+                step.observation.contact_span_m,
+                step.observation.contact_center_error_m,
+                step.observation.contact_opposition,
+                step.observation.stable_contact_steps,
                 step.observation.dual_contact,
                 step.observation.grasped,
                 step.observation.placed,
@@ -109,7 +113,7 @@ fn render_gif() {
             .named_translation_m("right_hand_palm_link")
             .expect("right Dex3 palm");
         let part = observation.part_position_m;
-        let follow_part = if observation.grasped { 0.70 } else { 0.80 };
+        let follow_part = if observation.grasped { 0.55 } else { 0.65 };
         let inset_focus = Vec3::new(
             palm.0 * (1.0 - follow_part) + part[0] * follow_part,
             palm.1 * (1.0 - follow_part) + part[1] * follow_part,
@@ -118,12 +122,12 @@ fn render_gif() {
         let inset_orbit = CameraOrbit {
             focus: inset_focus,
             yaw_rad: 0.78,
-            pitch_rad: 1.18,
-            distance_m: 0.38,
+            pitch_rad: 1.12,
+            distance_m: 0.42,
         };
         let inset_camera_transform = inset_orbit.camera_transform();
         let marker_offset_m =
-            (inset_camera_transform.translation - inset_focus).normalize_or_zero() * 0.022;
+            (inset_camera_transform.translation - inset_focus).normalize_or_zero() * 0.018;
         let mut inset_scene = scene.clone();
         inset_scene.items.retain(|item| {
             matches!(item.shape, VisualShape::Mesh { .. })
@@ -152,6 +156,11 @@ fn render_gif() {
             &inset.color.rgba8,
             inset.color.width,
             inset.color.height,
+            if observation.grasped {
+                [40, 245, 105, 255]
+            } else {
+                [20, 205, 225, 255]
+            },
         );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
@@ -190,7 +199,7 @@ fn append_contact_markers(
             transform: Transform3 {
                 translation: Vec3::new(x, y, z) + marker_offset_m,
                 rotation: rne_math::Quat::IDENTITY,
-                scale: Vec3::splat(0.016),
+                scale: Vec3::splat(if dual_contact { 0.012 } else { 0.010 }),
             },
             shape: VisualShape::Sphere { radius_m: 1.0 },
             color_rgba: if dual_contact {
@@ -210,13 +219,14 @@ fn composite_inset(
     inset: &[u8],
     inset_width: u32,
     inset_height: u32,
+    border_rgba: [u8; 4],
 ) {
     let x0 = base_width - inset_width - INSET_BORDER * 3;
     let y0 = INSET_BORDER * 3;
     for y in y0 - INSET_BORDER..y0 + inset_height + INSET_BORDER {
         for x in x0 - INSET_BORDER..x0 + inset_width + INSET_BORDER {
             let index = ((y * base_width + x) * 4) as usize;
-            base[index..index + 4].copy_from_slice(&[20, 205, 225, 255]);
+            base[index..index + 4].copy_from_slice(&border_rgba);
         }
     }
     for y in 0..inset_height {

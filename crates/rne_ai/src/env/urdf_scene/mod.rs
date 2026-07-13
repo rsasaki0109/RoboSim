@@ -482,6 +482,43 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Welds a child to a parent at its current relative pose after two distinct contacts.
+    ///
+    /// Both named contact entities must touch the child during the latest physics
+    /// step. Unlike the canonical-anchor variant, this captures the current
+    /// translation and rotation, so confirming a grasp never snaps the payload.
+    pub fn weld_named_child_on_dual_contact(
+        &mut self,
+        parent_name: &str,
+        first_contact_name: &str,
+        second_contact_name: &str,
+        child_name: &str,
+    ) -> bool {
+        if !self.named_child_has_distinct_dual_contact(
+            first_contact_name,
+            second_contact_name,
+            child_name,
+        ) {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let Some(child) = find_entity_by_name(&self.world, child_name) else {
+            return false;
+        };
+        let parent_transform = world_transform_of(&self.world, parent);
+        let child_transform = world_transform_of(&self.world, child);
+        self.world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: parent_transform.rotation.conjugate()
+                * (child_transform.translation - parent_transform.translation),
+            anchor_child_m: rne_math::Vec3::ZERO,
+            relative_rotation: parent_transform.rotation.conjugate() * child_transform.rotation,
+        });
+        true
+    }
+
     /// Returns whether two distinct named entities both contact a named child.
     ///
     /// Contacts must come from the latest physics step. Passing the same entity

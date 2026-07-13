@@ -16,7 +16,6 @@ const OPEN_STEPS: u64 = 8;
 const PLACE_SETTLE_STEPS: u64 = 60;
 const THUMB_SENSOR_NAME: &str = "right_dex3_thumb_contact_sensor";
 const INDEX_SENSOR_NAME: &str = "right_dex3_index_contact_sensor";
-const GRASP_FRAME_NAME: &str = "right_dex3_grasp_frame";
 const THUMB_SENSOR_SIZE_M: [f64; 3] = [0.026, 0.050, 0.026];
 const THUMB_SENSOR_OFFSET_M: [f64; 3] = [0.0, 0.026, 0.0];
 const INDEX_SENSOR_SIZE_M: [f64; 3] = [0.050, 0.026, 0.026];
@@ -24,7 +23,7 @@ const INDEX_SENSOR_OFFSET_M: [f64; 3] = [0.026, 0.0, 0.0];
 const LIFT_START_STEP: u64 = APPROACH_STEPS + CLOSE_STEPS + PINCH_SETTLE_STEPS;
 const RELEASE_STEP: u64 = LIFT_START_STEP + LIFT_STEPS + HOLD_STEPS;
 const SUCCESS_STEP: u64 = RELEASE_STEP + PLACE_SETTLE_STEPS;
-const GRASP_ANCHOR_M: [f64; 3] = [0.084, 0.068, 0.014];
+const MIN_GRASP_CLOSURE: f64 = 0.8;
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
 const MIN_PLACED_HEIGHT_M: f64 = 0.82;
 const MAX_PLACED_SPEED_M_S: f64 = 0.05;
@@ -52,7 +51,7 @@ pub enum UnitreeG1Dex3Phase {
 pub struct UnitreeG1Dex3EpisodeConfig {
     /// Scene containing the official G1, Dex3 hand, part, and tray.
     pub scene_path: PathBuf,
-    /// Palm link used as the parent of the grasp-follow frame.
+    /// Palm link used as the parent of the contact-confirmed fixed joint.
     pub palm_name: String,
     /// Thumb-tip link used for the first side of the pinch gate.
     pub thumb_name: String,
@@ -64,6 +63,18 @@ pub struct UnitreeG1Dex3EpisodeConfig {
     pub place_marker_name: String,
     /// Maximum controlled steps before truncation.
     pub max_steps: u64,
+    /// Consecutive qualifying two-sided contact steps required before attachment.
+    pub required_stable_contact_steps: u32,
+    /// Maximum thumb-to-index origin distance accepted as a closed pinch.
+    pub max_grasp_pinch_gap_m: f64,
+    /// Maximum payload speed accepted while confirming a stable grasp.
+    pub max_grasp_speed_m_s: f64,
+    /// Minimum distance between contact-sensor centers for independent contacts.
+    pub min_grasp_contact_span_m: f64,
+    /// Maximum payload-center offset from the midpoint of both contact sensors.
+    pub max_grasp_center_error_m: f64,
+    /// Maximum payload-to-sensor direction dot product accepted as opposing contact.
+    pub max_grasp_contact_opposition: f64,
 }
 
 impl Default for UnitreeG1Dex3EpisodeConfig {
@@ -76,6 +87,12 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             part_name: "dex3_inspection_part".into(),
             place_marker_name: "dex3_place_zone".into(),
             max_steps: SUCCESS_STEP + 8,
+            required_stable_contact_steps: 3,
+            max_grasp_pinch_gap_m: 0.075,
+            max_grasp_speed_m_s: 0.20,
+            min_grasp_contact_span_m: 0.015,
+            max_grasp_center_error_m: 0.030,
+            max_grasp_contact_opposition: 0.50,
         }
     }
 }
@@ -106,9 +123,17 @@ pub struct UnitreeG1Dex3Observation {
     pub index_contact: bool,
     /// Whether both sides contacted simultaneously in the latest physics step.
     pub dual_contact: bool,
+    /// Number of consecutive physics steps that passed every grasp gate.
+    pub stable_contact_steps: u32,
     /// Distance between the thumb-tip and index-tip link origins in meters.
     pub pinch_gap_m: f64,
-    /// Whether the part currently follows the contact-gated grasp frame.
+    /// Distance between the two fingertip contact-sensor centers in meters.
+    pub contact_span_m: f64,
+    /// Distance from the payload center to the midpoint of both contact sensors.
+    pub contact_center_error_m: f64,
+    /// Dot product of payload-to-sensor directions; `-1` is fully opposing.
+    pub contact_opposition: f64,
+    /// Whether the payload currently carries the contact-confirmed fixed joint.
     pub grasped: bool,
     /// Whether a two-sided contact-gated grasp occurred this episode.
     pub was_grasped: bool,
@@ -125,7 +150,7 @@ pub struct UnitreeG1Dex3Episode {
     episode_index: u32,
     step_in_episode: u64,
     was_grasped: bool,
-    grasped: bool,
+    stable_contact_steps: u32,
     max_part_height_m: f64,
 }
 
@@ -145,7 +170,7 @@ impl UnitreeG1Dex3Episode {
             episode_index: 0,
             step_in_episode: 0,
             was_grasped: false,
-            grasped: false,
+            stable_contact_steps: 0,
             max_part_height_m: initial_height_m,
         })
     }
@@ -191,8 +216,9 @@ impl UnitreeG1Dex3Episode {
         let index_contact = self
             .sim
             .named_entities_in_contact(INDEX_SENSOR_NAME, &self.config.part_name);
-        let grasped = self.grasped;
+        let grasped = self.sim.named_child_is_welded(&self.config.part_name);
         let pinch_gap_m = pinch_gap_m(&self.sim, &self.config);
+        let contact_geometry = contact_geometry(&self.sim, &self.config);
         let placed = self.was_grasped
             && !grasped
             && place_distance_m <= marker.3
@@ -207,7 +233,11 @@ impl UnitreeG1Dex3Episode {
             thumb_contact,
             index_contact,
             dual_contact: thumb_contact && index_contact,
+            stable_contact_steps: self.stable_contact_steps,
             pinch_gap_m,
+            contact_span_m: contact_geometry.span_m,
+            contact_center_error_m: contact_geometry.center_error_m,
+            contact_opposition: contact_geometry.opposition,
             grasped,
             was_grasped: self.was_grasped,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
@@ -239,8 +269,9 @@ impl UnitreeG1Dex3Episode {
         let index_contact = self
             .sim
             .named_entities_in_contact(INDEX_SENSOR_NAME, &self.config.part_name);
-        let grasped = self.grasped;
+        let grasped = self.sim.named_child_is_welded(&self.config.part_name);
         let pinch_gap_m = pinch_gap_m(&self.sim, &self.config);
+        let contact_geometry = contact_geometry(&self.sim, &self.config);
         UnitreeG1Dex3Observation {
             phase: UnitreeG1Dex3Phase::Place,
             part_position_m: [part.0, part.1, part.2],
@@ -250,7 +281,11 @@ impl UnitreeG1Dex3Episode {
             thumb_contact,
             index_contact,
             dual_contact: thumb_contact && index_contact,
+            stable_contact_steps: self.stable_contact_steps,
             pinch_gap_m,
+            contact_span_m: contact_geometry.span_m,
+            contact_center_error_m: contact_geometry.center_error_m,
+            contact_opposition: contact_geometry.opposition,
             grasped,
             was_grasped: self.was_grasped,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
@@ -273,7 +308,7 @@ impl Episode for UnitreeG1Dex3Episode {
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;
         self.was_grasped = false;
-        self.grasped = false;
+        self.stable_contact_steps = 0;
         self.max_part_height_m = self
             .sim
             .named_translation_m(&self.config.part_name)
@@ -292,7 +327,8 @@ impl Episode for UnitreeG1Dex3Episode {
         if action.advance {
             let step = self.step_in_episode;
             if step == RELEASE_STEP {
-                self.grasped = false;
+                self.sim.release_named_child(&self.config.part_name);
+                self.stable_contact_steps = 0;
             }
             let (approach, lift, closure) = command_at_step(step);
             self.sim
@@ -301,23 +337,41 @@ impl Episode for UnitreeG1Dex3Episode {
                     lift,
                     UnitreeG1Dex3HandCommand { closure },
                 ));
-            if !self.was_grasped
-                && (APPROACH_STEPS..RELEASE_STEP).contains(&step)
-                && self.sim.named_child_has_distinct_dual_contact(
-                    THUMB_SENSOR_NAME,
-                    INDEX_SENSOR_NAME,
-                    &self.config.part_name,
-                )
-            {
-                self.was_grasped = true;
-                self.grasped = true;
-            }
-            if self.grasped
-                && !self
-                    .sim
-                    .follow_named_body_to_frame(&self.config.part_name, GRASP_FRAME_NAME)
-            {
-                panic!("validated grasp follower entities");
+            if !self.was_grasped && (APPROACH_STEPS..RELEASE_STEP).contains(&step) {
+                let contact_geometry = contact_geometry(&self.sim, &self.config);
+                let qualifies = grasp_gate_qualifies(
+                    &self.config,
+                    GraspGateSample {
+                        closure,
+                        pinch_gap_m: pinch_gap_m(&self.sim, &self.config),
+                        payload_speed_m_s: self
+                            .sim
+                            .named_linear_speed_m_s(&self.config.part_name)
+                            .expect("validated dynamic part"),
+                        contact_geometry,
+                        dual_contact: self.sim.named_child_has_distinct_dual_contact(
+                            THUMB_SENSOR_NAME,
+                            INDEX_SENSOR_NAME,
+                            &self.config.part_name,
+                        ),
+                    },
+                );
+                self.stable_contact_steps = next_contact_streak(
+                    self.stable_contact_steps,
+                    qualifies,
+                    self.config.required_stable_contact_steps,
+                );
+                if self.stable_contact_steps >= self.config.required_stable_contact_steps {
+                    self.was_grasped = self.sim.weld_named_child_on_dual_contact(
+                        &self.config.palm_name,
+                        THUMB_SENSOR_NAME,
+                        INDEX_SENSOR_NAME,
+                        &self.config.part_name,
+                    );
+                    if !self.was_grasped {
+                        self.stable_contact_steps = 0;
+                    }
+                }
             }
             self.step_in_episode += 1;
             let height_m = self
@@ -387,6 +441,33 @@ fn command_at_step(step: u64) -> (f64, f64, f64) {
     }
 }
 
+fn next_contact_streak(current: u32, qualifies: bool, required: u32) -> u32 {
+    if qualifies {
+        current.saturating_add(1).min(required)
+    } else {
+        0
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GraspGateSample {
+    closure: f64,
+    pinch_gap_m: f64,
+    payload_speed_m_s: f64,
+    contact_geometry: ContactGeometry,
+    dual_contact: bool,
+}
+
+fn grasp_gate_qualifies(config: &UnitreeG1Dex3EpisodeConfig, sample: GraspGateSample) -> bool {
+    sample.dual_contact
+        && sample.closure >= MIN_GRASP_CLOSURE
+        && sample.pinch_gap_m <= config.max_grasp_pinch_gap_m
+        && sample.payload_speed_m_s <= config.max_grasp_speed_m_s
+        && sample.contact_geometry.span_m >= config.min_grasp_contact_span_m
+        && sample.contact_geometry.center_error_m <= config.max_grasp_center_error_m
+        && sample.contact_geometry.opposition <= config.max_grasp_contact_opposition
+}
+
 fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, AssetError> {
     let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
     sim.configure_position_motors(220.0, 24.0, 88.0);
@@ -402,9 +483,6 @@ fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, A
         if !sim.configure_named_position_motor(name, 40.0, 4.0, max_force_nm) {
             return Err(invalid(config, format!("missing Dex3 motor `{name}`")));
         }
-    }
-    if !sim.add_named_child_frame(&config.palm_name, GRASP_FRAME_NAME, GRASP_ANCHOR_M) {
-        return Err(invalid(config, "could not add Dex3 grasp frame"));
     }
     if !sim.add_named_child_box_sensor(
         &config.thumb_name,
@@ -444,7 +522,79 @@ fn pinch_gap_m(sim: &UrdfSceneSim, config: &UnitreeG1Dex3EpisodeConfig) -> f64 {
     thumb.distance(index)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ContactGeometry {
+    span_m: f64,
+    center_error_m: f64,
+    opposition: f64,
+}
+
+fn contact_geometry(sim: &UrdfSceneSim, config: &UnitreeG1Dex3EpisodeConfig) -> ContactGeometry {
+    let thumb = sim
+        .named_transform(THUMB_SENSOR_NAME)
+        .expect("configured thumb sensor")
+        .translation;
+    let index = sim
+        .named_transform(INDEX_SENSOR_NAME)
+        .expect("configured index sensor")
+        .translation;
+    let part = sim
+        .named_transform(&config.part_name)
+        .expect("validated part")
+        .translation;
+    let thumb_from_part = thumb - part;
+    let index_from_part = index - part;
+    ContactGeometry {
+        span_m: thumb.distance(index),
+        center_error_m: part.distance((thumb + index) * 0.5),
+        opposition: thumb_from_part
+            .normalize_or_zero()
+            .dot(index_from_part.normalize_or_zero()),
+    }
+}
+
 fn validate_scene_names(config: &UnitreeG1Dex3EpisodeConfig) -> Result<(), AssetError> {
+    if config.required_stable_contact_steps == 0 {
+        return Err(invalid(
+            config,
+            "required_stable_contact_steps must be greater than zero",
+        ));
+    }
+    if !config.max_grasp_pinch_gap_m.is_finite() || config.max_grasp_pinch_gap_m <= 0.0 {
+        return Err(invalid(
+            config,
+            "max_grasp_pinch_gap_m must be finite and greater than zero",
+        ));
+    }
+    if !config.max_grasp_speed_m_s.is_finite() || config.max_grasp_speed_m_s < 0.0 {
+        return Err(invalid(
+            config,
+            "max_grasp_speed_m_s must be finite and non-negative",
+        ));
+    }
+    if !config.min_grasp_contact_span_m.is_finite()
+        || config.min_grasp_contact_span_m <= 0.0
+        || config.min_grasp_contact_span_m >= config.max_grasp_pinch_gap_m
+    {
+        return Err(invalid(
+            config,
+            "min_grasp_contact_span_m must be finite, positive, and below max_grasp_pinch_gap_m",
+        ));
+    }
+    if !config.max_grasp_center_error_m.is_finite() || config.max_grasp_center_error_m <= 0.0 {
+        return Err(invalid(
+            config,
+            "max_grasp_center_error_m must be finite and greater than zero",
+        ));
+    }
+    if !config.max_grasp_contact_opposition.is_finite()
+        || !(-1.0..=1.0).contains(&config.max_grasp_contact_opposition)
+    {
+        return Err(invalid(
+            config,
+            "max_grasp_contact_opposition must be finite and within [-1, 1]",
+        ));
+    }
     let scene: SceneAsset = rne_assets::load_scene_asset(&config.scene_path)?;
     for name in [&config.part_name, &config.place_marker_name] {
         let exists = scene.objects.iter().any(|object| object.name == *name)
@@ -466,6 +616,93 @@ fn invalid(config: &UnitreeG1Dex3EpisodeConfig, message: impl Into<String>) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stable_contact_gate_requires_consecutive_qualifying_steps() {
+        let required = 3;
+        assert_eq!(next_contact_streak(0, true, required), 1);
+        assert_eq!(next_contact_streak(1, true, required), 2);
+        assert_eq!(next_contact_streak(2, false, required), 0);
+        assert_eq!(next_contact_streak(0, true, required), 1);
+        assert_eq!(next_contact_streak(1, true, required), 2);
+        assert_eq!(next_contact_streak(2, true, required), required);
+        assert_eq!(next_contact_streak(required, true, required), required);
+    }
+
+    #[test]
+    fn grasp_gate_rejects_every_invalid_contact_dimension() {
+        let config = UnitreeG1Dex3EpisodeConfig::default();
+        let valid = GraspGateSample {
+            closure: 1.0,
+            pinch_gap_m: 0.057,
+            payload_speed_m_s: 0.01,
+            contact_geometry: ContactGeometry {
+                span_m: 0.033,
+                center_error_m: 0.022,
+                opposition: 0.30,
+            },
+            dual_contact: true,
+        };
+        assert!(grasp_gate_qualifies(&config, valid));
+
+        let invalid = [
+            GraspGateSample {
+                dual_contact: false,
+                ..valid
+            },
+            GraspGateSample {
+                closure: MIN_GRASP_CLOSURE - 0.01,
+                ..valid
+            },
+            GraspGateSample {
+                pinch_gap_m: config.max_grasp_pinch_gap_m + 0.001,
+                ..valid
+            },
+            GraspGateSample {
+                payload_speed_m_s: config.max_grasp_speed_m_s + 0.01,
+                ..valid
+            },
+            GraspGateSample {
+                contact_geometry: ContactGeometry {
+                    span_m: config.min_grasp_contact_span_m - 0.001,
+                    ..valid.contact_geometry
+                },
+                ..valid
+            },
+            GraspGateSample {
+                contact_geometry: ContactGeometry {
+                    center_error_m: config.max_grasp_center_error_m + 0.001,
+                    ..valid.contact_geometry
+                },
+                ..valid
+            },
+            GraspGateSample {
+                contact_geometry: ContactGeometry {
+                    opposition: config.max_grasp_contact_opposition + 0.01,
+                    ..valid.contact_geometry
+                },
+                ..valid
+            },
+        ];
+        for sample in invalid {
+            assert!(!grasp_gate_qualifies(&config, sample));
+        }
+    }
+
+    #[test]
+    fn invalid_grasp_gate_configuration_is_rejected() {
+        let mut config = UnitreeG1Dex3EpisodeConfig {
+            required_stable_contact_steps: 0,
+            ..Default::default()
+        };
+        assert!(validate_scene_names(&config).is_err());
+        config.required_stable_contact_steps = 3;
+        config.min_grasp_contact_span_m = config.max_grasp_pinch_gap_m;
+        assert!(validate_scene_names(&config).is_err());
+        config.min_grasp_contact_span_m = 0.015;
+        config.max_grasp_contact_opposition = 1.1;
+        assert!(validate_scene_names(&config).is_err());
+    }
 
     #[test]
     fn dual_contact_gate_rejects_missing_or_duplicate_fingers() {
@@ -496,13 +733,15 @@ mod tests {
 
     #[test]
     fn dex3_episode_requires_two_contacts_and_replays_exactly() {
-        let mut first = UnitreeG1Dex3Episode::new(Default::default()).expect("first episode");
-        let mut second = UnitreeG1Dex3Episode::new(Default::default()).expect("second episode");
+        let config = UnitreeG1Dex3EpisodeConfig::default();
+        let mut first = UnitreeG1Dex3Episode::new(config.clone()).expect("first episode");
+        let mut second = UnitreeG1Dex3Episode::new(config.clone()).expect("second episode");
         let initial_gap_m = first.observation().pinch_gap_m;
         let mut saw_single_contact_before_grasp = false;
         let mut saw_grasp_transition = false;
 
         loop {
+            let before = first.observation();
             let first_step = first.step(UnitreeG1Dex3Action { advance: true });
             let second_step = second.step(UnitreeG1Dex3Action { advance: true });
             assert_eq!(
@@ -511,6 +750,11 @@ mod tests {
             );
 
             let observation = first_step.observation;
+            assert_eq!(
+                observation.grasped,
+                first.simulation().named_child_is_welded(&config.part_name),
+                "grasp observation must report the real fixed-joint state"
+            );
             if !observation.was_grasped && observation.thumb_contact ^ observation.index_contact {
                 saw_single_contact_before_grasp = true;
                 assert!(!observation.grasped, "one-sided contact must not grasp");
@@ -519,6 +763,29 @@ mod tests {
                 saw_grasp_transition = true;
                 assert!(observation.dual_contact, "grasp must start on dual contact");
                 assert!(observation.pinch_gap_m < initial_gap_m);
+                assert_eq!(
+                    observation.stable_contact_steps,
+                    config.required_stable_contact_steps
+                );
+                assert_eq!(
+                    before.stable_contact_steps + 1,
+                    config.required_stable_contact_steps,
+                    "grasp must wait for consecutive confirmation"
+                );
+                assert!(observation.contact_span_m >= config.min_grasp_contact_span_m);
+                assert!(observation.contact_center_error_m <= config.max_grasp_center_error_m);
+                assert!(observation.contact_opposition <= config.max_grasp_contact_opposition);
+                let displacement_m = observation
+                    .part_position_m
+                    .into_iter()
+                    .zip(before.part_position_m)
+                    .map(|(after, before)| (after - before).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                assert!(
+                    displacement_m < 0.01,
+                    "fixed-joint capture must not snap the payload: {displacement_m} m"
+                );
             }
 
             if first_step.is_done() {
@@ -531,6 +798,7 @@ mod tests {
                 assert!(observation.lifted);
                 assert!(observation.placed);
                 assert!(!observation.grasped);
+                assert_eq!(observation.stable_contact_steps, 0);
                 break;
             }
         }

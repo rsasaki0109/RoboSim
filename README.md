@@ -60,7 +60,7 @@ cargo run -p unitree_g1_gif --example 39_unitree_g1_gif
     <img src="docs/media/unitree-g1-dex3.gif" alt="Official 29-DoF Unitree G1 pinching, lifting, carrying, and placing a part, with a close-up inset of the articulated Dex3-1 contact grasp" width="600">
   </picture>
   <br>
-  <sub>The official G1 29-DoF + two Dex3-1 hands load as one 43-joint URDF articulation. The cyan-bordered inset tracks the working right hand: orange and blue mark the independent thumb/index contact points, and both turn green on simultaneous contact. The fingers visibly close around the orange part; a one-sided touch is rejected. The arm then lifts and carries the part, opens the hand, and returns the released dynamic body to physics so it settles on the cyan tray. The original 23-DoF walking and dynamic scenes remain separate and unchanged. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>The official G1 29-DoF + two Dex3-1 hands load as one 43-joint URDF articulation. The close-up inset tracks the working right hand: orange and blue mark the independent thumb/index contact points, and the cyan border turns green only after three consecutive qualifying contact steps. The gate also checks finger closure, pinch width, payload speed, contact separation, centering, and opposing geometry; a one-sided touch or transient overlap is rejected. Confirmation creates a real palm-to-payload fixed joint at the current relative pose without snapping the part. The arm lifts and carries it, then opening removes the joint and returns the dynamic body to physics so it settles on the cyan tray. The original 23-DoF walking and dynamic scenes remain separate and unchanged. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
@@ -70,12 +70,13 @@ cargo run -p unitree_g1_dex3_pick_place --example 42_unitree_g1_dex3_pick_place
 cargo run -p unitree_g1_dex3_pick_place --example 42_unitree_g1_dex3_pick_place -- --gif
 ```
 
-`UnitreeG1Dex3Episode` reports each fingertip contact, simultaneous dual contact, current and
-historical grasp state, pinch gap, payload pose/speed, maximum lift height, place-zone distance,
-phase, and completion. Success requires a two-sided contact-gated grasp, a lift above 0.98 m,
-release, and a payload settled inside `dex3_place_zone` at no more than 0.05 m/s. Its regression
-test proves that a single fingertip cannot grasp and compares two complete 232-step rollouts for
-exact replay.
+`UnitreeG1Dex3Episode` reports each fingertip contact, simultaneous dual contact, stable-contact
+count, current and historical fixed-joint state, pinch gap, contact span/centering/opposition,
+payload pose/speed, maximum lift height, place-zone distance, phase, and completion. Success
+requires the stable multi-gate grasp, a lift above 0.98 m, release, and a payload settled inside
+`dex3_place_zone` at no more than 0.05 m/s. Regression tests reject one-sided, interrupted,
+coincident, off-center, and invalidly configured grasps; verify capture without a pose snap; and
+compare two complete 232-step rollouts for exact replay.
 
 The earlier passive-hand example is still available as
 `cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place` for users of
