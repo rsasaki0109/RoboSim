@@ -115,6 +115,8 @@ fn hero_media_check() -> anyhow::Result<()> {
     let gif_path = root.join("docs/media/rne-hero.gif");
     let png_path = root.join("docs/media/rne-hero.png");
     let metadata_path = root.join("docs/media/rne-hero.json");
+    let dex3_gif_path = root.join("docs/media/unitree-g1-dex3.gif");
+    let dex3_png_path = root.join("docs/media/unitree-g1-dex3.png");
     let readme = fs::read_to_string(&readme_path)?;
     anyhow::ensure!(
         readme.contains("srcset=\"docs/media/rne-hero.png\""),
@@ -146,6 +148,17 @@ fn hero_media_check() -> anyhow::Result<()> {
         gif.len()
     );
     anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
+    anyhow::ensure!(
+        readme.contains("srcset=\"docs/media/unitree-g1-dex3.png\"")
+            && readme.contains("<img src=\"docs/media/unitree-g1-dex3.gif\""),
+        "README G1 Dex3 media references are missing"
+    );
+    let dex3_gif = fs::read(&dex3_gif_path)?;
+    anyhow::ensure!(
+        dex3_gif.starts_with(b"GIF8") && dex3_gif.ends_with(b";") && dex3_gif.len() > 100_000,
+        "README G1 Dex3 GIF is missing or malformed"
+    );
+    anyhow::ensure!(dex3_png_path.is_file(), "README G1 Dex3 PNG is missing");
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     anyhow::ensure!(
         metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
@@ -653,6 +666,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_minimal_clutter.rne.scene.toml"),
         root.join("assets/scenes/mm_mobile_clutter.rne.scene.toml"),
         root.join("assets/scenes/mm_mobile_hero.rne.scene.toml"),
+        root.join("assets/scenes/unitree_g1_dex3_pick_place.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),
@@ -660,6 +674,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/robots/mm_minimal.rne.robot.toml"),
         root.join("assets/robots/mm_mobile.rne.robot.toml"),
         root.join("assets/robots/mm_lift.rne.robot.toml"),
+        root.join("assets/robots/unitree_g1_29dof_dex3_fixed.rne.robot.toml"),
     ];
 
     for scene in scenes {

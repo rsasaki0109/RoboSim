@@ -11,14 +11,14 @@ pub struct ContactEvent {
     pub entity_a: Entity,
     /// Second colliding entity.
     pub entity_b: Entity,
-    /// Contact normal pointing from A to B.
+    /// Contact normal pointing from A to B, or zero for a sensor overlap.
     pub normal: Vec3,
     /// Accumulated normal-impulse magnitude for this contact pair over the last
     /// physics step, summed across every manifold and contact point between the
     /// two colliders (units: N·s, i.e. force integrated over the fixed step —
     /// Rapier applies impulses rather than forces internally). Zero when the
-    /// backend does not populate it (e.g. a contact pair with no active solver
-    /// contact this step). Useful for distinguishing a light graze from a
+    /// backend does not populate it (e.g. a sensor overlap or contact pair with
+    /// no active solver contact this step). Useful for distinguishing a light graze from a
     /// load-bearing contact (see friction-based grasping) without needing raw
     /// per-point solver data.
     pub impulse: f32,

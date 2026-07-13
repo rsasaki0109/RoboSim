@@ -45,6 +45,7 @@ pub fn collider_from_element(
         shape,
         material: Default::default(),
         local_offset,
+        sensor: false,
     })
 }
 
@@ -96,6 +97,7 @@ pub fn collider_from_link_with_meshes(
         shape: ColliderShape::Cuboid { half_extents_m },
         material,
         local_offset: Transform3::from_translation_rotation(center_m, Quat::IDENTITY),
+        sensor: false,
     })
 }
 

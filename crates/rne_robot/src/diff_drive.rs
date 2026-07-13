@@ -174,6 +174,7 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
                         restitution: 0.0,
                     },
                     local_offset: Transform3::IDENTITY,
+                    sensor: false,
                 },
                 RevoluteJointDesc {
                     parent: base_link,
