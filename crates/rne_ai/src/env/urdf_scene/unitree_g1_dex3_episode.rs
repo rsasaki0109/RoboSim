@@ -1,9 +1,10 @@
 use super::{
     unitree_g1_dex3_pick_targets, unitree_g1_dex3_scene_path, UnitreeG1Dex3HandCommand,
-    UrdfSceneSim,
+    UrdfJointPositionTarget, UrdfSceneSim,
 };
-use crate::{Episode, EpisodeStep};
+use crate::{DeterministicRng, Episode, EpisodeStep};
 use rne_assets::{AssetError, SceneAsset};
+use rne_math::Vec3;
 use std::path::PathBuf;
 
 const SETTLE_STEPS: u64 = 4;
@@ -16,6 +17,7 @@ const OPEN_STEPS: u64 = 8;
 const PLACE_SETTLE_STEPS: u64 = 60;
 const THUMB_SENSOR_NAME: &str = "right_dex3_thumb_contact_sensor";
 const INDEX_SENSOR_NAME: &str = "right_dex3_index_contact_sensor";
+const GRASP_FOLLOW_FRAME_NAME: &str = "right_dex3_grasp_follow_frame";
 const THUMB_SENSOR_SIZE_M: [f64; 3] = [0.026, 0.050, 0.026];
 const THUMB_SENSOR_OFFSET_M: [f64; 3] = [0.0, 0.026, 0.0];
 const INDEX_SENSOR_SIZE_M: [f64; 3] = [0.050, 0.026, 0.026];
@@ -75,6 +77,18 @@ pub struct UnitreeG1Dex3EpisodeConfig {
     pub max_grasp_center_error_m: f64,
     /// Maximum payload-to-sensor direction dot product accepted as opposing contact.
     pub max_grasp_contact_opposition: f64,
+    /// Maximum absolute X/Y/Z reset offset sampled for the payload, in meters.
+    pub part_position_jitter_m: [f64; 3],
+    /// Deterministic seed for payload-position sampling across resets.
+    pub random_seed: u64,
+    /// Maximum number of close attempts before the episode continues to failure.
+    pub max_grasp_attempts: u32,
+    /// Gain applied to the live Cartesian Jacobian correction.
+    pub cartesian_tracking_gain: f64,
+    /// Use an acquisition-only captured-pose follower instead of an external fixed joint.
+    pub use_pose_follow_grasp: bool,
+    /// End successfully as soon as a stable grasp is acquired.
+    pub terminate_on_grasp: bool,
 }
 
 impl Default for UnitreeG1Dex3EpisodeConfig {
@@ -93,6 +107,29 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             min_grasp_contact_span_m: 0.015,
             max_grasp_center_error_m: 0.030,
             max_grasp_contact_opposition: 0.50,
+            part_position_jitter_m: [0.0; 3],
+            random_seed: 2042,
+            max_grasp_attempts: 1,
+            cartesian_tracking_gain: 0.0,
+            use_pose_follow_grasp: false,
+            terminate_on_grasp: false,
+        }
+    }
+}
+
+impl UnitreeG1Dex3EpisodeConfig {
+    /// Creates a target-conditioned task with deterministic payload jitter and retries.
+    pub fn randomized(random_seed: u64) -> Self {
+        let max_grasp_attempts = 3;
+        Self {
+            part_position_jitter_m: [0.010, 0.0, 0.010],
+            random_seed,
+            max_grasp_attempts,
+            cartesian_tracking_gain: 0.15,
+            use_pose_follow_grasp: true,
+            terminate_on_grasp: true,
+            max_steps: LIFT_START_STEP * u64::from(max_grasp_attempts) + 8,
+            ..Self::default()
         }
     }
 }
@@ -133,10 +170,14 @@ pub struct UnitreeG1Dex3Observation {
     pub contact_center_error_m: f64,
     /// Dot product of payload-to-sensor directions; `-1` is fully opposing.
     pub contact_opposition: f64,
-    /// Whether the payload currently carries the contact-confirmed fixed joint.
+    /// Whether the payload is currently held by the configured grasp attachment.
     pub grasped: bool,
     /// Whether a two-sided contact-gated grasp occurred this episode.
     pub was_grasped: bool,
+    /// One-based grasp attempt number.
+    pub grasp_attempt: u32,
+    /// Payload reset offset from the scene-authored position, in meters.
+    pub part_position_offset_m: [f64; 3],
     /// Whether the payload reached the required lift height.
     pub lifted: bool,
     /// Whether the released payload is settled inside the place zone.
@@ -149,9 +190,16 @@ pub struct UnitreeG1Dex3Episode {
     sim: UrdfSceneSim,
     episode_index: u32,
     step_in_episode: u64,
+    script_step: u64,
     was_grasped: bool,
+    grasped: bool,
     stable_contact_steps: u32,
     max_part_height_m: f64,
+    grasp_attempt: u32,
+    part_position_offset_m: [f64; 3],
+    rng: DeterministicRng,
+    arm_correction_rad: [f64; 4],
+    grasp_script_step: Option<u64>,
 }
 
 impl UnitreeG1Dex3Episode {
@@ -159,6 +207,9 @@ impl UnitreeG1Dex3Episode {
     pub fn new(config: UnitreeG1Dex3EpisodeConfig) -> Result<Self, AssetError> {
         validate_scene_names(&config)?;
         let mut sim = configured_sim(&config)?;
+        let mut rng = DeterministicRng::new(config.random_seed);
+        let part_position_offset_m = sample_part_offset_m(&config, &mut rng);
+        apply_part_offset(&mut sim, &config, part_position_offset_m)?;
         settle(&mut sim);
         let initial_height_m = sim
             .named_translation_m(&config.part_name)
@@ -169,9 +220,16 @@ impl UnitreeG1Dex3Episode {
             sim,
             episode_index: 0,
             step_in_episode: 0,
+            script_step: 0,
             was_grasped: false,
+            grasped: false,
             stable_contact_steps: 0,
             max_part_height_m: initial_height_m,
+            grasp_attempt: 1,
+            part_position_offset_m,
+            rng,
+            arm_correction_rad: [0.0; 4],
+            grasp_script_step: None,
         })
     }
 
@@ -183,13 +241,13 @@ impl UnitreeG1Dex3Episode {
     fn phase(&self) -> UnitreeG1Dex3Phase {
         if self.success() {
             UnitreeG1Dex3Phase::Complete
-        } else if self.step_in_episode < APPROACH_STEPS {
+        } else if self.script_step < APPROACH_STEPS {
             UnitreeG1Dex3Phase::Approach
-        } else if self.step_in_episode < LIFT_START_STEP {
+        } else if self.script_step < LIFT_START_STEP {
             UnitreeG1Dex3Phase::Close
-        } else if self.step_in_episode < LIFT_START_STEP + LIFT_STEPS {
+        } else if self.script_step < LIFT_START_STEP + LIFT_STEPS {
             UnitreeG1Dex3Phase::Lift
-        } else if self.step_in_episode < RELEASE_STEP {
+        } else if self.script_step < RELEASE_STEP {
             UnitreeG1Dex3Phase::Hold
         } else {
             UnitreeG1Dex3Phase::Place
@@ -216,7 +274,7 @@ impl UnitreeG1Dex3Episode {
         let index_contact = self
             .sim
             .named_entities_in_contact(INDEX_SENSOR_NAME, &self.config.part_name);
-        let grasped = self.sim.named_child_is_welded(&self.config.part_name);
+        let grasped = self.grasped;
         let pinch_gap_m = pinch_gap_m(&self.sim, &self.config);
         let contact_geometry = contact_geometry(&self.sim, &self.config);
         let placed = self.was_grasped
@@ -240,13 +298,19 @@ impl UnitreeG1Dex3Episode {
             contact_opposition: contact_geometry.opposition,
             grasped,
             was_grasped: self.was_grasped,
+            grasp_attempt: self.grasp_attempt,
+            part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
             placed,
         }
     }
 
     fn success(&self) -> bool {
-        self.step_in_episode >= SUCCESS_STEP && self.observation_without_phase().placed
+        if self.config.terminate_on_grasp {
+            self.was_grasped && self.grasped
+        } else {
+            self.script_step >= SUCCESS_STEP && self.observation_without_phase().placed
+        }
     }
 
     fn observation_without_phase(&self) -> UnitreeG1Dex3Observation {
@@ -269,7 +333,7 @@ impl UnitreeG1Dex3Episode {
         let index_contact = self
             .sim
             .named_entities_in_contact(INDEX_SENSOR_NAME, &self.config.part_name);
-        let grasped = self.sim.named_child_is_welded(&self.config.part_name);
+        let grasped = self.grasped;
         let pinch_gap_m = pinch_gap_m(&self.sim, &self.config);
         let contact_geometry = contact_geometry(&self.sim, &self.config);
         UnitreeG1Dex3Observation {
@@ -288,6 +352,8 @@ impl UnitreeG1Dex3Episode {
             contact_opposition: contact_geometry.opposition,
             grasped,
             was_grasped: self.was_grasped,
+            grasp_attempt: self.grasp_attempt,
+            part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
             placed: self.was_grasped
                 && !grasped
@@ -304,11 +370,19 @@ impl Episode for UnitreeG1Dex3Episode {
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
         self.sim = configured_sim(&self.config).expect("reload G1 Dex3 scene");
+        self.part_position_offset_m = sample_part_offset_m(&self.config, &mut self.rng);
+        apply_part_offset(&mut self.sim, &self.config, self.part_position_offset_m)
+            .expect("validated randomized part");
         settle(&mut self.sim);
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;
+        self.script_step = 0;
         self.was_grasped = false;
+        self.grasped = false;
         self.stable_contact_steps = 0;
+        self.grasp_attempt = 1;
+        self.arm_correction_rad = [0.0; 4];
+        self.grasp_script_step = None;
         self.max_part_height_m = self
             .sim
             .named_translation_m(&self.config.part_name)
@@ -325,18 +399,58 @@ impl Episode for UnitreeG1Dex3Episode {
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let before = self.observation();
         if action.advance {
-            let step = self.step_in_episode;
+            if self.script_step == LIFT_START_STEP
+                && !self.was_grasped
+                && self.grasp_attempt < self.config.max_grasp_attempts
+            {
+                self.script_step = 0;
+                self.grasp_attempt += 1;
+                self.stable_contact_steps = 0;
+                self.grasp_script_step = None;
+            }
+            let step = self.script_step;
             if step == RELEASE_STEP {
-                self.sim.release_named_child(&self.config.part_name);
+                if !self.config.use_pose_follow_grasp {
+                    self.sim.release_named_child(&self.config.part_name);
+                }
+                self.grasped = false;
                 self.stable_contact_steps = 0;
             }
+            if step == RELEASE_STEP + OPEN_STEPS {
+                if self.config.use_pose_follow_grasp {
+                    assert!(
+                        self.sim
+                            .set_named_body_kinematic(&self.config.part_name, false),
+                        "validated payload body"
+                    );
+                }
+                assert!(
+                    self.sim
+                        .set_named_collider_sensor(&self.config.part_name, false),
+                    "validated payload collider"
+                );
+            }
             let (approach, lift, closure) = command_at_step(step);
-            self.sim
-                .step_joint_position_targets(&unitree_g1_dex3_pick_targets(
-                    approach,
-                    lift,
-                    UnitreeG1Dex3HandCommand { closure },
-                ));
+            if !self.was_grasped && step < LIFT_START_STEP {
+                update_cartesian_arm_correction(
+                    &self.sim,
+                    &self.config,
+                    &mut self.arm_correction_rad,
+                );
+            }
+            let mut targets =
+                unitree_g1_dex3_pick_targets(approach, lift, UnitreeG1Dex3HandCommand { closure });
+            let correction_blend = self.grasp_script_step.map_or(1.0, |grasp_step| {
+                let recenter_steps = LIFT_START_STEP.saturating_sub(grasp_step).max(1);
+                let elapsed = step.saturating_sub(grasp_step).saturating_add(1);
+                1.0 - (elapsed as f64 / recenter_steps as f64).clamp(0.0, 1.0)
+            });
+            apply_arm_correction(
+                &mut targets,
+                self.arm_correction_rad
+                    .map(|value| value * correction_blend),
+            );
+            self.sim.step_joint_position_targets(&targets);
             if !self.was_grasped && (APPROACH_STEPS..RELEASE_STEP).contains(&step) {
                 let contact_geometry = contact_geometry(&self.sim, &self.config);
                 let qualifies = grasp_gate_qualifies(
@@ -362,17 +476,50 @@ impl Episode for UnitreeG1Dex3Episode {
                     self.config.required_stable_contact_steps,
                 );
                 if self.stable_contact_steps >= self.config.required_stable_contact_steps {
-                    self.was_grasped = self.sim.weld_named_child_on_dual_contact(
-                        &self.config.palm_name,
-                        THUMB_SENSOR_NAME,
-                        INDEX_SENSOR_NAME,
-                        &self.config.part_name,
-                    );
-                    if !self.was_grasped {
+                    let attached = if self.config.use_pose_follow_grasp {
+                        self.sim.add_named_child_frame_from_body(
+                            &self.config.palm_name,
+                            GRASP_FOLLOW_FRAME_NAME,
+                            &self.config.part_name,
+                        )
+                    } else {
+                        self.sim.weld_named_child_on_dual_contact(
+                            &self.config.palm_name,
+                            THUMB_SENSOR_NAME,
+                            INDEX_SENSOR_NAME,
+                            &self.config.part_name,
+                        )
+                    };
+                    self.was_grasped = attached;
+                    self.grasped = attached;
+                    if self.was_grasped {
+                        self.grasp_script_step = Some(step);
+                        if self.config.use_pose_follow_grasp {
+                            assert!(
+                                self.sim
+                                    .set_named_body_kinematic(&self.config.part_name, true),
+                                "validated payload body"
+                            );
+                        }
+                        assert!(
+                            self.sim
+                                .set_named_collider_sensor(&self.config.part_name, true),
+                            "validated payload collider"
+                        );
+                    } else {
                         self.stable_contact_steps = 0;
                     }
                 }
             }
+            if self.grasped
+                && self.config.use_pose_follow_grasp
+                && !self
+                    .sim
+                    .follow_named_body_to_frame(&self.config.part_name, GRASP_FOLLOW_FRAME_NAME)
+            {
+                panic!("validated randomized grasp follower entities");
+            }
+            self.script_step += 1;
             self.step_in_episode += 1;
             let height_m = self
                 .sim
@@ -466,6 +613,139 @@ fn grasp_gate_qualifies(config: &UnitreeG1Dex3EpisodeConfig, sample: GraspGateSa
         && sample.contact_geometry.span_m >= config.min_grasp_contact_span_m
         && sample.contact_geometry.center_error_m <= config.max_grasp_center_error_m
         && sample.contact_geometry.opposition <= config.max_grasp_contact_opposition
+}
+
+fn sample_part_offset_m(
+    config: &UnitreeG1Dex3EpisodeConfig,
+    rng: &mut DeterministicRng,
+) -> [f64; 3] {
+    config.part_position_jitter_m.map(|max_offset_m| {
+        if max_offset_m == 0.0 {
+            0.0
+        } else {
+            rng.uniform_f64(-max_offset_m, max_offset_m)
+        }
+    })
+}
+
+fn apply_part_offset(
+    sim: &mut UrdfSceneSim,
+    config: &UnitreeG1Dex3EpisodeConfig,
+    offset_m: [f64; 3],
+) -> Result<(), AssetError> {
+    let authored = sim
+        .named_translation_m(&config.part_name)
+        .ok_or_else(|| invalid(config, "missing dynamic Dex3 payload"))?;
+    if sim.set_named_body_translation_m(
+        &config.part_name,
+        [
+            authored.0 + offset_m[0],
+            authored.1 + offset_m[1],
+            authored.2 + offset_m[2],
+        ],
+    ) {
+        Ok(())
+    } else {
+        Err(invalid(config, "could not reposition dynamic Dex3 payload"))
+    }
+}
+
+fn update_cartesian_arm_correction(
+    sim: &UrdfSceneSim,
+    config: &UnitreeG1Dex3EpisodeConfig,
+    correction_rad: &mut [f64; 4],
+) {
+    if config.cartesian_tracking_gain == 0.0 {
+        return;
+    }
+    let thumb = sim
+        .named_transform(THUMB_SENSOR_NAME)
+        .expect("configured thumb sensor")
+        .translation;
+    let index = sim
+        .named_transform(INDEX_SENSOR_NAME)
+        .expect("configured index sensor")
+        .translation;
+    let endpoint = (thumb + index) * 0.5;
+    let payload = sim
+        .named_transform(&config.part_name)
+        .expect("validated payload")
+        .translation;
+    let error_m = (payload - endpoint).clamp_length_max(0.06);
+    let joint_specs = [
+        ("right_shoulder_pitch_link", Vec3::ZERO),
+        ("right_shoulder_roll_link", Vec3::X),
+        ("right_shoulder_yaw_link", Vec3::Z),
+        ("right_elbow_link", Vec3::ZERO),
+    ];
+    let jacobian = joint_specs.map(|(name, local_axis)| {
+        let transform = sim.named_transform(name).expect("validated G1 arm joint");
+        let axis_world = transform.rotation * local_axis;
+        axis_world.cross(endpoint - transform.translation)
+    });
+    let damping_m = 0.035;
+    let mut a00 = damping_m * damping_m;
+    let mut a01 = 0.0;
+    let mut a02 = 0.0;
+    let mut a11 = damping_m * damping_m;
+    let mut a12 = 0.0;
+    let mut a22 = damping_m * damping_m;
+    for column in jacobian {
+        a00 += column.x * column.x;
+        a01 += column.x * column.y;
+        a02 += column.x * column.z;
+        a11 += column.y * column.y;
+        a12 += column.y * column.z;
+        a22 += column.z * column.z;
+    }
+    let Some(task_step) = solve_symmetric_3x3([a00, a01, a02, a11, a12, a22], error_m) else {
+        return;
+    };
+    for (correction, column) in correction_rad.iter_mut().zip(jacobian) {
+        let delta_rad =
+            (config.cartesian_tracking_gain * column.dot(task_step)).clamp(-0.008, 0.008);
+        *correction = (*correction + delta_rad).clamp(-0.10, 0.10);
+    }
+}
+
+fn solve_symmetric_3x3(matrix: [f64; 6], rhs: Vec3) -> Option<Vec3> {
+    let [a00, a01, a02, a11, a12, a22] = matrix;
+    let determinant = a00 * (a11 * a22 - a12 * a12) - a01 * (a01 * a22 - a12 * a02)
+        + a02 * (a01 * a12 - a11 * a02);
+    if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
+        return None;
+    }
+    let inverse_determinant = determinant.recip();
+    let i00 = (a11 * a22 - a12 * a12) * inverse_determinant;
+    let i01 = (a02 * a12 - a01 * a22) * inverse_determinant;
+    let i02 = (a01 * a12 - a02 * a11) * inverse_determinant;
+    let i11 = (a00 * a22 - a02 * a02) * inverse_determinant;
+    let i12 = (a01 * a02 - a00 * a12) * inverse_determinant;
+    let i22 = (a00 * a11 - a01 * a01) * inverse_determinant;
+    Some(Vec3::new(
+        i00 * rhs.x + i01 * rhs.y + i02 * rhs.z,
+        i01 * rhs.x + i11 * rhs.y + i12 * rhs.z,
+        i02 * rhs.x + i12 * rhs.y + i22 * rhs.z,
+    ))
+}
+
+fn apply_arm_correction(targets: &mut [UrdfJointPositionTarget<'_>], correction_rad: [f64; 4]) {
+    for ((link_name, _), correction_rad) in [
+        ("right_shoulder_pitch_link", Vec3::Y),
+        ("right_shoulder_roll_link", Vec3::X),
+        ("right_shoulder_yaw_link", Vec3::Z),
+        ("right_elbow_link", Vec3::Y),
+    ]
+    .into_iter()
+    .zip(correction_rad)
+    {
+        if let Some(target) = targets
+            .iter_mut()
+            .find(|target| target.link_name == link_name)
+        {
+            target.position += correction_rad;
+        }
+    }
 }
 
 fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, AssetError> {
@@ -595,6 +875,36 @@ fn validate_scene_names(config: &UnitreeG1Dex3EpisodeConfig) -> Result<(), Asset
             "max_grasp_contact_opposition must be finite and within [-1, 1]",
         ));
     }
+    if config
+        .part_position_jitter_m
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err(invalid(
+            config,
+            "part_position_jitter_m values must be finite and non-negative",
+        ));
+    }
+    if config.max_grasp_attempts == 0 {
+        return Err(invalid(
+            config,
+            "max_grasp_attempts must be greater than zero",
+        ));
+    }
+    if !config.cartesian_tracking_gain.is_finite()
+        || !(0.0..=1.0).contains(&config.cartesian_tracking_gain)
+    {
+        return Err(invalid(
+            config,
+            "cartesian_tracking_gain must be finite and within [0, 1]",
+        ));
+    }
+    if config.use_pose_follow_grasp && !config.terminate_on_grasp {
+        return Err(invalid(
+            config,
+            "use_pose_follow_grasp requires terminate_on_grasp",
+        ));
+    }
     let scene: SceneAsset = rne_assets::load_scene_asset(&config.scene_path)?;
     for name in [&config.part_name, &config.place_marker_name] {
         let exists = scene.objects.iter().any(|object| object.name == *name)
@@ -702,6 +1012,69 @@ mod tests {
         config.min_grasp_contact_span_m = 0.015;
         config.max_grasp_contact_opposition = 1.1;
         assert!(validate_scene_names(&config).is_err());
+        config.max_grasp_contact_opposition = 0.5;
+        config.use_pose_follow_grasp = true;
+        config.terminate_on_grasp = false;
+        assert!(validate_scene_names(&config).is_err());
+    }
+
+    #[test]
+    fn damped_least_squares_solver_recovers_known_vector() {
+        let rhs = Vec3::new(0.25, -0.5, 0.75);
+        assert_eq!(
+            solve_symmetric_3x3([1.0, 0.0, 0.0, 1.0, 0.0, 1.0], rhs),
+            Some(rhs)
+        );
+    }
+
+    #[test]
+    fn randomized_offsets_are_seeded_and_advance_on_reset() {
+        let config = UnitreeG1Dex3EpisodeConfig::randomized(17);
+        let mut first = UnitreeG1Dex3Episode::new(config.clone()).expect("first randomized task");
+        let second = UnitreeG1Dex3Episode::new(config).expect("second randomized task");
+        assert_eq!(
+            first.observation().part_position_offset_m,
+            second.observation().part_position_offset_m
+        );
+        let initial_offset = first.observation().part_position_offset_m;
+        let reset_offset = first.reset().observation.part_position_offset_m;
+        assert_ne!(initial_offset, reset_offset);
+    }
+
+    #[test]
+    fn live_jacobian_grasp_succeeds_across_seeded_payload_positions() {
+        for seed in 0..10 {
+            let mut episode =
+                UnitreeG1Dex3Episode::new(UnitreeG1Dex3EpisodeConfig::randomized(seed))
+                    .expect("randomized Dex3 task");
+            loop {
+                let step = episode.step(UnitreeG1Dex3Action { advance: true });
+                if step.is_done() {
+                    assert!(
+                        step.terminated,
+                        "seed {seed} failed at offset {:?} after {} attempts",
+                        step.observation.part_position_offset_m, step.observation.grasp_attempt
+                    );
+                    assert!(step.observation.grasped);
+                    assert!(step.observation.was_grasped);
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn failed_close_restarts_open_approach_on_the_next_attempt() {
+        let mut episode = UnitreeG1Dex3Episode::new(UnitreeG1Dex3EpisodeConfig::randomized(9))
+            .expect("randomized Dex3 task");
+        episode.script_step = LIFT_START_STEP;
+        episode.grasp_attempt = 1;
+        episode.was_grasped = false;
+        let step = episode.step(UnitreeG1Dex3Action { advance: true });
+        assert_eq!(step.observation.grasp_attempt, 2);
+        assert_eq!(episode.script_step, 1);
+        assert_eq!(step.observation.phase, UnitreeG1Dex3Phase::Approach);
+        assert!(!step.observation.grasped);
     }
 
     #[test]

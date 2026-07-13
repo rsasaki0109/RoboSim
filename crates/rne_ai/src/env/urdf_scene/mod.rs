@@ -59,7 +59,7 @@ use rne_ecs::{Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
 use rne_physics::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, PhysicsBackend,
-    PhysicsWorldDesc, PhysicsWorldId, RigidBody,
+    PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
@@ -352,6 +352,57 @@ impl UrdfSceneSim {
     pub fn named_transform(&self, name: &str) -> Option<rne_world::Transform3> {
         let entity = find_entity_by_name(&self.world, name)?;
         Some(world_transform_of(&self.world, entity))
+    }
+
+    /// Repositions an unparented named rigid body and clears its velocity.
+    ///
+    /// This is intended for deterministic episode reset randomization before
+    /// simulation resumes. Returns false for missing, parented, non-rigid, or
+    /// non-finite targets.
+    pub fn set_named_body_translation_m(&mut self, name: &str, translation_m: [f64; 3]) -> bool {
+        if translation_m.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        if self.world.get::<Parent>(entity).is_some()
+            || self.world.get::<RigidBody>(entity).is_none()
+        {
+            return false;
+        }
+        let mut transform = world_transform_of(&self.world, entity);
+        transform.translation =
+            rne_math::Vec3::new(translation_m[0], translation_m[1], translation_m[2]);
+        self.world.entity_mut(entity).insert(transform);
+        let mut body = self
+            .world
+            .get_mut::<RigidBody>(entity)
+            .expect("rigid body checked above");
+        body.linear_velocity_m_s = rne_math::Vec3::ZERO;
+        body.angular_velocity_rad_s = rne_math::Vec3::ZERO;
+        true
+    }
+
+    /// Switches a named rigid body between kinematic following and dynamic simulation.
+    ///
+    /// Velocities are cleared on every transition so releasing a pose-followed
+    /// payload starts from rest. Returns false when the named entity is not a body.
+    pub fn set_named_body_kinematic(&mut self, name: &str, kinematic: bool) -> bool {
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        let Some(mut body) = self.world.get_mut::<RigidBody>(entity) else {
+            return false;
+        };
+        body.body_type = if kinematic {
+            RigidBodyType::Kinematic
+        } else {
+            RigidBodyType::Dynamic
+        };
+        body.linear_velocity_m_s = rne_math::Vec3::ZERO;
+        body.angular_velocity_rad_s = rne_math::Vec3::ZERO;
+        true
     }
 
     /// Returns a named rigid body's linear speed in meters per second.
@@ -698,6 +749,43 @@ impl UrdfSceneSim {
                 rne_math::Quat::IDENTITY,
             ),
         ));
+        true
+    }
+
+    /// Adds a child frame whose world pose initially matches a named body.
+    ///
+    /// The body's current pose is converted into the parent's local frame. This
+    /// supports pose-preserving deterministic grasp followers without a capture
+    /// teleport. Returns false when a name is missing or the frame already exists.
+    pub fn add_named_child_frame_from_body(
+        &mut self,
+        parent_name: &str,
+        frame_name: &str,
+        body_name: &str,
+    ) -> bool {
+        if frame_name.is_empty() || find_entity_by_name(&self.world, frame_name).is_some() {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let Some(body) = find_entity_by_name(&self.world, body_name) else {
+            return false;
+        };
+        let parent_transform = world_transform_of(&self.world, parent);
+        let body_transform = world_transform_of(&self.world, body);
+        let inverse_parent_rotation = parent_transform.rotation.conjugate();
+        let local_transform = WorldTransform3 {
+            translation: inverse_parent_rotation
+                * ((body_transform.translation - parent_transform.translation)
+                    / parent_transform.scale),
+            rotation: inverse_parent_rotation * body_transform.rotation,
+            scale: body_transform.scale / parent_transform.scale,
+        };
+        let frame = rne_ecs::spawn_named(&mut self.world, frame_name);
+        self.world
+            .entity_mut(frame)
+            .insert((Parent(parent), local_transform));
         true
     }
 

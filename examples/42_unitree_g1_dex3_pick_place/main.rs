@@ -20,15 +20,22 @@ const STEPS_PER_FRAME: usize = 4;
 const CLEAR_COLOR: [f32; 4] = [0.025, 0.04, 0.07, 1.0];
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--gif") {
+    let args: Vec<_> = std::env::args().collect();
+    let randomized = args.iter().any(|arg| arg == "--randomized");
+    if args.iter().any(|arg| arg == "--gif") {
         render_gif();
         return;
     }
-    run_headless();
+    run_headless(randomized);
 }
 
-fn run_headless() {
-    let mut episode = UnitreeG1Dex3Episode::new(Default::default()).expect("load G1 Dex3 episode");
+fn run_headless(randomized: bool) {
+    let config = if randomized {
+        rne_ai::UnitreeG1Dex3EpisodeConfig::randomized(4)
+    } else {
+        Default::default()
+    };
+    let mut episode = UnitreeG1Dex3Episode::new(config).expect("load G1 Dex3 episode");
     let mut total_reward = 0.0;
     let mut last_phase = None;
     loop {
@@ -36,9 +43,11 @@ fn run_headless() {
         total_reward += step.reward;
         if last_phase != Some(step.observation.phase) || step.is_done() {
             println!(
-                "step {:3}: phase={:?} height={:.3}m gap={:.3}m span={:.3}m center={:.3}m opposition={:.2} stable={} dual={} grasped={} placed={}",
+                "step {:3}: phase={:?} attempt={} offset={:?} height={:.3}m gap={:.3}m span={:.3}m center={:.3}m opposition={:.2} stable={} dual={} grasped={} placed={}",
                 episode.step_in_episode(),
                 step.observation.phase,
+                step.observation.grasp_attempt,
+                step.observation.part_position_offset_m,
                 step.observation.part_position_m[1],
                 step.observation.pinch_gap_m,
                 step.observation.contact_span_m,
@@ -53,10 +62,17 @@ fn run_headless() {
         }
         if step.is_done() {
             assert!(step.terminated, "Dex3 task must succeed before truncation");
-            println!(
-                "G1 Dex3 pick-and-place complete: total_reward={total_reward:.3}, placed={}",
-                step.observation.placed
-            );
+            if randomized {
+                println!(
+                    "G1 Dex3 randomized grasp acquired: total_reward={total_reward:.3}, attempt={}, offset={:?}",
+                    step.observation.grasp_attempt, step.observation.part_position_offset_m
+                );
+            } else {
+                println!(
+                    "G1 Dex3 pick-and-place complete: total_reward={total_reward:.3}, placed={}",
+                    step.observation.placed
+                );
+            }
             break;
         }
     }
