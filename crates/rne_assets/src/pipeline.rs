@@ -474,6 +474,30 @@ path = "diff_drive.rne.robot.toml"
     }
 
     #[test]
+    fn hot_reload_keeps_last_valid_bundle_and_recovers_after_parse_error() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rne_assets_hot_reload_recovery_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+        let scene_path = temp_dir.join("scene.rne.scene.toml");
+        fs::write(&scene_path, "[world]\nseed = 7\n").unwrap();
+
+        let mut reloader = AssetHotReloader::load(&scene_path).unwrap();
+        thread::sleep(Duration::from_millis(1100));
+        fs::write(&scene_path, "[world\nseed =").unwrap();
+        assert!(reloader.poll().is_err());
+        assert_eq!(reloader.bundle().scene.world.seed, 7);
+
+        thread::sleep(Duration::from_millis(1100));
+        fs::write(&scene_path, "[world]\nseed = 8\n").unwrap();
+        assert!(reloader.poll().unwrap());
+        assert_eq!(reloader.bundle().scene.world.seed, 8);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn urdf_robot_requires_existing_file() {
         let robot_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/diff_drive_urdf.rne.robot.toml");

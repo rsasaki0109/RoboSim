@@ -155,7 +155,8 @@ cargo run -p interactive_viewer --example 14_interactive_viewer -- --urdf assets
 
 The viewer watches the scene, referenced robot/URDF files, and environment meshes. Saving any
 dependency rebuilds the complete simulation World, clears resolved mesh caches, and preserves the
-camera workflow for live factory-layout iteration.
+camera workflow for live factory-layout iteration. Invalid intermediate saves keep the last valid
+World running; the viewer reports the error once and automatically recovers after a corrected save.
 
 ### Python policy example
 

@@ -608,6 +608,8 @@ struct App {
     hot_reloader: Option<AssetHotReloader>,
     mesh_cache: MeshRenderCache,
     reload_count: u32,
+    reload_pending: bool,
+    last_reload_error: Option<String>,
     orbit: CameraOrbit,
     pressed: HashSet<KeyCode>,
     show_lidar: bool,
@@ -626,6 +628,8 @@ impl App {
             hot_reloader: None,
             mesh_cache: MeshRenderCache::new(),
             reload_count: 0,
+            reload_pending: false,
+            last_reload_error: None,
             orbit: CameraOrbit::default(),
             pressed: HashSet::new(),
             show_lidar: true,
@@ -828,17 +832,35 @@ impl App {
     }
 
     fn poll_hot_reload(&mut self) -> Result<(), String> {
-        let Some(reloader) = self.hot_reloader.as_mut() else {
-            return Ok(());
-        };
-        if !reloader.poll().map_err(|error| error.to_string())? {
-            return Ok(());
+        if !self.reload_pending {
+            let poll_result = match self.hot_reloader.as_mut() {
+                Some(reloader) => reloader.poll(),
+                None => return Ok(()),
+            };
+            match poll_result {
+                Ok(true) => self.reload_pending = true,
+                Ok(false) => return Ok(()),
+                Err(error) => {
+                    self.report_reload_error(format!("asset reload rejected: {error}"));
+                    return Ok(());
+                }
+            }
         }
 
-        let sim = self.sim.as_mut().ok_or("simulation not ready")?;
-        sim.reload_scene(profile_scene_path(&self.profile))?;
+        let reload_result = self
+            .sim
+            .as_mut()
+            .ok_or("simulation not ready")?
+            .reload_scene(profile_scene_path(&self.profile));
+        if let Err(error) = reload_result {
+            self.report_reload_error(error);
+            return Ok(());
+        }
+        self.reload_pending = false;
+        self.last_reload_error = None;
         self.reload_count += 1;
         self.mesh_cache.clear();
+        let sim = self.sim.as_ref().ok_or("simulation not ready")?;
         self.orbit.focus = sim.focus();
         println!(
             "reloaded scene (#{}) seed={} mesh_roots={}",
@@ -847,6 +869,13 @@ impl App {
             sim.mesh_roots().len()
         );
         Ok(())
+    }
+
+    fn report_reload_error(&mut self, error: String) {
+        if self.last_reload_error.as_deref() != Some(&error) {
+            eprintln!("{error}; keeping the last valid World and waiting for another save");
+            self.last_reload_error = Some(error);
+        }
     }
 
     fn apply_camera_input(&mut self) {
