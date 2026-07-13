@@ -25,9 +25,9 @@ collision = { shape = "box", size_m = [0.030, 0.030, 0.030] }
 
 [[objects]]
 name = "dex3_inspection_tray"
-translation_m = [0.414, 0.77, 0.207]
-visual = { shape = "box", size_m = [0.16, 0.08, 0.16], color_rgba = [0.08, 0.42, 0.50, 1.0] }
-collision = { shape = "box", size_m = [0.16, 0.08, 0.16] }
+translation_m = [0.414, 0.735, 0.207]
+visual = { shape = "box", size_m = [0.16, 0.02, 0.16], color_rgba = [0.08, 0.42, 0.50, 1.0] }
+collision = { shape = "box", size_m = [0.16, 0.02, 0.16] }
 
 [[objects]]
 name = "dex3_factory_back_wall"
@@ -38,5 +38,5 @@ collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
 [[task_markers]]
 name = "dex3_place_zone"
 kind = "place"
-translation_m = [0.414, 0.81, 0.207]
+translation_m = [0.414, 0.76, 0.207]
 radius_m = 0.07

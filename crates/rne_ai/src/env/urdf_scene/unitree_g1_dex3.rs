@@ -12,7 +12,8 @@ pub struct UnitreeG1Dex3HandCommand {
 /// `approach_blend` transitions from a slightly retracted pose to the low work
 /// pose, while `lift_blend` transitions that work pose to the raised carry pose.
 /// The hand closure is clamped to `[0, 1]` and drives the thumb, index, and
-/// middle finger within their official limits.
+/// middle finger within their official limits. The inactive left arm and hand
+/// receive explicit neutral targets so contact cannot make them drift.
 pub fn unitree_g1_dex3_pick_targets(
     approach_blend: f64,
     lift_blend: f64,
@@ -31,6 +32,20 @@ pub fn unitree_g1_dex3_pick_targets(
         target("waist_yaw_link", 0.0),
         target("waist_roll_link", 0.0),
         target("torso_link", 0.0),
+        target("left_shoulder_pitch_link", 0.0),
+        target("left_shoulder_roll_link", 0.0),
+        target("left_shoulder_yaw_link", 0.0),
+        target("left_elbow_link", 0.0),
+        target("left_wrist_roll_link", 0.0),
+        target("left_wrist_pitch_link", 0.0),
+        target("left_wrist_yaw_link", 0.0),
+        target("left_hand_thumb_0_link", 0.0),
+        target("left_hand_thumb_1_link", 0.0),
+        target("left_hand_thumb_2_link", 0.0),
+        target("left_hand_middle_0_link", 0.0),
+        target("left_hand_middle_1_link", 0.0),
+        target("left_hand_index_0_link", 0.0),
+        target("left_hand_index_1_link", 0.0),
         target(
             "right_shoulder_pitch_link",
             0.18 * (1.0 - approach) * (1.0 - lift) - 0.58 * lift,
@@ -92,6 +107,39 @@ mod tests {
                 .expect("closed finger target")
                 .position;
             assert_ne!(open_position, closed_position);
+        }
+    }
+
+    #[test]
+    fn inactive_left_arm_stays_in_the_same_neutral_pose() {
+        let approach =
+            unitree_g1_dex3_pick_targets(0.0, 0.0, UnitreeG1Dex3HandCommand { closure: 0.0 });
+        let carry =
+            unitree_g1_dex3_pick_targets(1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+        for link_name in [
+            "left_shoulder_pitch_link",
+            "left_shoulder_roll_link",
+            "left_shoulder_yaw_link",
+            "left_elbow_link",
+            "left_wrist_roll_link",
+            "left_wrist_pitch_link",
+            "left_wrist_yaw_link",
+            "left_hand_thumb_0_link",
+            "left_hand_thumb_1_link",
+            "left_hand_thumb_2_link",
+            "left_hand_middle_0_link",
+            "left_hand_middle_1_link",
+            "left_hand_index_0_link",
+            "left_hand_index_1_link",
+        ] {
+            let position = |targets: &[UrdfJointPositionTarget<'_>]| {
+                targets
+                    .iter()
+                    .find(|target| target.link_name == link_name)
+                    .expect("stowed left-side target")
+                    .position
+            };
+            assert_eq!(position(&approach), position(&carry), "{link_name}");
         }
     }
 }

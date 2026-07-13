@@ -27,7 +27,7 @@ const RELEASE_STEP: u64 = LIFT_START_STEP + LIFT_STEPS + HOLD_STEPS;
 const SUCCESS_STEP: u64 = RELEASE_STEP + PLACE_SETTLE_STEPS;
 const MIN_GRASP_CLOSURE: f64 = 0.8;
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
-const MIN_PLACED_HEIGHT_M: f64 = 0.82;
+const MIN_PLACED_HEIGHT_M: f64 = 0.75;
 const MAX_PLACED_SPEED_M_S: f64 = 0.05;
 
 /// Script phase reported by [`UnitreeG1Dex3Episode`].
@@ -752,6 +752,13 @@ fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, A
     let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
     sim.configure_position_motors(220.0, 24.0, 88.0);
     for (name, max_force_nm) in [
+        ("left_hand_thumb_0_link", 2.45),
+        ("left_hand_thumb_1_link", 1.4),
+        ("left_hand_thumb_2_link", 1.4),
+        ("left_hand_middle_0_link", 1.4),
+        ("left_hand_middle_1_link", 1.4),
+        ("left_hand_index_0_link", 1.4),
+        ("left_hand_index_1_link", 1.4),
         ("right_hand_thumb_0_link", 2.45),
         ("right_hand_thumb_1_link", 1.4),
         ("right_hand_thumb_2_link", 1.4),
