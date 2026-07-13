@@ -45,7 +45,7 @@ and lift actions, four-foot loads and gait phase, and a locomotion/upright rewar
     <img src="docs/media/unitree-g1.gif" alt="Official Unitree G1 walking to an inspection station and performing a point-and-confirm task" width="600">
   </picture>
   <br>
-  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody walks to an equipment station, stops, and performs a point-and-confirm inspection gesture using all force-limited joints against primitive foot contacts. The deterministic task is rendered offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
+  <sub>Official Unitree G1 23-DoF URDF and 29 STL meshes loaded through the same generic pipeline. After a standing settle, its dynamic multibody follows a three-checkpoint factory route, stopping for a point-and-confirm inspection gesture at the parts area, safety barrier, and equipment panel. The deterministic task is rendered offscreen with wgpu. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
 </p>
 
 ```bash
@@ -132,8 +132,9 @@ radius_m = 0.45
 ```
 
 `assets/scenes/unitree_g1_factory.rne.scene.toml` demonstrates a complete factory cell
-with a shelf, safety barrier, back wall, inspection equipment, and semantic inspection goal.
-`UnitreeG1InspectionEpisode` consumes that named marker directly and exposes marker distance,
+with a shelf, safety barrier, back wall, inspection equipment, and three ordered semantic
+inspection goals. `UnitreeG1InspectionEpisode` walks and performs a point-and-confirm gesture
+at each named marker, exposing the current route index, completed-marker count, distance,
 interaction radius, gesture progress, success termination, and a deterministic task reward.
 
 ```bash

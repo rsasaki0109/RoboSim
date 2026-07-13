@@ -16,8 +16,9 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
-const FRAME_COUNT: usize = 36;
+const FRAME_COUNT: usize = 90;
 const STEPS_PER_FRAME: u64 = 3;
+const STEPS_PER_INSPECTION: u64 = 90;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
 
 fn main() {
@@ -32,7 +33,13 @@ fn main() {
 
     let mut sim =
         UrdfSceneSim::from_scene_path(&unitree_g1_factory_scene_path()).expect("load factory G1");
-    assert!(sim.task_marker("inspection_panel_check").is_some());
+    for marker_name in [
+        "inspection_parts_check",
+        "inspection_safety_check",
+        "inspection_panel_check",
+    ] {
+        assert!(sim.task_marker(marker_name).is_some());
+    }
     sim.configure_position_motors(220.0, 24.0, 88.0);
     let stand = standing_targets();
     for _ in 0..120 {
@@ -49,7 +56,9 @@ fn main() {
     for frame in 0..FRAME_COUNT {
         for substep in 0..STEPS_PER_FRAME {
             let step = frame as u64 * STEPS_PER_FRAME + substep;
-            sim.step_joint_position_targets(&unitree_g1_inspection_targets(step));
+            sim.step_joint_position_targets(&unitree_g1_inspection_targets(
+                step % STEPS_PER_INSPECTION,
+            ));
         }
         let mut scene = build_visual_render_scene(sim.world());
         scene.items.retain(|item| {

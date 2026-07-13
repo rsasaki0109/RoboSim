@@ -45,6 +45,18 @@ visual = { shape = "box", size_m = [3.2, 2.0, 0.08], color_rgba = [0.18, 0.22, 0
 collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
 
 [[task_markers]]
+name = "inspection_parts_check"
+kind = "inspection"
+translation_m = [0.20, 0.0, -0.12]
+radius_m = 0.50
+
+[[task_markers]]
+name = "inspection_safety_check"
+kind = "inspection"
+translation_m = [0.38, 0.0, -0.22]
+radius_m = 0.62
+
+[[task_markers]]
 name = "inspection_panel_check"
 kind = "inspection"
 translation_m = [0.72, 0.0, -0.30]

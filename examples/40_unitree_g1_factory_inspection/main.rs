@@ -14,17 +14,22 @@ fn main() {
         total_reward += step.reward;
         if episode.step_in_episode() == 1 {
             println!(
-                "inspection start: marker_distance={:.3} m radius={:.3} m",
-                step.observation.marker_distance_m, step.observation.marker_radius_m
+                "inspection route start: marker {}/{} distance={:.3} m radius={:.3} m",
+                step.observation.current_marker_index + 1,
+                step.observation.marker_count,
+                step.observation.marker_distance_m,
+                step.observation.marker_radius_m
             );
         }
         if episode.step_in_episode().is_multiple_of(30) || step.is_done() {
             println!(
-                "step {:3}: marker_distance={:.3} m gesture={:.0}% inside={} reward={:.3}",
+                "step {:3}: marker={}/{} distance={:.3} m gesture={:.0}% completed={} reward={:.3}",
                 episode.step_in_episode(),
+                step.observation.current_marker_index + 1,
+                step.observation.marker_count,
                 step.observation.marker_distance_m,
                 step.observation.gesture_progress * 100.0,
-                step.observation.inside_marker,
+                step.observation.completed_markers,
                 step.reward,
             );
         }
@@ -34,7 +39,8 @@ fn main() {
                 "inspection should succeed before truncation"
             );
             println!(
-                "factory inspection complete: total_reward={total_reward:.3}, marker=inspection_panel_check"
+                "factory inspection route complete: total_reward={total_reward:.3}, markers={}",
+                step.observation.completed_markers
             );
             break;
         }

@@ -28,8 +28,8 @@
 | Quadruped standing | `cargo run -p quadruped_stand --example 36_quadruped_stand` | Headless 12-DoF URDF standing controller with four-foot contact impulses |
 | Humanoid standing | `cargo run -p humanoid_stand --example 37_humanoid_stand` | Headless 12-DoF humanoid balance smoke with left/right foot loads |
 | Unitree Go2 GIF | `cargo run -p unitree_go2_gif --example 38_unitree_go2_gif` | Settles the official dynamic Go2 multibody, steps a diagonal contact trot, and renders README GIF/PNG media |
-| Unitree G1 GIF | `cargo run -p unitree_g1_gif --example 39_unitree_g1_gif` | Settles the official dynamic G1 multibody, walks to an equipment station, performs a point-and-confirm inspection, and renders README GIF/PNG media |
-| Unitree G1 factory inspection | `cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection` | Loads the factory World and named task marker, then runs the deterministic headless inspection Episode to success |
+| Unitree G1 GIF | `cargo run -p unitree_g1_gif --example 39_unitree_g1_gif` | Renders the official dynamic G1 completing a three-checkpoint factory inspection route |
+| Unitree G1 factory inspection | `cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection` | Runs a deterministic three-marker factory inspection route with walking and point-and-confirm gestures |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
