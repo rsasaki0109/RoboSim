@@ -327,6 +327,12 @@ impl UrdfSceneSim {
         Some((translation.x, translation.y, translation.z))
     }
 
+    /// Returns any named scene entity's world transform.
+    pub fn named_transform(&self, name: &str) -> Option<rne_world::Transform3> {
+        let entity = find_entity_by_name(&self.world, name)?;
+        Some(world_transform_of(&self.world, entity))
+    }
+
     /// Returns a named rigid body's linear speed in meters per second.
     pub fn named_linear_speed_m_s(&self, name: &str) -> Option<f64> {
         let entity = find_entity_by_name(&self.world, name)?;
@@ -379,6 +385,41 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Welds a contacting child at a canonical pose in the parent's local frame.
+    ///
+    /// Unlike [`Self::weld_named_child_on_contact`], this places the child's origin
+    /// at `anchor_parent_m` and aligns its rotation with the parent. The contact
+    /// requirement prevents a distant body from being attached through scripting.
+    pub fn weld_named_child_on_contact_at_parent_anchor(
+        &mut self,
+        parent_name: &str,
+        child_name: &str,
+        anchor_parent_m: [f64; 3],
+    ) -> bool {
+        if anchor_parent_m.iter().any(|value| !value.is_finite())
+            || !self.named_entities_in_contact(parent_name, child_name)
+        {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let Some(child) = find_entity_by_name(&self.world, child_name) else {
+            return false;
+        };
+        self.world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: rne_math::Vec3::new(
+                anchor_parent_m[0],
+                anchor_parent_m[1],
+                anchor_parent_m[2],
+            ),
+            anchor_child_m: rne_math::Vec3::ZERO,
+            relative_rotation: rne_math::Quat::IDENTITY,
+        });
+        true
+    }
+
     /// Releases a named child body previously attached by a fixed joint.
     pub fn release_named_child(&mut self, child_name: &str) -> bool {
         let Some(child) = find_entity_by_name(&self.world, child_name) else {
@@ -401,9 +442,24 @@ impl UrdfSceneSim {
     /// visual-quality URDF mesh intentionally has mesh collisions disabled but
     /// a small end-effector proxy is needed for deterministic interaction.
     pub fn add_named_box_contact_proxy(&mut self, name: &str, size_m: [f64; 3]) -> bool {
+        self.add_named_box_contact_proxy_at(name, size_m, [0.0; 3])
+    }
+
+    /// Adds an offset box-shaped physics contact proxy to a named entity.
+    ///
+    /// `size_m` contains full X/Y/Z extents and `offset_m` locates the proxy in
+    /// the entity's local frame. This is useful for URDF end-effector meshes whose
+    /// link origin is at the wrist rather than inside the visible palm.
+    pub fn add_named_box_contact_proxy_at(
+        &mut self,
+        name: &str,
+        size_m: [f64; 3],
+        offset_m: [f64; 3],
+    ) -> bool {
         if size_m
             .iter()
             .any(|extent_m| !extent_m.is_finite() || *extent_m <= 0.0)
+            || offset_m.iter().any(|value| !value.is_finite())
         {
             return false;
         }
@@ -417,6 +473,10 @@ impl UrdfSceneSim {
             shape: ColliderShape::Cuboid {
                 half_extents_m: rne_math::Vec3::new(size_m[0], size_m[1], size_m[2]) * 0.5,
             },
+            local_offset: rne_world::Transform3::from_translation_rotation(
+                rne_math::Vec3::new(offset_m[0], offset_m[1], offset_m[2]),
+                rne_math::Quat::IDENTITY,
+            ),
             ..Collider::default()
         });
         true

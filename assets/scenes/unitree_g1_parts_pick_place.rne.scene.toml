@@ -22,12 +22,12 @@ collision = { shape = "box", size_m = [0.24, 0.16, 0.24] }
 
 [[objects]]
 name = "g1_inspection_part"
-translation_m = [0.122, 0.88, 0.144]
+translation_m = [0.274, 0.874, 0.086]
 body_type = "dynamic"
 mass_kg = 0.04
 friction = 0.9
-visual = { shape = "box", size_m = [0.10, 0.10, 0.10], color_rgba = [0.95, 0.42, 0.10, 1.0] }
-collision = { shape = "box", size_m = [0.10, 0.10, 0.10] }
+visual = { shape = "box", size_m = [0.055, 0.055, 0.055], color_rgba = [0.95, 0.42, 0.10, 1.0] }
+collision = { shape = "box", size_m = [0.055, 0.055, 0.055] }
 
 [[objects]]
 name = "inspection_parts_tray"

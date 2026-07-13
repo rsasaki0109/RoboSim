@@ -10,9 +10,14 @@ const SETTLE_STEPS: u64 = 120;
 const CARRY_STEPS: u64 = 90;
 const HOLD_BEFORE_RELEASE_STEPS: u64 = 60;
 const PLACE_SETTLE_STEPS: u64 = 90;
-const HAND_PROXY_SIZE_M: [f64; 3] = [0.14, 0.14, 0.14];
+// The G1 rubber-hand mesh starts at the wrist origin and extends along local +X.
+// Keep the proxy inside the visible palm/finger pocket instead of surrounding the wrist.
+const HAND_PROXY_SIZE_M: [f64; 3] = [0.08, 0.065, 0.07];
+const HAND_PROXY_OFFSET_M: [f64; 3] = [0.17, 0.006, 0.018];
+const GRASP_ANCHOR_M: [f64; 3] = [0.17, 0.006, 0.018];
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
-const MIN_PLACED_HEIGHT_M: f64 = 0.84;
+// Tray top is 0.81 m; the 55 mm part settles with its center near 0.8375 m.
+const MIN_PLACED_HEIGHT_M: f64 = 0.83;
 const MAX_PLACED_SPEED_M_S: f64 = 0.05;
 
 /// Script phase reported by [`UnitreeG1PartsEpisode`].
@@ -228,9 +233,11 @@ impl Episode for UnitreeG1PartsEpisode {
         let before = self.observation();
         if action.advance {
             if self.step_in_episode == 0 {
-                self.was_grasped = self
-                    .sim
-                    .weld_named_child_on_contact(&self.config.hand_name, &self.config.part_name);
+                self.was_grasped = self.sim.weld_named_child_on_contact_at_parent_anchor(
+                    &self.config.hand_name,
+                    &self.config.part_name,
+                    GRASP_ANCHOR_M,
+                );
             }
             let hold = unitree_g1_inspection_targets(CARRY_STEPS - 1);
             if self.step_in_episode < CARRY_STEPS {
@@ -288,7 +295,11 @@ impl Episode for UnitreeG1PartsEpisode {
 fn configured_sim(config: &UnitreeG1PartsEpisodeConfig) -> Result<UrdfSceneSim, AssetError> {
     let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
     sim.configure_position_motors(220.0, 24.0, 88.0);
-    if !sim.add_named_box_contact_proxy(&config.hand_name, HAND_PROXY_SIZE_M) {
+    if !sim.add_named_box_contact_proxy_at(
+        &config.hand_name,
+        HAND_PROXY_SIZE_M,
+        HAND_PROXY_OFFSET_M,
+    ) {
         return Err(AssetError::Invalid {
             path: config.scene_path.display().to_string(),
             message: format!("could not add contact proxy to `{}`", config.hand_name),
@@ -368,5 +379,29 @@ mod tests {
         let mut sim = configured_sim(&config).expect("configured scene");
         assert!(!sim.weld_named_child_on_contact(&config.hand_name, "inspection_parts_tray"));
         assert!(!sim.named_child_is_welded("inspection_parts_tray"));
+    }
+
+    #[test]
+    fn grasp_anchor_is_inside_visible_rubber_hand() {
+        let mut episode = UnitreeG1PartsEpisode::new(Default::default()).expect("parts episode");
+        let step = episode.step(UnitreeG1PartsAction { advance: true });
+        assert!(step.observation.hand_contact);
+        assert!(step.observation.grasped);
+
+        let hand = episode
+            .simulation()
+            .named_transform(&episode.config.hand_name)
+            .expect("right hand transform");
+        let part = episode
+            .simulation()
+            .named_transform(&episode.config.part_name)
+            .expect("part transform");
+        let part_in_hand_m = hand.rotation.conjugate() * (part.translation - hand.translation);
+        assert!(
+            (0.12..=0.22).contains(&part_in_hand_m.x),
+            "part must be beyond the wrist and inside the 0.00-0.25 m hand mesh: {part_in_hand_m:?}"
+        );
+        assert!(part_in_hand_m.y.abs() <= 0.05, "{part_in_hand_m:?}");
+        assert!(part_in_hand_m.z.abs() <= 0.06, "{part_in_hand_m:?}");
     }
 }
