@@ -42,6 +42,7 @@ struct RapierWorldState {
     query_pipeline: QueryPipeline,
     entity_to_body: HashMap<Entity, RigidBodyHandle>,
     body_to_entity: HashMap<RigidBodyHandle, Entity>,
+    entity_to_collider: HashMap<Entity, ColliderHandle>,
     collider_to_entity: HashMap<ColliderHandle, Entity>,
     entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
     entity_to_multibody_joint: HashMap<Entity, MultibodyJointHandle>,
@@ -111,6 +112,7 @@ impl PhysicsBackend for RapierBackend {
                 query_pipeline: QueryPipeline::new(),
                 entity_to_body: HashMap::new(),
                 body_to_entity: HashMap::new(),
+                entity_to_collider: HashMap::new(),
                 collider_to_entity: HashMap::new(),
                 entity_to_joint: HashMap::new(),
                 entity_to_multibody_joint: HashMap::new(),
@@ -151,6 +153,7 @@ impl PhysicsBackend for RapierBackend {
                         body.set_angvel(vec3_to_rapier(rigid_body.angular_velocity_rad_s), true);
                     }
                 }
+                sync_entity_collider(world, state, entity, body_handle, collider);
                 continue;
             }
 
@@ -187,6 +190,7 @@ impl PhysicsBackend for RapierBackend {
                     body_handle,
                     &mut state.bodies,
                 );
+                state.entity_to_collider.insert(entity, collider_handle);
                 state.collider_to_entity.insert(collider_handle, entity);
             }
         }
@@ -345,6 +349,53 @@ impl PhysicsBackend for RapierBackend {
     fn capabilities(&self) -> &[PhysicsCapability] {
         &self.capabilities
     }
+}
+
+fn sync_entity_collider(
+    world: &World,
+    state: &mut RapierWorldState,
+    entity: Entity,
+    body_handle: RigidBodyHandle,
+    collider: Option<&Collider>,
+) {
+    let existing = state.entity_to_collider.get(&entity).copied();
+    match (existing, collider) {
+        (None, Some(collider)) => {
+            let handle = state.colliders.insert_with_parent(
+                collider_builder(world, entity, collider).build(),
+                body_handle,
+                &mut state.bodies,
+            );
+            state.entity_to_collider.insert(entity, handle);
+            state.collider_to_entity.insert(handle, entity);
+        }
+        (Some(_), Some(_)) => {}
+        (Some(handle), None) => {
+            state
+                .colliders
+                .remove(handle, &mut state.island_manager, &mut state.bodies, true);
+            state.collider_to_entity.remove(&handle);
+            state.entity_to_collider.remove(&entity);
+        }
+        (None, None) => {}
+    }
+}
+
+fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
+    ColliderBuilder::new(shape_to_shared(collider.shape))
+        .position(transform_to_isometry(&collider.local_offset))
+        .friction(collider.material.friction)
+        .restitution(collider.material.restitution)
+        .collision_groups({
+            let groups = world
+                .get::<rne_physics::CollisionGroups>(entity)
+                .copied()
+                .unwrap_or_default();
+            InteractionGroups::new(
+                Group::from_bits_truncate(groups.memberships),
+                Group::from_bits_truncate(groups.filter),
+            )
+        })
 }
 
 /// Maximum torque a revolute joint motor may apply.
@@ -782,6 +833,58 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entity, ground);
         assert_relative_eq!(hits[0].point_m.y, 0.0, epsilon = 0.1);
+    }
+
+    #[test]
+    fn collider_can_be_added_to_and_removed_from_existing_multibody_link() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .expect("physics world");
+        let mut world = World::new();
+        let link = spawn_named(&mut world, "tool_link");
+        world.entity_mut(link).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            MultibodyLink,
+            Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY),
+        ));
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        assert!(backend
+            .raycast(
+                physics_world,
+                RaycastQuery::downward(Vec3::new(0.0, 2.0, 0.0), 2.0),
+            )
+            .unwrap()
+            .is_empty());
+
+        world
+            .entity_mut(link)
+            .insert(Collider::cuboid(Vec3::splat(0.1)));
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        let hits = backend
+            .raycast(
+                physics_world,
+                RaycastQuery::downward(Vec3::new(0.0, 2.0, 0.0), 2.0),
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entity, link);
+
+        world.entity_mut(link).remove::<Collider>();
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        assert!(backend
+            .raycast(
+                physics_world,
+                RaycastQuery::downward(Vec3::new(0.0, 2.0, 0.0), 2.0),
+            )
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

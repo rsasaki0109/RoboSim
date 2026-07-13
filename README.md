@@ -52,6 +52,30 @@ and lift actions, four-foot loads and gait phase, and a locomotion/upright rewar
 cargo run -p unitree_g1_gif --example 39_unitree_g1_gif
 ```
 
+### G1 contact-grasp parts handling
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-parts.png">
+    <img src="docs/media/unitree-g1-parts.gif" alt="Fixed-base Unitree G1 grasping, lifting, carrying, and placing an inspection part" width="600">
+  </picture>
+  <br>
+  <sub>The official G1 articulation performs a deterministic arm-work phase in a dedicated fixed-root cell: its right-hand primitive contact proxy must physically touch the orange part before a weld grasp is allowed, then the arm lifts and stabilizes the payload, releases it, and lets gravity settle it inside the named cyan inspection tray. The walking G1 remains a separate dynamic-root scene.</sub>
+</p>
+
+```bash
+# Deterministic headless Episode
+cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place
+# Regenerate the real wgpu GIF and reduced-motion PNG
+cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place -- --gif
+```
+
+`UnitreeG1PartsEpisode` reports contact, current and historical grasp state, payload height,
+maximum lift height, place-zone distance, phase, and completion. Success requires a real
+contact-gated grasp, a lift above 0.98 m, weld release, and a settled payload inside the named
+`parts_place_zone` moving no faster than 0.05 m/s; exact replay after reset is covered by a
+headless test.
+
 The G1 integration also includes a headless dynamic balance episode with
 primitive foot contacts, deterministic reset/replay, observations, actions,
 and reward through `UnitreeG1Episode`. Its 23-DoF dynamic scene uses Rapier's

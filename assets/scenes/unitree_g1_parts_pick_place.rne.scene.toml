@@ -1,0 +1,48 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2041
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/unitree_g1_fixed.rne.robot.toml"
+
+[[objects]]
+name = "parts_rack"
+translation_m = [-0.55, 0.65, -0.55]
+visual = { shape = "mesh", path = "world/unitree_g1_parts_rack.obj", scale = [1.0, 1.0, 1.0], color_rgba = [0.24, 0.30, 0.38, 1.0] }
+collision = { shape = "box", size_m = [0.28, 1.30, 0.90] }
+
+[[objects]]
+name = "parts_pick_stand"
+translation_m = [0.16, 0.75, 0.16]
+visual = { shape = "box", size_m = [0.24, 0.16, 0.24], color_rgba = [0.32, 0.38, 0.46, 1.0] }
+collision = { shape = "box", size_m = [0.24, 0.16, 0.24] }
+
+[[objects]]
+name = "g1_inspection_part"
+translation_m = [0.122, 0.88, 0.144]
+body_type = "dynamic"
+mass_kg = 0.04
+friction = 0.9
+visual = { shape = "box", size_m = [0.10, 0.10, 0.10], color_rgba = [0.95, 0.42, 0.10, 1.0] }
+collision = { shape = "box", size_m = [0.10, 0.10, 0.10] }
+
+[[objects]]
+name = "inspection_parts_tray"
+translation_m = [0.38, 0.77, 0.32]
+visual = { shape = "box", size_m = [0.30, 0.08, 0.30], color_rgba = [0.08, 0.42, 0.50, 1.0] }
+collision = { shape = "box", size_m = [0.30, 0.08, 0.30] }
+
+[[objects]]
+name = "factory_back_wall"
+translation_m = [0.0, 1.0, -1.15]
+visual = { shape = "box", size_m = [3.2, 2.0, 0.08], color_rgba = [0.18, 0.22, 0.28, 1.0] }
+collision = { shape = "box", size_m = [3.2, 2.0, 0.08] }
+
+[[task_markers]]
+name = "parts_place_zone"
+kind = "place"
+translation_m = [0.38, 0.81, 0.32]
+radius_m = 0.14

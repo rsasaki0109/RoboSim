@@ -697,16 +697,32 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     if !venv_py.exists() {
         run_step(&format!("{host_python} -m venv .venv"))?;
     }
-    let venv = venv_py.display();
-    run_step(&format!(
-        "\"{venv}\" -m pip install -q --upgrade pip maturin"
-    ))?;
-    run_step(&format!(
-        "\"{venv}\" -m pip install -q -r examples/27_mobile_manipulator_rl/requirements-ci.txt"
-    ))?;
-    run_step(&format!(
-        "\"{venv}\" -m maturin develop -m crates/rne_py/Cargo.toml --release"
-    ))?;
+    run_program(
+        &venv_py,
+        &["-m", "pip", "install", "-q", "--upgrade", "pip", "maturin"],
+    )?;
+    run_program(
+        &venv_py,
+        &[
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "-r",
+            "examples/27_mobile_manipulator_rl/requirements-ci.txt",
+        ],
+    )?;
+    run_program(
+        &venv_py,
+        &[
+            "-m",
+            "maturin",
+            "develop",
+            "-m",
+            "crates/rne_py/Cargo.toml",
+            "--release",
+        ],
+    )?;
     for script in [
         "run.py",
         "train_place.py",
@@ -717,9 +733,8 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "train_mobile_clutter_ppo.py",
         "train_ppo.py",
     ] {
-        run_step(&format!(
-            "\"{venv}\" examples/27_mobile_manipulator_rl/{script} --smoke"
-        ))?;
+        let script_path = format!("examples/27_mobile_manipulator_rl/{script}");
+        run_program(&venv_py, &[&script_path, "--smoke"])?;
     }
     Ok(())
 }
@@ -886,6 +901,16 @@ fn run_step_output(command: &str) -> anyhow::Result<String> {
         Ok(format!("{stdout}\n{stderr}"))
     } else {
         anyhow::bail!("command failed with status {}", output.status);
+    }
+}
+
+fn run_program(program: &Path, args: &[&str]) -> anyhow::Result<()> {
+    println!("$ {} {}", program.display(), args.join(" "));
+    let status = Command::new(program).args(args).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("command failed with status {status}");
     }
 }
 

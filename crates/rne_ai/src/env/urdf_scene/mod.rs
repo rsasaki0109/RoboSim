@@ -9,6 +9,7 @@ mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
 mod unitree_g1_inspection;
 mod unitree_g1_inspection_episode;
+mod unitree_g1_parts_episode;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
 
@@ -36,6 +37,10 @@ pub use unitree_g1_inspection_episode::{
     UnitreeG1InspectionAction, UnitreeG1InspectionEpisode, UnitreeG1InspectionEpisodeConfig,
     UnitreeG1InspectionObservation,
 };
+pub use unitree_g1_parts_episode::{
+    UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
+    UnitreeG1PartsObservation, UnitreeG1PartsPhase,
+};
 pub use unitree_go2_episode::{
     UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
@@ -45,7 +50,10 @@ use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, As
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{Entity, Name, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat};
-use rne_physics::{JointMotor, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RigidBody};
+use rne_physics::{
+    Collider, ColliderShape, FixedJointDesc, JointMotor, PhysicsBackend, PhysicsWorldDesc,
+    PhysicsWorldId, RigidBody,
+};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::Link;
 use rne_world::{world_transform_of, TaskMarker};
@@ -248,6 +256,11 @@ impl UrdfSceneSim {
         unitree_g1_factory_scene_path()
     }
 
+    /// Fixed-base Unitree G1 parts pick-and-place scene path.
+    pub fn unitree_g1_parts_pick_place_scene_path() -> PathBuf {
+        unitree_g1_parts_pick_place_scene_path()
+    }
+
     /// Returns whether this scene has diff-drive wheel motors.
     pub fn left_wheel(&self) -> Option<Entity> {
         self.left_wheel
@@ -305,6 +318,108 @@ impl UrdfSceneSim {
         let entity = find_link_by_name(&self.world, link_name)?;
         let translation = world_transform_of(&self.world, entity).translation;
         Some((translation.x, translation.y, translation.z))
+    }
+
+    /// Returns any named scene entity's world translation in meters.
+    pub fn named_translation_m(&self, name: &str) -> Option<(f64, f64, f64)> {
+        let entity = find_entity_by_name(&self.world, name)?;
+        let translation = world_transform_of(&self.world, entity).translation;
+        Some((translation.x, translation.y, translation.z))
+    }
+
+    /// Returns a named rigid body's linear speed in meters per second.
+    pub fn named_linear_speed_m_s(&self, name: &str) -> Option<f64> {
+        let entity = find_entity_by_name(&self.world, name)?;
+        let velocity = self.world.get::<RigidBody>(entity)?.linear_velocity_m_s;
+        Some(velocity.x.hypot(velocity.y).hypot(velocity.z))
+    }
+
+    /// Returns whether two named entities contacted during the latest physics step.
+    pub fn named_entities_in_contact(&self, first_name: &str, second_name: &str) -> bool {
+        let Some(first) = find_entity_by_name(&self.world, first_name) else {
+            return false;
+        };
+        let Some(second) = find_entity_by_name(&self.world, second_name) else {
+            return false;
+        };
+        self.backend
+            .contacts(self.physics_world)
+            .is_ok_and(|contacts| {
+                contacts.iter().any(|contact| {
+                    (contact.entity_a == first && contact.entity_b == second)
+                        || (contact.entity_a == second && contact.entity_b == first)
+                })
+            })
+    }
+
+    /// Welds a named child body to a named parent only when they are in contact.
+    ///
+    /// The current relative pose is captured, so a successful attachment does not
+    /// teleport either body. Returns false when either entity is missing or the
+    /// latest physics step did not report contact between them.
+    pub fn weld_named_child_on_contact(&mut self, parent_name: &str, child_name: &str) -> bool {
+        if !self.named_entities_in_contact(parent_name, child_name) {
+            return false;
+        }
+        let Some(parent) = find_entity_by_name(&self.world, parent_name) else {
+            return false;
+        };
+        let Some(child) = find_entity_by_name(&self.world, child_name) else {
+            return false;
+        };
+        let parent_transform = world_transform_of(&self.world, parent);
+        let child_transform = world_transform_of(&self.world, child);
+        self.world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: parent_transform.rotation.conjugate()
+                * (child_transform.translation - parent_transform.translation),
+            anchor_child_m: rne_math::Vec3::ZERO,
+            relative_rotation: parent_transform.rotation.conjugate() * child_transform.rotation,
+        });
+        true
+    }
+
+    /// Releases a named child body previously attached by a fixed joint.
+    pub fn release_named_child(&mut self, child_name: &str) -> bool {
+        let Some(child) = find_entity_by_name(&self.world, child_name) else {
+            return false;
+        };
+        let was_welded = self.world.get::<FixedJointDesc>(child).is_some();
+        self.world.entity_mut(child).remove::<FixedJointDesc>();
+        was_welded
+    }
+
+    /// Returns whether a named child currently carries a fixed-joint attachment.
+    pub fn named_child_is_welded(&self, child_name: &str) -> bool {
+        find_entity_by_name(&self.world, child_name)
+            .is_some_and(|child| self.world.get::<FixedJointDesc>(child).is_some())
+    }
+
+    /// Adds a box-shaped physics contact proxy to a named entity without a collider.
+    ///
+    /// `size_m` contains full X/Y/Z extents in meters. This is useful when a
+    /// visual-quality URDF mesh intentionally has mesh collisions disabled but
+    /// a small end-effector proxy is needed for deterministic interaction.
+    pub fn add_named_box_contact_proxy(&mut self, name: &str, size_m: [f64; 3]) -> bool {
+        if size_m
+            .iter()
+            .any(|extent_m| !extent_m.is_finite() || *extent_m <= 0.0)
+        {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        if self.world.get::<Collider>(entity).is_some() {
+            return false;
+        }
+        self.world.entity_mut(entity).insert(Collider {
+            shape: ColliderShape::Cuboid {
+                half_extents_m: rne_math::Vec3::new(size_m[0], size_m[1], size_m[2]) * 0.5,
+            },
+            ..Collider::default()
+        });
+        true
     }
 
     /// Applies a diff-drive wheel action and steps one simulation tick.
@@ -495,6 +610,15 @@ fn find_link_by_name(world: &World, name: &str) -> Option<Entity> {
     None
 }
 
+fn find_entity_by_name(world: &World, name: &str) -> Option<Entity> {
+    world.iter_entities().find_map(|entity_ref| {
+        world
+            .get::<Name>(entity_ref.id())
+            .is_some_and(|entity_name| entity_name.0 == name)
+            .then_some(entity_ref.id())
+    })
+}
+
 fn assets_scene_path(file_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/scenes")
@@ -554,6 +678,11 @@ pub fn unitree_g1_dynamic_scene_path() -> PathBuf {
 /// Vendored official Unitree G1 factory inspection scene path.
 pub fn unitree_g1_factory_scene_path() -> PathBuf {
     assets_scene_path("unitree_g1_factory.rne.scene.toml")
+}
+
+/// Fixed-base official Unitree G1 parts pick-and-place scene path.
+pub fn unitree_g1_parts_pick_place_scene_path() -> PathBuf {
+    assets_scene_path("unitree_g1_parts_pick_place.rne.scene.toml")
 }
 
 #[cfg(test)]
