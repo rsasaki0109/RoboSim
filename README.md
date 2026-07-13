@@ -153,6 +153,10 @@ cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspe
 cargo run -p interactive_viewer --example 14_interactive_viewer -- --urdf assets/scenes/unitree_g1_factory.rne.scene.toml
 ```
 
+The viewer watches the scene, referenced robot/URDF files, and environment meshes. Saving any
+dependency rebuilds the complete simulation World, clears resolved mesh caches, and preserves the
+camera workflow for live factory-layout iteration.
+
 ### Python policy example
 
 ```bash

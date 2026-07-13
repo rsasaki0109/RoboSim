@@ -205,21 +205,19 @@ impl ViewerSim {
         }
     }
 
-    fn supports_hot_reload(&self) -> bool {
-        matches!(self, Self::DiffDrive(_))
-    }
-
     fn reload_scene(&mut self, scene_path: &Path) -> Result<(), String> {
         match self {
             Self::DiffDrive(sim) => sim
                 .reload_scene()
                 .map_err(|error| format!("reload scene: {error}")),
-            Self::Manipulator(_) => {
-                let _ = scene_path;
+            Self::Manipulator(sim) => {
+                **sim = MobileManipulatorSim::from_scene_path(scene_path)
+                    .map_err(|error| format!("reload manipulator scene: {error}"))?;
                 Ok(())
             }
-            Self::UrdfScene(_) => {
-                let _ = scene_path;
+            Self::UrdfScene(sim) => {
+                **sim = UrdfSceneSim::from_scene_path(scene_path)
+                    .map_err(|error| format!("reload URDF scene: {error}"))?;
                 Ok(())
             }
         }
@@ -343,6 +341,20 @@ fn profile_label(profile: &ViewerProfile) -> String {
         ViewerProfile::LeKiwi(path) => format!("lekiwi ({})", path.display()),
         ViewerProfile::LeKiwiSo101(path) => format!("lekiwi_so101 ({})", path.display()),
         ViewerProfile::Urdf(path) => format!("urdf ({})", path.display()),
+    }
+}
+
+fn profile_scene_path(profile: &ViewerProfile) -> &Path {
+    match profile {
+        ViewerProfile::DiffDriveScene(path)
+        | ViewerProfile::ManipulatorFixed(path)
+        | ViewerProfile::ManipulatorMobile(path)
+        | ViewerProfile::ManipulatorLift(path)
+        | ViewerProfile::So101(path)
+        | ViewerProfile::Cart(path)
+        | ViewerProfile::LeKiwi(path)
+        | ViewerProfile::LeKiwiSo101(path)
+        | ViewerProfile::Urdf(path) => path,
     }
 }
 
@@ -659,17 +671,13 @@ impl ApplicationHandler for App {
             }
         };
 
-        let hot_reloader = if let ViewerProfile::DiffDriveScene(path) = &self.profile {
-            match AssetHotReloader::load(path) {
-                Ok(reloader) => Some(reloader),
-                Err(error) => {
-                    eprintln!("failed to watch scene dependencies: {error}");
-                    event_loop.exit();
-                    return;
-                }
+        let hot_reloader = match AssetHotReloader::load(profile_scene_path(&self.profile)) {
+            Ok(reloader) => Some(reloader),
+            Err(error) => {
+                eprintln!("failed to watch scene dependencies: {error}");
+                event_loop.exit();
+                return;
             }
-        } else {
-            None
         };
 
         self.orbit.focus = sim.focus();
@@ -828,12 +836,7 @@ impl App {
         }
 
         let sim = self.sim.as_mut().ok_or("simulation not ready")?;
-        if !sim.supports_hot_reload() {
-            return Ok(());
-        }
-        if let ViewerProfile::DiffDriveScene(path) = &self.profile {
-            sim.reload_scene(path)?;
-        }
+        sim.reload_scene(profile_scene_path(&self.profile))?;
         self.reload_count += 1;
         self.mesh_cache.clear();
         self.orbit.focus = sim.focus();
@@ -1029,5 +1032,18 @@ mod tests {
             "expected base + arm + gripper links + ground, got {}",
             scene.items.len()
         );
+    }
+
+    #[test]
+    fn urdf_scene_can_be_rebuilt_for_hot_reload() {
+        let scene_path = cart_minimal_scene_path();
+        let profile = ViewerProfile::Urdf(scene_path.clone());
+        assert_eq!(profile_scene_path(&profile), scene_path);
+        let mut sim = load_sim(&profile).expect("load cart URDF scene");
+        let seed = sim.world_seed();
+        sim.reload_scene(&scene_path)
+            .expect("reload cart URDF scene");
+        assert_eq!(sim.world_seed(), seed);
+        assert!(matches!(sim, ViewerSim::UrdfScene(_)));
     }
 }
