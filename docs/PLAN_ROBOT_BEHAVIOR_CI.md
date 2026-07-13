@@ -320,4 +320,3 @@ that:
 - provides a replay that reproduces the failure;
 - opens the relevant failure interval in a browser;
 - does not require ROS2, a GPU, or physics-backend-specific public APIs.
-
