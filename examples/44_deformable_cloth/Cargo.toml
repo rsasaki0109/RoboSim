@@ -1,0 +1,18 @@
+[package]
+name = "deformable_cloth"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_assets = { path = "../../crates/rne_assets" }
+rne_deformable = { path = "../../crates/rne_deformable" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_render = { path = "../../crates/rne_render" }
+rne_render_wgpu = { path = "../../crates/rne_render_wgpu" }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "44_deformable_cloth"
+path = "main.rs"

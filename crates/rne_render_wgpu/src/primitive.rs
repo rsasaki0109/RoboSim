@@ -324,7 +324,9 @@ impl PrimitiveRenderer {
         match shape {
             VisualShape::Sphere { .. } => &self.sphere_mesh,
             VisualShape::Cylinder { .. } => &self.cylinder_mesh,
-            VisualShape::Box { .. } | VisualShape::Mesh { .. } => &self.box_mesh,
+            VisualShape::Box { .. } | VisualShape::Mesh { .. } | VisualShape::DynamicMesh => {
+                &self.box_mesh
+            }
         }
     }
 
@@ -367,6 +369,18 @@ impl PrimitiveRenderer {
                 .copy_from_slice(bytemuck::bytes_of(&uniform));
         }
         queue.write_buffer(&self.draw_buffer, 0, &draw_bytes);
+
+        let dynamic_meshes = scene
+            .items
+            .iter()
+            .map(|item| {
+                if item.shape == VisualShape::DynamicMesh {
+                    item.mesh.as_ref().map(|mesh| upload_mesh(device, mesh))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rne_camera_bind_group"),
@@ -419,7 +433,11 @@ impl PrimitiveRenderer {
                     &[index as u32 * self.draw_uniform_stride],
                 );
 
-                if let Some(mesh) = &item.mesh {
+                if let Some(gpu_mesh) = &dynamic_meshes[index] {
+                    pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
+                    pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
+                } else if let Some(mesh) = &item.mesh {
                     let gpu_mesh = self.gpu_mesh(device, mesh);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);

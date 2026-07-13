@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 rne_data = { path = "../rne_data" }
+rne_deformable = { path = "../rne_deformable" }
 rne_ecs = { path = "../rne_ecs" }
 rne_math = { path = "../rne_math" }
 rne_physics = { path = "../rne_physics" }

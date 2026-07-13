@@ -1,0 +1,33 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2042
+
+[ground]
+enabled = true
+
+[[objects]]
+name = "cloth_drape_box"
+translation_m = [0.0, 0.36, 0.0]
+visual = { shape = "box", size_m = [0.52, 0.72, 0.42], color_rgba = [0.24, 0.29, 0.36, 1.0] }
+collision = { shape = "box", size_m = [0.52, 0.72, 0.42] }
+friction = 0.62
+
+[[deformables]]
+kind = "cloth"
+name = "inspection_cloth"
+origin_m = [-0.55, 1.05, -0.38]
+width_direction_m = [1.10, 0.0, 0.0]
+height_direction_m = [0.0, 0.0, 0.76]
+columns = 17
+rows = 13
+total_mass_kg = 0.28
+pin_top_edge = false
+color_rgba = [0.08, 0.52, 0.88, 1.0]
+
+[deformables.material]
+collision_radius_m = 0.012
+structural_compliance_m_n = 0.0000002
+shear_compliance_m_n = 0.0000004
+bending_compliance_m_n = 0.0004
+velocity_retention_per_s = 0.994
+self_collision = true

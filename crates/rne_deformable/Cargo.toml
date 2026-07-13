@@ -1,0 +1,19 @@
+[package]
+name = "rne_deformable"
+description = "Deterministic backend-neutral cable and cloth dynamics for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_math = { path = "../rne_math" }
+rne_ecs = { path = "../rne_ecs" }
+rne_physics = { path = "../rne_physics" }
+rne_world = { path = "../rne_world" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

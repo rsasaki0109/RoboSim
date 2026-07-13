@@ -350,6 +350,7 @@ fn format_scene_report(bundle: &SceneAssetBundle) -> String {
         format!("ground: enabled={}", bundle.scene.ground.enabled),
         format!("robots: {}", bundle.robots.len()),
         format!("environment objects: {}", bundle.scene.objects.len()),
+        format!("deformables: {}", bundle.scene.deformables.len()),
     ];
 
     for (path, robot) in &bundle.robots {

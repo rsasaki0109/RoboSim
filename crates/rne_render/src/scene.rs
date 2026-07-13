@@ -53,6 +53,16 @@ impl RenderScene {
         }
     }
 
+    /// Builds an identity-transform item from CPU-generated triangle geometry.
+    pub fn item_from_dynamic_mesh(mesh: TriangleMesh, color_rgba: [f32; 4]) -> RenderSceneItem {
+        RenderSceneItem {
+            transform: MathTransform3::IDENTITY,
+            shape: VisualShape::DynamicMesh,
+            color_rgba,
+            mesh: Some(Arc::new(mesh)),
+        }
+    }
+
     /// Loads STL or OBJ files referenced by mesh visuals in this scene.
     pub fn resolve_mesh_assets(&mut self, package_root: &Path) -> Result<(), MeshLoadError> {
         self.resolve_mesh_assets_with_roots(&[package_root])
@@ -107,6 +117,7 @@ fn apply_shape_scale(mut transform: MathTransform3, shape: &VisualShape) -> Math
             rne_math::Vec3::new(radius_m * 2.0, radius_m * 2.0, *length_m)
         }
         VisualShape::Mesh { scale, .. } => *scale,
+        VisualShape::DynamicMesh => rne_math::Vec3::ONE,
     };
     transform.scale = rne_math::Vec3::new(
         transform.scale.x * shape_scale.x,
@@ -134,6 +145,20 @@ mod tests {
             WorldTransform3::IDENTITY,
         );
         assert_eq!(item.transform.scale, Vec3::new(2.0, 1.0, 0.5));
+    }
+
+    #[test]
+    fn dynamic_mesh_item_keeps_generated_geometry() {
+        let mesh = TriangleMesh {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+        };
+        let item = RenderScene::item_from_dynamic_mesh(mesh.clone(), [0.2, 0.4, 0.8, 1.0]);
+
+        assert_eq!(item.shape, VisualShape::DynamicMesh);
+        assert_eq!(item.transform, MathTransform3::IDENTITY);
+        assert_eq!(item.mesh.as_deref(), Some(&mesh));
     }
 
     #[test]

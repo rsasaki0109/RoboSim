@@ -32,6 +32,8 @@ pub enum VisualShape {
         /// Non-uniform scale.
         scale: Vec3,
     },
+    /// CPU-generated triangle mesh updated by the simulation.
+    DynamicMesh,
 }
 
 /// Visual description attached to a link or prop entity.

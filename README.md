@@ -120,6 +120,33 @@ cargo run -p urdf_import --example 03_urdf_import
 
 See [examples/README.md](examples/README.md) for the full list.
 
+### Deterministic deformable cables and cloth
+
+RNE includes a backend-neutral XPBD solver for cable and cloth entities. It uses
+fixed substeps and stable sequential constraint ordering, supports structural,
+shear, bending, and pin constraints, and projects particles against fixed or
+kinematic plane, box, sphere, and capsule colliders with positional friction.
+Non-adjacent particle self-collision can be enabled per material for folded
+cloth and coiled cable scenes. Cloth also resolves non-adjacent vertex-triangle
+contacts to separate folded vertices from nearby cloth faces.
+The same state is headless-testable through stable hashes and renderable through
+wgpu as dynamic cable segments or a per-frame cloth triangle mesh with generated
+smooth normals.
+
+```bash
+# Headless deterministic rollouts
+cargo run -p deformable_cable --example 43_deformable_cable
+cargo run -p deformable_cloth --example 44_deformable_cloth
+
+# Exercise the real wgpu dynamic-geometry paths
+cargo run -p deformable_cable --example 43_deformable_cable -- --render
+cargo run -p deformable_cloth --example 44_deformable_cloth -- --render
+```
+
+The MVP intentionally uses one-way rigid coupling. Tearing,
+deformable-to-deformable collision, two-way rigid reaction forces, and robot
+grasping are explicit follow-up work.
+
 **Highlights:** 3D pick-and-place on a lift-equipped arm (top-down claw + vertical lift),
 position-controlled joints, goal-conditioned RL agents, reach curricula, multi-robot
 collision, ROS 2 sim-control parity (incl. `/lift_command`), and sim-captured README media.

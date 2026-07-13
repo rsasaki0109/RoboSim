@@ -26,9 +26,142 @@ pub struct SceneAsset {
     /// Named environment objects with independent visual and collision shapes.
     #[serde(default)]
     pub objects: Vec<SceneObjectAsset>,
+    /// Cable and cloth entities simulated by the deformable solver.
+    #[serde(default)]
+    pub deformables: Vec<SceneDeformableAsset>,
     /// Named semantic task locations spawned without physics or visuals.
     #[serde(default)]
     pub task_markers: Vec<SceneTaskMarkerAsset>,
+}
+
+/// Scene-authored deformable material overrides.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneDeformableMaterialAsset {
+    /// Particle collision radius in meters.
+    #[serde(default = "default_deformable_collision_radius_m")]
+    pub collision_radius_m: f64,
+    /// Structural XPBD compliance in meters per newton.
+    #[serde(default = "default_structural_compliance_m_n")]
+    pub structural_compliance_m_n: f64,
+    /// Shear XPBD compliance in meters per newton.
+    #[serde(default = "default_shear_compliance_m_n")]
+    pub shear_compliance_m_n: f64,
+    /// Bending XPBD compliance in meters per newton.
+    #[serde(default = "default_bending_compliance_m_n")]
+    pub bending_compliance_m_n: f64,
+    /// Fraction of velocity retained per second.
+    #[serde(default = "default_velocity_retention_per_s")]
+    pub velocity_retention_per_s: f64,
+    /// Enable deterministic collision between non-adjacent particles.
+    #[serde(default)]
+    pub self_collision: bool,
+}
+
+impl Default for SceneDeformableMaterialAsset {
+    fn default() -> Self {
+        Self {
+            collision_radius_m: default_deformable_collision_radius_m(),
+            structural_compliance_m_n: default_structural_compliance_m_n(),
+            shear_compliance_m_n: default_shear_compliance_m_n(),
+            bending_compliance_m_n: default_bending_compliance_m_n(),
+            velocity_retention_per_s: default_velocity_retention_per_s(),
+            self_collision: false,
+        }
+    }
+}
+
+/// Cable or rectangular cloth declared in a scene asset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SceneDeformableAsset {
+    /// One-dimensional particle cable.
+    Cable {
+        /// Entity name used for deterministic lookup.
+        name: String,
+        /// First endpoint in world-space meters.
+        start_m: [f64; 3],
+        /// Second endpoint in world-space meters.
+        end_m: [f64; 3],
+        /// Number of particles, at least two.
+        particle_count: usize,
+        /// Total cable mass in kilograms.
+        total_mass_kg: f64,
+        /// Pin the first endpoint.
+        #[serde(default)]
+        pin_start: bool,
+        /// Pin the second endpoint.
+        #[serde(default)]
+        pin_end: bool,
+        /// Physical material values.
+        #[serde(default)]
+        material: SceneDeformableMaterialAsset,
+        /// Linear RGBA render color.
+        #[serde(default = "default_cable_color")]
+        color_rgba: [f32; 4],
+    },
+    /// Two-dimensional rectangular cloth grid.
+    Cloth {
+        /// Entity name used for deterministic lookup.
+        name: String,
+        /// Grid origin in world-space meters.
+        origin_m: [f64; 3],
+        /// Vector across all grid columns in meters.
+        width_direction_m: [f64; 3],
+        /// Vector across all grid rows in meters.
+        height_direction_m: [f64; 3],
+        /// Grid column count, at least two.
+        columns: usize,
+        /// Grid row count, at least two.
+        rows: usize,
+        /// Total cloth mass in kilograms.
+        total_mass_kg: f64,
+        /// Pin every particle in the first row.
+        #[serde(default)]
+        pin_top_edge: bool,
+        /// Physical material values.
+        #[serde(default)]
+        material: SceneDeformableMaterialAsset,
+        /// Linear RGBA render color.
+        #[serde(default = "default_cloth_color")]
+        color_rgba: [f32; 4],
+    },
+}
+
+impl SceneDeformableAsset {
+    /// Returns the scene-unique entity name.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Cable { name, .. } | Self::Cloth { name, .. } => name,
+        }
+    }
+}
+
+fn default_deformable_collision_radius_m() -> f64 {
+    0.01
+}
+
+fn default_structural_compliance_m_n() -> f64 {
+    1.0e-7
+}
+
+fn default_shear_compliance_m_n() -> f64 {
+    2.0e-7
+}
+
+fn default_bending_compliance_m_n() -> f64 {
+    2.0e-4
+}
+
+fn default_velocity_retention_per_s() -> f64 {
+    0.995
+}
+
+fn default_cable_color() -> [f32; 4] {
+    [0.92, 0.45, 0.08, 1.0]
+}
+
+fn default_cloth_color() -> [f32; 4] {
+    [0.08, 0.48, 0.82, 1.0]
 }
 
 /// Semantic task location stored in a scene asset.
@@ -326,6 +459,10 @@ fn validate_scene_asset(scene: &SceneAsset, path: &Path) -> Result<(), AssetErro
         }
         validate_object_shapes(object).map_err(&invalid)?;
     }
+    for deformable in &scene.deformables {
+        validate_name(deformable.name(), "deformable", &mut names).map_err(&invalid)?;
+        validate_deformable(deformable).map_err(&invalid)?;
+    }
     for marker in &scene.task_markers {
         validate_name(&marker.name, "task marker", &mut names).map_err(&invalid)?;
         if marker.kind.trim().is_empty() {
@@ -347,6 +484,71 @@ fn validate_scene_asset(scene: &SceneAsset, path: &Path) -> Result<(), AssetErro
         }
     }
     Ok(())
+}
+
+fn validate_deformable(deformable: &SceneDeformableAsset) -> Result<(), String> {
+    use rne_deformable::{build_cable, build_cloth, CableSpec, ClothSpec};
+    let material = deformable_material(deformable);
+    let result = match deformable {
+        SceneDeformableAsset::Cable {
+            start_m,
+            end_m,
+            particle_count,
+            total_mass_kg,
+            pin_start,
+            pin_end,
+            ..
+        } => build_cable(CableSpec {
+            start_m: vec3_from_array(*start_m),
+            end_m: vec3_from_array(*end_m),
+            particle_count: *particle_count,
+            total_mass_kg: *total_mass_kg,
+            pin_start: *pin_start,
+            pin_end: *pin_end,
+            material,
+        }),
+        SceneDeformableAsset::Cloth {
+            origin_m,
+            width_direction_m,
+            height_direction_m,
+            columns,
+            rows,
+            total_mass_kg,
+            pin_top_edge,
+            ..
+        } => build_cloth(ClothSpec {
+            origin_m: vec3_from_array(*origin_m),
+            width_direction_m: vec3_from_array(*width_direction_m),
+            height_direction_m: vec3_from_array(*height_direction_m),
+            columns: *columns,
+            rows: *rows,
+            total_mass_kg: *total_mass_kg,
+            pin_top_edge: *pin_top_edge,
+            material,
+        }),
+    };
+    result
+        .map(|_| ())
+        .map_err(|error| format!("deformable `{}` is invalid: {error}", deformable.name()))
+}
+
+fn deformable_material(deformable: &SceneDeformableAsset) -> rne_deformable::DeformableMaterial {
+    let asset = match deformable {
+        SceneDeformableAsset::Cable { material, .. }
+        | SceneDeformableAsset::Cloth { material, .. } => *material,
+    };
+    rne_deformable::DeformableMaterial {
+        collision_radius_m: asset.collision_radius_m,
+        structural_compliance_m_n: asset.structural_compliance_m_n,
+        shear_compliance_m_n: asset.shear_compliance_m_n,
+        bending_compliance_m_n: asset.bending_compliance_m_n,
+        velocity_retention_per_s: asset.velocity_retention_per_s,
+        self_collision: asset.self_collision,
+    }
+}
+
+fn vec3_from_array(values: [f64; 3]) -> rne_math::Vec3 {
+    rne_math::Vec3::new(values[0], values[1], values[2])
 }
 
 fn validate_name(name: &str, kind: &str, names: &mut HashSet<String>) -> Result<(), String> {
@@ -565,7 +767,85 @@ mod tests {
         assert_eq!(scene.robots.len(), 1);
         assert!(scene.obstacles.is_empty());
         assert!(scene.objects.is_empty());
+        assert!(scene.deformables.is_empty());
         assert!(scene.task_markers.is_empty());
+    }
+
+    #[test]
+    fn parses_and_validates_cable_and_cloth_assets() {
+        let scene = parse_scene_asset(
+            r#"
+[[deformables]]
+kind = "cable"
+name = "tether"
+start_m = [-0.5, 1.0, 0.0]
+end_m = [0.5, 1.0, 0.0]
+particle_count = 17
+total_mass_kg = 0.2
+pin_start = true
+
+[[deformables]]
+kind = "cloth"
+name = "flag"
+origin_m = [-0.4, 1.2, 0.0]
+width_direction_m = [0.8, 0.0, 0.0]
+height_direction_m = [0.0, -0.6, 0.0]
+columns = 8
+rows = 6
+total_mass_kg = 0.15
+pin_top_edge = true
+
+[deformables.material]
+self_collision = true
+"#,
+            Path::new("deformables.rne.scene.toml"),
+        )
+        .expect("valid deformable scene");
+        assert_eq!(scene.deformables.len(), 2);
+        assert_eq!(scene.deformables[0].name(), "tether");
+        assert_eq!(scene.deformables[1].name(), "flag");
+        let SceneDeformableAsset::Cloth { material, .. } = &scene.deformables[1] else {
+            panic!("second deformable must be cloth");
+        };
+        assert!(material.self_collision);
+    }
+
+    #[test]
+    fn rejects_invalid_or_duplicate_deformables() {
+        let invalid = parse_scene_asset(
+            r#"
+[[deformables]]
+kind = "cable"
+name = "bad"
+start_m = [0.0, 1.0, 0.0]
+end_m = [0.0, 1.0, 0.0]
+particle_count = 1
+total_mass_kg = 0.0
+"#,
+            Path::new("invalid.rne.scene.toml"),
+        )
+        .expect_err("invalid cable must be rejected");
+        assert!(invalid.to_string().contains("deformable `bad` is invalid"));
+
+        let duplicate = parse_scene_asset(
+            r#"
+[[objects]]
+name = "shared"
+
+[[deformables]]
+kind = "cable"
+name = "shared"
+start_m = [0.0, 1.0, 0.0]
+end_m = [1.0, 1.0, 0.0]
+particle_count = 3
+total_mass_kg = 0.1
+"#,
+            Path::new("duplicate.rne.scene.toml"),
+        )
+        .expect_err("duplicate scene names must be rejected");
+        assert!(duplicate
+            .to_string()
+            .contains("duplicate scene entity name `shared`"));
     }
 
     #[test]

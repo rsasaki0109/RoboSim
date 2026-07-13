@@ -3,8 +3,9 @@
 use crate::error::AssetError;
 use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
 use crate::scene::{
-    ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneObjectAsset, SceneObstacleAsset,
-    SceneTaskMarkerAsset, SceneVisualAsset,
+    ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneDeformableAsset,
+    SceneDeformableMaterialAsset, SceneObjectAsset, SceneObstacleAsset, SceneTaskMarkerAsset,
+    SceneVisualAsset,
 };
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
@@ -97,6 +98,8 @@ pub struct SpawnedScene {
     pub lidar_mounts: Vec<LidarMountSpawned>,
     /// Wrist camera mounts spawned from robot assets.
     pub wrist_camera_mounts: Vec<WristCameraMountSpawned>,
+    /// Cable and cloth entities in scene declaration order.
+    pub deformables: Vec<Entity>,
 }
 
 /// Spawns entities described by a robot asset.
@@ -269,6 +272,11 @@ pub fn spawn_scene_with_sources(
     for object in &scene.objects {
         spawn_scene_object(world, object);
     }
+    let deformables = scene
+        .deformables
+        .iter()
+        .map(|asset| spawn_scene_deformable(world, asset))
+        .collect::<Result<Vec<_>, _>>()?;
     for marker in &scene.task_markers {
         spawn_scene_task_marker(world, marker);
     }
@@ -306,7 +314,80 @@ pub fn spawn_scene_with_sources(
         robots: spawned_robots,
         lidar_mounts,
         wrist_camera_mounts,
+        deformables,
     })
+}
+
+fn spawn_scene_deformable(
+    world: &mut World,
+    asset: &SceneDeformableAsset,
+) -> Result<Entity, AssetError> {
+    use rne_deformable::{build_cable, build_cloth, CableSpec, ClothSpec};
+    let (body, color_rgba) = match asset {
+        SceneDeformableAsset::Cable {
+            start_m,
+            end_m,
+            particle_count,
+            total_mass_kg,
+            pin_start,
+            pin_end,
+            material,
+            color_rgba,
+            ..
+        } => (
+            build_cable(CableSpec {
+                start_m: vec3_from_array(*start_m),
+                end_m: vec3_from_array(*end_m),
+                particle_count: *particle_count,
+                total_mass_kg: *total_mass_kg,
+                pin_start: *pin_start,
+                pin_end: *pin_end,
+                material: deformable_material(*material),
+            }),
+            *color_rgba,
+        ),
+        SceneDeformableAsset::Cloth {
+            origin_m,
+            width_direction_m,
+            height_direction_m,
+            columns,
+            rows,
+            total_mass_kg,
+            pin_top_edge,
+            material,
+            color_rgba,
+            ..
+        } => (
+            build_cloth(ClothSpec {
+                origin_m: vec3_from_array(*origin_m),
+                width_direction_m: vec3_from_array(*width_direction_m),
+                height_direction_m: vec3_from_array(*height_direction_m),
+                columns: *columns,
+                rows: *rows,
+                total_mass_kg: *total_mass_kg,
+                pin_top_edge: *pin_top_edge,
+                material: deformable_material(*material),
+            }),
+            *color_rgba,
+        ),
+    };
+    let body = body.map_err(|error| AssetError::invalid(asset.name(), error.to_string()))?;
+    let entity = spawn_named(world, asset.name());
+    world
+        .entity_mut(entity)
+        .insert((body, rne_deformable::DeformableVisual { color_rgba }));
+    Ok(entity)
+}
+
+fn deformable_material(asset: SceneDeformableMaterialAsset) -> rne_deformable::DeformableMaterial {
+    rne_deformable::DeformableMaterial {
+        collision_radius_m: asset.collision_radius_m,
+        structural_compliance_m_n: asset.structural_compliance_m_n,
+        shear_compliance_m_n: asset.shear_compliance_m_n,
+        bending_compliance_m_n: asset.bending_compliance_m_n,
+        velocity_retention_per_s: asset.velocity_retention_per_s,
+        self_collision: asset.self_collision,
+    }
 }
 
 fn spawn_scene_task_marker(world: &mut World, marker: &SceneTaskMarkerAsset) -> Entity {
@@ -654,9 +735,106 @@ mod tests {
         assert!(world.get::<WorldEntity>(spawned.world).is_some());
         assert_eq!(world.resource::<WorldRandom>().seed(), 42);
         assert_eq!(spawned.robots.len(), 1);
+        assert!(spawned.deformables.is_empty());
         assert!(world
             .get::<RigidBody>(spawned.robots[0].1.base_link)
             .is_some());
+    }
+
+    #[test]
+    fn cable_scene_spawns_and_replays_headlessly() {
+        use rne_deformable::{step_deformable_world, DeformableBody, DeformableSolverConfig};
+
+        let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/deformable_cable.rne.scene.toml");
+        let mut first = World::new();
+        let mut second = World::new();
+        let first_spawned =
+            load_and_spawn_scene(&mut first, &scene_path).expect("first cable scene");
+        let second_spawned =
+            load_and_spawn_scene(&mut second, &scene_path).expect("second cable scene");
+        assert_eq!(first_spawned.deformables.len(), 1);
+        assert_eq!(second_spawned.deformables.len(), 1);
+
+        for _ in 0..180 {
+            for world in [&mut first, &mut second] {
+                step_deformable_world(
+                    world,
+                    Vec3::new(0.0, -9.81, 0.0),
+                    1.0 / 60.0,
+                    DeformableSolverConfig::default(),
+                )
+                .expect("headless cable step");
+            }
+        }
+        let first_body = first
+            .get::<DeformableBody>(first_spawned.deformables[0])
+            .expect("first cable");
+        let second_body = second
+            .get::<DeformableBody>(second_spawned.deformables[0])
+            .expect("second cable");
+        assert_eq!(
+            first_body.stable_state_hash(),
+            second_body.stable_state_hash()
+        );
+        assert_eq!(first_body, second_body);
+        let obstacle_center = Vec3::new(0.0, 0.58, 0.0);
+        assert!(first_body.particles.iter().all(|particle| {
+            particle.position_m.distance(obstacle_center)
+                >= 0.16 + first_body.material.collision_radius_m - 1.0e-8
+        }));
+    }
+
+    #[test]
+    fn cloth_scene_drapes_over_box_and_replays_headlessly() {
+        use rne_deformable::{step_deformable_world, DeformableBody, DeformableSolverConfig};
+
+        let scene_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/deformable_cloth.rne.scene.toml");
+        let mut first = World::new();
+        let mut second = World::new();
+        let first_spawned =
+            load_and_spawn_scene(&mut first, &scene_path).expect("first cloth scene");
+        let second_spawned =
+            load_and_spawn_scene(&mut second, &scene_path).expect("second cloth scene");
+        for _ in 0..300 {
+            for world in [&mut first, &mut second] {
+                step_deformable_world(
+                    world,
+                    Vec3::new(0.0, -9.81, 0.0),
+                    1.0 / 60.0,
+                    DeformableSolverConfig::default(),
+                )
+                .expect("headless cloth step");
+            }
+        }
+        let first_body = first
+            .get::<DeformableBody>(first_spawned.deformables[0])
+            .expect("first cloth");
+        let second_body = second
+            .get::<DeformableBody>(second_spawned.deformables[0])
+            .expect("second cloth");
+        assert!(first_body.material.self_collision);
+        assert_eq!(first_body, second_body);
+        assert_eq!(
+            first_body.stable_state_hash(),
+            second_body.stable_state_hash()
+        );
+        let center = Vec3::new(0.0, 0.36, 0.0);
+        let expanded =
+            Vec3::new(0.26, 0.36, 0.21) + Vec3::splat(first_body.material.collision_radius_m);
+        assert!(first_body.particles.iter().all(|particle| {
+            let local = particle.position_m - center;
+            local.x.abs() >= expanded.x - 1.0e-8
+                || local.y.abs() >= expanded.y - 1.0e-8
+                || local.z.abs() >= expanded.z - 1.0e-8
+        }));
+        let mesh = first_body.cloth_surface_mesh().expect("cloth mesh");
+        assert_eq!(mesh.positions.len(), first_body.particles.len());
+        assert!(mesh
+            .normals
+            .iter()
+            .all(|normal| normal.iter().all(|value| value.is_finite())));
     }
 
     #[test]

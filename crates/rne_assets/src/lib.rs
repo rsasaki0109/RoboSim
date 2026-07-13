@@ -21,7 +21,8 @@ pub use robot::{
 };
 pub use scene::{
     load_scene_asset, parse_scene_asset, parse_scene_robots, SceneAsset, SceneCollisionAsset,
-    SceneObjectAsset, SceneObstacleAsset, SceneTaskMarkerAsset, SceneVisualAsset,
+    SceneDeformableAsset, SceneDeformableMaterialAsset, SceneObjectAsset, SceneObstacleAsset,
+    SceneTaskMarkerAsset, SceneVisualAsset,
 };
 pub use spawn::{
     load_and_spawn_scene, spawn_robot_asset, spawn_robot_asset_with_sources, spawn_scene,
