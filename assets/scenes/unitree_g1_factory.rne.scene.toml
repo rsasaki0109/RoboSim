@@ -24,7 +24,8 @@ collision = { shape = "box", size_m = [0.025, 0.25, 0.16] }
 [[objects]]
 name = "inspection_status_light"
 translation_m = [0.93, 1.11, -0.3]
-visual = { shape = "box", size_m = [0.018, 0.055, 0.055], color_rgba = [0.10, 0.95, 0.45, 1.0] }
+rotation_rpy_rad = [1.5707963267948966, 0.0, 0.0]
+visual = { shape = "cylinder", radius_m = 0.028, length_m = 0.018, color_rgba = [0.10, 0.95, 0.45, 1.0] }
 
 [[objects]]
 name = "parts_shelf"

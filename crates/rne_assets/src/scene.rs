@@ -99,6 +99,16 @@ pub enum SceneVisualAsset {
         #[serde(default = "default_object_color")]
         color_rgba: [f32; 4],
     },
+    /// Solid cylinder aligned with the local Z axis.
+    Cylinder {
+        /// Cylinder radius in meters.
+        radius_m: f64,
+        /// Full cylinder length in meters.
+        length_m: f64,
+        /// Linear RGBA color.
+        #[serde(default = "default_object_color")]
+        color_rgba: [f32; 4],
+    },
     /// External STL mesh resolved relative to the scene file.
     Mesh {
         /// Mesh path or package URI.
@@ -124,6 +134,13 @@ pub enum SceneCollisionAsset {
     /// Sphere collider.
     Sphere {
         /// Sphere radius in meters.
+        radius_m: f64,
+    },
+    /// Capsule collider aligned with the local Y axis.
+    Capsule {
+        /// Half height of the cylindrical section in meters.
+        half_height_m: f64,
+        /// Capsule radius in meters.
         radius_m: f64,
     },
 }
@@ -496,6 +513,35 @@ restitution = 0.1
             scene.objects[0].collision,
             Some(SceneCollisionAsset::Box {
                 size_m: [0.2, 0.8, 0.2]
+            })
+        );
+    }
+
+    #[test]
+    fn parses_cylinder_visual_and_capsule_collision() {
+        let scene = parse_scene_asset(
+            r#"
+[[objects]]
+name = "safety_post"
+visual = { shape = "cylinder", radius_m = 0.08, length_m = 0.9 }
+collision = { shape = "capsule", half_height_m = 0.37, radius_m = 0.08 }
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+        assert!(matches!(
+            scene.objects[0].visual,
+            Some(SceneVisualAsset::Cylinder {
+                radius_m: 0.08,
+                length_m: 0.9,
+                ..
+            })
+        ));
+        assert_eq!(
+            scene.objects[0].collision,
+            Some(SceneCollisionAsset::Capsule {
+                half_height_m: 0.37,
+                radius_m: 0.08,
             })
         );
     }

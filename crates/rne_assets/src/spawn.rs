@@ -429,6 +429,13 @@ fn spawn_scene_object(world: &mut World, object: &SceneObjectAsset) -> Entity {
                 half_extents_m: vec3_from_array(size_m) * 0.5,
             },
             SceneCollisionAsset::Sphere { radius_m } => ColliderShape::Sphere { radius_m },
+            SceneCollisionAsset::Capsule {
+                half_height_m,
+                radius_m,
+            } => ColliderShape::Capsule {
+                half_height_m,
+                radius_m,
+            },
         };
         let defaults = PhysicsMaterial::default();
         world.entity_mut(entity).insert(Collider {
@@ -455,6 +462,17 @@ fn spawn_scene_object(world: &mut World, object: &SceneObjectAsset) -> Entity {
             } => (
                 VisualShape::Sphere {
                     radius_m: *radius_m,
+                },
+                *color_rgba,
+            ),
+            SceneVisualAsset::Cylinder {
+                radius_m,
+                length_m,
+                color_rgba,
+            } => (
+                VisualShape::Cylinder {
+                    radius_m: *radius_m,
+                    length_m: *length_m,
                 },
                 *color_rgba,
             ),
@@ -765,6 +783,37 @@ collision = { shape = "box", size_m = [1.0, 1.0, 0.5] }
         let transform = world.get::<Transform3>(entity).expect("transform");
         assert_eq!(transform.translation, Vec3::new(1.0, 0.5, -0.25));
         assert_ne!(transform.rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn rounded_environment_object_spawns_cylinder_visual_and_capsule_collider() {
+        use crate::scene::parse_scene_asset;
+        use rne_physics::{Collider, ColliderShape};
+        use rne_render::{Visual, VisualShape};
+
+        let scene = parse_scene_asset(
+            r#"
+[[objects]]
+name = "safety_post"
+visual = { shape = "cylinder", radius_m = 0.08, length_m = 0.9 }
+collision = { shape = "capsule", half_height_m = 0.37, radius_m = 0.08 }
+"#,
+            Path::new("scene.toml"),
+        )
+        .unwrap();
+        let mut world = World::new();
+        let entity = super::spawn_scene_object(&mut world, &scene.objects[0]);
+        assert!(matches!(
+            world.get::<Visual>(entity).expect("visual").shape,
+            VisualShape::Cylinder { .. }
+        ));
+        assert_eq!(
+            world.get::<Collider>(entity).expect("collider").shape,
+            ColliderShape::Capsule {
+                half_height_m: 0.37,
+                radius_m: 0.08,
+            }
+        );
     }
 
     #[test]

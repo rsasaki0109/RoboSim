@@ -103,7 +103,8 @@ Architecture docs live under [docs/architecture/](docs/architecture/000_overview
 ### World assets
 
 Scene TOML can load named environment objects independently from robots. Visuals may be
-boxes, spheres, or scene-relative STL meshes; collision can use a separate box or sphere.
+boxes, spheres, cylinders, or scene-relative STL meshes; collision can use a separate box,
+sphere, or Y-axis capsule.
 Objects also carry transforms, fixed/dynamic body type, mass, friction, and restitution.
 
 ```toml
@@ -114,6 +115,15 @@ visual = { shape = "mesh", path = "world/station.stl", scale = [1.0, 1.0, 1.0] }
 collision = { shape = "box", size_m = [0.22, 1.18, 0.22] }
 body_type = "fixed"
 friction = 0.7
+```
+
+Rounded safety posts and rails can use a cylinder visual with a capsule collision shape:
+
+```toml
+[[objects]]
+name = "safety_post"
+visual = { shape = "cylinder", radius_m = 0.08, length_m = 0.9 }
+collision = { shape = "capsule", half_height_m = 0.37, radius_m = 0.08 }
 ```
 
 Environment mesh files are validated, included in hot-reload dependency tracking, and
