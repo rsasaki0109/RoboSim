@@ -20,22 +20,13 @@ embodied AI, synthetic sensor data, and policy evaluation.
 
 ## Official Unitree Go2 URDF
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-go2.png">
-    <img src="docs/media/unitree-go2.gif" alt="Official Unitree Go2 URDF trotting dynamically with multibody physics in RNE" width="800">
-  </picture>
-  <br>
-  <sub>Official Unitree Go2 URDF and meshes loaded through RNE's generic URDF articulation pipeline. After standing settle, its dynamic multibody drives a diagonal-pair trot through 12 force-limited joints and primitive foot contacts, rendered offscreen by wgpu. The fixed camera and stationary checker floor make its world-space motion visible. Model source: <a href="https://github.com/unitreerobotics/unitree_ros">Unitree Robotics unitree_ros</a> (BSD-3-Clause).</sub>
-</p>
-
-```bash
-cargo run -p unitree_go2_gif --example 38_unitree_go2_gif
-```
-
-Go2 also has a dynamic multibody scene with self-collision filtering and a
-headless four-foot standing/contact test. `UnitreeGo2Episode` exposes stride
-and lift actions, four-foot loads and gait phase, and a locomotion/upright reward.
+The official Unitree Go2 URDF and meshes load through RNE's generic articulation
+pipeline. Its dynamic multibody scene includes self-collision filtering, 12
+force-limited joints, primitive foot contacts, and a headless four-foot standing
+test. `UnitreeGo2Episode` exposes stride and lift actions, four-foot loads, gait
+phase, and a locomotion/upright reward. Model source:
+[Unitree Robotics unitree_ros](https://github.com/unitreerobotics/unitree_ros)
+(BSD-3-Clause).
 
 ## Official Unitree G1 URDF
 
