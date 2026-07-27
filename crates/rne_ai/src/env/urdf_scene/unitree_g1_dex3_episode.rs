@@ -29,6 +29,31 @@ const MIN_GRASP_CLOSURE: f64 = 0.8;
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
 const MIN_PLACED_HEIGHT_M: f64 = 0.75;
 const MAX_PLACED_SPEED_M_S: f64 = 0.05;
+const LEFT_HAND_LINKS: [&str; 8] = [
+    "left_hand_palm_link",
+    "left_hand_thumb_0_link",
+    "left_hand_thumb_1_link",
+    "left_hand_thumb_2_link",
+    "left_hand_middle_0_link",
+    "left_hand_middle_1_link",
+    "left_hand_index_0_link",
+    "left_hand_index_1_link",
+];
+const RIGHT_HAND_LINKS: [&str; 8] = [
+    "right_hand_palm_link",
+    "right_hand_thumb_0_link",
+    "right_hand_thumb_1_link",
+    "right_hand_thumb_2_link",
+    "right_hand_middle_0_link",
+    "right_hand_middle_1_link",
+    "right_hand_index_0_link",
+    "right_hand_index_1_link",
+];
+const WORKCELL_OBJECTS: [&str; 3] = [
+    "dex3_pick_stand",
+    "dex3_inspection_part",
+    "dex3_inspection_tray",
+];
 
 /// Script phase reported by [`UnitreeG1Dex3Episode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -182,6 +207,10 @@ pub struct UnitreeG1Dex3Observation {
     pub lifted: bool,
     /// Whether the released payload is settled inside the place zone.
     pub placed: bool,
+    /// Whether any inactive left-hand link contacted a task workcell object.
+    pub inactive_hand_workcell_contact: bool,
+    /// Whether any working right-hand link contacted the place tray.
+    pub working_hand_tray_contact: bool,
 }
 
 /// Deterministic fixed-base G1 29-DoF task with an articulated Dex3 pinch.
@@ -236,6 +265,16 @@ impl UnitreeG1Dex3Episode {
     /// Returns the underlying simulation for rendering and diagnostics.
     pub fn simulation(&self) -> &UrdfSceneSim {
         &self.sim
+    }
+
+    /// Returns mutable access to the underlying simulation for scenario customization.
+    pub fn simulation_mut(&mut self) -> &mut UrdfSceneSim {
+        &mut self.sim
+    }
+
+    /// Returns the observation at the current completed simulation step.
+    pub fn current_observation(&self) -> UnitreeG1Dex3Observation {
+        self.observation()
     }
 
     fn phase(&self) -> UnitreeG1Dex3Phase {
@@ -302,6 +341,16 @@ impl UnitreeG1Dex3Episode {
             part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
             placed,
+            inactive_hand_workcell_contact: any_named_contact(
+                &self.sim,
+                &LEFT_HAND_LINKS,
+                &WORKCELL_OBJECTS,
+            ),
+            working_hand_tray_contact: any_named_contact(
+                &self.sim,
+                &RIGHT_HAND_LINKS,
+                &["dex3_inspection_tray"],
+            ),
         }
     }
 
@@ -360,8 +409,26 @@ impl UnitreeG1Dex3Episode {
                 && place_distance_m <= marker.3
                 && part.1 >= MIN_PLACED_HEIGHT_M
                 && part_speed_m_s <= MAX_PLACED_SPEED_M_S,
+            inactive_hand_workcell_contact: any_named_contact(
+                &self.sim,
+                &LEFT_HAND_LINKS,
+                &WORKCELL_OBJECTS,
+            ),
+            working_hand_tray_contact: any_named_contact(
+                &self.sim,
+                &RIGHT_HAND_LINKS,
+                &["dex3_inspection_tray"],
+            ),
         }
     }
+}
+
+fn any_named_contact(sim: &UrdfSceneSim, first: &[&str], second: &[&str]) -> bool {
+    first.iter().any(|first_name| {
+        second
+            .iter()
+            .any(|second_name| sim.named_entities_in_contact(first_name, second_name))
+    })
 }
 
 impl Episode for UnitreeG1Dex3Episode {

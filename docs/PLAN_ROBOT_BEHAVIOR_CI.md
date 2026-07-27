@@ -1,6 +1,6 @@
 # Robot Behavior CI Plan
 
-Status: Proposed
+Status: Phase 1 implemented
 
 ## Goal
 
@@ -11,6 +11,28 @@ throughput.
 The first complete workflow should run the existing G1 + Dex3 task across many
 seeded workpiece placements, evaluate behavioral contracts headlessly, and
 produce a deterministic failure artifact that can be inspected in a browser.
+
+## Current implementation
+
+Phase 1 is available through the backend-neutral typed contract API in
+`rne_ai`. It evaluates `Always`, `Eventually`, and `Consecutive` predicates
+against task-owned observations using `SimClock`, runs unique seeds in stable
+ascending order, preserves the first violation, and emits versioned JSON and
+JUnit XML reports.
+
+The first scenario runs the randomized G1 + Dex3 acquisition task and checks
+finite observations, dual and stable contact before grasp, a three-step
+dual-contact streak, inactive-hand and premature-tray contact, a five-second
+grasp deadline, and bounded per-step payload motion. Run ten seeds headlessly:
+
+```bash
+cargo run -p xtask -- behavior-ci --seeds 0..10
+```
+
+Reports are written to `artifacts/behavior-ci/report.json` and
+`artifacts/behavior-ci/junit.xml` by default. Tests include a successful real
+G1 seed and an intentionally invalid tray placement that must produce a stable
+inactive-hand contact violation.
 
 The intended command-line experience is:
 
@@ -123,6 +145,8 @@ the necessary semantics.
 ## Milestones
 
 ### Phase 1: Typed Behavior Contract MVP
+
+Status: Implemented.
 
 Deliverables:
 

@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Robot Behavior CI Phase 1**: backend-neutral typed `Always`, `Eventually`,
+  and `Consecutive` contracts in `rne_ai`; deterministic ascending multi-seed
+  execution; first-violation diagnostics with stable entity names; versioned
+  JSON and JUnit XML reports; and `cargo run -p xtask -- behavior-ci`. The
+  initial headless G1 + Dex3 scenario checks grasp-contact stability, forbidden
+  hand/workcell contact, a simulation-time acquisition deadline, finite
+  observations, and bounded payload motion. A real successful seed and an
+  intentionally invalid tray layout cover both report outcomes.
 - **Friction-based grasp core (v0.14 Phase B)**: opt-in `GraspMode::Friction` on
   `MobileManipulatorSim` (`set_grasp_mode`) holds a grasped object with
   force-limited finger squeeze and surface friction only — no weld joint is

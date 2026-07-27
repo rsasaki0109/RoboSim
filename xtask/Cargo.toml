@@ -8,4 +8,5 @@ publish = false
 anyhow = { workspace = true }
 image = "0.25"
 rne_assets = { path = "../crates/rne_assets" }
+rne_ai = { path = "../crates/rne_ai" }
 serde_json = "1"
