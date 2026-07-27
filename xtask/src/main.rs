@@ -31,10 +31,98 @@ fn run() -> anyhow::Result<()> {
         "house-gif-demo" => house_gif_demo(),
         "hero-media-check" => hero_media_check(),
         "hero-contact-sheet" => hero_contact_sheet(),
+        "behavior-ci" => behavior_ci(&mut args),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
+}
+
+fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let mut seeds = (0_u64..10).collect::<Vec<_>>();
+    let mut json_path = root.join("artifacts/behavior-ci/report.json");
+    let mut junit_path = root.join("artifacts/behavior-ci/junit.xml");
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--seeds" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--seeds requires START..END"))?;
+                seeds = parse_seed_range(&value)?;
+            }
+            "--json" => {
+                json_path = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--json requires a path"))?,
+                );
+            }
+            "--junit" => {
+                junit_path = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--junit requires a path"))?,
+                );
+            }
+            other => anyhow::bail!("unknown behavior-ci argument: {other}"),
+        }
+    }
+
+    let report = rne_ai::run_behavior_scenarios("unitree_g1_dex3_acquire", seeds, |seed| {
+        rne_ai::UnitreeG1Dex3BehaviorScenario::new(
+            seed,
+            rne_ai::UnitreeG1Dex3BehaviorConfig::default(),
+        )
+    });
+    if let Some(parent) = json_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = junit_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&json_path, report.to_json_pretty()?)?;
+    fs::write(&junit_path, report.to_junit_xml())?;
+
+    let passed = report
+        .seeds
+        .iter()
+        .filter(|seed| seed.status == rne_ai::BehaviorSeedStatus::Passed)
+        .count();
+    println!(
+        "Behavior CI: {passed}/{} seeds passed\nJSON: {}\nJUnit: {}",
+        report.seeds.len(),
+        json_path.display(),
+        junit_path.display()
+    );
+    if let Some((seed, contract, violation)) = report.seeds.iter().find_map(|seed| {
+        seed.contracts.iter().find_map(|contract| {
+            contract
+                .violation
+                .as_ref()
+                .map(|violation| (seed.seed, contract.name.as_str(), violation))
+        })
+    }) {
+        eprintln!(
+            "FAIL seed={seed} step={} contract={contract} entities={}",
+            violation.step,
+            violation.entities.join(",")
+        );
+    }
+    anyhow::ensure!(report.passed(), "one or more behavior contracts failed");
+    Ok(())
+}
+
+fn parse_seed_range(value: &str) -> anyhow::Result<Vec<u64>> {
+    let (start, end) = value
+        .split_once("..")
+        .ok_or_else(|| anyhow::anyhow!("seed range must use START..END"))?;
+    let start = start.parse::<u64>()?;
+    let end = end.parse::<u64>()?;
+    anyhow::ensure!(start < end, "seed range must be non-empty and ascending");
+    anyhow::ensure!(
+        end - start <= 10_000,
+        "seed range may contain at most 10000 seeds"
+    );
+    Ok((start..end).collect())
 }
 
 fn ci() -> anyhow::Result<()> {
@@ -983,7 +1071,16 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter};
+    use super::{
+        extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range,
+    };
+
+    #[test]
+    fn parses_half_open_behavior_seed_ranges() {
+        assert_eq!(parse_seed_range("0..3").expect("range"), vec![0, 1, 2]);
+        assert!(parse_seed_range("3..3").is_err());
+        assert!(parse_seed_range("3...4").is_err());
+    }
 
     #[test]
     fn extracts_hero_digest_from_smoke_output() {

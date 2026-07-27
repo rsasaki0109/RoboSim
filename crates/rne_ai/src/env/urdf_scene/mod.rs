@@ -5,6 +5,7 @@ mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
 mod unitree_g1_dex3;
+mod unitree_g1_dex3_behavior;
 mod unitree_g1_dex3_episode;
 mod unitree_g1_episode;
 mod unitree_g1_gait;
@@ -28,6 +29,7 @@ pub use quadruped_episode::{
     QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
 };
 pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
+pub use unitree_g1_dex3_behavior::{UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario};
 pub use unitree_g1_dex3_episode::{
     UnitreeG1Dex3Action, UnitreeG1Dex3Episode, UnitreeG1Dex3EpisodeConfig,
     UnitreeG1Dex3Observation, UnitreeG1Dex3Phase,

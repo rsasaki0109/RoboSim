@@ -4,6 +4,7 @@
 
 pub mod action;
 pub mod agent;
+pub mod behavior;
 pub mod camera;
 pub mod domain_randomization;
 pub mod env;
@@ -32,6 +33,11 @@ pub use agent::{
     step_shared_diff_drive_agents, Agent, AgentGoal, AgentKind, AgentTarget, AttachedPolicy,
     DiffDriveAgentState, SharedDiffDriveAgentState,
 };
+pub use behavior::{
+    run_behavior_scenarios, BehaviorContract, BehaviorContractError, BehaviorContractKind,
+    BehaviorContractResult, BehaviorContractStatus, BehaviorReport, BehaviorScenario,
+    BehaviorScenarioStep, BehaviorSeedReport, BehaviorSeedStatus, BehaviorViolation,
+};
 pub use camera::{
     sync_wrist_camera_mount, sync_wrist_camera_mounts, wrist_camera_image_valid,
     wrist_camera_mounts_from_spawned, wrist_camera_pixel_count, wrist_camera_stream_for_index,
@@ -58,13 +64,13 @@ pub use env::{
     MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
     MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
     MobileManipulatorTransformSnapshot, QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig,
-    QuadrupedObservation, UnitreeG1Action, UnitreeG1Dex3Action, UnitreeG1Dex3Episode,
-    UnitreeG1Dex3EpisodeConfig, UnitreeG1Dex3HandCommand, UnitreeG1Dex3Observation,
-    UnitreeG1Dex3Phase, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1GaitAction,
-    UnitreeG1GaitCommand, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig,
-    UnitreeG1GaitObservation, UnitreeG1InspectionAction, UnitreeG1InspectionEpisode,
-    UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation, UnitreeG1Observation,
-    UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
+    QuadrupedObservation, UnitreeG1Action, UnitreeG1Dex3Action, UnitreeG1Dex3BehaviorConfig,
+    UnitreeG1Dex3BehaviorScenario, UnitreeG1Dex3Episode, UnitreeG1Dex3EpisodeConfig,
+    UnitreeG1Dex3HandCommand, UnitreeG1Dex3Observation, UnitreeG1Dex3Phase, UnitreeG1Episode,
+    UnitreeG1EpisodeConfig, UnitreeG1GaitAction, UnitreeG1GaitCommand, UnitreeG1GaitEpisode,
+    UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation, UnitreeG1InspectionAction,
+    UnitreeG1InspectionEpisode, UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation,
+    UnitreeG1Observation, UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
     UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeGo2Action, UnitreeGo2Episode,
     UnitreeGo2EpisodeConfig, UnitreeGo2GaitCommand, UnitreeGo2Observation, UrdfArmAction,
     UrdfCartAction, UrdfJointPositionTarget, UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim,
