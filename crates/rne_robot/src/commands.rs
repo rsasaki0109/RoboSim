@@ -55,6 +55,8 @@ pub enum ActuatorCommand {
     },
     /// Ackermann steering command.
     Ackermann {
+        /// Vehicle entity carrying an [`crate::AckermannDrive`] component.
+        vehicle: Entity,
         /// Forward speed in meters per second.
         speed_m_s: f64,
         /// Steering angle in radians.
@@ -167,6 +169,7 @@ mod tests {
         let t0 = SimTime::from_seconds(Seconds::new(0.0));
         let seq_a = buffer.push(
             ActuatorCommand::Ackermann {
+                vehicle: Entity::PLACEHOLDER,
                 speed_m_s: 1.0,
                 steering_rad: 0.0,
             },
@@ -174,6 +177,7 @@ mod tests {
         );
         let seq_b = buffer.push(
             ActuatorCommand::Ackermann {
+                vehicle: Entity::PLACEHOLDER,
                 speed_m_s: 2.0,
                 steering_rad: 0.0,
             },
@@ -190,6 +194,7 @@ mod tests {
         let t0 = SimTime::from_seconds(Seconds::new(0.0));
         buffer.push(
             ActuatorCommand::Ackermann {
+                vehicle: Entity::PLACEHOLDER,
                 speed_m_s: 1.0,
                 steering_rad: 0.0,
             },
@@ -202,6 +207,7 @@ mod tests {
         assert_eq!(buffer.next_sequence(), 9);
         let seq = buffer.push(
             ActuatorCommand::Ackermann {
+                vehicle: Entity::PLACEHOLDER,
                 speed_m_s: 2.0,
                 steering_rad: 0.0,
             },

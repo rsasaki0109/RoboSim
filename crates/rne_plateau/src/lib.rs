@@ -1,4 +1,4 @@
-//! Deterministic offline import of PLATEAU CityGML building LOD1 data.
+//! Deterministic offline import of PLATEAU CityGML building and road LOD1 data.
 //!
 //! The importer deliberately lives outside the simulation core. It converts a
 //! bounded CityGML tile into ordinary RNE scene, OBJ, and JSON assets so runtime
@@ -58,6 +58,8 @@ pub struct ImportOptions {
     pub world_seed: u64,
     /// Linear RGBA tint applied to imported building meshes.
     pub building_color_rgba: [f32; 4],
+    /// Linear RGBA tint applied to imported road meshes.
+    pub road_color_rgba: [f32; 4],
 }
 
 impl Default for ImportOptions {
@@ -68,6 +70,7 @@ impl Default for ImportOptions {
             origin: None,
             world_seed: 0,
             building_color_rgba: [0.625, 0.6875, 0.75, 1.0],
+            road_color_rgba: [0.0625, 0.078125, 0.09375, 1.0],
         }
     }
 }
@@ -81,12 +84,43 @@ pub struct ImportResult {
     pub metadata_path: PathBuf,
     /// Number of imported CityGML buildings.
     pub building_count: usize,
+    /// Number of imported CityGML roads.
+    pub road_count: usize,
+    /// Number of deterministically derived traffic lanes.
+    pub lane_count: usize,
     /// Total number of generated mesh triangles.
     pub triangle_count: usize,
     /// Resolved coordinate mode after auto detection.
     pub coordinate_mode: CoordinateMode,
     /// Source-space origin used by the conversion.
     pub origin: SourceOrigin,
+    /// Deterministically derived lanes available to runtime examples.
+    pub lanes: Vec<ImportedLane>,
+}
+
+/// A deterministic straight lane derived from one PLATEAU LOD1 road surface.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportedLane {
+    /// Stable lane identifier derived from the road `gml:id` and surface index.
+    pub lane_id: String,
+    /// Stable source `tran:Road` identifier.
+    pub road_source_id: String,
+    /// Directed two-point centerline in local RNE meters.
+    pub centerline_m: [[f64; 3]; 2],
+    /// Derived lane width in meters.
+    pub width_m: f64,
+    /// Travel direction relative to the road surface's canonical principal axis.
+    pub travel_direction: LaneTravelDirection,
+}
+
+/// Direction assigned to a derived lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaneTravelDirection {
+    /// Travel from the negative to positive principal-axis endpoint.
+    PrincipalAxisPositive,
+    /// Travel from the positive to negative principal-axis endpoint.
+    PrincipalAxisNegative,
 }
 
 /// PLATEAU import failure.
@@ -95,28 +129,34 @@ pub enum ImportError {
     /// The CityGML XML document is malformed.
     #[error("invalid CityGML XML: {0}")]
     Xml(String),
-    /// The document contains no supported building LOD1 geometry.
-    #[error("CityGML contains no Building with lod1Solid geometry")]
-    NoLod1Buildings,
+    /// The document contains no supported building or road LOD1 geometry.
+    #[error("CityGML contains no Building lod1Solid or Road lod1MultiSurface geometry")]
+    NoSupportedLod1Geometry,
     /// A building has no stable `gml:id`.
     #[error("Building is missing gml:id")]
     MissingBuildingId,
     /// Two buildings share the same stable identifier.
     #[error("duplicate Building gml:id `{0}`")]
     DuplicateBuildingId(String),
+    /// A road has no stable `gml:id`.
+    #[error("Road is missing gml:id")]
+    MissingRoadId,
+    /// Two roads share the same stable identifier.
+    #[error("duplicate Road gml:id `{0}`")]
+    DuplicateRoadId(String),
     /// A polygon uses geometry outside the Phase 1 subset.
-    #[error("unsupported geometry in Building `{building_id}`: {message}")]
+    #[error("unsupported geometry in CityGML feature `{feature_id}`: {message}")]
     UnsupportedGeometry {
-        /// Stable CityGML building identifier.
-        building_id: String,
+        /// Stable CityGML feature identifier.
+        feature_id: String,
         /// Description of the unsupported geometry.
         message: String,
     },
     /// A coordinate list is invalid or non-finite.
-    #[error("invalid coordinates in Building `{building_id}`: {message}")]
+    #[error("invalid coordinates in CityGML feature `{feature_id}`: {message}")]
     InvalidCoordinates {
-        /// Stable CityGML building identifier.
-        building_id: String,
+        /// Stable CityGML feature identifier.
+        feature_id: String,
         /// Description of the invalid coordinate data.
         message: String,
     },
@@ -157,6 +197,14 @@ struct ParsedBuilding {
     polygons: Vec<Vec<SourcePoint>>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ParsedRoad {
+    id: String,
+    name: Option<String>,
+    function: Option<String>,
+    polygons: Vec<Vec<SourcePoint>>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct TileMetadata {
     schema_version: u32,
@@ -167,6 +215,7 @@ struct TileMetadata {
     axis_mapping: &'static str,
     scene_path: String,
     buildings: Vec<BuildingMetadata>,
+    roads: Vec<RoadMetadata>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -183,11 +232,31 @@ struct BuildingMetadata {
     triangle_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct RoadMetadata {
+    source_id: String,
+    entity_name: String,
+    name: Option<String>,
+    function: Option<String>,
+    mesh_path: String,
+    bounds_min_m: [f64; 3],
+    bounds_max_m: [f64; 3],
+    triangle_count: usize,
+    lane_derivation: &'static str,
+    lanes: Vec<ImportedLane>,
+}
+
 #[derive(Clone, Debug)]
 struct GeneratedBuilding {
     metadata: BuildingMetadata,
     obj: String,
     size_m: [f64; 3],
+}
+
+#[derive(Clone, Debug)]
+struct GeneratedRoad {
+    metadata: RoadMetadata,
+    obj: String,
 }
 
 /// Imports a CityGML file and writes deterministic RNE assets into `output_dir`.
@@ -219,16 +288,24 @@ pub fn import_citygml_str(
         .map(str::to_owned);
     let mut buildings = parse_buildings(&document)?;
     buildings.sort_by(|left, right| left.id.cmp(&right.id));
-    if buildings.is_empty() {
-        return Err(ImportError::NoLod1Buildings);
+    let mut roads = parse_roads(&document)?;
+    roads.sort_by(|left, right| left.id.cmp(&right.id));
+    if buildings.is_empty() && roads.is_empty() {
+        return Err(ImportError::NoSupportedLod1Geometry);
     }
 
     let mode = resolve_coordinate_mode(options.coordinate_mode, source_crs.as_deref());
-    let origin = options.origin.unwrap_or_else(|| default_origin(&buildings));
+    let origin = options
+        .origin
+        .unwrap_or_else(|| default_origin(&buildings, &roads));
     let tile_name = sanitize_component(&options.tile_name);
     let mut generated = Vec::with_capacity(buildings.len());
     for (index, building) in buildings.iter().enumerate() {
         generated.push(generate_building(building, index, mode, origin)?);
+    }
+    let mut generated_roads = Vec::with_capacity(roads.len());
+    for (index, road) in roads.iter().enumerate() {
+        generated_roads.push(generate_road(road, index, mode, origin)?);
     }
 
     fs::create_dir_all(output_dir).map_err(|error| io_error(output_dir, error))?;
@@ -238,8 +315,12 @@ pub fn import_citygml_str(
         let path = output_dir.join(&building.metadata.mesh_path);
         fs::write(&path, &building.obj).map_err(|error| io_error(&path, error))?;
     }
+    for road in &generated_roads {
+        let path = output_dir.join(&road.metadata.mesh_path);
+        fs::write(&path, &road.obj).map_err(|error| io_error(&path, error))?;
+    }
 
-    let scene = generated_scene(&generated, options);
+    let scene = generated_scene(&generated, &generated_roads, options);
     let scene_text = toml::to_string_pretty(&scene).map_err(|error| ImportError::Serialize {
         kind: "scene TOML",
         message: error.to_string(),
@@ -251,7 +332,7 @@ pub fn import_citygml_str(
         .map_err(|error| io_error(&scene_path, error))?;
 
     let metadata = TileMetadata {
-        schema_version: 1,
+        schema_version: 2,
         source: source_name.to_owned(),
         source_crs,
         coordinate_mode: mode,
@@ -271,6 +352,10 @@ pub fn import_citygml_str(
             .iter()
             .map(|building| building.metadata.clone())
             .collect(),
+        roads: generated_roads
+            .iter()
+            .map(|road| road.metadata.clone())
+            .collect(),
     };
     let mut metadata_text =
         serde_json::to_string_pretty(&metadata).map_err(|error| ImportError::Serialize {
@@ -285,12 +370,26 @@ pub fn import_citygml_str(
         scene_path,
         metadata_path,
         building_count: generated.len(),
+        road_count: generated_roads.len(),
+        lane_count: generated_roads
+            .iter()
+            .map(|road| road.metadata.lanes.len())
+            .sum(),
         triangle_count: generated
             .iter()
             .map(|building| building.metadata.triangle_count)
+            .chain(
+                generated_roads
+                    .iter()
+                    .map(|road| road.metadata.triangle_count),
+            )
             .sum(),
         coordinate_mode: mode,
         origin,
+        lanes: generated_roads
+            .iter()
+            .flat_map(|road| road.metadata.lanes.iter().cloned())
+            .collect(),
     })
 }
 
@@ -307,6 +406,15 @@ fn validate_options(options: &ImportOptions) -> Result<(), ImportError> {
     {
         return Err(ImportError::InvalidGeneratedScene(
             "building_color_rgba must be finite".into(),
+        ));
+    }
+    if !options
+        .road_color_rgba
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Err(ImportError::InvalidGeneratedScene(
+            "road_color_rgba must be finite".into(),
         ));
     }
     if let Some(origin) = options.origin {
@@ -370,16 +478,55 @@ fn parse_buildings(document: &Document<'_>) -> Result<Vec<ParsedBuilding>, Impor
     Ok(buildings)
 }
 
-fn parse_polygon(
-    polygon: Node<'_, '_>,
-    building_id: &str,
-) -> Result<Vec<SourcePoint>, ImportError> {
+fn parse_roads(document: &Document<'_>) -> Result<Vec<ParsedRoad>, ImportError> {
+    let mut seen = HashSet::new();
+    let mut roads = Vec::new();
+    for node in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "Road")
+    {
+        let id = node
+            .attributes()
+            .find(|attribute| attribute.name() == "id")
+            .map(|attribute| attribute.value().trim().to_owned())
+            .filter(|id| !id.is_empty())
+            .ok_or(ImportError::MissingRoadId)?;
+        if !seen.insert(id.clone()) {
+            return Err(ImportError::DuplicateRoadId(id));
+        }
+        let Some(lod1) = node
+            .descendants()
+            .find(|child| child.is_element() && child.tag_name().name() == "lod1MultiSurface")
+        else {
+            continue;
+        };
+        let mut polygons = Vec::new();
+        for polygon in lod1
+            .descendants()
+            .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
+        {
+            polygons.push(parse_polygon(polygon, &id)?);
+        }
+        if polygons.is_empty() {
+            continue;
+        }
+        roads.push(ParsedRoad {
+            id,
+            name: descendant_text(node, "name"),
+            function: descendant_text(node, "function"),
+            polygons,
+        });
+    }
+    Ok(roads)
+}
+
+fn parse_polygon(polygon: Node<'_, '_>, feature_id: &str) -> Result<Vec<SourcePoint>, ImportError> {
     if polygon
         .descendants()
         .any(|node| node.is_element() && node.tag_name().name() == "interior")
     {
         return Err(ImportError::UnsupportedGeometry {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: "polygon interior rings are not supported in Phase 1".into(),
         });
     }
@@ -387,29 +534,29 @@ fn parse_polygon(
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "exterior")
         .ok_or_else(|| ImportError::UnsupportedGeometry {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: "polygon has no exterior ring".into(),
         })?;
     let ring = exterior
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "LinearRing")
         .ok_or_else(|| ImportError::UnsupportedGeometry {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: "polygon exterior has no LinearRing".into(),
         })?;
     let mut points = if let Some(pos_list) = ring
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "posList")
     {
-        parse_pos_list(pos_list, building_id)?
+        parse_pos_list(pos_list, feature_id)?
     } else {
-        parse_pos_elements(ring, building_id)?
+        parse_pos_elements(ring, feature_id)?
     };
     remove_duplicate_ring_end(&mut points);
     remove_consecutive_duplicates(&mut points);
     if points.len() < 3 {
         return Err(ImportError::InvalidCoordinates {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: "polygon ring must contain at least three distinct points".into(),
         });
     }
@@ -418,16 +565,16 @@ fn parse_polygon(
 
 fn parse_pos_list(
     pos_list: Node<'_, '_>,
-    building_id: &str,
+    feature_id: &str,
 ) -> Result<Vec<SourcePoint>, ImportError> {
-    let values = parse_numbers(pos_list.text().unwrap_or_default(), building_id)?;
+    let values = parse_numbers(pos_list.text().unwrap_or_default(), feature_id)?;
     let dimension = pos_list
         .attribute("srsDimension")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(3);
     if dimension != 3 || !values.len().is_multiple_of(3) {
         return Err(ImportError::InvalidCoordinates {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: format!(
                 "expected 3D posList triples, got dimension {dimension} and {} values",
                 values.len()
@@ -446,17 +593,17 @@ fn parse_pos_list(
 
 fn parse_pos_elements(
     ring: Node<'_, '_>,
-    building_id: &str,
+    feature_id: &str,
 ) -> Result<Vec<SourcePoint>, ImportError> {
     let mut points = Vec::new();
     for pos in ring
         .descendants()
         .filter(|node| node.is_element() && node.tag_name().name() == "pos")
     {
-        let values = parse_numbers(pos.text().unwrap_or_default(), building_id)?;
+        let values = parse_numbers(pos.text().unwrap_or_default(), feature_id)?;
         if values.len() != 3 {
             return Err(ImportError::InvalidCoordinates {
-                building_id: building_id.into(),
+                feature_id: feature_id.into(),
                 message: format!("expected 3 values in gml:pos, got {}", values.len()),
             });
         }
@@ -468,14 +615,14 @@ fn parse_pos_elements(
     }
     if points.is_empty() {
         return Err(ImportError::UnsupportedGeometry {
-            building_id: building_id.into(),
+            feature_id: feature_id.into(),
             message: "LinearRing has neither posList nor pos elements".into(),
         });
     }
     Ok(points)
 }
 
-fn parse_numbers(text: &str, building_id: &str) -> Result<Vec<f64>, ImportError> {
+fn parse_numbers(text: &str, feature_id: &str) -> Result<Vec<f64>, ImportError> {
     text.split_whitespace()
         .map(|token| {
             token
@@ -483,7 +630,7 @@ fn parse_numbers(text: &str, building_id: &str) -> Result<Vec<f64>, ImportError>
                 .ok()
                 .filter(|value| value.is_finite())
                 .ok_or_else(|| ImportError::InvalidCoordinates {
-                    building_id: building_id.into(),
+                    feature_id: feature_id.into(),
                     message: format!("`{token}` is not a finite number"),
                 })
         })
@@ -525,13 +672,14 @@ fn resolve_coordinate_mode(requested: CoordinateMode, crs: Option<&str>) -> Coor
     }
 }
 
-fn default_origin(buildings: &[ParsedBuilding]) -> SourceOrigin {
+fn default_origin(buildings: &[ParsedBuilding], roads: &[ParsedRoad]) -> SourceOrigin {
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
     for point in buildings
         .iter()
         .flat_map(|building| building.polygons.iter())
         .flatten()
+        .chain(roads.iter().flat_map(|road| road.polygons.iter()).flatten())
     {
         min[0] = min[0].min(point.first_deg_or_m);
         min[1] = min[1].min(point.second_deg_or_m);
@@ -578,7 +726,7 @@ fn generate_building(
         .any(|extent| !extent.is_finite() || *extent <= 0.0)
     {
         return Err(ImportError::InvalidCoordinates {
-            building_id: building.id.clone(),
+            feature_id: building.id.clone(),
             message: format!("LOD1 solid has degenerate bounds {size_m:?}"),
         });
     }
@@ -603,7 +751,7 @@ fn generate_building(
         }
         let triangles =
             triangulate_polygon(polygon).map_err(|message| ImportError::UnsupportedGeometry {
-                building_id: building.id.clone(),
+                feature_id: building.id.clone(),
                 message,
             })?;
         for triangle in triangles {
@@ -634,6 +782,161 @@ fn generate_building(
         obj,
         size_m,
     })
+}
+
+fn generate_road(
+    road: &ParsedRoad,
+    index: usize,
+    mode: CoordinateMode,
+    origin: SourceOrigin,
+) -> Result<GeneratedRoad, ImportError> {
+    let local_polygons: Vec<Vec<[f64; 3]>> = road
+        .polygons
+        .iter()
+        .map(|polygon| {
+            polygon
+                .iter()
+                .map(|point| source_to_local(*point, mode, origin))
+                .collect()
+        })
+        .collect();
+    let (bounds_min_m, bounds_max_m) = bounds(&local_polygons);
+    let safe_id = sanitize_component(&road.id);
+    let entity_name = format!("plateau_road_{index:04}_{safe_id}");
+    let mesh_path = format!("meshes/{entity_name}.obj");
+    let mut obj = format!("# RNE PLATEAU LOD1 road {}\no {entity_name}\n", road.id);
+    let mut vertex_count = 0_usize;
+    let mut triangle_count = 0_usize;
+    let mut lanes = Vec::new();
+    for (polygon_index, polygon) in local_polygons.iter().enumerate() {
+        for point in polygon {
+            obj.push_str(&format!(
+                "v {:.6} {:.6} {:.6}\n",
+                clean_zero(point[0]),
+                clean_zero(point[1] + 0.02),
+                clean_zero(point[2])
+            ));
+        }
+        let triangles =
+            triangulate_polygon(polygon).map_err(|message| ImportError::UnsupportedGeometry {
+                feature_id: road.id.clone(),
+                message,
+            })?;
+        for mut triangle in triangles {
+            let a = polygon[triangle[0]];
+            let b = polygon[triangle[1]];
+            let c = polygon[triangle[2]];
+            let normal_y = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+            if normal_y < 0.0 {
+                triangle.swap(1, 2);
+            }
+            obj.push_str(&format!(
+                "f {} {} {}\n",
+                vertex_count + triangle[0] + 1,
+                vertex_count + triangle[1] + 1,
+                vertex_count + triangle[2] + 1
+            ));
+            triangle_count += 1;
+        }
+        vertex_count += polygon.len();
+        lanes.extend(derive_two_way_lanes(polygon, &road.id, polygon_index));
+    }
+
+    Ok(GeneratedRoad {
+        metadata: RoadMetadata {
+            source_id: road.id.clone(),
+            entity_name,
+            name: road.name.clone(),
+            function: road.function.clone(),
+            mesh_path,
+            bounds_min_m,
+            bounds_max_m,
+            triangle_count,
+            lane_derivation: "deterministic principal-axis approximation from LOD1 road surface",
+            lanes,
+        },
+        obj,
+    })
+}
+
+fn derive_two_way_lanes(
+    polygon: &[[f64; 3]],
+    road_id: &str,
+    polygon_index: usize,
+) -> Vec<ImportedLane> {
+    let count = polygon.len() as f64;
+    let center_x = polygon.iter().map(|point| point[0]).sum::<f64>() / count;
+    let center_y = polygon.iter().map(|point| point[1]).sum::<f64>() / count;
+    let center_z = polygon.iter().map(|point| point[2]).sum::<f64>() / count;
+    let mut covariance_xx = 0.0;
+    let mut covariance_xz = 0.0;
+    let mut covariance_zz = 0.0;
+    for point in polygon {
+        let x = point[0] - center_x;
+        let z = point[2] - center_z;
+        covariance_xx += x * x;
+        covariance_xz += x * z;
+        covariance_zz += z * z;
+    }
+    let angle_rad = 0.5 * (2.0 * covariance_xz).atan2(covariance_xx - covariance_zz);
+    let mut axis = [angle_rad.cos(), angle_rad.sin()];
+    if axis[0] < -EPSILON || (axis[0].abs() <= EPSILON && axis[1] < 0.0) {
+        axis[0] = -axis[0];
+        axis[1] = -axis[1];
+    }
+    let perpendicular = [-axis[1], axis[0]];
+    let mut axis_min = f64::INFINITY;
+    let mut axis_max = f64::NEG_INFINITY;
+    let mut transverse_min = f64::INFINITY;
+    let mut transverse_max = f64::NEG_INFINITY;
+    for point in polygon {
+        let relative = [point[0] - center_x, point[2] - center_z];
+        let along = relative[0] * axis[0] + relative[1] * axis[1];
+        let transverse = relative[0] * perpendicular[0] + relative[1] * perpendicular[1];
+        axis_min = axis_min.min(along);
+        axis_max = axis_max.max(along);
+        transverse_min = transverse_min.min(transverse);
+        transverse_max = transverse_max.max(transverse);
+    }
+    let length_m = axis_max - axis_min;
+    let road_width_m = transverse_max - transverse_min;
+    if !length_m.is_finite()
+        || !road_width_m.is_finite()
+        || road_width_m < 4.0
+        || length_m < road_width_m * 1.5
+    {
+        return Vec::new();
+    }
+    let transverse_center = (transverse_min + transverse_max) * 0.5;
+    let lane_width_m = road_width_m * 0.5;
+    [-0.25, 0.25]
+        .into_iter()
+        .enumerate()
+        .map(|(lane_index, width_fraction)| {
+            let lane_transverse = transverse_center + road_width_m * width_fraction;
+            let point = |along: f64| {
+                [
+                    center_x + axis[0] * along + perpendicular[0] * lane_transverse,
+                    center_y + 0.05,
+                    center_z + axis[1] * along + perpendicular[1] * lane_transverse,
+                ]
+            };
+            let mut centerline_m = [point(axis_min), point(axis_max)];
+            let travel_direction = if lane_index == 0 {
+                LaneTravelDirection::PrincipalAxisPositive
+            } else {
+                centerline_m.swap(0, 1);
+                LaneTravelDirection::PrincipalAxisNegative
+            };
+            ImportedLane {
+                lane_id: format!("{road_id}/surface-{polygon_index:04}/lane-{lane_index}"),
+                road_source_id: road_id.to_owned(),
+                centerline_m,
+                width_m: lane_width_m,
+                travel_direction,
+            }
+        })
+        .collect()
 }
 
 fn source_to_local(point: SourcePoint, mode: CoordinateMode, origin: SourceOrigin) -> [f64; 3] {
@@ -779,7 +1082,46 @@ fn point_in_triangle(
         && cross_2d(c, a, point) * orientation >= -EPSILON
 }
 
-fn generated_scene(buildings: &[GeneratedBuilding], options: &ImportOptions) -> SceneAsset {
+fn generated_scene(
+    buildings: &[GeneratedBuilding],
+    roads: &[GeneratedRoad],
+    options: &ImportOptions,
+) -> SceneAsset {
+    let mut objects: Vec<SceneObjectAsset> = buildings
+        .iter()
+        .map(|building| SceneObjectAsset {
+            name: building.metadata.entity_name.clone(),
+            translation_m: building.metadata.translation_m,
+            rotation_rpy_rad: [0.0; 3],
+            body_type: ObstacleBodyType::Fixed,
+            mass_kg: 0.08,
+            friction: Some(0.75),
+            restitution: Some(0.0),
+            visual: Some(SceneVisualAsset::Mesh {
+                path: building.metadata.mesh_path.clone(),
+                scale: [1.0; 3],
+                color_rgba: options.building_color_rgba,
+            }),
+            collision: Some(SceneCollisionAsset::Box {
+                size_m: building.size_m,
+            }),
+        })
+        .collect();
+    objects.extend(roads.iter().map(|road| SceneObjectAsset {
+        name: road.metadata.entity_name.clone(),
+        translation_m: [0.0; 3],
+        rotation_rpy_rad: [0.0; 3],
+        body_type: ObstacleBodyType::Fixed,
+        mass_kg: 0.08,
+        friction: Some(0.9),
+        restitution: Some(0.0),
+        visual: Some(SceneVisualAsset::Mesh {
+            path: road.metadata.mesh_path.clone(),
+            scale: [1.0; 3],
+            color_rgba: options.road_color_rgba,
+        }),
+        collision: None,
+    }));
     SceneAsset {
         world: SceneWorldAsset {
             seed: options.world_seed,
@@ -788,26 +1130,7 @@ fn generated_scene(buildings: &[GeneratedBuilding], options: &ImportOptions) -> 
         ground: GroundAsset { enabled: true },
         robots: Vec::new(),
         obstacles: Vec::new(),
-        objects: buildings
-            .iter()
-            .map(|building| SceneObjectAsset {
-                name: building.metadata.entity_name.clone(),
-                translation_m: building.metadata.translation_m,
-                rotation_rpy_rad: [0.0; 3],
-                body_type: ObstacleBodyType::Fixed,
-                mass_kg: 0.08,
-                friction: Some(0.75),
-                restitution: Some(0.0),
-                visual: Some(SceneVisualAsset::Mesh {
-                    path: building.metadata.mesh_path.clone(),
-                    scale: [1.0; 3],
-                    color_rgba: options.building_color_rgba,
-                }),
-                collision: Some(SceneCollisionAsset::Box {
-                    size_m: building.size_m,
-                }),
-            })
-            .collect(),
+        objects,
         deformables: Vec::new(),
         task_markers: Vec::new(),
     }
@@ -911,7 +1234,7 @@ mod tests {
     }
 
     #[test]
-    fn polygon_holes_are_rejected_with_building_id() {
+    fn polygon_holes_are_rejected_with_feature_id() {
         let xml = r#"
             <CityModel xmlns:gml="urn:gml" xmlns:bldg="urn:bldg">
               <bldg:Building gml:id="with-hole">
@@ -930,7 +1253,28 @@ mod tests {
         let error = parse_buildings(&document).expect_err("hole should fail");
         assert!(matches!(
             error,
-            ImportError::UnsupportedGeometry { building_id, .. } if building_id == "with-hole"
+            ImportError::UnsupportedGeometry { feature_id, .. } if feature_id == "with-hole"
         ));
+    }
+
+    #[test]
+    fn derives_stable_opposing_lanes_from_straight_road_surface() {
+        let polygon = vec![
+            [-3.0, 0.0, -17.0],
+            [3.0, 0.0, -17.0],
+            [3.0, 0.0, 17.0],
+            [-3.0, 0.0, 17.0],
+        ];
+        let first = derive_two_way_lanes(&polygon, "road-main", 0);
+        let second = derive_two_way_lanes(&polygon, "road-main", 0);
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0].lane_id, "road-main/surface-0000/lane-0");
+        assert!((first[0].width_m - 3.0).abs() < 1.0e-9);
+        assert!((first[0].centerline_m[0][0].abs() - 1.5).abs() < 1.0e-9);
+        assert!((first[1].centerline_m[0][0].abs() - 1.5).abs() < 1.0e-9);
+        assert!((first[0].centerline_m[0][0] + first[1].centerline_m[0][0]).abs() < 1.0e-9);
+        assert_eq!(first[0].centerline_m, second[0].centerline_m);
+        assert_eq!(first[0].centerline_m[0][2], first[1].centerline_m[1][2]);
+        assert_eq!(first[0].centerline_m[1][2], first[1].centerline_m[0][2]);
     }
 }

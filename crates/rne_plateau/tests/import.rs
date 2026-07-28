@@ -37,23 +37,32 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
     .expect("import synthetic PLATEAU fixture");
 
     assert_eq!(result.building_count, 2);
-    assert_eq!(result.triangle_count, 24);
+    assert_eq!(result.road_count, 1);
+    assert_eq!(result.lane_count, 2);
+    assert_eq!(result.triangle_count, 26);
     assert_eq!(result.coordinate_mode, CoordinateMode::GeographicDegrees);
 
     let metadata: Value =
         serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
             .expect("metadata JSON");
-    assert_eq!(metadata["schema_version"], 1);
+    assert_eq!(metadata["schema_version"], 2);
     assert_eq!(metadata["buildings"][0]["source_id"], "bldg-A");
     assert_eq!(metadata["buildings"][1]["source_id"], "bldg-B");
     assert_eq!(metadata["buildings"][0]["name"], "RNE City Hall");
+    assert_eq!(metadata["roads"][0]["source_id"], "road-main");
+    assert_eq!(metadata["roads"][0]["name"], "RNE Avenue");
+    assert_eq!(metadata["roads"][0]["lanes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        metadata["roads"][0]["lanes"][0]["travel_direction"],
+        "principal_axis_positive"
+    );
 
     let bundle = load_scene_bundle(&result.scene_path).expect("validate generated scene");
-    assert_eq!(bundle.scene.objects.len(), 2);
+    assert_eq!(bundle.scene.objects.len(), 3);
     let mut world = World::new();
     spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())
         .expect("headless spawn generated scene");
-    assert_eq!(world.query::<&Visual>().iter(&world).count(), 2);
+    assert_eq!(world.query::<&Visual>().iter(&world).count(), 3);
     assert_eq!(world.query::<&Collider>().iter(&world).count(), 3);
 
     fs::remove_dir_all(output).expect("remove test output");
@@ -86,6 +95,7 @@ fn repeated_import_is_byte_for_byte_deterministic() {
     for mesh in [
         "plateau_building_0000_bldg_a.obj",
         "plateau_building_0001_bldg_b.obj",
+        "plateau_road_0000_road_main.obj",
     ] {
         assert_eq!(
             fs::read(first.join("meshes").join(mesh)).expect("first mesh"),

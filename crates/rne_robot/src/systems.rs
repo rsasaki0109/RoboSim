@@ -2,7 +2,7 @@
 
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
-use crate::components::{Actuator, Joint, JointKind};
+use crate::components::{AckermannDrive, Actuator, Joint, JointKind};
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
 use bevy_ecs::prelude::{Entity, World};
@@ -22,6 +22,126 @@ pub enum CommandApplyResult {
     JointRejected(JointValidationError),
     /// Command ignored because it was stale.
     Stale,
+}
+
+/// Result of commanding a kinematic Ackermann drive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AckermannCommandResult {
+    /// The finite command was clamped to the drive limits and applied.
+    Applied,
+    /// The target entity has no valid [`AckermannDrive`].
+    InvalidTarget,
+    /// At least one command value was non-finite; the previous target was preserved.
+    NonFiniteCommand,
+}
+
+/// Applies a bounded speed and steering target to one kinematic Ackermann vehicle.
+pub fn command_ackermann_drive(
+    world: &mut World,
+    vehicle: Entity,
+    speed_m_s: f64,
+    steering_rad: f64,
+) -> AckermannCommandResult {
+    if !speed_m_s.is_finite() || !steering_rad.is_finite() {
+        return AckermannCommandResult::NonFiniteCommand;
+    }
+    let Some(mut drive) = world.get_mut::<AckermannDrive>(vehicle) else {
+        return AckermannCommandResult::InvalidTarget;
+    };
+    if !drive.is_valid() {
+        return AckermannCommandResult::InvalidTarget;
+    }
+    drive.target_speed_m_s = speed_m_s.clamp(-drive.max_speed_m_s, drive.max_speed_m_s);
+    drive.target_steering_rad = steering_rad.clamp(-drive.max_steering_rad, drive.max_steering_rad);
+    AckermannCommandResult::Applied
+}
+
+/// Integrates every valid Ackermann vehicle in stable entity order for one fixed step.
+///
+/// Invalid drive configurations and entities without a [`Transform3`] are left unchanged.
+pub fn ackermann_kinematics(world: &mut World, dt: SimDuration) {
+    let dt_s = dt.as_seconds().value();
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return;
+    }
+    let mut vehicles: Vec<Entity> = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<AckermannDrive>() && entity.contains::<Transform3>())
+        .map(|entity| entity.id())
+        .collect();
+    vehicles.sort_by_key(|entity| entity.to_bits());
+
+    for vehicle in vehicles {
+        let Some(mut drive) = world.get::<AckermannDrive>(vehicle).cloned() else {
+            continue;
+        };
+        if !drive.is_valid() {
+            continue;
+        }
+        let accelerating = drive.target_speed_m_s.signum() == drive.speed_m_s.signum()
+            && drive.target_speed_m_s.abs() > drive.speed_m_s.abs();
+        let speed_rate_m_s2 = if accelerating {
+            drive.max_acceleration_m_s2
+        } else {
+            drive.max_deceleration_m_s2
+        };
+        drive.speed_m_s = move_towards(
+            drive.speed_m_s,
+            drive.target_speed_m_s,
+            speed_rate_m_s2 * dt_s,
+        );
+        drive.steering_rad = move_towards(
+            drive.steering_rad,
+            drive.target_steering_rad,
+            drive.max_steering_rate_rad_s * dt_s,
+        );
+        let yaw_rad_s = drive.speed_m_s / drive.wheelbase_m * drive.steering_rad.tan();
+        let yaw_delta_rad = yaw_rad_s * dt_s;
+        let mut forward = Vec3::X;
+        if let Some(mut transform) = world.get_mut::<Transform3>(vehicle) {
+            let midpoint_rotation =
+                (Quat::from_rotation_y(yaw_delta_rad * 0.5) * transform.rotation).normalize();
+            forward = midpoint_rotation * Vec3::X;
+            transform.translation += forward * drive.speed_m_s * dt_s;
+            transform.rotation =
+                (Quat::from_rotation_y(yaw_delta_rad) * transform.rotation).normalize();
+        }
+        if let Some(mut body) = world.get_mut::<RigidBody>(vehicle) {
+            body.linear_velocity_m_s = forward * drive.speed_m_s;
+            body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rad_s, 0.0);
+        }
+        world.entity_mut(vehicle).insert(drive);
+    }
+}
+
+/// Computes a pure-pursuit steering target toward a world-space lookahead point.
+///
+/// The returned angle follows the Ackermann convention used by
+/// [`ackermann_kinematics`] and is not clamped to a particular vehicle's limits.
+pub fn pure_pursuit_steering(
+    transform: &Transform3,
+    target_m: Vec3,
+    wheelbase_m: f64,
+    lookahead_m: f64,
+) -> f64 {
+    if !wheelbase_m.is_finite()
+        || !lookahead_m.is_finite()
+        || wheelbase_m <= 0.0
+        || lookahead_m <= 0.0
+    {
+        return 0.0;
+    }
+    let local_target = transform.rotation.conjugate() * (target_m - transform.translation);
+    (-2.0 * wheelbase_m * local_target.z).atan2(lookahead_m * lookahead_m)
+}
+
+fn move_towards(current: f64, target: f64, max_delta: f64) -> f64 {
+    let delta = target - current;
+    if delta.abs() <= max_delta {
+        target
+    } else {
+        current + delta.signum() * max_delta
+    }
 }
 
 /// Applies queued actuator commands to actuators and joints.
@@ -53,7 +173,16 @@ fn apply_one_command(world: &mut World, command: &ActuatorCommand) -> CommandApp
         ActuatorCommand::GripperWidth { .. } | ActuatorCommand::BodyWrench { .. } => {
             CommandApplyResult::InvalidTarget
         }
-        ActuatorCommand::Ackermann { .. } => CommandApplyResult::InvalidTarget,
+        ActuatorCommand::Ackermann {
+            vehicle,
+            speed_m_s,
+            steering_rad,
+        } => match command_ackermann_drive(world, *vehicle, *speed_m_s, *steering_rad) {
+            AckermannCommandResult::Applied => CommandApplyResult::Applied,
+            AckermannCommandResult::InvalidTarget | AckermannCommandResult::NonFiniteCommand => {
+                CommandApplyResult::InvalidTarget
+            }
+        },
     }
 }
 
@@ -280,8 +409,8 @@ pub fn sync_joint_motors_from_actuators(world: &mut World, drives: &[Differentia
 mod tests {
     use super::*;
     use crate::actuator::ActuatorLimits;
-    use crate::components::{JointKind, JointLimits, Link, Robot, RobotId};
-    use rne_core::SimTime;
+    use crate::components::{AckermannDrive, JointKind, JointLimits, Link, Robot, RobotId};
+    use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
 
@@ -399,5 +528,55 @@ mod tests {
             .translation
             .x;
         assert!(x > 0.0, "robot should move forward, x={x}");
+    }
+
+    #[test]
+    fn ackermann_commands_clamp_and_integrate_from_sim_clock() {
+        let mut world = World::new();
+        let vehicle = spawn_named(&mut world, "test_vehicle");
+        world
+            .entity_mut(vehicle)
+            .insert((Transform3::default(), AckermannDrive::default()));
+        assert_eq!(
+            command_ackermann_drive(&mut world, vehicle, 100.0, 2.0),
+            AckermannCommandResult::Applied
+        );
+        let commanded = world.get::<AckermannDrive>(vehicle).unwrap();
+        assert_eq!(commanded.target_speed_m_s, commanded.max_speed_m_s);
+        assert_eq!(commanded.target_steering_rad, commanded.max_steering_rad);
+
+        let fixed_delta = SimDuration::from_seconds(Seconds::new(1.0 / 60.0));
+        let mut clock = SimClock::new(fixed_delta);
+        for _ in 0..60 {
+            assert_eq!(clock.advance(fixed_delta), 1);
+            ackermann_kinematics(&mut world, clock.fixed_delta());
+        }
+        let transform = world.get::<Transform3>(vehicle).unwrap();
+        let drive = world.get::<AckermannDrive>(vehicle).unwrap();
+        assert!(drive.speed_m_s > 2.4 && drive.speed_m_s < 2.6);
+        assert!(transform.translation.length() > 1.0);
+        assert_eq!(clock.sim_time().ticks(), fixed_delta.ticks() * 60);
+    }
+
+    #[test]
+    fn ackermann_rejects_non_finite_command_without_mutation() {
+        let mut world = World::new();
+        let vehicle = spawn_named(&mut world, "test_vehicle");
+        world
+            .entity_mut(vehicle)
+            .insert((Transform3::default(), AckermannDrive::default()));
+        let before = world.get::<AckermannDrive>(vehicle).unwrap().clone();
+        assert_eq!(
+            command_ackermann_drive(&mut world, vehicle, f64::NAN, 0.0),
+            AckermannCommandResult::NonFiniteCommand
+        );
+        assert_eq!(world.get::<AckermannDrive>(vehicle).unwrap(), &before);
+    }
+
+    #[test]
+    fn pure_pursuit_steers_toward_lateral_target() {
+        let transform = Transform3::default();
+        let steering = pure_pursuit_steering(&transform, Vec3::new(5.0, 0.0, 2.0), 2.7, 5.0);
+        assert!(steering < 0.0);
     }
 }

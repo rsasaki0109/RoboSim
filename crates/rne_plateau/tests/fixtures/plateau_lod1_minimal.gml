@@ -3,13 +3,34 @@
 <core:CityModel
     xmlns:core="http://www.opengis.net/citygml/2.0"
     xmlns:gml="http://www.opengis.net/gml"
-    xmlns:bldg="http://www.opengis.net/citygml/building/2.0">
+    xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+    xmlns:tran="http://www.opengis.net/citygml/transportation/2.0">
   <gml:boundedBy>
     <gml:Envelope srsName="http://www.opengis.net/def/crs/EPSG/0/6697" srsDimension="3">
-      <gml:lowerCorner>35.681201187 139.76693425 5</gml:lowerCorner>
-      <gml:upperCorner>35.681398813 139.76726575 20</gml:upperCorner>
+      <gml:lowerCorner>35.681147289 139.76693425 5</gml:lowerCorner>
+      <gml:upperCorner>35.681452711 139.76726575 20</gml:upperCorner>
     </gml:Envelope>
   </gml:boundedBy>
+
+  <core:cityObjectMember>
+    <tran:Road gml:id="road-main">
+      <gml:name>RNE Avenue</gml:name>
+      <tran:function>1</tran:function>
+      <tran:lod1MultiSurface>
+        <gml:MultiSurface>
+          <gml:surfaceMember>
+            <gml:Polygon>
+              <gml:exterior>
+                <gml:LinearRing>
+                  <gml:posList srsDimension="3">35.681147289 139.76706685 5 35.681452711 139.76706685 5 35.681452711 139.76713315 5 35.681147289 139.76713315 5 35.681147289 139.76706685 5</gml:posList>
+                </gml:LinearRing>
+              </gml:exterior>
+            </gml:Polygon>
+          </gml:surfaceMember>
+        </gml:MultiSurface>
+      </tran:lod1MultiSurface>
+    </tran:Road>
+  </core:cityObjectMember>
 
   <!-- Deliberately reverse source order to exercise stable gml:id sorting. -->
   <core:cityObjectMember>
