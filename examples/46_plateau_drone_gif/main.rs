@@ -38,6 +38,78 @@ const SANJO_ORIGIN: SourceOrigin = SourceOrigin {
 const KITA_SANJO_STATION_XZ_M: [f64; 2] = [59.46, -77.17];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+struct Footprint {
+    min_x_m: f64,
+    max_x_m: f64,
+    min_z_m: f64,
+    max_z_m: f64,
+}
+
+impl Footprint {
+    fn overlaps_disc(self, center: Vec3, radius_m: f64) -> bool {
+        let nearest_x_m = center.x.clamp(self.min_x_m, self.max_x_m);
+        let nearest_z_m = center.z.clamp(self.min_z_m, self.max_z_m);
+        (center.x - nearest_x_m).powi(2) + (center.z - nearest_z_m).powi(2) < radius_m.powi(2)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StreetFixture {
+    center: Vec3,
+    clearance_radius_m: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RoadFrame {
+    center: Vec3,
+    direction: Vec3,
+    right: Vec3,
+    length_m: f64,
+    half_width_m: f64,
+    yaw_rad: f64,
+}
+
+impl RoadFrame {
+    fn from_lanes(lanes: &[ImportedLane]) -> Self {
+        assert_eq!(lanes.len(), 2, "streetscape requires an opposing lane pair");
+        let start = (Vec3::from_array(lanes[0].centerline_m[0])
+            + Vec3::from_array(lanes[1].centerline_m[1]))
+            * 0.5;
+        let end = (Vec3::from_array(lanes[0].centerline_m[1])
+            + Vec3::from_array(lanes[1].centerline_m[0]))
+            * 0.5;
+        let delta = end - start;
+        let direction = delta.normalize_or_zero();
+        let right = Vec3::new(-direction.z, 0.0, direction.x);
+        let lane_midpoints = [
+            (Vec3::from_array(lanes[0].centerline_m[0])
+                + Vec3::from_array(lanes[0].centerline_m[1]))
+                * 0.5,
+            (Vec3::from_array(lanes[1].centerline_m[0])
+                + Vec3::from_array(lanes[1].centerline_m[1]))
+                * 0.5,
+        ];
+        let lane_separation_m = (lane_midpoints[1] - lane_midpoints[0]).dot(right).abs();
+        let average_lane_width_m = (lanes[0].width_m + lanes[1].width_m) * 0.5;
+        Self {
+            center: (start + end) * 0.5,
+            direction,
+            right,
+            length_m: delta.length(),
+            half_width_m: (lane_separation_m + average_lane_width_m) * 0.5,
+            yaw_rad: -direction.z.atan2(direction.x),
+        }
+    }
+
+    fn point(self, along_m: f64, lateral_m: f64, height_m: f64) -> Vec3 {
+        self.center
+            + self.direction * along_m
+            + self.right * lateral_m
+            + Vec3::new(0.0, height_m, 0.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct VehicleFrame {
     transform: Transform3,
     speed_m_s: f64,
@@ -281,12 +353,20 @@ fn main() {
     city_scene
         .resolve_mesh_assets_with_roots(&root_refs)
         .expect("resolve generated PLATEAU meshes");
+    let building_footprints = building_footprints(&building_bundle);
+    let street_fixtures =
+        append_city_streetscape(&mut city_scene, &showcase_lanes, &building_footprints);
     append_lane_markings(&mut city_scene, &showcase_lanes);
     let vehicle_assets = VehicleRenderAssets::load();
 
     assert!(
         city_scene.items.len() <= MAX_STATIC_SCENE_ITEMS,
         "PLATEAU scene leaves insufficient room for moving actors"
+    );
+    println!(
+        "streetscape ready: fixtures={} static_scene_items={}",
+        street_fixtures.len(),
+        city_scene.items.len()
     );
     let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
     camera.far_m = 280.0;
@@ -503,114 +583,124 @@ fn render_scene_from_world(world: &mut World) -> RenderScene {
     scene
 }
 
-#[cfg(test)]
-fn append_city_streetscape(scene: &mut RenderScene) {
-    scene.items.push(RenderSceneItem {
-        transform: MathTransform3 {
-            translation: Vec3::new(0.0, -0.08, 0.0),
-            rotation: Quat::IDENTITY,
-            scale: Vec3::new(60.0, 0.12, 100.0),
-        },
-        shape: VisualShape::Box { size_m: Vec3::ONE },
-        color_rgba: [0.16, 0.20, 0.18, 1.0],
-        mesh: None,
-        base_color_texture: None,
-    });
-    for x in [-1.48, 1.48] {
-        push_box(
-            scene,
-            Vec3::new(x, 0.022, 0.0),
-            Quat::IDENTITY,
-            Vec3::new(0.74, 0.018, 88.0),
-            [0.135, 0.155, 0.166, 1.0],
-        );
-    }
-    for (x, z, width_m, length_m) in [
-        (-1.1, -31.0, 1.8, 4.4),
-        (1.0, -14.0, 1.5, 3.2),
-        (-0.8, 17.0, 1.9, 4.8),
-        (1.2, 34.0, 1.6, 3.6),
-    ] {
-        push_box(
-            scene,
-            Vec3::new(x, 0.028, z),
-            Quat::IDENTITY,
-            Vec3::new(width_m, 0.016, length_m),
-            [0.19, 0.205, 0.21, 1.0],
-        );
-    }
-    for side in [-1.0, 1.0] {
-        push_box(
-            scene,
-            Vec3::new(side * 5.25, 0.06, 0.0),
-            Quat::IDENTITY,
-            Vec3::new(2.35, 0.14, 92.0),
-            [0.43, 0.45, 0.44, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(side * 4.08, 0.11, 0.0),
-            Quat::IDENTITY,
-            Vec3::new(0.18, 0.24, 92.0),
-            [0.68, 0.68, 0.64, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(side * 4.20, 0.018, 0.0),
-            Quat::IDENTITY,
-            Vec3::new(0.22, 0.018, 92.0),
-            [0.09, 0.105, 0.11, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(side * 3.72, 0.045, 0.0),
-            Quat::IDENTITY,
-            Vec3::new(0.12, 0.045, 88.0),
-            [0.86, 0.82, 0.58, 1.0],
-        );
-        for z in [-36.0, -18.0, 18.0, 36.0] {
-            append_streetlight(scene, Vec3::new(side * 5.55, 0.0, z), -side);
-        }
-        for (index, z) in [-29.0, -11.0, 10.0, 29.0].into_iter().enumerate() {
-            append_tree(
-                scene,
-                Vec3::new(side * (6.15 + index as f64 * 0.08), 0.0, z),
-            );
-        }
-        append_traffic_signal(scene, side, 3.0);
-    }
-    for segment in -10..=10 {
-        push_box(
-            scene,
-            Vec3::new(0.0, 0.05, segment as f64 * 4.0),
-            Quat::IDENTITY,
-            Vec3::new(0.10, 0.045, 2.1),
-            [0.88, 0.88, 0.84, 1.0],
-        );
-    }
-    for z in [-1.35, -0.45, 0.45, 1.35] {
-        push_box(
-            scene,
-            Vec3::new(0.0, 0.055, z),
-            Quat::IDENTITY,
-            Vec3::new(7.1, 0.05, 0.38),
-            [0.90, 0.90, 0.86, 1.0],
-        );
-    }
-    for (x, z) in [(-0.65, -22.0), (0.72, 23.0)] {
-        push_cylinder(
-            scene,
-            Vec3::new(x, 0.04, z),
-            Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
-            0.36,
-            0.025,
-            [0.14, 0.16, 0.17, 1.0],
-        );
-    }
+fn building_footprints(bundle: &SceneAssetBundle) -> Vec<Footprint> {
+    bundle
+        .scene
+        .objects
+        .iter()
+        .filter(|object| object.name.starts_with("plateau_building_"))
+        .filter_map(|object| {
+            let SceneCollisionAsset::Box { size_m } = object.collision? else {
+                return None;
+            };
+            Some(Footprint {
+                min_x_m: object.translation_m[0] - size_m[0] * 0.5,
+                max_x_m: object.translation_m[0] + size_m[0] * 0.5,
+                min_z_m: object.translation_m[2] - size_m[2] * 0.5,
+                max_z_m: object.translation_m[2] + size_m[2] * 0.5,
+            })
+        })
+        .collect()
 }
 
-#[cfg(test)]
-fn append_streetlight(scene: &mut RenderScene, base: Vec3, road_direction: f64) {
+fn append_city_streetscape(
+    scene: &mut RenderScene,
+    lanes: &[ImportedLane],
+    buildings: &[Footprint],
+) -> Vec<StreetFixture> {
+    let road = RoadFrame::from_lanes(lanes);
+    let rotation = Quat::from_rotation_y(road.yaw_rad);
+    let mut fixtures = Vec::new();
+
+    // A low ground slab receives shadows and keeps non-road pixels from becoming sky.
+    push_box(
+        scene,
+        Vec3::new(0.0, -0.12, 0.0),
+        Quat::IDENTITY,
+        Vec3::new(360.0, 0.20, 360.0),
+        [0.21, 0.27, 0.19, 1.0],
+    );
+
+    let sidewalk_width_m = 2.4;
+    let sidewalk_center_offset_m = road.half_width_m + sidewalk_width_m * 0.5;
+    for side in [-1.0, 1.0] {
+        let sidewalk_center = road.point(0.0, side * sidewalk_center_offset_m, 0.055);
+        push_box(
+            scene,
+            sidewalk_center,
+            rotation,
+            Vec3::new(road.length_m + 3.0, 0.11, sidewalk_width_m),
+            [0.48, 0.49, 0.47, 1.0],
+        );
+        let curb_center = road.point(0.0, side * (road.half_width_m + 0.08), 0.105);
+        push_box(
+            scene,
+            curb_center,
+            rotation,
+            Vec3::new(road.length_m + 3.0, 0.21, 0.16),
+            [0.67, 0.67, 0.63, 1.0],
+        );
+
+        for along_fraction in [-0.38, -0.12, 0.15, 0.40] {
+            let base = road.point(
+                road.length_m * along_fraction,
+                side * (road.half_width_m + 1.55),
+                0.11,
+            );
+            if fixture_is_clear(base, 0.45, buildings) {
+                append_streetlight(scene, base, -side, rotation);
+                fixtures.push(StreetFixture {
+                    center: base,
+                    clearance_radius_m: 0.45,
+                });
+            }
+        }
+
+        for along_fraction in [-0.31, -0.02, 0.27] {
+            let base = road.point(
+                road.length_m * along_fraction,
+                side * (road.half_width_m + 3.0),
+                0.0,
+            );
+            if fixture_is_clear(base, 1.15, buildings) {
+                append_tree(scene, base);
+                fixtures.push(StreetFixture {
+                    center: base,
+                    clearance_radius_m: 1.15,
+                });
+            }
+        }
+
+        for along_fraction in [-0.24, 0.30] {
+            let center = road.point(
+                road.length_m * along_fraction,
+                side * (road.half_width_m + 0.58),
+                0.12,
+            );
+            if fixture_is_clear(center, 3.2, buildings) {
+                append_guardrail(scene, center, rotation);
+                fixtures.push(StreetFixture {
+                    center,
+                    clearance_radius_m: 3.2,
+                });
+            }
+        }
+    }
+    fixtures
+}
+
+fn fixture_is_clear(center: Vec3, radius_m: f64, buildings: &[Footprint]) -> bool {
+    buildings
+        .iter()
+        .all(|building| !building.overlaps_disc(center, radius_m))
+}
+
+fn append_streetlight(
+    scene: &mut RenderScene,
+    base: Vec3,
+    road_direction: f64,
+    road_rotation: Quat,
+) {
     push_cylinder(
         scene,
         base + Vec3::new(0.0, 2.6, 0.0),
@@ -621,28 +711,27 @@ fn append_streetlight(scene: &mut RenderScene, base: Vec3, road_direction: f64) 
     );
     push_box(
         scene,
-        base + Vec3::new(road_direction * 0.55, 5.12, 0.0),
-        Quat::IDENTITY,
-        Vec3::new(1.1, 0.08, 0.08),
+        base + road_rotation * Vec3::new(0.0, 5.12, road_direction * 0.55),
+        road_rotation,
+        Vec3::new(0.08, 0.08, 1.1),
         [0.18, 0.20, 0.21, 1.0],
     );
     push_box(
         scene,
-        base + Vec3::new(road_direction * 1.05, 5.02, 0.0),
-        Quat::IDENTITY,
-        Vec3::new(0.48, 0.13, 0.24),
+        base + road_rotation * Vec3::new(0.0, 5.02, road_direction * 1.05),
+        road_rotation,
+        Vec3::new(0.24, 0.13, 0.48),
         [0.28, 0.30, 0.30, 1.0],
     );
     push_box(
         scene,
-        base + Vec3::new(road_direction * 1.05, 4.94, 0.0),
-        Quat::IDENTITY,
-        Vec3::new(0.34, 0.04, 0.16),
+        base + road_rotation * Vec3::new(0.0, 4.94, road_direction * 1.05),
+        road_rotation,
+        Vec3::new(0.16, 0.04, 0.34),
         [0.92, 0.82, 0.50, 1.0],
     );
 }
 
-#[cfg(test)]
 fn append_tree(scene: &mut RenderScene, base: Vec3) {
     push_cylinder(
         scene,
@@ -659,46 +748,28 @@ fn append_tree(scene: &mut RenderScene, base: Vec3) {
     ] {
         push_sphere(scene, base + offset, radius_m, color);
     }
-    push_box(
-        scene,
-        base + Vec3::new(0.72, 0.025, 0.42),
-        Quat::from_rotation_y(-0.35),
-        Vec3::new(2.2, 0.018, 1.25),
-        [0.105, 0.12, 0.105, 1.0],
-    );
 }
 
-#[cfg(test)]
-fn append_traffic_signal(scene: &mut RenderScene, side: f64, z_m: f64) {
-    let pole_x_m = side * 5.35;
-    push_cylinder(
-        scene,
-        Vec3::new(pole_x_m, 2.45, z_m),
-        Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
-        0.09,
-        4.9,
-        [0.18, 0.20, 0.20, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(side * 3.80, 4.78, z_m),
-        Quat::IDENTITY,
-        Vec3::new(3.1, 0.10, 0.10),
-        [0.18, 0.20, 0.20, 1.0],
-    );
-    push_box(
-        scene,
-        Vec3::new(side * 2.42, 4.55, z_m),
-        Quat::IDENTITY,
-        Vec3::new(0.32, 0.72, 0.42),
-        [0.055, 0.065, 0.065, 1.0],
-    );
-    push_sphere(
-        scene,
-        Vec3::new(side * 2.39, 4.34, z_m - 0.22),
-        0.10,
-        [0.08, 0.72, 0.24, 1.0],
-    );
+fn append_guardrail(scene: &mut RenderScene, center: Vec3, road_rotation: Quat) {
+    for height_m in [0.42, 0.78] {
+        push_box(
+            scene,
+            center + Vec3::new(0.0, height_m, 0.0),
+            road_rotation,
+            Vec3::new(5.8, 0.10, 0.10),
+            [0.58, 0.60, 0.58, 1.0],
+        );
+    }
+    for along_m in [-2.7, -0.9, 0.9, 2.7] {
+        let post = center + road_rotation * Vec3::new(along_m, 0.39, 0.0);
+        push_box(
+            scene,
+            post,
+            road_rotation,
+            Vec3::new(0.10, 0.78, 0.10),
+            [0.42, 0.44, 0.43, 1.0],
+        );
+    }
 }
 
 #[cfg(test)]
@@ -973,7 +1044,6 @@ fn push_box(
     });
 }
 
-#[cfg(test)]
 fn push_cylinder(
     scene: &mut RenderScene,
     translation: Vec3,
@@ -995,7 +1065,6 @@ fn push_cylinder(
     });
 }
 
-#[cfg(test)]
 fn push_sphere(scene: &mut RenderScene, translation: Vec3, radius_m: f64, color_rgba: [f32; 4]) {
     scene.items.push(RenderSceneItem {
         transform: MathTransform3 {
@@ -1283,9 +1352,47 @@ mod tests {
     #[test]
     fn cinematic_streetscape_reserves_capacity_for_dynamic_actors() {
         let mut scene = RenderScene::new();
-        append_city_streetscape(&mut scene);
+        let lanes = vec![
+            ImportedLane {
+                lane_id: "road-main/surface-0000/lane-0".into(),
+                road_source_id: "road-main".into(),
+                centerline_m: [[-1.5, 0.05, -44.0], [-1.5, 0.05, 44.0]],
+                width_m: 3.0,
+                travel_direction: rne_plateau::LaneTravelDirection::PrincipalAxisPositive,
+            },
+            ImportedLane {
+                lane_id: "road-main/surface-0000/lane-1".into(),
+                road_source_id: "road-main".into(),
+                centerline_m: [[1.5, 0.05, 44.0], [1.5, 0.05, -44.0]],
+                width_m: 3.0,
+                travel_direction: rne_plateau::LaneTravelDirection::PrincipalAxisNegative,
+            },
+        ];
+        let blocking_building = Footprint {
+            min_x_m: 5.0,
+            max_x_m: 8.0,
+            min_z_m: -29.0,
+            max_z_m: -23.0,
+        };
+        let first =
+            append_city_streetscape(&mut scene, &lanes, std::slice::from_ref(&blocking_building));
+        let mut repeated_scene = RenderScene::new();
+        let second = append_city_streetscape(
+            &mut repeated_scene,
+            &lanes,
+            std::slice::from_ref(&blocking_building),
+        );
+
         assert!(scene.items.len() <= MAX_STATIC_SCENE_ITEMS);
-        assert!(scene.items.len() > 80);
+        assert!(scene.items.len() > 50);
+        assert_eq!(first, second);
+        assert!(first.iter().all(|fixture| {
+            !blocking_building.overlaps_disc(fixture.center, fixture.clearance_radius_m)
+        }));
+        assert!(
+            first.len() < 18,
+            "the building should reject at least one candidate fixture"
+        );
     }
 
     #[test]
