@@ -23,16 +23,22 @@ pub use asset::{
     TrafficConnection, TrafficNetwork, TrafficSignal, TRAFFIC_ASSET_SCHEMA,
     TRAFFIC_ASSET_SCHEMA_VERSION,
 };
-pub use components::{TrafficActor, TrafficActorKind, TrafficNetworkRoot};
+pub use components::{
+    TrafficActor, TrafficActorKind, TrafficNetworkRoot, TrafficPose, TrafficRouteFollower,
+};
 pub use error::{TrafficAssetError, TrafficIdError};
 pub use events::TrafficStepCompleted;
 pub use id::TrafficId;
 pub use io::{
     canonical_traffic_asset_bytes, load_traffic_asset, parse_traffic_asset, save_traffic_asset,
 };
-pub use resources::TrafficRuntime;
+pub use resources::{
+    TrafficRoute, TrafficRouteCatalog, TrafficRouteError, TrafficRouteSample, TrafficRuntime,
+};
 pub use systems::{
-    advance_traffic_step, traffic_actors_in_stable_order, MissingTrafficActorStableId,
+    advance_kinematic_traffic, advance_traffic_step, traffic_actors_in_stable_order,
+    KinematicTrafficConfig, KinematicTrafficError, KinematicTrafficStep,
+    MissingTrafficActorStableId,
 };
 pub use topology::{
     build_traffic_topology, TopologyBuildConfig, TopologyBuildResult, TopologyBuildStats,

@@ -17,6 +17,10 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
 };
+use rne_traffic::{
+    advance_kinematic_traffic, KinematicTrafficConfig, TrafficActor, TrafficId, TrafficPose,
+    TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
+};
 use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1079,75 +1083,134 @@ fn simulate_route_vehicle(route: &TurnRoute, frame_count: usize) -> Vec<VehicleF
     let mut clock = SimClock::new(fixed_delta);
     let mut world = World::new();
     let vehicle = spawn_named(&mut world, "vehicle_signalized_turn");
-    let start = route.points[0] + Vec3::new(0.0, 0.60, 0.0);
-    let yaw_rad = -route.incoming_direction.z.atan2(route.incoming_direction.x);
-    let drive = AckermannDrive {
-        max_speed_m_s: 7.0,
-        max_acceleration_m_s2: 2.2,
-        max_deceleration_m_s2: 4.5,
-        max_steering_rate_rad_s: 0.7,
-        ..AckermannDrive::default()
-    };
+    let route_id = TrafficId::new("plateau:sanjo/showcase-turn").expect("showcase route ID");
+    let traffic_route = TrafficRoute::new(
+        route_id.clone(),
+        route
+            .points
+            .iter()
+            .map(|point| [point.x, point.y + 0.60, point.z])
+            .collect(),
+        false,
+    )
+    .expect("showcase traffic route");
+    let stop_distance_m = nearest_route_distance_m(&traffic_route, route.stop_point);
+    let initial = traffic_route.sample(0.0);
+    let mut routes = TrafficRouteCatalog::default();
+    routes.insert(traffic_route).expect("insert showcase route");
     world.entity_mut(vehicle).insert((
-        Transform3::from_translation_rotation(start, Quat::from_rotation_y(yaw_rad)),
-        drive,
+        TrafficActor::motor_vehicle(),
+        TrafficRouteFollower {
+            route_id,
+            distance_m: 0.0,
+            speed_m_s: 0.0,
+            desired_speed_m_s: 5.2,
+            length_m: 4.2,
+        },
+        TrafficPose {
+            position_m: initial.position_m,
+            yaw_rad: initial.yaw_rad,
+        },
     ));
-    let mut waypoint_index = 1;
+    let config = KinematicTrafficConfig {
+        max_acceleration_m_s2: 2.2,
+        max_braking_m_s2: 4.5,
+        ..KinematicTrafficConfig::default()
+    };
+    let mut runtime = TrafficRuntime::default();
     let mut wheel_rotation_rad = 0.0;
     let mut frames = Vec::with_capacity(frame_count);
     for _ in 0..frame_count {
-        let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
-        let drive = world
-            .get::<AckermannDrive>(vehicle)
-            .expect("Ackermann drive");
+        let pose = *world.get::<TrafficPose>(vehicle).expect("traffic pose");
+        let follower = world
+            .get::<TrafficRouteFollower>(vehicle)
+            .expect("route follower");
+        let steering_rad = route_steering_rad(
+            routes.get(&follower.route_id).expect("showcase route"),
+            follower.distance_m,
+            pose.yaw_rad,
+        );
         frames.push(VehicleFrame {
-            transform,
-            speed_m_s: drive.speed_m_s,
-            steering_rad: drive.steering_rad,
+            transform: Transform3::from_translation_rotation(
+                Vec3::from_array(pose.position_m),
+                Quat::from_rotation_y(pose.yaw_rad),
+            ),
+            speed_m_s: follower.speed_m_s,
+            steering_rad,
             wheel_rotation_rad,
-            braking: drive.speed_m_s > 0.2 && drive.target_speed_m_s + 0.05 < drive.speed_m_s,
+            braking: follower.speed_m_s > 0.2
+                && follower.desired_speed_m_s + 0.05 < follower.speed_m_s,
         });
         for _ in 0..SIM_STEPS_PER_FRAME {
-            let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
-            while waypoint_index + 1 < route.points.len()
-                && (route.points[waypoint_index] - transform.translation).length() < 1.6
-            {
-                waypoint_index += 1;
-            }
-            let target_index = (waypoint_index + 3).min(route.points.len() - 1);
-            let target = route.points[target_index] + Vec3::new(0.0, 0.60, 0.0);
-            let drive = world
-                .get::<AckermannDrive>(vehicle)
-                .expect("Ackermann drive");
-            let before_stop =
-                (route.stop_point - transform.translation).dot(route.incoming_direction) > 0.0;
-            let stop_distance_m =
-                (route.stop_point - transform.translation).dot(route.incoming_direction) - 0.6;
-            let stop_distance_m = stop_distance_m.max(0.0);
-            let signal_speed_m_s = (2.0 * drive.max_deceleration_m_s2 * stop_distance_m).sqrt();
-            let at_route_end = waypoint_index + 1 == route.points.len()
-                && (target - transform.translation).length() < 0.8;
-            let target_speed_m_s = if at_route_end {
-                0.0
-            } else if before_stop
+            let follower = world
+                .get::<TrafficRouteFollower>(vehicle)
+                .expect("route follower");
+            let before_stop = follower.distance_m < stop_distance_m;
+            let remaining_stop_m = (stop_distance_m - follower.distance_m - 0.6).max(0.0);
+            let signal_speed_m_s = (2.0 * config.max_braking_m_s2 * remaining_stop_m).sqrt();
+            let desired_speed_m_s = if before_stop
                 && signal_phase_at(clock.sim_time().as_seconds().value()) == SignalPhase::Red
             {
                 signal_speed_m_s.min(5.2)
             } else {
                 5.2
             };
-            let steering_rad = pure_pursuit_steering(&transform, target, drive.wheelbase_m, 4.5);
-            let _ = command_ackermann_drive(&mut world, vehicle, target_speed_m_s, steering_rad);
+            world
+                .get_mut::<TrafficRouteFollower>(vehicle)
+                .expect("route follower")
+                .desired_speed_m_s = desired_speed_m_s;
             assert_eq!(clock.advance(fixed_delta), 1);
-            ackermann_kinematics(&mut world, clock.fixed_delta());
             let speed_m_s = world
-                .get::<AckermannDrive>(vehicle)
-                .expect("Ackermann drive")
+                .get::<TrafficRouteFollower>(vehicle)
+                .expect("route follower")
                 .speed_m_s;
+            advance_kinematic_traffic(
+                &mut world,
+                &routes,
+                &mut runtime,
+                clock.sim_time(),
+                fixed_delta,
+                config,
+            )
+            .expect("advance showcase traffic");
             wheel_rotation_rad += speed_m_s * fixed_delta.as_seconds().value() / 0.36;
         }
     }
     frames
+}
+
+fn nearest_route_distance_m(route: &TrafficRoute, target: Vec3) -> f64 {
+    let mut best = (f64::INFINITY, 0.0);
+    let mut cumulative_m = 0.0;
+    for segment in route.path_m().windows(2) {
+        let start = Vec3::from_array(segment[0]);
+        let end = Vec3::from_array(segment[1]);
+        let delta = end - start;
+        let length_m = delta.length();
+        let progress = if length_m <= 1.0e-9 {
+            0.0
+        } else {
+            ((target - start).dot(delta) / delta.length_squared()).clamp(0.0, 1.0)
+        };
+        let projected = start + delta * progress;
+        let distance_squared_m = (target - projected).length_squared();
+        if distance_squared_m < best.0 {
+            best = (distance_squared_m, cumulative_m + length_m * progress);
+        }
+        cumulative_m += length_m;
+    }
+    best.1
+}
+
+fn route_steering_rad(route: &TrafficRoute, distance_m: f64, yaw_rad: f64) -> f64 {
+    let lookahead_m = 4.5;
+    let lookahead_yaw_rad = route.sample(distance_m + lookahead_m).yaw_rad;
+    let heading_delta_rad = (lookahead_yaw_rad - yaw_rad + std::f64::consts::PI)
+        .rem_euclid(std::f64::consts::TAU)
+        - std::f64::consts::PI;
+    (2.7 * heading_delta_rad / lookahead_m)
+        .atan()
+        .clamp(-0.55, 0.55)
 }
 
 fn simulate_lane_vehicle(
