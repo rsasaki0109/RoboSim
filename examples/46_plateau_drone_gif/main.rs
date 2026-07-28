@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
-const CAR_FRAME_COUNT: usize = 96;
+const CAR_FRAME_COUNT: usize = 144;
 const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
@@ -36,6 +36,31 @@ const SANJO_ORIGIN: SourceOrigin = SourceOrigin {
     height_m: 0.0,
 };
 const KITA_SANJO_STATION_XZ_M: [f64; 2] = [59.46, -77.17];
+const SIGNAL_GREEN_TIME_S: f64 = 7.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SignalPhase {
+    Red,
+    Green,
+}
+
+fn signal_phase_at(time_s: f64) -> SignalPhase {
+    if time_s < SIGNAL_GREEN_TIME_S {
+        SignalPhase::Red
+    } else {
+        SignalPhase::Green
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TurnRoute {
+    points: Vec<Vec3>,
+    intersection: Vec3,
+    incoming_direction: Vec3,
+    outgoing_direction: Vec3,
+    incoming_half_width_m: f64,
+    stop_point: Vec3,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Footprint {
@@ -315,8 +340,9 @@ fn main() {
     assert_eq!(roads.road_count, 59);
     assert_eq!(roads.lane_count, 84);
     let showcase_lanes = select_station_road_lanes(&roads.lanes);
-    let (primary_traffic, opposing_traffic) =
-        simulate_two_way_traffic(&showcase_lanes, CAR_FRAME_COUNT);
+    let turn_lane = select_station_turn_lane(&roads.lanes, &showcase_lanes[0]);
+    let (primary_traffic, opposing_traffic, turn_route) =
+        simulate_signalized_turn(&showcase_lanes, &turn_lane, CAR_FRAME_COUNT);
     println!(
         "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={}",
         buildings.building_count,
@@ -356,6 +382,7 @@ fn main() {
     let building_footprints = building_footprints(&building_bundle);
     let street_fixtures =
         append_city_streetscape(&mut city_scene, &showcase_lanes, &building_footprints);
+    append_intersection_markings(&mut city_scene, &turn_route);
     append_lane_markings(&mut city_scene, &showcase_lanes);
     let vehicle_assets = VehicleRenderAssets::load();
 
@@ -373,6 +400,11 @@ fn main() {
     for frame in 0..CAR_FRAME_COUNT {
         let primary = primary_traffic[frame];
         let mut scene = city_scene.clone();
+        append_traffic_signals(
+            &mut scene,
+            &turn_route,
+            signal_phase_at(frame as f64 / RENDER_HZ as f64),
+        );
         append_traffic(
             &mut scene,
             &vehicle_assets,
@@ -400,7 +432,7 @@ fn main() {
     }
     let car_gif_path = media_dir.join("plateau-car.gif");
     build_gif(&frames_dir, &car_gif_path).expect("encode PLATEAU car GIF");
-    image::open(frames_dir.join("frame-032.png"))
+    image::open(frames_dir.join("frame-110.png"))
         .expect("read PLATEAU car poster frame")
         .save(media_dir.join("plateau-car.png"))
         .expect("write PLATEAU car poster");
@@ -772,6 +804,106 @@ fn append_guardrail(scene: &mut RenderScene, center: Vec3, road_rotation: Quat) 
     }
 }
 
+fn append_intersection_markings(scene: &mut RenderScene, route: &TurnRoute) {
+    let rotation =
+        Quat::from_rotation_y(-route.incoming_direction.z.atan2(route.incoming_direction.x));
+    push_box(
+        scene,
+        route.intersection + Vec3::new(0.0, 0.035, 0.0),
+        rotation,
+        Vec3::new(
+            route.incoming_half_width_m * 2.05,
+            0.045,
+            route.incoming_half_width_m * 2.05,
+        ),
+        [0.135, 0.155, 0.166, 1.0],
+    );
+    push_box(
+        scene,
+        route.stop_point + Vec3::new(0.0, 0.075, 0.0),
+        rotation,
+        Vec3::new(0.42, 0.025, route.incoming_half_width_m * 1.75),
+        [0.92, 0.92, 0.88, 1.0],
+    );
+    for index in 0..5 {
+        let center = route.stop_point + route.incoming_direction * (1.2 + index as f64 * 0.75);
+        push_box(
+            scene,
+            center + Vec3::new(0.0, 0.077, 0.0),
+            rotation,
+            Vec3::new(0.38, 0.026, route.incoming_half_width_m * 1.65),
+            [0.88, 0.88, 0.84, 1.0],
+        );
+    }
+}
+
+fn append_traffic_signals(scene: &mut RenderScene, route: &TurnRoute, phase: SignalPhase) {
+    let direction = route.incoming_direction;
+    let right = Vec3::new(-direction.z, 0.0, direction.x);
+    let rotation = Quat::from_rotation_y(-direction.z.atan2(direction.x));
+    for side in [-1.0, 1.0] {
+        let base = route.intersection
+            + direction * 5.5
+            + right * side * (route.incoming_half_width_m + 0.55);
+        append_traffic_signal(scene, base, -side, rotation, phase);
+    }
+}
+
+fn append_traffic_signal(
+    scene: &mut RenderScene,
+    base: Vec3,
+    road_direction: f64,
+    road_rotation: Quat,
+    phase: SignalPhase,
+) {
+    push_cylinder(
+        scene,
+        base + Vec3::new(0.0, 2.45, 0.0),
+        Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+        0.10,
+        4.9,
+        [0.15, 0.17, 0.17, 1.0],
+    );
+    push_box(
+        scene,
+        base + road_rotation * Vec3::new(0.0, 4.78, road_direction * 0.72),
+        road_rotation,
+        Vec3::new(0.10, 0.10, 1.45),
+        [0.15, 0.17, 0.17, 1.0],
+    );
+    let housing = base + road_rotation * Vec3::new(0.0, 4.56, road_direction * 1.36);
+    push_box(
+        scene,
+        housing,
+        road_rotation,
+        Vec3::new(0.38, 0.82, 0.40),
+        [0.035, 0.045, 0.045, 1.0],
+    );
+    let red_color = if phase == SignalPhase::Red {
+        [1.0, 0.025, 0.012, 1.0]
+    } else {
+        [0.12, 0.008, 0.005, 1.0]
+    };
+    let green_color = if phase == SignalPhase::Green {
+        [0.015, 0.95, 0.18, 1.0]
+    } else {
+        [0.004, 0.12, 0.018, 1.0]
+    };
+    let lens_offset = road_rotation * Vec3::new(0.0, 0.0, road_direction * 0.215);
+    push_sphere(
+        scene,
+        housing + Vec3::new(0.0, 0.21, 0.0) + lens_offset,
+        0.105,
+        red_color,
+    );
+    push_sphere(
+        scene,
+        housing + Vec3::new(0.0, -0.21, 0.0) + lens_offset,
+        0.105,
+        green_color,
+    );
+}
+
 #[cfg(test)]
 fn drone_position(progress: f64) -> Vec3 {
     let x = -20.0 + 40.0 * progress;
@@ -801,10 +933,36 @@ fn select_station_road_lanes(lanes: &[ImportedLane]) -> Vec<ImportedLane> {
     vec![selected.clone(), opposing.clone()]
 }
 
+fn select_station_turn_lane(lanes: &[ImportedLane], incoming: &ImportedLane) -> ImportedLane {
+    let incoming_direction = lane_direction(incoming);
+    let incoming_end = Vec3::from_array(incoming.centerline_m[1]);
+    lanes
+        .iter()
+        .filter(|lane| lane.lane_id.ends_with("/lane-0"))
+        .filter(|lane| lane.road_source_id != incoming.road_source_id)
+        .filter(|lane| lane_length_m(lane) >= 35.0)
+        .filter(|lane| lane_direction(lane).dot(incoming_direction).abs() < 0.50)
+        .filter(|lane| (Vec3::from_array(lane.centerline_m[0]) - incoming_end).length() <= 5.0)
+        .min_by(|left, right| {
+            let left_distance =
+                (Vec3::from_array(left.centerline_m[0]) - incoming_end).length_squared();
+            let right_distance =
+                (Vec3::from_array(right.centerline_m[0]) - incoming_end).length_squared();
+            left_distance.total_cmp(&right_distance)
+        })
+        .cloned()
+        .expect("official tile must contain a perpendicular outgoing road at the station junction")
+}
+
 fn lane_length_m(lane: &ImportedLane) -> f64 {
     let start = Vec3::from_array(lane.centerline_m[0]);
     let end = Vec3::from_array(lane.centerline_m[1]);
     (end - start).length()
+}
+
+fn lane_direction(lane: &ImportedLane) -> Vec3 {
+    (Vec3::from_array(lane.centerline_m[1]) - Vec3::from_array(lane.centerline_m[0]))
+        .normalize_or_zero()
 }
 
 fn lane_distance_to_station_m(lane: &ImportedLane) -> f64 {
@@ -816,6 +974,7 @@ fn lane_distance_to_station_m(lane: &ImportedLane) -> f64 {
     (station - (start + segment * progress)).length()
 }
 
+#[cfg(test)]
 fn simulate_two_way_traffic(
     lanes: &[ImportedLane],
     frame_count: usize,
@@ -831,6 +990,164 @@ fn simulate_two_way_traffic(
         simulate_lane_vehicle(ordered[0], frame_count, 0.0),
         simulate_lane_vehicle(ordered[1], frame_count, 0.9),
     )
+}
+
+fn simulate_signalized_turn(
+    lanes: &[ImportedLane],
+    outgoing: &ImportedLane,
+    frame_count: usize,
+) -> (Vec<VehicleFrame>, Vec<VehicleFrame>, TurnRoute) {
+    assert_eq!(lanes.len(), 2, "example requires one derived two-way road");
+    let route = build_turn_route(&lanes[0], outgoing);
+    let primary = simulate_route_vehicle(&route, frame_count);
+    let opposing = simulate_lane_vehicle(&lanes[1], frame_count, 0.9);
+    (primary, opposing, route)
+}
+
+fn build_turn_route(incoming: &ImportedLane, outgoing: &ImportedLane) -> TurnRoute {
+    let incoming_direction = lane_direction(incoming);
+    let outgoing_direction = lane_direction(outgoing);
+    let incoming_end = Vec3::from_array(incoming.centerline_m[1]);
+    let outgoing_start = Vec3::from_array(outgoing.centerline_m[0]);
+    let intersection = line_intersection_xz(
+        incoming_end,
+        incoming_direction,
+        outgoing_start,
+        outgoing_direction,
+    )
+    .unwrap_or((incoming_end + outgoing_start) * 0.5);
+    let radius_m = 8.0;
+    let entry = intersection - incoming_direction * radius_m;
+    let exit = intersection + outgoing_direction * radius_m;
+    let route_start = entry - incoming_direction * 25.0;
+    let route_end = exit + outgoing_direction * 34.0;
+    let stop_point = entry - incoming_direction * 3.0;
+    let mut points = Vec::new();
+    append_sampled_line(&mut points, route_start, entry, 1.0);
+    for index in 1..=16 {
+        let t = index as f64 / 16.0;
+        let one_minus_t = 1.0 - t;
+        points.push(
+            entry * one_minus_t.powi(2) + intersection * (2.0 * one_minus_t * t) + exit * t.powi(2),
+        );
+    }
+    append_sampled_line(&mut points, exit, route_end, 1.0);
+    TurnRoute {
+        points,
+        intersection,
+        incoming_direction,
+        outgoing_direction,
+        incoming_half_width_m: incoming.width_m,
+        stop_point,
+    }
+}
+
+fn line_intersection_xz(
+    first_point: Vec3,
+    first_direction: Vec3,
+    second_point: Vec3,
+    second_direction: Vec3,
+) -> Option<Vec3> {
+    let denominator =
+        first_direction.x * second_direction.z - first_direction.z * second_direction.x;
+    if denominator.abs() < 1.0e-6 {
+        return None;
+    }
+    let delta = second_point - first_point;
+    let progress = (delta.x * second_direction.z - delta.z * second_direction.x) / denominator;
+    Some(first_point + first_direction * progress)
+}
+
+fn append_sampled_line(points: &mut Vec<Vec3>, start: Vec3, end: Vec3, spacing_m: f64) {
+    let distance_m = (end - start).length();
+    let sample_count = (distance_m / spacing_m).ceil().max(1.0) as usize;
+    for index in 0..sample_count {
+        let t = index as f64 / sample_count as f64;
+        let point = start + (end - start) * t;
+        if points
+            .last()
+            .is_none_or(|previous| (*previous - point).length_squared() > 1.0e-8)
+        {
+            points.push(point);
+        }
+    }
+    points.push(end);
+}
+
+fn simulate_route_vehicle(route: &TurnRoute, frame_count: usize) -> Vec<VehicleFrame> {
+    let fixed_delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
+    let mut clock = SimClock::new(fixed_delta);
+    let mut world = World::new();
+    let vehicle = spawn_named(&mut world, "vehicle_signalized_turn");
+    let start = route.points[0] + Vec3::new(0.0, 0.60, 0.0);
+    let yaw_rad = -route.incoming_direction.z.atan2(route.incoming_direction.x);
+    let drive = AckermannDrive {
+        max_speed_m_s: 7.0,
+        max_acceleration_m_s2: 2.2,
+        max_deceleration_m_s2: 4.5,
+        max_steering_rate_rad_s: 0.7,
+        ..AckermannDrive::default()
+    };
+    world.entity_mut(vehicle).insert((
+        Transform3::from_translation_rotation(start, Quat::from_rotation_y(yaw_rad)),
+        drive,
+    ));
+    let mut waypoint_index = 1;
+    let mut wheel_rotation_rad = 0.0;
+    let mut frames = Vec::with_capacity(frame_count);
+    for _ in 0..frame_count {
+        let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
+        let drive = world
+            .get::<AckermannDrive>(vehicle)
+            .expect("Ackermann drive");
+        frames.push(VehicleFrame {
+            transform,
+            speed_m_s: drive.speed_m_s,
+            steering_rad: drive.steering_rad,
+            wheel_rotation_rad,
+            braking: drive.speed_m_s > 0.2 && drive.target_speed_m_s + 0.05 < drive.speed_m_s,
+        });
+        for _ in 0..SIM_STEPS_PER_FRAME {
+            let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
+            while waypoint_index + 1 < route.points.len()
+                && (route.points[waypoint_index] - transform.translation).length() < 1.6
+            {
+                waypoint_index += 1;
+            }
+            let target_index = (waypoint_index + 3).min(route.points.len() - 1);
+            let target = route.points[target_index] + Vec3::new(0.0, 0.60, 0.0);
+            let drive = world
+                .get::<AckermannDrive>(vehicle)
+                .expect("Ackermann drive");
+            let before_stop =
+                (route.stop_point - transform.translation).dot(route.incoming_direction) > 0.0;
+            let stop_distance_m =
+                (route.stop_point - transform.translation).dot(route.incoming_direction) - 0.6;
+            let stop_distance_m = stop_distance_m.max(0.0);
+            let signal_speed_m_s = (2.0 * drive.max_deceleration_m_s2 * stop_distance_m).sqrt();
+            let at_route_end = waypoint_index + 1 == route.points.len()
+                && (target - transform.translation).length() < 0.8;
+            let target_speed_m_s = if at_route_end {
+                0.0
+            } else if before_stop
+                && signal_phase_at(clock.sim_time().as_seconds().value()) == SignalPhase::Red
+            {
+                signal_speed_m_s.min(5.2)
+            } else {
+                5.2
+            };
+            let steering_rad = pure_pursuit_steering(&transform, target, drive.wheelbase_m, 4.5);
+            let _ = command_ackermann_drive(&mut world, vehicle, target_speed_m_s, steering_rad);
+            assert_eq!(clock.advance(fixed_delta), 1);
+            ackermann_kinematics(&mut world, clock.fixed_delta());
+            let speed_m_s = world
+                .get::<AckermannDrive>(vehicle)
+                .expect("Ackermann drive")
+                .speed_m_s;
+            wheel_rotation_rad += speed_m_s * fixed_delta.as_seconds().value() / 0.36;
+        }
+    }
+    frames
 }
 
 fn simulate_lane_vehicle(
@@ -920,10 +1237,10 @@ fn follow_camera(vehicle: VehicleFrame) -> CameraOrbit {
     let right = vehicle.transform.rotation * Vec3::Z;
     let eye_direction = (-forward + right * 0.10).normalize_or_zero();
     CameraOrbit {
-        focus: vehicle.transform.translation + forward * 6.6 + Vec3::new(0.0, 0.42, 0.0),
+        focus: vehicle.transform.translation + forward * 5.4 + Vec3::new(0.0, 0.42, 0.0),
         yaw_rad: eye_direction.x.atan2(eye_direction.z),
         pitch_rad: 1.40,
-        distance_m: 15.5,
+        distance_m: 11.8,
     }
 }
 
@@ -1214,6 +1531,16 @@ mod tests {
         assert_eq!(lanes.len(), 2);
         assert!(lane_length_m(&lanes[0]) >= 45.0);
         assert!(lane_distance_to_station_m(&lanes[0]) < 30.0);
+        let turn_lane = select_station_turn_lane(&roads.lanes, &lanes[0]);
+        assert!(turn_lane
+            .lane_id
+            .starts_with("tran_b9e43a5f-9251-424a-9b40-5128df71a3b3/"));
+        assert!(
+            lane_direction(&turn_lane)
+                .dot(lane_direction(&lanes[0]))
+                .abs()
+                < 0.50
+        );
         fs::remove_dir_all(output).expect("remove Sanjo output");
     }
 
@@ -1292,6 +1619,55 @@ mod tests {
                 assert!(frame.transform.translation.z <= 17.05);
             }
         }
+    }
+
+    #[test]
+    fn signalized_turn_stops_on_red_then_follows_outgoing_lane() {
+        let lanes = vec![
+            ImportedLane {
+                lane_id: "incoming/surface-0000/lane-0".into(),
+                road_source_id: "incoming".into(),
+                centerline_m: [[0.0, 0.05, -40.0], [0.0, 0.05, 0.0]],
+                width_m: 3.0,
+                travel_direction: rne_plateau::LaneTravelDirection::PrincipalAxisPositive,
+            },
+            ImportedLane {
+                lane_id: "incoming/surface-0000/lane-1".into(),
+                road_source_id: "incoming".into(),
+                centerline_m: [[3.0, 0.05, 0.0], [3.0, 0.05, -40.0]],
+                width_m: 3.0,
+                travel_direction: rne_plateau::LaneTravelDirection::PrincipalAxisNegative,
+            },
+        ];
+        let outgoing = ImportedLane {
+            lane_id: "outgoing/surface-0000/lane-0".into(),
+            road_source_id: "outgoing".into(),
+            centerline_m: [[2.0, 0.05, 2.0], [42.0, 0.05, 2.0]],
+            width_m: 3.0,
+            travel_direction: rne_plateau::LaneTravelDirection::PrincipalAxisPositive,
+        };
+        let first = simulate_signalized_turn(&lanes, &outgoing, CAR_FRAME_COUNT);
+        let second = simulate_signalized_turn(&lanes, &outgoing, CAR_FRAME_COUNT);
+        assert_eq!(first, second);
+        assert_eq!(signal_phase_at(6.99), SignalPhase::Red);
+        assert_eq!(signal_phase_at(7.0), SignalPhase::Green);
+        let green_frame = (SIGNAL_GREEN_TIME_S * RENDER_HZ as f64) as usize;
+        assert!(first.0[..green_frame]
+            .iter()
+            .any(|frame| frame.speed_m_s < 0.15));
+        assert!(first.0[..green_frame].iter().any(|frame| frame.braking));
+        assert!(first.0[..green_frame].iter().all(|frame| {
+            (first.2.stop_point - frame.transform.translation).dot(first.2.incoming_direction)
+                > -0.5
+        }));
+        let final_frame = first.0.last().expect("turn frame");
+        assert!(
+            (final_frame.transform.translation - first.2.intersection)
+                .dot(first.2.outgoing_direction)
+                > 8.0
+        );
+        let final_forward = final_frame.transform.rotation * Vec3::X;
+        assert!(final_forward.dot(first.2.outgoing_direction) > 0.75);
     }
 
     #[test]

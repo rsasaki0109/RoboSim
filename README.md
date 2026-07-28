@@ -27,8 +27,11 @@ and derived two-way lane centerlines. The
 conversion stays outside simulation core crates. Example 46 imports the
 official Project PLATEAU Sanjo City 2025 mesh around Kita-Sanjo Station:
 213 buildings, 59 road surfaces, and the station's real LOD2 Appearance
-textures. It selects a nearby derived two-way lane and uses a SimClock-driven
-Ackermann model to move two textured CC0 Kenney sedans for eight seconds.
+textures. It selects a nearby derived two-way lane and its connected station
+road, then uses a SimClock-driven Ackermann model to move two textured CC0
+Kenney sedans for twelve seconds. The lead car approaches a procedural
+signalized intersection, brakes to a deterministic stop on red, starts on
+green, and follows a smooth 69-degree turn onto the outgoing PLATEAU road.
 Their four wheel meshes rotate independently, the front pair follows the
 Ackermann steering angle, and rear lamps respond to braking. The daylight scene
 adds directional sunlight, PCF-filtered building and vehicle shadow maps,
@@ -46,7 +49,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: CC0 Kenney sedan meshes with Ackermann-steered rotating wheels and brake lamps, a CC0 procedural streetscape, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
+  <sub>Twelve seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: a CC0 Kenney sedan brakes at a red signal, starts on green, and makes a SimClock-driven Ackermann turn onto a connected road; the scene also includes a CC0 procedural streetscape, textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
 </p>
 
 ```bash
