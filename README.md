@@ -32,7 +32,11 @@ Ackermann model to move two textured CC0 Kenney sedans for eight seconds.
 Their four wheel meshes rotate independently, the front pair follows the
 Ackermann steering angle, and rear lamps respond to braking. The daylight scene
 adds directional sunlight, PCF-filtered building and vehicle shadow maps,
-approximate lane markings, and a stable world-up follow camera. The
+approximate lane markings, and a stable world-up follow camera. A deterministic
+CC0 procedural streetscape adds shadow-receiving grass, concrete sidewalks,
+curbs, street trees, streetlights, and guardrails along the selected road.
+Furniture candidates that overlap imported building collision footprints are
+discarded in stable order. The
 presentation is rendered at 1280×720 before a deterministic depth-aware
 atmospheric pass and high-quality 960×540 GIF downsample.
 
@@ -42,7 +46,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: CC0 Kenney sedan meshes with Ackermann-steered rotating wheels and brake lamps, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
+  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: CC0 Kenney sedan meshes with Ackermann-steered rotating wheels and brake lamps, a CC0 procedural streetscape, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
 </p>
 
 ```bash
@@ -56,6 +60,8 @@ reproduce the capture. Its source and CC BY 4.0 attribution are recorded
 [beside the example](examples/46_plateau_drone_gif/assets/sanjo_2025/README.md).
 The reproducible vehicle subset and its original CC0 notice are documented in
 the [Kenney asset directory](examples/46_plateau_drone_gif/assets/kenney_car/README.md).
+The example-authored street furniture and ground designs are released under
+[CC0-1.0](examples/46_plateau_drone_gif/STREETSCAPE_LICENSE.txt).
 
 See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
 mapping, outputs, and current limits.

@@ -126,15 +126,21 @@ The official road LOD1 geometry has zero elevation while building geometry
 uses surveyed absolute elevations. For this visualization the example
 deterministically places every building's lowest AABB face on the road datum.
 The source meshes and textures are unchanged. Approximate lane markings are
-example-authored overlays. Buildings and vehicles use the wgpu renderer's
+example-authored overlays. A low grass-colored ground receiver removes the
+empty-sky gaps between imported surfaces. Concrete sidewalks and curbs follow
+the selected road's derived principal axis and width. CC0 procedural street
+trees, streetlights, and guardrails are sampled at fixed longitudinal
+fractions; a candidate is omitted whenever its clearance disc intersects an
+imported building collision AABB. Tests verify stable placement and non-overlap.
+Buildings, streetscape props, and vehicles use the wgpu renderer's
 2048×2048 directional shadow map with 3×3 percentage-closer filtering; the
 light projection is fitted to scene bounds and snapped to shadow texels to
 limit shimmer between frames. Each sedan is split into one cached body mesh and
 four wheel instances: wheel spin comes from integrated distance, the front pair
 also receives the Ackermann steering angle, and rear lamp intensity follows
 actual deceleration. Red and blue body palettes preserve the source windows,
-lamps, trim, and shading. The PLATEAU data attribution and Kenney CC0 notice are
-recorded beside the example.
+lamps, trim, and shading. The PLATEAU data attribution, Kenney CC0 notice, and
+procedural streetscape CC0 dedication are recorded beside the example.
 
 This presentation strategy follows the official
 [PLATEAU daytime visualization tutorial](https://www.mlit.go.jp/plateau/learning/tpc26-1/),

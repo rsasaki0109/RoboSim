@@ -1,0 +1,13 @@
+RNE Example 46 Procedural Streetscape Assets
+
+To the extent possible under law, the Robot Native Engine contributors have
+waived all copyright and related or neighboring rights to the procedural
+street-tree, streetlight, guardrail, curb, sidewalk, and ground designs authored
+for Example 46.
+
+SPDX-License-Identifier: CC0-1.0
+https://creativecommons.org/publicdomain/zero/1.0/
+
+These designs are generated from primitive geometry in main.rs. They contain no
+surveyed geometry and are independent of the official PLATEAU CityGML data and
+the separately licensed Kenney vehicle meshes.
