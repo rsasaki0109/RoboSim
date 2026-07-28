@@ -92,15 +92,34 @@ Ackermann cars accelerate, steer, and brake along imported opposing lanes:
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-It writes both aerial `docs/media/plateau-drone.gif` and car-follow
-`docs/media/plateau-car.gif` animations, with matching reduced-motion PNGs.
-Set `RNE_SKIP_GPU=1` to run only the conversion and headless load smoke.
+It writes both aerial `docs/media/plateau-drone.gif` and eight-second
+car-follow `docs/media/plateau-car.gif` animations, with matching
+reduced-motion PNGs. Frames are rasterized at 1280×720 and downsampled to a
+960×540 GIF. A deterministic CPU presentation pass uses the renderer's linear
+depth buffer for atmospheric perspective, replaces empty pixels with a
+sky-to-horizon gradient, and applies restrained color balance and vignette.
+This pass changes presentation pixels only; simulation and camera depth outputs
+remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
+load smoke.
 
 For presentation, the example deterministically generates a larger CC0
 PLATEAU-style showcase containing ten varied-height buildings and a 90-meter
-road. Sidewalks, curbs, markings, facade bands, trees, and streetlights are
-example-authored render overlays rather than imported CityGML semantics. The
-showcase license is recorded beside the example.
+road. Sidewalks, curbs, markings, road wear, batched facade windows, rooftop
+equipment, trees, streetlights, signals, and contact shadows are
+example-authored render overlays rather than imported CityGML semantics. Round
+primitive dimensions and the presentation pass have unit tests, while the
+traffic replay remains exact and SimClock-driven. The showcase license is
+recorded beside the example.
+
+This presentation strategy follows the official
+[PLATEAU daytime visualization tutorial](https://www.mlit.go.jp/plateau/learning/tpc26-1/),
+which recommends texture, fog, lighting, and kitbashed or extruded detail to
+improve LOD1 city footage. RNE uses procedural solid-color detail here because
+the renderer does not yet ingest CityGML appearance textures. It also keeps
+derived lane markings explicitly approximate: the
+[PLATEAU road LOD guidance](https://www.mlit.go.jp/plateaudocument02/tocD/tocD_02/_007b6849-33c2-5206-74a3-025bfbf0bdcd/)
+states that LOD1 represents a road as a surface, while internal road
+classification begins at LOD2.
 
 ## Phase 1 limits
 

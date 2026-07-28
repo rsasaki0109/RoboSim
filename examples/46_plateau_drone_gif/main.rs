@@ -6,7 +6,9 @@ use rne_core::{SimClock, SimDuration};
 use rne_ecs::{spawn_named, Name, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
 use rne_plateau::{import_citygml_str, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
-use rne_render::{Camera, RenderBackend, RenderScene, RenderSceneItem, Visual, VisualShape};
+use rne_render::{
+    Camera, RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, Visual, VisualShape,
+};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
@@ -15,14 +17,15 @@ use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const WIDTH: u32 = 720;
-const HEIGHT: u32 = 405;
+const WIDTH: u32 = 1_280;
+const HEIGHT: u32 = 720;
 const DRONE_FRAME_COUNT: usize = 48;
 const CAR_FRAME_COUNT: usize = 96;
 const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
-const CLEAR_COLOR: [f32; 4] = [0.16, 0.28, 0.42, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
+const MAX_STATIC_SCENE_ITEMS: usize = 190;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct VehicleFrame {
@@ -203,7 +206,12 @@ fn main() {
         .expect("resolve generated PLATEAU meshes");
     append_city_streetscape(&mut city_scene);
 
-    let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
+    assert!(
+        city_scene.items.len() <= MAX_STATIC_SCENE_ITEMS,
+        "cinematic streetscape leaves insufficient room for moving actors"
+    );
+    let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
+    camera.far_m = 140.0;
     let orbit = CameraOrbit {
         focus: Vec3::new(0.0, 8.5, 0.0),
         yaw_rad: -0.80,
@@ -225,9 +233,16 @@ fn main() {
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render PLATEAU drone frame");
+        let presented = cinematic_postprocess(
+            &output.color.rgba8,
+            &output.depth.depth_m,
+            output.color.width,
+            output.color.height,
+            camera.far_m as f32,
+        );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
-            &output.color.rgba8,
+            &presented,
             output.color.width,
             output.color.height,
         )
@@ -251,9 +266,16 @@ fn main() {
         let output = backend
             .render_scene_camera(&camera, &car_camera.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render PLATEAU car frame");
+        let presented = cinematic_postprocess(
+            &output.color.rgba8,
+            &output.depth.depth_m,
+            output.color.width,
+            output.color.height,
+            camera.far_m as f32,
+        );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
-            &output.color.rgba8,
+            &presented,
             output.color.width,
             output.color.height,
         )
@@ -386,6 +408,29 @@ fn append_city_streetscape(scene: &mut RenderScene) {
         color_rgba: [0.16, 0.20, 0.18, 1.0],
         mesh: None,
     });
+    for x in [-1.48, 1.48] {
+        push_box(
+            scene,
+            Vec3::new(x, 0.022, 0.0),
+            Quat::IDENTITY,
+            Vec3::new(0.74, 0.018, 88.0),
+            [0.135, 0.155, 0.166, 1.0],
+        );
+    }
+    for (x, z, width_m, length_m) in [
+        (-1.1, -31.0, 1.8, 4.4),
+        (1.0, -14.0, 1.5, 3.2),
+        (-0.8, 17.0, 1.9, 4.8),
+        (1.2, 34.0, 1.6, 3.6),
+    ] {
+        push_box(
+            scene,
+            Vec3::new(x, 0.028, z),
+            Quat::IDENTITY,
+            Vec3::new(width_m, 0.016, length_m),
+            [0.19, 0.205, 0.21, 1.0],
+        );
+    }
     for side in [-1.0, 1.0] {
         push_box(
             scene,
@@ -403,6 +448,13 @@ fn append_city_streetscape(scene: &mut RenderScene) {
         );
         push_box(
             scene,
+            Vec3::new(side * 4.20, 0.018, 0.0),
+            Quat::IDENTITY,
+            Vec3::new(0.22, 0.018, 92.0),
+            [0.09, 0.105, 0.11, 1.0],
+        );
+        push_box(
+            scene,
             Vec3::new(side * 3.72, 0.045, 0.0),
             Quat::IDENTITY,
             Vec3::new(0.12, 0.045, 88.0),
@@ -417,6 +469,7 @@ fn append_city_streetscape(scene: &mut RenderScene) {
                 Vec3::new(side * (6.15 + index as f64 * 0.08), 0.0, z),
             );
         }
+        append_traffic_signal(scene, side, 3.0);
     }
     for segment in -10..=10 {
         push_box(
@@ -434,6 +487,16 @@ fn append_city_streetscape(scene: &mut RenderScene) {
             Quat::IDENTITY,
             Vec3::new(7.1, 0.05, 0.38),
             [0.90, 0.90, 0.86, 1.0],
+        );
+    }
+    for (x, z) in [(-0.65, -22.0), (0.72, 23.0)] {
+        push_cylinder(
+            scene,
+            Vec3::new(x, 0.04, z),
+            Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+            0.36,
+            0.025,
+            [0.14, 0.16, 0.17, 1.0],
         );
     }
     append_showcase_facades(scene);
@@ -480,35 +543,50 @@ fn append_tree(scene: &mut RenderScene, base: Vec3) {
         2.5,
         [0.27, 0.15, 0.07, 1.0],
     );
-    push_sphere(
+    for (offset, radius_m, color) in [
+        (Vec3::new(-0.42, 3.05, 0.08), 0.88, [0.10, 0.29, 0.13, 1.0]),
+        (Vec3::new(0.38, 3.15, -0.18), 0.94, [0.13, 0.37, 0.17, 1.0]),
+        (Vec3::new(0.02, 3.74, 0.12), 0.82, [0.16, 0.42, 0.19, 1.0]),
+    ] {
+        push_sphere(scene, base + offset, radius_m, color);
+    }
+    push_box(
         scene,
-        base + Vec3::new(0.0, 3.25, 0.0),
-        1.25,
-        [0.12, 0.34, 0.16, 1.0],
+        base + Vec3::new(0.72, 0.025, 0.42),
+        Quat::from_rotation_y(-0.35),
+        Vec3::new(2.2, 0.018, 1.25),
+        [0.105, 0.12, 0.105, 1.0],
     );
 }
 
 fn append_showcase_facades(scene: &mut RenderScene) {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
     for building in SHOWCASE_BUILDINGS {
-        let road_face_x = if building.x_max_m < 0.0 {
-            building.x_max_m + 0.025
+        let (road_face_x, normal_x) = if building.x_max_m < 0.0 {
+            (building.x_max_m + 0.035, 1.0)
         } else {
-            building.x_min_m - 0.025
+            (building.x_min_m - 0.035, -1.0)
         };
-        let mut floor_y_m = 2.2;
-        while floor_y_m < building.height_m - 1.0 {
-            push_box(
-                scene,
-                Vec3::new(
+        let mut floor_y_m = 2.25;
+        while floor_y_m < building.height_m - 1.1 {
+            let mut window_z_m = building.z_min_m + 1.35;
+            while window_z_m < building.z_max_m - 1.0 {
+                append_facade_quad(
+                    &mut positions,
+                    &mut normals,
+                    &mut indices,
                     road_face_x,
-                    floor_y_m,
-                    (building.z_min_m + building.z_max_m) * 0.5,
-                ),
-                Quat::IDENTITY,
-                Vec3::new(0.06, 1.05, building.z_max_m - building.z_min_m - 2.4),
-                [0.07, 0.15, 0.21, 1.0],
-            );
-            floor_y_m += 2.8;
+                    floor_y_m - 0.58,
+                    floor_y_m + 0.58,
+                    window_z_m - 0.66,
+                    window_z_m + 0.66,
+                    normal_x,
+                );
+                window_z_m += 2.18;
+            }
+            floor_y_m += 2.72;
         }
         push_box(
             scene,
@@ -519,9 +597,109 @@ fn append_showcase_facades(scene: &mut RenderScene) {
             ),
             Quat::IDENTITY,
             Vec3::new(0.08, 2.25, 1.45),
-            [0.10, 0.12, 0.13, 1.0],
+            [0.07, 0.085, 0.095, 1.0],
+        );
+        push_box(
+            scene,
+            Vec3::new(
+                road_face_x - normal_x * 0.32,
+                2.32,
+                (building.z_min_m + building.z_max_m) * 0.5,
+            ),
+            Quat::IDENTITY,
+            Vec3::new(0.62, 0.18, building.z_max_m - building.z_min_m - 1.2),
+            [0.44, 0.47, 0.47, 1.0],
+        );
+        push_box(
+            scene,
+            Vec3::new(
+                road_face_x - normal_x * 0.20,
+                building.height_m - 0.34,
+                (building.z_min_m + building.z_max_m) * 0.5,
+            ),
+            Quat::IDENTITY,
+            Vec3::new(0.38, 0.68, building.z_max_m - building.z_min_m),
+            [0.48, 0.50, 0.49, 1.0],
+        );
+        push_box(
+            scene,
+            Vec3::new(
+                (building.x_min_m + building.x_max_m) * 0.5,
+                building.height_m + 0.42,
+                (building.z_min_m + building.z_max_m) * 0.5,
+            ),
+            Quat::IDENTITY,
+            Vec3::new(2.2, 0.84, 1.7),
+            [0.35, 0.37, 0.37, 1.0],
         );
     }
+    scene.items.push(RenderScene::item_from_dynamic_mesh(
+        TriangleMesh {
+            positions,
+            normals,
+            indices,
+        },
+        [0.045, 0.11, 0.16, 1.0],
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_facade_quad(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    indices: &mut Vec<u32>,
+    x_m: f64,
+    y_min_m: f64,
+    y_max_m: f64,
+    z_min_m: f64,
+    z_max_m: f64,
+    normal_x: f64,
+) {
+    let base = positions.len() as u32;
+    positions.extend([
+        [x_m as f32, y_min_m as f32, z_min_m as f32],
+        [x_m as f32, y_max_m as f32, z_min_m as f32],
+        [x_m as f32, y_max_m as f32, z_max_m as f32],
+        [x_m as f32, y_min_m as f32, z_max_m as f32],
+    ]);
+    normals.extend([[normal_x as f32, 0.0, 0.0]; 4]);
+    if normal_x > 0.0 {
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    } else {
+        indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+}
+
+fn append_traffic_signal(scene: &mut RenderScene, side: f64, z_m: f64) {
+    let pole_x_m = side * 5.35;
+    push_cylinder(
+        scene,
+        Vec3::new(pole_x_m, 2.45, z_m),
+        Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+        0.09,
+        4.9,
+        [0.18, 0.20, 0.20, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(side * 3.80, 4.78, z_m),
+        Quat::IDENTITY,
+        Vec3::new(3.1, 0.10, 0.10),
+        [0.18, 0.20, 0.20, 1.0],
+    );
+    push_box(
+        scene,
+        Vec3::new(side * 2.42, 4.55, z_m),
+        Quat::IDENTITY,
+        Vec3::new(0.32, 0.72, 0.42),
+        [0.055, 0.065, 0.065, 1.0],
+    );
+    push_sphere(
+        scene,
+        Vec3::new(side * 2.39, 4.34, z_m - 0.22),
+        0.10,
+        [0.08, 0.72, 0.24, 1.0],
+    );
 }
 
 fn drone_position(progress: f64) -> Vec3 {
@@ -647,18 +825,34 @@ fn simulate_lane_vehicle(
 fn follow_camera(vehicle: VehicleFrame) -> CameraOrbit {
     let forward = vehicle.transform.rotation * Vec3::X;
     let right = vehicle.transform.rotation * Vec3::Z;
-    let eye_direction = (-forward + right * 0.14).normalize_or_zero();
+    let eye_direction = (-forward + right * 0.10).normalize_or_zero();
     CameraOrbit {
-        focus: vehicle.transform.translation + forward * 4.0 + Vec3::new(0.0, 0.55, 0.0),
+        focus: vehicle.transform.translation + forward * 6.6 + Vec3::new(0.0, 0.42, 0.0),
         yaw_rad: eye_direction.x.atan2(eye_direction.z),
-        pitch_rad: 1.28,
-        distance_m: 18.0,
+        pitch_rad: 1.40,
+        distance_m: 15.5,
     }
 }
 
 fn append_traffic(scene: &mut RenderScene, primary: VehicleFrame, opposing: VehicleFrame) {
+    append_car_shadow(scene, primary);
+    append_car_shadow(scene, opposing);
     append_car(scene, primary, [0.84, 0.12, 0.045, 1.0]);
     append_car(scene, opposing, [0.045, 0.24, 0.72, 1.0]);
+}
+
+fn append_car_shadow(scene: &mut RenderScene, vehicle: VehicleFrame) {
+    push_box(
+        scene,
+        Vec3::new(
+            vehicle.transform.translation.x - 0.12,
+            0.035,
+            vehicle.transform.translation.z + 0.10,
+        ),
+        vehicle.transform.rotation,
+        Vec3::new(4.15, 0.018, 1.52),
+        [0.085, 0.095, 0.098, 1.0],
+    );
 }
 
 fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 4]) {
@@ -669,6 +863,13 @@ fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 
         center,
         rotation,
         Vec3::new(4.35, 0.52, 1.82),
+        color_rgba,
+    );
+    push_box(
+        scene,
+        center + rotation * Vec3::new(0.34, 0.31, 0.0),
+        rotation * Quat::from_rotation_z(-0.055),
+        Vec3::new(3.55, 0.40, 1.76),
         color_rgba,
     );
     push_box(
@@ -691,6 +892,43 @@ fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 
         rotation * Quat::from_rotation_z(0.64),
         Vec3::new(0.08, 0.72, 1.48),
         [0.14, 0.23, 0.30, 1.0],
+    );
+    for z in [-0.81, 0.81] {
+        push_box(
+            scene,
+            center + rotation * Vec3::new(-0.08, 0.51, z),
+            rotation,
+            Vec3::new(1.55, 0.48, 0.035),
+            [0.085, 0.16, 0.21, 1.0],
+        );
+        push_box(
+            scene,
+            center + rotation * Vec3::new(0.62, 0.43, z * 1.035),
+            rotation,
+            Vec3::new(0.28, 0.15, 0.12),
+            color_rgba,
+        );
+    }
+    push_box(
+        scene,
+        center + rotation * Vec3::new(2.19, -0.05, 0.0),
+        rotation,
+        Vec3::new(0.10, 0.22, 0.92),
+        [0.035, 0.045, 0.050, 1.0],
+    );
+    push_box(
+        scene,
+        center + rotation * Vec3::new(-2.20, -0.02, 0.0),
+        rotation,
+        Vec3::new(0.10, 0.18, 0.62),
+        [0.83, 0.84, 0.78, 1.0],
+    );
+    push_box(
+        scene,
+        center + rotation * Vec3::new(-2.255, -0.03, 0.0),
+        rotation,
+        Vec3::new(0.025, 0.12, 0.42),
+        [0.90, 0.91, 0.86, 1.0],
     );
     for (x, color) in [
         (2.20, [0.98, 0.86, 0.42, 1.0]),
@@ -802,7 +1040,7 @@ fn push_cylinder(
         transform: MathTransform3 {
             translation,
             rotation,
-            scale: Vec3::ONE,
+            scale: Vec3::new(radius_m * 2.0, radius_m * 2.0, length_m),
         },
         shape: VisualShape::Cylinder { radius_m, length_m },
         color_rgba,
@@ -815,12 +1053,76 @@ fn push_sphere(scene: &mut RenderScene, translation: Vec3, radius_m: f64, color_
         transform: MathTransform3 {
             translation,
             rotation: Quat::IDENTITY,
-            scale: Vec3::ONE,
+            scale: Vec3::splat(radius_m * 2.0),
         },
         shape: VisualShape::Sphere { radius_m },
         color_rgba,
         mesh: None,
     });
+}
+
+fn cinematic_postprocess(
+    rgba8: &[u8],
+    depth_m: &[f32],
+    width: u32,
+    height: u32,
+    far_m: f32,
+) -> Vec<u8> {
+    assert_eq!(rgba8.len(), width as usize * height as usize * 4);
+    assert_eq!(depth_m.len(), width as usize * height as usize);
+    let mut presented = rgba8.to_vec();
+    let width_denominator = width.saturating_sub(1).max(1) as f32;
+    let height_denominator = height.saturating_sub(1).max(1) as f32;
+    for (pixel_index, depth_m) in depth_m.iter().copied().enumerate() {
+        let x = (pixel_index as u32 % width) as f32 / width_denominator;
+        let y = (pixel_index as u32 / width) as f32 / height_denominator;
+        let byte_index = pixel_index * 4;
+        if !depth_m.is_finite() || depth_m >= far_m * 0.995 {
+            let horizon_mix = smoothstep(0.02, 0.82, y);
+            let top = [0.28_f32, 0.50, 0.72];
+            let horizon = [0.76_f32, 0.84, 0.89];
+            let sun_distance_sq = (x - 0.78).powi(2) + ((y - 0.20) * 1.35).powi(2);
+            let sun_glow = (1.0 - sun_distance_sq / 0.055).clamp(0.0, 1.0).powi(3);
+            for channel in 0..3 {
+                let sky = top[channel] + (horizon[channel] - top[channel]) * horizon_mix;
+                let sun = [1.0_f32, 0.91, 0.72][channel];
+                presented[byte_index + channel] = to_srgb_byte(sky + (sun - sky) * sun_glow * 0.72);
+            }
+            presented[byte_index + 3] = 255;
+            continue;
+        }
+
+        let fog = smoothstep(25.0, 92.0, depth_m) * 0.42;
+        let atmospheric = [0.70_f32, 0.77, 0.80];
+        let mut color = [0.0_f32; 3];
+        for channel in 0..3 {
+            let source = f32::from(rgba8[byte_index + channel]) / 255.0;
+            color[channel] = source + (atmospheric[channel] - source) * fog;
+        }
+        let luma = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
+        for channel in &mut color {
+            *channel = luma + (*channel - luma) * 0.94;
+            *channel = 0.5 + (*channel - 0.5) * 1.055;
+        }
+        color[0] *= 1.018;
+        color[2] *= 0.985;
+        let vignette_radius_sq = ((x - 0.5) * 1.50).powi(2) + ((y - 0.48) * 1.05).powi(2);
+        let vignette = 1.0 - vignette_radius_sq.clamp(0.0, 1.0) * 0.095;
+        for channel in 0..3 {
+            presented[byte_index + channel] = to_srgb_byte(color[channel] * vignette);
+        }
+        presented[byte_index + 3] = 255;
+    }
+    presented
+}
+
+fn smoothstep(edge_min: f32, edge_max: f32, value: f32) -> f32 {
+    let t = ((value - edge_min) / (edge_max - edge_min)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn to_srgb_byte(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
@@ -832,7 +1134,7 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
             "-i",
             &frames_dir.join("frame-%03d.png").to_string_lossy(),
             "-vf",
-            "fps=12,scale=800:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+            "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=224:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
             &gif_path.to_string_lossy(),
         ])
         .status()?;
@@ -918,5 +1220,47 @@ mod tests {
                 assert!(frame.transform.translation.z <= 17.05);
             }
         }
+    }
+
+    #[test]
+    fn cinematic_streetscape_reserves_capacity_for_dynamic_actors() {
+        let mut scene = RenderScene::new();
+        append_city_streetscape(&mut scene);
+        assert!(scene.items.len() <= MAX_STATIC_SCENE_ITEMS);
+        let window_mesh = scene
+            .items
+            .iter()
+            .find_map(|item| item.mesh.as_deref())
+            .expect("batched facade windows");
+        assert!(window_mesh.positions.len() > 400);
+        assert_eq!(window_mesh.positions.len(), window_mesh.normals.len());
+        assert!(!window_mesh.indices.is_empty());
+    }
+
+    #[test]
+    fn showcase_round_primitives_apply_requested_dimensions() {
+        let mut scene = RenderScene::new();
+        push_sphere(&mut scene, Vec3::ZERO, 0.10, [1.0; 4]);
+        push_cylinder(&mut scene, Vec3::ZERO, Quat::IDENTITY, 0.09, 5.2, [1.0; 4]);
+        assert_eq!(scene.items[0].transform.scale, Vec3::splat(0.20));
+        assert_eq!(scene.items[1].transform.scale, Vec3::new(0.18, 0.18, 5.2));
+    }
+
+    #[test]
+    fn cinematic_postprocess_is_deterministic_and_depth_aware() {
+        let rgba8 = vec![
+            80, 110, 140, 255, 80, 110, 140, 255, 60, 70, 75, 255, 60, 70, 75, 255,
+        ];
+        let depth_m = vec![140.0, 140.0, 8.0, 90.0];
+        let first = cinematic_postprocess(&rgba8, &depth_m, 2, 2, 140.0);
+        let second = cinematic_postprocess(&rgba8, &depth_m, 2, 2, 140.0);
+        assert_eq!(first, second);
+        assert_ne!(first, rgba8);
+        assert_ne!(&first[0..3], &rgba8[0..3]);
+        assert!(
+            first[14] > first[10],
+            "distant geometry should receive blue atmospheric haze"
+        );
+        assert!(first.chunks_exact(4).all(|pixel| pixel[3] == 255));
     }
 }
