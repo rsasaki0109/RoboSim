@@ -124,9 +124,11 @@ load smoke.
 The official road LOD1 geometry has zero elevation while building geometry
 uses surveyed absolute elevations. For this visualization the example
 deterministically places every building's lowest AABB face on the road datum.
-The source meshes and textures are unchanged. Approximate lane markings and
-planar shadows projected along the renderer's sun direction are
-example-authored overlays. The data subset, source URL, and CC BY 4.0
+The source meshes and textures are unchanged. Approximate lane markings are
+example-authored overlays. Buildings and vehicles use the wgpu renderer's
+2048×2048 directional shadow map with 3×3 percentage-closer filtering; the
+light projection is fitted to scene bounds and snapped to shadow texels to
+limit shimmer between frames. The data subset, source URL, and CC BY 4.0
 attribution are recorded beside the example.
 
 This presentation strategy follows the official

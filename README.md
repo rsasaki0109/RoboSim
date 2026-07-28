@@ -29,7 +29,7 @@ official Project PLATEAU Sanjo City 2025 mesh around Kita-Sanjo Station:
 213 buildings, 59 road surfaces, and the station's real LOD2 Appearance
 textures. It selects a nearby derived two-way lane and uses a SimClock-driven
 Ackermann model to move two cars for eight seconds. The daylight scene adds
-directional sunlight, deterministic building and vehicle shadows, approximate
+directional sunlight, PCF-filtered building and vehicle shadow maps, approximate
 lane markings, and a stable world-up follow camera. The
 presentation is rendered at 1280×720 before a deterministic depth-aware
 atmospheric pass and high-quality 960×540 GIF downsample.
@@ -40,7 +40,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: SimClock-driven Ackermann motion, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, sunlight and deterministic planar shadows.</sub>
+  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: SimClock-driven Ackermann motion, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, sunlight and PCF-filtered directional shadow maps.</sub>
 </p>
 
 ```bash
