@@ -3,12 +3,10 @@
 use png::{BitDepth, ColorType, Encoder};
 use rne_assets::{load_scene_bundle, mesh_package_roots, spawn_scene_bundle, SpawnSceneOptions};
 use rne_core::{SimClock, SimDuration};
-use rne_ecs::{spawn_named, Name, World};
+use rne_ecs::{spawn_named, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
-use rne_plateau::{import_citygml_str, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
-use rne_render::{
-    Camera, RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, Visual, VisualShape,
-};
+use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
+use rne_render::{Camera, RenderBackend, RenderScene, RenderSceneItem, Visual, VisualShape};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
@@ -25,7 +23,7 @@ const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
-const MAX_STATIC_SCENE_ITEMS: usize = 190;
+const MAX_STATIC_SCENE_ITEMS: usize = 210;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct VehicleFrame {
@@ -142,10 +140,15 @@ const SHOWCASE_BUILDINGS: [ShowcaseBuilding; 10] = [
 fn main() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let generated_dir = repo_root.join("target/plateau-city-drive-demo");
+    let source_dir = generated_dir.join("source");
+    let appearance_dir = source_dir.join("appearance");
+    fs::create_dir_all(&appearance_dir).expect("create synthetic PLATEAU source directory");
     let citygml = showcase_citygml();
-    let result = import_citygml_str(
-        &citygml,
-        "synthetic_plateau_drive_showcase.gml",
+    let citygml_path = source_dir.join("synthetic_plateau_drive_showcase.gml");
+    fs::write(&citygml_path, citygml).expect("write synthetic PLATEAU CityGML");
+    write_facade_texture(&appearance_dir.join("facade.png"));
+    let result = import_citygml_file(
+        &citygml_path,
         &generated_dir,
         &ImportOptions {
             tile_name: "plateau-city-drive".into(),
@@ -165,14 +168,18 @@ fn main() {
     spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())
         .expect("spawn generated PLATEAU scene headlessly");
     assert_eq!(result.building_count, 10);
+    assert_eq!(result.lod2_building_count, 10);
+    assert_eq!(result.textured_surface_count, 40);
     assert_eq!(result.road_count, 1);
     assert_eq!(result.lane_count, 2);
     assert_eq!(bundle.scene.objects.len(), 11);
     let (primary_traffic, opposing_traffic) =
         simulate_two_way_traffic(&result.lanes, CAR_FRAME_COUNT);
     println!(
-        "PLATEAU tile ready: buildings={} roads={} lanes={} triangles={} scene={}",
+        "PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={} scene={}",
         result.building_count,
+        result.lod2_building_count,
+        result.textured_surface_count,
         result.road_count,
         result.lane_count,
         result.triangle_count,
@@ -295,6 +302,32 @@ fn main() {
     );
 }
 
+fn write_facade_texture(path: &Path) {
+    const SIZE: u32 = 384;
+    let image = image::RgbaImage::from_fn(SIZE, SIZE, |x, y| {
+        let mortar = x % 64 < 4 || y % 64 < 4;
+        let inset_x = x % 64;
+        let inset_y = y % 64;
+        let window = (10..54).contains(&inset_x) && (12..50).contains(&inset_y);
+        let pixel = if mortar {
+            [132, 126, 116, 255]
+        } else if window {
+            let glint = ((x / 64 + y / 64) & 1) == 0;
+            if glint {
+                [72, 116, 142, 255]
+            } else {
+                [45, 78, 101, 255]
+            }
+        } else {
+            [190, 181, 165, 255]
+        };
+        image::Rgba(pixel)
+    });
+    image
+        .save(path)
+        .expect("write procedural CC0 facade texture");
+}
+
 fn showcase_citygml() -> String {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -303,6 +336,7 @@ fn showcase_citygml() -> String {
     xmlns:core="http://www.opengis.net/citygml/2.0"
     xmlns:gml="http://www.opengis.net/gml"
     xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+    xmlns:app="http://www.opengis.net/citygml/appearance/2.0"
     xmlns:tran="http://www.opengis.net/citygml/transportation/2.0">
   <gml:boundedBy>
     <gml:Envelope srsName="urn:ogc:def:crs:EPSG::6677" srsDimension="3">
@@ -332,6 +366,20 @@ fn showcase_citygml() -> String {
     for building in SHOWCASE_BUILDINGS {
         append_showcase_building(&mut xml, building);
     }
+    xml.push_str(
+        "  <app:appearanceMember>\n    <app:Appearance>\n      <app:theme>rgbTexture</app:theme>\n      <app:surfaceDataMember>\n        <app:ParameterizedTexture>\n          <app:imageURI>appearance/facade.png</app:imageURI>\n          <app:mimeType>image/png</app:mimeType>\n",
+    );
+    for building in SHOWCASE_BUILDINGS {
+        for surface_index in 2..6 {
+            xml.push_str(&format!(
+                "          <app:target uri=\"#{}-polygon-{surface_index}\"><app:TexCoordList><app:textureCoordinates ring=\"#{}-ring-{surface_index}\">0 0 1 0 1 1 0 1 0 0</app:textureCoordinates></app:TexCoordList></app:target>\n",
+                building.id, building.id
+            ));
+        }
+    }
+    xml.push_str(
+        "        </app:ParameterizedTexture>\n      </app:surfaceDataMember>\n    </app:Appearance>\n  </app:appearanceMember>\n",
+    );
     xml.push_str("</core:CityModel>\n");
     xml
 }
@@ -351,50 +399,38 @@ fn append_showcase_building(xml: &mut String, building: ShowcaseBuilding) {
         format!("{x0} {s1} 0 {x0} {s1} {h} {x0} {s0} {h} {x0} {s0} 0 {x0} {s1} 0"),
     ];
     xml.push_str(&format!(
-        "  <core:cityObjectMember>\n    <bldg:Building gml:id=\"{}\">\n      <gml:name>{}</gml:name>\n      <bldg:function>401</bldg:function>\n      <bldg:measuredHeight uom=\"m\">{h}</bldg:measuredHeight>\n      <bldg:lod1Solid><gml:Solid><gml:exterior><gml:CompositeSurface>\n",
+        "  <core:cityObjectMember>\n    <bldg:Building gml:id=\"{}\">\n      <gml:name>{}</gml:name>\n      <bldg:function>401</bldg:function>\n      <bldg:measuredHeight uom=\"m\">{h}</bldg:measuredHeight>\n",
         building.id, building.name
     ));
-    for ring in rings {
+    let surface_types = [
+        "GroundSurface",
+        "RoofSurface",
+        "WallSurface",
+        "WallSurface",
+        "WallSurface",
+        "WallSurface",
+    ];
+    for (surface_index, (ring, surface_type)) in rings.into_iter().zip(surface_types).enumerate() {
         xml.push_str(&format!(
-            "        <gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">{ring}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>\n"
+            "      <bldg:boundedBy><bldg:{surface_type} gml:id=\"{}-surface-{surface_index}\"><bldg:lod2MultiSurface><gml:MultiSurface><gml:surfaceMember><gml:Polygon gml:id=\"{}-polygon-{surface_index}\"><gml:exterior><gml:LinearRing gml:id=\"{}-ring-{surface_index}\"><gml:posList srsDimension=\"3\">{ring}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember></gml:MultiSurface></bldg:lod2MultiSurface></bldg:{surface_type}></bldg:boundedBy>\n",
+            building.id, building.id, building.id
         ));
     }
-    xml.push_str(
-        "      </gml:CompositeSurface></gml:exterior></gml:Solid></bldg:lod1Solid>\n    </bldg:Building>\n  </core:cityObjectMember>\n",
-    );
+    xml.push_str("    </bldg:Building>\n  </core:cityObjectMember>\n");
 }
 
 fn render_scene_from_world(world: &mut World) -> RenderScene {
     let mut scene = RenderScene::new();
-    let mut query = world.query::<(&Transform3, &Visual, Option<&Name>)>();
-    for (transform, visual, name) in query.iter(world) {
-        let color_rgba = name
-            .filter(|name| name.0.starts_with("plateau_building_"))
-            .map(|name| building_color(&name.0))
-            .unwrap_or(visual.color_rgba);
+    let mut query = world.query::<(&Transform3, &Visual)>();
+    for (transform, visual) in query.iter(world) {
         scene.items.push(RenderScene::item_from_visual(
             *transform,
             visual.shape.clone(),
-            color_rgba,
+            visual.color_rgba,
             visual.local_offset,
         ));
     }
     scene
-}
-
-fn building_color(name: &str) -> [f32; 4] {
-    const PALETTE: [[f32; 4]; 6] = [
-        [0.64, 0.68, 0.71, 1.0],
-        [0.72, 0.66, 0.58, 1.0],
-        [0.58, 0.64, 0.69, 1.0],
-        [0.69, 0.70, 0.66, 1.0],
-        [0.62, 0.58, 0.55, 1.0],
-        [0.73, 0.72, 0.68, 1.0],
-    ];
-    let hash = name.bytes().fold(2_166_136_261_u32, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
-    });
-    PALETTE[hash as usize % PALETTE.len()]
 }
 
 fn append_city_streetscape(scene: &mut RenderScene) {
@@ -407,6 +443,7 @@ fn append_city_streetscape(scene: &mut RenderScene) {
         shape: VisualShape::Box { size_m: Vec3::ONE },
         color_rgba: [0.16, 0.20, 0.18, 1.0],
         mesh: None,
+        base_color_texture: None,
     });
     for x in [-1.48, 1.48] {
         push_box(
@@ -499,7 +536,6 @@ fn append_city_streetscape(scene: &mut RenderScene) {
             [0.14, 0.16, 0.17, 1.0],
         );
     }
-    append_showcase_facades(scene);
 }
 
 fn append_streetlight(scene: &mut RenderScene, base: Vec3, road_direction: f64) {
@@ -557,117 +593,6 @@ fn append_tree(scene: &mut RenderScene, base: Vec3) {
         Vec3::new(2.2, 0.018, 1.25),
         [0.105, 0.12, 0.105, 1.0],
     );
-}
-
-fn append_showcase_facades(scene: &mut RenderScene) {
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut indices = Vec::new();
-    for building in SHOWCASE_BUILDINGS {
-        let (road_face_x, normal_x) = if building.x_max_m < 0.0 {
-            (building.x_max_m + 0.035, 1.0)
-        } else {
-            (building.x_min_m - 0.035, -1.0)
-        };
-        let mut floor_y_m = 2.25;
-        while floor_y_m < building.height_m - 1.1 {
-            let mut window_z_m = building.z_min_m + 1.35;
-            while window_z_m < building.z_max_m - 1.0 {
-                append_facade_quad(
-                    &mut positions,
-                    &mut normals,
-                    &mut indices,
-                    road_face_x,
-                    floor_y_m - 0.58,
-                    floor_y_m + 0.58,
-                    window_z_m - 0.66,
-                    window_z_m + 0.66,
-                    normal_x,
-                );
-                window_z_m += 2.18;
-            }
-            floor_y_m += 2.72;
-        }
-        push_box(
-            scene,
-            Vec3::new(
-                road_face_x,
-                1.15,
-                (building.z_min_m + building.z_max_m) * 0.5,
-            ),
-            Quat::IDENTITY,
-            Vec3::new(0.08, 2.25, 1.45),
-            [0.07, 0.085, 0.095, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(
-                road_face_x - normal_x * 0.32,
-                2.32,
-                (building.z_min_m + building.z_max_m) * 0.5,
-            ),
-            Quat::IDENTITY,
-            Vec3::new(0.62, 0.18, building.z_max_m - building.z_min_m - 1.2),
-            [0.44, 0.47, 0.47, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(
-                road_face_x - normal_x * 0.20,
-                building.height_m - 0.34,
-                (building.z_min_m + building.z_max_m) * 0.5,
-            ),
-            Quat::IDENTITY,
-            Vec3::new(0.38, 0.68, building.z_max_m - building.z_min_m),
-            [0.48, 0.50, 0.49, 1.0],
-        );
-        push_box(
-            scene,
-            Vec3::new(
-                (building.x_min_m + building.x_max_m) * 0.5,
-                building.height_m + 0.42,
-                (building.z_min_m + building.z_max_m) * 0.5,
-            ),
-            Quat::IDENTITY,
-            Vec3::new(2.2, 0.84, 1.7),
-            [0.35, 0.37, 0.37, 1.0],
-        );
-    }
-    scene.items.push(RenderScene::item_from_dynamic_mesh(
-        TriangleMesh {
-            positions,
-            normals,
-            indices,
-        },
-        [0.045, 0.11, 0.16, 1.0],
-    ));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn append_facade_quad(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    indices: &mut Vec<u32>,
-    x_m: f64,
-    y_min_m: f64,
-    y_max_m: f64,
-    z_min_m: f64,
-    z_max_m: f64,
-    normal_x: f64,
-) {
-    let base = positions.len() as u32;
-    positions.extend([
-        [x_m as f32, y_min_m as f32, z_min_m as f32],
-        [x_m as f32, y_max_m as f32, z_min_m as f32],
-        [x_m as f32, y_max_m as f32, z_max_m as f32],
-        [x_m as f32, y_min_m as f32, z_max_m as f32],
-    ]);
-    normals.extend([[normal_x as f32, 0.0, 0.0]; 4]);
-    if normal_x > 0.0 {
-        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-    } else {
-        indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
-    }
 }
 
 fn append_traffic_signal(scene: &mut RenderScene, side: f64, z_m: f64) {
@@ -1025,6 +950,7 @@ fn push_box(
         shape: VisualShape::Box { size_m: Vec3::ONE },
         color_rgba,
         mesh: None,
+        base_color_texture: None,
     });
 }
 
@@ -1045,6 +971,7 @@ fn push_cylinder(
         shape: VisualShape::Cylinder { radius_m, length_m },
         color_rgba,
         mesh: None,
+        base_color_texture: None,
     });
 }
 
@@ -1058,6 +985,7 @@ fn push_sphere(scene: &mut RenderScene, translation: Vec3, radius_m: f64, color_
         shape: VisualShape::Sphere { radius_m },
         color_rgba,
         mesh: None,
+        base_color_texture: None,
     });
 }
 
@@ -1166,10 +1094,15 @@ mod tests {
         if output.exists() {
             fs::remove_dir_all(&output).expect("remove stale showcase output");
         }
-        let result = import_citygml_str(
-            &first,
-            "synthetic_plateau_drive_showcase.gml",
-            &output,
+        let source = output.join("source");
+        let appearance = source.join("appearance");
+        fs::create_dir_all(&appearance).expect("create showcase source");
+        let citygml_path = source.join("synthetic_plateau_drive_showcase.gml");
+        fs::write(&citygml_path, first).expect("write showcase CityGML");
+        write_facade_texture(&appearance.join("facade.png"));
+        let result = import_citygml_file(
+            &citygml_path,
+            &output.join("imported"),
             &ImportOptions {
                 tile_name: "showcase-test".into(),
                 coordinate_mode: CoordinateMode::ProjectedMeters,
@@ -1183,6 +1116,8 @@ mod tests {
         )
         .expect("import generated showcase");
         assert_eq!(result.building_count, 10);
+        assert_eq!(result.lod2_building_count, 10);
+        assert_eq!(result.textured_surface_count, 40);
         assert_eq!(result.road_count, 1);
         assert_eq!(result.lane_count, 2);
         assert_eq!(result.triangle_count, 122);
@@ -1227,14 +1162,7 @@ mod tests {
         let mut scene = RenderScene::new();
         append_city_streetscape(&mut scene);
         assert!(scene.items.len() <= MAX_STATIC_SCENE_ITEMS);
-        let window_mesh = scene
-            .items
-            .iter()
-            .find_map(|item| item.mesh.as_deref())
-            .expect("batched facade windows");
-        assert!(window_mesh.positions.len() > 400);
-        assert_eq!(window_mesh.positions.len(), window_mesh.normals.len());
-        assert!(!window_mesh.indices.is_empty());
+        assert!(scene.items.len() > 80);
     }
 
     #[test]

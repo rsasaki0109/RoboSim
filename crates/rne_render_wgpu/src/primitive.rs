@@ -15,17 +15,21 @@ struct DrawUniform {
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var<uniform> draw: DrawUniform;
+@group(2) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(2) @binding(1) var base_color_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
+    @location(2) texcoord: vec2<f32>,
 }
 
 @vertex
 fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) texcoord: vec2<f32>,
 ) -> VertexOutput {
     var out: VertexOutput;
     let world = draw.model * vec4<f32>(position, 1.0);
@@ -44,6 +48,7 @@ fn vs_main(
         world_normal = normalize(world_normal);
     }
     out.world_normal = world_normal;
+    out.texcoord = texcoord;
     return out;
 }
 
@@ -52,7 +57,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(camera.light_ambient.xyz);
     let ndotl = max(dot(normalize(input.world_normal), light_dir), 0.0);
     let shade = camera.light_ambient.w + camera.diffuse_pad.x * ndotl;
-    return vec4<f32>(input.color.rgb * shade, input.color.a);
+    let texture_color = textureSample(
+        base_color_texture,
+        base_color_sampler,
+        vec2<f32>(input.texcoord.x, 1.0 - input.texcoord.y),
+    );
+    return vec4<f32>(
+        input.color.rgb * texture_color.rgb * shade,
+        input.color.a * texture_color.a,
+    );
 }
 "#;
 
@@ -72,6 +85,7 @@ use wgpu::util::DeviceExt;
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
+    texcoord: [f32; 2],
 }
 
 #[repr(C)]
@@ -129,6 +143,9 @@ pub struct PrimitiveRenderer {
     camera_buffer: wgpu::Buffer,
     draw_buffer: wgpu::Buffer,
     mesh_cache: HashMap<usize, GpuMesh>,
+    texture_layout: wgpu::BindGroupLayout,
+    fallback_texture: GpuTexture,
+    texture_cache: HashMap<usize, GpuTexture>,
 }
 
 struct GpuMesh {
@@ -136,6 +153,11 @@ struct GpuMesh {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     index_format: wgpu::IndexFormat,
+}
+
+struct GpuTexture {
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
 }
 
 /// Color and depth views for an on-screen or off-screen render pass.
@@ -183,7 +205,11 @@ pub struct PrimitiveRenderPass<'a> {
 }
 
 impl PrimitiveRenderer {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rne_primitive_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -216,10 +242,31 @@ impl PrimitiveRenderer {
                 count: None,
             }],
         });
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rne_base_color_texture_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rne_primitive_pipeline_layout"),
-            bind_group_layouts: &[&camera_layout, &draw_layout],
+            bind_group_layouts: &[&camera_layout, &draw_layout, &texture_layout],
             push_constant_ranges: &[],
         });
 
@@ -242,6 +289,11 @@ impl PrimitiveRenderer {
                             format: wgpu::VertexFormat::Float32x3,
                             offset: 12,
                             shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 24,
+                            shader_location: 2,
                         },
                     ],
                 }],
@@ -305,6 +357,13 @@ impl PrimitiveRenderer {
                 }),
             }],
         });
+        let fallback_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_white_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+        );
 
         Self {
             pipeline,
@@ -317,6 +376,9 @@ impl PrimitiveRenderer {
             camera_buffer,
             draw_buffer,
             mesh_cache: HashMap::new(),
+            texture_layout,
+            fallback_texture,
+            texture_cache: HashMap::new(),
         }
     }
 
@@ -381,6 +443,24 @@ impl PrimitiveRenderer {
                 }
             })
             .collect::<Vec<_>>();
+        for item in &scene.items {
+            if let Some(mesh) = &item.mesh {
+                let _ = self.gpu_mesh(device, mesh);
+            }
+            if let Some(texture) = &item.base_color_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_base_color_texture",
+                        texture,
+                    );
+                    self.texture_cache.insert(key, uploaded);
+                }
+            }
+        }
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rne_camera_bind_group"),
@@ -432,13 +512,22 @@ impl PrimitiveRenderer {
                     &self.draw_bind_group,
                     &[index as u32 * self.draw_uniform_stride],
                 );
+                let texture = item
+                    .base_color_texture
+                    .as_ref()
+                    .and_then(|texture| self.texture_cache.get(&(Arc::as_ptr(texture) as usize)))
+                    .unwrap_or(&self.fallback_texture);
+                pass.set_bind_group(2, &texture.bind_group, &[]);
 
                 if let Some(gpu_mesh) = &dynamic_meshes[index] {
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 } else if let Some(mesh) = &item.mesh {
-                    let gpu_mesh = self.gpu_mesh(device, mesh);
+                    let gpu_mesh = self
+                        .mesh_cache
+                        .get(&(Arc::as_ptr(mesh) as usize))
+                        .expect("mesh uploaded before render pass");
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
@@ -621,9 +710,11 @@ fn upload_mesh(device: &wgpu::Device, mesh: &TriangleMesh) -> GpuMesh {
         .positions
         .iter()
         .zip(mesh.normals.iter())
-        .map(|(position, normal)| Vertex {
+        .zip(mesh.texcoords.iter())
+        .map(|((position, normal), texcoord)| Vertex {
             position: *position,
             normal: *normal,
+            texcoord: *texcoord,
         })
         .collect();
 
@@ -659,6 +750,75 @@ fn upload_mesh(device: &wgpu::Device, mesh: &TriangleMesh) -> GpuMesh {
         index_buffer,
         index_count,
         index_format,
+    }
+}
+
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    label: &str,
+    image: &ImageFrame,
+) -> GpuTexture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: image.width.max(1),
+            height: image.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &image.rgba8,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(image.width * 4),
+            rows_per_image: Some(image.height),
+        },
+        wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("rne_base_color_sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rne_base_color_texture_bind_group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+    GpuTexture {
+        _texture: texture,
+        bind_group,
     }
 }
 
@@ -773,7 +933,7 @@ fn align_to(value: u32, alignment: u32) -> u32 {
     value.div_ceil(alignment) * alignment
 }
 
-const MAX_SCENE_ITEMS: u32 = 256;
+const MAX_SCENE_ITEMS: u32 = 512;
 
 fn uniform_stride(alignment: u32) -> u32 {
     align_to(std::mem::size_of::<DrawUniform>() as u32, alignment)
@@ -807,6 +967,7 @@ fn unit_cube() -> (Vec<Vertex>, Vec<u16>) {
             vertices.push(Vertex {
                 position: p[corner],
                 normal,
+                texcoord: [0.0, 0.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -829,6 +990,7 @@ fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
             vertices.push(Vertex {
                 position: [x, y, ring],
                 normal: [angle.cos(), angle.sin(), 0.0],
+                texcoord: [0.0, 0.0],
             });
         }
     }
@@ -846,11 +1008,13 @@ fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
     vertices.push(Vertex {
         position: [0.0, 0.0, -0.5],
         normal: [0.0, 0.0, -1.0],
+        texcoord: [0.0, 0.0],
     });
     let top_center = vertices.len() as u16;
     vertices.push(Vertex {
         position: [0.0, 0.0, 0.5],
         normal: [0.0, 0.0, 1.0],
+        texcoord: [0.0, 0.0],
     });
 
     for segment in 0..SEGMENTS {
@@ -887,6 +1051,7 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
             vertices.push(Vertex {
                 position: [x * 0.5, y * 0.5, z * 0.5],
                 normal,
+                texcoord: [0.0, 0.0],
             });
         }
     }

@@ -1,4 +1,4 @@
-//! Deterministic offline import of PLATEAU CityGML building and road LOD1 data.
+//! Deterministic offline import of PLATEAU CityGML building LOD1/LOD2 and road LOD1 data.
 //!
 //! The importer deliberately lives outside the simulation core. It converts a
 //! bounded CityGML tile into ordinary RNE scene, OBJ, and JSON assets so runtime
@@ -13,7 +13,7 @@ use rne_assets::{
 use roxmltree::{Document, Node};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -84,6 +84,10 @@ pub struct ImportResult {
     pub metadata_path: PathBuf,
     /// Number of imported CityGML buildings.
     pub building_count: usize,
+    /// Number of buildings imported from semantic LOD2 boundary surfaces.
+    pub lod2_building_count: usize,
+    /// Number of building surfaces linked to Appearance textures.
+    pub textured_surface_count: usize,
     /// Number of imported CityGML roads.
     pub road_count: usize,
     /// Number of deterministically derived traffic lanes.
@@ -129,8 +133,10 @@ pub enum ImportError {
     /// The CityGML XML document is malformed.
     #[error("invalid CityGML XML: {0}")]
     Xml(String),
-    /// The document contains no supported building or road LOD1 geometry.
-    #[error("CityGML contains no Building lod1Solid or Road lod1MultiSurface geometry")]
+    /// The document contains no supported building LOD1/LOD2 or road LOD1 geometry.
+    #[error(
+        "CityGML contains no Building lod2MultiSurface/lod1Solid or Road lod1MultiSurface geometry"
+    )]
     NoSupportedLod1Geometry,
     /// A building has no stable `gml:id`.
     #[error("Building is missing gml:id")]
@@ -158,6 +164,14 @@ pub enum ImportError {
         /// Stable CityGML feature identifier.
         feature_id: String,
         /// Description of the invalid coordinate data.
+        message: String,
+    },
+    /// An Appearance texture reference is unsafe or cannot be resolved.
+    #[error("invalid Appearance texture `{uri}`: {message}")]
+    InvalidTexture {
+        /// Source `app:imageURI` value.
+        uri: String,
+        /// Validation or resolution failure.
         message: String,
     },
     /// A generated asset could not be read or written.
@@ -194,7 +208,34 @@ struct ParsedBuilding {
     name: Option<String>,
     function: Option<String>,
     measured_height_m: Option<f64>,
-    polygons: Vec<Vec<SourcePoint>>,
+    lod: u8,
+    polygons: Vec<ParsedBuildingPolygon>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum BuildingSurface {
+    Roof,
+    Wall,
+    Ground,
+    OuterCeiling,
+    OuterFloor,
+    Closure,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ParsedBuildingPolygon {
+    polygon_id: Option<String>,
+    points: Vec<SourcePoint>,
+    surface: BuildingSurface,
+    texture: Option<TextureBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TextureBinding {
+    image_uri: String,
+    texcoords: Vec<[f64; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -225,7 +266,12 @@ struct BuildingMetadata {
     name: Option<String>,
     function: Option<String>,
     measured_height_m: Option<f64>,
+    lod: u8,
+    surface_counts: BTreeMap<BuildingSurface, usize>,
+    textured_surface_count: usize,
+    texture_paths: Vec<String>,
     mesh_path: String,
+    material_path: Option<String>,
     translation_m: [f64; 3],
     bounds_min_m: [f64; 3],
     bounds_max_m: [f64; 3],
@@ -250,6 +296,7 @@ struct RoadMetadata {
 struct GeneratedBuilding {
     metadata: BuildingMetadata,
     obj: String,
+    mtl: Option<String>,
     size_m: [f64; 3],
 }
 
@@ -270,7 +317,7 @@ pub fn import_citygml_file(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("<citygml>");
-    import_citygml_str(&xml, source_name, output_dir, options)
+    import_citygml_impl(&xml, source_name, input_path.parent(), output_dir, options)
 }
 
 /// Imports CityGML text and writes deterministic RNE assets into `output_dir`.
@@ -280,13 +327,24 @@ pub fn import_citygml_str(
     output_dir: &Path,
     options: &ImportOptions,
 ) -> Result<ImportResult, ImportError> {
+    import_citygml_impl(xml, source_name, None, output_dir, options)
+}
+
+fn import_citygml_impl(
+    xml: &str,
+    source_name: &str,
+    source_dir: Option<&Path>,
+    output_dir: &Path,
+    options: &ImportOptions,
+) -> Result<ImportResult, ImportError> {
     validate_options(options)?;
     let document = Document::parse(xml).map_err(|error| ImportError::Xml(error.to_string()))?;
     let source_crs = document
         .descendants()
         .find_map(|node| node.attribute("srsName"))
         .map(str::to_owned);
-    let mut buildings = parse_buildings(&document)?;
+    let appearances = parse_appearance_textures(&document)?;
+    let mut buildings = parse_buildings(&document, &appearances)?;
     buildings.sort_by(|left, right| left.id.cmp(&right.id));
     let mut roads = parse_roads(&document)?;
     roads.sort_by(|left, right| left.id.cmp(&right.id));
@@ -299,9 +357,16 @@ pub fn import_citygml_str(
         .origin
         .unwrap_or_else(|| default_origin(&buildings, &roads));
     let tile_name = sanitize_component(&options.tile_name);
+    let texture_paths = resolve_texture_paths(&buildings, source_dir)?;
     let mut generated = Vec::with_capacity(buildings.len());
     for (index, building) in buildings.iter().enumerate() {
-        generated.push(generate_building(building, index, mode, origin)?);
+        generated.push(generate_building(
+            building,
+            index,
+            mode,
+            origin,
+            &texture_paths,
+        )?);
     }
     let mut generated_roads = Vec::with_capacity(roads.len());
     for (index, road) in roads.iter().enumerate() {
@@ -311,9 +376,15 @@ pub fn import_citygml_str(
     fs::create_dir_all(output_dir).map_err(|error| io_error(output_dir, error))?;
     let meshes_dir = output_dir.join("meshes");
     fs::create_dir_all(&meshes_dir).map_err(|error| io_error(&meshes_dir, error))?;
+    copy_appearance_textures(source_dir, output_dir, &texture_paths)?;
     for building in &generated {
         let path = output_dir.join(&building.metadata.mesh_path);
         fs::write(&path, &building.obj).map_err(|error| io_error(&path, error))?;
+        if let (Some(material_path), Some(mtl)) = (&building.metadata.material_path, &building.mtl)
+        {
+            let material_path = output_dir.join(material_path);
+            fs::write(&material_path, mtl).map_err(|error| io_error(&material_path, error))?;
+        }
     }
     for road in &generated_roads {
         let path = output_dir.join(&road.metadata.mesh_path);
@@ -332,7 +403,7 @@ pub fn import_citygml_str(
         .map_err(|error| io_error(&scene_path, error))?;
 
     let metadata = TileMetadata {
-        schema_version: 2,
+        schema_version: 3,
         source: source_name.to_owned(),
         source_crs,
         coordinate_mode: mode,
@@ -370,6 +441,14 @@ pub fn import_citygml_str(
         scene_path,
         metadata_path,
         building_count: generated.len(),
+        lod2_building_count: generated
+            .iter()
+            .filter(|building| building.metadata.lod == 2)
+            .count(),
+        textured_surface_count: generated
+            .iter()
+            .map(|building| building.metadata.textured_surface_count)
+            .sum(),
         road_count: generated_roads.len(),
         lane_count: generated_roads
             .iter()
@@ -434,7 +513,72 @@ fn validate_options(options: &ImportOptions) -> Result<(), ImportError> {
     Ok(())
 }
 
-fn parse_buildings(document: &Document<'_>) -> Result<Vec<ParsedBuilding>, ImportError> {
+fn parse_appearance_textures(
+    document: &Document<'_>,
+) -> Result<HashMap<String, TextureBinding>, ImportError> {
+    let mut textures = HashMap::new();
+    for parameterized in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "ParameterizedTexture")
+    {
+        let image_uri = descendant_text(parameterized, "imageURI").ok_or_else(|| {
+            ImportError::InvalidTexture {
+                uri: "<missing>".into(),
+                message: "ParameterizedTexture has no imageURI".into(),
+            }
+        })?;
+        for target in parameterized
+            .descendants()
+            .filter(|node| node.is_element() && node.tag_name().name() == "target")
+        {
+            let Some(polygon_id) = target
+                .attributes()
+                .find(|attribute| attribute.name() == "uri")
+                .map(|attribute| attribute.value().trim().trim_start_matches('#'))
+                .filter(|id| !id.is_empty())
+            else {
+                continue;
+            };
+            let coordinates = target
+                .descendants()
+                .find(|node| node.is_element() && node.tag_name().name() == "textureCoordinates")
+                .ok_or_else(|| ImportError::InvalidTexture {
+                    uri: image_uri.clone(),
+                    message: format!("target #{polygon_id} has no textureCoordinates"),
+                })?;
+            let values = parse_numbers(coordinates.text().unwrap_or_default(), polygon_id)?;
+            if values.len() < 6 || !values.len().is_multiple_of(2) {
+                return Err(ImportError::InvalidTexture {
+                    uri: image_uri.clone(),
+                    message: format!("target #{polygon_id} must contain at least three UV pairs"),
+                });
+            }
+            let mut texcoords: Vec<[f64; 2]> = values
+                .chunks_exact(2)
+                .map(|value| [value[0], value[1]])
+                .collect();
+            if texcoords.first() == texcoords.last() {
+                texcoords.pop();
+            }
+            let binding = TextureBinding {
+                image_uri: image_uri.clone(),
+                texcoords,
+            };
+            if textures.insert(polygon_id.to_owned(), binding).is_some() {
+                return Err(ImportError::InvalidTexture {
+                    uri: image_uri.clone(),
+                    message: format!("polygon #{polygon_id} has multiple texture targets"),
+                });
+            }
+        }
+    }
+    Ok(textures)
+}
+
+fn parse_buildings(
+    document: &Document<'_>,
+    appearances: &HashMap<String, TextureBinding>,
+) -> Result<Vec<ParsedBuilding>, ImportError> {
     let mut seen = HashSet::new();
     let mut buildings = Vec::new();
     for node in document
@@ -450,18 +594,57 @@ fn parse_buildings(document: &Document<'_>) -> Result<Vec<ParsedBuilding>, Impor
         if !seen.insert(id.clone()) {
             return Err(ImportError::DuplicateBuildingId(id));
         }
-        let Some(lod1) = node
+        let lod2_roots: Vec<_> = node
             .descendants()
-            .find(|child| child.is_element() && child.tag_name().name() == "lod1Solid")
-        else {
-            continue;
+            .filter(|child| child.is_element() && child.tag_name().name() == "lod2MultiSurface")
+            .collect();
+        let (lod, geometry_roots) = if lod2_roots.is_empty() {
+            let Some(lod1) = node
+                .descendants()
+                .find(|child| child.is_element() && child.tag_name().name() == "lod1Solid")
+            else {
+                continue;
+            };
+            (1, vec![lod1])
+        } else {
+            (2, lod2_roots)
         };
         let mut polygons = Vec::new();
-        for polygon in lod1
-            .descendants()
-            .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
-        {
-            polygons.push(parse_polygon(polygon, &id)?);
+        for geometry in geometry_roots {
+            for polygon in geometry
+                .descendants()
+                .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
+            {
+                let polygon_id = polygon
+                    .attributes()
+                    .find(|attribute| attribute.name() == "id")
+                    .map(|attribute| attribute.value().trim().to_owned())
+                    .filter(|value| !value.is_empty());
+                let points = parse_polygon(polygon, &id)?;
+                let texture = polygon_id
+                    .as_ref()
+                    .and_then(|polygon_id| appearances.get(polygon_id))
+                    .cloned();
+                if let Some(texture) = &texture {
+                    if texture.texcoords.len() != points.len() {
+                        return Err(ImportError::InvalidTexture {
+                            uri: texture.image_uri.clone(),
+                            message: format!(
+                                "polygon #{} has {} vertices but {} UV pairs",
+                                polygon_id.as_deref().unwrap_or_default(),
+                                points.len(),
+                                texture.texcoords.len()
+                            ),
+                        });
+                    }
+                }
+                polygons.push(ParsedBuildingPolygon {
+                    polygon_id,
+                    points,
+                    surface: building_surface(polygon),
+                    texture,
+                });
+            }
         }
         if polygons.is_empty() {
             continue;
@@ -472,10 +655,28 @@ fn parse_buildings(document: &Document<'_>) -> Result<Vec<ParsedBuilding>, Impor
             function: descendant_text(node, "function"),
             measured_height_m: descendant_text(node, "measuredHeight")
                 .and_then(|value| value.parse().ok()),
+            lod,
             polygons,
         });
     }
     Ok(buildings)
+}
+
+fn building_surface(polygon: Node<'_, '_>) -> BuildingSurface {
+    for ancestor in polygon.ancestors() {
+        let surface = match ancestor.tag_name().name() {
+            "RoofSurface" => BuildingSurface::Roof,
+            "WallSurface" => BuildingSurface::Wall,
+            "GroundSurface" => BuildingSurface::Ground,
+            "OuterCeilingSurface" => BuildingSurface::OuterCeiling,
+            "OuterFloorSurface" => BuildingSurface::OuterFloor,
+            "ClosureSurface" => BuildingSurface::Closure,
+            "Building" => break,
+            _ => continue,
+        };
+        return surface;
+    }
+    BuildingSurface::Unknown
 }
 
 fn parse_roads(document: &Document<'_>) -> Result<Vec<ParsedRoad>, ImportError> {
@@ -678,7 +879,7 @@ fn default_origin(buildings: &[ParsedBuilding], roads: &[ParsedRoad]) -> SourceO
     for point in buildings
         .iter()
         .flat_map(|building| building.polygons.iter())
-        .flatten()
+        .flat_map(|polygon| polygon.points.iter())
         .chain(roads.iter().flat_map(|road| road.polygons.iter()).flatten())
     {
         min[0] = min[0].min(point.first_deg_or_m);
@@ -694,17 +895,92 @@ fn default_origin(buildings: &[ParsedBuilding], roads: &[ParsedRoad]) -> SourceO
     }
 }
 
+fn resolve_texture_paths(
+    buildings: &[ParsedBuilding],
+    source_dir: Option<&Path>,
+) -> Result<BTreeMap<String, String>, ImportError> {
+    let image_uris: BTreeSet<_> = buildings
+        .iter()
+        .flat_map(|building| building.polygons.iter())
+        .filter_map(|polygon| polygon.texture.as_ref())
+        .map(|texture| texture.image_uri.clone())
+        .collect();
+    let mut paths = BTreeMap::new();
+    for (index, uri) in image_uris.into_iter().enumerate() {
+        let relative = Path::new(&uri);
+        if relative.as_os_str().is_empty()
+            || relative.is_absolute()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ImportError::InvalidTexture {
+                uri,
+                message: "imageURI must be a safe relative path".into(),
+            });
+        }
+        let extension = relative
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .filter(|extension| matches!(extension.as_str(), "png" | "jpg" | "jpeg"))
+            .ok_or_else(|| ImportError::InvalidTexture {
+                uri: uri.clone(),
+                message: "only PNG and JPEG images are supported".into(),
+            })?;
+        let source_dir = source_dir.ok_or_else(|| ImportError::InvalidTexture {
+            uri: uri.clone(),
+            message: "string imports cannot resolve external Appearance images".into(),
+        })?;
+        let source = source_dir.join(relative);
+        if !source.is_file() {
+            return Err(ImportError::InvalidTexture {
+                uri,
+                message: format!("referenced file does not exist at {}", source.display()),
+            });
+        }
+        paths.insert(uri, format!("textures/appearance_{index:04}.{extension}"));
+    }
+    Ok(paths)
+}
+
+fn copy_appearance_textures(
+    source_dir: Option<&Path>,
+    output_dir: &Path,
+    texture_paths: &BTreeMap<String, String>,
+) -> Result<(), ImportError> {
+    if texture_paths.is_empty() {
+        return Ok(());
+    }
+    let source_dir = source_dir.expect("validated while resolving texture paths");
+    let textures_dir = output_dir.join("textures");
+    fs::create_dir_all(&textures_dir).map_err(|error| io_error(&textures_dir, error))?;
+    for (uri, generated_path) in texture_paths {
+        let source = source_dir.join(uri);
+        let destination = output_dir.join(generated_path);
+        fs::copy(&source, &destination).map_err(|error| io_error(&source, error))?;
+    }
+    Ok(())
+}
+
 fn generate_building(
     building: &ParsedBuilding,
     index: usize,
     mode: CoordinateMode,
     origin: SourceOrigin,
+    texture_paths: &BTreeMap<String, String>,
 ) -> Result<GeneratedBuilding, ImportError> {
     let local_polygons: Vec<Vec<[f64; 3]>> = building
         .polygons
         .iter()
         .map(|polygon| {
             polygon
+                .points
                 .iter()
                 .map(|point| source_to_local(*point, mode, origin))
                 .collect()
@@ -727,20 +1003,34 @@ fn generate_building(
     {
         return Err(ImportError::InvalidCoordinates {
             feature_id: building.id.clone(),
-            message: format!("LOD1 solid has degenerate bounds {size_m:?}"),
+            message: format!(
+                "LOD{} building has degenerate bounds {size_m:?}",
+                building.lod
+            ),
         });
     }
 
     let safe_id = sanitize_component(&building.id);
     let entity_name = format!("plateau_building_{index:04}_{safe_id}");
     let mesh_path = format!("meshes/{entity_name}.obj");
+    let material_path = (building.lod == 2).then(|| format!("meshes/{entity_name}.mtl"));
     let mut obj = format!(
-        "# RNE PLATEAU LOD1 building {}\no {entity_name}\n",
-        building.id
+        "# RNE PLATEAU LOD{} building {}\n",
+        building.lod, building.id
     );
+    if building.lod == 2 {
+        obj.push_str(&format!("mtllib {entity_name}.mtl\n"));
+    }
+    obj.push_str(&format!("o {entity_name}\n"));
+    let mut mtl = (building.lod == 2).then(String::new);
     let mut vertex_count = 0_usize;
     let mut triangle_count = 0_usize;
-    for polygon in &local_polygons {
+    let mut surface_counts = BTreeMap::new();
+    let mut used_texture_paths = BTreeSet::new();
+    let mut textured_surface_count = 0;
+    for (polygon_index, polygon) in local_polygons.iter().enumerate() {
+        let parsed_polygon = &building.polygons[polygon_index];
+        *surface_counts.entry(parsed_polygon.surface).or_insert(0) += 1;
         for point in polygon {
             obj.push_str(&format!(
                 "v {:.6} {:.6} {:.6}\n",
@@ -749,18 +1039,56 @@ fn generate_building(
                 clean_zero(point[2] - translation_m[2])
             ));
         }
+        if building.lod == 2 {
+            let texcoords = parsed_polygon
+                .texture
+                .as_ref()
+                .map(|texture| texture.texcoords.as_slice());
+            for vertex_index in 0..polygon.len() {
+                let texcoord = texcoords
+                    .map(|texcoords| texcoords[vertex_index])
+                    .unwrap_or([0.0, 0.0]);
+                obj.push_str(&format!("vt {:.6} {:.6}\n", texcoord[0], texcoord[1]));
+            }
+            let material_name = format!("surface_{polygon_index:04}");
+            obj.push_str(&format!("usemtl {material_name}\n"));
+            let material = mtl.as_mut().expect("LOD2 material document");
+            material.push_str(&format!("newmtl {material_name}\n"));
+            if let Some(texture) = &parsed_polygon.texture {
+                let generated_path = texture_paths
+                    .get(&texture.image_uri)
+                    .expect("validated texture path");
+                material.push_str("Kd 1.000000 1.000000 1.000000\n");
+                material.push_str(&format!("map_Kd ../{generated_path}\n\n"));
+                used_texture_paths.insert(generated_path.clone());
+                textured_surface_count += 1;
+            } else {
+                let color = semantic_surface_color(parsed_polygon.surface);
+                material.push_str(&format!(
+                    "Kd {:.6} {:.6} {:.6}\n\n",
+                    color[0], color[1], color[2]
+                ));
+            }
+        }
         let triangles =
             triangulate_polygon(polygon).map_err(|message| ImportError::UnsupportedGeometry {
                 feature_id: building.id.clone(),
                 message,
             })?;
         for triangle in triangles {
-            obj.push_str(&format!(
-                "f {} {} {}\n",
+            let indices = [
                 vertex_count + triangle[0] + 1,
                 vertex_count + triangle[1] + 1,
-                vertex_count + triangle[2] + 1
-            ));
+                vertex_count + triangle[2] + 1,
+            ];
+            if building.lod == 2 {
+                obj.push_str(&format!(
+                    "f {0}/{0} {1}/{1} {2}/{2}\n",
+                    indices[0], indices[1], indices[2]
+                ));
+            } else {
+                obj.push_str(&format!("f {} {} {}\n", indices[0], indices[1], indices[2]));
+            }
             triangle_count += 1;
         }
         vertex_count += polygon.len();
@@ -773,15 +1101,32 @@ fn generate_building(
             name: building.name.clone(),
             function: building.function.clone(),
             measured_height_m: building.measured_height_m,
+            lod: building.lod,
+            surface_counts,
+            textured_surface_count,
+            texture_paths: used_texture_paths.into_iter().collect(),
             mesh_path,
+            material_path,
             translation_m,
             bounds_min_m,
             bounds_max_m,
             triangle_count,
         },
         obj,
+        mtl,
         size_m,
     })
+}
+
+fn semantic_surface_color(surface: BuildingSurface) -> [f32; 3] {
+    match surface {
+        BuildingSurface::Roof => [0.42, 0.20, 0.16],
+        BuildingSurface::Wall => [0.72, 0.69, 0.61],
+        BuildingSurface::Ground | BuildingSurface::OuterFloor => [0.32, 0.34, 0.33],
+        BuildingSurface::OuterCeiling => [0.62, 0.61, 0.56],
+        BuildingSurface::Closure => [0.55, 0.57, 0.58],
+        BuildingSurface::Unknown => [0.63, 0.68, 0.72],
+    }
 }
 
 fn generate_road(
@@ -1100,7 +1445,11 @@ fn generated_scene(
             visual: Some(SceneVisualAsset::Mesh {
                 path: building.metadata.mesh_path.clone(),
                 scale: [1.0; 3],
-                color_rgba: options.building_color_rgba,
+                color_rgba: if building.metadata.lod == 2 {
+                    [1.0; 4]
+                } else {
+                    options.building_color_rgba
+                },
             }),
             collision: Some(SceneCollisionAsset::Box {
                 size_m: building.size_m,
@@ -1250,7 +1599,7 @@ mod tests {
             </CityModel>
         "#;
         let document = Document::parse(xml).expect("test XML");
-        let error = parse_buildings(&document).expect_err("hole should fail");
+        let error = parse_buildings(&document, &HashMap::new()).expect_err("hole should fail");
         assert!(matches!(
             error,
             ImportError::UnsupportedGeometry { feature_id, .. } if feature_id == "with-hole"

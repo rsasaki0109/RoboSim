@@ -1,4 +1,5 @@
-The files in this directory are synthetic test data created for Robot Native
+The files in this directory, including generated companion texture images used
+by tests, are synthetic test data created for Robot Native
 Engine. They contain no surveyed PLATEAU geometry and no third-party data.
 
 To the extent possible under law, the contributors waive all copyright and

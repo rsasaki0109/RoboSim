@@ -1,16 +1,20 @@
 //! Triangle mesh loading for render backends.
 
+use crate::ImageFrame;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
 
-/// CPU-side triangle mesh with per-vertex normals.
+/// CPU-side triangle mesh with per-vertex normals and optional UV coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TriangleMesh {
     /// Positions in meters.
     pub positions: Vec<[f32; 3]>,
     /// Unit normals aligned with `positions`.
     pub normals: Vec<[f32; 3]>,
+    /// UV coordinates aligned with `positions`; absent mappings contain `[0, 0]`.
+    pub texcoords: Vec<[f32; 2]>,
     /// Triangle indices.
     pub indices: Vec<u32>,
 }
@@ -22,19 +26,44 @@ impl TriangleMesh {
     }
 }
 
+/// One material-homogeneous mesh part loaded from an asset.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadedMeshPart {
+    /// Triangle geometry for this material part.
+    pub mesh: TriangleMesh,
+    /// Optional decoded sRGB base-color texture.
+    pub base_color_texture: Option<ImageFrame>,
+    /// Optional material diffuse color and opacity.
+    pub base_color_rgba: Option<[f32; 4]>,
+}
+
 /// Loads a supported triangle mesh based on its file extension.
 ///
 /// STL and Wavefront OBJ files are supported. Extension matching is
 /// case-insensitive.
 pub fn load_mesh(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
+    let parts = load_mesh_parts(path)?;
+    merge_mesh_parts(parts)
+}
+
+/// Loads material-homogeneous mesh parts and their optional base-color textures.
+///
+/// STL produces one untextured part. OBJ object/material boundaries are
+/// preserved in source order so callers can draw each diffuse texture
+/// independently.
+pub fn load_mesh_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
     match path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("stl") => load_stl(path),
-        Some("obj") => load_obj(path),
+        Some("stl") => Ok(vec![LoadedMeshPart {
+            mesh: load_stl(path)?,
+            base_color_texture: None,
+            base_color_rgba: None,
+        }]),
+        Some("obj") => load_obj_parts(path),
         _ => Err(invalid_mesh(
             &path.display().to_string(),
             "unsupported mesh extension; expected .stl or .obj",
@@ -72,64 +101,165 @@ pub fn load_stl(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
     load_stl_bytes(path, &bytes)
 }
 
-fn load_obj(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
-    let (models, _) =
+fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
+    let (models, materials) =
         tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS).map_err(|error| MeshLoadError::Invalid {
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut indices = Vec::new();
-    let mut missing_normals = false;
+    let materials = materials.map_err(|error| MeshLoadError::Invalid {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let mut texture_cache = HashMap::<String, ImageFrame>::new();
+    let mut parts = Vec::new();
     for model in models {
-        let mesh = model.mesh;
-        let vertex_offset = positions.len() as u32;
-        positions.extend(
-            mesh.positions
-                .chunks_exact(3)
-                .map(|value| [value[0], value[1], value[2]]),
-        );
-        if mesh.normals.len() == mesh.positions.len() {
-            normals.extend(
-                mesh.normals
-                    .chunks_exact(3)
-                    .map(|value| [value[0], value[1], value[2]]),
-            );
+        let tobj::Mesh {
+            positions: raw_positions,
+            normals: raw_normals,
+            texcoords: raw_texcoords,
+            indices,
+            material_id,
+            ..
+        } = model.mesh;
+        let positions: Vec<[f32; 3]> = raw_positions
+            .chunks_exact(3)
+            .map(|value| [value[0], value[1], value[2]])
+            .collect();
+        let texcoords = if raw_texcoords.len() == positions.len() * 2 {
+            raw_texcoords
+                .chunks_exact(2)
+                .map(|value| [value[0], value[1]])
+                .collect()
         } else {
-            missing_normals = true;
-            normals.resize(positions.len(), [0.0, 0.0, 0.0]);
-        }
-        indices.extend(mesh.indices.into_iter().map(|index| vertex_offset + index));
+            vec![[0.0, 0.0]; positions.len()]
+        };
+        let triangle_mesh = if raw_normals.len() == raw_positions.len() {
+            TriangleMesh {
+                positions,
+                normals: raw_normals
+                    .chunks_exact(3)
+                    .map(|value| [value[0], value[1], value[2]])
+                    .collect(),
+                texcoords,
+                indices,
+            }
+        } else {
+            mesh_with_flat_normals(&positions, &texcoords, &indices)
+        };
+        validate_triangle_mesh(path, &triangle_mesh)?;
+        let material = material_id.and_then(|index| materials.get(index));
+        let base_color_rgba = material.and_then(|material| {
+            material.diffuse.map(|diffuse| {
+                [
+                    diffuse[0],
+                    diffuse[1],
+                    diffuse[2],
+                    material.dissolve.unwrap_or(1.0),
+                ]
+            })
+        });
+        let base_color_texture = material
+            .and_then(|material| material.diffuse_texture.as_deref())
+            .map(|texture_path| load_base_color_texture(path, texture_path, &mut texture_cache))
+            .transpose()?;
+        parts.push(LoadedMeshPart {
+            mesh: triangle_mesh,
+            base_color_texture,
+            base_color_rgba,
+        });
     }
-    if positions.is_empty() || indices.is_empty() || !indices.len().is_multiple_of(3) {
+    if parts.is_empty() {
         return Err(invalid_mesh(
             &path.display().to_string(),
             "OBJ contains no triangles",
         ));
     }
-    if indices
-        .iter()
-        .any(|index| *index as usize >= positions.len())
+    Ok(parts)
+}
+
+fn merge_mesh_parts(parts: Vec<LoadedMeshPart>) -> Result<TriangleMesh, MeshLoadError> {
+    if parts.is_empty() {
+        return Err(invalid_mesh("<mesh parts>", "mesh contains no parts"));
+    }
+    let mut merged = TriangleMesh {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        texcoords: Vec::new(),
+        indices: Vec::new(),
+    };
+    for part in parts {
+        let vertex_offset = merged.positions.len() as u32;
+        merged.positions.extend(part.mesh.positions);
+        merged.normals.extend(part.mesh.normals);
+        merged.texcoords.extend(part.mesh.texcoords);
+        merged.indices.extend(
+            part.mesh
+                .indices
+                .into_iter()
+                .map(|index| vertex_offset + index),
+        );
+    }
+    Ok(merged)
+}
+
+fn validate_triangle_mesh(path: &Path, mesh: &TriangleMesh) -> Result<(), MeshLoadError> {
+    if mesh.positions.is_empty() || mesh.indices.is_empty() || !mesh.indices.len().is_multiple_of(3)
     {
         return Err(invalid_mesh(
             &path.display().to_string(),
-            "OBJ index is out of bounds",
+            "mesh contains no triangles",
         ));
     }
-    if missing_normals {
-        return Ok(mesh_with_flat_normals(&positions, &indices));
+    if mesh.normals.len() != mesh.positions.len() || mesh.texcoords.len() != mesh.positions.len() {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            "mesh vertex attributes have different lengths",
+        ));
     }
-    Ok(TriangleMesh {
-        positions,
-        normals,
-        indices,
-    })
+    if mesh
+        .indices
+        .iter()
+        .any(|index| *index as usize >= mesh.positions.len())
+    {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            "mesh index is out of bounds",
+        ));
+    }
+    Ok(())
 }
 
-fn mesh_with_flat_normals(positions: &[[f32; 3]], indices: &[u32]) -> TriangleMesh {
+fn load_base_color_texture(
+    obj_path: &Path,
+    texture_path: &str,
+    cache: &mut HashMap<String, ImageFrame>,
+) -> Result<ImageFrame, MeshLoadError> {
+    if let Some(texture) = cache.get(texture_path) {
+        return Ok(texture.clone());
+    }
+    let path = obj_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(texture_path);
+    let decoded = image::open(&path).map_err(|error| MeshLoadError::Invalid {
+        path: path.display().to_string(),
+        message: format!("could not decode diffuse texture: {error}"),
+    })?;
+    let rgba8 = decoded.to_rgba8();
+    let texture = ImageFrame::from_rgba8(rgba8.width(), rgba8.height(), rgba8.into_raw());
+    cache.insert(texture_path.to_owned(), texture.clone());
+    Ok(texture)
+}
+
+fn mesh_with_flat_normals(
+    positions: &[[f32; 3]],
+    texcoords: &[[f32; 2]],
+    indices: &[u32],
+) -> TriangleMesh {
     let mut flat_positions = Vec::with_capacity(indices.len());
     let mut flat_normals = Vec::with_capacity(indices.len());
+    let mut flat_texcoords = Vec::with_capacity(indices.len());
     let mut flat_indices = Vec::with_capacity(indices.len());
     for triangle in indices.chunks_exact(3) {
         let a = positions[triangle[0] as usize];
@@ -147,11 +277,17 @@ fn mesh_with_flat_normals(positions: &[[f32; 3]], indices: &[u32]) -> TriangleMe
             flat_positions.push(position);
             flat_normals.push(normal);
         }
+        flat_texcoords.extend([
+            texcoords[triangle[0] as usize],
+            texcoords[triangle[1] as usize],
+            texcoords[triangle[2] as usize],
+        ]);
         flat_indices.extend_from_slice(&[base, base + 1, base + 2]);
     }
     TriangleMesh {
         positions: flat_positions,
         normals: flat_normals,
+        texcoords: flat_texcoords,
         indices: flat_indices,
     }
 }
@@ -217,6 +353,7 @@ fn parse_binary_stl(_path: &str, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadE
     }
 
     Ok(TriangleMesh {
+        texcoords: vec![[0.0, 0.0]; positions.len()],
         positions,
         normals,
         indices,
@@ -278,6 +415,7 @@ fn parse_ascii_stl(path: &str, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadErr
     }
 
     Ok(TriangleMesh {
+        texcoords: vec![[0.0, 0.0]; positions.len()],
         positions,
         normals,
         indices,
@@ -378,6 +516,44 @@ endsolid box
             .normals
             .iter()
             .all(|normal| (length_squared(*normal) - 1.0).abs() < 1.0e-5));
+    }
+
+    #[test]
+    fn obj_material_parts_preserve_uvs_and_decode_diffuse_texture() {
+        let root =
+            std::env::temp_dir().join(format!("rne-render-textured-obj-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale textured OBJ test");
+        }
+        fs::create_dir_all(&root).expect("create textured OBJ test");
+        fs::write(
+            root.join("panel.obj"),
+            "mtllib panel.mtl\no panel\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl facade\nf 1/1 2/2 3/3\n",
+        )
+        .expect("write OBJ");
+        fs::write(
+            root.join("panel.mtl"),
+            "newmtl facade\nKd 1 1 1\nmap_Kd facade.png\n",
+        )
+        .expect("write MTL");
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([24, 80, 160, 255]))
+            .save(root.join("facade.png"))
+            .expect("write texture");
+
+        let parts = load_mesh_parts(&root.join("panel.obj")).expect("load textured OBJ");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            parts[0].mesh.texcoords,
+            vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        );
+        let texture = parts[0]
+            .base_color_texture
+            .as_ref()
+            .expect("diffuse texture");
+        assert_eq!((texture.width, texture.height), (2, 1));
+        assert_eq!(&texture.rgba8[..4], &[24, 80, 160, 255]);
+
+        fs::remove_dir_all(root).expect("remove textured OBJ test");
     }
 
     #[test]

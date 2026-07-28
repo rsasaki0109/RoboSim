@@ -63,6 +63,7 @@ pub fn append_task_marker_overlay(
                 shape: VisualShape::Sphere { radius_m: 0.5 },
                 color_rgba: TASK_MARKER_COLOR,
                 mesh: None,
+                base_color_texture: None,
             });
         }
     }

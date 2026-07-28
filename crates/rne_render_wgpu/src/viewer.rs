@@ -107,7 +107,7 @@ impl InteractiveViewer {
         };
         surface.configure(&device, &config);
 
-        let primitive = PrimitiveRenderer::new(&device, format);
+        let primitive = PrimitiveRenderer::new(&device, &queue, format);
         let (depth_texture, depth_view) = create_depth_target(&device, width, height);
         let overlay = ImageOverlay::new(&device, format);
 
