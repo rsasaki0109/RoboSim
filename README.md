@@ -26,14 +26,18 @@ fixed building collision boxes, and derived two-way lane centerlines. The
 conversion stays outside simulation core crates. Example 46 imports a synthetic
 CC0 ten-building, 90-meter city avenue headlessly and uses a SimClock-driven
 Ackermann model to move two cars along the imported road. Its daylight scene
-adds sidewalks, curbs, road markings, trees, streetlights, and stable
-world-up follow cameras.
+adds sidewalks, curbs, road markings, trees, streetlights, facade windows,
+rooftop equipment, contact shadows, and stable world-up follow cameras. The
+presentation is rendered at 1280×720 before a deterministic depth-aware
+atmospheric pass and high-quality 960×540 GIF downsample.
 
 <p align="center">
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-drone.png">
-    <img src="docs/media/plateau-drone.gif" alt="A simulated drone and two cars moving through a PLATEAU CityGML tile imported into RNE" width="720">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
+    <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
+  <br>
+  <sub>Eight seconds of real wgpu output: SimClock-driven Ackermann motion, imported LOD1 building and road geometry, procedural CC0 streetscape detail, supersampled edges, and depth-based atmospheric perspective.</sub>
 </p>
 
 ```bash
@@ -42,12 +46,14 @@ cargo run -p rne_plateau_import -- path/to/tile.gml \
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-The example also writes a car-follow view against the imported PLATEAU city:
+The same run also writes an aerial view of the imported tile:
 
-<picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
-    <img src="docs/media/plateau-car.gif" alt="A car driving through a PLATEAU CityGML city imported into RNE" width="720">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-drone.png">
+    <img src="docs/media/plateau-drone.gif" alt="A simulated drone and two cars moving through a PLATEAU CityGML tile imported into RNE" width="720">
+  </picture>
+</p>
 
 See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
 mapping, outputs, and current limits.
