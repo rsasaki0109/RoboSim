@@ -1,4 +1,4 @@
-//! Deterministic offline import of PLATEAU CityGML building LOD1/LOD2 and road LOD1 data.
+//! Deterministic offline import of PLATEAU CityGML building and road data.
 //!
 //! The importer deliberately lives outside the simulation core. It converts a
 //! bounded CityGML tile into ordinary RNE scene, OBJ, and JSON assets so runtime
@@ -9,6 +9,11 @@
 use rne_assets::scene::{GroundAsset, ObstacleBodyType, SceneWorldAsset};
 use rne_assets::{
     parse_scene_asset, SceneAsset, SceneCollisionAsset, SceneObjectAsset, SceneVisualAsset,
+};
+use rne_traffic::{
+    save_traffic_asset, Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame,
+    Lane, LaneKind, Provenance, SourceReference, TrafficActorKind, TrafficAsset, TrafficId,
+    TrafficNetwork,
 };
 use roxmltree::{Document, Node};
 use serde::{Deserialize, Serialize};
@@ -80,8 +85,10 @@ impl Default for ImportOptions {
 pub struct ImportResult {
     /// Generated `.rne.scene.toml` path.
     pub scene_path: PathBuf,
-    /// Generated stable building metadata JSON path.
+    /// Generated stable PLATEAU metadata JSON path.
     pub metadata_path: PathBuf,
+    /// Generated deterministic `.rne.traffic.json` path.
+    pub traffic_path: PathBuf,
     /// Number of imported CityGML buildings.
     pub building_count: usize,
     /// Number of buildings imported from semantic LOD2 boundary surfaces.
@@ -90,6 +97,12 @@ pub struct ImportResult {
     pub textured_surface_count: usize,
     /// Number of imported CityGML roads.
     pub road_count: usize,
+    /// Number of imported semantic `tran:TrafficArea` objects.
+    pub traffic_area_count: usize,
+    /// Number of imported semantic `tran:AuxiliaryTrafficArea` objects.
+    pub auxiliary_traffic_area_count: usize,
+    /// Number of LOD3 traffic areas explicitly classified as lane code `1010`.
+    pub lod31_lane_area_count: usize,
     /// Number of deterministically derived traffic lanes.
     pub lane_count: usize,
     /// Total number of generated mesh triangles.
@@ -100,9 +113,53 @@ pub struct ImportResult {
     pub origin: SourceOrigin,
     /// Deterministically derived lanes available to runtime examples.
     pub lanes: Vec<ImportedLane>,
+    /// Road-level `tran:class` and all `tran:function` values.
+    pub road_semantics: Vec<ImportedRoadSemantics>,
+    /// Imported LOD2/LOD3 traffic-area semantics.
+    pub traffic_areas: Vec<ImportedTrafficArea>,
 }
 
-/// A deterministic straight lane derived from one PLATEAU LOD1 road surface.
+/// Road-level PLATEAU semantic codes preserved by the importer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedRoadSemantics {
+    /// Stable source `tran:Road` identifier.
+    pub road_source_id: String,
+    /// Optional direct `tran:class` code.
+    pub class: Option<String>,
+    /// All direct `tran:function` codes in stable source order.
+    pub functions: Vec<String>,
+}
+
+/// Kind of semantic PLATEAU traffic area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedTrafficAreaKind {
+    /// Traversable `tran:TrafficArea`.
+    Traffic,
+    /// Non-traversable or supporting `tran:AuxiliaryTrafficArea`.
+    Auxiliary,
+}
+
+/// LOD2/LOD3 traffic-area semantics preserved from PLATEAU.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedTrafficArea {
+    /// Stable source area `gml:id`.
+    pub area_source_id: String,
+    /// Stable containing `tran:Road` identifier.
+    pub road_source_id: String,
+    /// Traffic or auxiliary traffic area.
+    pub kind: ImportedTrafficAreaKind,
+    /// Geometry LOD selected by the importer (`2` or `3`).
+    pub lod: u8,
+    /// Optional direct `tran:class` code.
+    pub class: Option<String>,
+    /// All direct `tran:function` codes.
+    pub functions: Vec<String>,
+    /// Number of polygons in the selected multi-surface.
+    pub polygon_count: usize,
+}
+
+/// A deterministic straight lane derived from a PLATEAU road or traffic-area surface.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportedLane {
     /// Stable lane identifier derived from the road `gml:id` and surface index.
@@ -133,10 +190,8 @@ pub enum ImportError {
     /// The CityGML XML document is malformed.
     #[error("invalid CityGML XML: {0}")]
     Xml(String),
-    /// The document contains no supported building LOD1/LOD2 or road LOD1 geometry.
-    #[error(
-        "CityGML contains no Building lod2MultiSurface/lod1Solid or Road lod1MultiSurface geometry"
-    )]
+    /// The document contains no supported building or road geometry.
+    #[error("CityGML contains no supported Building LOD1/LOD2 or Road LOD1/LOD2/LOD3 geometry")]
     NoSupportedLod1Geometry,
     /// A building has no stable `gml:id`.
     #[error("Building is missing gml:id")]
@@ -150,6 +205,12 @@ pub enum ImportError {
     /// Two roads share the same stable identifier.
     #[error("duplicate Road gml:id `{0}`")]
     DuplicateRoadId(String),
+    /// A semantic traffic area has no stable `gml:id`.
+    #[error("TrafficArea or AuxiliaryTrafficArea is missing gml:id")]
+    MissingTrafficAreaId,
+    /// Two semantic traffic areas share the same stable identifier.
+    #[error("duplicate traffic-area gml:id `{0}`")]
+    DuplicateTrafficAreaId(String),
     /// A polygon uses geometry outside the Phase 1 subset.
     #[error("unsupported geometry in CityGML feature `{feature_id}`: {message}")]
     UnsupportedGeometry {
@@ -193,6 +254,9 @@ pub enum ImportError {
     /// The generated scene did not satisfy the RNE asset schema.
     #[error("generated RNE scene is invalid: {0}")]
     InvalidGeneratedScene(String),
+    /// The generated traffic document did not satisfy schema v1.
+    #[error("generated RNE traffic asset is invalid: {0}")]
+    InvalidGeneratedTraffic(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -248,7 +312,20 @@ struct TextureBinding {
 struct ParsedRoad {
     id: String,
     name: Option<String>,
-    function: Option<String>,
+    class: Option<String>,
+    functions: Vec<String>,
+    lod: u8,
+    polygons: Vec<ParsedPolygon>,
+    areas: Vec<ParsedTrafficArea>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ParsedTrafficArea {
+    id: String,
+    kind: ImportedTrafficAreaKind,
+    lod: u8,
+    class: Option<String>,
+    functions: Vec<String>,
     polygons: Vec<ParsedPolygon>,
 }
 
@@ -261,6 +338,7 @@ struct TileMetadata {
     source_origin: SourceOrigin,
     axis_mapping: &'static str,
     scene_path: String,
+    traffic_path: String,
     buildings: Vec<BuildingMetadata>,
     roads: Vec<RoadMetadata>,
 }
@@ -289,7 +367,10 @@ struct RoadMetadata {
     source_id: String,
     entity_name: String,
     name: Option<String>,
-    function: Option<String>,
+    class: Option<String>,
+    functions: Vec<String>,
+    lod: u8,
+    traffic_areas: Vec<ImportedTrafficArea>,
     mesh_path: String,
     bounds_min_m: [f64; 3],
     bounds_max_m: [f64; 3],
@@ -310,6 +391,7 @@ struct GeneratedBuilding {
 struct GeneratedRoad {
     metadata: RoadMetadata,
     obj: String,
+    traffic_lanes: Vec<Lane>,
 }
 
 #[derive(Clone, Debug)]
@@ -382,7 +464,14 @@ fn import_citygml_impl(
     }
     let mut generated_roads = Vec::with_capacity(roads.len());
     for (index, road) in roads.iter().enumerate() {
-        generated_roads.push(generate_road(road, index, mode, origin)?);
+        generated_roads.push(generate_road(
+            road,
+            index,
+            mode,
+            origin,
+            source_name,
+            &tile_name,
+        )?);
     }
 
     fs::create_dir_all(output_dir).map_err(|error| io_error(output_dir, error))?;
@@ -414,8 +503,18 @@ fn import_citygml_impl(
     fs::write(&scene_path, format!("{scene_text}\n"))
         .map_err(|error| io_error(&scene_path, error))?;
 
+    let traffic = generated_traffic_asset(
+        &tile_name,
+        source_name,
+        source_crs.clone(),
+        &generated_roads,
+    )?;
+    let traffic_path = output_dir.join(format!("{tile_name}.rne.traffic.json"));
+    save_traffic_asset(&traffic_path, &traffic)
+        .map_err(|error| ImportError::InvalidGeneratedTraffic(error.to_string()))?;
+
     let metadata = TileMetadata {
-        schema_version: 3,
+        schema_version: 4,
         source: source_name.to_owned(),
         source_crs,
         coordinate_mode: mode,
@@ -427,6 +526,11 @@ fn import_citygml_impl(
             }
         },
         scene_path: scene_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned(),
+        traffic_path: traffic_path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default()
@@ -452,6 +556,7 @@ fn import_citygml_impl(
     Ok(ImportResult {
         scene_path,
         metadata_path,
+        traffic_path,
         building_count: generated.len(),
         lod2_building_count: generated
             .iter()
@@ -462,6 +567,21 @@ fn import_citygml_impl(
             .map(|building| building.metadata.textured_surface_count)
             .sum(),
         road_count: generated_roads.len(),
+        traffic_area_count: roads
+            .iter()
+            .flat_map(|road| &road.areas)
+            .filter(|area| area.kind == ImportedTrafficAreaKind::Traffic)
+            .count(),
+        auxiliary_traffic_area_count: roads
+            .iter()
+            .flat_map(|road| &road.areas)
+            .filter(|area| area.kind == ImportedTrafficAreaKind::Auxiliary)
+            .count(),
+        lod31_lane_area_count: roads
+            .iter()
+            .flat_map(|road| &road.areas)
+            .filter(|area| area.lod == 3 && area.functions.iter().any(|value| value == "1010"))
+            .count(),
         lane_count: generated_roads
             .iter()
             .map(|road| road.metadata.lanes.len())
@@ -481,7 +601,62 @@ fn import_citygml_impl(
             .iter()
             .flat_map(|road| road.metadata.lanes.iter().cloned())
             .collect(),
+        road_semantics: roads
+            .iter()
+            .map(|road| ImportedRoadSemantics {
+                road_source_id: road.id.clone(),
+                class: road.class.clone(),
+                functions: road.functions.clone(),
+            })
+            .collect(),
+        traffic_areas: roads.iter().flat_map(imported_traffic_areas).collect(),
     })
+}
+
+fn generated_traffic_asset(
+    id_namespace: &str,
+    source_name: &str,
+    source_crs: Option<String>,
+    roads: &[GeneratedRoad],
+) -> Result<TrafficAsset, ImportError> {
+    let dataset = if source_name.trim().is_empty() {
+        "<citygml>"
+    } else {
+        source_name
+    };
+    Ok(TrafficAsset::new(TrafficNetwork {
+        id: encoded_traffic_id(id_namespace, "network")?,
+        provenance: Provenance {
+            authority: AuthorityClass::Derived,
+            accuracy: Accuracy {
+                class: AccuracyClass::Modeled,
+                horizontal_m: None,
+                vertical_m: None,
+            },
+            sources: vec![SourceReference {
+                dataset: dataset.to_owned(),
+                feature_id: None,
+                uri: None,
+            }],
+            method: Some(
+                "PLATEAU CityGML semantic extraction and deterministic local-frame conversion"
+                    .into(),
+            ),
+        },
+        coordinate_frame: CoordinateFrame {
+            frame_id: "map".into(),
+            axis_convention: AxisConvention::RneYUp,
+            origin_m: [0.0; 3],
+            source_crs,
+        },
+        lanes: roads
+            .iter()
+            .flat_map(|road| road.traffic_lanes.iter().cloned())
+            .collect(),
+        junctions: Vec::new(),
+        connections: Vec::new(),
+        signals: Vec::new(),
+    }))
 }
 
 fn validate_options(options: &ImportOptions) -> Result<(), ImportError> {
@@ -702,6 +877,7 @@ fn building_surface(polygon: Node<'_, '_>) -> BuildingSurface {
 
 fn parse_roads(document: &Document<'_>) -> Result<Vec<ParsedRoad>, ImportError> {
     let mut seen = HashSet::new();
+    let mut seen_areas = HashSet::new();
     let mut roads = Vec::new();
     for node in document
         .descendants()
@@ -716,27 +892,85 @@ fn parse_roads(document: &Document<'_>) -> Result<Vec<ParsedRoad>, ImportError> 
         if !seen.insert(id.clone()) {
             return Err(ImportError::DuplicateRoadId(id));
         }
-        let Some(lod1) = node
-            .descendants()
-            .find(|child| child.is_element() && child.tag_name().name() == "lod1MultiSurface")
-        else {
-            continue;
-        };
-        let mut polygons = Vec::new();
-        for polygon in lod1
-            .descendants()
-            .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
-        {
-            polygons.push(parse_polygon(polygon, &id)?);
+        let mut lod1_polygons = Vec::new();
+        if let Some(lod1) = direct_child(node, "lod1MultiSurface") {
+            for polygon in lod1
+                .descendants()
+                .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
+            {
+                lod1_polygons.push(parse_polygon(polygon, &id)?);
+            }
         }
+
+        let mut areas = Vec::new();
+        for area_node in node.descendants().filter(|child| {
+            child.is_element()
+                && matches!(
+                    child.tag_name().name(),
+                    "TrafficArea" | "AuxiliaryTrafficArea"
+                )
+        }) {
+            let area_id = area_node
+                .attributes()
+                .find(|attribute| attribute.name() == "id")
+                .map(|attribute| attribute.value().trim().to_owned())
+                .filter(|id| !id.is_empty())
+                .ok_or(ImportError::MissingTrafficAreaId)?;
+            if !seen_areas.insert(area_id.clone()) {
+                return Err(ImportError::DuplicateTrafficAreaId(area_id));
+            }
+            let geometry = direct_child(area_node, "lod3MultiSurface")
+                .map(|geometry| (3, geometry))
+                .or_else(|| {
+                    direct_child(area_node, "lod2MultiSurface").map(|geometry| (2, geometry))
+                });
+            let Some((lod, geometry)) = geometry else {
+                continue;
+            };
+            let mut polygons = Vec::new();
+            for polygon in geometry
+                .descendants()
+                .filter(|child| child.is_element() && child.tag_name().name() == "Polygon")
+            {
+                polygons.push(parse_polygon(polygon, &area_id)?);
+            }
+            if polygons.is_empty() {
+                continue;
+            }
+            areas.push(ParsedTrafficArea {
+                id: area_id,
+                kind: if area_node.tag_name().name() == "TrafficArea" {
+                    ImportedTrafficAreaKind::Traffic
+                } else {
+                    ImportedTrafficAreaKind::Auxiliary
+                },
+                lod,
+                class: child_text(area_node, "class"),
+                functions: child_texts(area_node, "function"),
+                polygons,
+            });
+        }
+        areas.sort_by(|left, right| left.id.cmp(&right.id));
+        let lod = areas.iter().map(|area| area.lod).max().unwrap_or(1);
+        let polygons = if areas.is_empty() {
+            lod1_polygons
+        } else {
+            areas
+                .iter()
+                .flat_map(|area| area.polygons.iter().cloned())
+                .collect()
+        };
         if polygons.is_empty() {
             continue;
         }
         roads.push(ParsedRoad {
             id,
-            name: descendant_text(node, "name"),
-            function: descendant_text(node, "function"),
+            name: child_text(node, "name"),
+            class: child_text(node, "class"),
+            functions: child_texts(node, "function"),
+            lod,
             polygons,
+            areas,
         });
     }
     Ok(roads)
@@ -879,6 +1113,30 @@ fn descendant_text(node: Node<'_, '_>, local_name: &str) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_owned)
+}
+
+fn direct_child<'a>(node: Node<'a, 'a>, local_name: &str) -> Option<Node<'a, 'a>> {
+    node.children()
+        .find(|child| child.is_element() && child.tag_name().name() == local_name)
+}
+
+fn child_text(node: Node<'_, '_>, local_name: &str) -> Option<String> {
+    node.children()
+        .find(|child| child.is_element() && child.tag_name().name() == local_name)
+        .and_then(|child| child.text())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+}
+
+fn child_texts(node: Node<'_, '_>, local_name: &str) -> Vec<String> {
+    node.children()
+        .filter(|child| child.is_element() && child.tag_name().name() == local_name)
+        .filter_map(|child| child.text())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn remove_duplicate_ring_end(points: &mut Vec<SourcePoint>) {
@@ -1205,6 +1463,8 @@ fn generate_road(
     index: usize,
     mode: CoordinateMode,
     origin: SourceOrigin,
+    source_name: &str,
+    id_namespace: &str,
 ) -> Result<GeneratedRoad, ImportError> {
     let local_polygons: Vec<LocalPolygon> = road
         .polygons
@@ -1238,11 +1498,13 @@ fn generate_road(
     let safe_id = sanitize_component(&road.id);
     let entity_name = format!("plateau_road_{index:04}_{safe_id}");
     let mesh_path = format!("meshes/{entity_name}.obj");
-    let mut obj = format!("# RNE PLATEAU LOD1 road {}\no {entity_name}\n", road.id);
+    let mut obj = format!(
+        "# RNE PLATEAU LOD{} road {}\no {entity_name}\n",
+        road.lod, road.id
+    );
     let mut vertex_count = 0_usize;
     let mut triangle_count = 0_usize;
-    let mut lanes = Vec::new();
-    for (polygon_index, polygon) in local_polygons.iter().enumerate() {
+    for polygon in &local_polygons {
         let points: Vec<_> = polygon
             .exterior
             .iter()
@@ -1279,11 +1541,69 @@ fn generate_road(
             triangle_count += 1;
         }
         vertex_count += points.len();
-        lanes.extend(derive_two_way_lanes(
-            &polygon.exterior,
-            &road.id,
-            polygon_index,
-        ));
+    }
+
+    let mut lanes = Vec::new();
+    let mut traffic_lanes = Vec::new();
+    if road.areas.is_empty() {
+        for (polygon_index, polygon) in local_polygons.iter().enumerate() {
+            let derived = derive_two_way_lanes(&polygon.exterior, &road.id, polygon_index);
+            append_traffic_lanes(
+                &mut lanes,
+                &mut traffic_lanes,
+                derived,
+                road,
+                source_name,
+                id_namespace,
+                &road.id,
+                LaneKind::Driving,
+                vec![TrafficActorKind::MotorVehicle],
+                "principal-axis opposing-lane approximation from PLATEAU Road LOD1 surface",
+            )?;
+        }
+    } else {
+        let has_explicit_lane = road.areas.iter().any(|area| {
+            area.kind == ImportedTrafficAreaKind::Traffic
+                && area.functions.iter().any(|function| function == "1010")
+        });
+        for area in &road.areas {
+            let local_area_polygons: Vec<Vec<[f64; 3]>> = area
+                .polygons
+                .iter()
+                .map(|polygon| {
+                    polygon
+                        .exterior
+                        .iter()
+                        .map(|point| source_to_local(*point, mode, origin))
+                        .collect()
+                })
+                .collect();
+            for (polygon_index, polygon) in local_area_polygons.iter().enumerate() {
+                let lane_spec = semantic_lane_spec(area, has_explicit_lane);
+                let Some((kind, allowed_actors, method, opposing)) = lane_spec else {
+                    continue;
+                };
+                let derived = if opposing {
+                    derive_two_way_lanes(polygon, &area.id, polygon_index)
+                } else {
+                    derive_single_lane(polygon, &area.id, polygon_index)
+                        .into_iter()
+                        .collect()
+                };
+                append_traffic_lanes(
+                    &mut lanes,
+                    &mut traffic_lanes,
+                    derived,
+                    road,
+                    source_name,
+                    id_namespace,
+                    &area.id,
+                    kind,
+                    allowed_actors,
+                    method,
+                )?;
+            }
+        }
     }
 
     Ok(GeneratedRoad {
@@ -1291,16 +1611,118 @@ fn generate_road(
             source_id: road.id.clone(),
             entity_name,
             name: road.name.clone(),
-            function: road.function.clone(),
+            class: road.class.clone(),
+            functions: road.functions.clone(),
+            lod: road.lod,
+            traffic_areas: imported_traffic_areas(road),
             mesh_path,
             bounds_min_m,
             bounds_max_m,
             triangle_count,
-            lane_derivation: "deterministic principal-axis approximation from LOD1 road surface",
+            lane_derivation: if road.areas.is_empty() {
+                "deterministic principal-axis approximation from LOD1 road surface"
+            } else {
+                "PLATEAU traffic-area semantics with derived centerline, width, and direction"
+            },
             lanes,
         },
         obj,
+        traffic_lanes,
     })
+}
+
+fn semantic_lane_spec(
+    area: &ParsedTrafficArea,
+    has_explicit_lane: bool,
+) -> Option<(LaneKind, Vec<TrafficActorKind>, &'static str, bool)> {
+    if area.kind == ImportedTrafficAreaKind::Auxiliary {
+        return None;
+    }
+    if area.functions.iter().any(|function| function == "1010") {
+        return Some((
+            LaneKind::Driving,
+            vec![TrafficActorKind::MotorVehicle],
+            "centerline, width, and canonical direction derived from PLATEAU TrafficArea code 1010 polygon",
+            false,
+        ));
+    }
+    if area.functions.iter().any(|function| function == "2000") {
+        return Some((
+            LaneKind::Sidewalk,
+            vec![TrafficActorKind::Bicycle, TrafficActorKind::Pedestrian],
+            "centerline and width derived from PLATEAU TrafficArea code 2000 polygon",
+            false,
+        ));
+    }
+    if !has_explicit_lane && area.functions.iter().any(|function| function == "1000") {
+        return Some((
+            LaneKind::Driving,
+            vec![TrafficActorKind::MotorVehicle],
+            "opposing lanes derived from PLATEAU LOD2 TrafficArea code 1000 polygon",
+            true,
+        ));
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_traffic_lanes(
+    imported_lanes: &mut Vec<ImportedLane>,
+    traffic_lanes: &mut Vec<Lane>,
+    derived: Vec<ImportedLane>,
+    road: &ParsedRoad,
+    source_name: &str,
+    id_namespace: &str,
+    source_feature_id: &str,
+    kind: LaneKind,
+    allowed_actors: Vec<TrafficActorKind>,
+    method: &'static str,
+) -> Result<(), ImportError> {
+    for mut imported in derived {
+        imported.road_source_id = road.id.clone();
+        let lane_id = encoded_traffic_id(id_namespace, &imported.lane_id)?;
+        traffic_lanes.push(Lane {
+            id: lane_id,
+            provenance: Provenance {
+                authority: AuthorityClass::Derived,
+                accuracy: Accuracy {
+                    class: AccuracyClass::Heuristic,
+                    horizontal_m: None,
+                    vertical_m: None,
+                },
+                sources: vec![SourceReference {
+                    dataset: source_name.to_owned(),
+                    feature_id: Some(source_feature_id.to_owned()),
+                    uri: None,
+                }],
+                method: Some(method.into()),
+            },
+            kind,
+            allowed_actors: allowed_actors.clone(),
+            centerline_m: imported.centerline_m.into(),
+            width_m: imported.width_m,
+            speed_limit_m_s: None,
+            road_class: road.class.clone(),
+            road_functions: road.functions.clone(),
+        });
+        imported_lanes.push(imported);
+    }
+    Ok(())
+}
+
+fn imported_traffic_areas(road: &ParsedRoad) -> Vec<ImportedTrafficArea> {
+    road.areas
+        .iter()
+        .map(|area| ImportedTrafficArea {
+            area_source_id: area.id.clone(),
+            road_source_id: road.id.clone(),
+            kind: area.kind,
+            lod: area.lod,
+            class: area.class.clone(),
+            functions: area.functions.clone(),
+            polygon_count: area.polygons.len(),
+        })
+        .collect()
 }
 
 fn derive_two_way_lanes(
@@ -1381,6 +1803,91 @@ fn derive_two_way_lanes(
             }
         })
         .collect()
+}
+
+fn derive_single_lane(
+    polygon: &[[f64; 3]],
+    area_id: &str,
+    polygon_index: usize,
+) -> Option<ImportedLane> {
+    let count = polygon.len() as f64;
+    let center_x = polygon.iter().map(|point| point[0]).sum::<f64>() / count;
+    let center_y = polygon.iter().map(|point| point[1]).sum::<f64>() / count;
+    let center_z = polygon.iter().map(|point| point[2]).sum::<f64>() / count;
+    let mut covariance_xx = 0.0;
+    let mut covariance_xz = 0.0;
+    let mut covariance_zz = 0.0;
+    for point in polygon {
+        let x = point[0] - center_x;
+        let z = point[2] - center_z;
+        covariance_xx += x * x;
+        covariance_xz += x * z;
+        covariance_zz += z * z;
+    }
+    let angle_rad = 0.5 * (2.0 * covariance_xz).atan2(covariance_xx - covariance_zz);
+    let mut axis = [angle_rad.cos(), angle_rad.sin()];
+    if axis[0] < -EPSILON || (axis[0].abs() <= EPSILON && axis[1] < 0.0) {
+        axis[0] = -axis[0];
+        axis[1] = -axis[1];
+    }
+    let perpendicular = [-axis[1], axis[0]];
+    let mut axis_min = f64::INFINITY;
+    let mut axis_max = f64::NEG_INFINITY;
+    let mut transverse_min = f64::INFINITY;
+    let mut transverse_max = f64::NEG_INFINITY;
+    for point in polygon {
+        let relative = [point[0] - center_x, point[2] - center_z];
+        let along = relative[0] * axis[0] + relative[1] * axis[1];
+        let transverse = relative[0] * perpendicular[0] + relative[1] * perpendicular[1];
+        axis_min = axis_min.min(along);
+        axis_max = axis_max.max(along);
+        transverse_min = transverse_min.min(transverse);
+        transverse_max = transverse_max.max(transverse);
+    }
+    let length_m = axis_max - axis_min;
+    let width_m = transverse_max - transverse_min;
+    if !length_m.is_finite() || !width_m.is_finite() || width_m < 0.5 || length_m < width_m * 1.5 {
+        return None;
+    }
+    let transverse_center = (transverse_min + transverse_max) * 0.5;
+    let point = |along: f64| {
+        [
+            center_x + axis[0] * along + perpendicular[0] * transverse_center,
+            center_y + 0.05,
+            center_z + axis[1] * along + perpendicular[1] * transverse_center,
+        ]
+    };
+    Some(ImportedLane {
+        lane_id: format!("{area_id}/surface-{polygon_index:04}/lane-0"),
+        road_source_id: area_id.to_owned(),
+        centerline_m: [point(axis_min), point(axis_max)],
+        width_m,
+        travel_direction: LaneTravelDirection::PrincipalAxisPositive,
+    })
+}
+
+fn encoded_traffic_id(namespace: &str, source_id: &str) -> Result<TrafficId, ImportError> {
+    let mut encoded = format!("plateau:{}/", encoded_traffic_component(namespace, false));
+    encoded.push_str(&encoded_traffic_component(source_id, true));
+    TrafficId::new(encoded).map_err(|error| ImportError::InvalidGeneratedTraffic(error.to_string()))
+}
+
+fn encoded_traffic_component(value: &str, allow_slash: bool) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        let character = *byte as char;
+        if byte.is_ascii_alphanumeric()
+            || matches!(character, '-' | '_' | '.' | ':' | '#')
+            || (allow_slash && character == '/')
+        {
+            encoded.push(character);
+        } else {
+            encoded.push('~');
+            encoded.push(char::from_digit((byte >> 4) as u32, 16).expect("hex digit"));
+            encoded.push(char::from_digit((byte & 0x0f) as u32, 16).expect("hex digit"));
+        }
+    }
+    encoded
 }
 
 fn source_to_local(point: SourcePoint, mode: CoordinateMode, origin: SourceOrigin) -> [f64; 3] {
@@ -1786,5 +2293,67 @@ mod tests {
         assert_eq!(first[0].centerline_m, second[0].centerline_m);
         assert_eq!(first[0].centerline_m[0][2], first[1].centerline_m[1][2]);
         assert_eq!(first[0].centerline_m[1][2], first[1].centerline_m[0][2]);
+    }
+
+    #[test]
+    fn road_semantics_do_not_inherit_area_function() {
+        let xml = r#"
+            <core:CityModel
+                xmlns:core="urn:core" xmlns:gml="urn:gml" xmlns:tran="urn:tran">
+              <tran:Road gml:id="road-no-function">
+                <tran:trafficArea>
+                  <tran:TrafficArea gml:id="lane-a">
+                    <tran:function>1010</tran:function>
+                    <tran:lod3MultiSurface><gml:MultiSurface><gml:Polygon>
+                      <gml:exterior><gml:LinearRing><gml:posList>
+                        0 0 0 10 0 0 10 3 0 0 3 0 0 0 0
+                      </gml:posList></gml:LinearRing></gml:exterior>
+                    </gml:Polygon></gml:MultiSurface></tran:lod3MultiSurface>
+                  </tran:TrafficArea>
+                </tran:trafficArea>
+              </tran:Road>
+            </core:CityModel>
+        "#;
+        let document = Document::parse(xml).expect("semantic XML");
+        let roads = parse_roads(&document).expect("parse roads");
+
+        assert!(roads[0].functions.is_empty());
+        assert_eq!(roads[0].areas[0].functions, ["1010"]);
+        assert_eq!(roads[0].areas[0].lod, 3);
+    }
+
+    #[test]
+    fn semantic_area_requires_stable_id() {
+        let xml = r#"
+            <core:CityModel
+                xmlns:core="urn:core" xmlns:gml="urn:gml" xmlns:tran="urn:tran">
+              <tran:Road gml:id="road-a">
+                <tran:trafficArea><tran:TrafficArea>
+                  <tran:function>1010</tran:function>
+                  <tran:lod3MultiSurface><gml:MultiSurface><gml:Polygon>
+                    <gml:exterior><gml:LinearRing><gml:posList>
+                      0 0 0 10 0 0 10 3 0 0 3 0 0 0 0
+                    </gml:posList></gml:LinearRing></gml:exterior>
+                  </gml:Polygon></gml:MultiSurface></tran:lod3MultiSurface>
+                </tran:TrafficArea></tran:trafficArea>
+              </tran:Road>
+            </core:CityModel>
+        "#;
+        let document = Document::parse(xml).expect("semantic XML");
+
+        assert!(matches!(
+            parse_roads(&document),
+            Err(ImportError::MissingTrafficAreaId)
+        ));
+    }
+
+    #[test]
+    fn traffic_id_encoding_is_collision_safe_for_escaped_text() {
+        let space = encoded_traffic_id("tile/a.gml", "lane 1").expect("encoded space");
+        let literal_escape = encoded_traffic_id("tile/a.gml", "lane~201").expect("encoded tilde");
+
+        assert_eq!(space.as_str(), "plateau:tile~2fa.gml/lane~201");
+        assert_eq!(literal_escape.as_str(), "plateau:tile~2fa.gml/lane~7e201");
+        assert_ne!(space, literal_escape);
     }
 }

@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 earcutr = { workspace = true }
 rne_assets = { path = "../rne_assets" }
+rne_traffic = { path = "../rne_traffic" }
 roxmltree = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

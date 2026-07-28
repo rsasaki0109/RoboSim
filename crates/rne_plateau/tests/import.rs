@@ -3,6 +3,7 @@ use rne_ecs::World;
 use rne_physics::Collider;
 use rne_plateau::{import_citygml_file, CoordinateMode, ImportError, ImportOptions};
 use rne_render::Visual;
+use rne_traffic::{load_traffic_asset, AccuracyClass, AuthorityClass, LaneKind};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,7 +48,8 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
     let metadata: Value =
         serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
             .expect("metadata JSON");
-    assert_eq!(metadata["schema_version"], 3);
+    assert_eq!(metadata["schema_version"], 4);
+    assert_eq!(metadata["traffic_path"], "synthetic_city.rne.traffic.json");
     assert_eq!(metadata["buildings"][0]["source_id"], "bldg-A");
     assert_eq!(metadata["buildings"][1]["source_id"], "bldg-B");
     assert_eq!(metadata["buildings"][0]["name"], "RNE City Hall");
@@ -58,6 +60,17 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
         metadata["roads"][0]["lanes"][0]["travel_direction"],
         "principal_axis_positive"
     );
+    assert_eq!(metadata["roads"][0]["class"], Value::Null);
+    assert_eq!(metadata["roads"][0]["functions"][0], "1");
+
+    let traffic = load_traffic_asset(&result.traffic_path).expect("load generated traffic");
+    assert_eq!(traffic.network.lanes.len(), 2);
+    assert!(traffic.network.lanes.iter().all(|lane| {
+        lane.provenance.authority == AuthorityClass::Derived
+            && lane.provenance.accuracy.class == AccuracyClass::Heuristic
+            && lane.kind == LaneKind::Driving
+            && lane.road_functions == ["1"]
+    }));
 
     let bundle = load_scene_bundle(&result.scene_path).expect("validate generated scene");
     assert_eq!(bundle.scene.objects.len(), 3);
@@ -111,7 +124,7 @@ fn imports_lod2_semantics_and_parameterized_texture() {
     let metadata: Value =
         serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
             .expect("metadata JSON");
-    assert_eq!(metadata["schema_version"], 3);
+    assert_eq!(metadata["schema_version"], 4);
     assert_eq!(metadata["buildings"][0]["lod"], 2);
     assert_eq!(metadata["buildings"][0]["surface_counts"]["wall"], 1);
     assert_eq!(metadata["buildings"][0]["surface_counts"]["roof"], 1);
@@ -189,6 +202,10 @@ fn repeated_import_is_byte_for_byte_deterministic() {
         fs::read(first_result.metadata_path).expect("first metadata"),
         fs::read(second_result.metadata_path).expect("second metadata")
     );
+    assert_eq!(
+        fs::read(first_result.traffic_path).expect("first traffic"),
+        fs::read(second_result.traffic_path).expect("second traffic")
+    );
     for mesh in [
         "plateau_building_0000_bldg_a.obj",
         "plateau_building_0001_bldg_b.obj",
@@ -202,4 +219,113 @@ fn repeated_import_is_byte_for_byte_deterministic() {
 
     fs::remove_dir_all(first).expect("remove first output");
     fs::remove_dir_all(second).expect("remove second output");
+}
+
+#[test]
+fn imports_lod2_and_lod31_road_semantics_into_traffic_schema() {
+    let output = temp_output("road-semantics");
+    let repeated_output = temp_output("road-semantics-repeat");
+    reset_dir(&output);
+    reset_dir(&repeated_output);
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plateau_road_semantics.gml");
+
+    let result = import_citygml_file(
+        &fixture,
+        &output,
+        &ImportOptions {
+            tile_name: "semantic-roads".into(),
+            coordinate_mode: CoordinateMode::ProjectedMeters,
+            ..ImportOptions::default()
+        },
+    )
+    .expect("import semantic roads");
+
+    assert_eq!(result.road_count, 2);
+    assert_eq!(result.traffic_area_count, 6);
+    assert_eq!(result.auxiliary_traffic_area_count, 2);
+    assert_eq!(result.lod31_lane_area_count, 2);
+    assert_eq!(result.lane_count, 5);
+    assert_eq!(result.road_semantics[0].road_source_id, "road-lod2");
+    assert_eq!(result.road_semantics[0].class.as_deref(), Some("1"));
+    assert_eq!(result.road_semantics[0].functions, ["1", "2"]);
+    assert_eq!(
+        result
+            .traffic_areas
+            .iter()
+            .find(|area| area.area_source_id == "lod31-lane-a")
+            .expect("LOD3.1 lane")
+            .functions,
+        ["1010"]
+    );
+
+    let traffic = load_traffic_asset(&result.traffic_path).expect("load traffic schema");
+    assert_eq!(traffic.network.lanes.len(), 5);
+    assert_eq!(
+        traffic
+            .network
+            .lanes
+            .iter()
+            .filter(|lane| lane.kind == LaneKind::Driving)
+            .count(),
+        4
+    );
+    assert_eq!(
+        traffic
+            .network
+            .lanes
+            .iter()
+            .filter(|lane| lane.kind == LaneKind::Sidewalk)
+            .count(),
+        1
+    );
+    let explicit_lane = traffic
+        .network
+        .lanes
+        .iter()
+        .find(|lane| lane.id.as_str().contains("lod31-lane-a"))
+        .expect("explicit LOD3.1 lane");
+    assert_eq!(explicit_lane.width_m, 3.0);
+    assert_eq!(explicit_lane.road_class.as_deref(), Some("1"));
+    assert_eq!(explicit_lane.road_functions, ["3"]);
+    assert_eq!(explicit_lane.provenance.authority, AuthorityClass::Derived);
+    assert!(explicit_lane
+        .provenance
+        .method
+        .as_deref()
+        .expect("derivation method")
+        .contains("code 1010"));
+
+    let metadata: Value =
+        serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
+            .expect("metadata JSON");
+    assert_eq!(metadata["schema_version"], 4);
+    assert_eq!(metadata["roads"][0]["lod"], 2);
+    assert_eq!(metadata["roads"][1]["lod"], 3);
+    assert_eq!(
+        metadata["roads"][1]["traffic_areas"][1]["functions"][0],
+        "1010"
+    );
+
+    let repeated = import_citygml_file(
+        &fixture,
+        &repeated_output,
+        &ImportOptions {
+            tile_name: "semantic-roads".into(),
+            coordinate_mode: CoordinateMode::ProjectedMeters,
+            ..ImportOptions::default()
+        },
+    )
+    .expect("repeat semantic import");
+    assert_eq!(
+        fs::read(&result.traffic_path).expect("first semantic traffic"),
+        fs::read(&repeated.traffic_path).expect("repeated semantic traffic")
+    );
+    assert_eq!(
+        fs::read(&result.metadata_path).expect("first semantic metadata"),
+        fs::read(&repeated.metadata_path).expect("repeated semantic metadata")
+    );
+
+    fs::remove_dir_all(output).expect("remove semantic output");
+    fs::remove_dir_all(repeated_output).expect("remove repeated semantic output");
 }

@@ -8,12 +8,12 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(
     name = "rne-plateau-import",
-    about = "Convert PLATEAU CityGML building LOD1/LOD2 and road LOD1 into RNE assets"
+    about = "Convert PLATEAU CityGML buildings and LOD1/LOD2/LOD3 roads into RNE assets"
 )]
 struct Cli {
     /// Input PLATEAU CityGML file.
     input: PathBuf,
-    /// Directory receiving scene, OBJ, and metadata assets.
+    /// Directory receiving scene, traffic, OBJ, and metadata assets.
     #[arg(short, long)]
     output: PathBuf,
     /// Stable base name for generated tile assets.
@@ -63,15 +63,19 @@ fn main() -> Result<()> {
     )
     .with_context(|| format!("import {}", cli.input.display()))?;
     println!(
-        "imported buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={} mode={:?} scene={} metadata={}",
+        "imported buildings={} lod2={} textured_surfaces={} roads={} traffic_areas={} auxiliary_areas={} lod31_lanes={} lanes={} triangles={} mode={:?} scene={} traffic={} metadata={}",
         result.building_count,
         result.lod2_building_count,
         result.textured_surface_count,
         result.road_count,
+        result.traffic_area_count,
+        result.auxiliary_traffic_area_count,
+        result.lod31_lane_area_count,
         result.lane_count,
         result.triangle_count,
         result.coordinate_mode,
         result.scene_path.display(),
+        result.traffic_path.display(),
         result.metadata_path.display()
     );
     Ok(())
