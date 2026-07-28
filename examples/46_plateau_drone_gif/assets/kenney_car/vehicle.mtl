@@ -1,0 +1,4 @@
+# Derived from Kenney Car Kit 3.1 (CC0)
+newmtl colormap
+Kd 1 1 1
+map_Kd colormap.png

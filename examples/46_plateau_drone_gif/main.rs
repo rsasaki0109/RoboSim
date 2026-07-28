@@ -9,7 +9,10 @@ use rne_core::{SimClock, SimDuration};
 use rne_ecs::{spawn_named, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
 use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
-use rne_render::{Camera, RenderBackend, RenderScene, RenderSceneItem, Visual, VisualShape};
+use rne_render::{
+    load_mesh_parts, Camera, ImageFrame, RenderBackend, RenderScene, RenderSceneItem, TriangleMesh,
+    Visual, VisualShape,
+};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
@@ -17,6 +20,7 @@ use rne_robot::{
 use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
@@ -39,6 +43,50 @@ struct VehicleFrame {
     speed_m_s: f64,
     steering_rad: f64,
     wheel_rotation_rad: f64,
+    braking: bool,
+}
+
+#[derive(Clone, Debug)]
+struct VehicleRenderAssets {
+    body_meshes: Vec<Arc<TriangleMesh>>,
+    wheel_meshes: Vec<Arc<TriangleMesh>>,
+    red_body_texture: Arc<ImageFrame>,
+    blue_body_texture: Arc<ImageFrame>,
+    wheel_texture: Arc<ImageFrame>,
+}
+
+impl VehicleRenderAssets {
+    fn load() -> Self {
+        let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/kenney_car");
+        Self {
+            body_meshes: load_vehicle_meshes(&asset_dir.join("sedan-body.obj")),
+            wheel_meshes: load_vehicle_meshes(&asset_dir.join("wheel.obj")),
+            red_body_texture: load_vehicle_texture(&asset_dir.join("colormap-red.png")),
+            blue_body_texture: load_vehicle_texture(&asset_dir.join("colormap-blue.png")),
+            wheel_texture: load_vehicle_texture(&asset_dir.join("colormap.png")),
+        }
+    }
+}
+
+fn load_vehicle_meshes(path: &Path) -> Vec<Arc<TriangleMesh>> {
+    let meshes: Vec<_> = load_mesh_parts(path)
+        .unwrap_or_else(|error| panic!("load vehicle mesh {}: {error}", path.display()))
+        .into_iter()
+        .map(|part| Arc::new(part.mesh))
+        .collect();
+    assert!(!meshes.is_empty(), "vehicle mesh must contain geometry");
+    meshes
+}
+
+fn load_vehicle_texture(path: &Path) -> Arc<ImageFrame> {
+    let rgba = image::open(path)
+        .unwrap_or_else(|error| panic!("load vehicle texture {}: {error}", path.display()))
+        .into_rgba8();
+    Arc::new(ImageFrame::from_rgba8(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
 }
 
 #[cfg(test)]
@@ -234,6 +282,7 @@ fn main() {
         .resolve_mesh_assets_with_roots(&root_refs)
         .expect("resolve generated PLATEAU meshes");
     append_lane_markings(&mut city_scene, &showcase_lanes);
+    let vehicle_assets = VehicleRenderAssets::load();
 
     assert!(
         city_scene.items.len() <= MAX_STATIC_SCENE_ITEMS,
@@ -244,7 +293,12 @@ fn main() {
     for frame in 0..CAR_FRAME_COUNT {
         let primary = primary_traffic[frame];
         let mut scene = city_scene.clone();
-        append_traffic(&mut scene, primary, opposing_traffic[frame]);
+        append_traffic(
+            &mut scene,
+            &vehicle_assets,
+            primary,
+            opposing_traffic[frame],
+        );
         let car_camera = follow_camera(primary);
         let output = backend
             .render_scene_camera(&camera, &car_camera.camera_transform(), &scene, CLEAR_COLOR)
@@ -744,6 +798,7 @@ fn simulate_lane_vehicle(
             speed_m_s: drive.speed_m_s,
             steering_rad: drive.steering_rad,
             wheel_rotation_rad,
+            braking: drive.speed_m_s > 0.2 && drive.target_speed_m_s + 0.05 < drive.speed_m_s,
         });
         for _ in 0..SIM_STEPS_PER_FRAME {
             let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
@@ -801,124 +856,100 @@ fn follow_camera(vehicle: VehicleFrame) -> CameraOrbit {
     }
 }
 
-fn append_traffic(scene: &mut RenderScene, primary: VehicleFrame, opposing: VehicleFrame) {
-    append_car(scene, primary, [0.84, 0.12, 0.045, 1.0]);
-    append_car(scene, opposing, [0.045, 0.24, 0.72, 1.0]);
+fn append_traffic(
+    scene: &mut RenderScene,
+    assets: &VehicleRenderAssets,
+    primary: VehicleFrame,
+    opposing: VehicleFrame,
+) {
+    append_car(scene, assets, primary, &assets.red_body_texture);
+    append_car(scene, assets, opposing, &assets.blue_body_texture);
 }
 
-fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 4]) {
+fn append_car(
+    scene: &mut RenderScene,
+    assets: &VehicleRenderAssets,
+    vehicle: VehicleFrame,
+    body_texture: &Arc<ImageFrame>,
+) {
     let center = vehicle.transform.translation;
     let rotation = vehicle.transform.rotation;
-    push_box(
+    append_vehicle_meshes(
         scene,
-        center,
-        rotation,
-        Vec3::new(4.35, 0.52, 1.82),
-        color_rgba,
+        &assets.body_meshes,
+        body_texture,
+        "kenney://sedan-body",
+        MathTransform3 {
+            translation: center + rotation * Vec3::new(0.0, -0.50, 0.0),
+            rotation: rotation * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            scale: Vec3::new(1.24, 1.25, 1.70),
+        },
     );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(0.34, 0.31, 0.0),
-        rotation * Quat::from_rotation_z(-0.055),
-        Vec3::new(3.55, 0.40, 1.76),
-        color_rgba,
-    );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(-0.15, 0.48, 0.0),
-        rotation,
-        Vec3::new(1.95, 0.65, 1.58),
-        [0.12, 0.20, 0.27, 1.0],
-    );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(0.82, 0.50, 0.0),
-        rotation * Quat::from_rotation_z(-0.68),
-        Vec3::new(0.08, 0.78, 1.50),
-        [0.16, 0.26, 0.34, 1.0],
-    );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(-1.12, 0.48, 0.0),
-        rotation * Quat::from_rotation_z(0.64),
-        Vec3::new(0.08, 0.72, 1.48),
-        [0.14, 0.23, 0.30, 1.0],
-    );
-    for z in [-0.81, 0.81] {
-        push_box(
+
+    for (x_m, z_m, steerable) in [
+        (-1.27, -0.82, false),
+        (-1.27, 0.82, false),
+        (1.32, -0.82, true),
+        (1.32, 0.82, true),
+    ] {
+        let steering = if steerable { vehicle.steering_rad } else { 0.0 };
+        append_vehicle_meshes(
             scene,
-            center + rotation * Vec3::new(-0.08, 0.51, z),
-            rotation,
-            Vec3::new(1.55, 0.48, 0.035),
-            [0.085, 0.16, 0.21, 1.0],
+            &assets.wheel_meshes,
+            &assets.wheel_texture,
+            "kenney://wheel-default",
+            MathTransform3 {
+                translation: center + rotation * Vec3::new(x_m, -0.24, z_m),
+                rotation: rotation
+                    * Quat::from_rotation_y(steering)
+                    * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2)
+                    * Quat::from_rotation_x(-vehicle.wheel_rotation_rad),
+                scale: Vec3::new(0.65, 1.20, 1.20),
+            },
         );
+    }
+
+    let brake_color = if vehicle.braking {
+        [1.0, 0.025, 0.008, 1.0]
+    } else {
+        [0.24, 0.008, 0.004, 1.0]
+    };
+    for z_m in [-0.58, 0.58] {
         push_box(
             scene,
-            center + rotation * Vec3::new(0.62, 0.43, z * 1.035),
+            center + rotation * Vec3::new(-2.19, 0.10, z_m),
             rotation,
-            Vec3::new(0.28, 0.15, 0.12),
-            color_rgba,
+            Vec3::new(0.055, 0.18, 0.32),
+            brake_color,
         );
     }
     push_box(
         scene,
-        center + rotation * Vec3::new(2.19, -0.05, 0.0),
+        center + rotation * Vec3::new(-2.19, -0.19, 0.0),
         rotation,
-        Vec3::new(0.10, 0.22, 0.92),
-        [0.035, 0.045, 0.050, 1.0],
+        Vec3::new(0.045, 0.14, 0.34),
+        [0.78, 0.80, 0.78, 1.0],
     );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(-2.20, -0.02, 0.0),
-        rotation,
-        Vec3::new(0.10, 0.18, 0.62),
-        [0.83, 0.84, 0.78, 1.0],
-    );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(-2.255, -0.03, 0.0),
-        rotation,
-        Vec3::new(0.025, 0.12, 0.42),
-        [0.90, 0.91, 0.86, 1.0],
-    );
-    for (x, color) in [
-        (2.20, [0.98, 0.86, 0.42, 1.0]),
-        (-2.20, [0.90, 0.04, 0.025, 1.0]),
-    ] {
-        for z in [-0.58, 0.58] {
-            push_box(
-                scene,
-                center + rotation * Vec3::new(x, -0.02, z),
-                rotation,
-                Vec3::new(0.08, 0.18, 0.34),
-                color,
-            );
-        }
-    }
-    for (x, z, steerable) in [
-        (-1.34, -0.96, false),
-        (-1.34, 0.96, false),
-        (1.34, -0.96, true),
-        (1.34, 0.96, true),
-    ] {
-        let wheel_rotation = rotation
-            * Quat::from_rotation_y(if steerable { vehicle.steering_rad } else { 0.0 })
-            * Quat::from_rotation_z(vehicle.wheel_rotation_rad);
-        push_cylinder(
-            scene,
-            center + rotation * Vec3::new(x, -0.32, z),
-            wheel_rotation,
-            0.36,
-            0.24,
-            [0.012, 0.016, 0.020, 1.0],
-        );
-        push_box(
-            scene,
-            center + rotation * Vec3::new(x, -0.32, z),
-            wheel_rotation,
-            Vec3::new(0.58, 0.07, 0.26),
-            [0.58, 0.61, 0.64, 1.0],
-        );
+}
+
+fn append_vehicle_meshes(
+    scene: &mut RenderScene,
+    meshes: &[Arc<TriangleMesh>],
+    texture: &Arc<ImageFrame>,
+    asset_id: &str,
+    transform: MathTransform3,
+) {
+    for mesh in meshes {
+        scene.items.push(RenderSceneItem {
+            transform,
+            shape: VisualShape::Mesh {
+                path: asset_id.to_string(),
+                scale: Vec3::ONE,
+            },
+            color_rgba: [1.0; 4],
+            mesh: Some(Arc::clone(mesh)),
+            base_color_texture: Some(Arc::clone(texture)),
+        });
     }
 }
 
@@ -942,6 +973,7 @@ fn push_box(
     });
 }
 
+#[cfg(test)]
 fn push_cylinder(
     scene: &mut RenderScene,
     translation: Vec3,
@@ -1178,6 +1210,11 @@ mod tests {
         let second = simulate_two_way_traffic(&lanes, CAR_FRAME_COUNT);
         assert_eq!(first, second);
         assert!(first.0.last().unwrap().transform.translation.z > 12.0);
+        assert!(first.0.iter().any(|frame| frame.braking));
+        assert!(
+            first.0.last().unwrap().wheel_rotation_rad
+                > first.0.first().unwrap().wheel_rotation_rad
+        );
         for (lane, frames) in [(&lanes[0], &first.0), (&lanes[1], &first.1)] {
             let lane_x = lane.centerline_m[0][0];
             for frame in frames {
@@ -1186,6 +1223,61 @@ mod tests {
                 assert!(frame.transform.translation.z <= 17.05);
             }
         }
+    }
+
+    #[test]
+    fn kenney_vehicle_assets_load_with_independent_steered_wheels() {
+        let assets = VehicleRenderAssets::load();
+        assert!(
+            assets
+                .body_meshes
+                .iter()
+                .map(|mesh| mesh.triangle_count())
+                .sum::<usize>()
+                > 100
+        );
+        assert!(
+            assets
+                .wheel_meshes
+                .iter()
+                .map(|mesh| mesh.triangle_count())
+                .sum::<usize>()
+                > 50
+        );
+        assert_ne!(
+            assets.red_body_texture.hash_pixels(),
+            assets.blue_body_texture.hash_pixels()
+        );
+
+        let mut scene = RenderScene::new();
+        let vehicle = VehicleFrame {
+            transform: Transform3::from_translation_rotation(
+                Vec3::new(0.0, 0.65, 0.0),
+                Quat::IDENTITY,
+            ),
+            speed_m_s: 4.0,
+            steering_rad: 0.25,
+            wheel_rotation_rad: 1.5,
+            braking: true,
+        };
+        append_car(&mut scene, &assets, vehicle, &assets.red_body_texture);
+
+        let mesh_count = assets.body_meshes.len() + 4 * assets.wheel_meshes.len();
+        assert_eq!(scene.items.len(), mesh_count + 3);
+        assert!(scene.items[..mesh_count]
+            .iter()
+            .all(|item| item.mesh.is_some() && item.base_color_texture.is_some()));
+        let rear_wheel = &scene.items[assets.body_meshes.len()].transform;
+        let front_wheel =
+            &scene.items[assets.body_meshes.len() + 2 * assets.wheel_meshes.len()].transform;
+        assert_ne!(rear_wheel.rotation, front_wheel.rotation);
+        assert!(scene.items[mesh_count..mesh_count + 2]
+            .iter()
+            .all(|item| item.color_rgba[0] == 1.0));
+        assert_eq!(
+            scene.items[mesh_count + 2].color_rgba,
+            [0.78, 0.80, 0.78, 1.0]
+        );
     }
 
     #[test]
