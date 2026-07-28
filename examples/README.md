@@ -34,8 +34,10 @@
 | XPBD deformable cable | `cargo run -p deformable_cable --example 43_deformable_cable -- --render` | Deterministic pinned cable draping over a sphere with backend-neutral contact and wgpu segment rendering |
 | XPBD deformable cloth | `cargo run -p deformable_cloth --example 44_deformable_cloth -- --render` | Deterministic structural/shear/bending cloth draping over a box with dynamic normals and wgpu mesh updates |
 | Unitree G1 Dex3 cloth handling | `cargo run --release -p unitree_g1_cloth_handling --example 45_unitree_g1_cloth_handling` | Dual fingertip-overlap cloth grasp, sampled moving-link contact, fixed inactive arm, exact replay, and real wgpu GIF capture (`-- --gif`) |
+| PLATEAU drone + traffic GIFs | `cargo run -p plateau_drone_gif --example 46_plateau_drone_gif` | Converts synthetic PLATEAU CityGML LOD1 to deterministic RNE assets, spawns fixed headless building collision, and renders aerial and car-follow animations |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
+| PLATEAU import CLI | `cargo run -p rne_plateau_import -- path/to/tile.gml --output target/plateau/tile --tile-name tile` | Convert bounded PLATEAU CityGML building LOD1 to OBJ, RNE scene, and stable metadata |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |
 | ROS 2 bridge CI | `cargo run -p xtask -- ci-ros2-bridge` | Python bridge smoke + topic check (requires ROS 2 Jazzy/Humble) |

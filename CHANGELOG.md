@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **PLATEAU import Phase 1**: a ROS2-free offline `rne_plateau` pipeline and
+  `rne-plateau-import` CLI convert bounded CityGML building LOD1 solids into
+  deterministic per-building OBJ meshes, an ordinary RNE scene, and stable
+  `gml:id` metadata. Geographic and projected coordinates map to local-meter
+  Y-up space, building AABBs provide inexpensive static headless collision,
+  and a synthetic CC0 fixture covers byte-identical replay and scene spawning.
+  Example 46 renders a deterministic drone traversal plus two-way car traffic
+  over an example-authored center road.
 - **Robot Behavior CI Phase 1**: backend-neutral typed `Always`, `Eventually`,
   and `Consecutive` contracts in `rne_ai`; deterministic ascending multi-seed
   execution; first-violation diagnostics with stable entity names; versioned

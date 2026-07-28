@@ -16,6 +16,7 @@ members = [
   "crates/rne_ai",
   "crates/rne_assets",
   "crates/rne_py",
+  "crates/rne_plateau",
   "crates/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
   "examples/00_hello_world",
@@ -63,9 +64,11 @@ members = [
   "examples/43_deformable_cable",
   "examples/44_deformable_cloth",
   "examples/45_unitree_g1_cloth_handling",
+  "examples/46_plateau_drone_gif",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
+  "tools/rne_plateau_import",
   "xtask",
 ]
 exclude = [
@@ -99,3 +102,4 @@ wgpu = "24"
 pollster = "0.4"
 pyo3 = { version = "0.23", features = ["abi3-py39"] }
 roxmltree = "0.20"
+serde_json = "1"

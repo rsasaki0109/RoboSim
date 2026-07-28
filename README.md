@@ -18,6 +18,37 @@ headless CI, and real wgpu rendering.
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
 embodied AI, synthetic sensor data, and policy evaluation.
 
+## PLATEAU city tiles
+
+RNE can convert bounded PLATEAU CityGML building LOD1 data into deterministic
+per-building OBJ meshes, a normal `.rne.scene.toml`, stable `gml:id` metadata,
+and inexpensive fixed collision boxes. The conversion stays outside simulation
+core crates. Example 46 imports a synthetic CC0 tile headlessly and renders a
+drone flying through the resulting city while two cars use the center road.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-drone.png">
+    <img src="docs/media/plateau-drone.gif" alt="A simulated drone and two cars moving through a PLATEAU CityGML tile imported into RNE" width="720">
+  </picture>
+</p>
+
+```bash
+cargo run -p rne_plateau_import -- path/to/tile.gml \
+  --output target/plateau/tile --tile-name tile
+cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
+```
+
+The example also writes a car-follow view against the imported PLATEAU city:
+
+<picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
+    <img src="docs/media/plateau-car.gif" alt="A car driving through a PLATEAU CityGML city imported into RNE" width="720">
+</picture>
+
+See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
+mapping, outputs, and current limits.
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
