@@ -1,5 +1,25 @@
 # Roadmap
 
+## v0.16 goal: PLATEAU urban autonomy
+
+Build a deterministic, renderer-independent urban traffic domain, then import
+PLATEAU road semantics into it and drive Robot Entities through signalized
+routes. The first stage is deliberately split into five reviewable PRs:
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Architecture | `rne_traffic` ownership, dependency boundary, deterministic ECS foundation | Done |
+| B | Asset | `.rne.traffic.json` schema v1 with stable IDs, provenance, lanes, junctions, connections, signals, and byte-identical golden output | Pending |
+| C | PLATEAU | Import road class/function, LOD2 `TrafficArea`/`AuxiliaryTrafficArea`, and LOD3.1 lane semantics | Pending |
+| D | Topology | Deterministic tile stitching, junction classification, turn curves, grade separation, and conflict relationships | Pending |
+| E | Runtime / Demo | Headless routing, signals, turns, multi-vehicle replay; migrate example 46 and publish GIF/README media | Pending |
+
+Stage-one acceptance requires byte-identical assets for identical input, stable
+world hashes for identical seeds and actions, zero signal violations and
+collisions in the reference replay, explicit authoritative/derived/synthetic
+provenance, and at least 60 Hz headless execution for 100 vehicles in one tile.
+See [architecture/010_traffic_domain.md](architecture/010_traffic_domain.md).
+
 ## v0.14 goal: realistic grasping
 
 User feedback after v0.13: "the manipulator holding an object doesn't look real". The

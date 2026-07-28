@@ -14,6 +14,7 @@ Robot Native Engine (RNE) is a robot-native simulation core written in Rust.
 ```
 rne_math → rne_core → rne_ecs → rne_world
                               ↘ rne_robot → rne_physics → rne_physics_rapier
+                              ↘ rne_traffic
                               ↘ rne_data / rne_sensor / rne_render / rne_ai / rne_assets
 adapters/ros2/* (optional)
 ```
@@ -34,3 +35,4 @@ See also:
 - [DataBus](005_data_bus.md)
 - [Mobile manipulator target](006_mobile_manipulator.md)
 - [Web viewer boundary](007_web_viewer.md)
+- [Traffic domain](010_traffic_domain.md)
