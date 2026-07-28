@@ -37,13 +37,31 @@ impl CameraOrbit {
             self.focus.y + self.distance_m * pitch.cos(),
             self.focus.z + horizontal * yaw.cos(),
         );
-        let forward = (self.focus - eye).normalize_or_zero();
-        let rotation = if forward.length_squared() > f64::EPSILON {
-            Quat::from_rotation_arc(-Vec3::Z, forward)
-        } else {
-            Quat::IDENTITY
-        };
+        let rotation = (Quat::from_rotation_y(yaw)
+            * Quat::from_rotation_x(pitch - std::f64::consts::FRAC_PI_2))
+        .normalize();
 
         Transform3::from_translation_rotation(eye, rotation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn orbit_camera_looks_at_focus_without_roll() {
+        let orbit = CameraOrbit {
+            focus: Vec3::new(3.0, 2.0, -4.0),
+            yaw_rad: 1.1,
+            pitch_rad: 1.0,
+            distance_m: 12.0,
+        };
+        let transform = orbit.camera_transform();
+        let expected_forward = (orbit.focus - transform.translation).normalize();
+        let actual_forward = transform.rotation * -Vec3::Z;
+        assert!((expected_forward - actual_forward).length() < 1.0e-12);
+        assert!((transform.rotation * Vec3::X).y.abs() < 1.0e-12);
+        assert!((transform.rotation * Vec3::Y).dot(Vec3::Y) > 0.0);
     }
 }

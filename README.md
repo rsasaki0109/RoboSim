@@ -24,8 +24,10 @@ RNE can convert bounded PLATEAU CityGML building and road LOD1 data into
 deterministic OBJ meshes, a normal `.rne.scene.toml`, stable `gml:id` metadata,
 fixed building collision boxes, and derived two-way lane centerlines. The
 conversion stays outside simulation core crates. Example 46 imports a synthetic
-CC0 tile headlessly and uses a SimClock-driven Ackermann model to move two cars
-along the imported road while a drone flies through the resulting city.
+CC0 ten-building, 90-meter city avenue headlessly and uses a SimClock-driven
+Ackermann model to move two cars along the imported road. Its daylight scene
+adds sidewalks, curbs, road markings, trees, streetlights, and stable
+world-up follow cameras.
 
 <p align="center">
   <picture>
