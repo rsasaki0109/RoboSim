@@ -1,8 +1,9 @@
 const SHADER: &str = r#"
 struct CameraUniform {
     view_proj: mat4x4<f32>,
+    light_view_proj: mat4x4<f32>,
     light_ambient: vec4<f32>,
-    diffuse_pad: vec4<f32>,
+    diffuse_shadow: vec4<f32>,
 }
 
 struct DrawUniform {
@@ -17,12 +18,15 @@ struct DrawUniform {
 @group(1) @binding(0) var<uniform> draw: DrawUniform;
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(2) @binding(1) var base_color_sampler: sampler;
+@group(3) @binding(0) var shadow_texture: texture_depth_2d;
+@group(3) @binding(1) var shadow_sampler: sampler_comparison;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) texcoord: vec2<f32>,
+    @location(3) light_clip_position: vec4<f32>,
 }
 
 @vertex
@@ -34,6 +38,7 @@ fn vs_main(
     var out: VertexOutput;
     let world = draw.model * vec4<f32>(position, 1.0);
     out.clip_position = camera.view_proj * world;
+    out.light_clip_position = camera.light_view_proj * world;
     out.color = draw.color;
 
     let normal_matrix = mat3x3<f32>(
@@ -52,11 +57,41 @@ fn vs_main(
     return out;
 }
 
+fn shadow_visibility(input: VertexOutput, ndotl: f32) -> f32 {
+    let light_ndc = input.light_clip_position.xyz / input.light_clip_position.w;
+    let uv = vec2<f32>(
+        light_ndc.x * 0.5 + 0.5,
+        0.5 - light_ndc.y * 0.5,
+    );
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 ||
+        light_ndc.z <= 0.0 || light_ndc.z >= 1.0) {
+        return 1.0;
+    }
+    let dimensions = vec2<f32>(textureDimensions(shadow_texture));
+    let texel = 1.0 / dimensions;
+    let bias = max(0.00035, 0.0015 * (1.0 - ndotl));
+    var visibility = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel;
+            visibility += textureSampleCompare(
+                shadow_texture,
+                shadow_sampler,
+                uv + offset,
+                light_ndc.z - bias,
+            );
+        }
+    }
+    return visibility / 9.0;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(camera.light_ambient.xyz);
     let ndotl = max(dot(normalize(input.world_normal), light_dir), 0.0);
-    let shade = camera.light_ambient.w + camera.diffuse_pad.x * ndotl;
+    let visibility = shadow_visibility(input, ndotl);
+    let shadowed = mix(1.0 - camera.diffuse_shadow.y, 1.0, visibility);
+    let shade = camera.light_ambient.w + camera.diffuse_shadow.x * ndotl * shadowed;
     let texture_color = textureSample(
         base_color_texture,
         base_color_sampler,
@@ -69,9 +104,30 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+const SHADOW_SHADER: &str = r#"
+struct ShadowUniform {
+    light_view_proj: mat4x4<f32>,
+}
+
+struct DrawUniform {
+    model: mat4x4<f32>,
+    normal_col0: vec4<f32>,
+    normal_col1: vec4<f32>,
+    normal_col2: vec4<f32>,
+    color: vec4<f32>,
+}
+
+@group(0) @binding(0) var<uniform> shadow: ShadowUniform;
+@group(1) @binding(0) var<uniform> draw: DrawUniform;
+
+@vertex
+fn vs_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+    return shadow.light_view_proj * draw.model * vec4<f32>(position, 1.0);
+}
+"#;
+
 use bytemuck::{Pod, Zeroable};
-use rne_math::Mat4;
-use rne_math::Transform3;
+use rne_math::{Mat4, Transform3, Vec3};
 use rne_render::{
     Camera, CameraPassOutput, DepthFrame, ImageFrame, RenderError, RenderScene, RenderTarget,
     TriangleMesh, VisualShape,
@@ -92,8 +148,9 @@ struct Vertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    light_view_proj: [[f32; 4]; 4],
     light_ambient: [f32; 4],
-    diffuse_pad: [f32; 4],
+    diffuse_shadow: [f32; 4],
 }
 
 /// Default directional light for primitive shading (world space, not normalized).
@@ -102,18 +159,30 @@ pub const DEFAULT_LIGHT_DIR: [f32; 3] = [0.35, 0.9, 0.25];
 pub const DEFAULT_AMBIENT: f32 = 0.28;
 /// Additional diffuse multiplier at surfaces facing the light.
 pub const DEFAULT_DIFFUSE: f32 = 0.72;
+/// Fraction of direct illumination removed by a fully shadowed surface.
+pub const DEFAULT_SHADOW_STRENGTH: f32 = 0.82;
 
-fn default_camera_uniform(view_proj: rne_math::Mat4) -> CameraUniform {
+fn default_camera_uniform(
+    view_proj: rne_math::Mat4,
+    light_view_proj: rne_math::Mat4,
+) -> CameraUniform {
     CameraUniform {
         view_proj: mat4_to_cols(view_proj),
+        light_view_proj: mat4_to_cols(light_view_proj),
         light_ambient: [
             DEFAULT_LIGHT_DIR[0],
             DEFAULT_LIGHT_DIR[1],
             DEFAULT_LIGHT_DIR[2],
             DEFAULT_AMBIENT,
         ],
-        diffuse_pad: [DEFAULT_DIFFUSE, 0.0, 0.0, 0.0],
+        diffuse_shadow: [DEFAULT_DIFFUSE, DEFAULT_SHADOW_STRENGTH, 0.0, 0.0],
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShadowUniform {
+    light_view_proj: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -134,18 +203,24 @@ struct BuiltPrimitiveMesh {
 
 pub struct PrimitiveRenderer {
     pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     camera_layout: wgpu::BindGroupLayout,
+    shadow_camera_layout: wgpu::BindGroupLayout,
     draw_bind_group: wgpu::BindGroup,
     draw_uniform_stride: u32,
     box_mesh: BuiltPrimitiveMesh,
     sphere_mesh: BuiltPrimitiveMesh,
     cylinder_mesh: BuiltPrimitiveMesh,
     camera_buffer: wgpu::Buffer,
+    shadow_camera_buffer: wgpu::Buffer,
     draw_buffer: wgpu::Buffer,
     mesh_cache: HashMap<usize, GpuMesh>,
     texture_layout: wgpu::BindGroupLayout,
     fallback_texture: GpuTexture,
     texture_cache: HashMap<usize, GpuTexture>,
+    _shadow_texture: wgpu::Texture,
+    shadow_view: wgpu::TextureView,
+    shadow_bind_group: wgpu::BindGroup,
 }
 
 struct GpuMesh {
@@ -214,6 +289,10 @@ impl PrimitiveRenderer {
             label: Some("rne_primitive_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
+        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rne_shadow_shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADOW_SHADER.into()),
+        });
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rne_camera_layout"),
@@ -242,6 +321,20 @@ impl PrimitiveRenderer {
                 count: None,
             }],
         });
+        let shadow_camera_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("rne_shadow_camera_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rne_base_color_texture_layout"),
             entries: &[
@@ -263,10 +356,37 @@ impl PrimitiveRenderer {
                 },
             ],
         });
+        let shadow_texture_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("rne_shadow_texture_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rne_primitive_pipeline_layout"),
-            bind_group_layouts: &[&camera_layout, &draw_layout, &texture_layout],
+            bind_group_layouts: &[
+                &camera_layout,
+                &draw_layout,
+                &texture_layout,
+                &shadow_texture_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -327,6 +447,52 @@ impl PrimitiveRenderer {
             multiview: None,
             cache: None,
         });
+        let shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("rne_shadow_pipeline_layout"),
+                bind_group_layouts: &[&shadow_camera_layout, &draw_layout],
+                push_constant_ranges: &[],
+            });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rne_shadow_pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some("vs_shadow"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
 
         let box_mesh = upload_primitive(device, "rne_box", &unit_cube());
         let sphere_mesh = upload_primitive(device, "rne_sphere", &unit_sphere());
@@ -334,6 +500,12 @@ impl PrimitiveRenderer {
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rne_camera_uniform"),
             size: std::mem::size_of::<CameraUniform>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rne_shadow_camera_uniform"),
+            size: std::mem::size_of::<ShadowUniform>() as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -364,21 +536,67 @@ impl PrimitiveRenderer {
             "rne_white_texture",
             &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
         );
+        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_directional_shadow_map"),
+            size: wgpu::Extent3d {
+                width: SHADOW_MAP_SIZE,
+                height: SHADOW_MAP_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rne_shadow_comparison_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rne_shadow_texture_bind_group"),
+            layout: &shadow_texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
 
         Self {
             pipeline,
+            shadow_pipeline,
             camera_layout,
+            shadow_camera_layout,
             draw_bind_group,
             draw_uniform_stride,
             box_mesh,
             sphere_mesh,
             cylinder_mesh,
             camera_buffer,
+            shadow_camera_buffer,
             draw_buffer,
             mesh_cache: HashMap::new(),
             texture_layout,
             fallback_texture,
             texture_cache: HashMap::new(),
+            _shadow_texture: shadow_texture,
+            shadow_view,
+            shadow_bind_group,
         }
     }
 
@@ -402,10 +620,18 @@ impl PrimitiveRenderer {
         let clear_color = pass.clear_color;
         let targets = pass.targets;
         let view_proj = camera.view_projection(view);
+        let light_view_proj = directional_light_view_projection(scene);
         queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::bytes_of(&default_camera_uniform(view_proj)),
+            bytemuck::bytes_of(&default_camera_uniform(view_proj, light_view_proj)),
+        );
+        queue.write_buffer(
+            &self.shadow_camera_buffer,
+            0,
+            bytemuck::bytes_of(&ShadowUniform {
+                light_view_proj: mat4_to_cols(light_view_proj),
+            }),
         );
 
         if scene.items.len() > MAX_SCENE_ITEMS as usize {
@@ -470,10 +696,65 @@ impl PrimitiveRenderer {
                 resource: self.camera_buffer.as_entire_binding(),
             }],
         });
+        let shadow_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rne_shadow_camera_bind_group"),
+            layout: &self.shadow_camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.shadow_camera_buffer.as_entire_binding(),
+            }],
+        });
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("rne_scene_encoder"),
         });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("rne_directional_shadow_pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, &shadow_camera_bind_group, &[]);
+            for (index, item) in scene.items.iter().enumerate() {
+                pass.set_bind_group(
+                    1,
+                    &self.draw_bind_group,
+                    &[index as u32 * self.draw_uniform_stride],
+                );
+                if let Some(gpu_mesh) = &dynamic_meshes[index] {
+                    pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
+                    pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
+                } else if let Some(mesh) = &item.mesh {
+                    let gpu_mesh = self
+                        .mesh_cache
+                        .get(&(Arc::as_ptr(mesh) as usize))
+                        .expect("mesh uploaded before shadow pass");
+                    pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
+                    pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
+                } else {
+                    let primitive = self.primitive_mesh_for(&item.shape);
+                    pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        primitive.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint16,
+                    );
+                    pass.draw_indexed(0..primitive.index_count, 0, 0..1);
+                }
+            }
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -505,6 +786,7 @@ impl PrimitiveRenderer {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &camera_bind_group, &[]);
+            pass.set_bind_group(3, &self.shadow_bind_group, &[]);
 
             for (index, item) in scene.items.iter().enumerate() {
                 pass.set_bind_group(
@@ -890,6 +1172,92 @@ fn linearize_depth(depth: f32, near: f32, far: f32) -> f32 {
     (near * far) / (far - depth * (far - near))
 }
 
+fn directional_light_view_projection(scene: &RenderScene) -> Mat4 {
+    let (bounds_min, bounds_max) =
+        scene_world_bounds(scene).unwrap_or((Vec3::splat(-10.0), Vec3::splat(10.0)));
+    let center = (bounds_min + bounds_max) * 0.5;
+    let radius_m = ((bounds_max - bounds_min).length() * 0.5).max(1.0);
+    let light_direction = Vec3::new(
+        f64::from(DEFAULT_LIGHT_DIR[0]),
+        f64::from(DEFAULT_LIGHT_DIR[1]),
+        f64::from(DEFAULT_LIGHT_DIR[2]),
+    )
+    .normalize();
+    let light_eye = center + light_direction * (radius_m * 2.0 + 20.0);
+    let light_view = Mat4::look_at_rh(light_eye, center, Vec3::Z);
+
+    let mut light_min = Vec3::splat(f64::INFINITY);
+    let mut light_max = Vec3::splat(f64::NEG_INFINITY);
+    for corner in aabb_corners(bounds_min, bounds_max) {
+        let light_position = light_view.transform_point3(corner);
+        light_min = light_min.min(light_position);
+        light_max = light_max.max(light_position);
+    }
+
+    let width_m = (light_max.x - light_min.x + SHADOW_BOUNDS_MARGIN_M * 2.0).max(1.0);
+    let height_m = (light_max.y - light_min.y + SHADOW_BOUNDS_MARGIN_M * 2.0).max(1.0);
+    let texel_x_m = width_m / f64::from(SHADOW_MAP_SIZE);
+    let texel_y_m = height_m / f64::from(SHADOW_MAP_SIZE);
+    let center_x = (((light_min.x + light_max.x) * 0.5) / texel_x_m).round() * texel_x_m;
+    let center_y = (((light_min.y + light_max.y) * 0.5) / texel_y_m).round() * texel_y_m;
+    let left = center_x - width_m * 0.5;
+    let right = center_x + width_m * 0.5;
+    let bottom = center_y - height_m * 0.5;
+    let top = center_y + height_m * 0.5;
+    let near = (-light_max.z - SHADOW_BOUNDS_MARGIN_M).max(0.1);
+    let far = (-light_min.z + SHADOW_BOUNDS_MARGIN_M).max(near + 1.0);
+
+    Mat4::orthographic_rh(left, right, bottom, top, near, far) * light_view
+}
+
+fn scene_world_bounds(scene: &RenderScene) -> Option<(Vec3, Vec3)> {
+    let mut bounds_min = Vec3::splat(f64::INFINITY);
+    let mut bounds_max = Vec3::splat(f64::NEG_INFINITY);
+    let mut has_position = false;
+
+    for item in &scene.items {
+        let model = item.transform.to_matrix();
+        if let Some(mesh) = &item.mesh {
+            for position in &mesh.positions {
+                let world = model.transform_point3(Vec3::new(
+                    f64::from(position[0]),
+                    f64::from(position[1]),
+                    f64::from(position[2]),
+                ));
+                if world.is_finite() {
+                    bounds_min = bounds_min.min(world);
+                    bounds_max = bounds_max.max(world);
+                    has_position = true;
+                }
+            }
+        } else {
+            for corner in aabb_corners(Vec3::splat(-0.5), Vec3::splat(0.5)) {
+                let world = model.transform_point3(corner);
+                if world.is_finite() {
+                    bounds_min = bounds_min.min(world);
+                    bounds_max = bounds_max.max(world);
+                    has_position = true;
+                }
+            }
+        }
+    }
+
+    has_position.then_some((bounds_min, bounds_max))
+}
+
+fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+    [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
 fn mat4_to_cols(matrix: Mat4) -> [[f32; 4]; 4] {
     let cols = matrix.to_cols_array_2d();
     [
@@ -934,6 +1302,8 @@ fn align_to(value: u32, alignment: u32) -> u32 {
 }
 
 const MAX_SCENE_ITEMS: u32 = 512;
+const SHADOW_MAP_SIZE: u32 = 2_048;
+const SHADOW_BOUNDS_MARGIN_M: f64 = 3.0;
 
 fn uniform_stride(alignment: u32) -> u32 {
     align_to(std::mem::size_of::<DrawUniform>() as u32, alignment)
@@ -1072,13 +1442,51 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
 
 #[cfg(test)]
 mod mesh_tests {
-    use super::{unit_cube, unit_cylinder, unit_sphere};
+    use super::{
+        directional_light_view_projection, unit_cube, unit_cylinder, unit_sphere, RenderScene,
+        Transform3, Vec3, VisualShape,
+    };
+    use rne_render::RenderSceneItem;
 
     #[test]
     fn primitive_meshes_have_triangles() {
         for mesh in [unit_cube(), unit_cylinder(), unit_sphere()] {
             assert!(!mesh.0.is_empty());
             assert!(mesh.1.len() >= 3);
+        }
+    }
+
+    #[test]
+    fn directional_shadow_projection_contains_scene_bounds() {
+        let item = RenderSceneItem {
+            transform: Transform3 {
+                translation: Vec3::new(12.0, 4.0, -8.0),
+                scale: Vec3::new(6.0, 8.0, 10.0),
+                ..Transform3::IDENTITY
+            },
+            shape: VisualShape::Box { size_m: Vec3::ONE },
+            color_rgba: [1.0; 4],
+            mesh: None,
+            base_color_texture: None,
+        };
+        let scene = RenderScene { items: vec![item] };
+        let projection = directional_light_view_projection(&scene);
+
+        assert!(projection.is_finite());
+        assert_eq!(
+            projection,
+            directional_light_view_projection(&scene),
+            "the fitted projection must be deterministic"
+        );
+        for corner in super::aabb_corners(Vec3::splat(-0.5), Vec3::splat(0.5)) {
+            let world = scene.items[0]
+                .transform
+                .to_matrix()
+                .transform_point3(corner);
+            let clip = projection.transform_point3(world);
+            assert!((-1.0..=1.0).contains(&clip.x));
+            assert!((-1.0..=1.0).contains(&clip.y));
+            assert!((0.0..=1.0).contains(&clip.z));
         }
     }
 }

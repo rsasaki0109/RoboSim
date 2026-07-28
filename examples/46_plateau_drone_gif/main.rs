@@ -233,7 +233,6 @@ fn main() {
     city_scene
         .resolve_mesh_assets_with_roots(&root_refs)
         .expect("resolve generated PLATEAU meshes");
-    append_nearby_sun_shadows(&mut city_scene, &building_bundle);
     append_lane_markings(&mut city_scene, &showcase_lanes);
 
     assert!(
@@ -287,41 +286,6 @@ fn flatten_buildings_to_road_datum(bundle: &mut SceneAssetBundle) {
             continue;
         };
         object.translation_m[1] = size_m[1] * 0.5;
-    }
-}
-
-fn append_nearby_sun_shadows(scene: &mut RenderScene, bundle: &SceneAssetBundle) {
-    let mut buildings: Vec<_> = bundle
-        .scene
-        .objects
-        .iter()
-        .filter_map(|object| {
-            let SceneCollisionAsset::Box { size_m } = object.collision? else {
-                return None;
-            };
-            let dx = object.translation_m[0] - KITA_SANJO_STATION_XZ_M[0];
-            let dz = object.translation_m[2] - KITA_SANJO_STATION_XZ_M[1];
-            Some((dx * dx + dz * dz, object, size_m))
-        })
-        .collect();
-    buildings.sort_by(|left, right| left.0.total_cmp(&right.0));
-    for (_, building, size_m) in buildings.into_iter().take(42) {
-        let height_m = size_m[1];
-        push_box(
-            scene,
-            Vec3::new(
-                building.translation_m[0] - height_m * 0.24,
-                0.04,
-                building.translation_m[2] - height_m * 0.16,
-            ),
-            Quat::from_rotation_y(building.rotation_rpy_rad[1]),
-            Vec3::new(
-                size_m[0] + height_m * 0.48,
-                0.025,
-                size_m[2] + height_m * 0.32,
-            ),
-            [0.075, 0.095, 0.105, 1.0],
-        );
     }
 }
 
@@ -838,24 +802,8 @@ fn follow_camera(vehicle: VehicleFrame) -> CameraOrbit {
 }
 
 fn append_traffic(scene: &mut RenderScene, primary: VehicleFrame, opposing: VehicleFrame) {
-    append_car_shadow(scene, primary);
-    append_car_shadow(scene, opposing);
     append_car(scene, primary, [0.84, 0.12, 0.045, 1.0]);
     append_car(scene, opposing, [0.045, 0.24, 0.72, 1.0]);
-}
-
-fn append_car_shadow(scene: &mut RenderScene, vehicle: VehicleFrame) {
-    push_box(
-        scene,
-        Vec3::new(
-            vehicle.transform.translation.x - 0.12,
-            0.035,
-            vehicle.transform.translation.z + 0.10,
-        ),
-        vehicle.transform.rotation,
-        Vec3::new(4.15, 0.018, 1.52),
-        [0.085, 0.095, 0.098, 1.0],
-    );
 }
 
 fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 4]) {
