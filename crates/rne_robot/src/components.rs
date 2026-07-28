@@ -118,6 +118,78 @@ pub struct Actuator {
     pub limits: crate::actuator::ActuatorLimits,
 }
 
+/// Deterministic kinematic Ackermann drive state and safety limits.
+///
+/// The drive uses the entity's local `+X` axis as its forward direction. Commands
+/// are clamped to the configured speed and steering limits. The integration
+/// system ignores an entity when its limits are non-finite or physically invalid.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct AckermannDrive {
+    /// Distance between front and rear axles in meters.
+    pub wheelbase_m: f64,
+    /// Maximum absolute forward or reverse speed in meters per second.
+    pub max_speed_m_s: f64,
+    /// Maximum absolute front-wheel steering angle in radians.
+    pub max_steering_rad: f64,
+    /// Maximum speed increase per second in meters per second squared.
+    pub max_acceleration_m_s2: f64,
+    /// Maximum braking or direction-change rate in meters per second squared.
+    pub max_deceleration_m_s2: f64,
+    /// Maximum steering-angle change in radians per second.
+    pub max_steering_rate_rad_s: f64,
+    /// Current signed longitudinal speed in meters per second.
+    pub speed_m_s: f64,
+    /// Current front-wheel steering angle in radians.
+    pub steering_rad: f64,
+    /// Clamped target signed longitudinal speed in meters per second.
+    pub target_speed_m_s: f64,
+    /// Clamped target front-wheel steering angle in radians.
+    pub target_steering_rad: f64,
+}
+
+impl Default for AckermannDrive {
+    fn default() -> Self {
+        Self {
+            wheelbase_m: 2.7,
+            max_speed_m_s: 13.9,
+            max_steering_rad: 0.6,
+            max_acceleration_m_s2: 2.5,
+            max_deceleration_m_s2: 5.0,
+            max_steering_rate_rad_s: 0.8,
+            speed_m_s: 0.0,
+            steering_rad: 0.0,
+            target_speed_m_s: 0.0,
+            target_steering_rad: 0.0,
+        }
+    }
+}
+
+impl AckermannDrive {
+    /// Returns whether all limits and state values are finite and physically valid.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.wheelbase_m,
+            self.max_speed_m_s,
+            self.max_steering_rad,
+            self.max_acceleration_m_s2,
+            self.max_deceleration_m_s2,
+            self.max_steering_rate_rad_s,
+            self.speed_m_s,
+            self.steering_rad,
+            self.target_speed_m_s,
+            self.target_steering_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.wheelbase_m > 0.0
+            && self.max_speed_m_s >= 0.0
+            && self.max_steering_rad >= 0.0
+            && self.max_acceleration_m_s2 >= 0.0
+            && self.max_deceleration_m_s2 >= 0.0
+            && self.max_steering_rate_rad_s >= 0.0
+    }
+}
+
 /// Inertial properties for a link.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Inertial {

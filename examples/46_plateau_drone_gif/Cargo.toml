@@ -8,11 +8,13 @@ publish = false
 image = "0.25"
 png = "0.17"
 rne_assets = { path = "../../crates/rne_assets" }
+rne_core = { path = "../../crates/rne_core" }
 rne_ecs = { path = "../../crates/rne_ecs" }
 rne_math = { path = "../../crates/rne_math" }
 rne_plateau = { path = "../../crates/rne_plateau" }
 rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
+rne_robot = { path = "../../crates/rne_robot" }
 rne_world = { path = "../../crates/rne_world" }
 
 [[example]]

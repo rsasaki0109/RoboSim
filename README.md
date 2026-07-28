@@ -20,11 +20,12 @@ embodied AI, synthetic sensor data, and policy evaluation.
 
 ## PLATEAU city tiles
 
-RNE can convert bounded PLATEAU CityGML building LOD1 data into deterministic
-per-building OBJ meshes, a normal `.rne.scene.toml`, stable `gml:id` metadata,
-and inexpensive fixed collision boxes. The conversion stays outside simulation
-core crates. Example 46 imports a synthetic CC0 tile headlessly and renders a
-drone flying through the resulting city while two cars use the center road.
+RNE can convert bounded PLATEAU CityGML building and road LOD1 data into
+deterministic OBJ meshes, a normal `.rne.scene.toml`, stable `gml:id` metadata,
+fixed building collision boxes, and derived two-way lane centerlines. The
+conversion stays outside simulation core crates. Example 46 imports a synthetic
+CC0 tile headlessly and uses a SimClock-driven Ackermann model to move two cars
+along the imported road while a drone flies through the resulting city.
 
 <p align="center">
   <picture>

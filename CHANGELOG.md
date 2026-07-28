@@ -6,14 +6,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **PLATEAU road traffic realism**: `tran:Road` LOD1 surfaces now become
+  deterministic road meshes and stable derived two-way lane metadata. A bounded
+  SimClock-driven Ackermann model supplies acceleration, braking, steering-rate
+  limits, pure-pursuit control, and explicit invalid-command behavior. Example
+  46 drives both cars from imported lanes with rotating and steering wheels.
 - **PLATEAU import Phase 1**: a ROS2-free offline `rne_plateau` pipeline and
   `rne-plateau-import` CLI convert bounded CityGML building LOD1 solids into
   deterministic per-building OBJ meshes, an ordinary RNE scene, and stable
   `gml:id` metadata. Geographic and projected coordinates map to local-meter
   Y-up space, building AABBs provide inexpensive static headless collision,
   and a synthetic CC0 fixture covers byte-identical replay and scene spawning.
-  Example 46 renders a deterministic drone traversal plus two-way car traffic
-  over an example-authored center road.
+  Example 46 renders a deterministic drone traversal plus two-way car traffic.
 - **Robot Behavior CI Phase 1**: backend-neutral typed `Always`, `Eventually`,
   and `Consecutive` contracts in `rne_ai`; deterministic ascending multi-seed
   execution; first-violation diagnostics with stable entity names; versioned

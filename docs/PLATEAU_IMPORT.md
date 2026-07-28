@@ -2,19 +2,19 @@
 
 RNE imports a bounded PLATEAU CityGML tile offline. PLATEAU-specific XML and
 geospatial types never enter simulation core crates: the converter emits normal
-RNE scene assets, per-building OBJ meshes, and a stable metadata sidecar.
+RNE scene assets, building and road OBJ meshes, and a stable metadata sidecar.
 
-Phase 1 targets `bldg:Building` LOD1 solids from the
-[Project PLATEAU standard product specification](https://www.mlit.go.jp/plateaudocument/).
+The importer targets `bldg:Building` LOD1 solids and `tran:Road` LOD1 surfaces
+from the [Project PLATEAU standard product specification](https://www.mlit.go.jp/plateaudocument/).
 It supports `gml:Polygon` exterior `gml:LinearRing` geometry expressed with
 3D `gml:posList` or `gml:pos` coordinates. Polygon interior rings are rejected
-with a building-specific diagnostic instead of being silently dropped.
+with a feature-specific diagnostic instead of being silently dropped.
 
 ## Convert a tile
 
 ```bash
 cargo run -p rne_plateau_import -- \
-  path/to/533946_bldg_6697_op.gml \
+  path/to/tile.gml \
   --output target/plateau/533946 \
   --tile-name 533946
 ```
@@ -27,6 +27,7 @@ The output contains:
 ├── 533946.plateau.json
 └── meshes/
     ├── plateau_building_0000_<stable-id>.obj
+    ├── plateau_road_0000_<stable-id>.obj
     └── ...
 ```
 
@@ -34,6 +35,12 @@ The JSON sidecar preserves each `gml:id`, name, function, measured height,
 generated entity name and mesh path, local translation, world-space bounds, and
 triangle count. Buildings are sorted by `gml:id`; generated scene, metadata,
 filenames, vertices, and triangle order are deterministic.
+
+Each `tran:Road/lod1MultiSurface` polygon becomes a visual road mesh. For a
+straight surface whose length is at least 1.5 times its width, the importer also
+derives two opposing lane centerlines in stable principal-axis order. These
+lanes are explicitly marked as derived approximations: LOD1 describes the whole
+road boundary and does not provide authoritative lane separation.
 
 ## Coordinates
 
@@ -62,7 +69,8 @@ Each building becomes a fixed RNE object. Its visual uses the generated LOD1
 OBJ, while collision uses a deterministic axis-aligned bounding box. This keeps
 headless physics inexpensive and avoids exposing CityGML or renderer-specific
 types through physics traits. Phase 1 collision follows the LOD1 envelope; it
-does not reproduce concave footprints.
+does not reproduce concave footprints. Road meshes are visual surfaces over the
+scene's fixed ground collider.
 
 The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 
@@ -70,13 +78,15 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 - byte-identical repeated conversion;
 - OBJ loading through the normal RNE mesh pipeline;
 - headless scene spawning with fixed building colliders;
+- deterministic road mesh and opposing-lane derivation;
+- bounded Ackermann commands and 60 Hz SimClock-driven vehicle replay;
 - geographic and projected Y-up coordinate conversion.
 
 ## Drone and traffic traversal GIF
 
 The runnable example converts the synthetic tile, loads it headlessly, then
-renders a deterministic drone path over the buildings while two scripted cars
-travel in opposite directions along the collision-clear center road:
+renders a deterministic drone path over the buildings while two SimClock-driven
+Ackermann cars accelerate, steer, and brake along imported opposing lanes:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
@@ -88,9 +98,11 @@ Set `RNE_SKIP_GPU=1` to run only the conversion and headless load smoke.
 
 ## Phase 1 limits
 
-- Building LOD1 solids only; no road CityGML, terrain, vegetation, textures, or
-  LOD2. The Phase 1 GIF road and cars follow an example-authored route; importing
-  `tran:Road` geometry and deriving vehicle lanes is the next PLATEAU phase.
+- Building solids and road surfaces at LOD1 only; no terrain, vegetation,
+  textures, signals, or LOD2 traffic-area semantics.
+- Derived lanes currently support elongated straight road polygons. Curved
+  centerlines, intersections, and authoritative `tran:TrafficArea` lanes are
+  future work.
 - Exterior polygon rings only.
 - One bounded CityGML file per invocation.
 - Static AABB collision rather than triangle-mesh collision.
