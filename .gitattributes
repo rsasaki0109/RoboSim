@@ -1,1 +1,2 @@
 *.rs text eol=lf
+*.rne.traffic.json text eol=lf

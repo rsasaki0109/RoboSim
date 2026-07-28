@@ -11,6 +11,8 @@ bevy_ecs = { workspace = true }
 rne_core = { path = "../rne_core" }
 rne_ecs = { path = "../rne_ecs" }
 serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }

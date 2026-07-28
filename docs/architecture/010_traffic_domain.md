@@ -111,3 +111,6 @@ Headless execution uses the same steps and is the acceptance path.
   types.
 - Source uncertainty remains observable instead of being hidden by import
   heuristics.
+
+Schema v1 is documented in
+[`docs/TRAFFIC_ASSET.md`](../TRAFFIC_ASSET.md).
