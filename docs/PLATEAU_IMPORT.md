@@ -107,13 +107,17 @@ The runnable example converts the checked-in official Sanjo City 2025 mesh,
 loads 213 buildings and 59 road surfaces headlessly, then renders two textured
 CC0 Kenney sedans accelerating, steering, and braking through a SimClock-driven
 Ackermann model on a derived road pair beside the textured LOD2 Kita-Sanjo
-Station:
+Station. The lead sedan follows a deterministic signalized route: it approaches
+the end of the selected lane, stops before an example-authored stop line while
+the signal is red, starts when the SimClock-driven phase turns green at seven
+seconds, and follows a sampled quadratic curve onto a nearby outgoing PLATEAU
+road whose derived centerline starts 2.94 m from the incoming endpoint:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-It writes the eight-second car-follow `docs/media/plateau-car.gif` animation
+It writes the twelve-second car-follow `docs/media/plateau-car.gif` animation
 and matching reduced-motion PNG. Frames are rasterized at 1280×720 and downsampled to a
 960×540 GIF. A deterministic CPU presentation pass uses the renderer's linear
 depth buffer for atmospheric perspective, replaces empty pixels with a
@@ -128,8 +132,12 @@ deterministically places every building's lowest AABB face on the road datum.
 The source meshes and textures are unchanged. Approximate lane markings are
 example-authored overlays. A low grass-colored ground receiver removes the
 empty-sky gaps between imported surfaces. Concrete sidewalks and curbs follow
-the selected road's derived principal axis and width. CC0 procedural street
-trees, streetlights, and guardrails are sampled at fixed longitudinal
+the selected road's derived principal axis and width. The procedural
+intersection asphalt bridges the small gap between independently derived road
+surfaces; stop and crosswalk markings make the approximation explicit. Two
+signals render the same deterministic red/green phase that gates the Ackermann
+speed command. CC0 procedural street trees, streetlights, and guardrails are
+sampled at fixed longitudinal
 fractions; a candidate is omitted whenever its clearance disc intersects an
 imported building collision AABB. Tests verify stable placement and non-overlap.
 Buildings, streetscape props, and vehicles use the wgpu renderer's
