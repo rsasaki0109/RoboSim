@@ -75,6 +75,12 @@ evaluates the whole candidate population in lock-step with
 `rne_py.VectorizedMobileManipulatorEnv`, advancing every policy with a single batched
 `step` call (each policy's reward is frozen the moment its episode ends).
 
+The mobile-clutter CEM smoke uses a fixed Python RNG seed, one known feasible
+candidate in its initial population, and explicit grasp/place bonuses in its
+optimizer score. Raw episode reward and complete `(reward, grasped, placed)`
+metrics are still replayed twice exactly. This makes CI cross-platform stable
+without allowing a non-grasping approach-only candidate to outrank task success.
+
 Vectorized environments can be checkpointed and restored from Python as JSON, which is
 intended for long training jobs that need deterministic resume:
 
