@@ -2,11 +2,12 @@
 
 RNE imports a bounded PLATEAU CityGML tile offline. PLATEAU-specific XML and
 geospatial types never enter simulation core crates: the converter emits normal
-RNE scene assets, building and road OBJ/MTL meshes, copied textures, and a
-stable metadata sidecar.
+RNE scene assets, a canonical `.rne.traffic.json` network, building and road
+OBJ/MTL meshes, copied textures, and a stable metadata sidecar.
 
 The importer prefers semantic `bldg:Building` LOD2 boundary surfaces, falls back
-to building LOD1 solids, and imports `tran:Road` LOD1 surfaces
+to building LOD1 solids, and imports `tran:Road` LOD1 surfaces plus LOD2/LOD3
+`TrafficArea` and `AuxiliaryTrafficArea` surfaces
 from the [Project PLATEAU LOD2 building specification](https://www.mlit.go.jp/plateaudocument02/tocC/tocC_02/tocC_02_02/).
 It supports `gml:Polygon` exterior `gml:LinearRing` geometry expressed with
 3D `gml:posList` or `gml:pos` coordinates. Untextured polygon interior
@@ -37,6 +38,7 @@ The output contains:
 ```text
 533946/
 ├── 533946.rne.scene.toml
+├── 533946.rne.traffic.json
 ├── 533946.plateau.json
 ├── meshes/
     ├── plateau_building_0000_<stable-id>.obj
@@ -47,7 +49,7 @@ The output contains:
     └── appearance_0000.png
 ```
 
-The JSON sidecar preserves each `gml:id`, name, function, measured height,
+The JSON sidecar preserves each `gml:id`, name, class, every function, measured height,
 generated entity name and mesh path, LOD, semantic surface counts, texture
 paths, local translation, world-space bounds, and triangle count. Buildings are
 sorted by `gml:id`; generated scene, metadata,
@@ -58,6 +60,46 @@ straight surface whose length is at least 1.5 times its width, the importer also
 derives two opposing lane centerlines in stable principal-axis order. These
 lanes are explicitly marked as derived approximations: LOD1 describes the whole
 road boundary and does not provide authoritative lane separation.
+
+## Road semantics
+
+When a road contains inline `tran:TrafficArea` or
+`tran:AuxiliaryTrafficArea`, the importer selects `lod3MultiSurface` before
+`lod2MultiSurface`, preserves each area's `gml:id`, direct `tran:class`, and all
+direct `tran:function` codes, and builds the road mesh from those non-overlapping
+semantic surfaces. Road-level class and function codes are read only from direct
+children, so an area's function cannot be mistaken for the containing road's
+function.
+
+The mapping follows the official PLATEAU
+[`TrafficArea_function.xml`](https://www.mlit.go.jp/plateaudocument/toc4/toc4_03/toc4_03_04/toc4_03_04_01/_trafficarea_function_xml/)
+definitions:
+
+| LOD | Code | Meaning | RNE import |
+|-----|------|---------|------------|
+| 2 / 3.0 | `1000` | carriageway | two opposing derived driving lanes |
+| 2 / 3.x | `1020` | carriageway intersection | semantic area preserved; topology deferred |
+| 2 / 3.x | `2000` | sidewalk area | one derived bicycle/pedestrian path |
+| 3.1 | `1010` | explicit vehicle lane | one derived driving centerline |
+
+For LOD2 and LOD3.1, auxiliary code `3000` represents an island, median, or
+tram stop island according to the official
+[`AuxiliaryTrafficArea_function.xml`](https://www.mlit.go.jp/plateaudocument/toc4/toc4_03/toc4_03_04/toc4_03_04_01/AuxiliaryTrafficArea_function_xml/).
+It is preserved in metadata and mesh geometry but is not emitted as a
+traversable lane.
+
+PLATEAU's [LOD3.1 road definition](https://www.mlit.go.jp/plateaudocument/toc4/toc4_03/toc4_03_01/toc4_03_01_04/%E4%BA%A4%E9%80%9A%E9%81%93%E8%B7%AF%E3%83%A2%E3%83%87%E3%83%AB_lod3_1%E3%81%AE%E5%AE%9A%E7%BE%A9_/)
+states that code `1010` separates vehicle lanes. The polygon is
+source-authoritative, but PLATEAU CityGML does not provide the travel direction
+used by RNE. Therefore the emitted centerline, width, and canonical
+principal-axis direction remain `derived` with `heuristic` accuracy and a
+human-readable method. Road and area raw codes remain available in the PLATEAU
+metadata sidecar. No inferred value is labeled authoritative.
+
+The traffic file is validated and serialized by `rne_traffic` schema v1.
+Network and lane IDs are namespaced by the sanitized `--tile-name`, all
+geometry is in the same local `map` frame as the scene, and repeated imports of
+identical input are byte-identical.
 
 ## Coordinates
 
@@ -94,10 +136,13 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 
 - stable `gml:id` ordering and metadata;
 - byte-identical repeated conversion;
+- byte-identical `.rne.traffic.json` output and schema validation;
 - OBJ loading through the normal RNE mesh pipeline;
 - LOD2 semantic surface counts, UV preservation, and Appearance texture decoding;
 - headless scene spawning with fixed building colliders;
 - deterministic road mesh and opposing-lane derivation;
+- road-level class/function preservation, LOD2 traffic/auxiliary areas, and
+  LOD3.1 code-`1010` lane extraction;
 - bounded Ackermann commands and 60 Hz SimClock-driven vehicle replay;
 - geographic and projected Y-up coordinate conversion.
 
@@ -163,13 +208,13 @@ classification begins at LOD2.
 ## Phase 1 limits
 
 - Building LOD1 solids and LOD2 boundary surfaces are supported; terrain,
-  vegetation, signals, `GeoreferencedTexture`, and LOD2 traffic-area semantics
-  are not.
+  vegetation, signals, and `GeoreferencedTexture` are not.
 - Appearance support is limited to polygon-targeted `ParameterizedTexture`
   PNG/JPEG images with one exterior-ring UV list.
-- Derived lanes currently support elongated straight road polygons. Curved
-  centerlines, intersections, and authoritative `tran:TrafficArea` lanes are
-  future work.
+- Derived centerlines currently support elongated road/traffic-area polygons.
+  Curved centerlines, tile stitching, intersections, and travel-direction
+  attribution are handled by the topology phase rather than the semantic
+  reader.
 - Interior rings are supported for untextured polygons.
 - One bounded CityGML file per invocation.
 - Static AABB collision rather than triangle-mesh collision.

@@ -10,7 +10,7 @@ routes. The first stage is deliberately split into five reviewable PRs:
 |-------|------|-------------|--------|
 | A | Architecture | `rne_traffic` ownership, dependency boundary, deterministic ECS foundation | Done |
 | B | Asset | `.rne.traffic.json` schema v1 with stable IDs, provenance, lanes, junctions, connections, signals, and byte-identical golden output | Done |
-| C | PLATEAU | Import road class/function, LOD2 `TrafficArea`/`AuxiliaryTrafficArea`, and LOD3.1 lane semantics | Pending |
+| C | PLATEAU | Import road class/function, LOD2 `TrafficArea`/`AuxiliaryTrafficArea`, and LOD3.1 lane semantics | Done |
 | D | Topology | Deterministic tile stitching, junction classification, turn curves, grade separation, and conflict relationships | Pending |
 | E | Runtime / Demo | Headless routing, signals, turns, multi-vehicle replay; migrate example 46 and publish GIF/README media | Pending |
 
