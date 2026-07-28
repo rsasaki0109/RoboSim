@@ -104,3 +104,4 @@ pyo3 = { version = "0.23", features = ["abi3-py39"] }
 roxmltree = "0.20"
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+earcutr = "0.5"

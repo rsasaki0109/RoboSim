@@ -227,9 +227,15 @@ enum BuildingSurface {
 #[derive(Clone, Debug, PartialEq)]
 struct ParsedBuildingPolygon {
     polygon_id: Option<String>,
-    points: Vec<SourcePoint>,
+    geometry: ParsedPolygon,
     surface: BuildingSurface,
     texture: Option<TextureBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ParsedPolygon {
+    exterior: Vec<SourcePoint>,
+    interiors: Vec<Vec<SourcePoint>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,7 +249,7 @@ struct ParsedRoad {
     id: String,
     name: Option<String>,
     function: Option<String>,
-    polygons: Vec<Vec<SourcePoint>>,
+    polygons: Vec<ParsedPolygon>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -304,6 +310,12 @@ struct GeneratedBuilding {
 struct GeneratedRoad {
     metadata: RoadMetadata,
     obj: String,
+}
+
+#[derive(Clone, Debug)]
+struct LocalPolygon {
+    exterior: Vec<[f64; 3]>,
+    interiors: Vec<Vec<[f64; 3]>>,
 }
 
 /// Imports a CityGML file and writes deterministic RNE assets into `output_dir`.
@@ -620,19 +632,28 @@ fn parse_buildings(
                     .find(|attribute| attribute.name() == "id")
                     .map(|attribute| attribute.value().trim().to_owned())
                     .filter(|value| !value.is_empty());
-                let points = parse_polygon(polygon, &id)?;
+                let geometry = parse_polygon(polygon, &id)?;
                 let texture = polygon_id
                     .as_ref()
                     .and_then(|polygon_id| appearances.get(polygon_id))
                     .cloned();
                 if let Some(texture) = &texture {
-                    if texture.texcoords.len() != points.len() {
+                    if !geometry.interiors.is_empty() {
+                        return Err(ImportError::InvalidTexture {
+                            uri: texture.image_uri.clone(),
+                            message: format!(
+                                "textured polygon #{} has unsupported interior rings",
+                                polygon_id.as_deref().unwrap_or_default()
+                            ),
+                        });
+                    }
+                    if texture.texcoords.len() != geometry.exterior.len() {
                         return Err(ImportError::InvalidTexture {
                             uri: texture.image_uri.clone(),
                             message: format!(
                                 "polygon #{} has {} vertices but {} UV pairs",
                                 polygon_id.as_deref().unwrap_or_default(),
-                                points.len(),
+                                geometry.exterior.len(),
                                 texture.texcoords.len()
                             ),
                         });
@@ -640,7 +661,7 @@ fn parse_buildings(
                 }
                 polygons.push(ParsedBuildingPolygon {
                     polygon_id,
-                    points,
+                    geometry,
                     surface: building_surface(polygon),
                     texture,
                 });
@@ -721,16 +742,7 @@ fn parse_roads(document: &Document<'_>) -> Result<Vec<ParsedRoad>, ImportError> 
     Ok(roads)
 }
 
-fn parse_polygon(polygon: Node<'_, '_>, feature_id: &str) -> Result<Vec<SourcePoint>, ImportError> {
-    if polygon
-        .descendants()
-        .any(|node| node.is_element() && node.tag_name().name() == "interior")
-    {
-        return Err(ImportError::UnsupportedGeometry {
-            feature_id: feature_id.into(),
-            message: "polygon interior rings are not supported in Phase 1".into(),
-        });
-    }
+fn parse_polygon(polygon: Node<'_, '_>, feature_id: &str) -> Result<ParsedPolygon, ImportError> {
     let exterior = polygon
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "exterior")
@@ -738,13 +750,35 @@ fn parse_polygon(polygon: Node<'_, '_>, feature_id: &str) -> Result<Vec<SourcePo
             feature_id: feature_id.into(),
             message: "polygon has no exterior ring".into(),
         })?;
-    let ring = exterior
+    let exterior_ring = exterior
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "LinearRing")
         .ok_or_else(|| ImportError::UnsupportedGeometry {
             feature_id: feature_id.into(),
             message: "polygon exterior has no LinearRing".into(),
         })?;
+    let exterior = parse_ring(exterior_ring, feature_id)?;
+    let mut interiors = Vec::new();
+    for interior in polygon
+        .children()
+        .filter(|node| node.is_element() && node.tag_name().name() == "interior")
+    {
+        let ring = interior
+            .descendants()
+            .find(|node| node.is_element() && node.tag_name().name() == "LinearRing")
+            .ok_or_else(|| ImportError::UnsupportedGeometry {
+                feature_id: feature_id.into(),
+                message: "polygon interior has no LinearRing".into(),
+            })?;
+        interiors.push(parse_ring(ring, feature_id)?);
+    }
+    Ok(ParsedPolygon {
+        exterior,
+        interiors,
+    })
+}
+
+fn parse_ring(ring: Node<'_, '_>, feature_id: &str) -> Result<Vec<SourcePoint>, ImportError> {
     let mut points = if let Some(pos_list) = ring
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "posList")
@@ -876,12 +910,24 @@ fn resolve_coordinate_mode(requested: CoordinateMode, crs: Option<&str>) -> Coor
 fn default_origin(buildings: &[ParsedBuilding], roads: &[ParsedRoad]) -> SourceOrigin {
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
-    for point in buildings
-        .iter()
-        .flat_map(|building| building.polygons.iter())
-        .flat_map(|polygon| polygon.points.iter())
-        .chain(roads.iter().flat_map(|road| road.polygons.iter()).flatten())
-    {
+    let building_points = buildings.iter().flat_map(|building| {
+        building.polygons.iter().flat_map(|polygon| {
+            polygon
+                .geometry
+                .exterior
+                .iter()
+                .chain(polygon.geometry.interiors.iter().flatten())
+        })
+    });
+    let road_points = roads.iter().flat_map(|road| {
+        road.polygons.iter().flat_map(|polygon| {
+            polygon
+                .exterior
+                .iter()
+                .chain(polygon.interiors.iter().flatten())
+        })
+    });
+    for point in building_points.chain(road_points) {
         min[0] = min[0].min(point.first_deg_or_m);
         min[1] = min[1].min(point.second_deg_or_m);
         min[2] = min[2].min(point.height_m);
@@ -975,18 +1021,37 @@ fn generate_building(
     origin: SourceOrigin,
     texture_paths: &BTreeMap<String, String>,
 ) -> Result<GeneratedBuilding, ImportError> {
-    let local_polygons: Vec<Vec<[f64; 3]>> = building
+    let local_polygons: Vec<LocalPolygon> = building
         .polygons
         .iter()
         .map(|polygon| {
-            polygon
-                .points
+            let exterior = polygon
+                .geometry
+                .exterior
                 .iter()
                 .map(|point| source_to_local(*point, mode, origin))
-                .collect()
+                .collect();
+            let interiors = polygon
+                .geometry
+                .interiors
+                .iter()
+                .map(|ring| {
+                    ring.iter()
+                        .map(|point| source_to_local(*point, mode, origin))
+                        .collect()
+                })
+                .collect();
+            LocalPolygon {
+                exterior,
+                interiors,
+            }
         })
         .collect();
-    let (bounds_min_m, bounds_max_m) = bounds(&local_polygons);
+    let exterior_polygons: Vec<_> = local_polygons
+        .iter()
+        .map(|polygon| polygon.exterior.clone())
+        .collect();
+    let (bounds_min_m, bounds_max_m) = bounds(&exterior_polygons);
     let translation_m = [
         (bounds_min_m[0] + bounds_max_m[0]) * 0.5,
         (bounds_min_m[1] + bounds_max_m[1]) * 0.5,
@@ -1031,7 +1096,13 @@ fn generate_building(
     for (polygon_index, polygon) in local_polygons.iter().enumerate() {
         let parsed_polygon = &building.polygons[polygon_index];
         *surface_counts.entry(parsed_polygon.surface).or_insert(0) += 1;
-        for point in polygon {
+        let points: Vec<_> = polygon
+            .exterior
+            .iter()
+            .chain(polygon.interiors.iter().flatten())
+            .copied()
+            .collect();
+        for point in &points {
             obj.push_str(&format!(
                 "v {:.6} {:.6} {:.6}\n",
                 clean_zero(point[0] - translation_m[0]),
@@ -1044,7 +1115,7 @@ fn generate_building(
                 .texture
                 .as_ref()
                 .map(|texture| texture.texcoords.as_slice());
-            for vertex_index in 0..polygon.len() {
+            for vertex_index in 0..points.len() {
                 let texcoord = texcoords
                     .map(|texcoords| texcoords[vertex_index])
                     .unwrap_or([0.0, 0.0]);
@@ -1070,8 +1141,8 @@ fn generate_building(
                 ));
             }
         }
-        let triangles =
-            triangulate_polygon(polygon).map_err(|message| ImportError::UnsupportedGeometry {
+        let triangles = triangulate_polygon_with_holes(&polygon.exterior, &polygon.interiors)
+            .map_err(|message| ImportError::UnsupportedGeometry {
                 feature_id: building.id.clone(),
                 message,
             })?;
@@ -1091,7 +1162,7 @@ fn generate_building(
             }
             triangle_count += 1;
         }
-        vertex_count += polygon.len();
+        vertex_count += points.len();
     }
 
     Ok(GeneratedBuilding {
@@ -1135,17 +1206,35 @@ fn generate_road(
     mode: CoordinateMode,
     origin: SourceOrigin,
 ) -> Result<GeneratedRoad, ImportError> {
-    let local_polygons: Vec<Vec<[f64; 3]>> = road
+    let local_polygons: Vec<LocalPolygon> = road
         .polygons
         .iter()
         .map(|polygon| {
-            polygon
+            let exterior = polygon
+                .exterior
                 .iter()
                 .map(|point| source_to_local(*point, mode, origin))
-                .collect()
+                .collect();
+            let interiors = polygon
+                .interiors
+                .iter()
+                .map(|ring| {
+                    ring.iter()
+                        .map(|point| source_to_local(*point, mode, origin))
+                        .collect()
+                })
+                .collect();
+            LocalPolygon {
+                exterior,
+                interiors,
+            }
         })
         .collect();
-    let (bounds_min_m, bounds_max_m) = bounds(&local_polygons);
+    let exterior_polygons: Vec<_> = local_polygons
+        .iter()
+        .map(|polygon| polygon.exterior.clone())
+        .collect();
+    let (bounds_min_m, bounds_max_m) = bounds(&exterior_polygons);
     let safe_id = sanitize_component(&road.id);
     let entity_name = format!("plateau_road_{index:04}_{safe_id}");
     let mesh_path = format!("meshes/{entity_name}.obj");
@@ -1154,7 +1243,13 @@ fn generate_road(
     let mut triangle_count = 0_usize;
     let mut lanes = Vec::new();
     for (polygon_index, polygon) in local_polygons.iter().enumerate() {
-        for point in polygon {
+        let points: Vec<_> = polygon
+            .exterior
+            .iter()
+            .chain(polygon.interiors.iter().flatten())
+            .copied()
+            .collect();
+        for point in &points {
             obj.push_str(&format!(
                 "v {:.6} {:.6} {:.6}\n",
                 clean_zero(point[0]),
@@ -1162,15 +1257,15 @@ fn generate_road(
                 clean_zero(point[2])
             ));
         }
-        let triangles =
-            triangulate_polygon(polygon).map_err(|message| ImportError::UnsupportedGeometry {
+        let triangles = triangulate_polygon_with_holes(&polygon.exterior, &polygon.interiors)
+            .map_err(|message| ImportError::UnsupportedGeometry {
                 feature_id: road.id.clone(),
                 message,
             })?;
         for mut triangle in triangles {
-            let a = polygon[triangle[0]];
-            let b = polygon[triangle[1]];
-            let c = polygon[triangle[2]];
+            let a = points[triangle[0]];
+            let b = points[triangle[1]];
+            let c = points[triangle[2]];
             let normal_y = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
             if normal_y < 0.0 {
                 triangle.swap(1, 2);
@@ -1183,8 +1278,12 @@ fn generate_road(
             ));
             triangle_count += 1;
         }
-        vertex_count += polygon.len();
-        lanes.extend(derive_two_way_lanes(polygon, &road.id, polygon_index));
+        vertex_count += points.len();
+        lanes.extend(derive_two_way_lanes(
+            &polygon.exterior,
+            &road.id,
+            polygon_index,
+        ));
     }
 
     Ok(GeneratedRoad {
@@ -1366,7 +1465,50 @@ fn triangulate_polygon(points: &[[f64; 3]]) -> Result<Vec<[usize; 3]>, String> {
     Ok(triangles)
 }
 
+fn triangulate_polygon_with_holes(
+    exterior: &[[f64; 3]],
+    interiors: &[Vec<[f64; 3]>],
+) -> Result<Vec<[usize; 3]>, String> {
+    if interiors.is_empty() {
+        return triangulate_polygon(exterior);
+    }
+    let drop_axis = polygon_drop_axis(exterior)?;
+    let mut coordinates = Vec::new();
+    let mut hole_indices = Vec::with_capacity(interiors.len());
+    let mut vertex_count = 0;
+    for (ring_index, ring) in std::iter::once(exterior)
+        .chain(interiors.iter().map(Vec::as_slice))
+        .enumerate()
+    {
+        if ring_index > 0 {
+            hole_indices.push(vertex_count);
+        }
+        for point in ring {
+            let projected = project_point(*point, drop_axis);
+            coordinates.extend(projected);
+            vertex_count += 1;
+        }
+    }
+    let indices = earcutr::earcut(&coordinates, &hole_indices, 2)
+        .map_err(|error| format!("polygon with interior rings cannot be triangulated: {error}"))?;
+    if indices.is_empty() || !indices.len().is_multiple_of(3) {
+        return Err("polygon with interior rings produced no complete triangles".into());
+    }
+    Ok(indices
+        .chunks_exact(3)
+        .map(|triangle| [triangle[0], triangle[1], triangle[2]])
+        .collect())
+}
+
 fn project_polygon(points: &[[f64; 3]]) -> Result<Vec<[f64; 2]>, String> {
+    let drop_axis = polygon_drop_axis(points)?;
+    Ok(points
+        .iter()
+        .map(|point| project_point(*point, drop_axis))
+        .collect())
+}
+
+fn polygon_drop_axis(points: &[[f64; 3]]) -> Result<usize, String> {
     let mut normal = [0.0; 3];
     for index in 0..points.len() {
         let current = points[index];
@@ -1389,14 +1531,15 @@ fn project_polygon(points: &[[f64; 3]]) -> Result<Vec<[f64; 2]>, String> {
     if normal[drop_axis].abs() <= EPSILON {
         return Err("polygon has no stable plane normal".into());
     }
-    Ok(points
-        .iter()
-        .map(|point| match drop_axis {
-            0 => [point[1], point[2]],
-            1 => [point[0], point[2]],
-            _ => [point[0], point[1]],
-        })
-        .collect())
+    Ok(drop_axis)
+}
+
+fn project_point(point: [f64; 3], drop_axis: usize) -> [f64; 2] {
+    match drop_axis {
+        0 => [point[1], point[2]],
+        1 => [point[0], point[2]],
+        _ => [point[0], point[1]],
+    }
 }
 
 fn signed_area(points: &[[f64; 2]]) -> f64 {
@@ -1583,13 +1726,13 @@ mod tests {
     }
 
     #[test]
-    fn polygon_holes_are_rejected_with_feature_id() {
+    fn polygon_holes_are_parsed_and_triangulated_deterministically() {
         let xml = r#"
             <CityModel xmlns:gml="urn:gml" xmlns:bldg="urn:bldg">
               <bldg:Building gml:id="with-hole">
                 <bldg:lod1Solid><gml:Solid><gml:Polygon>
                   <gml:exterior><gml:LinearRing><gml:posList>
-                    0 0 0 1 0 0 1 1 0 0 0 0
+                    0 0 0 1 0 0 1 1 0 0 1 0 0 0 0
                   </gml:posList></gml:LinearRing></gml:exterior>
                   <gml:interior><gml:LinearRing><gml:posList>
                     0.2 0.2 0 0.4 0.2 0 0.2 0.4 0 0.2 0.2 0
@@ -1599,11 +1742,29 @@ mod tests {
             </CityModel>
         "#;
         let document = Document::parse(xml).expect("test XML");
-        let error = parse_buildings(&document, &HashMap::new()).expect_err("hole should fail");
-        assert!(matches!(
-            error,
-            ImportError::UnsupportedGeometry { feature_id, .. } if feature_id == "with-hole"
-        ));
+        let buildings = parse_buildings(&document, &HashMap::new()).expect("parse hole");
+        let geometry = &buildings[0].polygons[0].geometry;
+        assert_eq!(geometry.exterior.len(), 4);
+        assert_eq!(geometry.interiors.len(), 1);
+        let exterior: Vec<_> = geometry
+            .exterior
+            .iter()
+            .map(|point| [point.first_deg_or_m, point.height_m, point.second_deg_or_m])
+            .collect();
+        let interiors: Vec<Vec<_>> = geometry
+            .interiors
+            .iter()
+            .map(|ring| {
+                ring.iter()
+                    .map(|point| [point.first_deg_or_m, point.height_m, point.second_deg_or_m])
+                    .collect()
+            })
+            .collect();
+        let first = triangulate_polygon_with_holes(&exterior, &interiors).expect("triangulate");
+        let second =
+            triangulate_polygon_with_holes(&exterior, &interiors).expect("repeat triangulation");
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 7);
     }
 
     #[test]

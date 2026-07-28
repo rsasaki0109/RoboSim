@@ -1,7 +1,10 @@
-//! Imports a synthetic PLATEAU tile and renders drone and car traversal GIFs.
+//! Imports official PLATEAU data for Kita-Sanjo Station and renders a car traversal GIF.
 
 use png::{BitDepth, ColorType, Encoder};
-use rne_assets::{load_scene_bundle, mesh_package_roots, spawn_scene_bundle, SpawnSceneOptions};
+use rne_assets::{
+    load_scene_bundle, mesh_package_roots, spawn_scene_bundle, SceneAssetBundle,
+    SceneCollisionAsset, SpawnSceneOptions,
+};
 use rne_core::{SimClock, SimDuration};
 use rne_ecs::{spawn_named, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
@@ -17,13 +20,18 @@ use std::path::{Path, PathBuf};
 
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
-const DRONE_FRAME_COUNT: usize = 48;
 const CAR_FRAME_COUNT: usize = 96;
 const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
-const MAX_STATIC_SCENE_ITEMS: usize = 210;
+const MAX_STATIC_SCENE_ITEMS: usize = 400;
+const SANJO_ORIGIN: SourceOrigin = SourceOrigin {
+    first_deg_or_m: 37.631_938_029_139_7,
+    second_deg_or_m: 138.955_122_347_658_72,
+    height_m: 0.0,
+};
+const KITA_SANJO_STATION_XZ_M: [f64; 2] = [59.46, -77.17];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct VehicleFrame {
@@ -33,6 +41,7 @@ struct VehicleFrame {
     wheel_rotation_rad: f64,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 struct ShowcaseBuilding {
     id: &'static str,
@@ -44,6 +53,7 @@ struct ShowcaseBuilding {
     height_m: f64,
 }
 
+#[cfg(test)]
 const SHOWCASE_BUILDINGS: [ShowcaseBuilding; 10] = [
     ShowcaseBuilding {
         id: "showcase-west-01",
@@ -139,51 +149,62 @@ const SHOWCASE_BUILDINGS: [ShowcaseBuilding; 10] = [
 
 fn main() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let generated_dir = repo_root.join("target/plateau-city-drive-demo");
-    let source_dir = generated_dir.join("source");
-    let appearance_dir = source_dir.join("appearance");
-    fs::create_dir_all(&appearance_dir).expect("create synthetic PLATEAU source directory");
-    let citygml = showcase_citygml();
-    let citygml_path = source_dir.join("synthetic_plateau_drive_showcase.gml");
-    fs::write(&citygml_path, citygml).expect("write synthetic PLATEAU CityGML");
-    write_facade_texture(&appearance_dir.join("facade.png"));
-    let result = import_citygml_file(
-        &citygml_path,
-        &generated_dir,
+    let generated_dir = repo_root.join("target/plateau-sanjo-drive-demo");
+    let source_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/sanjo_2025");
+    let buildings = import_citygml_file(
+        &source_dir.join("56383756_bldg_6697.gml"),
+        &generated_dir.join("buildings"),
         &ImportOptions {
-            tile_name: "plateau-city-drive".into(),
-            coordinate_mode: CoordinateMode::ProjectedMeters,
-            origin: Some(SourceOrigin {
-                first_deg_or_m: 0.0,
-                second_deg_or_m: 0.0,
-                height_m: 0.0,
-            }),
+            tile_name: "sanjo-buildings".into(),
+            coordinate_mode: CoordinateMode::GeographicDegrees,
+            origin: Some(SANJO_ORIGIN),
             world_seed: 46,
             ..ImportOptions::default()
         },
     )
-    .expect("import synthetic PLATEAU tile");
-    let bundle = load_scene_bundle(&result.scene_path).expect("load generated PLATEAU scene");
+    .expect("import official PLATEAU building tile");
+    let roads = import_citygml_file(
+        &source_dir.join("56383756_tran_6697.gml"),
+        &generated_dir.join("roads"),
+        &ImportOptions {
+            tile_name: "sanjo-roads".into(),
+            coordinate_mode: CoordinateMode::GeographicDegrees,
+            origin: Some(SANJO_ORIGIN),
+            world_seed: 46,
+            ..ImportOptions::default()
+        },
+    )
+    .expect("import official PLATEAU road tile");
+    let mut building_bundle =
+        load_scene_bundle(&buildings.scene_path).expect("load generated PLATEAU buildings");
+    let road_bundle = load_scene_bundle(&roads.scene_path).expect("load generated PLATEAU roads");
+    flatten_buildings_to_road_datum(&mut building_bundle);
     let mut world = World::new();
-    spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())
-        .expect("spawn generated PLATEAU scene headlessly");
-    assert_eq!(result.building_count, 10);
-    assert_eq!(result.lod2_building_count, 10);
-    assert_eq!(result.textured_surface_count, 40);
-    assert_eq!(result.road_count, 1);
-    assert_eq!(result.lane_count, 2);
-    assert_eq!(bundle.scene.objects.len(), 11);
+    spawn_scene_bundle(
+        &mut world,
+        &building_bundle,
+        None,
+        SpawnSceneOptions::default(),
+    )
+    .expect("spawn generated PLATEAU buildings headlessly");
+    spawn_scene_bundle(&mut world, &road_bundle, None, SpawnSceneOptions::default())
+        .expect("spawn generated PLATEAU roads headlessly");
+    assert_eq!(buildings.building_count, 213);
+    assert_eq!(buildings.lod2_building_count, 1);
+    assert_eq!(buildings.textured_surface_count, 37);
+    assert_eq!(roads.road_count, 59);
+    assert_eq!(roads.lane_count, 84);
+    let showcase_lanes = select_station_road_lanes(&roads.lanes);
     let (primary_traffic, opposing_traffic) =
-        simulate_two_way_traffic(&result.lanes, CAR_FRAME_COUNT);
+        simulate_two_way_traffic(&showcase_lanes, CAR_FRAME_COUNT);
     println!(
-        "PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={} scene={}",
-        result.building_count,
-        result.lod2_building_count,
-        result.textured_surface_count,
-        result.road_count,
-        result.lane_count,
-        result.triangle_count,
-        result.scene_path.display()
+        "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={}",
+        buildings.building_count,
+        buildings.lod2_building_count,
+        buildings.textured_surface_count,
+        roads.road_count,
+        roads.lane_count,
+        buildings.triangle_count + roads.triangle_count,
     );
 
     if std::env::var("RNE_SKIP_GPU").is_ok() {
@@ -206,65 +227,21 @@ fn main() {
     fs::create_dir_all(&media_dir).expect("create media directory");
 
     let mut city_scene = render_scene_from_world(&mut world);
-    let mesh_roots = mesh_package_roots(&bundle);
+    let mut mesh_roots = mesh_package_roots(&building_bundle);
+    mesh_roots.extend(mesh_package_roots(&road_bundle));
     let root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
     city_scene
         .resolve_mesh_assets_with_roots(&root_refs)
         .expect("resolve generated PLATEAU meshes");
-    append_city_streetscape(&mut city_scene);
+    append_nearby_sun_shadows(&mut city_scene, &building_bundle);
+    append_lane_markings(&mut city_scene, &showcase_lanes);
 
     assert!(
         city_scene.items.len() <= MAX_STATIC_SCENE_ITEMS,
-        "cinematic streetscape leaves insufficient room for moving actors"
+        "PLATEAU scene leaves insufficient room for moving actors"
     );
     let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
-    camera.far_m = 140.0;
-    let orbit = CameraOrbit {
-        focus: Vec3::new(0.0, 8.5, 0.0),
-        yaw_rad: -0.80,
-        pitch_rad: 0.91,
-        distance_m: 42.0,
-    };
-    for frame in 0..DRONE_FRAME_COUNT {
-        let progress = frame as f64 / (DRONE_FRAME_COUNT - 1) as f64;
-        let drone_position = drone_position(progress);
-        let traffic_index = frame * (CAR_FRAME_COUNT - 1) / (DRONE_FRAME_COUNT - 1);
-        let mut scene = city_scene.clone();
-        append_flight_path(&mut scene, progress);
-        append_traffic(
-            &mut scene,
-            primary_traffic[traffic_index],
-            opposing_traffic[traffic_index],
-        );
-        append_drone(&mut scene, drone_position, progress);
-        let output = backend
-            .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
-            .expect("render PLATEAU drone frame");
-        let presented = cinematic_postprocess(
-            &output.color.rgba8,
-            &output.depth.depth_m,
-            output.color.width,
-            output.color.height,
-            camera.far_m as f32,
-        );
-        write_png(
-            &frames_dir.join(format!("frame-{frame:03}.png")),
-            &presented,
-            output.color.width,
-            output.color.height,
-        )
-        .expect("write PLATEAU drone frame");
-    }
-
-    let gif_path = media_dir.join("plateau-drone.gif");
-    build_gif(&frames_dir, &gif_path).expect("encode PLATEAU drone GIF");
-    image::open(frames_dir.join("frame-040.png"))
-        .expect("read PLATEAU poster frame")
-        .save(media_dir.join("plateau-drone.png"))
-        .expect("write PLATEAU poster");
-    fs::remove_dir_all(&frames_dir).expect("remove PLATEAU frame directory");
-
-    fs::create_dir_all(&frames_dir).expect("create PLATEAU car frames");
+    camera.far_m = 280.0;
     for frame in 0..CAR_FRAME_COUNT {
         let primary = primary_traffic[frame];
         let mut scene = city_scene.clone();
@@ -296,12 +273,85 @@ fn main() {
         .expect("write PLATEAU car poster");
     fs::remove_dir_all(&frames_dir).expect("remove PLATEAU car frame directory");
     println!(
-        "rendered PLATEAU drone and car media to {} and {}",
-        gif_path.display(),
+        "rendered official PLATEAU car media to {}",
         car_gif_path.display()
     );
 }
 
+fn flatten_buildings_to_road_datum(bundle: &mut SceneAssetBundle) {
+    for object in &mut bundle.scene.objects {
+        if !object.name.starts_with("plateau_building_") {
+            continue;
+        }
+        let Some(SceneCollisionAsset::Box { size_m }) = object.collision else {
+            continue;
+        };
+        object.translation_m[1] = size_m[1] * 0.5;
+    }
+}
+
+fn append_nearby_sun_shadows(scene: &mut RenderScene, bundle: &SceneAssetBundle) {
+    let mut buildings: Vec<_> = bundle
+        .scene
+        .objects
+        .iter()
+        .filter_map(|object| {
+            let SceneCollisionAsset::Box { size_m } = object.collision? else {
+                return None;
+            };
+            let dx = object.translation_m[0] - KITA_SANJO_STATION_XZ_M[0];
+            let dz = object.translation_m[2] - KITA_SANJO_STATION_XZ_M[1];
+            Some((dx * dx + dz * dz, object, size_m))
+        })
+        .collect();
+    buildings.sort_by(|left, right| left.0.total_cmp(&right.0));
+    for (_, building, size_m) in buildings.into_iter().take(42) {
+        let height_m = size_m[1];
+        push_box(
+            scene,
+            Vec3::new(
+                building.translation_m[0] - height_m * 0.24,
+                0.04,
+                building.translation_m[2] - height_m * 0.16,
+            ),
+            Quat::from_rotation_y(building.rotation_rpy_rad[1]),
+            Vec3::new(
+                size_m[0] + height_m * 0.48,
+                0.025,
+                size_m[2] + height_m * 0.32,
+            ),
+            [0.075, 0.095, 0.105, 1.0],
+        );
+    }
+}
+
+fn append_lane_markings(scene: &mut RenderScene, lanes: &[ImportedLane]) {
+    let start = (Vec3::from_array(lanes[0].centerline_m[0])
+        + Vec3::from_array(lanes[1].centerline_m[1]))
+        * 0.5;
+    let end = (Vec3::from_array(lanes[0].centerline_m[1])
+        + Vec3::from_array(lanes[1].centerline_m[0]))
+        * 0.5;
+    let direction = (end - start).normalize_or_zero();
+    let length_m = (end - start).length();
+    let yaw_rad = -direction.z.atan2(direction.x);
+    let dash_length_m = 3.2;
+    let dash_period_m = 7.0;
+    let dash_count = (length_m / dash_period_m).floor() as usize;
+    for index in 0..dash_count {
+        let distance_m = index as f64 * dash_period_m + dash_length_m * 0.5;
+        let center = start + direction * distance_m;
+        push_box(
+            scene,
+            Vec3::new(center.x, 0.075, center.z),
+            Quat::from_rotation_y(yaw_rad),
+            Vec3::new(dash_length_m, 0.018, 0.11),
+            [0.82, 0.80, 0.69, 1.0],
+        );
+    }
+}
+
+#[cfg(test)]
 fn write_facade_texture(path: &Path) {
     const SIZE: u32 = 384;
     let image = image::RgbaImage::from_fn(SIZE, SIZE, |x, y| {
@@ -328,6 +378,7 @@ fn write_facade_texture(path: &Path) {
         .expect("write procedural CC0 facade texture");
 }
 
+#[cfg(test)]
 fn showcase_citygml() -> String {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -384,6 +435,7 @@ fn showcase_citygml() -> String {
     xml
 }
 
+#[cfg(test)]
 fn append_showcase_building(xml: &mut String, building: ShowcaseBuilding) {
     let x0 = building.x_min_m;
     let x1 = building.x_max_m;
@@ -433,6 +485,7 @@ fn render_scene_from_world(world: &mut World) -> RenderScene {
     scene
 }
 
+#[cfg(test)]
 fn append_city_streetscape(scene: &mut RenderScene) {
     scene.items.push(RenderSceneItem {
         transform: MathTransform3 {
@@ -538,6 +591,7 @@ fn append_city_streetscape(scene: &mut RenderScene) {
     }
 }
 
+#[cfg(test)]
 fn append_streetlight(scene: &mut RenderScene, base: Vec3, road_direction: f64) {
     push_cylinder(
         scene,
@@ -570,6 +624,7 @@ fn append_streetlight(scene: &mut RenderScene, base: Vec3, road_direction: f64) 
     );
 }
 
+#[cfg(test)]
 fn append_tree(scene: &mut RenderScene, base: Vec3) {
     push_cylinder(
         scene,
@@ -595,6 +650,7 @@ fn append_tree(scene: &mut RenderScene, base: Vec3) {
     );
 }
 
+#[cfg(test)]
 fn append_traffic_signal(scene: &mut RenderScene, side: f64, z_m: f64) {
     let pole_x_m = side * 5.35;
     push_cylinder(
@@ -627,6 +683,7 @@ fn append_traffic_signal(scene: &mut RenderScene, side: f64, z_m: f64) {
     );
 }
 
+#[cfg(test)]
 fn drone_position(progress: f64) -> Vec3 {
     let x = -20.0 + 40.0 * progress;
     let z = 8.5 - 17.0 * progress;
@@ -634,19 +691,40 @@ fn drone_position(progress: f64) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
-fn append_flight_path(scene: &mut RenderScene, progress: f64) {
-    let visible_markers = (progress * 20.0).floor() as usize;
-    for marker in 0..=visible_markers {
-        let marker_progress = marker as f64 / 20.0;
-        let position = drone_position(marker_progress) - Vec3::new(0.0, 0.8, 0.0);
-        push_box(
-            scene,
-            position,
-            Quat::IDENTITY,
-            Vec3::splat(0.24),
-            [0.10, 0.70, 0.88, 0.75],
-        );
-    }
+fn select_station_road_lanes(lanes: &[ImportedLane]) -> Vec<ImportedLane> {
+    let selected = lanes
+        .iter()
+        .filter(|lane| lane.lane_id.ends_with("/lane-0"))
+        .filter(|lane| lane_length_m(lane) >= 45.0)
+        .min_by(|left, right| {
+            lane_distance_to_station_m(left).total_cmp(&lane_distance_to_station_m(right))
+        })
+        .expect("official tile must contain a long road near Kita-Sanjo Station");
+    let surface_id = selected
+        .lane_id
+        .strip_suffix("/lane-0")
+        .expect("lane-0 suffix");
+    let opposing_id = format!("{surface_id}/lane-1");
+    let opposing = lanes
+        .iter()
+        .find(|lane| lane.lane_id == opposing_id)
+        .expect("derived lane must have its opposing lane");
+    vec![selected.clone(), opposing.clone()]
+}
+
+fn lane_length_m(lane: &ImportedLane) -> f64 {
+    let start = Vec3::from_array(lane.centerline_m[0]);
+    let end = Vec3::from_array(lane.centerline_m[1]);
+    (end - start).length()
+}
+
+fn lane_distance_to_station_m(lane: &ImportedLane) -> f64 {
+    let start = Vec3::from_array(lane.centerline_m[0]);
+    let end = Vec3::from_array(lane.centerline_m[1]);
+    let station = Vec3::new(KITA_SANJO_STATION_XZ_M[0], 0.05, KITA_SANJO_STATION_XZ_M[1]);
+    let segment = end - start;
+    let progress = ((station - start).dot(segment) / segment.length_squared()).clamp(0.0, 1.0);
+    (station - (start + segment * progress)).length()
 }
 
 fn simulate_two_way_traffic(
@@ -896,44 +974,6 @@ fn append_car(scene: &mut RenderScene, vehicle: VehicleFrame, color_rgba: [f32; 
     }
 }
 
-fn append_drone(scene: &mut RenderScene, center: Vec3, progress: f64) {
-    let yaw = -0.4 + progress * 0.8;
-    push_box(
-        scene,
-        center,
-        Quat::from_rotation_y(yaw),
-        Vec3::new(2.8, 0.70, 1.9),
-        [0.09, 0.16, 0.22, 1.0],
-    );
-    for diagonal in [-1.0, 1.0] {
-        push_box(
-            scene,
-            center + Vec3::new(0.0, 0.05, 0.0),
-            Quat::from_rotation_y(yaw + diagonal * std::f64::consts::FRAC_PI_4),
-            Vec3::new(5.6, 0.20, 0.20),
-            [0.18, 0.26, 0.32, 1.0],
-        );
-    }
-    let rotor_spin = progress * std::f64::consts::TAU * 10.0;
-    for (x, z) in [(-2.0, -1.35), (-2.0, 1.35), (2.0, -1.35), (2.0, 1.35)] {
-        let local = Quat::from_rotation_y(yaw) * Vec3::new(x, 0.18, z);
-        push_box(
-            scene,
-            center + local,
-            Quat::from_rotation_y(rotor_spin),
-            Vec3::new(2.1, 0.08, 0.15),
-            [0.20, 0.85, 0.95, 1.0],
-        );
-    }
-    push_box(
-        scene,
-        center + Vec3::new(0.0, -0.42, 0.45),
-        Quat::IDENTITY,
-        Vec3::new(0.75, 0.55, 0.70),
-        [0.92, 0.38, 0.12, 1.0],
-    );
-}
-
 fn push_box(
     scene: &mut RenderScene,
     translation: Vec3,
@@ -975,6 +1015,7 @@ fn push_cylinder(
     });
 }
 
+#[cfg(test)]
 fn push_sphere(scene: &mut RenderScene, translation: Vec3, radius_m: f64, color_rgba: [f32; 4]) {
     scene.items.push(RenderSceneItem {
         transform: MathTransform3 {
@@ -1084,6 +1125,48 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn official_sanjo_subset_imports_and_selects_station_road() {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/sanjo_2025");
+        let output =
+            std::env::temp_dir().join(format!("rne-plateau-sanjo-test-{}", std::process::id()));
+        if output.exists() {
+            fs::remove_dir_all(&output).expect("remove stale Sanjo output");
+        }
+        let buildings = import_citygml_file(
+            &source.join("56383756_bldg_6697.gml"),
+            &output.join("buildings"),
+            &ImportOptions {
+                tile_name: "sanjo-buildings".into(),
+                coordinate_mode: CoordinateMode::GeographicDegrees,
+                origin: Some(SANJO_ORIGIN),
+                ..ImportOptions::default()
+            },
+        )
+        .expect("import official Sanjo buildings");
+        let roads = import_citygml_file(
+            &source.join("56383756_tran_6697.gml"),
+            &output.join("roads"),
+            &ImportOptions {
+                tile_name: "sanjo-roads".into(),
+                coordinate_mode: CoordinateMode::GeographicDegrees,
+                origin: Some(SANJO_ORIGIN),
+                ..ImportOptions::default()
+            },
+        )
+        .expect("import official Sanjo roads");
+        assert_eq!(buildings.building_count, 213);
+        assert_eq!(buildings.lod2_building_count, 1);
+        assert_eq!(buildings.textured_surface_count, 37);
+        assert_eq!(roads.road_count, 59);
+        assert_eq!(roads.lane_count, 84);
+        let lanes = select_station_road_lanes(&roads.lanes);
+        assert_eq!(lanes.len(), 2);
+        assert!(lane_length_m(&lanes[0]) >= 45.0);
+        assert!(lane_distance_to_station_m(&lanes[0]) < 30.0);
+        fs::remove_dir_all(output).expect("remove Sanjo output");
+    }
 
     #[test]
     fn showcase_citygml_is_deterministic_and_importable() {
