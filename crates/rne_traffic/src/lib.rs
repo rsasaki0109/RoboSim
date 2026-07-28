@@ -14,6 +14,7 @@ pub mod id;
 pub mod io;
 pub mod resources;
 pub mod systems;
+pub mod topology;
 
 pub use asset::{
     Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame, Junction,
@@ -32,4 +33,8 @@ pub use io::{
 pub use resources::TrafficRuntime;
 pub use systems::{
     advance_traffic_step, traffic_actors_in_stable_order, MissingTrafficActorStableId,
+};
+pub use topology::{
+    build_traffic_topology, TopologyBuildConfig, TopologyBuildResult, TopologyBuildStats,
+    TopologyBuilder, TopologyError,
 };
