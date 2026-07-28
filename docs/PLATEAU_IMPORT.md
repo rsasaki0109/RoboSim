@@ -96,6 +96,12 @@ It writes both aerial `docs/media/plateau-drone.gif` and car-follow
 `docs/media/plateau-car.gif` animations, with matching reduced-motion PNGs.
 Set `RNE_SKIP_GPU=1` to run only the conversion and headless load smoke.
 
+For presentation, the example deterministically generates a larger CC0
+PLATEAU-style showcase containing ten varied-height buildings and a 90-meter
+road. Sidewalks, curbs, markings, facade bands, trees, and streetlights are
+example-authored render overlays rather than imported CityGML semantics. The
+showcase license is recorded beside the example.
+
 ## Phase 1 limits
 
 - Building solids and road surfaces at LOD1 only; no terrain, vegetation,

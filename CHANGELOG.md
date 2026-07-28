@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
+  90-meter, ten-building PLATEAU-style showcase and renders varied facades,
+  sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The
+  shared orbit camera now keeps world `+Y` upright, eliminating follow-camera
+  roll, and the regenerated eight-second driving GIF uses a daylight city view.
 - **PLATEAU road traffic realism**: `tran:Road` LOD1 surfaces now become
   deterministic road meshes and stable derived two-way lane metadata. A bounded
   SimClock-driven Ackermann model supplies acceleration, braking, steering-rate
