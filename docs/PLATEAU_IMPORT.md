@@ -104,9 +104,10 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 ## Official PLATEAU traffic traversal GIF
 
 The runnable example converts the checked-in official Sanjo City 2025 mesh,
-loads 213 buildings and 59 road surfaces headlessly, then renders two
-SimClock-driven Ackermann cars accelerating, steering, and braking on a
-derived road pair beside the textured LOD2 Kita-Sanjo Station:
+loads 213 buildings and 59 road surfaces headlessly, then renders two textured
+CC0 Kenney sedans accelerating, steering, and braking through a SimClock-driven
+Ackermann model on a derived road pair beside the textured LOD2 Kita-Sanjo
+Station:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
@@ -128,15 +129,19 @@ The source meshes and textures are unchanged. Approximate lane markings are
 example-authored overlays. Buildings and vehicles use the wgpu renderer's
 2048×2048 directional shadow map with 3×3 percentage-closer filtering; the
 light projection is fitted to scene bounds and snapped to shadow texels to
-limit shimmer between frames. The data subset, source URL, and CC BY 4.0
-attribution are recorded beside the example.
+limit shimmer between frames. Each sedan is split into one cached body mesh and
+four wheel instances: wheel spin comes from integrated distance, the front pair
+also receives the Ackermann steering angle, and rear lamp intensity follows
+actual deceleration. Red and blue body palettes preserve the source windows,
+lamps, trim, and shading. The PLATEAU data attribution and Kenney CC0 notice are
+recorded beside the example.
 
 This presentation strategy follows the official
 [PLATEAU daytime visualization tutorial](https://www.mlit.go.jp/plateau/learning/tpc26-1/),
 which recommends texture, fog, lighting, and kitbashed or extruded detail to
-improve city footage. RNE feeds the example's procedural CC0 texture through
-the same CityGML Appearance → OBJ/MTL → wgpu path used by file imports. It also keeps
-derived lane markings explicitly approximate: the
+improve city footage. RNE feeds the Kenney OBJ/MTL palette and the example's
+procedural CC0 texture through the same textured-mesh path used by CityGML
+Appearance imports. It also keeps derived lane markings explicitly approximate: the
 [PLATEAU road LOD guidance](https://www.mlit.go.jp/plateaudocument02/tocD/tocD_02/_007b6849-33c2-5206-74a3-025bfbf0bdcd/)
 states that LOD1 represents a road as a surface, while internal road
 classification begins at LOD2.
