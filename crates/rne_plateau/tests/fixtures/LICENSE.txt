@@ -1,0 +1,6 @@
+The files in this directory are synthetic test data created for Robot Native
+Engine. They contain no surveyed PLATEAU geometry and no third-party data.
+
+To the extent possible under law, the contributors waive all copyright and
+related or neighboring rights to these fixture files under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/

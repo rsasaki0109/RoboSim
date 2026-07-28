@@ -1,0 +1,20 @@
+[package]
+name = "plateau_drone_gif"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+image = "0.25"
+png = "0.17"
+rne_assets = { path = "../../crates/rne_assets" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_math = { path = "../../crates/rne_math" }
+rne_plateau = { path = "../../crates/rne_plateau" }
+rne_render = { path = "../../crates/rne_render" }
+rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
+rne_world = { path = "../../crates/rne_world" }
+
+[[example]]
+name = "46_plateau_drone_gif"
+path = "main.rs"
