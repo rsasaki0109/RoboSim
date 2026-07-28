@@ -1,0 +1,403 @@
+{
+  "schema": "rne.traffic",
+  "schema_version": 1,
+  "network": {
+    "id": "plateau:53394525/network",
+    "provenance": {
+      "authority": "authoritative",
+      "accuracy": {
+        "class": "modeled",
+        "horizontal_m": 0.2,
+        "vertical_m": 0.3
+      },
+      "sources": [
+        {
+          "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+          "feature_id": "CityModel-53394525",
+          "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+        }
+      ],
+      "method": null
+    },
+    "coordinate_frame": {
+      "frame_id": "map",
+      "axis_convention": "rne_y_up",
+      "origin_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_crs": "EPSG:6697"
+    },
+    "lanes": [
+      {
+        "id": "plateau:53394525/road-east#lane-0",
+        "provenance": {
+          "authority": "authoritative",
+          "accuracy": {
+            "class": "modeled",
+            "horizontal_m": 0.2,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "road-east",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": null
+        },
+        "kind": "driving",
+        "allowed_actors": [
+          "motor_vehicle",
+          "bicycle"
+        ],
+        "centerline_m": [
+          [
+            4.0,
+            0.0,
+            1.75
+          ],
+          [
+            20.0,
+            0.0,
+            1.75
+          ]
+        ],
+        "width_m": 3.25,
+        "speed_limit_m_s": 11.11111111111111,
+        "road_class": "道路",
+        "road_functions": [
+          "一般道路",
+          "緊急輸送道路"
+        ]
+      },
+      {
+        "id": "plateau:53394525/road-north#lane-0",
+        "provenance": {
+          "authority": "authoritative",
+          "accuracy": {
+            "class": "modeled",
+            "horizontal_m": 0.2,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "road-north",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": null
+        },
+        "kind": "driving",
+        "allowed_actors": [
+          "motor_vehicle",
+          "bicycle"
+        ],
+        "centerline_m": [
+          [
+            -1.75,
+            0.0,
+            -4.0
+          ],
+          [
+            -1.75,
+            0.0,
+            -20.0
+          ]
+        ],
+        "width_m": 3.25,
+        "speed_limit_m_s": 11.11111111111111,
+        "road_class": "道路",
+        "road_functions": [
+          "一般道路",
+          "緊急輸送道路"
+        ]
+      },
+      {
+        "id": "plateau:53394525/road-south#lane-0",
+        "provenance": {
+          "authority": "authoritative",
+          "accuracy": {
+            "class": "modeled",
+            "horizontal_m": 0.2,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "road-south",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": null
+        },
+        "kind": "driving",
+        "allowed_actors": [
+          "motor_vehicle",
+          "bicycle"
+        ],
+        "centerline_m": [
+          [
+            -1.75,
+            0.0,
+            20.0
+          ],
+          [
+            -1.75,
+            0.0,
+            4.0
+          ]
+        ],
+        "width_m": 3.25,
+        "speed_limit_m_s": 11.11111111111111,
+        "road_class": "道路",
+        "road_functions": [
+          "一般道路",
+          "緊急輸送道路"
+        ]
+      },
+      {
+        "id": "plateau:53394525/road-west#lane-0",
+        "provenance": {
+          "authority": "authoritative",
+          "accuracy": {
+            "class": "modeled",
+            "horizontal_m": 0.2,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "road-west",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": null
+        },
+        "kind": "driving",
+        "allowed_actors": [
+          "motor_vehicle",
+          "bicycle"
+        ],
+        "centerline_m": [
+          [
+            -20.0,
+            0.0,
+            1.75
+          ],
+          [
+            -4.0,
+            0.0,
+            1.75
+          ]
+        ],
+        "width_m": 3.25,
+        "speed_limit_m_s": 11.11111111111111,
+        "road_class": "道路",
+        "road_functions": [
+          "一般道路",
+          "緊急輸送道路"
+        ]
+      }
+    ],
+    "junctions": [
+      {
+        "id": "plateau:53394525/junction-main",
+        "provenance": {
+          "authority": "derived",
+          "accuracy": {
+            "class": "derived",
+            "horizontal_m": 0.35,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "junction-main",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": "intersect at-grade lane centerlines"
+        },
+        "kind": "cross_intersection",
+        "center_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "id": "plateau:53394525/connection-eastbound",
+        "provenance": {
+          "authority": "derived",
+          "accuracy": {
+            "class": "derived",
+            "horizontal_m": 0.35,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "junction-main",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": "connect directed lane endpoints"
+        },
+        "incoming_lane_id": "plateau:53394525/road-west#lane-0",
+        "outgoing_lane_id": "plateau:53394525/road-east#lane-0",
+        "junction_id": "plateau:53394525/junction-main",
+        "movement": "straight",
+        "path_m": [
+          [
+            -4.0,
+            0.0,
+            1.75
+          ],
+          [
+            0.0,
+            0.0,
+            1.75
+          ],
+          [
+            4.0,
+            0.0,
+            1.75
+          ]
+        ],
+        "conflict_connection_ids": [
+          "plateau:53394525/connection-northbound"
+        ],
+        "signal_group_id": "scenario:signal-main/group-eastbound"
+      },
+      {
+        "id": "plateau:53394525/connection-northbound",
+        "provenance": {
+          "authority": "derived",
+          "accuracy": {
+            "class": "derived",
+            "horizontal_m": 0.35,
+            "vertical_m": 0.3
+          },
+          "sources": [
+            {
+              "dataset": "PLATEAU 53394525 (CityGML 3.0)",
+              "feature_id": "junction-main",
+              "uri": "https://www.geospatial.jp/ckan/dataset/plateau-53394525"
+            }
+          ],
+          "method": "connect directed lane endpoints"
+        },
+        "incoming_lane_id": "plateau:53394525/road-south#lane-0",
+        "outgoing_lane_id": "plateau:53394525/road-north#lane-0",
+        "junction_id": "plateau:53394525/junction-main",
+        "movement": "straight",
+        "path_m": [
+          [
+            -1.75,
+            0.0,
+            4.0
+          ],
+          [
+            -1.75,
+            0.0,
+            0.0
+          ],
+          [
+            -1.75,
+            0.0,
+            -4.0
+          ]
+        ],
+        "conflict_connection_ids": [
+          "plateau:53394525/connection-eastbound"
+        ],
+        "signal_group_id": "scenario:signal-main/group-northbound"
+      }
+    ],
+    "signals": [
+      {
+        "id": "scenario:signal-main",
+        "provenance": {
+          "authority": "synthetic",
+          "accuracy": {
+            "class": "scenario_authored",
+            "horizontal_m": null,
+            "vertical_m": null
+          },
+          "sources": [],
+          "method": "reference intersection signal placement"
+        },
+        "junction_id": "plateau:53394525/junction-main",
+        "position_m": [
+          -3.5,
+          3.0,
+          3.5
+        ],
+        "facing_yaw_rad": 0.0,
+        "groups": [
+          {
+            "id": "scenario:signal-main/group-eastbound",
+            "connection_ids": [
+              "plateau:53394525/connection-eastbound"
+            ]
+          },
+          {
+            "id": "scenario:signal-main/group-northbound",
+            "connection_ids": [
+              "plateau:53394525/connection-northbound"
+            ]
+          }
+        ],
+        "program": {
+          "provenance": {
+            "authority": "synthetic",
+            "accuracy": {
+              "class": "scenario_authored",
+              "horizontal_m": null,
+              "vertical_m": null
+            },
+            "sources": [],
+            "method": "RNE fixed-time reference scenario"
+          },
+          "offset_s": 0.0,
+          "phases": [
+            {
+              "id": "scenario:signal-main/phase-eastbound",
+              "duration_s": 12.0,
+              "group_aspects": [
+                {
+                  "group_id": "scenario:signal-main/group-eastbound",
+                  "aspect": "green"
+                },
+                {
+                  "group_id": "scenario:signal-main/group-northbound",
+                  "aspect": "red"
+                }
+              ]
+            },
+            {
+              "id": "scenario:signal-main/phase-northbound",
+              "duration_s": 10.0,
+              "group_aspects": [
+                {
+                  "group_id": "scenario:signal-main/group-eastbound",
+                  "aspect": "red"
+                },
+                {
+                  "group_id": "scenario:signal-main/group-northbound",
+                  "aspect": "green"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
