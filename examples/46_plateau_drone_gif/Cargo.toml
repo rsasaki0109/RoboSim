@@ -15,6 +15,7 @@ rne_plateau = { path = "../../crates/rne_plateau" }
 rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
 rne_robot = { path = "../../crates/rne_robot" }
+rne_traffic = { path = "../../crates/rne_traffic" }
 rne_world = { path = "../../crates/rne_world" }
 
 [[example]]

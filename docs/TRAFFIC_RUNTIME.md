@@ -1,0 +1,69 @@
+# Deterministic traffic runtime
+
+`rne_traffic` provides a backend-neutral kinematic path for large traffic
+populations. It is intended for deterministic urban replay and background
+traffic; selected Robot Entities can still use a full vehicle dynamics or
+physics model.
+
+## Runtime model
+
+Each managed entity has:
+
+- `TrafficActor` and a stable `rne_ecs::EntityUuid`;
+- `TrafficRouteFollower`, containing route ID, longitudinal distance, current
+  and desired speed, and vehicle length;
+- `TrafficPose`, containing the sampled position and Y-up yaw.
+
+`TrafficRouteCatalog` stores validated open or closed 3D polylines by
+`TrafficId`. Route distances and poses are in meters and radians. An open route
+stops at its final point; a closed route wraps across its final-to-first
+segment.
+
+`advance_kinematic_traffic` receives `SimTime` and `SimDuration` explicitly. It
+never reads wall-clock time. Before mutation it validates every actor, route
+reference, UUID, numeric value, and control parameter. Invalid input therefore
+cannot leave a partly advanced fleet.
+
+## Deterministic car following
+
+Actors are ordered by UUID, then grouped by route and longitudinal distance.
+Each actor accelerates toward `desired_speed_m_s`, subject to configured
+acceleration and braking limits. Its leader gap limits travel using vehicle
+length, a fixed minimum bumper gap, and a speed-proportional time headway.
+Updates are calculated from the same pre-step snapshot, so ECS insertion order
+cannot affect the result.
+
+The step report includes actor count, minimum observed gap, completed simulation
+step metadata, and a stable FNV-1a hash over ordered follower and pose state.
+The hash implementation, floating-point state, and actor order are explicit.
+
+`shortest_lane_route` plans over schema-v1 directed connections. Cost is
+centerline and connection-path distance; equal-cost alternatives use lane and
+connection stable IDs as deterministic tie-breakers.
+
+`TrafficSignalControls` supplies stable route stop positions and current
+aspects. The controlled step limits braking speed and clamps the vehicle front
+before a red stop line. Signal phase scheduling remains a policy input, keeping
+scenario timing and external traffic adapters out of the integrator.
+
+## Acceptance coverage
+
+`crates/rne_traffic/tests/fleet_replay.rs` runs 100 vehicles for 600 fixed
+steps on a closed urban route. Forward and reverse ECS spawn order must produce
+the committed state hash `5765881651073142143`, identical minimum gaps, and no
+violation of the configured two-meter bumper gap.
+
+Renderer-free Example 47 combines shortest routing, red-to-green stopping,
+left and right turns, and 100 vehicles. It asserts zero signal violations, zero
+bumper overlaps, spawn-order-identical replay hashes, and measured throughput
+of at least 60 simulation steps per wall-clock second:
+
+```bash
+cargo run -p traffic_city_replay --example 47_traffic_city_replay
+```
+
+Example 46 uses the same `TrafficRoute`, `TrafficRouteFollower`, and
+`advance_kinematic_traffic` API for the lead vehicle in the rendered official
+PLATEAU Sanjo scene. A deterministic pre-step signal policy reduces desired
+speed for red, then releases the vehicle on green. The generated
+`docs/media/plateau-car.gif` contains 144 rendered frames over 12 seconds.

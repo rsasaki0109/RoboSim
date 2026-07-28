@@ -28,10 +28,11 @@ conversion stays outside simulation core crates. Example 46 imports the
 official Project PLATEAU Sanjo City 2025 mesh around Kita-Sanjo Station:
 213 buildings, 59 road surfaces, and the station's real LOD2 Appearance
 textures. It selects a nearby derived two-way lane and its connected station
-road, then uses a SimClock-driven Ackermann model to move two textured CC0
-Kenney sedans for twelve seconds. The lead car approaches a procedural
-signalized intersection, brakes to a deterministic stop on red, starts on
-green, and follows a smooth 69-degree turn onto the outgoing PLATEAU road.
+road, then moves two textured CC0 Kenney sedans for twelve seconds. The lead
+car uses the backend-neutral `rne_traffic` route follower and explicit
+`SimClock` steps; a deterministic signal policy makes it stop on red, start on
+green, and follow a smooth 69-degree turn onto the outgoing PLATEAU road. The
+opposing car uses RNE's Ackermann model.
 Their four wheel meshes rotate independently, the front pair follows the
 Ackermann steering angle, and rear lamps respond to braking. The daylight scene
 adds directional sunlight, PCF-filtered building and vehicle shadow maps,
@@ -49,13 +50,14 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Twelve seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: a CC0 Kenney sedan brakes at a red signal, starts on green, and makes a SimClock-driven Ackermann turn onto a connected road; the scene also includes a CC0 procedural streetscape, textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
+  <sub>Twelve seconds and 144 frames of real wgpu output over official PLATEAU Sanjo City 2025 data: an RNE traffic-route follower brakes at a red signal, starts on green, and turns onto a connected road; the scene also includes a CC0 procedural streetscape, textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, and PCF-filtered directional shadows.</sub>
 </p>
 
 ```bash
 cargo run -p rne_plateau_import -- path/to/tile.gml \
   --output target/plateau/tile --tile-name tile
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
+cargo run -p traffic_city_replay --example 47_traffic_city_replay
 ```
 
 The checked-in sample is the single official `56383756` mesh needed to
@@ -67,7 +69,9 @@ The example-authored street furniture and ground designs are released under
 [CC0-1.0](examples/46_plateau_drone_gif/STREETSCAPE_LICENSE.txt).
 
 See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
-mapping, outputs, and current limits.
+mapping, outputs, and current limits. The same traffic runtime has a headless
+acceptance replay of 100 vehicles for 600 deterministic fixed steps; see
+[deterministic traffic runtime](docs/TRAFFIC_RUNTIME.md).
 
 ## Official Unitree Go2 URDF
 

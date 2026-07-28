@@ -101,9 +101,9 @@ Headless execution uses the same steps and is the acceptance path.
 4. Build deterministic topology, tile stitching, turns, and conflicts.
 5. Add the headless urban replay and migrate the rendered PLATEAU car example.
 
-Stages 1 through 4 are implemented. Stage 5 remains the acceptance milestone
-for deterministic multi-vehicle runtime behavior and the rendered PLATEAU
-demonstration.
+Stages 1 through 5 are implemented. The acceptance coverage includes a
+100-vehicle, 600-step headless replay with a committed state hash and a
+12-second rendered PLATEAU traffic demonstration.
 
 ## Consequences
 
@@ -120,3 +120,5 @@ Schema v1 is documented in
 [`docs/TRAFFIC_ASSET.md`](../TRAFFIC_ASSET.md).
 Topology construction is documented in
 [`docs/TRAFFIC_TOPOLOGY.md`](../TRAFFIC_TOPOLOGY.md).
+Kinematic replay is documented in
+[`docs/TRAFFIC_RUNTIME.md`](../TRAFFIC_RUNTIME.md).

@@ -3,6 +3,8 @@
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
+use crate::TrafficId;
+
 /// Marks the root ECS entity for one loaded traffic network.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrafficNetworkRoot;
@@ -36,4 +38,28 @@ impl TrafficActor {
             kind: TrafficActorKind::MotorVehicle,
         }
     }
+}
+
+/// Kinematic progress of one actor along a catalogued traffic route.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrafficRouteFollower {
+    /// Stable route identifier resolved through `TrafficRouteCatalog`.
+    pub route_id: TrafficId,
+    /// Distance traveled from the beginning of the route.
+    pub distance_m: f64,
+    /// Current longitudinal speed.
+    pub speed_m_s: f64,
+    /// Free-flow target speed before headway constraints.
+    pub desired_speed_m_s: f64,
+    /// Actor bumper-to-bumper length.
+    pub length_m: f64,
+}
+
+/// Backend-neutral pose sampled from a traffic route.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrafficPose {
+    /// Position in the route coordinate frame.
+    pub position_m: [f64; 3],
+    /// Heading around the positive Y axis in radians.
+    pub yaw_rad: f64,
 }
