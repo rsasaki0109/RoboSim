@@ -24,12 +24,13 @@ RNE can convert bounded PLATEAU CityGML building LOD1/LOD2 and road LOD1 data
 into deterministic OBJ/MTL meshes, Appearance PNG/JPEG textures, a normal
 `.rne.scene.toml`, stable `gml:id` metadata, fixed building collision boxes,
 and derived two-way lane centerlines. The
-conversion stays outside simulation core crates. Example 46 imports a synthetic
-CC0 ten-building, 90-meter city avenue headlessly and uses a SimClock-driven
-Ackermann model to move two cars along the imported road. Its daylight scene
-imports semantic LOD2 walls and roofs with procedural CC0 facade textures, then
-adds sidewalks, curbs, road markings, trees, streetlights, contact shadows, and
-stable world-up follow cameras. The
+conversion stays outside simulation core crates. Example 46 imports the
+official Project PLATEAU Sanjo City 2025 mesh around Kita-Sanjo Station:
+213 buildings, 59 road surfaces, and the station's real LOD2 Appearance
+textures. It selects a nearby derived two-way lane and uses a SimClock-driven
+Ackermann model to move two cars for eight seconds. The daylight scene adds
+directional sunlight, deterministic building and vehicle shadows, approximate
+lane markings, and a stable world-up follow camera. The
 presentation is rendered at 1280×720 before a deterministic depth-aware
 atmospheric pass and high-quality 960×540 GIF downsample.
 
@@ -39,7 +40,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Eight seconds of real wgpu output: SimClock-driven Ackermann motion, imported semantic LOD2 buildings with CityGML Appearance UV textures, LOD1 road geometry, supersampled edges, and depth-based atmospheric perspective.</sub>
+  <sub>Eight seconds of real wgpu output over official PLATEAU Sanjo City 2025 data: SimClock-driven Ackermann motion, the textured LOD2 Kita-Sanjo Station, 212 surrounding LOD1 buildings, LOD1 roads, sunlight and deterministic planar shadows.</sub>
 </p>
 
 ```bash
@@ -48,14 +49,9 @@ cargo run -p rne_plateau_import -- path/to/tile.gml \
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-The same run also writes an aerial view of the imported tile:
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-drone.png">
-    <img src="docs/media/plateau-drone.gif" alt="A simulated drone and two cars moving through a PLATEAU CityGML tile imported into RNE" width="720">
-  </picture>
-</p>
+The checked-in sample is the single official `56383756` mesh needed to
+reproduce the capture. Its source and CC BY 4.0 attribution are recorded
+[beside the example](examples/46_plateau_drone_gif/assets/sanjo_2025/README.md).
 
 See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
 mapping, outputs, and current limits.

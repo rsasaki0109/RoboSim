@@ -9,8 +9,9 @@ The importer prefers semantic `bldg:Building` LOD2 boundary surfaces, falls back
 to building LOD1 solids, and imports `tran:Road` LOD1 surfaces
 from the [Project PLATEAU LOD2 building specification](https://www.mlit.go.jp/plateaudocument02/tocC/tocC_02/tocC_02_02/).
 It supports `gml:Polygon` exterior `gml:LinearRing` geometry expressed with
-3D `gml:posList` or `gml:pos` coordinates. Polygon interior rings are rejected
-with a feature-specific diagnostic instead of being silently dropped.
+3D `gml:posList` or `gml:pos` coordinates. Untextured polygon interior
+rings are triangulated deterministically; textured polygons currently require
+one exterior-ring UV list and therefore reject interior rings explicitly.
 
 LOD2 `RoofSurface`, `WallSurface`, `GroundSurface`, `OuterCeilingSurface`,
 `OuterFloorSurface`, and `ClosureSurface` classifications are preserved.
@@ -100,19 +101,19 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 - bounded Ackermann commands and 60 Hz SimClock-driven vehicle replay;
 - geographic and projected Y-up coordinate conversion.
 
-## Drone and traffic traversal GIF
+## Official PLATEAU traffic traversal GIF
 
-The runnable example converts the synthetic tile, loads it headlessly, then
-renders a deterministic drone path over the buildings while two SimClock-driven
-Ackermann cars accelerate, steer, and brake along imported opposing lanes:
+The runnable example converts the checked-in official Sanjo City 2025 mesh,
+loads 213 buildings and 59 road surfaces headlessly, then renders two
+SimClock-driven Ackermann cars accelerating, steering, and braking on a
+derived road pair beside the textured LOD2 Kita-Sanjo Station:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-It writes both aerial `docs/media/plateau-drone.gif` and eight-second
-car-follow `docs/media/plateau-car.gif` animations, with matching
-reduced-motion PNGs. Frames are rasterized at 1280×720 and downsampled to a
+It writes the eight-second car-follow `docs/media/plateau-car.gif` animation
+and matching reduced-motion PNG. Frames are rasterized at 1280×720 and downsampled to a
 960×540 GIF. A deterministic CPU presentation pass uses the renderer's linear
 depth buffer for atmospheric perspective, replaces empty pixels with a
 sky-to-horizon gradient, and applies restrained color balance and vignette.
@@ -120,15 +121,13 @@ This pass changes presentation pixels only; simulation and camera depth outputs
 remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
 load smoke.
 
-For presentation, the example deterministically generates a larger CC0
-PLATEAU-style showcase containing ten varied-height semantic LOD2 buildings,
-a procedural CC0 facade texture, and a 90-meter road. Sidewalks, curbs,
-markings, road wear, trees, streetlights, signals, and contact shadows are
-example-authored render overlays. Building surface classification and facade
-UVs are imported from the generated CityGML. Round
-primitive dimensions and the presentation pass have unit tests, while the
-traffic replay remains exact and SimClock-driven. The showcase license is
-recorded beside the example.
+The official road LOD1 geometry has zero elevation while building geometry
+uses surveyed absolute elevations. For this visualization the example
+deterministically places every building's lowest AABB face on the road datum.
+The source meshes and textures are unchanged. Approximate lane markings and
+planar shadows projected along the renderer's sun direction are
+example-authored overlays. The data subset, source URL, and CC BY 4.0
+attribution are recorded beside the example.
 
 This presentation strategy follows the official
 [PLATEAU daytime visualization tutorial](https://www.mlit.go.jp/plateau/learning/tpc26-1/),
@@ -150,7 +149,7 @@ classification begins at LOD2.
 - Derived lanes currently support elongated straight road polygons. Curved
   centerlines, intersections, and authoritative `tran:TrafficArea` lanes are
   future work.
-- Exterior polygon rings only.
+- Interior rings are supported for untextured polygons.
 - One bounded CityGML file per invocation.
 - Static AABB collision rather than triangle-mesh collision.
 - Geographic conversion uses a local tangent approximation rather than a full
