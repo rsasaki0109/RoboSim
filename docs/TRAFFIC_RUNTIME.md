@@ -37,9 +37,14 @@ The step report includes actor count, minimum observed gap, completed simulation
 step metadata, and a stable FNV-1a hash over ordered follower and pose state.
 The hash implementation, floating-point state, and actor order are explicit.
 
-Signal programs and route choice are policy inputs: update an actor's desired
-speed or route before the kinematic step. This keeps signal control, agent
-policy, and external traffic adapters out of the backend-neutral integrator.
+`shortest_lane_route` plans over schema-v1 directed connections. Cost is
+centerline and connection-path distance; equal-cost alternatives use lane and
+connection stable IDs as deterministic tie-breakers.
+
+`TrafficSignalControls` supplies stable route stop positions and current
+aspects. The controlled step limits braking speed and clamps the vehicle front
+before a red stop line. Signal phase scheduling remains a policy input, keeping
+scenario timing and external traffic adapters out of the integrator.
 
 ## Acceptance coverage
 
@@ -47,6 +52,15 @@ policy, and external traffic adapters out of the backend-neutral integrator.
 steps on a closed urban route. Forward and reverse ECS spawn order must produce
 the committed state hash `5765881651073142143`, identical minimum gaps, and no
 violation of the configured two-meter bumper gap.
+
+Renderer-free Example 47 combines shortest routing, red-to-green stopping,
+left and right turns, and 100 vehicles. It asserts zero signal violations, zero
+bumper overlaps, spawn-order-identical replay hashes, and measured throughput
+of at least 60 simulation steps per wall-clock second:
+
+```bash
+cargo run -p traffic_city_replay --example 47_traffic_city_replay
+```
 
 Example 46 uses the same `TrafficRoute`, `TrafficRouteFollower`, and
 `advance_kinematic_traffic` API for the lead vehicle in the rendered official

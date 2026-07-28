@@ -2,8 +2,9 @@ use bevy_ecs::prelude::World;
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::EntityUuid;
 use rne_traffic::{
-    advance_kinematic_traffic, KinematicTrafficConfig, TrafficActor, TrafficId, TrafficPose,
-    TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
+    advance_controlled_kinematic_traffic, advance_kinematic_traffic, KinematicTrafficConfig,
+    SignalAspect, TrafficActor, TrafficId, TrafficPose, TrafficRoute, TrafficRouteCatalog,
+    TrafficRouteFollower, TrafficRuntime, TrafficSignalControl, TrafficSignalControls,
 };
 use uuid::Uuid;
 
@@ -117,4 +118,95 @@ fn closed_route_samples_every_segment_and_wraps() {
     assert_eq!(route.sample(750.0).position_m, [500.0, 0.0, 250.0]);
     assert_eq!(route.sample(1_750.0).position_m, [0.0, 0.0, 250.0]);
     assert_eq!(route.sample(2_050.0).position_m, [50.0, 0.0, 0.0]);
+}
+
+#[test]
+fn red_signal_stops_then_releases_without_violation() {
+    let route_id = id("route:signal");
+    let route = TrafficRoute::new(
+        route_id.clone(),
+        vec![[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]],
+        false,
+    )
+    .expect("signal route");
+    let initial = route.sample(0.0);
+    let mut catalog = TrafficRouteCatalog::default();
+    catalog.insert(route).expect("insert route");
+    let control_id = id("signal:main");
+    let mut controls = TrafficSignalControls::default();
+    controls
+        .insert(TrafficSignalControl {
+            id: control_id.clone(),
+            route_id: route_id.clone(),
+            stop_distance_m: 50.0,
+            aspect: SignalAspect::Red,
+        })
+        .expect("insert signal");
+    let mut world = World::new();
+    let vehicle = world
+        .spawn((
+            TrafficActor::motor_vehicle(),
+            EntityUuid(Uuid::from_u128(1)),
+            TrafficRouteFollower {
+                route_id,
+                distance_m: 0.0,
+                speed_m_s: 0.0,
+                desired_speed_m_s: 12.0,
+                length_m: 4.4,
+            },
+            TrafficPose {
+                position_m: initial.position_m,
+                yaw_rad: initial.yaw_rad,
+            },
+        ))
+        .id();
+    let delta = SimDuration::from_ticks(16_666_666);
+    let mut runtime = TrafficRuntime::default();
+    for step in 1..=600 {
+        let report = advance_controlled_kinematic_traffic(
+            &mut world,
+            &catalog,
+            &controls,
+            &mut runtime,
+            SimTime::from_ticks(step * delta.ticks()),
+            delta,
+            KinematicTrafficConfig::default(),
+        )
+        .expect("red step");
+        assert_eq!(report.signal_violation_count, 0);
+        assert_eq!(report.collision_count, 0);
+    }
+    let stopped = world
+        .get::<TrafficRouteFollower>(vehicle)
+        .expect("follower");
+    assert!(
+        stopped.speed_m_s < 0.01,
+        "speed={} distance={}",
+        stopped.speed_m_s,
+        stopped.distance_m
+    );
+    assert!(stopped.distance_m <= 47.8 + 1.0e-9);
+
+    controls
+        .set_aspect(&control_id, SignalAspect::Green)
+        .expect("green signal");
+    for step in 601..=720 {
+        advance_controlled_kinematic_traffic(
+            &mut world,
+            &catalog,
+            &controls,
+            &mut runtime,
+            SimTime::from_ticks(step * delta.ticks()),
+            delta,
+            KinematicTrafficConfig::default(),
+        )
+        .expect("green step");
+    }
+    assert!(
+        world
+            .get::<TrafficRouteFollower>(vehicle)
+            .expect("follower")
+            .distance_m
+            > 50.0
+    );
 }

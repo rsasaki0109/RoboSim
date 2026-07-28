@@ -57,6 +57,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
 cargo run -p rne_plateau_import -- path/to/tile.gml \
   --output target/plateau/tile --tile-name tile
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
+cargo run -p traffic_city_replay --example 47_traffic_city_replay
 ```
 
 The checked-in sample is the single official `56383756` mesh needed to

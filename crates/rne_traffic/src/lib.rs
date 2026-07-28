@@ -13,6 +13,7 @@ pub mod events;
 pub mod id;
 pub mod io;
 pub mod resources;
+pub mod routing;
 pub mod systems;
 pub mod topology;
 
@@ -34,11 +35,13 @@ pub use io::{
 };
 pub use resources::{
     TrafficRoute, TrafficRouteCatalog, TrafficRouteError, TrafficRouteSample, TrafficRuntime,
+    TrafficSignalControl, TrafficSignalControlError, TrafficSignalControls,
 };
+pub use routing::{shortest_lane_route, LaneRoute, RoutingError};
 pub use systems::{
-    advance_kinematic_traffic, advance_traffic_step, traffic_actors_in_stable_order,
-    KinematicTrafficConfig, KinematicTrafficError, KinematicTrafficStep,
-    MissingTrafficActorStableId,
+    advance_controlled_kinematic_traffic, advance_kinematic_traffic, advance_traffic_step,
+    traffic_actors_in_stable_order, KinematicTrafficConfig, KinematicTrafficError,
+    KinematicTrafficStep, MissingTrafficActorStableId,
 };
 pub use topology::{
     build_traffic_topology, TopologyBuildConfig, TopologyBuildResult, TopologyBuildStats,

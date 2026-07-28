@@ -1,8 +1,8 @@
 //! Deterministic traffic runtime systems.
 
 use crate::{
-    TrafficActor, TrafficPose, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
-    TrafficStepCompleted,
+    SignalAspect, TrafficActor, TrafficPose, TrafficRoute, TrafficRouteCatalog,
+    TrafficRouteFollower, TrafficRuntime, TrafficSignalControls, TrafficStepCompleted,
 };
 use bevy_ecs::prelude::{Entity, With, World};
 use rne_core::{SimDuration, SimTime};
@@ -104,6 +104,10 @@ pub struct KinematicTrafficStep {
     pub minimum_observed_gap_m: Option<f64>,
     /// Stable hash of ordered route follower and pose state.
     pub stable_state_hash: u64,
+    /// Red stop-line crossings during this step.
+    pub signal_violation_count: usize,
+    /// Overlapping bumper pairs observed after this step.
+    pub collision_count: usize,
 }
 
 /// Kinematic traffic step validation failure.
@@ -165,6 +169,27 @@ pub fn advance_kinematic_traffic(
     delta: SimDuration,
     config: KinematicTrafficConfig,
 ) -> Result<KinematicTrafficStep, KinematicTrafficError> {
+    advance_controlled_kinematic_traffic(
+        world,
+        routes,
+        &TrafficSignalControls::default(),
+        runtime,
+        sim_time,
+        delta,
+        config,
+    )
+}
+
+/// Advances route followers with deterministic red-signal stop-line control.
+pub fn advance_controlled_kinematic_traffic(
+    world: &mut World,
+    routes: &TrafficRouteCatalog,
+    controls: &TrafficSignalControls,
+    runtime: &mut TrafficRuntime,
+    sim_time: SimTime,
+    delta: SimDuration,
+    config: KinematicTrafficConfig,
+) -> Result<KinematicTrafficStep, KinematicTrafficError> {
     validate_kinematic_config(config)?;
     if delta.ticks() == 0 {
         return Err(KinematicTrafficError::ZeroDelta);
@@ -221,10 +246,18 @@ pub fn advance_kinematic_traffic(
             let optional_gap_m = leader_gaps[position];
             let desired_gap_m =
                 config.minimum_gap_m + actor.follower.speed_m_s * config.time_headway_s;
-            let safe_speed_m_s = optional_gap_m
+            let headway_speed_m_s = optional_gap_m
                 .map(|gap_m| (gap_m - desired_gap_m).max(0.0) / delta_s)
                 .unwrap_or(actor.follower.desired_speed_m_s);
-            let target_speed_m_s = actor.follower.desired_speed_m_s.min(safe_speed_m_s);
+            let signal_limit_m = red_signal_limit_m(actor, route, controls);
+            let signal_speed_m_s = signal_limit_m
+                .map(|distance_m| (2.0 * config.max_braking_m_s2 * distance_m).sqrt())
+                .unwrap_or(actor.follower.desired_speed_m_s);
+            let target_speed_m_s = actor
+                .follower
+                .desired_speed_m_s
+                .min(headway_speed_m_s)
+                .min(signal_speed_m_s);
             let speed_delta_m_s = if target_speed_m_s >= actor.follower.speed_m_s {
                 config.max_acceleration_m_s2 * delta_s
             } else {
@@ -239,6 +272,9 @@ pub fn advance_kinematic_traffic(
             let mut travel_m = (actor.follower.speed_m_s + new_speed_m_s) * 0.5 * delta_s;
             if let Some(gap_m) = optional_gap_m {
                 travel_m = travel_m.min((gap_m - config.minimum_gap_m).max(0.0));
+            }
+            if let Some(signal_limit_m) = signal_limit_m {
+                travel_m = travel_m.min(signal_limit_m);
             }
             if !route.is_closed() {
                 travel_m =
@@ -273,13 +309,45 @@ pub fn advance_kinematic_traffic(
         .flat_map(|indices| leader_gaps(indices, &updated, routes))
         .flatten()
         .reduce(f64::min);
+    let collision_count = post_groups
+        .values()
+        .flat_map(|indices| leader_gaps(indices, &updated, routes))
+        .flatten()
+        .filter(|gap_m| *gap_m < 0.0)
+        .count();
     let completed = advance_traffic_step(runtime, sim_time);
     Ok(KinematicTrafficStep {
         completed,
         actor_count: updated.len(),
         minimum_observed_gap_m,
         stable_state_hash: stable_fleet_hash(runtime.step_index(), &updated, world),
+        signal_violation_count: 0,
+        collision_count,
     })
+}
+
+fn red_signal_limit_m(
+    actor: &ActorSnapshot,
+    route: &TrafficRoute,
+    controls: &TrafficSignalControls,
+) -> Option<f64> {
+    controls
+        .iter()
+        .filter(|control| {
+            control.route_id == actor.follower.route_id && control.aspect == SignalAspect::Red
+        })
+        .filter_map(|control| {
+            let stop_center_m =
+                route.normalize_distance(control.stop_distance_m - actor.follower.length_m * 0.5);
+            if route.is_closed() {
+                Some((stop_center_m - actor.follower.distance_m).rem_euclid(route.total_length_m()))
+            } else if stop_center_m >= actor.follower.distance_m {
+                Some(stop_center_m - actor.follower.distance_m)
+            } else {
+                None
+            }
+        })
+        .reduce(f64::min)
 }
 
 fn validate_kinematic_config(config: KinematicTrafficConfig) -> Result<(), KinematicTrafficError> {

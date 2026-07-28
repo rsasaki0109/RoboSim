@@ -1,6 +1,6 @@
 //! Traffic runtime resources.
 
-use crate::TrafficId;
+use crate::{SignalAspect, TrafficId};
 use bevy_ecs::prelude::Resource;
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -201,6 +201,88 @@ pub enum TrafficRouteError {
     DuplicateId {
         /// Duplicate route ID.
         route_id: TrafficId,
+    },
+}
+
+/// One signal-controlled stop position on a runtime route.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrafficSignalControl {
+    /// Stable signal-control identifier.
+    pub id: TrafficId,
+    /// Route affected by this control.
+    pub route_id: TrafficId,
+    /// Longitudinal stop-line distance along the route.
+    pub stop_distance_m: f64,
+    /// Current signal aspect.
+    pub aspect: SignalAspect,
+}
+
+/// Runtime signal controls keyed by stable ID.
+#[derive(Clone, Debug, Default, PartialEq, Resource)]
+pub struct TrafficSignalControls {
+    controls: BTreeMap<TrafficId, TrafficSignalControl>,
+}
+
+impl TrafficSignalControls {
+    /// Inserts a validated control.
+    pub fn insert(
+        &mut self,
+        control: TrafficSignalControl,
+    ) -> Result<(), TrafficSignalControlError> {
+        if !control.stop_distance_m.is_finite() || control.stop_distance_m < 0.0 {
+            return Err(TrafficSignalControlError::InvalidStopDistance {
+                control_id: control.id,
+            });
+        }
+        if self.controls.contains_key(&control.id) {
+            return Err(TrafficSignalControlError::DuplicateId {
+                control_id: control.id,
+            });
+        }
+        self.controls.insert(control.id.clone(), control);
+        Ok(())
+    }
+
+    /// Updates one control aspect.
+    pub fn set_aspect(
+        &mut self,
+        control_id: &TrafficId,
+        aspect: SignalAspect,
+    ) -> Result<(), TrafficSignalControlError> {
+        let control = self.controls.get_mut(control_id).ok_or_else(|| {
+            TrafficSignalControlError::UnknownId {
+                control_id: control_id.clone(),
+            }
+        })?;
+        control.aspect = aspect;
+        Ok(())
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &TrafficSignalControl> {
+        self.controls.values()
+    }
+}
+
+/// Invalid runtime signal-control operation.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum TrafficSignalControlError {
+    /// Stop distance was negative or non-finite.
+    #[error("traffic signal control `{control_id}` has an invalid stop distance")]
+    InvalidStopDistance {
+        /// Invalid control ID.
+        control_id: TrafficId,
+    },
+    /// The stable control ID was already registered.
+    #[error("duplicate traffic signal control ID `{control_id}`")]
+    DuplicateId {
+        /// Duplicate control ID.
+        control_id: TrafficId,
+    },
+    /// The stable control ID was not registered.
+    #[error("unknown traffic signal control ID `{control_id}`")]
+    UnknownId {
+        /// Missing control ID.
+        control_id: TrafficId,
     },
 }
 

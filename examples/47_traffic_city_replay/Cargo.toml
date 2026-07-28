@@ -1,0 +1,16 @@
+[package]
+name = "traffic_city_replay"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_core = { path = "../../crates/rne_core" }
+rne_ecs = { path = "../../crates/rne_ecs" }
+rne_traffic = { path = "../../crates/rne_traffic" }
+uuid = { workspace = true }
+
+[[example]]
+name = "47_traffic_city_replay"
+path = "main.rs"
