@@ -144,6 +144,7 @@ fn append_inspection_markers(scene: &mut RenderScene, frame: usize) {
                 shape: VisualShape::Sphere { radius_m: 0.5 },
                 color_rgba,
                 mesh: None,
+                base_color_texture: None,
             });
         }
     }
@@ -170,6 +171,7 @@ fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f6
                 shape: VisualShape::Box { size_m: Vec3::ONE },
                 color_rgba: color,
                 mesh: None,
+                base_color_texture: None,
             });
         }
     }

@@ -325,6 +325,7 @@ fn append_cloth(scene: &mut RenderScene, sim: &UrdfSceneSim, attached: bool) {
         TriangleMesh {
             positions: surface.positions,
             normals: surface.normals,
+            texcoords: vec![[0.0, 0.0]; surface.indices.len()],
             indices: surface.indices,
         },
         if attached {
@@ -350,6 +351,7 @@ fn append_probe_markers(scene: &mut RenderScene, sim: &UrdfSceneSim) {
             shape: VisualShape::Sphere { radius_m: 1.0 },
             color_rgba: color,
             mesh: None,
+            base_color_texture: None,
         });
     }
 }
@@ -370,6 +372,7 @@ fn append_checker_floor(scene: &mut RenderScene, tile_m: f64) {
                     [0.045, 0.065, 0.10, 1.0]
                 },
                 mesh: None,
+                base_color_texture: None,
             });
         }
     }

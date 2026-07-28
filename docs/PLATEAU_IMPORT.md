@@ -2,13 +2,25 @@
 
 RNE imports a bounded PLATEAU CityGML tile offline. PLATEAU-specific XML and
 geospatial types never enter simulation core crates: the converter emits normal
-RNE scene assets, building and road OBJ meshes, and a stable metadata sidecar.
+RNE scene assets, building and road OBJ/MTL meshes, copied textures, and a
+stable metadata sidecar.
 
-The importer targets `bldg:Building` LOD1 solids and `tran:Road` LOD1 surfaces
-from the [Project PLATEAU standard product specification](https://www.mlit.go.jp/plateaudocument/).
+The importer prefers semantic `bldg:Building` LOD2 boundary surfaces, falls back
+to building LOD1 solids, and imports `tran:Road` LOD1 surfaces
+from the [Project PLATEAU LOD2 building specification](https://www.mlit.go.jp/plateaudocument02/tocC/tocC_02/tocC_02_02/).
 It supports `gml:Polygon` exterior `gml:LinearRing` geometry expressed with
 3D `gml:posList` or `gml:pos` coordinates. Polygon interior rings are rejected
 with a feature-specific diagnostic instead of being silently dropped.
+
+LOD2 `RoofSurface`, `WallSurface`, `GroundSurface`, `OuterCeilingSurface`,
+`OuterFloorSurface`, and `ClosureSurface` classifications are preserved.
+`app:ParameterizedTexture` targets are matched by polygon ID; their exterior
+ring UV order is written to OBJ `vt` records. Referenced PNG/JPEG files must
+use safe relative paths. They are copied into the generated asset bundle and
+sampled as sRGB base color by the wgpu renderer.
+The mapping follows PLATEAU's
+[`ParameterizedTexture` model](https://www.mlit.go.jp/plateaudocument/toc4/toc4_22/toc4_22_03/toc4_22_03_01/)
+and [lower-left UV convention](https://www.mlit.go.jp/plateaudocument/toc9/toc9_05/toc9_05_02/).
 
 ## Convert a tile
 
@@ -25,15 +37,19 @@ The output contains:
 533946/
 ├── 533946.rne.scene.toml
 ├── 533946.plateau.json
-└── meshes/
+├── meshes/
     ├── plateau_building_0000_<stable-id>.obj
+    ├── plateau_building_0000_<stable-id>.mtl
     ├── plateau_road_0000_<stable-id>.obj
     └── ...
+└── textures/
+    └── appearance_0000.png
 ```
 
 The JSON sidecar preserves each `gml:id`, name, function, measured height,
-generated entity name and mesh path, local translation, world-space bounds, and
-triangle count. Buildings are sorted by `gml:id`; generated scene, metadata,
+generated entity name and mesh path, LOD, semantic surface counts, texture
+paths, local translation, world-space bounds, and triangle count. Buildings are
+sorted by `gml:id`; generated scene, metadata,
 filenames, vertices, and triangle order are deterministic.
 
 Each `tran:Road/lod1MultiSurface` polygon becomes a visual road mesh. For a
@@ -65,10 +81,11 @@ coordinates before import.
 
 ## Physics and headless use
 
-Each building becomes a fixed RNE object. Its visual uses the generated LOD1
-OBJ, while collision uses a deterministic axis-aligned bounding box. This keeps
+Each building becomes a fixed RNE object. Its visual uses the generated LOD1 or
+LOD2 OBJ/MTL, while collision uses a deterministic axis-aligned bounding box.
+This keeps
 headless physics inexpensive and avoids exposing CityGML or renderer-specific
-types through physics traits. Phase 1 collision follows the LOD1 envelope; it
+types through physics traits. Collision follows the imported building bounds; it
 does not reproduce concave footprints. Road meshes are visual surfaces over the
 scene's fixed ground collider.
 
@@ -77,6 +94,7 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 - stable `gml:id` ordering and metadata;
 - byte-identical repeated conversion;
 - OBJ loading through the normal RNE mesh pipeline;
+- LOD2 semantic surface counts, UV preservation, and Appearance texture decoding;
 - headless scene spawning with fixed building colliders;
 - deterministic road mesh and opposing-lane derivation;
 - bounded Ackermann commands and 60 Hz SimClock-driven vehicle replay;
@@ -103,10 +121,11 @@ remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
 load smoke.
 
 For presentation, the example deterministically generates a larger CC0
-PLATEAU-style showcase containing ten varied-height buildings and a 90-meter
-road. Sidewalks, curbs, markings, road wear, batched facade windows, rooftop
-equipment, trees, streetlights, signals, and contact shadows are
-example-authored render overlays rather than imported CityGML semantics. Round
+PLATEAU-style showcase containing ten varied-height semantic LOD2 buildings,
+a procedural CC0 facade texture, and a 90-meter road. Sidewalks, curbs,
+markings, road wear, trees, streetlights, signals, and contact shadows are
+example-authored render overlays. Building surface classification and facade
+UVs are imported from the generated CityGML. Round
 primitive dimensions and the presentation pass have unit tests, while the
 traffic replay remains exact and SimClock-driven. The showcase license is
 recorded beside the example.
@@ -114,8 +133,8 @@ recorded beside the example.
 This presentation strategy follows the official
 [PLATEAU daytime visualization tutorial](https://www.mlit.go.jp/plateau/learning/tpc26-1/),
 which recommends texture, fog, lighting, and kitbashed or extruded detail to
-improve LOD1 city footage. RNE uses procedural solid-color detail here because
-the renderer does not yet ingest CityGML appearance textures. It also keeps
+improve city footage. RNE feeds the example's procedural CC0 texture through
+the same CityGML Appearance → OBJ/MTL → wgpu path used by file imports. It also keeps
 derived lane markings explicitly approximate: the
 [PLATEAU road LOD guidance](https://www.mlit.go.jp/plateaudocument02/tocD/tocD_02/_007b6849-33c2-5206-74a3-025bfbf0bdcd/)
 states that LOD1 represents a road as a surface, while internal road
@@ -123,8 +142,11 @@ classification begins at LOD2.
 
 ## Phase 1 limits
 
-- Building solids and road surfaces at LOD1 only; no terrain, vegetation,
-  textures, signals, or LOD2 traffic-area semantics.
+- Building LOD1 solids and LOD2 boundary surfaces are supported; terrain,
+  vegetation, signals, `GeoreferencedTexture`, and LOD2 traffic-area semantics
+  are not.
+- Appearance support is limited to polygon-targeted `ParameterizedTexture`
+  PNG/JPEG images with one exterior-ring UV list.
 - Derived lanes currently support elongated straight road polygons. Curved
   centerlines, intersections, and authoritative `tran:TrafficArea` lanes are
   future work.

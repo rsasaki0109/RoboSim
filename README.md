@@ -20,14 +20,16 @@ embodied AI, synthetic sensor data, and policy evaluation.
 
 ## PLATEAU city tiles
 
-RNE can convert bounded PLATEAU CityGML building and road LOD1 data into
-deterministic OBJ meshes, a normal `.rne.scene.toml`, stable `gml:id` metadata,
-fixed building collision boxes, and derived two-way lane centerlines. The
+RNE can convert bounded PLATEAU CityGML building LOD1/LOD2 and road LOD1 data
+into deterministic OBJ/MTL meshes, Appearance PNG/JPEG textures, a normal
+`.rne.scene.toml`, stable `gml:id` metadata, fixed building collision boxes,
+and derived two-way lane centerlines. The
 conversion stays outside simulation core crates. Example 46 imports a synthetic
 CC0 ten-building, 90-meter city avenue headlessly and uses a SimClock-driven
 Ackermann model to move two cars along the imported road. Its daylight scene
-adds sidewalks, curbs, road markings, trees, streetlights, facade windows,
-rooftop equipment, contact shadows, and stable world-up follow cameras. The
+imports semantic LOD2 walls and roofs with procedural CC0 facade textures, then
+adds sidewalks, curbs, road markings, trees, streetlights, contact shadows, and
+stable world-up follow cameras. The
 presentation is rendered at 1280×720 before a deterministic depth-aware
 atmospheric pass and high-quality 960×540 GIF downsample.
 
@@ -37,7 +39,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="A deterministic Ackermann car driving through a detailed PLATEAU CityGML avenue in RNE" width="960">
   </picture>
   <br>
-  <sub>Eight seconds of real wgpu output: SimClock-driven Ackermann motion, imported LOD1 building and road geometry, procedural CC0 streetscape detail, supersampled edges, and depth-based atmospheric perspective.</sub>
+  <sub>Eight seconds of real wgpu output: SimClock-driven Ackermann motion, imported semantic LOD2 buildings with CityGML Appearance UV textures, LOD1 road geometry, supersampled edges, and depth-based atmospheric perspective.</sub>
 </p>
 
 ```bash

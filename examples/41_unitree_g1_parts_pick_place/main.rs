@@ -141,6 +141,7 @@ fn append_checker_floor(scene: &mut RenderScene, tile_m: f64) {
                 shape: VisualShape::Box { size_m: Vec3::ONE },
                 color_rgba: color,
                 mesh: None,
+                base_color_texture: None,
             });
         }
     }

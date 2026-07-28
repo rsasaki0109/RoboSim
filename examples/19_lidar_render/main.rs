@@ -112,6 +112,7 @@ fn append_box(scene: &mut RenderScene, center: Vec3, size_m: Vec3, color_rgba: [
         shape: VisualShape::Box { size_m },
         color_rgba,
         mesh: None,
+        base_color_texture: None,
     });
 }
 

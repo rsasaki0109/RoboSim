@@ -1,7 +1,7 @@
 use rne_assets::{load_scene_bundle, spawn_scene_bundle, SpawnSceneOptions};
 use rne_ecs::World;
 use rne_physics::Collider;
-use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions};
+use rne_plateau::{import_citygml_file, CoordinateMode, ImportError, ImportOptions};
 use rne_render::Visual;
 use serde_json::Value;
 use std::fs;
@@ -37,6 +37,8 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
     .expect("import synthetic PLATEAU fixture");
 
     assert_eq!(result.building_count, 2);
+    assert_eq!(result.lod2_building_count, 0);
+    assert_eq!(result.textured_surface_count, 0);
     assert_eq!(result.road_count, 1);
     assert_eq!(result.lane_count, 2);
     assert_eq!(result.triangle_count, 26);
@@ -45,7 +47,7 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
     let metadata: Value =
         serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
             .expect("metadata JSON");
-    assert_eq!(metadata["schema_version"], 2);
+    assert_eq!(metadata["schema_version"], 3);
     assert_eq!(metadata["buildings"][0]["source_id"], "bldg-A");
     assert_eq!(metadata["buildings"][1]["source_id"], "bldg-B");
     assert_eq!(metadata["buildings"][0]["name"], "RNE City Hall");
@@ -66,6 +68,101 @@ fn imports_lod1_scene_with_stable_metadata_and_headless_colliders() {
     assert_eq!(world.query::<&Collider>().iter(&world).count(), 3);
 
     fs::remove_dir_all(output).expect("remove test output");
+}
+
+#[test]
+fn imports_lod2_semantics_and_parameterized_texture() {
+    let root = temp_output("lod2-textured");
+    reset_dir(&root);
+    let source = root.join("source");
+    let appearance = source.join("appearance");
+    fs::create_dir_all(&appearance).expect("create appearance source");
+    let citygml_path = source.join("textured.gml");
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plateau_lod2_textured.gml"),
+        &citygml_path,
+    )
+    .expect("copy CityGML fixture");
+    let texture = image::RgbaImage::from_fn(2, 2, |x, y| match (x, y) {
+        (0, 0) => image::Rgba([220, 80, 50, 255]),
+        (1, 0) => image::Rgba([240, 210, 120, 255]),
+        (0, 1) => image::Rgba([60, 100, 180, 255]),
+        _ => image::Rgba([230, 230, 220, 255]),
+    });
+    texture
+        .save(appearance.join("facade.png"))
+        .expect("write synthetic CC0 texture");
+
+    let output = root.join("output");
+    let result = import_citygml_file(
+        &citygml_path,
+        &output,
+        &ImportOptions {
+            tile_name: "lod2-textured".into(),
+            ..ImportOptions::default()
+        },
+    )
+    .expect("import LOD2 Appearance fixture");
+
+    assert_eq!(result.building_count, 1);
+    assert_eq!(result.lod2_building_count, 1);
+    assert_eq!(result.textured_surface_count, 1);
+    assert_eq!(result.triangle_count, 6);
+    let metadata: Value =
+        serde_json::from_slice(&fs::read(&result.metadata_path).expect("metadata bytes"))
+            .expect("metadata JSON");
+    assert_eq!(metadata["schema_version"], 3);
+    assert_eq!(metadata["buildings"][0]["lod"], 2);
+    assert_eq!(metadata["buildings"][0]["surface_counts"]["wall"], 1);
+    assert_eq!(metadata["buildings"][0]["surface_counts"]["roof"], 1);
+    assert_eq!(
+        metadata["buildings"][0]["texture_paths"][0],
+        "textures/appearance_0000.png"
+    );
+
+    let mesh_path = output.join("meshes/plateau_building_0000_lod2_building.obj");
+    let mesh_parts = rne_render::load_mesh_parts(&mesh_path).expect("load generated OBJ and MTL");
+    assert_eq!(mesh_parts.len(), 3);
+    assert_eq!(
+        mesh_parts
+            .iter()
+            .filter(|part| part.base_color_texture.is_some())
+            .count(),
+        1
+    );
+    assert!(mesh_parts
+        .iter()
+        .all(|part| part.mesh.texcoords.len() == part.mesh.positions.len()));
+
+    fs::remove_dir_all(root).expect("remove LOD2 output");
+}
+
+#[test]
+fn rejects_appearance_path_traversal() {
+    let root = temp_output("appearance-traversal");
+    reset_dir(&root);
+    let source = root.join("source");
+    fs::create_dir_all(&source).expect("create source");
+    let fixture = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plateau_lod2_textured.gml"),
+    )
+    .expect("read fixture")
+    .replace("appearance/facade.png", "../facade.png");
+    let citygml_path = source.join("unsafe.gml");
+    fs::write(&citygml_path, fixture).expect("write unsafe fixture");
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255]))
+        .save(root.join("facade.png"))
+        .expect("write outside texture");
+
+    let error = import_citygml_file(
+        &citygml_path,
+        &root.join("output"),
+        &ImportOptions::default(),
+    )
+    .expect_err("path traversal must fail");
+    assert!(matches!(error, ImportError::InvalidTexture { .. }));
+
+    fs::remove_dir_all(root).expect("remove traversal output");
 }
 
 #[test]

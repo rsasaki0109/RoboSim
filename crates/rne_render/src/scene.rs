@@ -1,6 +1,7 @@
 //! Primitive scene description for rendering.
 
-use crate::mesh::{load_mesh, MeshLoadError, TriangleMesh};
+use crate::image::ImageFrame;
+use crate::mesh::{load_mesh_parts, MeshLoadError, TriangleMesh};
 use crate::path::resolve_package_uri;
 use crate::visual::VisualShape;
 use rne_math::Transform3 as MathTransform3;
@@ -20,6 +21,8 @@ pub struct RenderSceneItem {
     pub color_rgba: [f32; 4],
     /// Loaded mesh geometry for [`VisualShape::Mesh`] items.
     pub mesh: Option<Arc<TriangleMesh>>,
+    /// Optional sRGB base-color texture sampled with mesh UV coordinates.
+    pub base_color_texture: Option<Arc<ImageFrame>>,
 }
 
 /// Collection of primitives rendered in one camera pass.
@@ -50,6 +53,7 @@ impl RenderScene {
             shape,
             color_rgba,
             mesh: None,
+            base_color_texture: None,
         }
     }
 
@@ -60,6 +64,7 @@ impl RenderScene {
             shape: VisualShape::DynamicMesh,
             color_rgba,
             mesh: Some(Arc::new(mesh)),
+            base_color_texture: None,
         }
     }
 
@@ -73,13 +78,24 @@ impl RenderScene {
         &mut self,
         package_roots: &[&Path],
     ) -> Result<(), MeshLoadError> {
-        for item in &mut self.items {
+        let mut resolved_items = Vec::with_capacity(self.items.len());
+        for item in &self.items {
             let VisualShape::Mesh { path, .. } = &item.shape else {
+                resolved_items.push(item.clone());
                 continue;
             };
             let file_path = resolve_mesh_path(path, package_roots)?;
-            item.mesh = Some(Arc::new(load_mesh(&file_path)?));
+            for part in load_mesh_parts(&file_path)? {
+                let mut resolved = item.clone();
+                resolved.mesh = Some(Arc::new(part.mesh));
+                resolved.base_color_texture = part.base_color_texture.map(Arc::new);
+                if let Some(base_color_rgba) = part.base_color_rgba {
+                    resolved.color_rgba = base_color_rgba;
+                }
+                resolved_items.push(resolved);
+            }
         }
+        self.items = resolved_items;
         Ok(())
     }
 }
@@ -152,6 +168,7 @@ mod tests {
         let mesh = TriangleMesh {
             positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             normals: vec![[0.0, 0.0, 1.0]; 3],
+            texcoords: vec![[0.0, 0.0]; 3],
             indices: vec![0, 1, 2],
         };
         let item = RenderScene::item_from_dynamic_mesh(mesh.clone(), [0.2, 0.4, 0.8, 1.0]);
@@ -174,6 +191,7 @@ mod tests {
                 },
                 color_rgba: [1.0, 1.0, 1.0, 1.0],
                 mesh: None,
+                base_color_texture: None,
             }],
         };
         scene

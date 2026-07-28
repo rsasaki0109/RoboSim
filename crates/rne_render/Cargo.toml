@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 bevy_ecs = { workspace = true }
+image = { workspace = true }
 rne_core = { path = "../rne_core" }
 rne_math = { path = "../rne_math" }
 rne_world = { path = "../rne_world" }
