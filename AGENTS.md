@@ -31,6 +31,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_data`: typed DataBus, stream IDs, frame payloads
 - `crates/rne_ai`: agent, observation, action, reward, policy traits
 - `crates/rne_plugin`: plugin manifest and loading interfaces
+- `crates/rne_traffic`: backend-neutral traffic semantics, topology, signals, and routing
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests
@@ -110,6 +111,8 @@ Allowed dependencies:
 - `rne_physics_rapier` may depend on `rne_physics` and Rapier.
 - `rne_sensor` may depend on `rne_physics`, `rne_render`, `rne_data`.
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
+- `rne_traffic` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
+- Offline importers such as `rne_plateau` may depend on `rne_traffic`.
 - `adapters/*` may depend on external ecosystems such as ROS2.
 
 Forbidden:
@@ -118,6 +121,8 @@ Forbidden:
 - Core crates must not depend on ROS2.
 - `rne_robot` must not depend on Rapier, MuJoCo, PhysX, or Bullet.
 - `rne_sensor` must not require a renderer unless the specific sensor is camera-like.
+- `rne_traffic` must not depend on a renderer, physics backend, geospatial importer,
+  robotics adapter, or external traffic simulator.
 
 ## Pull Request Definition of Done
 

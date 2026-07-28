@@ -952,6 +952,37 @@ fn lint_boundaries() -> anyhow::Result<()> {
         }
     }
 
+    let traffic_manifest = workspace_root.join("crates/rne_traffic/Cargo.toml");
+    let traffic_content = std::fs::read_to_string(&traffic_manifest)?;
+    let traffic_forbidden = [
+        "rne_ai",
+        "rne_physics",
+        "rne_plateau",
+        "rne_render",
+        "rne_robot",
+        "rne_sensor",
+        "rapier",
+        "wgpu",
+        "sumo",
+        "opendrive",
+        "lanelet",
+    ];
+    for line in traffic_content.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('"') && !trimmed.contains(" = ") {
+            continue;
+        }
+        for pattern in traffic_forbidden {
+            if trimmed.contains(pattern) {
+                anyhow::bail!(
+                    "forbidden dependency in traffic domain {}: {}",
+                    traffic_manifest.display(),
+                    trimmed
+                );
+            }
+        }
+    }
+
     println!("dependency boundary check passed");
     Ok(())
 }
