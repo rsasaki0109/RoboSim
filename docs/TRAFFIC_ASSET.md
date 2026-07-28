@@ -96,3 +96,7 @@ Use `save_traffic_asset` or `canonical_traffic_asset_bytes`; do not call
 The golden tests prove that shuffled set-like input and negative zero produce
 byte-identical output, and that parse/serialize round trips preserve those
 bytes.
+
+Lane-only assets can be converted into junctions, connection paths, and
+conflicts with the deterministic builder described in
+[`docs/TRAFFIC_TOPOLOGY.md`](TRAFFIC_TOPOLOGY.md).
