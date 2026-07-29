@@ -23,13 +23,15 @@ use rne_robot::{
 #[cfg(test)]
 use rne_traffic::advance_kinematic_traffic;
 use rne_traffic::{
-    advance_controlled_kinematic_traffic, build_traffic_topology, load_traffic_asset,
-    materialize_lane_route, shortest_lane_route, KinematicTrafficConfig, LaneRoute, MovementKind,
-    SignalAspect, TopologyBuildConfig, TrafficActor, TrafficActorKind, TrafficId, TrafficNetwork,
+    advance_reserved_kinematic_traffic, build_traffic_topology, load_traffic_asset,
+    materialize_lane_route, shortest_lane_route, KinematicTrafficConfig, KinematicTrafficControls,
+    LaneRoute, MovementKind, SignalAspect, TopologyBuildConfig, TrafficActor, TrafficActorKind,
+    TrafficConflictControls, TrafficDeparture, TrafficFlowMetrics, TrafficId, TrafficNetwork,
     TrafficPose, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
     TrafficSignalControl, TrafficSignalControls,
 };
-use rne_world::Transform3;
+use rne_world::{RandomStreamId, Transform3, WorldRandom};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,6 +58,7 @@ const SIGNAL_GREEN_TIME_S: f64 = 7.0;
 const CITY_ACTOR_COUNT: usize = 100;
 const CITY_REPLAY_STEPS: u64 = 720;
 const CITY_SIGNAL_COUNT: usize = 3;
+const CITY_ROUTE_COUNT: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignalPhase {
@@ -161,6 +164,7 @@ struct VehicleFrame {
     steering_rad: f64,
     wheel_rotation_rad: f64,
     braking: bool,
+    class: CityVehicleClass,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -169,6 +173,63 @@ struct CityReplayResult {
     collision_count: usize,
     signal_violation_count: usize,
     minimum_gap_m: f64,
+    maximum_active_reservations: usize,
+    maximum_queue_length: usize,
+    flow: TrafficFlowMetrics,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum CityVehicleClass {
+    Compact,
+    Sedan,
+    Van,
+    Bus,
+}
+
+impl CityVehicleClass {
+    fn length_m(self) -> f64 {
+        match self {
+            Self::Compact => 3.7,
+            Self::Sedan => 4.4,
+            Self::Van => 5.2,
+            Self::Bus => 8.5,
+        }
+    }
+
+    fn render_scale(self) -> Vec3 {
+        match self {
+            Self::Compact => Vec3::new(1.05, 1.14, 1.46),
+            Self::Sedan => Vec3::new(1.24, 1.25, 1.70),
+            Self::Van => Vec3::new(1.34, 1.52, 1.92),
+            Self::Bus => Vec3::new(1.50, 1.68, 2.48),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CityActorSpec {
+    uuid: Uuid,
+    route_id: TrafficId,
+    distance_m: f64,
+    desired_speed_m_s: f64,
+    departure_time_s: f64,
+    class: CityVehicleClass,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CitySignalSpec {
+    id: TrafficId,
+    route_id: TrafficId,
+    stop_distance_m: f64,
+    phase_offset_steps: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CityTrafficScenario {
+    lane_routes: Vec<LaneRoute>,
+    routes: TrafficRouteCatalog,
+    actors: Vec<CityActorSpec>,
+    signals: Vec<CitySignalSpec>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -414,30 +475,40 @@ fn main() {
         TopologyBuildConfig::default(),
     )
     .expect("build official Sanjo traffic topology");
-    let city_lane_route = select_city_lane_route(&topology.network);
-    let city_runtime_route = materialize_lane_route(
-        &topology.network,
-        &city_lane_route,
-        TrafficId::new("plateau:sanjo/runtime-route").expect("Sanjo runtime route ID"),
-        false,
-    )
-    .expect("materialize official Sanjo runtime route");
+    let city_scenario = build_city_traffic_scenario(&topology.network);
+    let city_lane_route = &city_scenario.lane_routes[0];
+    let city_runtime_route = city_scenario
+        .routes
+        .get(
+            &TrafficId::new("plateau:sanjo/runtime-route-00")
+                .expect("representative Sanjo route ID"),
+        )
+        .expect("representative Sanjo runtime route");
     let (city_left_turns, city_right_turns) =
-        lane_route_turn_counts(&topology.network, &city_lane_route);
+        lane_route_turn_counts(&topology.network, city_lane_route);
     assert!(
         city_lane_route.connection_ids.len() >= 2,
         "Sanjo route must cross multiple junctions"
     );
-    let signal_distances_m =
-        city_signal_distances_m(&topology.network, &city_lane_route, &city_runtime_route);
+    let signal_distances_m = city_scenario
+        .signals
+        .iter()
+        .filter(|signal| signal.route_id == *city_runtime_route.id())
+        .map(|signal| signal.stop_distance_m)
+        .collect::<Vec<_>>();
     let replay_started = Instant::now();
-    let forward_replay = replay_city_fleet(&city_runtime_route, &signal_distances_m, false);
+    let forward_replay = replay_city_fleet(&topology.network, &city_scenario, false);
     let replay_elapsed = replay_started.elapsed();
-    let reverse_replay = replay_city_fleet(&city_runtime_route, &signal_distances_m, true);
+    let reverse_replay = replay_city_fleet(&topology.network, &city_scenario, true);
     assert_eq!(forward_replay.stable_hash, reverse_replay.stable_hash);
     assert_eq!(forward_replay.signal_violation_count, 0);
     assert_eq!(forward_replay.collision_count, 0);
-    assert!(forward_replay.minimum_gap_m >= 2.0);
+    assert!(
+        forward_replay.minimum_gap_m >= 2.0 - 1.0e-9,
+        "minimum Sanjo bumper gap was {:.12} m",
+        forward_replay.minimum_gap_m
+    );
+    assert!(forward_replay.maximum_active_reservations > 0);
     let replay_hz = CITY_REPLAY_STEPS as f64 / replay_elapsed.as_secs_f64();
     assert!(
         replay_hz >= 60.0,
@@ -447,7 +518,7 @@ fn main() {
     let turn_lane = select_station_turn_lane(&roads.lanes, &showcase_lanes[0]);
     let turn_route = build_turn_route(&showcase_lanes[0], &turn_lane);
     println!(
-        "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} junctions={} connections={} conflicts={} route_lanes={} route_m={:.1} left_turns={} right_turns={} actors={} signals={} violations={} collisions={} minimum_gap_m={:.3} stable_hash={} replay_hz={:.1} triangles={}",
+        "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} junctions={} connections={} conflicts={} routes={} route_lanes={} route_m={:.1} left_turns={} right_turns={} actors={} signals={} reservations={} violations={} collisions={} minimum_gap_m={:.3} average_speed_m_s={:.2} waiting={} max_queue={} completed={} waiting_time_s={:.2} stable_hash={} replay_hz={:.1} triangles={}",
         buildings.building_count,
         buildings.lod2_building_count,
         buildings.textured_surface_count,
@@ -456,15 +527,22 @@ fn main() {
         topology.stats.junction_count,
         topology.stats.connection_count,
         topology.stats.conflict_pair_count,
+        city_scenario.routes.len(),
         city_lane_route.lane_ids.len(),
         city_runtime_route.total_length_m(),
         city_left_turns,
         city_right_turns,
         CITY_ACTOR_COUNT,
-        signal_distances_m.len(),
+        city_scenario.signals.len(),
+        forward_replay.maximum_active_reservations,
         forward_replay.signal_violation_count,
         forward_replay.collision_count,
         forward_replay.minimum_gap_m,
+        forward_replay.flow.average_speed_m_s,
+        forward_replay.flow.waiting_actor_count,
+        forward_replay.maximum_queue_length,
+        forward_replay.flow.completed_trip_count,
+        forward_replay.flow.cumulative_waiting_time_s,
         forward_replay.stable_hash,
         replay_hz,
         buildings.triangle_count + roads.triangle_count,
@@ -508,18 +586,20 @@ fn main() {
         append_city_streetscape(&mut city_scene, &showcase_lanes, &building_footprints);
     append_intersection_markings(&mut city_scene, &turn_route);
     append_lane_markings(&mut city_scene, &showcase_lanes);
+    append_runtime_route_pavement(&mut city_scene, &city_scenario.routes);
     let debug_overlay = TrafficDebugOverlay::from_environment();
     append_traffic_debug_overlay(
         &mut city_scene,
         &topology.network,
-        &city_runtime_route,
+        &city_scenario.routes,
+        city_runtime_route,
         &signal_distances_m,
         debug_overlay,
     );
     println!("traffic debug overlay: {debug_overlay:?}");
     let vehicle_assets = VehicleRenderAssets::load();
     let city_traffic =
-        simulate_city_fleet_frames(&city_runtime_route, &signal_distances_m, render_frame_count);
+        simulate_city_fleet_frames(&topology.network, &city_scenario, render_frame_count);
 
     let scene_item_limit = if debug_overlay == TrafficDebugOverlay::default() {
         MAX_STATIC_SCENE_ITEMS
@@ -537,12 +617,24 @@ fn main() {
     );
     let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
     camera.far_m = 280.0;
+    let primary_actor_index = (0..CITY_ACTOR_COUNT)
+        .max_by(|left, right| {
+            city_vehicle_motion_m(&city_traffic, *left)
+                .total_cmp(&city_vehicle_motion_m(&city_traffic, *right))
+                .then_with(|| right.cmp(left))
+        })
+        .expect("Sanjo fleet contains a camera target");
+    println!(
+        "camera follows actor={} motion_m={:.1}",
+        primary_actor_index + 1,
+        city_vehicle_motion_m(&city_traffic, primary_actor_index),
+    );
     for (frame, vehicles) in city_traffic.iter().enumerate() {
-        let primary = vehicles[0];
+        let primary = vehicles[primary_actor_index];
         let mut scene = city_scene.clone();
         append_city_runtime_signals(
             &mut scene,
-            &city_runtime_route,
+            city_runtime_route,
             &signal_distances_m,
             frame * SIM_STEPS_PER_FRAME,
         );
@@ -550,6 +642,7 @@ fn main() {
             &mut scene,
             &vehicle_assets,
             vehicles,
+            primary_actor_index,
             debug_overlay == TrafficDebugOverlay::default(),
         );
         let car_camera = follow_camera(primary);
@@ -585,7 +678,26 @@ fn main() {
     );
 }
 
+#[cfg(test)]
 fn select_city_lane_route(network: &TrafficNetwork) -> LaneRoute {
+    select_city_lane_routes(network, 1)
+        .into_iter()
+        .next()
+        .expect("official Sanjo topology must contain a directed multi-junction route")
+}
+
+fn city_vehicle_motion_m(frames: &[Vec<VehicleFrame>], actor_index: usize) -> f64 {
+    frames
+        .windows(2)
+        .map(|pair| {
+            (pair[1][actor_index].transform.translation
+                - pair[0][actor_index].transform.translation)
+                .length()
+        })
+        .sum()
+}
+
+fn select_city_lane_routes(network: &TrafficNetwork, route_count: usize) -> Vec<LaneRoute> {
     let mut lane_ids: Vec<_> = network
         .lanes
         .iter()
@@ -596,7 +708,13 @@ fn select_city_lane_route(network: &TrafficNetwork) -> LaneRoute {
         .map(|lane| lane.id.clone())
         .collect();
     lane_ids.sort();
-    let mut best: Option<(bool, usize, LaneRoute)> = None;
+    let connections = network
+        .connections
+        .iter()
+        .map(|connection| (connection.id.clone(), connection))
+        .collect::<BTreeMap<_, _>>();
+    let mut unique_lane_sequences = BTreeSet::new();
+    let mut candidates = Vec::new();
     for start_lane_id in &lane_ids {
         for goal_lane_id in &lane_ids {
             if start_lane_id == goal_lane_id {
@@ -610,26 +728,314 @@ fn select_city_lane_route(network: &TrafficNetwork) -> LaneRoute {
             ) else {
                 continue;
             };
+            if route.connection_ids.len() < 2
+                || route.distance_m < 250.0
+                || !unique_lane_sequences.insert(route.lane_ids.clone())
+                || route_repeats_conflict_group(&route, &connections)
+            {
+                continue;
+            }
             let (left_turns, right_turns) = lane_route_turn_counts(network, &route);
             let has_both_turns = left_turns > 0 && right_turns > 0;
-            let replace = best
-                .as_ref()
-                .is_none_or(|(best_has_both, best_hops, best_route)| {
-                    (has_both_turns && !*best_has_both)
-                        || (has_both_turns == *best_has_both
-                            && (route.connection_ids.len() > *best_hops
-                                || (route.connection_ids.len() == *best_hops
-                                    && (route.distance_m < best_route.distance_m
-                                        || (route.distance_m == best_route.distance_m
-                                            && route.lane_ids < best_route.lane_ids)))))
-                });
-            if replace {
-                best = Some((has_both_turns, route.connection_ids.len(), route));
-            }
+            candidates.push((has_both_turns, route));
         }
     }
-    best.expect("official Sanjo topology must contain a directed multi-junction route")
-        .2
+    candidates.sort_by(|(left_both, left), (right_both, right)| {
+        right_both
+            .cmp(left_both)
+            .then_with(|| right.connection_ids.len().cmp(&left.connection_ids.len()))
+            .then_with(|| left.distance_m.total_cmp(&right.distance_m))
+            .then_with(|| left.lane_ids.cmp(&right.lane_ids))
+    });
+    let mut selected = Vec::with_capacity(route_count);
+    if let Some((_, route)) = candidates.first() {
+        selected.push(route.clone());
+    }
+    while selected.len() < route_count && selected.len() < candidates.len() {
+        let used_connections = selected
+            .iter()
+            .flat_map(|route| route.connection_ids.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        let used_starts = selected
+            .iter()
+            .filter_map(|route| route.lane_ids.first().cloned())
+            .collect::<BTreeSet<_>>();
+        let used_goals = selected
+            .iter()
+            .filter_map(|route| route.lane_ids.last().cloned())
+            .collect::<BTreeSet<_>>();
+        let next = candidates
+            .iter()
+            .filter(|(_, candidate)| {
+                !selected
+                    .iter()
+                    .any(|route| route.lane_ids == candidate.lane_ids)
+            })
+            .max_by(|(_, left), (_, right)| {
+                city_route_diversity_score(
+                    left,
+                    &connections,
+                    &used_connections,
+                    &used_starts,
+                    &used_goals,
+                )
+                .cmp(&city_route_diversity_score(
+                    right,
+                    &connections,
+                    &used_connections,
+                    &used_starts,
+                    &used_goals,
+                ))
+                .then_with(|| right.lane_ids.cmp(&left.lane_ids))
+            })
+            .map(|(_, route)| route.clone());
+        let Some(next) = next else {
+            break;
+        };
+        selected.push(next);
+    }
+    assert_eq!(
+        selected.len(),
+        route_count,
+        "official Sanjo topology needs {route_count} diverse routes"
+    );
+    selected
+}
+
+fn route_repeats_conflict_group(
+    route: &LaneRoute,
+    connections: &BTreeMap<TrafficId, &rne_traffic::TrafficConnection>,
+) -> bool {
+    let mut groups = BTreeSet::new();
+    route.connection_ids.iter().any(|connection_id| {
+        let connection = connections
+            .get(connection_id)
+            .expect("planned connection must exist");
+        !connection.conflict_connection_ids.is_empty()
+            && connection
+                .junction_id
+                .as_ref()
+                .is_some_and(|junction_id| !groups.insert(junction_id.clone()))
+    })
+}
+
+fn city_route_diversity_score(
+    route: &LaneRoute,
+    connections: &BTreeMap<TrafficId, &rne_traffic::TrafficConnection>,
+    used_connections: &BTreeSet<TrafficId>,
+    used_starts: &BTreeSet<TrafficId>,
+    used_goals: &BTreeSet<TrafficId>,
+) -> (bool, usize, usize, usize, usize) {
+    let conflict_count = route
+        .connection_ids
+        .iter()
+        .filter(|connection_id| {
+            connections.get(*connection_id).is_some_and(|connection| {
+                connection
+                    .conflict_connection_ids
+                    .iter()
+                    .any(|conflict_id| used_connections.contains(conflict_id))
+            })
+        })
+        .count();
+    let new_connection_count = route
+        .connection_ids
+        .iter()
+        .filter(|connection_id| !used_connections.contains(*connection_id))
+        .count();
+    let endpoint_novelty = usize::from(
+        route
+            .lane_ids
+            .first()
+            .is_some_and(|lane_id| !used_starts.contains(lane_id)),
+    ) + usize::from(
+        route
+            .lane_ids
+            .last()
+            .is_some_and(|lane_id| !used_goals.contains(lane_id)),
+    );
+    (
+        conflict_count > 0,
+        conflict_count,
+        new_connection_count,
+        endpoint_novelty,
+        route.connection_ids.len(),
+    )
+}
+
+fn build_city_traffic_scenario(network: &TrafficNetwork) -> CityTrafficScenario {
+    const ACTOR_STREAM_DOMAIN: u64 = 0x5341_4E4A_4F5F_4341;
+    let lane_routes = select_city_lane_routes(network, CITY_ROUTE_COUNT);
+    let mut routes = TrafficRouteCatalog::default();
+    for (index, lane_route) in lane_routes.iter().enumerate() {
+        routes
+            .insert(
+                materialize_lane_route(
+                    network,
+                    lane_route,
+                    TrafficId::new(format!("plateau:sanjo/runtime-route-{index:02}"))
+                        .expect("Sanjo runtime route ID"),
+                    false,
+                )
+                .expect("materialize official Sanjo runtime route"),
+            )
+            .expect("insert distinct Sanjo runtime route");
+    }
+
+    let world_random = WorldRandom::new(46);
+    let mut route_actor_indices = vec![Vec::new(); routes.len()];
+    for actor_index in 0..CITY_ACTOR_COUNT {
+        route_actor_indices[actor_index % routes.len()].push(actor_index);
+    }
+    let runtime_routes = routes.iter().map(|(_, route)| route).collect::<Vec<_>>();
+    let mut actors: Vec<Option<CityActorSpec>> = vec![None; CITY_ACTOR_COUNT];
+    for (route_index, actor_indices) in route_actor_indices.iter().enumerate() {
+        let route = runtime_routes[route_index];
+        let mut distance_m = 6.0;
+        let mut previous_length_m = 0.0;
+        for actor_index in actor_indices {
+            let mut rng = world_random.stream(RandomStreamId::new(
+                ACTOR_STREAM_DOMAIN ^ *actor_index as u64,
+            ));
+            let class = match rng.uniform_usize(12) {
+                0 => CityVehicleClass::Bus,
+                1..=3 => CityVehicleClass::Van,
+                4..=7 => CityVehicleClass::Compact,
+                _ => CityVehicleClass::Sedan,
+            };
+            let length_m = class.length_m();
+            let seeded_gap_m = rng.uniform_f64(4.0, 7.0);
+            if previous_length_m > 0.0 {
+                distance_m += (previous_length_m + length_m) * 0.5 + seeded_gap_m;
+            }
+            distance_m = city_lane_spawn_distance_m(route, distance_m, length_m);
+            while actors.iter().flatten().any(|other| {
+                let other_route = routes
+                    .get(&other.route_id)
+                    .expect("assigned Sanjo actor route");
+                city_vehicle_footprints_overlap(
+                    route,
+                    distance_m,
+                    length_m,
+                    other_route,
+                    other.distance_m,
+                    other.class.length_m(),
+                )
+            }) {
+                distance_m += 1.0;
+                distance_m = city_lane_spawn_distance_m(route, distance_m, length_m);
+                assert!(
+                    distance_m < route.total_length_m() * 0.65,
+                    "Sanjo route {route_index} cannot place its fleet without overlap"
+                );
+            }
+            let class_speed_m_s = match class {
+                CityVehicleClass::Compact => 9.2,
+                CityVehicleClass::Sedan => 9.0,
+                CityVehicleClass::Van => 8.3,
+                CityVehicleClass::Bus => 7.2,
+            };
+            assert!(
+                distance_m < route.total_length_m() * 0.65,
+                "Sanjo route {route_index} is too short for its deterministic fleet"
+            );
+            actors[*actor_index] = Some(CityActorSpec {
+                uuid: Uuid::from_u128(*actor_index as u128 + 1),
+                route_id: route.id().clone(),
+                distance_m,
+                desired_speed_m_s: class_speed_m_s + rng.uniform_f64(-0.5, 0.8),
+                departure_time_s: if *actor_index == 0 {
+                    0.0
+                } else {
+                    rng.uniform_f64(0.0, 5.0)
+                },
+                class,
+            });
+            previous_length_m = length_m;
+        }
+    }
+
+    let mut signals = Vec::new();
+    for (route_index, (lane_route, runtime_route)) in
+        lane_routes.iter().zip(runtime_routes).enumerate()
+    {
+        for (signal_index, stop_distance_m) in
+            city_signal_distances_m(network, lane_route, runtime_route)
+                .into_iter()
+                .enumerate()
+        {
+            let global_index = route_index * CITY_SIGNAL_COUNT + signal_index;
+            signals.push(CitySignalSpec {
+                id: TrafficId::new(format!(
+                    "plateau:sanjo/runtime-signal-{route_index:02}-{signal_index:02}"
+                ))
+                .expect("Sanjo signal control ID"),
+                route_id: runtime_route.id().clone(),
+                stop_distance_m,
+                phase_offset_steps: global_index as u64 * 120,
+            });
+        }
+    }
+    CityTrafficScenario {
+        lane_routes,
+        routes,
+        actors: actors
+            .into_iter()
+            .map(|actor| actor.expect("every Sanjo actor is assigned"))
+            .collect(),
+        signals,
+    }
+}
+
+fn city_lane_spawn_distance_m(
+    route: &TrafficRoute,
+    mut distance_m: f64,
+    vehicle_length_m: f64,
+) -> f64 {
+    loop {
+        let blocked = route.movements().iter().find(|movement| {
+            distance_m >= movement.entry_distance_m - vehicle_length_m * 0.5 - 2.0
+                && distance_m < movement.exit_distance_m + vehicle_length_m * 0.5 + 2.0
+        });
+        let Some(blocked) = blocked else {
+            return distance_m;
+        };
+        distance_m = blocked.exit_distance_m + vehicle_length_m * 0.5 + 2.0;
+    }
+}
+
+fn city_vehicle_footprints_overlap(
+    left_route: &TrafficRoute,
+    left_distance_m: f64,
+    left_length_m: f64,
+    right_route: &TrafficRoute,
+    right_distance_m: f64,
+    right_length_m: f64,
+) -> bool {
+    let left = left_route.sample(left_distance_m);
+    let right = right_route.sample(right_distance_m);
+    let left_forward = [left.yaw_rad.cos(), -left.yaw_rad.sin()];
+    let left_right = [-left_forward[1], left_forward[0]];
+    let right_forward = [right.yaw_rad.cos(), -right.yaw_rad.sin()];
+    let right_right = [-right_forward[1], right_forward[0]];
+    let delta = [
+        right.position_m[0] - left.position_m[0],
+        right.position_m[2] - left.position_m[2],
+    ];
+    [left_forward, left_right, right_forward, right_right]
+        .into_iter()
+        .all(|axis| {
+            let center_distance_m = city_dot2(delta, axis).abs();
+            let left_radius_m = left_length_m * 0.5 * city_dot2(left_forward, axis).abs()
+                + city_dot2(left_right, axis).abs();
+            let right_radius_m = right_length_m * 0.5 * city_dot2(right_forward, axis).abs()
+                + city_dot2(right_right, axis).abs();
+            center_distance_m < left_radius_m + right_radius_m - 1.0e-9
+        })
+}
+
+fn city_dot2(left: [f64; 2], right: [f64; 2]) -> f64 {
+    left[0] * right[0] + left[1] * right[1]
 }
 
 fn lane_route_turn_counts(network: &TrafficNetwork, route: &LaneRoute) -> (usize, usize) {
@@ -680,58 +1086,93 @@ fn city_signal_aspect(step: u64, signal_index: usize) -> SignalAspect {
     }
 }
 
-fn replay_city_fleet(
-    route: &TrafficRoute,
-    signal_distances_m: &[f64],
-    reverse_spawn_order: bool,
-) -> CityReplayResult {
-    let mut routes = TrafficRouteCatalog::default();
-    routes.insert(route.clone()).expect("insert Sanjo route");
-    let control_ids: Vec<_> = signal_distances_m
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            TrafficId::new(format!("plateau:sanjo/runtime-signal-{index:02}"))
-                .expect("Sanjo signal control ID")
-        })
-        .collect();
+fn city_signal_aspect_with_offset(step: u64, phase_offset_steps: u64) -> SignalAspect {
+    let phase_step = (step + phase_offset_steps) % 360;
+    if phase_step < 180 {
+        SignalAspect::Red
+    } else {
+        SignalAspect::Green
+    }
+}
+
+fn city_signal_controls(scenario: &CityTrafficScenario) -> TrafficSignalControls {
     let mut controls = TrafficSignalControls::default();
-    for (index, (control_id, distance_m)) in control_ids.iter().zip(signal_distances_m).enumerate()
-    {
+    for signal in &scenario.signals {
         controls
             .insert(TrafficSignalControl {
-                id: control_id.clone(),
-                route_id: route.id().clone(),
-                stop_distance_m: *distance_m,
-                aspect: city_signal_aspect(0, index),
+                id: signal.id.clone(),
+                route_id: signal.route_id.clone(),
+                stop_distance_m: signal.stop_distance_m,
+                aspect: city_signal_aspect_with_offset(0, signal.phase_offset_steps),
             })
             .expect("insert Sanjo signal control");
     }
-    let indices: Vec<_> = if reverse_spawn_order {
-        (0..CITY_ACTOR_COUNT).rev().collect()
+    controls
+}
+
+fn spawn_city_fleet(
+    world: &mut World,
+    scenario: &CityTrafficScenario,
+    reverse_spawn_order: bool,
+) -> Vec<Entity> {
+    let actor_indices: Vec<_> = if reverse_spawn_order {
+        (0..scenario.actors.len()).rev().collect()
     } else {
-        (0..CITY_ACTOR_COUNT).collect()
+        (0..scenario.actors.len()).collect()
     };
-    let mut world = World::new();
-    for index in indices {
-        let distance_m = route.total_length_m() * index as f64 / CITY_ACTOR_COUNT as f64;
+    let mut actor_entities = vec![None; scenario.actors.len()];
+    for index in actor_indices {
+        let actor = &scenario.actors[index];
+        let route = scenario
+            .routes
+            .get(&actor.route_id)
+            .expect("scenario actor route");
+        let distance_m = actor.distance_m;
         let sample = route.sample(distance_m);
-        world.spawn((
-            TrafficActor::motor_vehicle(),
-            EntityUuid(Uuid::from_u128(index as u128 + 1)),
-            TrafficRouteFollower {
-                route_id: route.id().clone(),
-                distance_m,
-                speed_m_s: 0.0,
-                desired_speed_m_s: 8.0 + (index % 5) as f64 * 0.2,
-                length_m: 4.2,
-            },
-            TrafficPose {
-                position_m: sample.position_m,
-                yaw_rad: sample.yaw_rad,
-            },
-        ));
+        actor_entities[index] = Some(
+            world
+                .spawn((
+                    TrafficActor::motor_vehicle(),
+                    EntityUuid(actor.uuid),
+                    TrafficRouteFollower {
+                        route_id: actor.route_id.clone(),
+                        distance_m,
+                        speed_m_s: 0.0,
+                        desired_speed_m_s: actor.desired_speed_m_s,
+                        length_m: actor.class.length_m(),
+                    },
+                    TrafficDeparture {
+                        departure_time_s: actor.departure_time_s,
+                    },
+                    TrafficPose {
+                        position_m: sample.position_m,
+                        yaw_rad: sample.yaw_rad,
+                    },
+                ))
+                .id(),
+        );
     }
+    actor_entities
+        .into_iter()
+        .map(|entity| entity.expect("every Sanjo actor is spawned"))
+        .collect()
+}
+
+fn replay_city_fleet(
+    network: &TrafficNetwork,
+    scenario: &CityTrafficScenario,
+    reverse_spawn_order: bool,
+) -> CityReplayResult {
+    let mut controls = city_signal_controls(scenario);
+    let mut conflict_controls =
+        TrafficConflictControls::from_network_routes(network, &scenario.routes, 24.0)
+            .expect("build Sanjo junction conflict controls");
+    assert!(
+        !conflict_controls.is_empty(),
+        "diverse Sanjo routes must exercise conflict reservations"
+    );
+    let mut world = World::new();
+    spawn_city_fleet(&mut world, scenario, reverse_spawn_order);
     let delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
     let mut clock = SimClock::new(delta);
     let mut runtime = TrafficRuntime::default();
@@ -739,17 +1180,23 @@ fn replay_city_fleet(
     let mut signal_violation_count = 0;
     let mut minimum_gap_m = f64::INFINITY;
     let mut stable_hash = 0;
+    let mut maximum_active_reservations = 0;
+    let mut maximum_queue_length = 0;
+    let mut flow = TrafficFlowMetrics::default();
     for step in 1..=CITY_REPLAY_STEPS {
-        for (index, control_id) in control_ids.iter().enumerate() {
+        for signal in &scenario.signals {
             controls
-                .set_aspect(control_id, city_signal_aspect(step, index))
+                .set_aspect(
+                    &signal.id,
+                    city_signal_aspect_with_offset(step, signal.phase_offset_steps),
+                )
                 .expect("update Sanjo signal phase");
         }
         assert_eq!(clock.advance(delta), 1);
-        let report = advance_controlled_kinematic_traffic(
+        let report = advance_reserved_kinematic_traffic(
             &mut world,
-            &routes,
-            &controls,
+            &scenario.routes,
+            KinematicTrafficControls::new(&controls, &mut conflict_controls),
             &mut runtime,
             clock.sim_time(),
             delta,
@@ -762,69 +1209,33 @@ fn replay_city_fleet(
             minimum_gap_m = minimum_gap_m.min(gap_m);
         }
         stable_hash = report.stable_state_hash;
+        maximum_active_reservations =
+            maximum_active_reservations.max(report.active_reservation_count);
+        maximum_queue_length = maximum_queue_length.max(report.flow.maximum_queue_length);
+        flow = report.flow;
     }
     CityReplayResult {
         stable_hash,
         collision_count,
         signal_violation_count,
         minimum_gap_m,
+        maximum_active_reservations,
+        maximum_queue_length,
+        flow,
     }
 }
 
 fn simulate_city_fleet_frames(
-    route: &TrafficRoute,
-    signal_distances_m: &[f64],
+    network: &TrafficNetwork,
+    scenario: &CityTrafficScenario,
     frame_count: usize,
 ) -> Vec<Vec<VehicleFrame>> {
-    let mut routes = TrafficRouteCatalog::default();
-    routes
-        .insert(route.clone())
-        .expect("insert Sanjo render route");
-    let control_ids: Vec<_> = signal_distances_m
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            TrafficId::new(format!("plateau:sanjo/render-signal-{index:02}"))
-                .expect("Sanjo render signal ID")
-        })
-        .collect();
-    let mut controls = TrafficSignalControls::default();
-    for (index, (control_id, distance_m)) in control_ids.iter().zip(signal_distances_m).enumerate()
-    {
-        controls
-            .insert(TrafficSignalControl {
-                id: control_id.clone(),
-                route_id: route.id().clone(),
-                stop_distance_m: *distance_m,
-                aspect: city_signal_aspect(0, index),
-            })
-            .expect("insert Sanjo render signal");
-    }
+    let mut controls = city_signal_controls(scenario);
+    let mut conflict_controls =
+        TrafficConflictControls::from_network_routes(network, &scenario.routes, 24.0)
+            .expect("build Sanjo render conflict controls");
     let mut world = World::new();
-    let mut entities: Vec<Entity> = Vec::with_capacity(CITY_ACTOR_COUNT);
-    for index in 0..CITY_ACTOR_COUNT {
-        let distance_m = route.total_length_m() * index as f64 / CITY_ACTOR_COUNT as f64;
-        let sample = route.sample(distance_m);
-        entities.push(
-            world
-                .spawn((
-                    TrafficActor::motor_vehicle(),
-                    EntityUuid(Uuid::from_u128(index as u128 + 1)),
-                    TrafficRouteFollower {
-                        route_id: route.id().clone(),
-                        distance_m,
-                        speed_m_s: 0.0,
-                        desired_speed_m_s: 8.0 + (index % 5) as f64 * 0.2,
-                        length_m: 4.2,
-                    },
-                    TrafficPose {
-                        position_m: sample.position_m,
-                        yaw_rad: sample.yaw_rad,
-                    },
-                ))
-                .id(),
-        );
-    }
+    let entities = spawn_city_fleet(&mut world, scenario, false);
     let delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
     let mut clock = SimClock::new(delta);
     let mut runtime = TrafficRuntime::default();
@@ -841,6 +1252,10 @@ fn simulate_city_fleet_frames(
                     let follower = world
                         .get::<TrafficRouteFollower>(*entity)
                         .expect("render follower");
+                    let route = scenario
+                        .routes
+                        .get(&follower.route_id)
+                        .expect("render follower route");
                     VehicleFrame {
                         transform: Transform3::from_translation_rotation(
                             Vec3::from_array(pose.position_m) + Vec3::new(0.0, 0.60, 0.0),
@@ -850,6 +1265,7 @@ fn simulate_city_fleet_frames(
                         steering_rad: route_steering_rad(route, follower.distance_m, pose.yaw_rad),
                         wheel_rotation_rad: wheel_rotation_rad[index],
                         braking: follower.speed_m_s + 0.05 < previous_speed_m_s[index],
+                        class: scenario.actors[index].class,
                     }
                 })
                 .collect(),
@@ -862,16 +1278,19 @@ fn simulate_city_fleet_frames(
         }
         for substep in 0..SIM_STEPS_PER_FRAME {
             let step = (frame_index * SIM_STEPS_PER_FRAME + substep + 1) as u64;
-            for (index, control_id) in control_ids.iter().enumerate() {
+            for signal in &scenario.signals {
                 controls
-                    .set_aspect(control_id, city_signal_aspect(step, index))
+                    .set_aspect(
+                        &signal.id,
+                        city_signal_aspect_with_offset(step, signal.phase_offset_steps),
+                    )
                     .expect("update Sanjo render signal");
             }
             assert_eq!(clock.advance(delta), 1);
-            let report = advance_controlled_kinematic_traffic(
+            let report = advance_reserved_kinematic_traffic(
                 &mut world,
-                &routes,
-                &controls,
+                &scenario.routes,
+                KinematicTrafficControls::new(&controls, &mut conflict_controls),
                 &mut runtime,
                 clock.sim_time(),
                 delta,
@@ -930,10 +1349,19 @@ fn append_lane_markings(scene: &mut RenderScene, lanes: &[ImportedLane]) {
     }
 }
 
+fn append_runtime_route_pavement(scene: &mut RenderScene, routes: &TrafficRouteCatalog) {
+    let mut mesh = DebugMeshBuilder::default();
+    for (_, route) in routes.iter() {
+        mesh.add_polyline(route.path_m(), 0.058, 3.4);
+    }
+    push_debug_mesh(scene, mesh, [0.075, 0.085, 0.090, 1.0]);
+}
+
 fn append_traffic_debug_overlay(
     scene: &mut RenderScene,
     network: &TrafficNetwork,
-    route: &TrafficRoute,
+    routes: &TrafficRouteCatalog,
+    signal_route: &TrafficRoute,
     signal_distances_m: &[f64],
     overlay: TrafficDebugOverlay,
 ) {
@@ -952,14 +1380,26 @@ fn append_traffic_debug_overlay(
         push_debug_mesh(scene, mesh, [0.08, 0.95, 0.72, 1.0]);
     }
     if overlay.route {
-        let mut mesh = DebugMeshBuilder::default();
-        mesh.add_polyline(route.path_m(), 0.30, 0.24);
-        push_debug_mesh(scene, mesh, [1.0, 0.72, 0.04, 1.0]);
+        const ROUTE_COLORS: [[f32; 4]; CITY_ROUTE_COUNT] = [
+            [1.0, 0.72, 0.04, 1.0],
+            [0.98, 0.24, 0.18, 1.0],
+            [0.66, 0.28, 0.96, 1.0],
+            [0.04, 0.78, 0.96, 1.0],
+            [0.18, 0.90, 0.38, 1.0],
+            [1.0, 0.38, 0.72, 1.0],
+            [0.98, 0.92, 0.16, 1.0],
+            [0.20, 0.52, 1.0, 1.0],
+        ];
+        for (index, (_, route)) in routes.iter().enumerate() {
+            let mut mesh = DebugMeshBuilder::default();
+            mesh.add_polyline(route.path_m(), 0.30 + index as f64 * 0.01, 0.24);
+            push_debug_mesh(scene, mesh, ROUTE_COLORS[index % ROUTE_COLORS.len()]);
+        }
     }
     if overlay.signals {
         let mut mesh = DebugMeshBuilder::default();
         for distance_m in signal_distances_m {
-            let point = Vec3::from_array(route.sample(*distance_m).position_m);
+            let point = Vec3::from_array(signal_route.sample(*distance_m).position_m);
             mesh.add_marker(point, 0.52, 0.55);
         }
         push_debug_mesh(scene, mesh, [1.0, 0.12, 0.04, 1.0]);
@@ -1731,6 +2171,7 @@ fn simulate_route_vehicle(route: &TurnRoute, frame_count: usize) -> Vec<VehicleF
             wheel_rotation_rad,
             braking: follower.speed_m_s > 0.2
                 && follower.desired_speed_m_s + 0.05 < follower.speed_m_s,
+            class: CityVehicleClass::Sedan,
         });
         for _ in 0..SIM_STEPS_PER_FRAME {
             let follower = world
@@ -1842,6 +2283,7 @@ fn simulate_lane_vehicle(
             steering_rad: drive.steering_rad,
             wheel_rotation_rad,
             braking: drive.speed_m_s > 0.2 && drive.target_speed_m_s + 0.05 < drive.speed_m_s,
+            class: CityVehicleClass::Sedan,
         });
         for _ in 0..SIM_STEPS_PER_FRAME {
             let transform = *world.get::<Transform3>(vehicle).expect("vehicle transform");
@@ -1903,6 +2345,7 @@ fn append_city_fleet(
     scene: &mut RenderScene,
     assets: &VehicleRenderAssets,
     vehicles: &[VehicleFrame],
+    detailed_actor_index: usize,
     detailed_lead: bool,
 ) {
     for (index, vehicle) in vehicles.iter().copied().enumerate() {
@@ -1911,7 +2354,7 @@ fn append_city_fleet(
         } else {
             &assets.blue_body_texture
         };
-        if index == 0 && detailed_lead {
+        if index == detailed_actor_index && detailed_lead {
             append_car(scene, assets, vehicle, texture);
         } else {
             append_fleet_body(scene, assets, vehicle, texture);
@@ -1934,7 +2377,7 @@ fn append_fleet_body(
         transform: MathTransform3 {
             translation: vehicle.transform.translation + rotation * Vec3::new(0.0, -0.50, 0.0),
             rotation: rotation * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
-            scale: Vec3::new(1.24, 1.25, 1.70),
+            scale: vehicle.class.render_scale(),
         },
         shape: VisualShape::Mesh {
             path: "kenney://sedan-body-lod".into(),
@@ -2245,31 +2688,60 @@ mod tests {
         assert_eq!(topology.stats.junction_count, 26);
         assert_eq!(topology.stats.connection_count, 137);
         assert_eq!(topology.stats.conflict_pair_count, 128);
+        let scenario = build_city_traffic_scenario(&topology.network);
         let planned = select_city_lane_route(&topology.network);
-        assert_eq!(planned.lane_ids.len(), 16);
-        assert_eq!(lane_route_turn_counts(&topology.network, &planned), (3, 7));
-        let runtime_route = materialize_lane_route(
-            &topology.network,
-            &planned,
-            TrafficId::new("plateau:sanjo/test-runtime").expect("test runtime ID"),
-            false,
-        )
-        .expect("materialize official route");
-        let signal_distances_m =
-            city_signal_distances_m(&topology.network, &planned, &runtime_route);
-        let forward = replay_city_fleet(&runtime_route, &signal_distances_m, false);
-        let reverse = replay_city_fleet(&runtime_route, &signal_distances_m, true);
+        assert_eq!(scenario.lane_routes[0], planned);
+        assert_eq!(planned.lane_ids.len(), 15);
+        assert_eq!(lane_route_turn_counts(&topology.network, &planned), (6, 4));
+        assert_eq!(scenario.routes.len(), CITY_ROUTE_COUNT);
+        assert_eq!(scenario.actors.len(), CITY_ACTOR_COUNT);
+        assert_eq!(
+            scenario
+                .actors
+                .iter()
+                .map(|actor| actor.route_id.clone())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            CITY_ROUTE_COUNT
+        );
+        assert_eq!(
+            scenario
+                .actors
+                .iter()
+                .map(|actor| actor.class)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            4
+        );
+        let runtime_route = scenario
+            .routes
+            .get(
+                &TrafficId::new("plateau:sanjo/runtime-route-00").expect("representative route ID"),
+            )
+            .expect("representative route");
+        let signal_distances_m = scenario
+            .signals
+            .iter()
+            .filter(|signal| signal.route_id == *runtime_route.id())
+            .map(|signal| signal.stop_distance_m)
+            .collect::<Vec<_>>();
+        let forward = replay_city_fleet(&topology.network, &scenario, false);
+        let reverse = replay_city_fleet(&topology.network, &scenario, true);
         assert_eq!(forward, reverse);
-        assert_eq!(forward.stable_hash, 2_121_434_296_870_367_030);
+        assert_eq!(forward.stable_hash, 12_942_443_943_866_480_899);
         assert_eq!(forward.signal_violation_count, 0);
         assert_eq!(forward.collision_count, 0);
-        assert!(forward.minimum_gap_m >= 2.0);
+        assert!(forward.minimum_gap_m >= 2.0 - 1.0e-9);
+        assert!(forward.maximum_active_reservations > 0);
+        assert!(forward.flow.average_speed_m_s > 0.0);
+        assert!(forward.flow.cumulative_waiting_time_s > 0.0);
 
         let mut debug_scene = RenderScene::new();
         append_traffic_debug_overlay(
             &mut debug_scene,
             &topology.network,
-            &runtime_route,
+            &scenario.routes,
+            runtime_route,
             &signal_distances_m,
             TrafficDebugOverlay {
                 lanes: true,
@@ -2279,7 +2751,7 @@ mod tests {
                 conflict_points: true,
             },
         );
-        assert_eq!(debug_scene.items.len(), 5);
+        assert_eq!(debug_scene.items.len(), CITY_ROUTE_COUNT + 4);
         fs::remove_dir_all(output).expect("remove Sanjo output");
     }
 
@@ -2443,6 +2915,7 @@ mod tests {
             steering_rad: 0.25,
             wheel_rotation_rad: 1.5,
             braking: true,
+            class: CityVehicleClass::Sedan,
         };
         append_car(&mut scene, &assets, vehicle, &assets.red_body_texture);
 

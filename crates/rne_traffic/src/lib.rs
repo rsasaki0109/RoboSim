@@ -25,7 +25,8 @@ pub use asset::{
     TRAFFIC_ASSET_SCHEMA_VERSION,
 };
 pub use components::{
-    TrafficActor, TrafficActorKind, TrafficNetworkRoot, TrafficPose, TrafficRouteFollower,
+    TrafficActor, TrafficActorKind, TrafficDeparture, TrafficNetworkRoot, TrafficPose,
+    TrafficRouteFollower,
 };
 pub use error::{TrafficAssetError, TrafficIdError};
 pub use events::TrafficStepCompleted;
@@ -34,16 +35,18 @@ pub use io::{
     canonical_traffic_asset_bytes, load_traffic_asset, parse_traffic_asset, save_traffic_asset,
 };
 pub use resources::{
-    TrafficRoute, TrafficRouteCatalog, TrafficRouteError, TrafficRouteSample, TrafficRuntime,
-    TrafficSignalControl, TrafficSignalControlError, TrafficSignalControls,
+    TrafficConflictControl, TrafficConflictControlError, TrafficConflictControls, TrafficRoute,
+    TrafficRouteCatalog, TrafficRouteError, TrafficRouteMovement, TrafficRouteSample,
+    TrafficRuntime, TrafficSignalControl, TrafficSignalControlError, TrafficSignalControls,
 };
 pub use routing::{
     materialize_lane_route, shortest_lane_route, LaneRoute, RouteMaterializationError, RoutingError,
 };
 pub use systems::{
-    advance_controlled_kinematic_traffic, advance_kinematic_traffic, advance_traffic_step,
-    traffic_actors_in_stable_order, KinematicTrafficConfig, KinematicTrafficError,
-    KinematicTrafficStep, MissingTrafficActorStableId,
+    advance_controlled_kinematic_traffic, advance_kinematic_traffic,
+    advance_reserved_kinematic_traffic, advance_traffic_step, traffic_actors_in_stable_order,
+    KinematicTrafficConfig, KinematicTrafficControls, KinematicTrafficError, KinematicTrafficStep,
+    MissingTrafficActorStableId, TrafficFlowMetrics,
 };
 pub use topology::{
     build_traffic_topology, TopologyBuildConfig, TopologyBuildResult, TopologyBuildStats,
