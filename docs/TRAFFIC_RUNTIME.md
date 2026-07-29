@@ -40,6 +40,8 @@ The hash implementation, floating-point state, and actor order are explicit.
 `shortest_lane_route` plans over schema-v1 directed connections. Cost is
 centerline and connection-path distance; equal-cost alternatives use lane and
 connection stable IDs as deterministic tie-breakers.
+`materialize_lane_route` validates that exact lane/connection sequence and
+assembles its centerlines and turn curves into one `TrafficRoute`.
 
 `TrafficSignalControls` supplies stable route stop positions and current
 aspects. The controlled step limits braking speed and clamps the vehicle front
@@ -62,8 +64,12 @@ of at least 60 simulation steps per wall-clock second:
 cargo run -p traffic_city_replay --example 47_traffic_city_replay
 ```
 
-Example 46 uses the same `TrafficRoute`, `TrafficRouteFollower`, and
-`advance_kinematic_traffic` API for the lead vehicle in the rendered official
-PLATEAU Sanjo scene. A deterministic pre-step signal policy reduces desired
-speed for red, then releases the vehicle on green. The generated
-`docs/media/plateau-car.gif` contains 144 rendered frames over 12 seconds.
+Example 46 runs this complete pipeline on the official PLATEAU Sanjo asset:
+84 lanes become 26 junctions and 137 connections; shortest routing and
+materialization produce a 16-lane, 731 m runtime path. One hundred vehicles run
+for 720 steps under three signal controls. Forward and reverse spawn order must
+produce the same hash, with zero signal violations, zero collisions, a
+two-meter minimum gap, and throughput above 60 Hz. The generated
+`docs/media/plateau-car.gif` contains 144 real wgpu frames over 12 seconds.
+Optional batched debug layers show every lane, the chosen route, signal
+positions, generated connections, and conflict points.

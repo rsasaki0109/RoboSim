@@ -37,7 +37,9 @@ pub use resources::{
     TrafficRoute, TrafficRouteCatalog, TrafficRouteError, TrafficRouteSample, TrafficRuntime,
     TrafficSignalControl, TrafficSignalControlError, TrafficSignalControls,
 };
-pub use routing::{shortest_lane_route, LaneRoute, RoutingError};
+pub use routing::{
+    materialize_lane_route, shortest_lane_route, LaneRoute, RouteMaterializationError, RoutingError,
+};
 pub use systems::{
     advance_controlled_kinematic_traffic, advance_kinematic_traffic, advance_traffic_step,
     traffic_actors_in_stable_order, KinematicTrafficConfig, KinematicTrafficError,

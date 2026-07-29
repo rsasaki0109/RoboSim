@@ -6,7 +6,9 @@ use rne_assets::{
     SceneCollisionAsset, SpawnSceneOptions,
 };
 use rne_core::{SimClock, SimDuration};
-use rne_ecs::{spawn_named, World};
+#[cfg(test)]
+use rne_ecs::spawn_named;
+use rne_ecs::{Entity, EntityUuid, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
 use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
 use rne_render::{
@@ -14,17 +16,25 @@ use rne_render::{
     Visual, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+#[cfg(test)]
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
 };
+#[cfg(test)]
+use rne_traffic::advance_kinematic_traffic;
 use rne_traffic::{
-    advance_kinematic_traffic, KinematicTrafficConfig, TrafficActor, TrafficId, TrafficPose,
-    TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
+    advance_controlled_kinematic_traffic, build_traffic_topology, load_traffic_asset,
+    materialize_lane_route, shortest_lane_route, KinematicTrafficConfig, LaneRoute, MovementKind,
+    SignalAspect, TopologyBuildConfig, TrafficActor, TrafficActorKind, TrafficId, TrafficNetwork,
+    TrafficPose, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
+    TrafficSignalControl, TrafficSignalControls,
 };
 use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
+use uuid::Uuid;
 
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
@@ -34,13 +44,18 @@ const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
 const MAX_STATIC_SCENE_ITEMS: usize = 400;
+const MAX_DEBUG_SCENE_ITEMS: usize = 3_000;
 const SANJO_ORIGIN: SourceOrigin = SourceOrigin {
     first_deg_or_m: 37.631_938_029_139_7,
     second_deg_or_m: 138.955_122_347_658_72,
     height_m: 0.0,
 };
 const KITA_SANJO_STATION_XZ_M: [f64; 2] = [59.46, -77.17];
+#[cfg(test)]
 const SIGNAL_GREEN_TIME_S: f64 = 7.0;
+const CITY_ACTOR_COUNT: usize = 100;
+const CITY_REPLAY_STEPS: u64 = 720;
+const CITY_SIGNAL_COUNT: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignalPhase {
@@ -48,6 +63,7 @@ enum SignalPhase {
     Green,
 }
 
+#[cfg(test)]
 fn signal_phase_at(time_s: f64) -> SignalPhase {
     if time_s < SIGNAL_GREEN_TIME_S {
         SignalPhase::Red
@@ -145,6 +161,53 @@ struct VehicleFrame {
     steering_rad: f64,
     wheel_rotation_rad: f64,
     braking: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CityReplayResult {
+    stable_hash: u64,
+    collision_count: usize,
+    signal_violation_count: usize,
+    minimum_gap_m: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TrafficDebugOverlay {
+    lanes: bool,
+    route: bool,
+    signals: bool,
+    connections: bool,
+    conflict_points: bool,
+}
+
+impl TrafficDebugOverlay {
+    fn from_environment() -> Self {
+        let Ok(value) = std::env::var("RNE_TRAFFIC_DEBUG") else {
+            return Self::default();
+        };
+        let mut overlay = Self::default();
+        for token in value.split(',').map(str::trim) {
+            match token {
+                "all" => {
+                    overlay = Self {
+                        lanes: true,
+                        route: true,
+                        signals: true,
+                        connections: true,
+                        conflict_points: true,
+                    };
+                }
+                "lanes" => overlay.lanes = true,
+                "route" => overlay.route = true,
+                "signals" => overlay.signals = true,
+                "connections" => overlay.connections = true,
+                "conflicts" | "conflict_points" => overlay.conflict_points = true,
+                "none" | "" => {}
+                unknown => eprintln!("ignoring unknown RNE_TRAFFIC_DEBUG layer `{unknown}`"),
+            }
+        }
+        overlay
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -343,17 +406,67 @@ fn main() {
     assert_eq!(buildings.textured_surface_count, 37);
     assert_eq!(roads.road_count, 59);
     assert_eq!(roads.lane_count, 84);
+    let imported_traffic =
+        load_traffic_asset(&roads.traffic_path).expect("load imported PLATEAU traffic asset");
+    let topology = build_traffic_topology(
+        TrafficId::new("plateau:sanjo/topology").expect("Sanjo topology ID"),
+        std::slice::from_ref(&imported_traffic.network),
+        TopologyBuildConfig::default(),
+    )
+    .expect("build official Sanjo traffic topology");
+    let city_lane_route = select_city_lane_route(&topology.network);
+    let city_runtime_route = materialize_lane_route(
+        &topology.network,
+        &city_lane_route,
+        TrafficId::new("plateau:sanjo/runtime-route").expect("Sanjo runtime route ID"),
+        false,
+    )
+    .expect("materialize official Sanjo runtime route");
+    let (city_left_turns, city_right_turns) =
+        lane_route_turn_counts(&topology.network, &city_lane_route);
+    assert!(
+        city_lane_route.connection_ids.len() >= 2,
+        "Sanjo route must cross multiple junctions"
+    );
+    let signal_distances_m =
+        city_signal_distances_m(&topology.network, &city_lane_route, &city_runtime_route);
+    let replay_started = Instant::now();
+    let forward_replay = replay_city_fleet(&city_runtime_route, &signal_distances_m, false);
+    let replay_elapsed = replay_started.elapsed();
+    let reverse_replay = replay_city_fleet(&city_runtime_route, &signal_distances_m, true);
+    assert_eq!(forward_replay.stable_hash, reverse_replay.stable_hash);
+    assert_eq!(forward_replay.signal_violation_count, 0);
+    assert_eq!(forward_replay.collision_count, 0);
+    assert!(forward_replay.minimum_gap_m >= 2.0);
+    let replay_hz = CITY_REPLAY_STEPS as f64 / replay_elapsed.as_secs_f64();
+    assert!(
+        replay_hz >= 60.0,
+        "Sanjo 100-vehicle replay throughput {replay_hz:.1} Hz is below 60 Hz"
+    );
     let showcase_lanes = select_station_road_lanes(&roads.lanes);
     let turn_lane = select_station_turn_lane(&roads.lanes, &showcase_lanes[0]);
-    let (primary_traffic, opposing_traffic, turn_route) =
-        simulate_signalized_turn(&showcase_lanes, &turn_lane, CAR_FRAME_COUNT);
+    let turn_route = build_turn_route(&showcase_lanes[0], &turn_lane);
     println!(
-        "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} triangles={}",
+        "official PLATEAU tile ready: buildings={} lod2={} textured_surfaces={} roads={} lanes={} junctions={} connections={} conflicts={} route_lanes={} route_m={:.1} left_turns={} right_turns={} actors={} signals={} violations={} collisions={} minimum_gap_m={:.3} stable_hash={} replay_hz={:.1} triangles={}",
         buildings.building_count,
         buildings.lod2_building_count,
         buildings.textured_surface_count,
         roads.road_count,
         roads.lane_count,
+        topology.stats.junction_count,
+        topology.stats.connection_count,
+        topology.stats.conflict_pair_count,
+        city_lane_route.lane_ids.len(),
+        city_runtime_route.total_length_m(),
+        city_left_turns,
+        city_right_turns,
+        CITY_ACTOR_COUNT,
+        signal_distances_m.len(),
+        forward_replay.signal_violation_count,
+        forward_replay.collision_count,
+        forward_replay.minimum_gap_m,
+        forward_replay.stable_hash,
+        replay_hz,
         buildings.triangle_count + roads.triangle_count,
     );
 
@@ -368,7 +481,14 @@ fn main() {
             return;
         }
     };
-    let media_dir = repo_root.join("docs/media");
+    let media_dir = std::env::var_os("RNE_MEDIA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("docs/media"));
+    let render_frame_count = std::env::var("RNE_RENDER_FRAME_COUNT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(CAR_FRAME_COUNT)
+        .clamp(1, CAR_FRAME_COUNT);
     let frames_dir = generated_dir.join("frames");
     if frames_dir.exists() {
         fs::remove_dir_all(&frames_dir).expect("remove old PLATEAU frames");
@@ -388,10 +508,26 @@ fn main() {
         append_city_streetscape(&mut city_scene, &showcase_lanes, &building_footprints);
     append_intersection_markings(&mut city_scene, &turn_route);
     append_lane_markings(&mut city_scene, &showcase_lanes);
+    let debug_overlay = TrafficDebugOverlay::from_environment();
+    append_traffic_debug_overlay(
+        &mut city_scene,
+        &topology.network,
+        &city_runtime_route,
+        &signal_distances_m,
+        debug_overlay,
+    );
+    println!("traffic debug overlay: {debug_overlay:?}");
     let vehicle_assets = VehicleRenderAssets::load();
+    let city_traffic =
+        simulate_city_fleet_frames(&city_runtime_route, &signal_distances_m, render_frame_count);
 
+    let scene_item_limit = if debug_overlay == TrafficDebugOverlay::default() {
+        MAX_STATIC_SCENE_ITEMS
+    } else {
+        MAX_DEBUG_SCENE_ITEMS
+    };
     assert!(
-        city_scene.items.len() <= MAX_STATIC_SCENE_ITEMS,
+        city_scene.items.len() <= scene_item_limit,
         "PLATEAU scene leaves insufficient room for moving actors"
     );
     println!(
@@ -401,19 +537,20 @@ fn main() {
     );
     let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
     camera.far_m = 280.0;
-    for frame in 0..CAR_FRAME_COUNT {
-        let primary = primary_traffic[frame];
+    for (frame, vehicles) in city_traffic.iter().enumerate() {
+        let primary = vehicles[0];
         let mut scene = city_scene.clone();
-        append_traffic_signals(
+        append_city_runtime_signals(
             &mut scene,
-            &turn_route,
-            signal_phase_at(frame as f64 / RENDER_HZ as f64),
+            &city_runtime_route,
+            &signal_distances_m,
+            frame * SIM_STEPS_PER_FRAME,
         );
-        append_traffic(
+        append_city_fleet(
             &mut scene,
             &vehicle_assets,
-            primary,
-            opposing_traffic[frame],
+            vehicles,
+            debug_overlay == TrafficDebugOverlay::default(),
         );
         let car_camera = follow_camera(primary);
         let output = backend
@@ -436,7 +573,8 @@ fn main() {
     }
     let car_gif_path = media_dir.join("plateau-car.gif");
     build_gif(&frames_dir, &car_gif_path).expect("encode PLATEAU car GIF");
-    image::open(frames_dir.join("frame-110.png"))
+    let poster_frame = render_frame_count.saturating_sub(1).min(110);
+    image::open(frames_dir.join(format!("frame-{poster_frame:03}.png")))
         .expect("read PLATEAU car poster frame")
         .save(media_dir.join("plateau-car.png"))
         .expect("write PLATEAU car poster");
@@ -445,6 +583,313 @@ fn main() {
         "rendered official PLATEAU car media to {}",
         car_gif_path.display()
     );
+}
+
+fn select_city_lane_route(network: &TrafficNetwork) -> LaneRoute {
+    let mut lane_ids: Vec<_> = network
+        .lanes
+        .iter()
+        .filter(|lane| {
+            lane.allowed_actors
+                .contains(&TrafficActorKind::MotorVehicle)
+        })
+        .map(|lane| lane.id.clone())
+        .collect();
+    lane_ids.sort();
+    let mut best: Option<(bool, usize, LaneRoute)> = None;
+    for start_lane_id in &lane_ids {
+        for goal_lane_id in &lane_ids {
+            if start_lane_id == goal_lane_id {
+                continue;
+            }
+            let Ok(route) = shortest_lane_route(
+                network,
+                start_lane_id,
+                goal_lane_id,
+                TrafficActorKind::MotorVehicle,
+            ) else {
+                continue;
+            };
+            let (left_turns, right_turns) = lane_route_turn_counts(network, &route);
+            let has_both_turns = left_turns > 0 && right_turns > 0;
+            let replace = best
+                .as_ref()
+                .is_none_or(|(best_has_both, best_hops, best_route)| {
+                    (has_both_turns && !*best_has_both)
+                        || (has_both_turns == *best_has_both
+                            && (route.connection_ids.len() > *best_hops
+                                || (route.connection_ids.len() == *best_hops
+                                    && (route.distance_m < best_route.distance_m
+                                        || (route.distance_m == best_route.distance_m
+                                            && route.lane_ids < best_route.lane_ids)))))
+                });
+            if replace {
+                best = Some((has_both_turns, route.connection_ids.len(), route));
+            }
+        }
+    }
+    best.expect("official Sanjo topology must contain a directed multi-junction route")
+        .2
+}
+
+fn lane_route_turn_counts(network: &TrafficNetwork, route: &LaneRoute) -> (usize, usize) {
+    let mut left_turns = 0;
+    let mut right_turns = 0;
+    for connection_id in &route.connection_ids {
+        let movement = network
+            .connections
+            .iter()
+            .find(|connection| &connection.id == connection_id)
+            .expect("planned connection must exist")
+            .movement;
+        match movement {
+            MovementKind::Left => left_turns += 1,
+            MovementKind::Right => right_turns += 1,
+            _ => {}
+        }
+    }
+    (left_turns, right_turns)
+}
+
+fn city_signal_distances_m(
+    network: &TrafficNetwork,
+    lane_route: &LaneRoute,
+    runtime_route: &TrafficRoute,
+) -> Vec<f64> {
+    (1..=CITY_SIGNAL_COUNT)
+        .map(|signal_index| {
+            let route_index =
+                signal_index * lane_route.connection_ids.len() / (CITY_SIGNAL_COUNT + 1);
+            let connection_id = &lane_route.connection_ids[route_index];
+            let connection = network
+                .connections
+                .iter()
+                .find(|connection| &connection.id == connection_id)
+                .expect("planned signal connection");
+            nearest_route_distance_m(runtime_route, Vec3::from_array(connection.path_m[0]))
+        })
+        .collect()
+}
+
+fn city_signal_aspect(step: u64, signal_index: usize) -> SignalAspect {
+    let phase_step = (step + signal_index as u64 * 120) % 360;
+    if phase_step < 180 {
+        SignalAspect::Red
+    } else {
+        SignalAspect::Green
+    }
+}
+
+fn replay_city_fleet(
+    route: &TrafficRoute,
+    signal_distances_m: &[f64],
+    reverse_spawn_order: bool,
+) -> CityReplayResult {
+    let mut routes = TrafficRouteCatalog::default();
+    routes.insert(route.clone()).expect("insert Sanjo route");
+    let control_ids: Vec<_> = signal_distances_m
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            TrafficId::new(format!("plateau:sanjo/runtime-signal-{index:02}"))
+                .expect("Sanjo signal control ID")
+        })
+        .collect();
+    let mut controls = TrafficSignalControls::default();
+    for (index, (control_id, distance_m)) in control_ids.iter().zip(signal_distances_m).enumerate()
+    {
+        controls
+            .insert(TrafficSignalControl {
+                id: control_id.clone(),
+                route_id: route.id().clone(),
+                stop_distance_m: *distance_m,
+                aspect: city_signal_aspect(0, index),
+            })
+            .expect("insert Sanjo signal control");
+    }
+    let indices: Vec<_> = if reverse_spawn_order {
+        (0..CITY_ACTOR_COUNT).rev().collect()
+    } else {
+        (0..CITY_ACTOR_COUNT).collect()
+    };
+    let mut world = World::new();
+    for index in indices {
+        let distance_m = route.total_length_m() * index as f64 / CITY_ACTOR_COUNT as f64;
+        let sample = route.sample(distance_m);
+        world.spawn((
+            TrafficActor::motor_vehicle(),
+            EntityUuid(Uuid::from_u128(index as u128 + 1)),
+            TrafficRouteFollower {
+                route_id: route.id().clone(),
+                distance_m,
+                speed_m_s: 0.0,
+                desired_speed_m_s: 8.0 + (index % 5) as f64 * 0.2,
+                length_m: 4.2,
+            },
+            TrafficPose {
+                position_m: sample.position_m,
+                yaw_rad: sample.yaw_rad,
+            },
+        ));
+    }
+    let delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
+    let mut clock = SimClock::new(delta);
+    let mut runtime = TrafficRuntime::default();
+    let mut collision_count = 0;
+    let mut signal_violation_count = 0;
+    let mut minimum_gap_m = f64::INFINITY;
+    let mut stable_hash = 0;
+    for step in 1..=CITY_REPLAY_STEPS {
+        for (index, control_id) in control_ids.iter().enumerate() {
+            controls
+                .set_aspect(control_id, city_signal_aspect(step, index))
+                .expect("update Sanjo signal phase");
+        }
+        assert_eq!(clock.advance(delta), 1);
+        let report = advance_controlled_kinematic_traffic(
+            &mut world,
+            &routes,
+            &controls,
+            &mut runtime,
+            clock.sim_time(),
+            delta,
+            KinematicTrafficConfig::default(),
+        )
+        .expect("advance Sanjo traffic");
+        collision_count += report.collision_count;
+        signal_violation_count += report.signal_violation_count;
+        if let Some(gap_m) = report.minimum_observed_gap_m {
+            minimum_gap_m = minimum_gap_m.min(gap_m);
+        }
+        stable_hash = report.stable_state_hash;
+    }
+    CityReplayResult {
+        stable_hash,
+        collision_count,
+        signal_violation_count,
+        minimum_gap_m,
+    }
+}
+
+fn simulate_city_fleet_frames(
+    route: &TrafficRoute,
+    signal_distances_m: &[f64],
+    frame_count: usize,
+) -> Vec<Vec<VehicleFrame>> {
+    let mut routes = TrafficRouteCatalog::default();
+    routes
+        .insert(route.clone())
+        .expect("insert Sanjo render route");
+    let control_ids: Vec<_> = signal_distances_m
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            TrafficId::new(format!("plateau:sanjo/render-signal-{index:02}"))
+                .expect("Sanjo render signal ID")
+        })
+        .collect();
+    let mut controls = TrafficSignalControls::default();
+    for (index, (control_id, distance_m)) in control_ids.iter().zip(signal_distances_m).enumerate()
+    {
+        controls
+            .insert(TrafficSignalControl {
+                id: control_id.clone(),
+                route_id: route.id().clone(),
+                stop_distance_m: *distance_m,
+                aspect: city_signal_aspect(0, index),
+            })
+            .expect("insert Sanjo render signal");
+    }
+    let mut world = World::new();
+    let mut entities: Vec<Entity> = Vec::with_capacity(CITY_ACTOR_COUNT);
+    for index in 0..CITY_ACTOR_COUNT {
+        let distance_m = route.total_length_m() * index as f64 / CITY_ACTOR_COUNT as f64;
+        let sample = route.sample(distance_m);
+        entities.push(
+            world
+                .spawn((
+                    TrafficActor::motor_vehicle(),
+                    EntityUuid(Uuid::from_u128(index as u128 + 1)),
+                    TrafficRouteFollower {
+                        route_id: route.id().clone(),
+                        distance_m,
+                        speed_m_s: 0.0,
+                        desired_speed_m_s: 8.0 + (index % 5) as f64 * 0.2,
+                        length_m: 4.2,
+                    },
+                    TrafficPose {
+                        position_m: sample.position_m,
+                        yaw_rad: sample.yaw_rad,
+                    },
+                ))
+                .id(),
+        );
+    }
+    let delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
+    let mut clock = SimClock::new(delta);
+    let mut runtime = TrafficRuntime::default();
+    let mut wheel_rotation_rad = vec![0.0; CITY_ACTOR_COUNT];
+    let mut previous_speed_m_s = vec![0.0; CITY_ACTOR_COUNT];
+    let mut frames = Vec::with_capacity(frame_count);
+    for frame_index in 0..frame_count {
+        frames.push(
+            entities
+                .iter()
+                .enumerate()
+                .map(|(index, entity)| {
+                    let pose = world.get::<TrafficPose>(*entity).expect("render pose");
+                    let follower = world
+                        .get::<TrafficRouteFollower>(*entity)
+                        .expect("render follower");
+                    VehicleFrame {
+                        transform: Transform3::from_translation_rotation(
+                            Vec3::from_array(pose.position_m) + Vec3::new(0.0, 0.60, 0.0),
+                            Quat::from_rotation_y(pose.yaw_rad),
+                        ),
+                        speed_m_s: follower.speed_m_s,
+                        steering_rad: route_steering_rad(route, follower.distance_m, pose.yaw_rad),
+                        wheel_rotation_rad: wheel_rotation_rad[index],
+                        braking: follower.speed_m_s + 0.05 < previous_speed_m_s[index],
+                    }
+                })
+                .collect(),
+        );
+        for (index, entity) in entities.iter().enumerate() {
+            previous_speed_m_s[index] = world
+                .get::<TrafficRouteFollower>(*entity)
+                .expect("captured render follower")
+                .speed_m_s;
+        }
+        for substep in 0..SIM_STEPS_PER_FRAME {
+            let step = (frame_index * SIM_STEPS_PER_FRAME + substep + 1) as u64;
+            for (index, control_id) in control_ids.iter().enumerate() {
+                controls
+                    .set_aspect(control_id, city_signal_aspect(step, index))
+                    .expect("update Sanjo render signal");
+            }
+            assert_eq!(clock.advance(delta), 1);
+            let report = advance_controlled_kinematic_traffic(
+                &mut world,
+                &routes,
+                &controls,
+                &mut runtime,
+                clock.sim_time(),
+                delta,
+                KinematicTrafficConfig::default(),
+            )
+            .expect("advance Sanjo render traffic");
+            assert_eq!(report.collision_count, 0);
+            assert_eq!(report.signal_violation_count, 0);
+            for (index, entity) in entities.iter().enumerate() {
+                let speed_m_s = world
+                    .get::<TrafficRouteFollower>(*entity)
+                    .expect("advanced render follower")
+                    .speed_m_s;
+                wheel_rotation_rad[index] += speed_m_s * delta.as_seconds().value() / 0.36;
+            }
+        }
+    }
+    frames
 }
 
 fn flatten_buildings_to_road_datum(bundle: &mut SceneAssetBundle) {
@@ -483,6 +928,143 @@ fn append_lane_markings(scene: &mut RenderScene, lanes: &[ImportedLane]) {
             [0.82, 0.80, 0.69, 1.0],
         );
     }
+}
+
+fn append_traffic_debug_overlay(
+    scene: &mut RenderScene,
+    network: &TrafficNetwork,
+    route: &TrafficRoute,
+    signal_distances_m: &[f64],
+    overlay: TrafficDebugOverlay,
+) {
+    if overlay.lanes {
+        let mut mesh = DebugMeshBuilder::default();
+        for lane in &network.lanes {
+            mesh.add_polyline(&lane.centerline_m, 0.18, 0.10);
+        }
+        push_debug_mesh(scene, mesh, [0.08, 0.52, 1.0, 1.0]);
+    }
+    if overlay.connections {
+        let mut mesh = DebugMeshBuilder::default();
+        for connection in &network.connections {
+            mesh.add_polyline(&connection.path_m, 0.23, 0.08);
+        }
+        push_debug_mesh(scene, mesh, [0.08, 0.95, 0.72, 1.0]);
+    }
+    if overlay.route {
+        let mut mesh = DebugMeshBuilder::default();
+        mesh.add_polyline(route.path_m(), 0.30, 0.24);
+        push_debug_mesh(scene, mesh, [1.0, 0.72, 0.04, 1.0]);
+    }
+    if overlay.signals {
+        let mut mesh = DebugMeshBuilder::default();
+        for distance_m in signal_distances_m {
+            let point = Vec3::from_array(route.sample(*distance_m).position_m);
+            mesh.add_marker(point, 0.52, 0.55);
+        }
+        push_debug_mesh(scene, mesh, [1.0, 0.12, 0.04, 1.0]);
+    }
+    if overlay.conflict_points {
+        let mut mesh = DebugMeshBuilder::default();
+        for (left_index, left) in network.connections.iter().enumerate() {
+            for right_id in &left.conflict_connection_ids {
+                let Some(right_index) = network
+                    .connections
+                    .iter()
+                    .position(|connection| &connection.id == right_id)
+                else {
+                    continue;
+                };
+                if right_index <= left_index {
+                    continue;
+                }
+                let point = closest_path_pair_midpoint(
+                    &left.path_m,
+                    &network.connections[right_index].path_m,
+                );
+                mesh.add_marker(point, 0.68, 0.34);
+            }
+        }
+        push_debug_mesh(scene, mesh, [1.0, 0.02, 0.42, 1.0]);
+    }
+}
+
+#[derive(Debug, Default)]
+struct DebugMeshBuilder {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    texcoords: Vec<[f32; 2]>,
+    indices: Vec<u32>,
+}
+
+impl DebugMeshBuilder {
+    fn add_polyline(&mut self, points_m: &[[f64; 3]], height_m: f64, width_m: f64) {
+        for segment in points_m.windows(2) {
+            let start = Vec3::from_array(segment[0]) + Vec3::new(0.0, height_m, 0.0);
+            let end = Vec3::from_array(segment[1]) + Vec3::new(0.0, height_m, 0.0);
+            let delta = end - start;
+            if delta.x.hypot(delta.z) <= 1.0e-6 {
+                continue;
+            }
+            let right = Vec3::new(-delta.z, 0.0, delta.x).normalize_or_zero() * width_m * 0.5;
+            self.add_quad(start - right, start + right, end - right, end + right);
+        }
+    }
+
+    fn add_marker(&mut self, point: Vec3, height_m: f64, radius_m: f64) {
+        let center = point + Vec3::new(0.0, height_m, 0.0);
+        self.add_quad(
+            center + Vec3::new(-radius_m, 0.0, 0.0),
+            center + Vec3::new(0.0, 0.0, -radius_m),
+            center + Vec3::new(0.0, 0.0, radius_m),
+            center + Vec3::new(radius_m, 0.0, 0.0),
+        );
+    }
+
+    fn add_quad(&mut self, first: Vec3, second: Vec3, third: Vec3, fourth: Vec3) {
+        let base = self.positions.len() as u32;
+        self.positions.extend(
+            [first, second, third, fourth]
+                .map(|point| [point.x as f32, point.y as f32, point.z as f32]),
+        );
+        self.normals.extend([[0.0, 1.0, 0.0]; 4]);
+        self.texcoords.extend([[0.0, 0.0]; 4]);
+        self.indices
+            .extend([base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+    }
+}
+
+fn push_debug_mesh(scene: &mut RenderScene, mesh: DebugMeshBuilder, color_rgba: [f32; 4]) {
+    if mesh.indices.is_empty() {
+        return;
+    }
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform3::IDENTITY,
+        shape: VisualShape::DynamicMesh,
+        color_rgba,
+        mesh: Some(Arc::new(TriangleMesh {
+            positions: mesh.positions,
+            normals: mesh.normals,
+            texcoords: mesh.texcoords,
+            indices: mesh.indices,
+        })),
+        base_color_texture: None,
+    });
+}
+
+fn closest_path_pair_midpoint(left: &[[f64; 3]], right: &[[f64; 3]]) -> Vec3 {
+    let mut best = (f64::INFINITY, Vec3::ZERO);
+    for left_point in left {
+        for right_point in right {
+            let left_point = Vec3::from_array(*left_point);
+            let right_point = Vec3::from_array(*right_point);
+            let distance_squared_m = (right_point - left_point).length_squared();
+            if distance_squared_m < best.0 {
+                best = (distance_squared_m, (left_point + right_point) * 0.5);
+            }
+        }
+    }
+    best.1
 }
 
 #[cfg(test)]
@@ -841,15 +1423,22 @@ fn append_intersection_markings(scene: &mut RenderScene, route: &TurnRoute) {
     }
 }
 
-fn append_traffic_signals(scene: &mut RenderScene, route: &TurnRoute, phase: SignalPhase) {
-    let direction = route.incoming_direction;
-    let right = Vec3::new(-direction.z, 0.0, direction.x);
-    let rotation = Quat::from_rotation_y(-direction.z.atan2(direction.x));
-    for side in [-1.0, 1.0] {
-        let base = route.intersection
-            + direction * 5.5
-            + right * side * (route.incoming_half_width_m + 0.55);
-        append_traffic_signal(scene, base, -side, rotation, phase);
+fn append_city_runtime_signals(
+    scene: &mut RenderScene,
+    route: &TrafficRoute,
+    signal_distances_m: &[f64],
+    step: usize,
+) {
+    for (index, distance_m) in signal_distances_m.iter().enumerate() {
+        let sample = route.sample(*distance_m);
+        let rotation = Quat::from_rotation_y(sample.yaw_rad);
+        let right = rotation * Vec3::Z;
+        let base = Vec3::from_array(sample.position_m) + right * 3.8;
+        let phase = match city_signal_aspect(step as u64, index) {
+            SignalAspect::Green => SignalPhase::Green,
+            _ => SignalPhase::Red,
+        };
+        append_traffic_signal(scene, base, -1.0, rotation, phase);
     }
 }
 
@@ -996,6 +1585,7 @@ fn simulate_two_way_traffic(
     )
 }
 
+#[cfg(test)]
 fn simulate_signalized_turn(
     lanes: &[ImportedLane],
     outgoing: &ImportedLane,
@@ -1078,6 +1668,7 @@ fn append_sampled_line(points: &mut Vec<Vec3>, start: Vec3, end: Vec3, spacing_m
     points.push(end);
 }
 
+#[cfg(test)]
 fn simulate_route_vehicle(route: &TurnRoute, frame_count: usize) -> Vec<VehicleFrame> {
     let fixed_delta = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
     let mut clock = SimClock::new(fixed_delta);
@@ -1213,6 +1804,7 @@ fn route_steering_rad(route: &TrafficRoute, distance_m: f64, yaw_rad: f64) -> f6
         .clamp(-0.55, 0.55)
 }
 
+#[cfg(test)]
 fn simulate_lane_vehicle(
     lane: &ImportedLane,
     frame_count: usize,
@@ -1307,14 +1899,51 @@ fn follow_camera(vehicle: VehicleFrame) -> CameraOrbit {
     }
 }
 
-fn append_traffic(
+fn append_city_fleet(
     scene: &mut RenderScene,
     assets: &VehicleRenderAssets,
-    primary: VehicleFrame,
-    opposing: VehicleFrame,
+    vehicles: &[VehicleFrame],
+    detailed_lead: bool,
 ) {
-    append_car(scene, assets, primary, &assets.red_body_texture);
-    append_car(scene, assets, opposing, &assets.blue_body_texture);
+    for (index, vehicle) in vehicles.iter().copied().enumerate() {
+        let texture = if index % 3 == 0 {
+            &assets.red_body_texture
+        } else {
+            &assets.blue_body_texture
+        };
+        if index == 0 && detailed_lead {
+            append_car(scene, assets, vehicle, texture);
+        } else {
+            append_fleet_body(scene, assets, vehicle, texture);
+        }
+    }
+}
+
+fn append_fleet_body(
+    scene: &mut RenderScene,
+    assets: &VehicleRenderAssets,
+    vehicle: VehicleFrame,
+    body_texture: &Arc<ImageFrame>,
+) {
+    let rotation = vehicle.transform.rotation;
+    let mesh = assets
+        .body_meshes
+        .first()
+        .expect("validated Kenney body mesh");
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform3 {
+            translation: vehicle.transform.translation + rotation * Vec3::new(0.0, -0.50, 0.0),
+            rotation: rotation * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            scale: Vec3::new(1.24, 1.25, 1.70),
+        },
+        shape: VisualShape::Mesh {
+            path: "kenney://sedan-body-lod".into(),
+            scale: Vec3::ONE,
+        },
+        color_rgba: [1.0; 4],
+        mesh: Some(Arc::clone(mesh)),
+        base_color_texture: Some(Arc::clone(body_texture)),
+    });
 }
 
 fn append_car(
@@ -1604,6 +2233,53 @@ mod tests {
                 .abs()
                 < 0.50
         );
+        let imported_traffic =
+            load_traffic_asset(&roads.traffic_path).expect("load official traffic asset");
+        let topology = build_traffic_topology(
+            TrafficId::new("plateau:sanjo/test-topology").expect("test topology ID"),
+            std::slice::from_ref(&imported_traffic.network),
+            TopologyBuildConfig::default(),
+        )
+        .expect("build official topology");
+        assert_eq!(topology.stats.lane_count, 84);
+        assert_eq!(topology.stats.junction_count, 26);
+        assert_eq!(topology.stats.connection_count, 137);
+        assert_eq!(topology.stats.conflict_pair_count, 128);
+        let planned = select_city_lane_route(&topology.network);
+        assert_eq!(planned.lane_ids.len(), 16);
+        assert_eq!(lane_route_turn_counts(&topology.network, &planned), (3, 7));
+        let runtime_route = materialize_lane_route(
+            &topology.network,
+            &planned,
+            TrafficId::new("plateau:sanjo/test-runtime").expect("test runtime ID"),
+            false,
+        )
+        .expect("materialize official route");
+        let signal_distances_m =
+            city_signal_distances_m(&topology.network, &planned, &runtime_route);
+        let forward = replay_city_fleet(&runtime_route, &signal_distances_m, false);
+        let reverse = replay_city_fleet(&runtime_route, &signal_distances_m, true);
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.stable_hash, 2_121_434_296_870_367_030);
+        assert_eq!(forward.signal_violation_count, 0);
+        assert_eq!(forward.collision_count, 0);
+        assert!(forward.minimum_gap_m >= 2.0);
+
+        let mut debug_scene = RenderScene::new();
+        append_traffic_debug_overlay(
+            &mut debug_scene,
+            &topology.network,
+            &runtime_route,
+            &signal_distances_m,
+            TrafficDebugOverlay {
+                lanes: true,
+                route: true,
+                signals: true,
+                connections: true,
+                conflict_points: true,
+            },
+        );
+        assert_eq!(debug_scene.items.len(), 5);
         fs::remove_dir_all(output).expect("remove Sanjo output");
     }
 
