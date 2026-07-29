@@ -15,8 +15,26 @@ pub struct ImuSample {
 /// LiDAR point cloud payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointCloud {
-    /// Points in the sensor frame, meters.
+    /// Points in the world frame, meters.
     pub points_m: Vec<Vec3>,
+    /// Normalized return intensity for each point in `[0, 1]`.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub intensities: Vec<f32>,
+    /// Source ray index for each point.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub ray_indices: Vec<u32>,
+    /// One-based return index within the source ray.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub return_indices: Vec<u8>,
 }
 
 impl PointCloud {
@@ -24,7 +42,30 @@ impl PointCloud {
     pub fn new() -> Self {
         Self {
             points_m: Vec::new(),
+            intensities: Vec::new(),
+            ray_indices: Vec::new(),
+            return_indices: Vec::new(),
         }
+    }
+
+    /// Appends one LiDAR return while preserving parallel-array invariants.
+    pub fn push_return(&mut self, point_m: Vec3, intensity: f32, ray_index: u32, return_index: u8) {
+        self.points_m.push(point_m);
+        self.intensities.push(intensity);
+        self.ray_indices.push(ray_index);
+        self.return_indices.push(return_index);
+    }
+
+    /// Returns true when all optional LiDAR attributes are absent or aligned.
+    pub fn attributes_are_aligned(&self) -> bool {
+        let len = self.points_m.len();
+        [
+            self.intensities.len(),
+            self.ray_indices.len(),
+            self.return_indices.len(),
+        ]
+        .into_iter()
+        .all(|attribute_len| attribute_len == 0 || attribute_len == len)
     }
 }
 
@@ -137,4 +178,33 @@ pub fn hash_depth_f32(values: &[f32]) -> u64 {
         }
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_cloud_return_attributes_stay_aligned() {
+        let mut cloud = PointCloud::new();
+        cloud.push_return(Vec3::new(1.0, 2.0, 3.0), 0.75, 4, 2);
+
+        assert!(cloud.attributes_are_aligned());
+        assert_eq!(cloud.points_m.len(), 1);
+        assert_eq!(cloud.intensities, vec![0.75]);
+        assert_eq!(cloud.ray_indices, vec![4]);
+        assert_eq!(cloud.return_indices, vec![2]);
+    }
+
+    #[test]
+    fn legacy_point_cloud_without_attributes_is_valid() {
+        let cloud = PointCloud {
+            points_m: vec![Vec3::X],
+            intensities: Vec::new(),
+            ray_indices: Vec::new(),
+            return_indices: Vec::new(),
+        };
+
+        assert!(cloud.attributes_are_aligned());
+    }
 }

@@ -164,9 +164,13 @@ junction reservations:
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-It writes the twelve-second car-follow `docs/media/plateau-car.gif` animation
-and matching reduced-motion PNG. Frames are rasterized at 1280×720 and downsampled to a
-960×540 GIF. A deterministic CPU presentation pass uses the renderer's linear
+It writes the twelve-second material-aware LiDAR
+`docs/media/plateau-lidar.gif` animation and matching reduced-motion PNG. The
+traffic-only `plateau-car.gif` remains as the baseline capture. Building
+collision boxes receive non-visual concrete or glass LiDAR properties in the
+example layer; this does not add a runtime dependency from the PLATEAU importer
+to `rne_sensor`. Frames are rasterized at 1280×720 and downsampled to a 960×540
+GIF. A deterministic CPU presentation pass uses the renderer's linear
 depth buffer for atmospheric perspective, replaces empty pixels with a
 sky-to-horizon gradient, and applies restrained color balance and vignette.
 This pass changes presentation pixels only; simulation and camera depth outputs
@@ -177,6 +181,10 @@ collisions, a two-meter minimum bumper gap, exercised reservations, and at least
 60 simulation steps per wall-clock second. The replay prints average speed,
 waiting actors, maximum queue length, completed trips, cumulative waiting time,
 and wall-clock throughput.
+The LiDAR capture additionally reports point and multiple-return counts, mean
+intensity, stable hash, and scan throughput. See
+[physics-aware LiDAR](LIDAR_SIMULATION.md) for the equations, timing contract,
+failure behavior, and official-Sanjo acceptance hash.
 
 Set `RNE_TRAFFIC_DEBUG` to a comma-separated selection of `lanes`, `route`,
 `signals`, `connections`, and `conflicts` (or `all`) to render batched debug

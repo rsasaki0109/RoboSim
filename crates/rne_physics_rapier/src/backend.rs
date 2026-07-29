@@ -197,6 +197,7 @@ impl PhysicsBackend for RapierBackend {
         }
 
         sync_joints_from_ecs(world, state)?;
+        state.query_pipeline.update(&state.colliders);
 
         Ok(())
     }
@@ -338,27 +339,32 @@ impl PhysicsBackend for RapierBackend {
 
         let ray = Ray::new(origin, direction.normalize());
         let filter = QueryFilter::default();
-        let Some((collider_handle, intersection)) = state.query_pipeline.cast_ray_and_get_normal(
+        let mut intersections = Vec::new();
+        state.query_pipeline.intersections_with_ray(
             &state.bodies,
             &state.colliders,
             &ray,
             query.max_distance_m as f32,
             true,
             filter,
-        ) else {
-            return Ok(Vec::new());
-        };
-
-        let Some(entity) = state.collider_to_entity.get(&collider_handle).copied() else {
-            return Ok(Vec::new());
-        };
-
-        Ok(vec![RaycastHit {
-            entity,
-            point_m: vec3_from_point(ray.point_at(intersection.time_of_impact)),
-            normal: vec3_from_rapier(intersection.normal),
-            distance_m: intersection.time_of_impact as f64,
-        }])
+            |collider_handle, intersection| {
+                if let Some(entity) = state.collider_to_entity.get(&collider_handle).copied() {
+                    intersections.push(RaycastHit {
+                        entity,
+                        point_m: vec3_from_point(ray.point_at(intersection.time_of_impact)),
+                        normal: vec3_from_rapier(intersection.normal),
+                        distance_m: intersection.time_of_impact as f64,
+                    });
+                }
+                true
+            },
+        );
+        intersections.sort_by(|left, right| {
+            left.distance_m
+                .total_cmp(&right.distance_m)
+                .then_with(|| left.entity.index().cmp(&right.entity.index()))
+        });
+        Ok(intersections)
     }
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
@@ -910,6 +916,44 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entity, ground);
         assert_relative_eq!(hits[0].point_m.y, 0.0, epsilon = 0.1);
+    }
+
+    #[test]
+    fn raycast_is_ready_after_sync_and_returns_all_hits_in_distance_order() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc::default())
+            .expect("physics world");
+        let mut world = World::new();
+        let near = spawn_named(&mut world, "near_wall");
+        let far = spawn_named(&mut world, "far_wall");
+        for (entity, x_m) in [(far, 6.0), (near, 3.0)] {
+            world.entity_mut(entity).insert((
+                RigidBody {
+                    body_type: RigidBodyType::Fixed,
+                    ..RigidBody::default()
+                },
+                Collider::cuboid(Vec3::new(0.2, 1.0, 1.0)),
+                Transform3::from_translation_rotation(Vec3::new(x_m, 0.0, 0.0), Quat::IDENTITY),
+            ));
+        }
+
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        let hits = backend
+            .raycast(
+                physics_world,
+                RaycastQuery {
+                    origin_m: Vec3::ZERO,
+                    direction: Vec3::X,
+                    max_distance_m: 10.0,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].entity, near);
+        assert_eq!(hits[1].entity, far);
+        assert!(hits[0].distance_m < hits[1].distance_m);
     }
 
     #[test]

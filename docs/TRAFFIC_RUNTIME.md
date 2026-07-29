@@ -101,3 +101,8 @@ average speed, waiting time, queue length, and throughput. The generated
 `docs/media/plateau-car.gif` contains 144 real wgpu frames over 12 seconds.
 Optional batched debug layers show every lane, the chosen route, signal
 positions, generated connections, and conflict points.
+
+The follow-on `docs/media/plateau-lidar.gif` mounts a physics-aware LiDAR on
+the tracked vehicle and raycasts against official building collision geometry
+and the other traffic actors. This integration remains example-side:
+`rne_traffic` does not depend on sensors, physics, rendering, or PLATEAU.

@@ -57,6 +57,22 @@ atmospheric pass and high-quality 960×540 GIF downsample.
   <sub>Twelve seconds and 144 frames of real wgpu output over official PLATEAU Sanjo City 2025 data: 100 seeded vehicles use eight shortest-path OD routes, 24 fixed-time signals, deterministic junction reservations, and car following with zero red-light violations and zero collisions.</sub>
 </p>
 
+The same official scenario now drives a deterministic physics-aware 905&nbsp;nm
+LiDAR. Non-visual concrete, glass, asphalt, and painted-metal properties control
+intensity and transmitted multiple returns; explicit beam divergence, Gaussian
+range/intensity noise, dropout, fog, rain, dust, and per-scan domain
+randomization all derive from `WorldRandom`. Blue, green, and yellow points show
+increasing normalized return intensity.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-lidar.png">
+    <img src="docs/media/plateau-lidar.gif" alt="Physics-aware LiDAR returns from a moving vehicle in official PLATEAU Sanjo traffic" width="960">
+  </picture>
+  <br>
+  <sub>Real 12-second/144-frame wgpu capture of 36,993 material-aware, incidence-aware, weather-attenuated LiDAR returns (1,296 later returns; stable scan hash <code>2990180753787339583</code>) while 100 deterministic vehicles share the official Sanjo scene.</sub>
+</p>
+
 ```bash
 cargo run -p rne_plateau_import -- path/to/tile.gml \
   --output target/plateau/tile --tile-name tile
@@ -82,6 +98,9 @@ official tile; it checks spawn-order-identical hashes, zero signal violations,
 zero collisions, a two-meter minimum gap, exercised reservations, traffic-flow
 KPIs, and at least 60 Hz. See
 [deterministic traffic runtime](docs/TRAFFIC_RUNTIME.md).
+The LiDAR equations, timestamp and failure behavior, deterministic weather
+randomization, payload attributes, and Sanjo acceptance hash are documented in
+[physics-aware LiDAR](docs/LIDAR_SIMULATION.md).
 
 ## Official Unitree Go2 URDF
 

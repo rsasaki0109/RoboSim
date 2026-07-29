@@ -1,4 +1,4 @@
-//! Imports official PLATEAU data for Kita-Sanjo Station and renders a car traversal GIF.
+//! Imports official PLATEAU data and renders physics-aware LiDAR in Sanjo traffic.
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_assets::{
@@ -6,10 +6,13 @@ use rne_assets::{
     SceneCollisionAsset, SpawnSceneOptions,
 };
 use rne_core::{SimClock, SimDuration};
-#[cfg(test)]
-use rne_ecs::spawn_named;
-use rne_ecs::{Entity, EntityUuid, World};
+use rne_data::PointCloud;
+use rne_ecs::{spawn_named, Entity, EntityUuid, Name, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
+use rne_physics::{
+    Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc, RigidBody, RigidBodyType,
+};
+use rne_physics_rapier::RapierBackend;
 use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
 use rne_render::{
     load_mesh_parts, Camera, ImageFrame, RenderBackend, RenderScene, RenderSceneItem, TriangleMesh,
@@ -19,6 +22,10 @@ use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 #[cfg(test)]
 use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
+};
+use rne_sensor::{
+    sample_lidar_keyed, LidarAtmosphere, LidarDomainRandomization, LidarMaterial, LidarSpec,
+    SensorNoiseKey,
 };
 #[cfg(test)]
 use rne_traffic::advance_kinematic_traffic;
@@ -59,6 +66,9 @@ const CITY_ACTOR_COUNT: usize = 100;
 const CITY_REPLAY_STEPS: u64 = 720;
 const CITY_SIGNAL_COUNT: usize = 3;
 const CITY_ROUTE_COUNT: usize = 8;
+const LIDAR_RAY_COUNT: u32 = 360;
+const LIDAR_MAX_RANGE_M: f64 = 80.0;
+const LIDAR_STREAM_ID: u64 = 46_905;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignalPhase {
@@ -178,6 +188,21 @@ struct CityReplayResult {
     flow: TrafficFlowMetrics,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct CityLidarFrame {
+    mount: Transform3,
+    cloud: PointCloud,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CityLidarCapture {
+    frames: Vec<CityLidarFrame>,
+    stable_hash: u64,
+    total_returns: usize,
+    multi_returns: usize,
+    average_intensity: f64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum CityVehicleClass {
     Compact,
@@ -202,6 +227,24 @@ impl CityVehicleClass {
             Self::Sedan => Vec3::new(1.24, 1.25, 1.70),
             Self::Van => Vec3::new(1.34, 1.52, 1.92),
             Self::Bus => Vec3::new(1.50, 1.68, 2.48),
+        }
+    }
+
+    fn width_m(self) -> f64 {
+        match self {
+            Self::Compact => 1.68,
+            Self::Sedan => 1.82,
+            Self::Van => 1.98,
+            Self::Bus => 2.48,
+        }
+    }
+
+    fn height_m(self) -> f64 {
+        match self {
+            Self::Compact => 1.48,
+            Self::Sedan => 1.52,
+            Self::Van => 2.16,
+            Self::Bus => 3.18,
         }
     }
 }
@@ -548,17 +591,6 @@ fn main() {
         buildings.triangle_count + roads.triangle_count,
     );
 
-    if std::env::var("RNE_SKIP_GPU").is_ok() {
-        println!("RNE_SKIP_GPU set; headless PLATEAU import completed");
-        return;
-    }
-    let mut backend = match WgpuRenderBackend::new() {
-        Ok(backend) => backend,
-        Err(error) => {
-            eprintln!("wgpu unavailable after successful headless import: {error}");
-            return;
-        }
-    };
     let media_dir = std::env::var_os("RNE_MEDIA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| repo_root.join("docs/media"));
@@ -567,12 +599,8 @@ fn main() {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(CAR_FRAME_COUNT)
         .clamp(1, CAR_FRAME_COUNT);
-    let frames_dir = generated_dir.join("frames");
-    if frames_dir.exists() {
-        fs::remove_dir_all(&frames_dir).expect("remove old PLATEAU frames");
-    }
-    fs::create_dir_all(&frames_dir).expect("create PLATEAU frames");
-    fs::create_dir_all(&media_dir).expect("create media directory");
+    let capture_frame_count = CAR_FRAME_COUNT;
+    let frames_dir = generated_dir.join("lidar-frames");
 
     let mut city_scene = render_scene_from_world(&mut world);
     let mut mesh_roots = mesh_package_roots(&building_bundle);
@@ -599,7 +627,7 @@ fn main() {
     println!("traffic debug overlay: {debug_overlay:?}");
     let vehicle_assets = VehicleRenderAssets::load();
     let city_traffic =
-        simulate_city_fleet_frames(&topology.network, &city_scenario, render_frame_count);
+        simulate_city_fleet_frames(&topology.network, &city_scenario, capture_frame_count);
 
     let scene_item_limit = if debug_overlay == TrafficDebugOverlay::default() {
         MAX_STATIC_SCENE_ITEMS
@@ -629,7 +657,52 @@ fn main() {
         primary_actor_index + 1,
         city_vehicle_motion_m(&city_traffic, primary_actor_index),
     );
-    for (frame, vehicles) in city_traffic.iter().enumerate() {
+    let lidar_started = Instant::now();
+    let lidar_capture =
+        capture_city_lidar_frames(&mut world, &city_traffic, primary_actor_index, false);
+    let lidar_elapsed = lidar_started.elapsed();
+    let lidar_hz = lidar_capture.frames.len() as f64 / lidar_elapsed.as_secs_f64();
+    assert_eq!(lidar_capture.frames.len(), capture_frame_count);
+    assert!(
+        lidar_capture.total_returns >= capture_frame_count * 24,
+        "Sanjo LiDAR produced too few returns: {}",
+        lidar_capture.total_returns
+    );
+    assert!(
+        lidar_capture.multi_returns > 0,
+        "Sanjo glass material must produce at least one later return"
+    );
+    assert!(
+        lidar_hz >= RENDER_HZ as f64,
+        "Sanjo physics-aware LiDAR throughput {lidar_hz:.1} Hz is below the {RENDER_HZ} Hz capture rate"
+    );
+    println!(
+        "physics-aware LiDAR ready: rays={} frames={} returns={} multi_returns={} average_intensity={:.3} stable_hash={} capture_hz={:.1}",
+        LIDAR_RAY_COUNT,
+        lidar_capture.frames.len(),
+        lidar_capture.total_returns,
+        lidar_capture.multi_returns,
+        lidar_capture.average_intensity,
+        lidar_capture.stable_hash,
+        lidar_hz,
+    );
+    if std::env::var("RNE_SKIP_GPU").is_ok() {
+        println!("RNE_SKIP_GPU set; headless PLATEAU LiDAR capture completed");
+        return;
+    }
+    let mut backend = match WgpuRenderBackend::new() {
+        Ok(backend) => backend,
+        Err(error) => {
+            eprintln!("wgpu unavailable after successful headless LiDAR capture: {error}");
+            return;
+        }
+    };
+    if frames_dir.exists() {
+        fs::remove_dir_all(&frames_dir).expect("remove old PLATEAU LiDAR frames");
+    }
+    fs::create_dir_all(&frames_dir).expect("create PLATEAU LiDAR frames");
+    fs::create_dir_all(&media_dir).expect("create media directory");
+    for (frame, vehicles) in city_traffic.iter().take(render_frame_count).enumerate() {
         let primary = vehicles[primary_actor_index];
         let mut scene = city_scene.clone();
         append_city_runtime_signals(
@@ -645,6 +718,7 @@ fn main() {
             primary_actor_index,
             debug_overlay == TrafficDebugOverlay::default(),
         );
+        append_lidar_intensity_overlay(&mut scene, &lidar_capture.frames[frame]);
         let car_camera = follow_camera(primary);
         let output = backend
             .render_scene_camera(&camera, &car_camera.camera_transform(), &scene, CLEAR_COLOR)
@@ -664,17 +738,17 @@ fn main() {
         )
         .expect("write PLATEAU car frame");
     }
-    let car_gif_path = media_dir.join("plateau-car.gif");
-    build_gif(&frames_dir, &car_gif_path).expect("encode PLATEAU car GIF");
+    let lidar_gif_path = media_dir.join("plateau-lidar.gif");
+    build_gif(&frames_dir, &lidar_gif_path).expect("encode PLATEAU LiDAR GIF");
     let poster_frame = render_frame_count.saturating_sub(1).min(110);
     image::open(frames_dir.join(format!("frame-{poster_frame:03}.png")))
-        .expect("read PLATEAU car poster frame")
-        .save(media_dir.join("plateau-car.png"))
-        .expect("write PLATEAU car poster");
-    fs::remove_dir_all(&frames_dir).expect("remove PLATEAU car frame directory");
+        .expect("read PLATEAU LiDAR poster frame")
+        .save(media_dir.join("plateau-lidar.png"))
+        .expect("write PLATEAU LiDAR poster");
+    fs::remove_dir_all(&frames_dir).expect("remove PLATEAU LiDAR frame directory");
     println!(
-        "rendered official PLATEAU car media to {}",
-        car_gif_path.display()
+        "rendered official PLATEAU LiDAR media to {}",
+        lidar_gif_path.display()
     );
 }
 
@@ -1311,6 +1385,231 @@ fn simulate_city_fleet_frames(
     frames
 }
 
+fn capture_city_lidar_frames(
+    world: &mut World,
+    traffic_frames: &[Vec<VehicleFrame>],
+    primary_actor_index: usize,
+    reverse_vehicle_spawn_order: bool,
+) -> CityLidarCapture {
+    assign_city_lidar_materials(world);
+    let actor_count = traffic_frames
+        .first()
+        .map(Vec::len)
+        .expect("LiDAR capture requires traffic frames");
+    let mut spawn_indices = (0..actor_count)
+        .filter(|index| *index != primary_actor_index)
+        .collect::<Vec<_>>();
+    if reverse_vehicle_spawn_order {
+        spawn_indices.reverse();
+    }
+    let mut collider_entities = vec![None; actor_count];
+    for actor_index in spawn_indices {
+        let vehicle = traffic_frames[0][actor_index];
+        let entity = spawn_named(world, format!("lidar_vehicle_{actor_index:03}"));
+        world.entity_mut(entity).insert((
+            RigidBody {
+                body_type: RigidBodyType::Kinematic,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: Vec3::new(
+                        vehicle.class.length_m() * 0.5,
+                        vehicle.class.height_m() * 0.5,
+                        vehicle.class.width_m() * 0.5,
+                    ),
+                },
+                ..Collider::default()
+            },
+            LidarMaterial::painted_metal(),
+            lidar_vehicle_transform(vehicle),
+        ));
+        collider_entities[actor_index] = Some(entity);
+    }
+
+    let mut physics = RapierBackend::new();
+    let physics_world = physics
+        .create_world(PhysicsWorldDesc::default())
+        .expect("create Sanjo LiDAR physics world");
+    let spec = city_lidar_spec();
+    let world_random = WorldRandom::new(46);
+    let mut frames = Vec::with_capacity(traffic_frames.len());
+    let mut stable_hash = 0xcbf29ce484222325_u64;
+    let mut total_returns = 0_usize;
+    let mut multi_returns = 0_usize;
+    let mut intensity_sum = 0.0_f64;
+
+    for (frame_index, vehicles) in traffic_frames.iter().enumerate() {
+        for (actor_index, entity) in collider_entities.iter().enumerate() {
+            let Some(entity) = entity else {
+                continue;
+            };
+            if let Some(mut transform) = world.get_mut::<Transform3>(*entity) {
+                *transform = lidar_vehicle_transform(vehicles[actor_index]);
+            }
+        }
+        physics
+            .sync_from_ecs(world, physics_world)
+            .expect("sync Sanjo LiDAR colliders");
+        let primary = vehicles[primary_actor_index];
+        let mount = lidar_mount_transform(primary);
+        let cloud = sample_lidar_keyed(
+            &physics,
+            physics_world,
+            world,
+            &mount,
+            &spec,
+            SensorNoiseKey::new(
+                world_random.seed(),
+                spec.seed,
+                LIDAR_STREAM_ID,
+                frame_index as u64 + 1,
+            ),
+        );
+        assert!(cloud.attributes_are_aligned());
+        total_returns += cloud.points_m.len();
+        multi_returns += cloud
+            .return_indices
+            .iter()
+            .filter(|return_index| **return_index > 1)
+            .count();
+        intensity_sum += cloud
+            .intensities
+            .iter()
+            .map(|intensity| f64::from(*intensity))
+            .sum::<f64>();
+        stable_hash = hash_lidar_cloud(stable_hash, &cloud);
+        frames.push(CityLidarFrame { mount, cloud });
+    }
+
+    CityLidarCapture {
+        frames,
+        stable_hash,
+        total_returns,
+        multi_returns,
+        average_intensity: if total_returns == 0 {
+            0.0
+        } else {
+            intensity_sum / total_returns as f64
+        },
+    }
+}
+
+fn city_lidar_spec() -> LidarSpec {
+    LidarSpec {
+        ray_count: LIDAR_RAY_COUNT,
+        min_angle_rad: -std::f64::consts::PI,
+        max_angle_rad: std::f64::consts::PI,
+        min_range_m: 0.8,
+        max_range_m: LIDAR_MAX_RANGE_M,
+        max_returns: 2,
+        wavelength_nm: 905.0,
+        beam_divergence_rad: 0.000_8,
+        range_noise_stddev_m: 0.012,
+        intensity_noise_stddev: 0.004,
+        dropout_probability: 0.01,
+        minimum_intensity: 0.002,
+        seed: 46_905,
+        atmosphere: LidarAtmosphere {
+            fog_extinction_per_m: 0.001,
+            rain_rate_mm_h: 1.5,
+            dust_density_mg_m3: 0.4,
+            snow_rate_mm_h: 0.0,
+        },
+        domain_randomization: LidarDomainRandomization {
+            fog_extinction_range_per_m: [0.0, 0.002],
+            rain_rate_range_mm_h: [0.0, 2.5],
+            dust_density_range_mg_m3: [0.0, 0.8],
+            snow_rate_range_mm_h: [0.0, 0.0],
+        },
+        ..LidarSpec::default()
+    }
+}
+
+fn assign_city_lidar_materials(world: &mut World) {
+    let assignments = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            world.get::<Collider>(entity)?;
+            let name = world
+                .get::<Name>(entity)
+                .map(|name| name.0.as_str())
+                .unwrap_or_default();
+            let material = if name.contains("road") || name.contains("ground") {
+                LidarMaterial::dry_asphalt()
+            } else if name.contains("building") && stable_name_hash(name).is_multiple_of(3) {
+                LidarMaterial::clear_glass()
+            } else if name.contains("building") {
+                LidarMaterial::concrete()
+            } else {
+                LidarMaterial::default()
+            };
+            Some((entity, material))
+        })
+        .collect::<Vec<_>>();
+    for (entity, material) in assignments {
+        world.entity_mut(entity).insert(material);
+    }
+}
+
+fn lidar_vehicle_transform(vehicle: VehicleFrame) -> Transform3 {
+    Transform3::from_translation_rotation(
+        Vec3::new(
+            vehicle.transform.translation.x,
+            vehicle.class.height_m() * 0.5,
+            vehicle.transform.translation.z,
+        ),
+        vehicle.transform.rotation,
+    )
+}
+
+fn lidar_mount_transform(vehicle: VehicleFrame) -> Transform3 {
+    let forward = vehicle.transform.rotation * Vec3::X;
+    Transform3::from_translation_rotation(
+        Vec3::new(
+            vehicle.transform.translation.x,
+            vehicle.class.height_m() + 0.18,
+            vehicle.transform.translation.z,
+        ) + forward * 0.55,
+        vehicle.transform.rotation,
+    )
+}
+
+fn hash_lidar_cloud(mut hash: u64, cloud: &PointCloud) -> u64 {
+    for point in &cloud.points_m {
+        for value in [point.x, point.y, point.z] {
+            for byte in value.to_bits().to_le_bytes() {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+        }
+    }
+    for intensity in &cloud.intensities {
+        for byte in intensity.to_bits().to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    for value in &cloud.ray_indices {
+        for byte in value.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    for value in &cloud.return_indices {
+        hash ^= u64::from(*value);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn stable_name_hash(value: &str) -> u64 {
+    value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
 fn flatten_buildings_to_road_datum(bundle: &mut SceneAssetBundle) {
     for object in &mut bundle.scene.objects {
         if !object.name.starts_with("plateau_building_") {
@@ -1429,6 +1728,48 @@ fn append_traffic_debug_overlay(
     }
 }
 
+fn append_lidar_intensity_overlay(scene: &mut RenderScene, frame: &CityLidarFrame) {
+    const COLORS: [[f32; 4]; 3] = [
+        [0.08, 0.42, 1.0, 1.0],
+        [0.04, 1.0, 0.52, 1.0],
+        [1.0, 0.86, 0.08, 1.0],
+    ];
+    let mut bins = [
+        DebugMeshBuilder::default(),
+        DebugMeshBuilder::default(),
+        DebugMeshBuilder::default(),
+    ];
+    for (point, intensity) in frame
+        .cloud
+        .points_m
+        .iter()
+        .zip(frame.cloud.intensities.iter().copied())
+    {
+        let bin = if intensity < 0.03 {
+            0
+        } else if intensity < 0.10 {
+            1
+        } else {
+            2
+        };
+        bins[bin].add_point_marker(*point, 0.18);
+    }
+    for ((point, ray_index), return_index) in frame
+        .cloud
+        .points_m
+        .iter()
+        .zip(&frame.cloud.ray_indices)
+        .zip(&frame.cloud.return_indices)
+    {
+        if *return_index == 1 && ray_index.is_multiple_of(24) {
+            bins[0].add_beam(frame.mount.translation, *point, 0.005);
+        }
+    }
+    for (mesh, color) in bins.into_iter().zip(COLORS) {
+        push_debug_mesh(scene, mesh, color);
+    }
+}
+
 #[derive(Debug, Default)]
 struct DebugMeshBuilder {
     positions: Vec<[f32; 3]>,
@@ -1458,6 +1799,36 @@ impl DebugMeshBuilder {
             center + Vec3::new(0.0, 0.0, -radius_m),
             center + Vec3::new(0.0, 0.0, radius_m),
             center + Vec3::new(radius_m, 0.0, 0.0),
+        );
+    }
+
+    fn add_point_marker(&mut self, center: Vec3, radius_m: f64) {
+        let x = Vec3::X * radius_m;
+        let y = Vec3::Y * radius_m;
+        let z = Vec3::Z * radius_m;
+        self.add_quad(center - x, center + y, center - y, center + x);
+        self.add_quad(center - z, center + y, center - y, center + z);
+        self.add_quad(center - x, center + z, center - z, center + x);
+    }
+
+    fn add_beam(&mut self, start: Vec3, end: Vec3, half_width_m: f64) {
+        let direction = (end - start).normalize_or_zero();
+        if direction == Vec3::ZERO {
+            return;
+        }
+        let horizontal = Vec3::Y.cross(direction).normalize_or_zero() * half_width_m;
+        let vertical = Vec3::Y * half_width_m;
+        self.add_quad(
+            start - horizontal,
+            start + horizontal,
+            end - horizontal,
+            end + horizontal,
+        );
+        self.add_quad(
+            start - vertical,
+            start + vertical,
+            end - vertical,
+            end + vertical,
         );
     }
 
@@ -2735,6 +3106,68 @@ mod tests {
         assert!(forward.maximum_active_reservations > 0);
         assert!(forward.flow.average_speed_m_s > 0.0);
         assert!(forward.flow.cumulative_waiting_time_s > 0.0);
+
+        let lidar_traffic = simulate_city_fleet_frames(&topology.network, &scenario, 12);
+        let lidar_actor_index = (0..CITY_ACTOR_COUNT)
+            .max_by(|left, right| {
+                city_vehicle_motion_m(&lidar_traffic, *left)
+                    .total_cmp(&city_vehicle_motion_m(&lidar_traffic, *right))
+                    .then_with(|| right.cmp(left))
+            })
+            .expect("official Sanjo LiDAR camera actor");
+        let mut lidar_building_bundle =
+            load_scene_bundle(&buildings.scene_path).expect("load LiDAR building bundle");
+        flatten_buildings_to_road_datum(&mut lidar_building_bundle);
+        let lidar_road_bundle =
+            load_scene_bundle(&roads.scene_path).expect("load LiDAR road bundle");
+        let mut forward_lidar_world = World::new();
+        spawn_scene_bundle(
+            &mut forward_lidar_world,
+            &lidar_building_bundle,
+            None,
+            SpawnSceneOptions::default(),
+        )
+        .expect("spawn forward LiDAR buildings");
+        spawn_scene_bundle(
+            &mut forward_lidar_world,
+            &lidar_road_bundle,
+            None,
+            SpawnSceneOptions::default(),
+        )
+        .expect("spawn forward LiDAR roads");
+        let mut reverse_lidar_world = World::new();
+        spawn_scene_bundle(
+            &mut reverse_lidar_world,
+            &lidar_building_bundle,
+            None,
+            SpawnSceneOptions::default(),
+        )
+        .expect("spawn reverse LiDAR buildings");
+        spawn_scene_bundle(
+            &mut reverse_lidar_world,
+            &lidar_road_bundle,
+            None,
+            SpawnSceneOptions::default(),
+        )
+        .expect("spawn reverse LiDAR roads");
+        let forward_lidar = capture_city_lidar_frames(
+            &mut forward_lidar_world,
+            &lidar_traffic,
+            lidar_actor_index,
+            false,
+        );
+        let reverse_lidar = capture_city_lidar_frames(
+            &mut reverse_lidar_world,
+            &lidar_traffic,
+            lidar_actor_index,
+            true,
+        );
+        assert_eq!(forward_lidar.stable_hash, reverse_lidar.stable_hash);
+        assert_eq!(forward_lidar.stable_hash, 6_499_951_982_825_043_854);
+        assert_eq!(forward_lidar.total_returns, reverse_lidar.total_returns);
+        assert_eq!(forward_lidar.multi_returns, reverse_lidar.multi_returns);
+        assert!(forward_lidar.total_returns >= 12 * 24);
+        assert!(forward_lidar.multi_returns > 0);
 
         let mut debug_scene = RenderScene::new();
         append_traffic_debug_overlay(

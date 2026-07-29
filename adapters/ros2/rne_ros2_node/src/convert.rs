@@ -158,6 +158,7 @@ mod tests {
     fn pointcloud_preserves_xyz_layout() {
         let cloud = PointCloud {
             points_m: vec![Vec3::new(3.0, 0.5, 0.0)],
+            ..PointCloud::default()
         };
         let ros = to_ros_pointcloud2(&cloud, SimTime::from_ticks(42), "lidar");
         let msg = to_pointcloud2_message(&ros);

@@ -26,8 +26,10 @@ pub fn pointcloud_to_laserscan(
     };
     let mut ranges = vec![0.0_f32; count];
     let mut filled = vec![false; count];
+    let has_intensity = cloud.intensities.len() == cloud.points_m.len();
+    let mut intensities = has_intensity.then(|| vec![0.0_f32; count]);
 
-    for point in &cloud.points_m {
+    for (point_index, point) in cloud.points_m.iter().enumerate() {
         let local = inv.transform_point(*point);
         let range = (local.x * local.x + local.z * local.z).sqrt() as f32;
         if range <= 0.0 || range > spec.max_range_m as f32 {
@@ -36,10 +38,18 @@ pub fn pointcloud_to_laserscan(
         let angle = local.z.atan2(local.x) as f32;
         let index = angle_to_index(angle, angle_min, angle_max, count);
         if filled[index] {
-            ranges[index] = ranges[index].min(range);
+            if range < ranges[index] {
+                ranges[index] = range;
+                if let Some(intensities) = &mut intensities {
+                    intensities[index] = cloud.intensities[point_index];
+                }
+            }
         } else {
             ranges[index] = range;
             filled[index] = true;
+            if let Some(intensities) = &mut intensities {
+                intensities[index] = cloud.intensities[point_index];
+            }
         }
     }
 
@@ -53,10 +63,10 @@ pub fn pointcloud_to_laserscan(
         angle_increment,
         time_increment: 0.0,
         scan_time: 0.0,
-        range_min: 0.0,
+        range_min: spec.min_range_m as f32,
         range_max: spec.max_range_m as f32,
         ranges,
-        intensities: Vec::new(),
+        intensities: intensities.unwrap_or_default(),
     }
 }
 
@@ -93,10 +103,12 @@ mod tests {
             max_angle_rad: std::f64::consts::FRAC_PI_2,
             max_range_m: 20.0,
             height_offset_m: 0.0,
+            ..LidarSpec::default()
         };
         let lidar_world = Transform3::from_translation_rotation(Vec3::ZERO, Quat::IDENTITY);
         let cloud = PointCloud {
             points_m: vec![Vec3::new(5.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 4.0)],
+            ..PointCloud::default()
         };
 
         let scan =
@@ -104,5 +116,24 @@ mod tests {
         assert_eq!(scan.ranges.len(), 4);
         assert!((scan.ranges[2] - 5.0).abs() < 1e-4);
         assert!((scan.ranges[3] - 4.0).abs() < 1e-4);
+        assert!(scan.intensities.is_empty());
+    }
+
+    #[test]
+    fn laserscan_keeps_intensity_of_nearest_return() {
+        let spec = LidarSpec {
+            ray_count: 1,
+            min_angle_rad: 0.0,
+            max_angle_rad: 0.0,
+            ..LidarSpec::default()
+        };
+        let mut cloud = PointCloud::new();
+        cloud.push_return(Vec3::new(5.0, 0.0, 0.0), 0.2, 0, 2);
+        cloud.push_return(Vec3::new(3.0, 0.0, 0.0), 0.7, 0, 1);
+
+        let scan =
+            pointcloud_to_laserscan(&cloud, &Transform3::IDENTITY, &spec, SimTime::ZERO, "lidar");
+        assert_eq!(scan.ranges, vec![3.0]);
+        assert_eq!(scan.intensities, vec![0.7]);
     }
 }
