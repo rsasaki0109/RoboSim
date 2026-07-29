@@ -2,7 +2,7 @@
 
 use crate::{
     TrafficActorKind, TrafficAsset, TrafficConnection, TrafficId, TrafficNetwork, TrafficRoute,
-    TrafficRouteError,
+    TrafficRouteError, TrafficRouteMovement,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -229,6 +229,7 @@ pub fn materialize_lane_route(
         .map(|connection| (&connection.id, connection))
         .collect::<BTreeMap<_, _>>();
     let mut path_m = Vec::new();
+    let mut movements = Vec::with_capacity(planned.connection_ids.len());
     for (index, lane_id) in planned.lane_ids.iter().enumerate() {
         let lane = lanes
             .get(lane_id)
@@ -254,9 +255,17 @@ pub fn materialize_lane_route(
                 expected_outgoing_lane_id: outgoing_lane_id.clone(),
             });
         }
+        let entry_distance_m = path_length_m(&path_m);
         append_geometry(&mut path_m, &connection.path_m);
+        movements.push(TrafficRouteMovement {
+            connection_id: connection_id.clone(),
+            entry_distance_m,
+            exit_distance_m: path_length_m(&path_m),
+        });
     }
-    TrafficRoute::new(route_id, path_m, closed).map_err(Into::into)
+    TrafficRoute::new(route_id, path_m, closed)
+        .map(|route| route.with_movements(movements))
+        .map_err(Into::into)
 }
 
 fn append_geometry(target: &mut Vec<[f64; 3]>, geometry: &[[f64; 3]]) {
@@ -265,6 +274,17 @@ fn append_geometry(target: &mut Vec<[f64; 3]>, geometry: &[[f64; 3]]) {
             target.push(*point);
         }
     }
+}
+
+fn path_length_m(points: &[[f64; 3]]) -> f64 {
+    points
+        .windows(2)
+        .map(|segment| {
+            (segment[1][0] - segment[0][0])
+                .hypot(segment[1][1] - segment[0][1])
+                .hypot(segment[1][2] - segment[0][2])
+        })
+        .sum()
 }
 
 fn candidate_order(left: &Candidate, right: &Candidate) -> std::cmp::Ordering {

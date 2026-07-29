@@ -29,10 +29,14 @@ official Project PLATEAU Sanjo City 2025 mesh around Kita-Sanjo Station:
 213 buildings, 59 road surfaces, and the station's real LOD2 Appearance
 textures. Its generated traffic asset contains 84 directed lanes; deterministic
 endpoint topology produces 26 junctions, 137 connections, and 128 conflict
-pairs. Shortest routing selects a 16-lane, 731 m path through multiple
-intersections with three left and seven right turns. One hundred textured CC0
-Kenney sedans follow that route for twelve seconds using explicit `SimClock`
-steps, deterministic car following, and three red/green stop-line controls.
+pairs. Shortest routing selects a 15-lane, 752 m path through multiple
+intersections as the first of eight diverse, reachable origin/destination
+routes. One hundred textured CC0 Kenney compact cars, sedans, vans, and buses
+are distributed across those routes using an explicit `WorldRandom` seed.
+Their desired speeds, departure times, and initial gaps vary reproducibly.
+They run for twelve seconds using explicit `SimClock` steps, deterministic car
+following, 24 red/green stop-line controls, and connection-conflict junction
+reservations.
 The tracked sedan's four wheel meshes rotate independently, the front pair
 follows its steering angle, and rear lamps respond to braking. The daylight scene
 adds directional sunlight, PCF-filtered building and vehicle shadow maps,
@@ -50,7 +54,7 @@ atmospheric pass and high-quality 960×540 GIF downsample.
     <img src="docs/media/plateau-car.gif" alt="One hundred deterministic traffic vehicles driving through an official PLATEAU Sanjo City tile in RNE" width="960">
   </picture>
   <br>
-  <sub>Twelve seconds and 144 frames of real wgpu output over official PLATEAU Sanjo City 2025 data: 100 deterministic route followers traverse a 16-lane, multi-intersection route with three fixed-time signals, car following, left/right turns, zero red-light violations, and zero collisions.</sub>
+  <sub>Twelve seconds and 144 frames of real wgpu output over official PLATEAU Sanjo City 2025 data: 100 seeded vehicles use eight shortest-path OD routes, 24 fixed-time signals, deterministic junction reservations, and car following with zero red-light violations and zero collisions.</sub>
 </p>
 
 ```bash
@@ -75,7 +79,8 @@ See [PLATEAU import](docs/PLATEAU_IMPORT.md) for supported geometry, coordinate
 mapping, outputs, and current limits. The same traffic runtime has a headless
 acceptance replay of 100 vehicles for 720 deterministic fixed steps on the
 official tile; it checks spawn-order-identical hashes, zero signal violations,
-zero collisions, a two-meter minimum gap, and at least 60 Hz. See
+zero collisions, a two-meter minimum gap, exercised reservations, traffic-flow
+KPIs, and at least 60 Hz. See
 [deterministic traffic runtime](docs/TRAFFIC_RUNTIME.md).
 
 ## Official Unitree Go2 URDF

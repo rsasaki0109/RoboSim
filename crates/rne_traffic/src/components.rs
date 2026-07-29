@@ -55,6 +55,13 @@ pub struct TrafficRouteFollower {
     pub length_m: f64,
 }
 
+/// Optional simulation-time gate for a scheduled traffic departure.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrafficDeparture {
+    /// Earliest simulation time at which the actor may move.
+    pub departure_time_s: f64,
+}
+
 /// Backend-neutral pose sampled from a traffic route.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TrafficPose {

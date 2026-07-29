@@ -169,4 +169,11 @@ fn planned_route_materializes_lane_and_connection_geometry_in_order() {
         ]
     );
     assert!((route.total_length_m() - planned.distance_m).abs() < 1.0e-9);
+    assert_eq!(route.movements().len(), 2);
+    assert_eq!(
+        route.movements()[0].connection_id,
+        id("connection:start-short")
+    );
+    assert!((route.movements()[0].entry_distance_m - 10.0).abs() < 1.0e-9);
+    assert!((route.movements()[0].exit_distance_m - (10.0 + 2.0_f64.sqrt())).abs() < 1.0e-9);
 }

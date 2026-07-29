@@ -152,10 +152,13 @@ The runnable example converts the checked-in official Sanjo City 2025 mesh and
 loads 213 buildings and 59 road surfaces headlessly. Its 84 imported directed
 lanes pass through `build_traffic_topology`, producing 26 junctions, 137
 connections, and 128 symmetric conflict pairs. `shortest_lane_route` selects a
-16-lane, 731 m path with three left and seven right turns, and
-`materialize_lane_route` converts the lane/connection sequence into runtime
-geometry. One hundred textured CC0 Kenney sedans follow it under three
-fixed-time red/green controls:
+representative multi-intersection path, then a stable diversity pass selects
+seven more reachable origin/destination paths that exercise real conflict
+relationships. `materialize_lane_route` converts every lane/connection
+sequence into runtime geometry and retains each connection's entry/exit span.
+One hundred textured CC0 Kenney compact cars, sedans, vans, and buses follow
+the eight routes under 24 fixed-time red/green controls and deterministic
+junction reservations:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
@@ -170,8 +173,10 @@ This pass changes presentation pixels only; simulation and camera depth outputs
 remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
 acceptance replay. That replay runs 720 steps twice with opposite ECS spawn
 orders and requires the same stable state hash, zero red-light violations, zero
-collisions, a two-meter minimum bumper gap, and at least 60 simulation steps per
-wall-clock second.
+collisions, a two-meter minimum bumper gap, exercised reservations, and at least
+60 simulation steps per wall-clock second. The replay prints average speed,
+waiting actors, maximum queue length, completed trips, cumulative waiting time,
+and wall-clock throughput.
 
 Set `RNE_TRAFFIC_DEBUG` to a comma-separated selection of `lanes`, `route`,
 `signals`, `connections`, and `conflicts` (or `all`) to render batched debug
@@ -183,13 +188,15 @@ The official road LOD1 geometry has zero elevation while building geometry
 uses surveyed absolute elevations. For this visualization the example
 deterministically places every building's lowest AABB face on the road datum.
 The source meshes and textures are unchanged. Approximate lane markings are
-example-authored overlays. A low grass-colored ground receiver removes the
+example-authored overlays. A single batched 3.4 m asphalt strip follows the
+eight materialized runtime routes to bridge LOD1 polygon gaps under moving
+vehicles; it changes presentation only, not topology or traffic geometry. A low grass-colored ground receiver removes the
 empty-sky gaps between imported surfaces. Concrete sidewalks and curbs follow
 the selected road's derived principal axis and width. The procedural
 intersection asphalt bridges the small gap between independently derived road
 surfaces; stop and crosswalk markings make the approximation explicit. Three
-signals render the deterministic red/green phases consumed by the traffic
-runtime. CC0 procedural street trees, streetlights, and guardrails are
+representative signals render phases from the same 24-control schedule consumed
+by the traffic runtime. CC0 procedural street trees, streetlights, and guardrails are
 sampled at fixed longitudinal
 fractions; a candidate is omitted whenever its clearance disc intersects an
 imported building collision AABB. Tests verify stable placement and non-overlap.
@@ -199,8 +206,8 @@ light projection is fitted to scene bounds and snapped to shadow texels to
 limit shimmer between frames. The tracked sedan uses one cached body mesh and
 four wheel instances: wheel spin comes from integrated distance, the front pair
 receives route steering, and rear lamp intensity follows actual deceleration.
-The remaining 99 vehicles use one-draw body-mesh LODs so the full fleet stays
-within the renderer item budget. Red and blue body palettes preserve the source
+The remaining 99 vehicles use one-draw, class-scaled body-mesh LODs so the full
+fleet stays within the renderer item budget. Red and blue body palettes preserve the source
 windows, lamps, trim, and shading. The PLATEAU data attribution, Kenney CC0 notice, and
 procedural streetscape CC0 dedication are recorded beside the example.
 
