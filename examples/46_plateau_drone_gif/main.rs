@@ -5,7 +5,7 @@ use rne_assets::{
     load_scene_bundle, mesh_package_roots, spawn_scene_bundle, SceneAssetBundle,
     SceneCollisionAsset, SpawnSceneOptions,
 };
-use rne_core::{SimClock, SimDuration};
+use rne_core::{SimClock, SimDuration, SimTime};
 use rne_data::PointCloud;
 use rne_ecs::{spawn_named, Entity, EntityUuid, Name, World};
 use rne_math::{Hertz, Quat, Transform3 as MathTransform3, Vec3};
@@ -15,8 +15,8 @@ use rne_physics::{
 use rne_physics_rapier::RapierBackend;
 use rne_plateau::{import_citygml_file, CoordinateMode, ImportOptions, ImportedLane, SourceOrigin};
 use rne_render::{
-    load_mesh_parts, Camera, ImageFrame, RenderBackend, RenderScene, RenderSceneItem, TriangleMesh,
-    Visual, VisualShape,
+    load_mesh_parts, Camera, HeadlessRenderBackend, ImageFrame, RenderBackend, RenderScene,
+    RenderSceneItem, TriangleMesh, Visual, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 #[cfg(test)]
@@ -24,8 +24,8 @@ use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
 };
 use rne_sensor::{
-    sample_lidar_keyed, LidarAtmosphere, LidarDomainRandomization, LidarMaterial, LidarSpec,
-    SensorNoiseKey,
+    sample_camera_rgbd, sample_lidar_swept, CameraRgbdSample, CameraSpec, LidarAtmosphere,
+    LidarDomainRandomization, LidarMaterial, LidarSpec, LidarSweep, SensorNoiseKey,
 };
 #[cfg(test)]
 use rne_traffic::advance_kinematic_traffic;
@@ -67,8 +67,30 @@ const CITY_REPLAY_STEPS: u64 = 720;
 const CITY_SIGNAL_COUNT: usize = 3;
 const CITY_ROUTE_COUNT: usize = 8;
 const LIDAR_RAY_COUNT: u32 = 360;
+/// Elevation channels, matching a 16-beam spinning scanner.
+const LIDAR_CHANNEL_COUNT: u16 = 16;
+/// Vertical field of view, matching the +/-15 degrees of a VLP-16 class sensor.
+const LIDAR_MIN_ELEVATION_RAD: f64 = -0.261_799_387_799_149_44;
+const LIDAR_MAX_ELEVATION_RAD: f64 = 0.261_799_387_799_149_44;
+/// One revolution per rendered frame, so the sweep spans exactly the platform motion.
+const LIDAR_ROTATION_PERIOD_S: f64 = 1.0 / RENDER_HZ as f64;
+/// Beam footprint sub-samples used to produce mixed pixels on silhouettes.
+const LIDAR_BEAM_SAMPLE_COUNT: u8 = 3;
+const LIDAR_SATURATION_INTENSITY: f64 = 0.92;
 const LIDAR_MAX_RANGE_M: f64 = 80.0;
 const LIDAR_STREAM_ID: u64 = 46_905;
+/// Onboard forward camera resolution, sized for the picture-in-picture insets.
+const CAMERA_WIDTH: u32 = 320;
+const CAMERA_HEIGHT: u32 = 180;
+/// Vertical field of view of a typical forward ADAS camera.
+const CAMERA_FOV_Y_RAD: f64 = 0.715_584_993_317_675_1;
+/// Slight downward tilt so the camera frames the road ahead.
+const CAMERA_PITCH_RAD: f64 = -0.045;
+const CAMERA_STREAM_ID: u64 = 46_906;
+const CAMERA_CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
+/// Inset margin and border thickness in pixels.
+const CAMERA_INSET_MARGIN_PX: u32 = 24;
+const CAMERA_INSET_BORDER_PX: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignalPhase {
@@ -200,7 +222,24 @@ struct CityLidarCapture {
     stable_hash: u64,
     total_returns: usize,
     multi_returns: usize,
+    saturated_returns: usize,
     average_intensity: f64,
+}
+
+/// One deterministic onboard-camera observation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CityCameraFrame {
+    center_depth_m: f32,
+    min_depth_m: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CityCameraCapture {
+    frames: Vec<CityCameraFrame>,
+    stable_hash: u64,
+    pixels_per_frame: usize,
+    nearest_depth_m: f32,
+    mean_center_depth_m: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -676,18 +715,59 @@ fn main() {
         lidar_hz >= RENDER_HZ as f64,
         "Sanjo physics-aware LiDAR throughput {lidar_hz:.1} Hz is below the {RENDER_HZ} Hz capture rate"
     );
+    assert!(
+        lidar_capture.saturated_returns > 0,
+        "retroreflective licence plates must saturate the detector at least once"
+    );
     println!(
-        "physics-aware LiDAR ready: rays={} frames={} returns={} multi_returns={} average_intensity={:.3} stable_hash={} capture_hz={:.1}",
+        "physics-aware LiDAR ready: columns={} channels={} rays_per_scan={} frames={} returns={} multi_returns={} saturated={} average_intensity={:.3} scan_duration_s={:.4} stable_hash={} capture_hz={:.1}",
         LIDAR_RAY_COUNT,
+        LIDAR_CHANNEL_COUNT,
+        city_lidar_spec().rays_per_scan(),
         lidar_capture.frames.len(),
         lidar_capture.total_returns,
         lidar_capture.multi_returns,
+        lidar_capture.saturated_returns,
         lidar_capture.average_intensity,
+        lidar_capture
+            .frames
+            .first()
+            .map(|frame| frame.cloud.scan_duration_s())
+            .unwrap_or_default(),
         lidar_capture.stable_hash,
         lidar_hz,
     );
+    let camera_started = Instant::now();
+    let camera_capture = capture_city_camera_frames(
+        &city_scene,
+        &vehicle_assets,
+        &city_traffic,
+        primary_actor_index,
+    );
+    let camera_elapsed = camera_started.elapsed();
+    assert_eq!(camera_capture.frames.len(), capture_frame_count);
+    assert_eq!(
+        camera_capture.pixels_per_frame,
+        (CAMERA_WIDTH * CAMERA_HEIGHT) as usize
+    );
+    assert!(
+        camera_capture.nearest_depth_m > 0.0 && camera_capture.nearest_depth_m.is_finite(),
+        "onboard camera must observe scene geometry, got {}",
+        camera_capture.nearest_depth_m
+    );
+    println!(
+        "onboard camera ready: {}x{} fov_y_rad={:.3} frames={} nearest_depth_m={:.2} mean_center_depth_m={:.2} stable_hash={} capture_hz={:.1}",
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT,
+        CAMERA_FOV_Y_RAD,
+        camera_capture.frames.len(),
+        camera_capture.nearest_depth_m,
+        camera_capture.mean_center_depth_m,
+        camera_capture.stable_hash,
+        camera_capture.frames.len() as f64 / camera_elapsed.as_secs_f64(),
+    );
     if std::env::var("RNE_SKIP_GPU").is_ok() {
-        println!("RNE_SKIP_GPU set; headless PLATEAU LiDAR capture completed");
+        println!("RNE_SKIP_GPU set; headless PLATEAU LiDAR and camera capture completed");
         return;
     }
     let mut backend = match WgpuRenderBackend::new() {
@@ -702,6 +782,7 @@ fn main() {
     }
     fs::create_dir_all(&frames_dir).expect("create PLATEAU LiDAR frames");
     fs::create_dir_all(&media_dir).expect("create media directory");
+    let onboard_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FOV_Y_RAD);
     for (frame, vehicles) in city_traffic.iter().take(render_frame_count).enumerate() {
         let primary = vehicles[primary_actor_index];
         let mut scene = city_scene.clone();
@@ -718,17 +799,41 @@ fn main() {
             primary_actor_index,
             debug_overlay == TrafficDebugOverlay::default(),
         );
+        // The onboard camera sees the world, not the LiDAR debug overlay, so it is
+        // rendered from the scene before the point cloud markers are appended.
+        let onboard_view = vehicle_camera_transform(primary);
+        let onboard = backend
+            .render_scene_camera(
+                &onboard_camera,
+                &MathTransform3 {
+                    translation: onboard_view.translation,
+                    rotation: onboard_view.rotation,
+                    scale: onboard_view.scale,
+                },
+                &scene,
+                CAMERA_CLEAR_COLOR,
+            )
+            .expect("render onboard camera frame");
+
         append_lidar_intensity_overlay(&mut scene, &lidar_capture.frames[frame]);
         let car_camera = follow_camera(primary);
         let output = backend
             .render_scene_camera(&camera, &car_camera.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render PLATEAU car frame");
-        let presented = cinematic_postprocess(
+        let mut presented = cinematic_postprocess(
             &output.color.rgba8,
             &output.depth.depth_m,
             output.color.width,
             output.color.height,
             camera.far_m as f32,
+        );
+        blit_camera_insets(
+            &mut presented,
+            output.color.width,
+            output.color.height,
+            &onboard.color,
+            &onboard.depth.depth_m,
+            onboard_camera.far_m as f32,
         );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
@@ -1403,6 +1508,7 @@ fn capture_city_lidar_frames(
         spawn_indices.reverse();
     }
     let mut collider_entities = vec![None; actor_count];
+    let mut plate_entities = vec![None; actor_count];
     for actor_index in spawn_indices {
         let vehicle = traffic_frames[0][actor_index];
         let entity = spawn_named(world, format!("lidar_vehicle_{actor_index:03}"));
@@ -1425,6 +1531,25 @@ fn capture_city_lidar_frames(
             lidar_vehicle_transform(vehicle),
         ));
         collider_entities[actor_index] = Some(entity);
+
+        // Retroreflective licence plates are what make vehicles saturate a real
+        // detector, so they exercise the saturation and bloom path.
+        let plate = spawn_named(world, format!("lidar_plate_{actor_index:03}"));
+        world.entity_mut(plate).insert((
+            RigidBody {
+                body_type: RigidBodyType::Kinematic,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: Vec3::new(0.02, 0.08, 0.17),
+                },
+                ..Collider::default()
+            },
+            LidarMaterial::licence_plate(),
+            lidar_plate_transform(vehicle),
+        ));
+        plate_entities[actor_index] = Some(plate);
     }
 
     let mut physics = RapierBackend::new();
@@ -1437,7 +1562,9 @@ fn capture_city_lidar_frames(
     let mut stable_hash = 0xcbf29ce484222325_u64;
     let mut total_returns = 0_usize;
     let mut multi_returns = 0_usize;
+    let mut saturated_returns = 0_usize;
     let mut intensity_sum = 0.0_f64;
+    let mut previous_mount: Option<Transform3> = None;
 
     for (frame_index, vehicles) in traffic_frames.iter().enumerate() {
         for (actor_index, entity) in collider_entities.iter().enumerate() {
@@ -1448,16 +1575,27 @@ fn capture_city_lidar_frames(
                 *transform = lidar_vehicle_transform(vehicles[actor_index]);
             }
         }
+        for (actor_index, entity) in plate_entities.iter().enumerate() {
+            let Some(entity) = entity else {
+                continue;
+            };
+            if let Some(mut transform) = world.get_mut::<Transform3>(*entity) {
+                *transform = lidar_plate_transform(vehicles[actor_index]);
+            }
+        }
         physics
             .sync_from_ecs(world, physics_world)
             .expect("sync Sanjo LiDAR colliders");
         let primary = vehicles[primary_actor_index];
         let mount = lidar_mount_transform(primary);
-        let cloud = sample_lidar_keyed(
+        // The scanner sweeps while the host vehicle drives, so each azimuth column is
+        // cast from the pose interpolated between the previous and current frame.
+        let sweep = LidarSweep::new(previous_mount.unwrap_or(mount), mount);
+        let cloud = sample_lidar_swept(
             &physics,
             physics_world,
             world,
-            &mount,
+            &sweep,
             &spec,
             SensorNoiseKey::new(
                 world_random.seed(),
@@ -1473,12 +1611,18 @@ fn capture_city_lidar_frames(
             .iter()
             .filter(|return_index| **return_index > 1)
             .count();
+        saturated_returns += cloud
+            .intensities
+            .iter()
+            .filter(|intensity| f64::from(**intensity) >= LIDAR_SATURATION_INTENSITY - 1e-6)
+            .count();
         intensity_sum += cloud
             .intensities
             .iter()
             .map(|intensity| f64::from(*intensity))
             .sum::<f64>();
         stable_hash = hash_lidar_cloud(stable_hash, &cloud);
+        previous_mount = Some(mount);
         frames.push(CityLidarFrame { mount, cloud });
     }
 
@@ -1487,6 +1631,7 @@ fn capture_city_lidar_frames(
         stable_hash,
         total_returns,
         multi_returns,
+        saturated_returns,
         average_intensity: if total_returns == 0 {
             0.0
         } else {
@@ -1500,14 +1645,25 @@ fn city_lidar_spec() -> LidarSpec {
         ray_count: LIDAR_RAY_COUNT,
         min_angle_rad: -std::f64::consts::PI,
         max_angle_rad: std::f64::consts::PI,
+        channel_count: LIDAR_CHANNEL_COUNT,
+        min_elevation_rad: LIDAR_MIN_ELEVATION_RAD,
+        max_elevation_rad: LIDAR_MAX_ELEVATION_RAD,
+        rotation_period_s: LIDAR_ROTATION_PERIOD_S,
         min_range_m: 0.8,
         max_range_m: LIDAR_MAX_RANGE_M,
         max_returns: 2,
         wavelength_nm: 905.0,
-        beam_divergence_rad: 0.000_8,
+        beam_divergence_rad: 0.003,
+        beam_sample_count: LIDAR_BEAM_SAMPLE_COUNT,
+        mixed_pixel_threshold_m: 0.35,
         range_noise_stddev_m: 0.012,
         intensity_noise_stddev: 0.004,
+        solar_noise_floor: 0.003,
         dropout_probability: 0.01,
+        saturation_intensity: LIDAR_SATURATION_INTENSITY,
+        bloom_gain: 0.06,
+        bloom_column_radius: 2,
+        backscatter_probability_scale: 0.35,
         minimum_intensity: 0.002,
         seed: 46_905,
         atmosphere: LidarAtmosphere {
@@ -1564,6 +1720,122 @@ fn lidar_vehicle_transform(vehicle: VehicleFrame) -> Transform3 {
     )
 }
 
+fn city_camera_spec() -> CameraSpec {
+    CameraSpec {
+        width: CAMERA_WIDTH,
+        height: CAMERA_HEIGHT,
+        fov_y_rad: CAMERA_FOV_Y_RAD,
+        seed: CAMERA_STREAM_ID,
+    }
+}
+
+/// Returns the pose of the forward camera mounted behind the windshield.
+///
+/// The render view convention looks along local `-Z`, so the yaw is taken from the
+/// direction opposite the vehicle heading, matching [`follow_camera`].
+fn vehicle_camera_transform(vehicle: VehicleFrame) -> Transform3 {
+    let forward = vehicle.transform.rotation * Vec3::X;
+    let yaw = (-forward.x).atan2(-forward.z);
+    let rotation =
+        (Quat::from_rotation_y(yaw) * Quat::from_rotation_x(CAMERA_PITCH_RAD)).normalize();
+    Transform3::from_translation_rotation(
+        Vec3::new(
+            vehicle.transform.translation.x,
+            vehicle.class.height_m() * 0.86,
+            vehicle.transform.translation.z,
+        ) + forward * (vehicle.class.length_m() * 0.18),
+        rotation,
+    )
+}
+
+/// Captures the onboard camera deterministically without a GPU.
+///
+/// [`HeadlessRenderBackend`] resolves scene geometry through the shared depth probe
+/// rather than rasterizing, so this capture is the GPU-free acceptance signal that
+/// the camera is mounted, moving with the vehicle, and observing the city. The wgpu
+/// path renders the same pose for the picture-in-picture insets.
+fn capture_city_camera_frames(
+    city_scene: &RenderScene,
+    vehicle_assets: &VehicleRenderAssets,
+    traffic_frames: &[Vec<VehicleFrame>],
+    primary_actor_index: usize,
+) -> CityCameraCapture {
+    let spec = city_camera_spec();
+    let mut render = HeadlessRenderBackend::new();
+    let mut frames = Vec::with_capacity(traffic_frames.len());
+    let mut stable_hash = 0xcbf29ce484222325_u64;
+    let mut pixels_per_frame = 0_usize;
+    let mut nearest_depth_m = f32::INFINITY;
+    let mut center_depth_sum = 0.0_f64;
+
+    for (frame_index, vehicles) in traffic_frames.iter().enumerate() {
+        let primary = vehicles[primary_actor_index];
+        let mut scene = city_scene.clone();
+        append_city_fleet(
+            &mut scene,
+            vehicle_assets,
+            vehicles,
+            primary_actor_index,
+            false,
+        );
+        let sample = sample_camera_rgbd(
+            &mut render,
+            &vehicle_camera_transform(primary),
+            &spec,
+            SimTime::from_ticks(frame_index as u64),
+            &scene,
+        );
+
+        pixels_per_frame = sample.depth.depth_m.len();
+        let center_depth_m = sample.depth.center_depth_m();
+        let min_depth_m = sample.depth.min_depth_m();
+        nearest_depth_m = nearest_depth_m.min(min_depth_m);
+        center_depth_sum += f64::from(center_depth_m);
+        stable_hash = hash_camera_sample(stable_hash, &sample);
+        frames.push(CityCameraFrame {
+            center_depth_m,
+            min_depth_m,
+        });
+    }
+
+    CityCameraCapture {
+        stable_hash,
+        pixels_per_frame,
+        nearest_depth_m: if nearest_depth_m.is_finite() {
+            nearest_depth_m
+        } else {
+            0.0
+        },
+        mean_center_depth_m: if frames.is_empty() {
+            0.0
+        } else {
+            center_depth_sum / frames.len() as f64
+        },
+        frames,
+    }
+}
+
+fn hash_camera_sample(mut hash: u64, sample: &CameraRgbdSample) -> u64 {
+    for byte in &sample.rgb.rgba8 {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^= sample.depth.hash_depth();
+    hash.wrapping_mul(0x100000001b3)
+}
+
+fn lidar_plate_transform(vehicle: VehicleFrame) -> Transform3 {
+    let backward = vehicle.transform.rotation * Vec3::NEG_X;
+    Transform3::from_translation_rotation(
+        Vec3::new(
+            vehicle.transform.translation.x,
+            vehicle.class.height_m() * 0.35,
+            vehicle.transform.translation.z,
+        ) + backward * (vehicle.class.length_m() * 0.5 + 0.03),
+        vehicle.transform.rotation,
+    )
+}
+
 fn lidar_mount_transform(vehicle: VehicleFrame) -> Transform3 {
     let forward = vehicle.transform.rotation * Vec3::X;
     Transform3::from_translation_rotation(
@@ -1600,6 +1872,18 @@ fn hash_lidar_cloud(mut hash: u64, cloud: &PointCloud) -> u64 {
     for value in &cloud.return_indices {
         hash ^= u64::from(*value);
         hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for value in &cloud.channel_indices {
+        for byte in value.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    for value in &cloud.timestamps_s {
+        for byte in value.to_bits().to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
     }
     hash
 }
@@ -1739,29 +2023,34 @@ fn append_lidar_intensity_overlay(scene: &mut RenderScene, frame: &CityLidarFram
         DebugMeshBuilder::default(),
         DebugMeshBuilder::default(),
     ];
+    // Bin thresholds follow the radiometric scale: weak far returns, ordinary diffuse
+    // surfaces, and near-saturation retroreflective hits.
     for (point, intensity) in frame
         .cloud
         .points_m
         .iter()
         .zip(frame.cloud.intensities.iter().copied())
     {
-        let bin = if intensity < 0.03 {
+        let bin = if intensity < 0.05 {
             0
-        } else if intensity < 0.10 {
+        } else if intensity < 0.30 {
             1
         } else {
             2
         };
-        bins[bin].add_point_marker(*point, 0.18);
+        // A 16-channel cloud is dense, so markers stay small to keep returns legible.
+        bins[bin].add_point_marker(*point, 0.11);
     }
-    for ((point, ray_index), return_index) in frame
+    let beam_channel = LIDAR_CHANNEL_COUNT / 2;
+    for (((point, ray_index), return_index), channel) in frame
         .cloud
         .points_m
         .iter()
         .zip(&frame.cloud.ray_indices)
         .zip(&frame.cloud.return_indices)
+        .zip(&frame.cloud.channel_indices)
     {
-        if *return_index == 1 && ray_index.is_multiple_of(24) {
+        if *return_index == 1 && *channel == beam_channel && ray_index.is_multiple_of(24) {
             bins[0].add_beam(frame.mount.translation, *point, 0.005);
         }
     }
@@ -2975,7 +3264,7 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
             "-i",
             &frames_dir.join("frame-%03d.png").to_string_lossy(),
             "-vf",
-            "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=224:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
+            "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=224:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
             &gif_path.to_string_lossy(),
         ])
         .status()?;
@@ -2983,6 +3272,154 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
         .success()
         .then_some(())
         .ok_or_else(|| std::io::Error::other("ffmpeg PLATEAU GIF encode failed"))
+}
+
+/// Colorizes a linear depth buffer with the same near-to-far ramp as the LiDAR bands.
+///
+/// Yellow is near, green is mid-range, and blue is far, so the depth inset reads
+/// against the intensity-colored point cloud without a second legend.
+fn depth_ramp_rgba(depth_m: &[f32], far_m: f32) -> Vec<u8> {
+    const NEAR: [f32; 3] = [1.0, 0.86, 0.08];
+    const MID: [f32; 3] = [0.04, 1.0, 0.52];
+    const FAR: [f32; 3] = [0.08, 0.42, 1.0];
+    let far_m = if far_m > 0.0 { far_m } else { 1.0 };
+
+    let mut rgba = Vec::with_capacity(depth_m.len() * 4);
+    for depth in depth_m {
+        let t = if depth.is_finite() {
+            (depth / far_m).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let (from, to, local) = if t < 0.5 {
+            (NEAR, MID, t * 2.0)
+        } else {
+            (MID, FAR, (t - 0.5) * 2.0)
+        };
+        for channel in 0..3 {
+            let value = from[channel] + (to[channel] - from[channel]) * local;
+            rgba.push((value.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+        rgba.push(255);
+    }
+    rgba
+}
+
+/// Mutable RGBA8 destination for inset compositing.
+struct FrameBuffer<'a> {
+    pixels: &'a mut [u8],
+    width: u32,
+    height: u32,
+}
+
+/// Read-only RGBA8 source for inset compositing.
+#[derive(Clone, Copy)]
+struct InsetImage<'a> {
+    pixels: &'a [u8],
+    width: u32,
+    height: u32,
+}
+
+/// Copies an inset image into the frame at `origin`, drawing a border around it.
+fn blit_inset(frame: &mut FrameBuffer<'_>, inset: InsetImage<'_>, origin: (u32, u32)) {
+    const BORDER: [u8; 4] = [235, 240, 248, 255];
+    let (origin_x, origin_y) = origin;
+    let (frame_width, frame_height) = (frame.width, frame.height);
+    let (inset_width, inset_height) = (inset.width, inset.height);
+    let pixels = &mut *frame.pixels;
+
+    let mut put = |x: i64, y: i64, pixel: [u8; 4]| {
+        if x < 0 || y < 0 || x >= i64::from(frame_width) || y >= i64::from(frame_height) {
+            return;
+        }
+        let offset = (y as usize * frame_width as usize + x as usize) * 4;
+        if offset + 4 <= pixels.len() {
+            pixels[offset..offset + 4].copy_from_slice(&pixel);
+        }
+    };
+
+    for y in 0..inset_height {
+        for x in 0..inset_width {
+            let source = (y as usize * inset_width as usize + x as usize) * 4;
+            if source + 4 > inset.pixels.len() {
+                continue;
+            }
+            let pixel = [
+                inset.pixels[source],
+                inset.pixels[source + 1],
+                inset.pixels[source + 2],
+                inset.pixels[source + 3],
+            ];
+            put(i64::from(origin_x + x), i64::from(origin_y + y), pixel);
+        }
+    }
+
+    for thickness in 0..CAMERA_INSET_BORDER_PX {
+        let offset = i64::from(thickness) + 1;
+        for x in -offset..i64::from(inset_width) + offset {
+            put(
+                i64::from(origin_x) + x,
+                i64::from(origin_y) - offset,
+                BORDER,
+            );
+            put(
+                i64::from(origin_x) + x,
+                i64::from(origin_y + inset_height) + offset - 1,
+                BORDER,
+            );
+        }
+        for y in -offset..i64::from(inset_height) + offset {
+            put(
+                i64::from(origin_x) - offset,
+                i64::from(origin_y) + y,
+                BORDER,
+            );
+            put(
+                i64::from(origin_x + inset_width) + offset - 1,
+                i64::from(origin_y) + y,
+                BORDER,
+            );
+        }
+    }
+}
+
+/// Draws the onboard RGB and depth camera views into the bottom-left of a frame.
+fn blit_camera_insets(
+    frame: &mut [u8],
+    frame_width: u32,
+    frame_height: u32,
+    color: &ImageFrame,
+    depth_m: &[f32],
+    far_m: f32,
+) {
+    let margin = CAMERA_INSET_MARGIN_PX;
+    let inset_top = frame_height.saturating_sub(margin + color.height);
+    let mut target = FrameBuffer {
+        pixels: frame,
+        width: frame_width,
+        height: frame_height,
+    };
+
+    blit_inset(
+        &mut target,
+        InsetImage {
+            pixels: &color.rgba8,
+            width: color.width,
+            height: color.height,
+        },
+        (margin, inset_top),
+    );
+
+    let depth_rgba = depth_ramp_rgba(depth_m, far_m);
+    blit_inset(
+        &mut target,
+        InsetImage {
+            pixels: &depth_rgba,
+            width: color.width,
+            height: color.height,
+        },
+        (margin * 2 + color.width, inset_top),
+    );
 }
 
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
@@ -3163,11 +3600,66 @@ mod tests {
             true,
         );
         assert_eq!(forward_lidar.stable_hash, reverse_lidar.stable_hash);
-        assert_eq!(forward_lidar.stable_hash, 6_499_951_982_825_043_854);
+        assert_eq!(forward_lidar.stable_hash, 16_655_478_738_827_555_718);
         assert_eq!(forward_lidar.total_returns, reverse_lidar.total_returns);
         assert_eq!(forward_lidar.multi_returns, reverse_lidar.multi_returns);
+        assert_eq!(
+            forward_lidar.saturated_returns,
+            reverse_lidar.saturated_returns
+        );
         assert!(forward_lidar.total_returns >= 12 * 24);
         assert!(forward_lidar.multi_returns > 0);
+        // Retroreflective licence plates must drive the detector into saturation.
+        assert!(forward_lidar.saturated_returns > 0);
+
+        // The onboard camera rides the same actor and must be reproducible headlessly.
+        let camera_scene = render_scene_from_world(&mut forward_lidar_world);
+        let camera_assets = VehicleRenderAssets::load();
+        let first_camera = capture_city_camera_frames(
+            &camera_scene,
+            &camera_assets,
+            &lidar_traffic,
+            lidar_actor_index,
+        );
+        let second_camera = capture_city_camera_frames(
+            &camera_scene,
+            &camera_assets,
+            &lidar_traffic,
+            lidar_actor_index,
+        );
+        assert_eq!(first_camera, second_camera);
+        assert_eq!(first_camera.frames.len(), lidar_traffic.len());
+        assert_eq!(
+            first_camera.pixels_per_frame,
+            (CAMERA_WIDTH * CAMERA_HEIGHT) as usize
+        );
+        assert!(first_camera.nearest_depth_m > 0.0);
+        assert!(first_camera.nearest_depth_m.is_finite());
+        assert!(first_camera.mean_center_depth_m > 0.0);
+        // The view must change as the host vehicle drives.
+        assert!(first_camera
+            .frames
+            .windows(2)
+            .any(|pair| pair[0] != pair[1]));
+
+        let probe = &forward_lidar.frames[1].cloud;
+        assert!(probe.attributes_are_aligned());
+        // Every elevation channel of the 3D scanner contributes returns.
+        let rings = probe
+            .channel_indices
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(rings.len(), usize::from(LIDAR_CHANNEL_COUNT));
+        // Returns spread vertically instead of lying in one scan plane.
+        let heights = probe.points_m.iter().map(|point| point.y);
+        let lowest = heights.clone().fold(f64::INFINITY, f64::min);
+        let highest = heights.fold(f64::NEG_INFINITY, f64::max);
+        assert!(highest - lowest > 2.0);
+        // Emission times sweep one revolution, which is what motion distortion needs.
+        assert!(probe.timestamps_s.iter().all(|time| *time >= 0.0));
+        assert!(probe.scan_duration_s() > 0.0);
+        assert!(probe.scan_duration_s() < LIDAR_ROTATION_PERIOD_S);
 
         let mut debug_scene = RenderScene::new();
         append_traffic_debug_overlay(
@@ -3423,6 +3915,105 @@ mod tests {
         push_cylinder(&mut scene, Vec3::ZERO, Quat::IDENTITY, 0.09, 5.2, [1.0; 4]);
         assert_eq!(scene.items[0].transform.scale, Vec3::splat(0.20));
         assert_eq!(scene.items[1].transform.scale, Vec3::new(0.18, 0.18, 5.2));
+    }
+
+    #[test]
+    fn onboard_camera_looks_along_the_vehicle_heading() {
+        for yaw_rad in [0.0_f64, 0.7, -1.9, 3.0, 2.4] {
+            let vehicle = VehicleFrame {
+                transform: Transform3::from_translation_rotation(
+                    Vec3::new(3.0, 0.0, -7.0),
+                    Quat::from_rotation_y(yaw_rad),
+                ),
+                speed_m_s: 4.0,
+                steering_rad: 0.0,
+                wheel_rotation_rad: 0.0,
+                braking: false,
+                class: CityVehicleClass::Sedan,
+            };
+            let pose = vehicle_camera_transform(vehicle);
+            let heading = vehicle.transform.rotation * Vec3::X;
+            // The render view convention looks along local -Z.
+            let view_forward = pose.rotation * Vec3::NEG_Z;
+
+            let horizontal = Vec3::new(view_forward.x, 0.0, view_forward.z).normalize_or_zero();
+            assert!(
+                horizontal.dot(heading) > 0.999,
+                "camera must face the vehicle heading at yaw {yaw_rad}"
+            );
+            // A forward ADAS camera is tilted slightly down.
+            assert!(view_forward.y < 0.0);
+            // It is mounted above the road and ahead of the vehicle origin.
+            assert!(pose.translation.y > 0.5);
+            assert!((pose.translation - vehicle.transform.translation).dot(heading) > 0.0);
+        }
+    }
+
+    #[test]
+    fn depth_ramp_runs_from_near_yellow_to_far_blue() {
+        let ramp = depth_ramp_rgba(&[0.0, 50.0, 100.0, f32::INFINITY], 100.0);
+        assert_eq!(ramp.len(), 16);
+
+        // Near is yellow, mid is green, far is blue.
+        assert_eq!(&ramp[0..4], &[255, 219, 20, 255]);
+        assert_eq!(&ramp[4..8], &[10, 255, 133, 255]);
+        assert_eq!(&ramp[8..12], &[20, 107, 255, 255]);
+        // Non-finite depth is treated as the far plane rather than producing garbage.
+        assert_eq!(&ramp[8..12], &ramp[12..16]);
+    }
+
+    #[test]
+    fn camera_insets_stay_inside_the_frame_and_leave_the_action_visible() {
+        let frame_width = 1_280_u32;
+        let frame_height = 720_u32;
+        let mut frame = vec![0_u8; (frame_width * frame_height * 4) as usize];
+        let color = ImageFrame {
+            width: CAMERA_WIDTH,
+            height: CAMERA_HEIGHT,
+            rgba8: (0..CAMERA_WIDTH * CAMERA_HEIGHT)
+                .flat_map(|_| [9_u8, 9, 9, 255])
+                .collect(),
+        };
+        let depth_m = vec![25.0_f32; (CAMERA_WIDTH * CAMERA_HEIGHT) as usize];
+
+        blit_camera_insets(
+            &mut frame,
+            frame_width,
+            frame_height,
+            &color,
+            &depth_m,
+            80.0,
+        );
+
+        let pixel = |x: u32, y: u32| {
+            let offset = (y as usize * frame_width as usize + x as usize) * 4;
+            [
+                frame[offset],
+                frame[offset + 1],
+                frame[offset + 2],
+                frame[offset + 3],
+            ]
+        };
+        let inset_top = frame_height - CAMERA_INSET_MARGIN_PX - CAMERA_HEIGHT;
+
+        // The RGB inset is copied verbatim.
+        assert_eq!(
+            pixel(CAMERA_INSET_MARGIN_PX + 1, inset_top + 1),
+            [9, 9, 9, 255]
+        );
+        // The depth inset sits beside it and is colorized, not copied.
+        let depth_x = CAMERA_INSET_MARGIN_PX * 2 + CAMERA_WIDTH + 1;
+        assert_ne!(pixel(depth_x, inset_top + 1), [9, 9, 9, 255]);
+        assert_eq!(pixel(depth_x, inset_top + 1)[3], 255);
+        // Both insets are bordered.
+        assert_eq!(
+            pixel(CAMERA_INSET_MARGIN_PX, inset_top - 1),
+            [235, 240, 248, 255]
+        );
+        // The upper two thirds of the frame stay untouched by the overlay.
+        assert_eq!(pixel(frame_width / 2, frame_height / 3), [0, 0, 0, 0]);
+        // Nothing wrote past the right edge of the second inset.
+        assert!(depth_x + CAMERA_WIDTH + CAMERA_INSET_BORDER_PX < frame_width);
     }
 
     #[test]

@@ -128,8 +128,8 @@ mod tests {
             ..LidarSpec::default()
         };
         let mut cloud = PointCloud::new();
-        cloud.push_return(Vec3::new(5.0, 0.0, 0.0), 0.2, 0, 2);
-        cloud.push_return(Vec3::new(3.0, 0.0, 0.0), 0.7, 0, 1);
+        cloud.push_return(Vec3::new(5.0, 0.0, 0.0), 0.2, 0, 2, 0, 0.0);
+        cloud.push_return(Vec3::new(3.0, 0.0, 0.0), 0.7, 0, 1, 0, 0.0);
 
         let scan =
             pointcloud_to_laserscan(&cloud, &Transform3::IDENTITY, &spec, SimTime::ZERO, "lidar");

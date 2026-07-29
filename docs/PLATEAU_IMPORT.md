@@ -168,8 +168,11 @@ It writes the twelve-second material-aware LiDAR
 `docs/media/plateau-lidar.gif` animation and matching reduced-motion PNG. The
 traffic-only `plateau-car.gif` remains as the baseline capture. Building
 collision boxes receive non-visual concrete or glass LiDAR properties in the
-example layer; this does not add a runtime dependency from the PLATEAU importer
-to `rne_sensor`. Frames are rasterized at 1280×720 and downsampled to a 960×540
+example layer, and each traffic actor carries a retroreflective licence-plate
+collider; this does not add a runtime dependency from the PLATEAU importer to
+`rne_sensor`. The scanner is a 16-channel spinning sensor sweeping one
+revolution per rendered frame, so azimuth columns are cast from the interpolated
+pose of the moving host vehicle. Frames are rasterized at 1280×720 and downsampled to a 960×540
 GIF. A deterministic CPU presentation pass uses the renderer's linear
 depth buffer for atmospheric perspective, replaces empty pixels with a
 sky-to-horizon gradient, and applies restrained color balance and vignette.
@@ -181,8 +184,11 @@ collisions, a two-meter minimum bumper gap, exercised reservations, and at least
 60 simulation steps per wall-clock second. The replay prints average speed,
 waiting actors, maximum queue length, completed trips, cumulative waiting time,
 and wall-clock throughput.
-The LiDAR capture additionally reports point and multiple-return counts, mean
-intensity, stable hash, and scan throughput. See
+The LiDAR capture additionally reports column and channel counts, point,
+multiple-return and saturated-return counts, mean intensity, per-scan duration,
+stable hash, and scan throughput. A forward RGB-D camera on the same vehicle is
+captured headlessly for a GPU-free determinism signal and composited into the
+GIF as color and depth insets by the wgpu path. See
 [physics-aware LiDAR](LIDAR_SIMULATION.md) for the equations, timing contract,
 failure behavior, and official-Sanjo acceptance hash.
 

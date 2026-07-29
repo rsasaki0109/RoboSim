@@ -102,7 +102,7 @@ average speed, waiting time, queue length, and throughput. The generated
 Optional batched debug layers show every lane, the chosen route, signal
 positions, generated connections, and conflict points.
 
-The follow-on `docs/media/plateau-lidar.gif` mounts a physics-aware LiDAR on
-the tracked vehicle and raycasts against official building collision geometry
-and the other traffic actors. This integration remains example-side:
+The follow-on `docs/media/plateau-lidar.gif` mounts a physics-aware 16-channel
+LiDAR on the tracked vehicle and raycasts against official building collision
+geometry, the other traffic actors, and their retroreflective licence plates. This integration remains example-side:
 `rne_traffic` does not depend on sensors, physics, rendering, or PLATEAU.
