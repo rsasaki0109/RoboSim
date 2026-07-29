@@ -11,8 +11,8 @@ routes. The first stage is deliberately split into five reviewable PRs:
 | A | Architecture | `rne_traffic` ownership, dependency boundary, deterministic ECS foundation | Done |
 | B | Asset | `.rne.traffic.json` schema v1 with stable IDs, provenance, lanes, junctions, connections, signals, and byte-identical golden output | Done |
 | C | PLATEAU | Import road class/function, LOD2 `TrafficArea`/`AuxiliaryTrafficArea`, and LOD3.1 lane semantics | Done |
-| D | Topology | Deterministic tile stitching, junction classification, turn curves, grade separation, and conflict relationships | Pending |
-| E | Runtime / Demo | Headless routing, signals, turns, multi-vehicle replay; migrate example 46 and publish GIF/README media | Pending |
+| D | Topology | Deterministic tile stitching, junction classification, turn curves, grade separation, and conflict relationships | Done |
+| E | Runtime / Demo | Headless routing, signals, turns, 100-vehicle official-Sanjo replay; migrate example 46 and publish GIF/README media | Done |
 
 Stage-one acceptance requires byte-identical assets for identical input, stable
 world hashes for identical seeds and actions, zero signal violations and

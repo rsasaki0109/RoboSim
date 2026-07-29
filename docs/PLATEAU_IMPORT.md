@@ -148,15 +148,14 @@ The repository includes a synthetic CC0 CityGML fixture and tests that verify:
 
 ## Official PLATEAU traffic traversal GIF
 
-The runnable example converts the checked-in official Sanjo City 2025 mesh,
-loads 213 buildings and 59 road surfaces headlessly, then renders two textured
-CC0 Kenney sedans accelerating, steering, and braking through a SimClock-driven
-Ackermann model on a derived road pair beside the textured LOD2 Kita-Sanjo
-Station. The lead sedan follows a deterministic signalized route: it approaches
-the end of the selected lane, stops before an example-authored stop line while
-the signal is red, starts when the SimClock-driven phase turns green at seven
-seconds, and follows a sampled quadratic curve onto a nearby outgoing PLATEAU
-road whose derived centerline starts 2.94 m from the incoming endpoint:
+The runnable example converts the checked-in official Sanjo City 2025 mesh and
+loads 213 buildings and 59 road surfaces headlessly. Its 84 imported directed
+lanes pass through `build_traffic_topology`, producing 26 junctions, 137
+connections, and 128 symmetric conflict pairs. `shortest_lane_route` selects a
+16-lane, 731 m path with three left and seven right turns, and
+`materialize_lane_route` converts the lane/connection sequence into runtime
+geometry. One hundred textured CC0 Kenney sedans follow it under three
+fixed-time red/green controls:
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
@@ -169,7 +168,16 @@ depth buffer for atmospheric perspective, replaces empty pixels with a
 sky-to-horizon gradient, and applies restrained color balance and vignette.
 This pass changes presentation pixels only; simulation and camera depth outputs
 remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
-load smoke.
+acceptance replay. That replay runs 720 steps twice with opposite ECS spawn
+orders and requires the same stable state hash, zero red-light violations, zero
+collisions, a two-meter minimum bumper gap, and at least 60 simulation steps per
+wall-clock second.
+
+Set `RNE_TRAFFIC_DEBUG` to a comma-separated selection of `lanes`, `route`,
+`signals`, `connections`, and `conflicts` (or `all`) to render batched debug
+overlays. `RNE_RENDER_FRAME_COUNT=1` and
+`RNE_MEDIA_DIR=target/plateau-debug-media` provide a fast one-frame
+visualization smoke without replacing README media.
 
 The official road LOD1 geometry has zero elevation while building geometry
 uses surveyed absolute elevations. For this visualization the example
@@ -179,20 +187,21 @@ example-authored overlays. A low grass-colored ground receiver removes the
 empty-sky gaps between imported surfaces. Concrete sidewalks and curbs follow
 the selected road's derived principal axis and width. The procedural
 intersection asphalt bridges the small gap between independently derived road
-surfaces; stop and crosswalk markings make the approximation explicit. Two
-signals render the same deterministic red/green phase that gates the Ackermann
-speed command. CC0 procedural street trees, streetlights, and guardrails are
+surfaces; stop and crosswalk markings make the approximation explicit. Three
+signals render the deterministic red/green phases consumed by the traffic
+runtime. CC0 procedural street trees, streetlights, and guardrails are
 sampled at fixed longitudinal
 fractions; a candidate is omitted whenever its clearance disc intersects an
 imported building collision AABB. Tests verify stable placement and non-overlap.
 Buildings, streetscape props, and vehicles use the wgpu renderer's
 2048×2048 directional shadow map with 3×3 percentage-closer filtering; the
 light projection is fitted to scene bounds and snapped to shadow texels to
-limit shimmer between frames. Each sedan is split into one cached body mesh and
+limit shimmer between frames. The tracked sedan uses one cached body mesh and
 four wheel instances: wheel spin comes from integrated distance, the front pair
-also receives the Ackermann steering angle, and rear lamp intensity follows
-actual deceleration. Red and blue body palettes preserve the source windows,
-lamps, trim, and shading. The PLATEAU data attribution, Kenney CC0 notice, and
+receives route steering, and rear lamp intensity follows actual deceleration.
+The remaining 99 vehicles use one-draw body-mesh LODs so the full fleet stays
+within the renderer item budget. Red and blue body palettes preserve the source
+windows, lamps, trim, and shading. The PLATEAU data attribution, Kenney CC0 notice, and
 procedural streetscape CC0 dedication are recorded beside the example.
 
 This presentation strategy follows the official

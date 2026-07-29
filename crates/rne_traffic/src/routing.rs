@@ -1,6 +1,9 @@
 //! Deterministic shortest-path routing over traffic schema v1.
 
-use crate::{TrafficActorKind, TrafficAsset, TrafficConnection, TrafficId, TrafficNetwork};
+use crate::{
+    TrafficActorKind, TrafficAsset, TrafficConnection, TrafficId, TrafficNetwork, TrafficRoute,
+    TrafficRouteError,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -45,6 +48,54 @@ pub enum RoutingError {
         /// Requested actor class.
         actor: TrafficActorKind,
     },
+}
+
+/// Failure while converting a planned lane route into runtime geometry.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RouteMaterializationError {
+    /// The source network failed schema validation.
+    #[error("invalid traffic network: {0}")]
+    InvalidNetwork(String),
+    /// A lane route must contain at least one lane.
+    #[error("lane route must contain at least one lane")]
+    EmptyRoute,
+    /// Lane and connection counts do not describe one contiguous sequence.
+    #[error(
+        "lane route contains {lane_count} lane(s) and {connection_count} connection(s); expected one fewer connection than lanes"
+    )]
+    InvalidSequenceLength {
+        /// Number of lane IDs supplied by the planner.
+        lane_count: usize,
+        /// Number of connection IDs supplied by the planner.
+        connection_count: usize,
+    },
+    /// A lane referenced by the route is absent from the network.
+    #[error("lane route references unknown lane `{lane_id}`")]
+    UnknownLane {
+        /// Missing lane ID.
+        lane_id: TrafficId,
+    },
+    /// A connection referenced by the route is absent from the network.
+    #[error("lane route references unknown connection `{connection_id}`")]
+    UnknownConnection {
+        /// Missing connection ID.
+        connection_id: TrafficId,
+    },
+    /// A connection does not join the adjacent lanes in the planned sequence.
+    #[error(
+        "connection `{connection_id}` does not join `{expected_incoming_lane_id}` to `{expected_outgoing_lane_id}`"
+    )]
+    DisconnectedSequence {
+        /// Connection whose endpoints did not match.
+        connection_id: TrafficId,
+        /// Expected incoming lane.
+        expected_incoming_lane_id: TrafficId,
+        /// Expected outgoing lane.
+        expected_outgoing_lane_id: TrafficId,
+    },
+    /// The assembled polyline was not usable by the kinematic runtime.
+    #[error(transparent)]
+    InvalidRouteGeometry(#[from] TrafficRouteError),
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +193,78 @@ pub fn shortest_lane_route(
         goal_lane_id: goal_lane_id.clone(),
         actor,
     })
+}
+
+/// Materializes a planned lane/connection sequence as one runtime polyline.
+///
+/// Geometry is appended in travel order as lane, connection, lane. Coincident
+/// adjacent points are emitted once. This function validates both the source
+/// network and the exact connection sequence before constructing the route.
+pub fn materialize_lane_route(
+    network: &TrafficNetwork,
+    planned: &LaneRoute,
+    route_id: TrafficId,
+    closed: bool,
+) -> Result<TrafficRoute, RouteMaterializationError> {
+    TrafficAsset::new(network.clone())
+        .validate()
+        .map_err(|error| RouteMaterializationError::InvalidNetwork(error.to_string()))?;
+    if planned.lane_ids.is_empty() {
+        return Err(RouteMaterializationError::EmptyRoute);
+    }
+    if planned.connection_ids.len() + 1 != planned.lane_ids.len() {
+        return Err(RouteMaterializationError::InvalidSequenceLength {
+            lane_count: planned.lane_ids.len(),
+            connection_count: planned.connection_ids.len(),
+        });
+    }
+    let lanes = network
+        .lanes
+        .iter()
+        .map(|lane| (&lane.id, lane))
+        .collect::<BTreeMap<_, _>>();
+    let connections = network
+        .connections
+        .iter()
+        .map(|connection| (&connection.id, connection))
+        .collect::<BTreeMap<_, _>>();
+    let mut path_m = Vec::new();
+    for (index, lane_id) in planned.lane_ids.iter().enumerate() {
+        let lane = lanes
+            .get(lane_id)
+            .ok_or_else(|| RouteMaterializationError::UnknownLane {
+                lane_id: lane_id.clone(),
+            })?;
+        append_geometry(&mut path_m, &lane.centerline_m);
+        let Some(connection_id) = planned.connection_ids.get(index) else {
+            continue;
+        };
+        let connection = connections.get(connection_id).ok_or_else(|| {
+            RouteMaterializationError::UnknownConnection {
+                connection_id: connection_id.clone(),
+            }
+        })?;
+        let outgoing_lane_id = &planned.lane_ids[index + 1];
+        if connection.incoming_lane_id != *lane_id
+            || connection.outgoing_lane_id != *outgoing_lane_id
+        {
+            return Err(RouteMaterializationError::DisconnectedSequence {
+                connection_id: connection_id.clone(),
+                expected_incoming_lane_id: lane_id.clone(),
+                expected_outgoing_lane_id: outgoing_lane_id.clone(),
+            });
+        }
+        append_geometry(&mut path_m, &connection.path_m);
+    }
+    TrafficRoute::new(route_id, path_m, closed).map_err(Into::into)
+}
+
+fn append_geometry(target: &mut Vec<[f64; 3]>, geometry: &[[f64; 3]]) {
+    for point in geometry {
+        if target.last() != Some(point) {
+            target.push(*point);
+        }
+    }
 }
 
 fn candidate_order(left: &Candidate, right: &Candidate) -> std::cmp::Ordering {

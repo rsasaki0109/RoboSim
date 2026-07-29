@@ -1,7 +1,7 @@
 use rne_traffic::{
-    shortest_lane_route, Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame,
-    Lane, LaneKind, MovementKind, Provenance, SourceReference, TrafficActorKind, TrafficConnection,
-    TrafficId, TrafficNetwork,
+    materialize_lane_route, shortest_lane_route, Accuracy, AccuracyClass, AuthorityClass,
+    AxisConvention, CoordinateFrame, Lane, LaneKind, MovementKind, Provenance, SourceReference,
+    TrafficActorKind, TrafficConnection, TrafficId, TrafficNetwork,
 };
 
 fn id(value: &str) -> TrafficId {
@@ -142,4 +142,31 @@ fn shortest_route_is_deterministic_and_contains_left_and_right_turns() {
         expected.connection_ids,
         vec![id("connection:start-short"), id("connection:short-goal")]
     );
+}
+
+#[test]
+fn planned_route_materializes_lane_and_connection_geometry_in_order() {
+    let network = fixture(false);
+    let planned = shortest_lane_route(
+        &network,
+        &id("lane:start"),
+        &id("lane:goal"),
+        TrafficActorKind::MotorVehicle,
+    )
+    .expect("shortest route");
+    let route = materialize_lane_route(&network, &planned, id("route:runtime"), false)
+        .expect("runtime route");
+
+    assert_eq!(
+        route.path_m(),
+        &[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [11.0, 0.0, 1.0],
+            [20.0, 0.0, 10.0],
+            [21.0, 0.0, 10.0],
+            [31.0, 0.0, 10.0],
+        ]
+    );
+    assert!((route.total_length_m() - planned.distance_m).abs() < 1.0e-9);
 }
