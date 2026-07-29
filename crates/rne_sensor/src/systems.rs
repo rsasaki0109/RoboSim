@@ -1,6 +1,6 @@
 //! Sensor sampling systems.
 
-use crate::camera::sample_camera_rgbd;
+use crate::camera::sample_camera_rgbd_keyed;
 use crate::components::{Sensor, SensorKind, SensorState};
 use crate::imu::sample_imu_keyed;
 use crate::lidar::sample_lidar_at_entity_keyed;
@@ -126,10 +126,30 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     .copied()
                     .unwrap_or_default();
                 let scene = ctx.scene.unwrap_or(&empty_scene);
+                let noise_key = SensorNoiseKey::new(
+                    world_seed,
+                    spec.seed,
+                    sensor.stream_id.0,
+                    state.last_sequence,
+                );
                 let sample = if let Some(render) = &mut ctx.render {
-                    sample_camera_rgbd(*render, &transform, spec, ctx.sim_time, scene)
+                    sample_camera_rgbd_keyed(
+                        *render,
+                        &transform,
+                        spec,
+                        ctx.sim_time,
+                        scene,
+                        noise_key,
+                    )
                 } else {
-                    sample_camera_rgbd(&mut headless_render, &transform, spec, ctx.sim_time, scene)
+                    sample_camera_rgbd_keyed(
+                        &mut headless_render,
+                        &transform,
+                        spec,
+                        ctx.sim_time,
+                        scene,
+                        noise_key,
+                    )
                 };
                 publish_frame(
                     bus,

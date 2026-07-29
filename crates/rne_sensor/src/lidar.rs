@@ -34,6 +34,7 @@
 //! own emission time, and every point carries that time in
 //! [`rne_data::PointCloud::timestamps_s`].
 
+use crate::noise::gaussian_pair;
 use crate::{LidarMaterial, SensorNoiseKey};
 use rne_core::{mix64, KeyedRandom};
 use rne_data::PointCloud;
@@ -1049,16 +1050,6 @@ fn return_slot(ordinal: u64, return_index: u8) -> u64 {
         ordinal,
         SLOT_RETURN_BASE + u64::from(return_index.saturating_sub(1)) * SLOT_RETURN_STRIDE,
     )
-}
-
-/// Draws two independent standard normals from one Box-Muller pair.
-fn gaussian_pair(random: &KeyedRandom, key: SensorNoiseKey, slot: u64) -> (f64, f64) {
-    let u1 = random
-        .sample_unit_f64(key.stable_sensor_id, key.sample_index, slot)
-        .max(f64::MIN_POSITIVE);
-    let u2 = random.sample_unit_f64(key.stable_sensor_id, key.sample_index, slot + 1);
-    let magnitude = (-2.0 * u1.ln()).sqrt();
-    (magnitude * (TAU * u2).cos(), magnitude * (TAU * u2).sin())
 }
 
 fn sample_nonnegative_range(

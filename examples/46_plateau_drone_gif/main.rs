@@ -1726,6 +1726,7 @@ fn city_camera_spec() -> CameraSpec {
         height: CAMERA_HEIGHT,
         fov_y_rad: CAMERA_FOV_Y_RAD,
         seed: CAMERA_STREAM_ID,
+        ..CameraSpec::default()
     }
 }
 

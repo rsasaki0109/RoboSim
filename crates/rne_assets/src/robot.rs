@@ -108,6 +108,7 @@ impl WristCameraRobotAsset {
             height: self.height,
             fov_y_rad: self.fov_y_rad,
             seed: 0,
+            ..rne_sensor::CameraSpec::default()
         }
     }
 
