@@ -69,6 +69,7 @@ members = [
   "examples/47_traffic_city_replay",
   "examples/48_imu_dead_reckoning",
   "examples/49_vehicle_dynamics",
+  "examples/50_control_eval",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

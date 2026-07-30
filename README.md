@@ -182,6 +182,37 @@ RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynami
 The tire equations, load transfer, the low-speed blend, and the acceptance numbers
 are documented in [vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
+## Controller evaluation
+
+`rne_ai::control_eval` computes the standard tracking metrics — RMS and maximum
+error, settling time, overshoot, steady-state error, control effort, smoothness,
+saturation exposure, constraint violations — from plain logged samples, and
+aggregates them across seeds into means and spreads. Example 50 runs one
+pure-pursuit controller through ten seeds that randomize tire friction (0.72–0.95),
+initial offset (±1.5 m), and steering actuator lag (50–180 ms), on both plants:
+
+| plant | RMS error | saturated | unsettled |
+| --- | --- | --- | --- |
+| kinematic | 0.507 ± 0.066 m | 0 % | 0 / 10 |
+| dynamic | 5.03 ± 2.29 m | 59 % | 7 / 10 |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/control-eval.png">
+    <img src="docs/media/control-eval.gif" alt="Ten randomized seeds of the same pure-pursuit controller fanning out over the course on the dynamic plant" width="960">
+  </picture>
+  <br>
+  <sub>Ten seeds, one controller. On the entry straight every trail overlaps; through the corner friction and actuator-lag differences fan them out. The no-slip plant reports a competent controller; the dynamic plant exposes what it lacks — no slowdown before the corner, no lag compensation. The <code>±2.29 m</code> spread is why multi-seed evaluation exists.</sub>
+</p>
+
+```bash
+cargo run --release -p control_eval_demo --example 50_control_eval
+RNE_SKIP_GPU=1 cargo run -p control_eval_demo --example 50_control_eval
+```
+
+Metric definitions, the lag model, and the acceptance numbers are documented in
+[controller evaluation](docs/CONTROL_EVALUATION.md).
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation

@@ -246,6 +246,13 @@ pub struct VehicleDynamics {
     pub friction_coefficient: f64,
     /// Forward speed below which the kinematic solution takes over, in meters per second.
     pub blend_low_speed_m_s: f64,
+    /// First-order steering actuator time constant in seconds; `0.0` is instantaneous.
+    ///
+    /// A real steering actuator does not reach its target within one control tick: the
+    /// steering column follows the command with a lag. This delays the whole lateral
+    /// response, which is exactly the phase loss that destabilizes aggressively tuned
+    /// controllers on hardware while they look fine against an instant plant.
+    pub steering_lag_s: f64,
     /// Current lateral velocity at the center of mass in meters per second.
     pub lateral_velocity_m_s: f64,
     /// Current yaw rate in radians per second.
@@ -273,6 +280,7 @@ impl Default for VehicleDynamics {
             rear_cornering_stiffness_n_rad: 88_000.0,
             friction_coefficient: 0.9,
             blend_low_speed_m_s: 2.0,
+            steering_lag_s: 0.0,
             lateral_velocity_m_s: 0.0,
             yaw_rate_rad_s: 0.0,
             front_slip_rad: 0.0,
@@ -310,6 +318,8 @@ impl VehicleDynamics {
             && self.rear_cornering_stiffness_n_rad > 0.0
             && self.friction_coefficient > 0.0
             && self.blend_low_speed_m_s >= 0.0
+            && self.steering_lag_s.is_finite()
+            && self.steering_lag_s >= 0.0
     }
 
     /// Wheelbase implied by the axle distances, in meters.

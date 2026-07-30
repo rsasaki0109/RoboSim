@@ -205,9 +205,18 @@ pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
             drive.target_speed_m_s,
             speed_rate_m_s2 * dt_s,
         );
+        // Steering passes through the first-order actuator lag before the rate limit.
+        // With a zero time constant the lag target is the command itself and this
+        // reduces exactly to the kinematic path's shaping.
+        let lag_target = if dynamics.steering_lag_s > 0.0 {
+            let alpha = 1.0 - (-dt_s / dynamics.steering_lag_s).exp();
+            drive.steering_rad + (drive.target_steering_rad - drive.steering_rad) * alpha
+        } else {
+            drive.target_steering_rad
+        };
         drive.steering_rad = move_towards(
             drive.steering_rad,
-            drive.target_steering_rad,
+            lag_target,
             drive.max_steering_rate_rad_s * dt_s,
         );
 
@@ -893,6 +902,42 @@ mod tests {
         };
 
         assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn steering_lag_delays_the_response_and_zero_lag_matches_legacy() {
+        let steering_after = |lag_s: f64, seconds: f64| {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                AckermannDrive {
+                    target_steering_rad: 0.3,
+                    speed_m_s: 10.0,
+                    target_speed_m_s: 10.0,
+                    max_speed_m_s: 30.0,
+                    // High enough that the rate limit never binds: this test isolates
+                    // the first-order lag. Their composition is covered implicitly by
+                    // every other dynamic-model test using the default rate.
+                    max_steering_rate_rad_s: 100.0,
+                    ..AckermannDrive::default()
+                },
+                VehicleDynamics {
+                    steering_lag_s: lag_s,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, seconds);
+            world.get::<AckermannDrive>(vehicle).unwrap().steering_rad
+        };
+
+        // Without lag the rate limit alone reaches the target quickly.
+        let instant = steering_after(0.0, 0.5);
+        assert!((instant - 0.3).abs() < 1e-9);
+        // One time constant reaches ~63 percent of the step.
+        let lagged = steering_after(0.2, 0.2);
+        assert!((lagged - 0.3 * 0.632).abs() < 0.01, "got {lagged}");
+        // The lag converges eventually.
+        assert!((steering_after(0.2, 2.0) - 0.3).abs() < 1e-3);
     }
 
     #[test]
