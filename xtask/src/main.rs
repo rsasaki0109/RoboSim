@@ -26,6 +26,10 @@ fn run() -> anyhow::Result<()> {
 
     match command.as_str() {
         "ci" => ci(),
+        "ci-lint" => ci_lint(),
+        "ci-test" => ci_test(),
+        "ci-smoke" => ci_smoke(),
+        "ci-rl" => ci_rl(),
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
         "house-gif-demo" => house_gif_demo(),
@@ -125,22 +129,47 @@ fn parse_seed_range(value: &str) -> anyhow::Result<Vec<u64>> {
     Ok((start..end).collect())
 }
 
+/// The full local gate: every stage in sequence.
+///
+/// CI runs the same stages as four parallel jobs (`ci-lint`, `ci-test`, `ci-smoke`,
+/// `ci-rl`), so wall-clock time there is the slowest stage instead of the sum. Keep
+/// stage contents in the stage functions so the local and CI gates cannot drift apart.
 fn ci() -> anyhow::Result<()> {
-    run_step("cargo fmt --all -- --check")?;
-    lint_boundaries()?;
-    run_step("cargo clippy --workspace --all-targets -- -D warnings")?;
-    run_step("cargo test --workspace")?;
-    pinocchio_golden_optional()?;
-    validate_repo_assets()?;
-    run_example_smokes()?;
+    ci_lint()?;
+    ci_test()?;
+    ci_smoke()?;
     if std::env::var("RNE_SKIP_RL_SMOKES").is_ok() {
         eprintln!("skipping mobile_manipulator_rl_smokes (RNE_SKIP_RL_SMOKES is set)");
     } else {
-        mobile_manipulator_rl_smokes()?;
+        ci_rl()?;
     }
-    house_gif_demo()?;
-    hero_media_check()?;
     Ok(())
+}
+
+/// Formatting, dependency boundaries, and Clippy.
+fn ci_lint() -> anyhow::Result<()> {
+    run_step("cargo fmt --all -- --check")?;
+    lint_boundaries()?;
+    run_step("cargo clippy --workspace --all-targets -- -D warnings")
+}
+
+/// Workspace tests, optional Pinocchio goldens, and asset validation.
+fn ci_test() -> anyhow::Result<()> {
+    run_step("cargo test --workspace")?;
+    pinocchio_golden_optional()?;
+    validate_repo_assets()
+}
+
+/// Example smokes and media checks.
+fn ci_smoke() -> anyhow::Result<()> {
+    run_example_smokes()?;
+    house_gif_demo()?;
+    hero_media_check()
+}
+
+/// Python RL smokes, including the maturin build of `rne_py`.
+fn ci_rl() -> anyhow::Result<()> {
+    mobile_manipulator_rl_smokes()
 }
 
 fn run_example_smokes() -> anyhow::Result<()> {
