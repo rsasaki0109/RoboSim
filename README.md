@@ -213,6 +213,38 @@ RNE_SKIP_GPU=1 cargo run -p control_eval_demo --example 50_control_eval
 Metric definitions, the lag model, and the acceptance numbers are documented in
 [controller evaluation](docs/CONTROL_EVALUATION.md).
 
+## Sensor latency in the loop
+
+Every frame on the DataBus carries an `available_time`; the new
+`DataBus::latest_available(stream, now)` is the read a real system performs — the
+newest frame that has actually arrived. Example 51 closes the loop through it: a
+localization source publishes the vehicle pose with transport latency, and the
+pure-pursuit controller steers the present vehicle from a pose of the past. The
+result has the shape feedback delay really has — a threshold, not a linear tax:
+
+| latency | RMS error | settles |
+| --- | --- | --- |
+| 0 ms | 0.468 m | yes |
+| 120 ms | 0.460 m | yes |
+| 240 ms | 2.05 m | **never** |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/latency-loop.png">
+    <img src="docs/media/latency-loop.gif" alt="Three identical control loops fed pose feedback at increasing latency; the heavily delayed loop oscillates across the course" width="960">
+  </picture>
+  <br>
+  <sub>Same vehicle, same controller, same course — only the age of the pose feedback differs. Green (0 ms) and amber (120 ms) sit inside the loop's phase margin and overlap; red (240 ms) covers most of the 5 m lookahead before its feedback arrives and weaves across the line for the whole run.</sub>
+</p>
+
+```bash
+cargo run --release -p latency_in_the_loop --example 51_latency_in_the_loop
+RNE_SKIP_GPU=1 cargo run -p latency_in_the_loop --example 51_latency_in_the_loop
+```
+
+The reading contract and the threshold analysis are documented in
+[sensor latency in the loop](docs/LATENCY_IN_THE_LOOP.md).
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation

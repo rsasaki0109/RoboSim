@@ -124,6 +124,19 @@ impl Default for PointCloud {
     }
 }
 
+/// Localization pose estimate payload.
+///
+/// Published by localization or ground-truth-with-latency sources so controllers can
+/// consume pose through the DataBus — and therefore through
+/// [`crate::Frame::available_time`] — instead of reading simulator state directly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PoseSample {
+    /// Position in the world frame, meters.
+    pub position_m: Vec3,
+    /// Heading about the world up axis in radians.
+    pub yaw_rad: f64,
+}
+
 /// Wheel encoder sample payload.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WheelEncoderSample {

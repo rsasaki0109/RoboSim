@@ -9,5 +9,7 @@ pub mod stream;
 
 pub use bus::{DataBus, InMemoryDataBus, SubscriptionCursor};
 pub use frame::{Frame, FrameHeader, FramePayload};
-pub use payloads::{ImageDepth, ImageRgb8, ImuSample, JointState, PointCloud, WheelEncoderSample};
+pub use payloads::{
+    ImageDepth, ImageRgb8, ImuSample, JointState, PointCloud, PoseSample, WheelEncoderSample,
+};
 pub use stream::StreamId;
