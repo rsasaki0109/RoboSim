@@ -117,6 +117,102 @@ randomization, payload attributes, and Sanjo acceptance hash are documented in
 and noise equations, rolling-shutter contract, and its Sanjo settings are
 documented in [physics-aware camera](docs/CAMERA_SIMULATION.md).
 
+## Physics-aware IMU
+
+A gyroscope reports body-frame angular rate and an accelerometer reports **specific
+force**, so a device at rest reads `+9.81 m/s²` along its up axis rather than zero.
+On top of that truth, RNE models the error terms an Allan-variance datasheet
+describes: angle and velocity random walk, bias instability as a first-order
+Gauss-Markov process, rate random walk, turn-on bias, scale factor, axis
+misalignment, saturation, and quantization. Every draw is seeded from
+`WorldRandom`, so a replayed run drifts identically.
+
+Example 48 makes that concrete. A vehicle drives a 20 m arc at 8 m/s for twelve
+seconds while its IMU is integrated with a textbook strapdown update and nothing
+corrects the result — the gap that opens up is exactly what the sensor model
+produces.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/imu-dead-reckoning.png">
+    <img src="docs/media/imu-dead-reckoning.gif" alt="Unaided IMU dead reckoning drifting away from ground truth along a circular track" width="960">
+  </picture>
+  <br>
+  <sub>Green is ground truth, orange is the unaided inertial estimate, and the red link is the live position error. Over 96.0 m the modeled consumer-grade MEMS IMU drifts <code>5.54 m</code> (5.8 % of distance) while an ideal <code>ImuSpec::default()</code> integrates back to within <code>0.160 m</code> — that 0.17 % bounds how much of the run is numerical rather than physical.</sub>
+</p>
+
+```bash
+cargo run --release -p imu_dead_reckoning --example 48_imu_dead_reckoning
+RNE_SKIP_GPU=1 cargo run -p imu_dead_reckoning --example 48_imu_dead_reckoning
+```
+
+The measurement equations, Allan-variance term table, determinism scheme, and
+acceptance numbers are documented in
+[physics-aware IMU](docs/IMU_SIMULATION.md).
+
+## Dynamic vehicle model
+
+The no-slip kinematic bicycle makes every controller look perfect: the vehicle goes
+exactly where the steering points it. Adding a `VehicleDynamics` component opts a
+vehicle into a planar dynamic bicycle model instead — front and rear slip angles, a
+linear tire that saturates at the friction limit `mu Fz`, and longitudinal weight
+transfer — so understeer emerges from the force balance. Below a configurable speed
+the model blends into the kinematic solution, avoiding the low-speed slip-angle
+singularity, and `ackermann_kinematics` automatically skips dynamic vehicles so the
+two models coexist in one schedule.
+
+Example 49 runs the same pure-pursuit controller through the same course at the same
+14 m/s on both plants. The corner demands ~10.9 m/s² of lateral acceleration; the
+tires can deliver 8.8.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/vehicle-dynamics.png">
+    <img src="docs/media/vehicle-dynamics.gif" alt="Kinematic and dynamic bicycle models under the same pure-pursuit controller; the dynamic vehicle understeers wide in the fast corner" width="960">
+  </picture>
+  <br>
+  <sub>Same controller, same commands, different plants. The kinematic car (green) tracks the sweeper within <code>0.78 m</code>; the dynamic car saturates its front axle for 92 steps (trail turns red), runs up to <code>17.1 m</code> wide, and rejoins on the exit. On the entry straight the two trails are identical — the divergence is entirely the vehicle model.</sub>
+</p>
+
+```bash
+cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+```
+
+The tire equations, load transfer, the low-speed blend, and the acceptance numbers
+are documented in [vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
+
+## Controller evaluation
+
+`rne_ai::control_eval` computes the standard tracking metrics — RMS and maximum
+error, settling time, overshoot, steady-state error, control effort, smoothness,
+saturation exposure, constraint violations — from plain logged samples, and
+aggregates them across seeds into means and spreads. Example 50 runs one
+pure-pursuit controller through ten seeds that randomize tire friction (0.72–0.95),
+initial offset (±1.5 m), and steering actuator lag (50–180 ms), on both plants:
+
+| plant | RMS error | saturated | unsettled |
+| --- | --- | --- | --- |
+| kinematic | 0.507 ± 0.066 m | 0 % | 0 / 10 |
+| dynamic | 5.03 ± 2.29 m | 59 % | 7 / 10 |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/control-eval.png">
+    <img src="docs/media/control-eval.gif" alt="Ten randomized seeds of the same pure-pursuit controller fanning out over the course on the dynamic plant" width="960">
+  </picture>
+  <br>
+  <sub>Ten seeds, one controller. On the entry straight every trail overlaps; through the corner friction and actuator-lag differences fan them out. The no-slip plant reports a competent controller; the dynamic plant exposes what it lacks — no slowdown before the corner, no lag compensation. The <code>±2.29 m</code> spread is why multi-seed evaluation exists.</sub>
+</p>
+
+```bash
+cargo run --release -p control_eval_demo --example 50_control_eval
+RNE_SKIP_GPU=1 cargo run -p control_eval_demo --example 50_control_eval
+```
+
+Metric definitions, the lag model, and the acceptance numbers are documented in
+[controller evaluation](docs/CONTROL_EVALUATION.md).
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation

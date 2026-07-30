@@ -1,8 +1,8 @@
 //! Sensor sampling systems.
 
 use crate::camera::sample_camera_rgbd_keyed;
-use crate::components::{Sensor, SensorKind, SensorState};
-use crate::imu::sample_imu_keyed;
+use crate::components::{ImuState, Sensor, SensorKind, SensorState};
+use crate::imu::sample_imu_stateful;
 use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
@@ -39,6 +39,7 @@ pub fn sample_sensors<B: PhysicsBackend>(
 ) -> usize {
     let mut published = 0_usize;
     let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
+    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
     let empty_scene = RenderScene::new();
     let world_seed = ctx
@@ -72,6 +73,27 @@ pub fn sample_sensors<B: PhysicsBackend>(
 
         match &sensor.kind {
             SensorKind::Imu(spec) => {
+                // The IMU error model is time correlated, so its state rides on the
+                // sensor entity and is written back with the sampling state below.
+                let mut imu_state = ctx
+                    .world
+                    .get::<ImuState>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                let sample = sample_imu_stateful(
+                    ctx.world,
+                    entity,
+                    spec,
+                    SensorNoiseKey::new(
+                        world_seed,
+                        spec.seed,
+                        sensor.stream_id.0,
+                        state.last_sequence,
+                    ),
+                    ctx.sim_time,
+                    &mut imu_state,
+                );
+                imu_updates.push((entity, imu_state));
                 publish_frame(
                     bus,
                     Frame::new(
@@ -79,17 +101,7 @@ pub fn sample_sensors<B: PhysicsBackend>(
                         entity,
                         state.last_sequence,
                         ctx.sim_time,
-                        sample_imu_keyed(
-                            ctx.world,
-                            entity,
-                            spec,
-                            SensorNoiseKey::new(
-                                world_seed,
-                                spec.seed,
-                                sensor.stream_id.0,
-                                state.last_sequence,
-                            ),
-                        ),
+                        sample,
                     )
                     .with_latency(sensor.latency()),
                 );
@@ -197,6 +209,10 @@ pub fn sample_sensors<B: PhysicsBackend>(
         if let Some(mut component) = ctx.world.get_mut::<SensorState>(entity) {
             *component = state;
         }
+    }
+
+    for (entity, state) in imu_updates {
+        ctx.world.entity_mut(entity).insert(state);
     }
 
     published
@@ -350,6 +366,7 @@ mod tests {
                 kind: SensorKind::Imu(ImuSpec {
                     noise: NoiseModel::default(),
                     seed: 1,
+                    ..ImuSpec::default()
                 }),
                 update_rate_hz: 10.0,
                 latency_ticks: 0,
@@ -494,6 +511,7 @@ mod tests {
                         linear_bias_m_s2: rne_math::Vec3::ZERO,
                     },
                     seed: 9,
+                    ..ImuSpec::default()
                 }),
                 update_rate_hz: 60.0,
                 latency_ticks: 0,

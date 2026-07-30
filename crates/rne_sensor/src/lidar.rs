@@ -267,6 +267,14 @@ pub struct LidarSpec {
     pub solar_noise_floor: f64,
     /// Base probability of dropping a physically valid return.
     pub dropout_probability: f64,
+    /// Normalized intensity at which a return is detected half the time.
+    ///
+    /// Ray drop is driven by how much energy comes back, so weak returns fail
+    /// stochastically while strong ones always register. `0.0` disables the model and
+    /// leaves only [`Self::dropout_probability`].
+    pub detection_threshold_intensity: f64,
+    /// Sharpness of the detection curve around the threshold; higher is more abrupt.
+    pub detection_sharpness: f64,
     /// Normalized intensity at which the detector saturates.
     pub saturation_intensity: f64,
     /// Fraction of clipped excess energy that blooms into neighbouring columns.
@@ -309,6 +317,8 @@ impl Default for LidarSpec {
             intensity_noise_stddev: 0.0,
             solar_noise_floor: 0.0,
             dropout_probability: 0.0,
+            detection_threshold_intensity: 0.0,
+            detection_sharpness: 3.0,
             saturation_intensity: 1.0,
             bloom_gain: 0.0,
             bloom_column_radius: 0,
@@ -836,7 +846,15 @@ fn surface_returns(
             * spec.solar_noise_floor.max(0.0);
 
         if intensity > 0.0
-            && detects_pulse(geometric_range_m, spec, atmosphere, random, noise_key, slot)
+            && detects_pulse(
+                intensity,
+                geometric_range_m,
+                spec,
+                atmosphere,
+                random,
+                noise_key,
+                slot,
+            )
         {
             let noisy_range_m = (geometric_range_m
                 + gaussian_pair(random, noise_key, slot + SLOT_RETURN_RANGE_NOISE).0
@@ -897,8 +915,30 @@ fn range_response(range_m: f64, spec: &LidarSpec) -> f64 {
     (RANGE_REFERENCE_M / range_m).powi(2) * overlap
 }
 
-/// Returns false when a discrete precipitation particle or a dropout swallows the pulse.
+/// Returns false when the pulse is not detected.
+///
+/// Ray drop in real scans is not a uniform coin flip. Whether a return registers depends
+/// on how much energy comes back: strong returns are detected essentially always, weak
+/// ones fail stochastically, and the transition is gradual rather than a hard threshold.
+/// Both [LiDARsim] and [LiDAR-RT] treat ray drop as a learned stochastic function of the
+/// return strength together with range and incidence angle; those already determine
+/// `intensity` here, so the detection curve is expressed directly in terms of it.
+///
+/// The detection probability is a logistic in the intensity ratio, centred on
+/// [`LidarSpec::detection_threshold_intensity`] and sharpened by
+/// [`LidarSpec::detection_sharpness`]:
+///
+/// ```text
+/// p_detect = 1 / (1 + (I_threshold / I)^k)
+/// ```
+///
+/// A threshold of zero disables the model and restores a flat dropout probability.
+///
+/// [LiDARsim]: https://arxiv.org/pdf/2006.09348
+/// [LiDAR-RT]: https://arxiv.org/html/2412.15199v1
+#[allow(clippy::too_many_arguments)]
 fn detects_pulse(
+    intensity: f64,
     range_m: f64,
     spec: &LidarSpec,
     atmosphere: LidarAtmosphere,
@@ -908,13 +948,25 @@ fn detects_pulse(
 ) -> bool {
     let base_dropout = spec.dropout_probability.clamp(0.0, 1.0);
     let occlusion = 1.0 - (-atmosphere.occlusion_per_m() * range_m.max(0.0)).exp();
-    let drop_probability = (base_dropout + (1.0 - base_dropout) * occlusion).clamp(0.0, 1.0);
+    let mut drop_probability = base_dropout + (1.0 - base_dropout) * occlusion;
+
+    let threshold = spec.detection_threshold_intensity.max(0.0);
+    if threshold > 0.0 {
+        let detection = if intensity <= 0.0 {
+            0.0
+        } else {
+            let sharpness = spec.detection_sharpness.max(f64::MIN_POSITIVE);
+            1.0 / (1.0 + (threshold / intensity).powf(sharpness))
+        };
+        drop_probability += (1.0 - drop_probability) * (1.0 - detection);
+    }
+
     let draw = random.sample_unit_f64(
         noise_key.stable_sensor_id,
         noise_key.sample_index,
         slot + SLOT_RETURN_DROPOUT,
     );
-    draw >= drop_probability
+    draw >= drop_probability.clamp(0.0, 1.0)
 }
 
 /// Returns an aerosol backscatter return sampled along the free path of the beam.
@@ -1925,6 +1977,98 @@ mod tests {
 
         assert_eq!(dry.points_m.len(), 128);
         assert!(downpour.points_m.len() < dry.points_m.len());
+    }
+
+    #[test]
+    fn ray_drop_is_driven_by_return_strength() {
+        let (world, wall) = diffuse_world(LidarMaterial::concrete());
+        let base = LidarSpec {
+            ray_count: 256,
+            min_angle_rad: -0.4,
+            max_angle_rad: 0.4,
+            min_range_m: 0.5,
+            max_range_m: 200.0,
+            height_offset_m: 0.0,
+            detection_threshold_intensity: 0.02,
+            detection_sharpness: 3.0,
+            ..LidarSpec::default()
+        };
+        let key = SensorNoiseKey::new(31, 32, 33, 34);
+
+        let returns_at = |plane_x: f64, spec: &LidarSpec| {
+            sample_lidar_keyed(
+                &WallPhysics {
+                    entity: wall,
+                    plane_x,
+                },
+                PhysicsWorldId::DEFAULT,
+                &world,
+                &Transform3::IDENTITY,
+                spec,
+                key,
+            )
+            .points_m
+            .len()
+        };
+
+        // Close, bright returns survive; distant, weak ones drop out stochastically.
+        let near = returns_at(6.0, &base);
+        // At 50 m a concrete wall returns roughly the threshold intensity, so returns
+        // survive only part of the time — the gradual transition ray drop really has.
+        let far = returns_at(50.0, &base);
+        assert_eq!(near, 256);
+        assert!(far > 0, "the far wall must not vanish entirely");
+        assert!(
+            far < near,
+            "weak returns must drop out, got {far} of {near}"
+        );
+
+        // With the model disabled every ray survives at both ranges.
+        let flat = LidarSpec {
+            detection_threshold_intensity: 0.0,
+            ..base
+        };
+        assert_eq!(returns_at(50.0, &flat), 256);
+    }
+
+    #[test]
+    fn detection_sharpness_controls_the_transition_width() {
+        let spec = |sharpness: f64| LidarSpec {
+            detection_threshold_intensity: 0.1,
+            detection_sharpness: sharpness,
+            ..LidarSpec::default()
+        };
+        let random = lidar_random(SensorNoiseKey::new(1, 1, 1, 1));
+        let key = SensorNoiseKey::new(1, 1, 1, 1);
+
+        // At the threshold the pulse is detected half the time regardless of sharpness.
+        let detected = |sharpness: f64, intensity: f64| {
+            let spec = spec(sharpness);
+            (0..2_000_u64)
+                .filter(|index| {
+                    detects_pulse(
+                        intensity,
+                        10.0,
+                        &spec,
+                        LidarAtmosphere::default(),
+                        &random,
+                        SensorNoiseKey {
+                            sample_index: *index,
+                            ..key
+                        },
+                        0,
+                    )
+                })
+                .count() as f64
+                / 2_000.0
+        };
+
+        assert!((detected(3.0, 0.1) - 0.5).abs() < 0.05);
+        assert!((detected(12.0, 0.1) - 0.5).abs() < 0.05);
+        // Above the threshold a sharper curve detects more reliably.
+        assert!(detected(12.0, 0.2) > detected(3.0, 0.2));
+        // Below it, a sharper curve rejects more aggressively.
+        assert!(detected(12.0, 0.05) < detected(3.0, 0.05));
     }
 
     #[test]

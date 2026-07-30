@@ -6,6 +6,7 @@ pub mod action;
 pub mod agent;
 pub mod behavior;
 pub mod camera;
+pub mod control_eval;
 pub mod domain_randomization;
 pub mod env;
 pub mod episode;
@@ -43,6 +44,7 @@ pub use camera::{
     wrist_camera_mounts_from_spawned, wrist_camera_pixel_count, wrist_camera_stream_for_index,
     WristCameraMount,
 };
+pub use control_eval::{ControlEvalReport, ControlMetrics, ControlTrackingSample, MetricSpread};
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
     cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
