@@ -15,8 +15,40 @@ pub struct ImuSample {
 /// LiDAR point cloud payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointCloud {
-    /// Points in the sensor frame, meters.
+    /// Points in the world frame, meters.
     pub points_m: Vec<Vec3>,
+    /// Normalized return intensity for each point in `[0, 1]`.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub intensities: Vec<f32>,
+    /// Source ray index for each point.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub ray_indices: Vec<u32>,
+    /// One-based return index within the source ray.
+    ///
+    /// Legacy point clouds may leave this empty. Otherwise its length matches
+    /// [`Self::points_m`].
+    #[serde(default)]
+    pub return_indices: Vec<u8>,
+    /// Zero-based elevation channel (ring) index for each point.
+    ///
+    /// Single-plane scanners report `0` for every point. Legacy point clouds may
+    /// leave this empty; otherwise its length matches [`Self::points_m`].
+    #[serde(default)]
+    pub channel_indices: Vec<u16>,
+    /// Emission time of each point relative to the start of the scan, in seconds.
+    ///
+    /// A spinning scanner emits one azimuth column at a time, so points in the same
+    /// cloud are captured at different instants. Consumers that need motion-corrected
+    /// geometry must use these offsets. Legacy point clouds may leave this empty;
+    /// otherwise its length matches [`Self::points_m`].
+    #[serde(default)]
+    pub timestamps_s: Vec<f64>,
 }
 
 impl PointCloud {
@@ -24,6 +56,64 @@ impl PointCloud {
     pub fn new() -> Self {
         Self {
             points_m: Vec::new(),
+            intensities: Vec::new(),
+            ray_indices: Vec::new(),
+            return_indices: Vec::new(),
+            channel_indices: Vec::new(),
+            timestamps_s: Vec::new(),
+        }
+    }
+
+    /// Appends one LiDAR return while preserving parallel-array invariants.
+    pub fn push_return(
+        &mut self,
+        point_m: Vec3,
+        intensity: f32,
+        ray_index: u32,
+        return_index: u8,
+        channel_index: u16,
+        timestamp_s: f64,
+    ) {
+        self.points_m.push(point_m);
+        self.intensities.push(intensity);
+        self.ray_indices.push(ray_index);
+        self.return_indices.push(return_index);
+        self.channel_indices.push(channel_index);
+        self.timestamps_s.push(timestamp_s);
+    }
+
+    /// Returns true when all optional LiDAR attributes are absent or aligned.
+    pub fn attributes_are_aligned(&self) -> bool {
+        let len = self.points_m.len();
+        [
+            self.intensities.len(),
+            self.ray_indices.len(),
+            self.return_indices.len(),
+            self.channel_indices.len(),
+            self.timestamps_s.len(),
+        ]
+        .into_iter()
+        .all(|attribute_len| attribute_len == 0 || attribute_len == len)
+    }
+
+    /// Returns the scan duration implied by the per-point timestamps, in seconds.
+    ///
+    /// Returns `0.0` when the cloud carries no timestamps.
+    pub fn scan_duration_s(&self) -> f64 {
+        let min = self
+            .timestamps_s
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let max = self
+            .timestamps_s
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        if min.is_finite() && max.is_finite() {
+            max - min
+        } else {
+            0.0
         }
     }
 }
@@ -137,4 +227,55 @@ pub fn hash_depth_f32(values: &[f32]) -> u64 {
         }
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_cloud_return_attributes_stay_aligned() {
+        let mut cloud = PointCloud::new();
+        cloud.push_return(Vec3::new(1.0, 2.0, 3.0), 0.75, 4, 2, 9, 0.004);
+
+        assert!(cloud.attributes_are_aligned());
+        assert_eq!(cloud.points_m.len(), 1);
+        assert_eq!(cloud.intensities, vec![0.75]);
+        assert_eq!(cloud.ray_indices, vec![4]);
+        assert_eq!(cloud.return_indices, vec![2]);
+        assert_eq!(cloud.channel_indices, vec![9]);
+        assert_eq!(cloud.timestamps_s, vec![0.004]);
+    }
+
+    #[test]
+    fn legacy_point_cloud_without_attributes_is_valid() {
+        let cloud = PointCloud {
+            points_m: vec![Vec3::X],
+            ..PointCloud::new()
+        };
+
+        assert!(cloud.attributes_are_aligned());
+    }
+
+    #[test]
+    fn legacy_serialized_cloud_deserializes_without_new_attributes() {
+        let legacy = r#"{"points_m":[[1.0,2.0,3.0]],"intensities":[0.5],"ray_indices":[0],"return_indices":[1]}"#;
+        let cloud: PointCloud = serde_json::from_str(legacy).expect("legacy point cloud");
+
+        assert_eq!(cloud.points_m.len(), 1);
+        assert!(cloud.channel_indices.is_empty());
+        assert!(cloud.timestamps_s.is_empty());
+        assert!(cloud.attributes_are_aligned());
+        assert_eq!(cloud.scan_duration_s(), 0.0);
+    }
+
+    #[test]
+    fn scan_duration_spans_first_and_last_emission() {
+        let mut cloud = PointCloud::new();
+        cloud.push_return(Vec3::X, 0.4, 0, 1, 0, 0.0);
+        cloud.push_return(Vec3::Y, 0.4, 1, 1, 0, 0.05);
+        cloud.push_return(Vec3::Z, 0.4, 2, 1, 0, 0.1);
+
+        assert!((cloud.scan_duration_s() - 0.1).abs() < 1e-12);
+    }
 }

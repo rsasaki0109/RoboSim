@@ -92,6 +92,9 @@ pub trait PhysicsBackend: Send + Sync + 'static {
     ) -> Result<(), PhysicsError>;
 
     /// Executes a raycast query.
+    ///
+    /// Implementations return every hit ordered by increasing distance, with
+    /// stable entity order used to break equal-distance ties.
     fn raycast(
         &self,
         physics_world: PhysicsWorldId,

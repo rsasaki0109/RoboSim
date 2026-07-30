@@ -11,9 +11,13 @@ pub mod systems;
 pub mod wheel_encoder;
 
 pub use camera::{sample_camera, sample_camera_rgbd, CameraRgbdSample, CameraSpec};
-pub use components::{Sensor, SensorKind, SensorState};
+pub use components::{LidarMaterial, Sensor, SensorKind, SensorState};
 pub use imu::{sample_imu, sample_imu_keyed, ImuSpec};
-pub use lidar::{sample_lidar, LidarSpec};
+pub use lidar::{
+    sample_lidar, sample_lidar_at_entity, sample_lidar_at_entity_keyed, sample_lidar_keyed,
+    sample_lidar_swept, LidarAtmosphere, LidarDomainRandomization, LidarFailureBehavior, LidarSpec,
+    LidarSweep, RANGE_REFERENCE_M,
+};
 pub use noise::{NoiseModel, SensorNoiseKey};
 pub use systems::{sample_sensors, SensorSampleContext, SensorSampler, CAMERA_DEPTH_STREAM_OFFSET};
 pub use wheel_encoder::{sample_wheel_encoder, WheelEncoderSpec};

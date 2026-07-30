@@ -3,7 +3,7 @@
 use crate::camera::sample_camera_rgbd;
 use crate::components::{Sensor, SensorKind, SensorState};
 use crate::imu::sample_imu_keyed;
-use crate::lidar::sample_lidar_at_entity;
+use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
 use rne_core::{SimDuration, SimTime};
@@ -102,12 +102,18 @@ pub fn sample_sensors<B: PhysicsBackend>(
                         entity,
                         state.last_sequence,
                         ctx.sim_time,
-                        sample_lidar_at_entity(
+                        sample_lidar_at_entity_keyed(
                             ctx.physics,
                             ctx.physics_world,
                             ctx.world,
                             entity,
                             spec,
+                            SensorNoiseKey::new(
+                                world_seed,
+                                spec.seed,
+                                sensor.stream_id.0,
+                                state.last_sequence,
+                            ),
                         ),
                     )
                     .with_latency(sensor.latency()),
@@ -267,6 +273,54 @@ mod tests {
         }
     }
 
+    struct LidarHitPhysics {
+        target: rne_ecs::Entity,
+    }
+
+    impl PhysicsBackend for LidarHitPhysics {
+        type BodyHandle = ();
+        type ColliderHandle = ();
+
+        fn create_world(&mut self, _: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
+            Ok(PhysicsWorldId::DEFAULT)
+        }
+        fn sync_from_ecs(
+            &mut self,
+            _: &mut rne_ecs::World,
+            _: PhysicsWorldId,
+        ) -> Result<(), PhysicsError> {
+            Ok(())
+        }
+        fn step(&mut self, _: PhysicsWorldId, _: SimDuration) -> Result<(), PhysicsError> {
+            Ok(())
+        }
+        fn sync_to_ecs(
+            &mut self,
+            _: &mut rne_ecs::World,
+            _: PhysicsWorldId,
+        ) -> Result<(), PhysicsError> {
+            Ok(())
+        }
+        fn raycast(
+            &self,
+            _: PhysicsWorldId,
+            query: RaycastQuery,
+        ) -> Result<Vec<RaycastHit>, PhysicsError> {
+            Ok(vec![RaycastHit {
+                entity: self.target,
+                point_m: query.origin_m + query.direction * 5.0,
+                normal: -query.direction,
+                distance_m: 5.0,
+            }])
+        }
+        fn contacts(&self, _: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
+            Ok(&[])
+        }
+        fn capabilities(&self) -> &[PhysicsCapability] {
+            &[]
+        }
+    }
+
     #[test]
     fn sensor_emits_at_configured_rate() {
         let mut world = World::new();
@@ -350,6 +404,60 @@ mod tests {
             .latest::<rne_data::ImageDepth>(StreamId::new(52))
             .unwrap();
         assert_eq!(depth.payload.width, 8);
+    }
+
+    #[test]
+    fn lidar_frame_has_material_attributes_and_explicit_latency() {
+        let mut world = World::new();
+        world.insert_resource(WorldRandom::new(42));
+        let target = spawn_named(&mut world, "painted_target");
+        world
+            .entity_mut(target)
+            .insert(crate::LidarMaterial::painted_metal());
+        let sensor_entity = spawn_named(&mut world, "physics_lidar");
+        world.entity_mut(sensor_entity).insert((
+            Sensor {
+                kind: SensorKind::Lidar(crate::LidarSpec {
+                    ray_count: 1,
+                    min_angle_rad: 0.0,
+                    max_angle_rad: 0.0,
+                    seed: 9,
+                    ..crate::LidarSpec::default()
+                }),
+                update_rate_hz: 10.0,
+                latency_ticks: 25,
+                frame_id: 3,
+                enabled: true,
+                stream_id: StreamId::new(78),
+            },
+            SensorState::default(),
+            Transform3::IDENTITY,
+        ));
+
+        let mut bus = InMemoryDataBus::new();
+        let physics = LidarHitPhysics { target };
+        sample_sensors(
+            &mut SensorSampleContext {
+                world: &mut world,
+                sim_time: SimTime::from_ticks(100),
+                physics: &physics,
+                physics_world: PhysicsWorldId::DEFAULT,
+                render: None,
+                scene: None,
+            },
+            &mut bus,
+        );
+
+        let frame = bus
+            .latest::<rne_data::PointCloud>(StreamId::new(78))
+            .expect("LiDAR frame");
+        assert_eq!(frame.capture_time, SimTime::from_ticks(100));
+        assert_eq!(frame.available_time, SimTime::from_ticks(125));
+        assert_eq!(frame.payload.points_m.len(), 1);
+        assert!(frame.payload.intensities[0] > 0.0);
+        assert_eq!(frame.payload.ray_indices, vec![0]);
+        assert_eq!(frame.payload.return_indices, vec![1]);
+        assert!(frame.payload.attributes_are_aligned());
     }
 
     #[test]

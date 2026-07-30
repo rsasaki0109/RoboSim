@@ -729,6 +729,7 @@ fn cloud_in_lidar_frame(cloud: &PointCloud, lidar_world: Option<&Transform3>) ->
             .iter()
             .map(|point| inv.transform_point(*point))
             .collect(),
+        ..cloud.clone()
     }
 }
 

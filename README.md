@@ -57,6 +57,28 @@ atmospheric pass and high-quality 960×540 GIF downsample.
   <sub>Twelve seconds and 144 frames of real wgpu output over official PLATEAU Sanjo City 2025 data: 100 seeded vehicles use eight shortest-path OD routes, 24 fixed-time signals, deterministic junction reservations, and car following with zero red-light violations and zero collisions.</sub>
 </p>
 
+The same official scenario now drives a deterministic physics-aware 905&nbsp;nm
+16-channel spinning LiDAR. Non-visual concrete, glass, asphalt, painted-metal,
+and retroreflective properties control an inverse-square radiometric intensity,
+transmitted multiple returns, and detector saturation with bloom; the beam
+footprint is integrated so silhouettes produce mixed pixels; fog, rain, dust, and
+snow attenuate, backscatter, and occlude; and the scanner sweeps a full
+revolution per frame, so each azimuth column is cast from the moving vehicle's
+interpolated pose and every point carries its own emission time. All
+randomization derives from `WorldRandom`. Blue, green, and yellow points show
+increasing normalized return intensity. The same vehicle also carries a forward
+RGB-D camera; its raw color and linear-depth views are composited as the two
+insets, and the depth ramp reuses the LiDAR intensity legend.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-lidar.png">
+    <img src="docs/media/plateau-lidar.gif" alt="Physics-aware LiDAR returns from a moving vehicle in official PLATEAU Sanjo traffic" width="960">
+  </picture>
+  <br>
+  <sub>Real 12-second/144-frame wgpu capture of 285,666 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,339 later returns, 488 saturated retroreflective returns; stable scan hash <code>11611048955455473063</code>) plus a vehicle-mounted RGB-D camera (stable hash <code>8873769722900379237</code>), while 100 deterministic vehicles share the official Sanjo scene.</sub>
+</p>
+
 ```bash
 cargo run -p rne_plateau_import -- path/to/tile.gml \
   --output target/plateau/tile --tile-name tile
@@ -82,6 +104,9 @@ official tile; it checks spawn-order-identical hashes, zero signal violations,
 zero collisions, a two-meter minimum gap, exercised reservations, traffic-flow
 KPIs, and at least 60 Hz. See
 [deterministic traffic runtime](docs/TRAFFIC_RUNTIME.md).
+The LiDAR equations, timestamp and failure behavior, deterministic weather
+randomization, payload attributes, and Sanjo acceptance hash are documented in
+[physics-aware LiDAR](docs/LIDAR_SIMULATION.md).
 
 ## Official Unitree Go2 URDF
 
