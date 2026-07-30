@@ -595,6 +595,40 @@ impl UrdfSceneSim {
         )
     }
 
+    /// Tilts a named root rigid body about a world-frame axis, preserving velocities.
+    ///
+    /// This is the disturbance that genuinely upsets an articulated robot: unlike a
+    /// root translation — which forward kinematics turns into a whole-tree teleport
+    /// that moves the feet with the body — a rotation changes the contact
+    /// configuration. Feet on one side press into the ground while the other side
+    /// lifts, and gravity plus the contact solver produce real tipping dynamics the
+    /// controller must catch. Returns false when the axis-angle is non-finite or the
+    /// named entity is not a root rigid body.
+    pub fn tilt_named_body_rad(&mut self, name: &str, axis_angle_rad: [f64; 3]) -> bool {
+        if axis_angle_rad.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        if self.world.get::<Parent>(entity).is_some()
+            || self.world.get::<RigidBody>(entity).is_none()
+        {
+            return false;
+        }
+        let axis_angle =
+            rne_math::Vec3::new(axis_angle_rad[0], axis_angle_rad[1], axis_angle_rad[2]);
+        let angle = axis_angle.length();
+        if angle <= f64::EPSILON {
+            return true;
+        }
+        let rotation = rne_math::Quat::from_axis_angle(axis_angle / angle, angle);
+        let mut transform = world_transform_of(&self.world, entity);
+        transform.rotation = (rotation * transform.rotation).normalize();
+        self.world.entity_mut(entity).insert(transform);
+        true
+    }
+
     /// Displaces a named rigid body by an offset, preserving its velocities.
     ///
     /// This is the deterministic disturbance primitive that works for articulated

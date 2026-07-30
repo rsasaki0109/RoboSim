@@ -49,15 +49,18 @@ pub fn unitree_go2_trot_targets(
     let a = gait_wave(phase);
     let b = gait_wave((phase + 0.5) % 1.0);
     let leg = |prefix: &'static str, wave: (f64, f64)| {
-        // Left and right hips abduct in opposite directions for a lateral lean.
-        let (hip, thigh, calf, hip_sign) = match prefix {
-            "FL" => ("FL_hip", "FL_thigh", "FL_calf", 1.0),
-            "FR" => ("FR_hip", "FR_thigh", "FR_calf", -1.0),
-            "RL" => ("RL_hip", "RL_thigh", "RL_calf", 1.0),
-            _ => ("RR_hip", "RR_thigh", "RR_calf", -1.0),
+        // The Go2 hip abduction axes are not mirrored between sides, so the same
+        // joint angle on every hip shifts all four feet the same lateral direction
+        // and the body leans the opposite way. (Mirrored signs would merely widen
+        // the stance, which stabilizes nothing.)
+        let (hip, thigh, calf) = match prefix {
+            "FL" => ("FL_hip", "FL_thigh", "FL_calf"),
+            "FR" => ("FR_hip", "FR_thigh", "FR_calf"),
+            "RL" => ("RL_hip", "RL_thigh", "RL_calf"),
+            _ => ("RR_hip", "RR_thigh", "RR_calf"),
         };
         [
-            target(hip, hip_sign * roll),
+            target(hip, roll),
             target(thigh, 0.8 + stride * wave.0 + pitch),
             target(calf, -1.5 - lift * wave.1),
         ]
