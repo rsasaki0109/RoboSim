@@ -9,6 +9,18 @@ pub struct UnitreeGo2GaitCommand {
     pub foot_lift_rad: f64,
     /// Simulation steps per gait cycle, clamped to `[40, 180]`.
     pub cycle_steps: u64,
+    /// Hip-abduction posture correction in radians, clamped to `[-0.35, 0.35]`.
+    ///
+    /// Applied with opposite signs on the left and right legs, so a positive value
+    /// shifts the stance laterally. A balance controller feeds the measured body
+    /// roll back through this term to lean the legs against a disturbance; the
+    /// scripted open-loop trot leaves it at zero.
+    pub roll_correction_rad: f64,
+    /// Thigh-pitch posture correction in radians, clamped to `[-0.3, 0.3]`.
+    ///
+    /// Applied uniformly to every thigh, pitching the body against forward or
+    /// backward disturbances.
+    pub pitch_correction_rad: f64,
 }
 
 impl Default for UnitreeGo2GaitCommand {
@@ -17,6 +29,8 @@ impl Default for UnitreeGo2GaitCommand {
             stride_rad: 0.12,
             foot_lift_rad: 0.16,
             cycle_steps: 90,
+            roll_correction_rad: 0.0,
+            pitch_correction_rad: 0.0,
         }
     }
 }
@@ -29,19 +43,22 @@ pub fn unitree_go2_trot_targets(
     let stride = command.stride_rad.clamp(0.0, 0.3);
     let lift = command.foot_lift_rad.clamp(0.0, 0.4);
     let cycle = command.cycle_steps.clamp(40, 180);
+    let roll = command.roll_correction_rad.clamp(-0.35, 0.35);
+    let pitch = command.pitch_correction_rad.clamp(-0.3, 0.3);
     let phase = (step % cycle) as f64 / cycle as f64;
     let a = gait_wave(phase);
     let b = gait_wave((phase + 0.5) % 1.0);
     let leg = |prefix: &'static str, wave: (f64, f64)| {
-        let (hip, thigh, calf) = match prefix {
-            "FL" => ("FL_hip", "FL_thigh", "FL_calf"),
-            "FR" => ("FR_hip", "FR_thigh", "FR_calf"),
-            "RL" => ("RL_hip", "RL_thigh", "RL_calf"),
-            _ => ("RR_hip", "RR_thigh", "RR_calf"),
+        // Left and right hips abduct in opposite directions for a lateral lean.
+        let (hip, thigh, calf, hip_sign) = match prefix {
+            "FL" => ("FL_hip", "FL_thigh", "FL_calf", 1.0),
+            "FR" => ("FR_hip", "FR_thigh", "FR_calf", -1.0),
+            "RL" => ("RL_hip", "RL_thigh", "RL_calf", 1.0),
+            _ => ("RR_hip", "RR_thigh", "RR_calf", -1.0),
         };
         [
-            target(hip, 0.0),
-            target(thigh, 0.8 + stride * wave.0),
+            target(hip, hip_sign * roll),
+            target(thigh, 0.8 + stride * wave.0 + pitch),
             target(calf, -1.5 - lift * wave.1),
         ]
     };

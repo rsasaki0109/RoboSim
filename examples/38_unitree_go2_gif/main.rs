@@ -39,6 +39,7 @@ fn main() {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
             cycle_steps: 90,
+            ..UnitreeGo2GaitCommand::default()
         },
     );
     for _ in 0..120 {

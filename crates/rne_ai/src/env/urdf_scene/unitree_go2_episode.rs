@@ -9,6 +9,15 @@ const SETTLE_STEPS: u64 = 120;
 const NOMINAL_HEIGHT_M: f64 = 0.23;
 const FALLEN_HEIGHT_M: f64 = 0.12;
 
+/// A deterministic velocity shove applied to the Go2 base during an episode.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2Push {
+    /// Controlled step at which the shove lands.
+    pub step: u64,
+    /// Velocity change applied to the base link, in meters per second.
+    pub velocity_m_s: [f64; 3],
+}
+
 /// Configuration for the official Unitree Go2 trot episode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnitreeGo2EpisodeConfig {
@@ -20,6 +29,8 @@ pub struct UnitreeGo2EpisodeConfig {
     pub cycle_steps: u64,
     /// Maximum relative pitch/roll magnitude before termination in radians.
     pub max_tilt_rad: f64,
+    /// Optional disturbance shove; `None` reproduces the undisturbed episode exactly.
+    pub push: Option<UnitreeGo2Push>,
 }
 
 impl Default for UnitreeGo2EpisodeConfig {
@@ -29,6 +40,7 @@ impl Default for UnitreeGo2EpisodeConfig {
             max_steps: 600,
             cycle_steps: 90,
             max_tilt_rad: 1.2,
+            push: None,
         }
     }
 }
@@ -40,6 +52,13 @@ pub struct UnitreeGo2Action {
     pub stride_rad: f64,
     /// Swing-leg calf flexion in radians, clamped to `[0, 0.4]`.
     pub foot_lift_rad: f64,
+    /// Hip-abduction posture correction in radians, clamped to `[-0.35, 0.35]`.
+    ///
+    /// A balance controller feeds measured body roll back through this term; the
+    /// open-loop trot leaves it at zero.
+    pub roll_correction_rad: f64,
+    /// Thigh-pitch posture correction in radians, clamped to `[-0.3, 0.3]`.
+    pub pitch_correction_rad: f64,
 }
 
 impl Default for UnitreeGo2Action {
@@ -47,6 +66,8 @@ impl Default for UnitreeGo2Action {
         Self {
             stride_rad: 0.12,
             foot_lift_rad: 0.16,
+            roll_correction_rad: 0.0,
+            pitch_correction_rad: 0.0,
         }
     }
 }
@@ -168,10 +189,19 @@ impl Episode for UnitreeGo2Episode {
 
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let before = self.sim.observe();
+        // The disturbance lands before the control targets apply, exactly like a
+        // shove that arrives between two controller ticks.
+        if let Some(push) = self.config.push {
+            if push.step == self.step_in_episode {
+                self.sim.add_named_body_velocity_m_s("base", push.velocity_m_s);
+            }
+        }
         let command = UnitreeGo2GaitCommand {
             stride_rad: action.stride_rad.clamp(0.0, 0.3),
             foot_lift_rad: action.foot_lift_rad.clamp(0.0, 0.4),
             cycle_steps: self.config.cycle_steps,
+            roll_correction_rad: action.roll_correction_rad.clamp(-0.35, 0.35),
+            pitch_correction_rad: action.pitch_correction_rad.clamp(-0.3, 0.3),
         };
         self.sim
             .step_joint_position_targets(&unitree_go2_trot_targets(self.step_in_episode, command));
@@ -215,6 +245,7 @@ fn settle(sim: &mut UrdfSceneSim, cycle_steps: u64) {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
             cycle_steps,
+            ..UnitreeGo2GaitCommand::default()
         },
     );
     for _ in 0..SETTLE_STEPS {
@@ -248,5 +279,112 @@ mod tests {
         assert!(!last.terminated);
         assert!(total_reward > 0.0);
         assert!(last.observation.gait_phase > 0.0);
+    }
+
+    /// Outcome of one pushed trot run.
+    struct PushOutcome {
+        fell: bool,
+        max_tilt_rad: f64,
+        steps_survived: u64,
+    }
+
+    fn run_pushed_trot(
+        push_velocity_m_s: [f64; 3],
+        controller: impl Fn(&UnitreeGo2Observation) -> UnitreeGo2Action,
+    ) -> PushOutcome {
+        let config = UnitreeGo2EpisodeConfig {
+            max_steps: 420,
+            push: Some(UnitreeGo2Push {
+                step: 180,
+                velocity_m_s: push_velocity_m_s,
+            }),
+            ..Default::default()
+        };
+        let mut episode = UnitreeGo2Episode::new(config).expect("pushed Go2 episode");
+        let mut observation = episode.reset().observation;
+        let mut max_tilt_rad = 0.0_f64;
+        let mut steps_survived = 0;
+        loop {
+            let step = episode.step(controller(&observation));
+            observation = step.observation;
+            max_tilt_rad = max_tilt_rad.max(
+                observation
+                    .base_relative_pitch_rad
+                    .hypot(observation.base_relative_roll_rad),
+            );
+            steps_survived += 1;
+            if step.terminated {
+                return PushOutcome {
+                    fell: true,
+                    max_tilt_rad,
+                    steps_survived,
+                };
+            }
+            if step.truncated {
+                return PushOutcome {
+                    fell: false,
+                    max_tilt_rad,
+                    steps_survived,
+                };
+            }
+        }
+    }
+
+    fn open_loop(_: &UnitreeGo2Observation) -> UnitreeGo2Action {
+        UnitreeGo2Action::default()
+    }
+
+    /// Proportional-derivative posture feedback from the measured base attitude.
+    fn posture_feedback_with(
+        roll_gain: f64,
+    ) -> impl Fn(&UnitreeGo2Observation) -> UnitreeGo2Action {
+        move |observation| {
+            let roll = observation.base_relative_roll_rad;
+            let roll_rate = observation.base_angular_velocity_rad_s[0];
+            UnitreeGo2Action {
+                roll_correction_rad: roll_gain * (roll + 0.1 * roll_rate),
+                ..UnitreeGo2Action::default()
+            }
+        }
+    }
+
+    #[test]
+    fn push_probe_direct() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        let before = sim.observe();
+        let landed = sim.add_named_body_velocity_m_s("base", [0.0, 0.0, 1.5]);
+        let after = sim.observe();
+        println!(
+            "landed={landed} vz_before={:.3} vz_after={:.3}",
+            before.base_linear_velocity_z_m_s, after.base_linear_velocity_z_m_s
+        );
+        assert!(landed, "the Go2 base link must accept a velocity impulse");
+        assert!(
+            (after.base_linear_velocity_z_m_s - before.base_linear_velocity_z_m_s - 1.5).abs()
+                < 1e-9,
+            "observed base velocity must include the impulse"
+        );
+    }
+
+    #[test]
+    fn push_tuning_probe() {
+        for push in [2.0, 3.0, 4.0] {
+            let open = run_pushed_trot([0.0, 0.0, push], open_loop);
+            let positive = run_pushed_trot([0.0, 0.0, push], posture_feedback_with(1.2));
+            let negative = run_pushed_trot([0.0, 0.0, push], posture_feedback_with(-1.2));
+            println!(
+                "push={push:.1}: open fell={} tilt={:.2} steps={} | +g fell={} tilt={:.2} steps={} | -g fell={} tilt={:.2} steps={}",
+                open.fell,
+                open.max_tilt_rad,
+                open.steps_survived,
+                positive.fell,
+                positive.max_tilt_rad,
+                positive.steps_survived,
+                negative.fell,
+                negative.max_tilt_rad,
+                negative.steps_survived,
+            );
+        }
     }
 }

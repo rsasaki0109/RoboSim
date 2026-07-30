@@ -574,6 +574,27 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Adds a velocity impulse to a named dynamic rigid body.
+    ///
+    /// This is the deterministic disturbance primitive: a lateral shove, a bump, or a
+    /// gust is a step change in velocity applied at an explicit simulation step, and
+    /// the physics backend picks it up on the next synchronization. Returns false when
+    /// the delta is non-finite or the named entity is not a rigid body.
+    pub fn add_named_body_velocity_m_s(&mut self, name: &str, delta_m_s: [f64; 3]) -> bool {
+        if delta_m_s.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        let Some(mut body) = self.world.get_mut::<RigidBody>(entity) else {
+            return false;
+        };
+        body.linear_velocity_m_s +=
+            rne_math::Vec3::new(delta_m_s[0], delta_m_s[1], delta_m_s[2]);
+        true
+    }
+
     /// Switches a named rigid body between kinematic following and dynamic simulation.
     ///
     /// Velocities are cleared on every transition so releasing a pose-followed
@@ -1546,6 +1567,7 @@ mod tests {
                 stride_rad: 0.0,
                 foot_lift_rad: 0.0,
                 cycle_steps: 90,
+                ..UnitreeGo2GaitCommand::default()
             },
         );
         for _ in 0..120 {

@@ -67,6 +67,38 @@ impl RapierBackend {
         self.worlds.get_mut(&id).ok_or(PhysicsError::WorldNotFound)
     }
 
+    /// Applies a velocity-equivalent impulse to an entity's rigid body.
+    ///
+    /// Multibody link velocities are derived from the articulation's generalized joint
+    /// velocities, so writing a link's linear velocity directly is overwritten by the
+    /// next solve. An impulse of `mass * delta_v` instead enters the solver as an
+    /// external force, which shoves plain dynamic bodies and multibody links alike —
+    /// the deterministic disturbance primitive. Returns false when the entity has no
+    /// body in this world or the delta is non-finite.
+    pub fn apply_velocity_impulse(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+        delta_v_m_s: Vec3,
+    ) -> bool {
+        if !delta_v_m_s.x.is_finite() || !delta_v_m_s.y.is_finite() || !delta_v_m_s.z.is_finite()
+        {
+            return false;
+        }
+        let Ok(state) = self.world_mut(physics_world) else {
+            return false;
+        };
+        let Some(body_handle) = state.entity_to_body.get(&entity).copied() else {
+            return false;
+        };
+        let Some(body) = state.bodies.get_mut(body_handle) else {
+            return false;
+        };
+        let impulse = vec3_to_rapier(delta_v_m_s) * body.mass();
+        body.apply_impulse(impulse, true);
+        true
+    }
+
     fn world(&self, id: PhysicsWorldId) -> Result<&RapierWorldState, PhysicsError> {
         self.worlds.get(&id).ok_or(PhysicsError::WorldNotFound)
     }
