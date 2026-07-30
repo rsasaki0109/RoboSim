@@ -26,7 +26,8 @@ use rne_robot::{
     DiffDriveSpawned, Link,
 };
 use rne_sensor::{
-    sample_sensors, ImuSpec, LidarSpec, Sensor, SensorKind, SensorSampleContext, SensorState,
+    sample_sensors, ImuSpec, ImuState, LidarSpec, Sensor, SensorKind, SensorSampleContext,
+    SensorState,
 };
 use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldRandomSnapshot};
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,8 @@ use std::any::type_name;
 use std::path::{Path, PathBuf};
 
 const IMU_STREAM_BASE: u32 = 100;
-const DIFF_DRIVE_SIM_SNAPSHOT_VERSION: u32 = 1;
+/// Bumped to 2 when the IMU error-model state joined the payload.
+const DIFF_DRIVE_SIM_SNAPSHOT_VERSION: u32 = 2;
 
 /// Error restoring or creating a differential-drive simulation snapshot.
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +87,19 @@ pub struct DiffDriveRigidBodySnapshot {
     pub linear_velocity_m_s: Vec3,
     /// Angular velocity in radians per second.
     pub angular_velocity_rad_s: Vec3,
+}
+
+/// IMU error-model state snapshot for one entity.
+///
+/// The IMU carries time-correlated bias processes and the previous body velocity, so a
+/// restored simulation must resume them or its measurements diverge from the original
+/// run.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiffDriveImuStateSnapshot {
+    /// Entity index in the simulation world.
+    pub entity_index: u32,
+    /// IMU error-model state component value.
+    pub state: ImuState,
 }
 
 /// Actuator runtime state snapshot for one entity.
@@ -194,6 +209,8 @@ pub struct DiffDriveSimSnapshot {
     pub joint_motors: Vec<DiffDriveJointMotorSnapshot>,
     /// Sensor runtime sequence state.
     pub sensor_states: Vec<DiffDriveSensorStateSnapshot>,
+    /// IMU error-model state.
+    pub imu_states: Vec<DiffDriveImuStateSnapshot>,
     /// Latest IMU frames by stream.
     pub imu_frames: Vec<DiffDriveFrameSnapshot<ImuSample>>,
     /// Latest LiDAR frames by stream.
@@ -382,6 +399,7 @@ impl DiffDriveSim {
             actuators: Vec::new(),
             joint_motors: Vec::new(),
             sensor_states: Vec::new(),
+            imu_states: Vec::new(),
             imu_frames: Vec::new(),
             lidar_frames: Vec::new(),
             wheel_encoder_frames: Vec::new(),
@@ -413,6 +431,12 @@ impl DiffDriveSim {
                 snapshot.joint_motors.push(DiffDriveJointMotorSnapshot {
                     entity_index,
                     motor: *motor,
+                });
+            }
+            if let Some(state) = self.world.get::<ImuState>(entity) {
+                snapshot.imu_states.push(DiffDriveImuStateSnapshot {
+                    entity_index,
+                    state: *state,
                 });
             }
             if let Some(state) = self.world.get::<SensorState>(entity) {
@@ -494,6 +518,21 @@ impl DiffDriveSim {
             state.last_sequence = item.last_sequence;
             state.last_sample_ticks = item.last_sample_ticks;
             state.frame_count = item.frame_count;
+        }
+        for item in &snapshot.imu_states {
+            // The IMU error state is inserted lazily on the first sample, so a restore
+            // into a world that has not sampled yet must add it rather than expect it.
+            let entity = Entity::from_raw(item.entity_index);
+            if !self
+                .world
+                .iter_entities()
+                .any(|entity_ref| entity_ref.id() == entity)
+            {
+                return Err(DiffDriveSimSnapshotError::MissingEntity {
+                    entity_index: item.entity_index,
+                });
+            }
+            self.world.entity_mut(entity).insert(item.state);
         }
 
         self.sim_time = SimTime::from_ticks(snapshot.sim_ticks);

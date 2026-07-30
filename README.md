@@ -117,6 +117,39 @@ randomization, payload attributes, and Sanjo acceptance hash are documented in
 and noise equations, rolling-shutter contract, and its Sanjo settings are
 documented in [physics-aware camera](docs/CAMERA_SIMULATION.md).
 
+## Physics-aware IMU
+
+A gyroscope reports body-frame angular rate and an accelerometer reports **specific
+force**, so a device at rest reads `+9.81 m/s²` along its up axis rather than zero.
+On top of that truth, RNE models the error terms an Allan-variance datasheet
+describes: angle and velocity random walk, bias instability as a first-order
+Gauss-Markov process, rate random walk, turn-on bias, scale factor, axis
+misalignment, saturation, and quantization. Every draw is seeded from
+`WorldRandom`, so a replayed run drifts identically.
+
+Example 48 makes that concrete. A vehicle drives a 20 m arc at 8 m/s for twelve
+seconds while its IMU is integrated with a textbook strapdown update and nothing
+corrects the result — the gap that opens up is exactly what the sensor model
+produces.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/imu-dead-reckoning.png">
+    <img src="docs/media/imu-dead-reckoning.gif" alt="Unaided IMU dead reckoning drifting away from ground truth along a circular track" width="960">
+  </picture>
+  <br>
+  <sub>Green is ground truth, orange is the unaided inertial estimate, and the red link is the live position error. Over 96.0 m the modeled consumer-grade MEMS IMU drifts <code>5.54 m</code> (5.8 % of distance) while an ideal <code>ImuSpec::default()</code> integrates back to within <code>0.160 m</code> — that 0.17 % bounds how much of the run is numerical rather than physical.</sub>
+</p>
+
+```bash
+cargo run --release -p imu_dead_reckoning --example 48_imu_dead_reckoning
+RNE_SKIP_GPU=1 cargo run -p imu_dead_reckoning --example 48_imu_dead_reckoning
+```
+
+The measurement equations, Allan-variance term table, determinism scheme, and
+acceptance numbers are documented in
+[physics-aware IMU](docs/IMU_SIMULATION.md).
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation

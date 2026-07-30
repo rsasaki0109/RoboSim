@@ -4,6 +4,7 @@ use crate::{CameraSpec, ImuSpec, LidarSpec, WheelEncoderSpec};
 use bevy_ecs::prelude::Component;
 use rne_core::SimDuration;
 use rne_data::StreamId;
+use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
 
 /// Non-visual optical properties used by physics-aware LiDAR sampling.
@@ -134,6 +135,31 @@ impl Sensor {
     pub fn latency(&self) -> SimDuration {
         SimDuration::from_ticks(self.latency_ticks)
     }
+}
+
+/// Evolving IMU error state carried between samples.
+///
+/// Bias instability and rate random walk are time-correlated processes, so they cannot
+/// be derived from a sample index alone. This component holds them on the sensor entity,
+/// together with the previous body velocity needed to derive proper acceleration.
+/// Replaying the same sample sequence reproduces the same drift.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ImuState {
+    /// Gyroscope Gauss-Markov bias in radians per second.
+    pub gyro_bias_rad_s: Vec3,
+    /// Accelerometer Gauss-Markov bias in meters per second squared.
+    pub accel_bias_m_s2: Vec3,
+    /// Accumulated gyroscope rate random walk in radians per second.
+    pub gyro_rate_walk_rad_s: Vec3,
+    /// Accumulated accelerometer rate random walk in meters per second squared.
+    pub accel_rate_walk_m_s2: Vec3,
+    /// World-frame linear velocity at the previous sample, in meters per second.
+    pub previous_linear_velocity_m_s: Vec3,
+    /// Simulation ticks of the previous sample.
+    pub previous_sample_ticks: u64,
+    /// Whether a previous sample has been taken.
+    pub initialized: bool,
 }
 
 /// Runtime sensor sampling state.

@@ -67,6 +67,7 @@ members = [
   "examples/45_unitree_g1_cloth_handling",
   "examples/46_plateau_drone_gif",
   "examples/47_traffic_city_replay",
+  "examples/48_imu_dead_reckoning",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
