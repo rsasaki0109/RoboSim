@@ -83,7 +83,7 @@ legend.
     <img src="docs/media/plateau-lidar.gif" alt="Physics-aware LiDAR returns from a moving vehicle in official PLATEAU Sanjo traffic" width="960">
   </picture>
   <br>
-  <sub>Real 12-second/144-frame wgpu capture of 285,666 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,339 later returns, 488 saturated retroreflective returns; stable scan hash <code>11611048955455473063</code>) plus a vehicle-mounted RGB-D camera with lens distortion, rolling shutter, auto exposure and sensor noise (stable hash <code>6959649481969108202</code>), while 100 deterministic vehicles share the official Sanjo scene.</sub>
+  <sub>Real 12-second/144-frame wgpu capture of 285,718 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,375 later returns, 514 saturated retroreflective returns; stable scan hash <code>1015973553409876591</code>) plus a vehicle-mounted RGB-D camera with lens distortion, rolling shutter, auto exposure and sensor noise (stable hash <code>10455576295794772416</code>). The sensors ride a dynamic-bicycle chassis chasing its kinematic traffic ghost (max deviation 0.19 m), while the other 99 deterministic vehicles keep the untouched traffic contract.</sub>
 </p>
 
 ```bash

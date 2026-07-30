@@ -20,9 +20,8 @@ use rne_render::{
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 #[cfg(test)]
-use rne_robot::{
-    ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
-};
+use rne_robot::{ackermann_kinematics, command_ackermann_drive};
+use rne_robot::{pure_pursuit_steering, vehicle_dynamics, AckermannDrive, VehicleDynamics};
 use rne_sensor::{
     sample_camera_rgbd_swept, sample_lidar_swept, CameraDistortion, CameraRgbdSample, CameraSpec,
     CameraSweep, LidarAtmosphere, LidarDomainRandomization, LidarMaterial, LidarSpec, LidarSweep,
@@ -702,6 +701,15 @@ fn main() {
         primary_actor_index + 1,
         city_vehicle_motion_m(&city_traffic, primary_actor_index),
     );
+    // The tracked actor's kinematic trajectory becomes a ghost that a dynamic-bicycle
+    // vehicle chases; the sensors ride the dynamic chassis, the other 99 actors and
+    // every traffic KPI stay on the untouched traffic contract.
+    let dynamic_primary = apply_dynamic_primary(&city_traffic, primary_actor_index);
+    println!(
+        "dynamic primary ready: max_ghost_deviation_m={:.2} saturated_steps={}",
+        dynamic_primary.maximum_deviation_m, dynamic_primary.saturated_steps,
+    );
+    let city_traffic = dynamic_primary.frames;
     let lidar_started = Instant::now();
     let lidar_capture =
         capture_city_lidar_frames(&mut world, &city_traffic, primary_actor_index, false);
@@ -1500,6 +1508,144 @@ fn simulate_city_fleet_frames(
         }
     }
     frames
+}
+
+/// Result of replacing the tracked actor's motion with the dynamic bicycle model.
+#[derive(Clone, Debug, PartialEq)]
+struct DynamicPrimaryResult {
+    /// Traffic frames with the primary actor's row rewritten per frame.
+    frames: Vec<Vec<VehicleFrame>>,
+    /// Largest distance between the dynamic vehicle and its kinematic ghost, meters.
+    maximum_deviation_m: f64,
+    /// Simulation steps during which either axle was friction saturated.
+    saturated_steps: usize,
+}
+
+/// Time the dynamic primary looks ahead along its ghost's trajectory, seconds.
+const DYNAMIC_PRIMARY_LOOKAHEAD_S: f64 = 0.6;
+/// Upper bound on how far the dynamic primary may stray from its ghost, meters.
+const DYNAMIC_PRIMARY_DEVIATION_LIMIT_M: f64 = 2.0;
+
+/// Re-drives the tracked actor with the planar dynamic bicycle model.
+///
+/// The deterministic traffic contract — routes, signals, reservations, and the other
+/// 99 actors — is untouched: `rne_traffic` stays free of physics backends, and the
+/// swap happens here in the example layer. The tracked actor's kinematic trajectory
+/// becomes a *ghost* that a [`VehicleDynamics`] vehicle chases with pure pursuit, so
+/// its pose gains tire slip, understeer in tight turns, and steering-actuator sway.
+/// The LiDAR and camera then ride a chassis that answers through forces, not the
+/// ghost that ignores them.
+fn apply_dynamic_primary(
+    traffic_frames: &[Vec<VehicleFrame>],
+    primary_actor_index: usize,
+) -> DynamicPrimaryResult {
+    let ghost: Vec<VehicleFrame> = traffic_frames
+        .iter()
+        .map(|vehicles| vehicles[primary_actor_index])
+        .collect();
+    assert!(!ghost.is_empty(), "traffic frames are empty");
+
+    // Interpolated ghost pose at an arbitrary time, clamped to the capture window.
+    let frame_dt_s = 1.0 / RENDER_HZ as f64;
+    let ghost_position = |time_s: f64| -> Vec3 {
+        let exact = (time_s / frame_dt_s).max(0.0);
+        let index = (exact.floor() as usize).min(ghost.len() - 1);
+        let next = (index + 1).min(ghost.len() - 1);
+        let t = (exact - index as f64).clamp(0.0, 1.0);
+        ghost[index]
+            .transform
+            .translation
+            .lerp(ghost[next].transform.translation, t)
+    };
+
+    let mut world = World::new();
+    let vehicle = spawn_named(&mut world, "dynamic_primary");
+    world.entity_mut(vehicle).insert((
+        AckermannDrive {
+            wheelbase_m: VehicleDynamics::default().wheelbase_m(),
+            max_speed_m_s: 20.0,
+            max_steering_rad: 0.6,
+            max_acceleration_m_s2: 3.0,
+            max_deceleration_m_s2: 6.0,
+            max_steering_rate_rad_s: 4.0,
+            speed_m_s: ghost[0].speed_m_s,
+            target_speed_m_s: ghost[0].speed_m_s,
+            ..AckermannDrive::default()
+        },
+        VehicleDynamics {
+            // A short steering-actuator lag keeps the chase visibly physical.
+            steering_lag_s: 0.08,
+            ..VehicleDynamics::default()
+        },
+        ghost[0].transform,
+        RigidBody::default(),
+    ));
+
+    let dt = SimDuration::from_hertz(Hertz::new(SIM_HZ as f64));
+    let dt_s = dt.as_seconds().value();
+    let mut frames = traffic_frames.to_vec();
+    let mut maximum_deviation_m = 0.0_f64;
+    let mut saturated_steps = 0_usize;
+    let mut wheel_rotation_rad = ghost[0].wheel_rotation_rad;
+
+    for (frame_index, vehicles) in frames.iter_mut().enumerate() {
+        for step in 0..SIM_STEPS_PER_FRAME {
+            let time_s = frame_index as f64 * frame_dt_s + step as f64 * dt_s;
+            let ghost_frame = &ghost[frame_index];
+            let transform = *world.get::<Transform3>(vehicle).expect("primary transform");
+
+            // Chase the ghost's future position; match the ghost's commanded speed so
+            // signal stops and car-following gaps carry over from the traffic layer.
+            let target = ghost_position(time_s + DYNAMIC_PRIMARY_LOOKAHEAD_S);
+            let steering = pure_pursuit_steering(
+                &transform,
+                target,
+                VehicleDynamics::default().wheelbase_m(),
+                (target - transform.translation).length().max(1.0),
+            );
+            {
+                let mut drive = world.get_mut::<AckermannDrive>(vehicle).expect("drive");
+                drive.target_steering_rad =
+                    steering.clamp(-drive.max_steering_rad, drive.max_steering_rad);
+                drive.target_speed_m_s = ghost_frame.speed_m_s;
+            }
+            vehicle_dynamics(&mut world, dt);
+
+            let dynamics = world
+                .get::<VehicleDynamics>(vehicle)
+                .expect("primary dynamics");
+            if dynamics.front_saturated || dynamics.rear_saturated {
+                saturated_steps += 1;
+            }
+        }
+
+        let transform = *world.get::<Transform3>(vehicle).expect("primary transform");
+        let drive = world.get::<AckermannDrive>(vehicle).expect("drive").clone();
+        let ghost_frame = ghost[frame_index];
+        maximum_deviation_m = maximum_deviation_m
+            .max((transform.translation - ghost_frame.transform.translation).length());
+        wheel_rotation_rad += drive.speed_m_s * frame_dt_s / 0.36;
+
+        vehicles[primary_actor_index] = VehicleFrame {
+            transform,
+            speed_m_s: drive.speed_m_s,
+            steering_rad: drive.steering_rad,
+            wheel_rotation_rad,
+            braking: ghost_frame.braking,
+            class: ghost_frame.class,
+        };
+    }
+
+    assert!(
+        maximum_deviation_m < DYNAMIC_PRIMARY_DEVIATION_LIMIT_M,
+        "dynamic primary strayed {maximum_deviation_m:.2} m from its ghost"
+    );
+
+    DynamicPrimaryResult {
+        frames,
+        maximum_deviation_m,
+        saturated_steps,
+    }
 }
 
 fn capture_city_lidar_frames(
@@ -3595,6 +3741,25 @@ mod tests {
                     .then_with(|| right.cmp(left))
             })
             .expect("official Sanjo LiDAR camera actor");
+        // The capture rides the dynamic-bicycle primary, exactly as the full run does.
+        let dynamic_primary = apply_dynamic_primary(&lidar_traffic, lidar_actor_index);
+        assert_eq!(
+            dynamic_primary,
+            apply_dynamic_primary(&lidar_traffic, lidar_actor_index),
+            "dynamic primary must be deterministic"
+        );
+        assert!(dynamic_primary.maximum_deviation_m < DYNAMIC_PRIMARY_DEVIATION_LIMIT_M);
+        // The swap touches exactly one actor; the other 99 rows are bit-identical.
+        for (dynamic_vehicles, ghost_vehicles) in dynamic_primary.frames.iter().zip(&lidar_traffic)
+        {
+            for (index, (dynamic, ghost)) in dynamic_vehicles.iter().zip(ghost_vehicles).enumerate()
+            {
+                if index != lidar_actor_index {
+                    assert_eq!(dynamic, ghost);
+                }
+            }
+        }
+        let lidar_traffic = dynamic_primary.frames;
         let mut lidar_building_bundle =
             load_scene_bundle(&buildings.scene_path).expect("load LiDAR building bundle");
         flatten_buildings_to_road_datum(&mut lidar_building_bundle);
@@ -3643,7 +3808,7 @@ mod tests {
             true,
         );
         assert_eq!(forward_lidar.stable_hash, reverse_lidar.stable_hash);
-        assert_eq!(forward_lidar.stable_hash, 16_655_478_738_827_555_718);
+        assert_eq!(forward_lidar.stable_hash, 7_688_105_174_862_316_538);
         assert_eq!(forward_lidar.total_returns, reverse_lidar.total_returns);
         assert_eq!(forward_lidar.multi_returns, reverse_lidar.multi_returns);
         assert_eq!(

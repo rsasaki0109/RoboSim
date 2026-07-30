@@ -141,7 +141,7 @@ produces the color and depth insets composited into `docs/media/plateau-lidar.gi
 those insets show real sensor output rather than a clean render.
 
 The committed 144-frame headless capture reports a nearest observed depth of `12.53 m`,
-a mean center depth of `43.47 m`, and stable hash `6959649481969108202`.
+a mean center depth of `43.60 m`, and stable hash `10455576295794772416`.
 
 ## Known simplification
 
