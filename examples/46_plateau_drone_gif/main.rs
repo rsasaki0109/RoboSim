@@ -24,8 +24,9 @@ use rne_robot::{
     ackermann_kinematics, command_ackermann_drive, pure_pursuit_steering, AckermannDrive,
 };
 use rne_sensor::{
-    sample_camera_rgbd, sample_lidar_swept, CameraRgbdSample, CameraSpec, LidarAtmosphere,
-    LidarDomainRandomization, LidarMaterial, LidarSpec, LidarSweep, SensorNoiseKey,
+    sample_camera_rgbd_swept, sample_lidar_swept, CameraDistortion, CameraRgbdSample, CameraSpec,
+    CameraSweep, LidarAtmosphere, LidarDomainRandomization, LidarMaterial, LidarSpec, LidarSweep,
+    SensorNoiseKey,
 };
 #[cfg(test)]
 use rne_traffic::advance_kinematic_traffic;
@@ -87,7 +88,12 @@ const CAMERA_FOV_Y_RAD: f64 = 0.715_584_993_317_675_1;
 /// Slight downward tilt so the camera frames the road ahead.
 const CAMERA_PITCH_RAD: f64 = -0.045;
 const CAMERA_STREAM_ID: u64 = 46_906;
-const CAMERA_CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
+/// Root world seed shared by the deterministic sensor captures.
+const CITY_WORLD_SEED: u64 = 46;
+/// Sensor readout time; the car covers real ground while the rows are scanned out.
+const CAMERA_READOUT_TIME_S: f64 = 0.02;
+/// Bands rendered per frame to approximate continuous row-by-row readout.
+const CAMERA_ROLLING_SHUTTER_BANDS: u16 = 8;
 /// Inset margin and border thickness in pixels.
 const CAMERA_INSET_MARGIN_PX: u32 = 24;
 const CAMERA_INSET_BORDER_PX: u32 = 2;
@@ -783,6 +789,8 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create PLATEAU LiDAR frames");
     fs::create_dir_all(&media_dir).expect("create media directory");
     let onboard_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FOV_Y_RAD);
+    let camera_spec = city_camera_spec();
+    let mut previous_camera_pose: Option<Transform3> = None;
     for (frame, vehicles) in city_traffic.iter().take(render_frame_count).enumerate() {
         let primary = vehicles[primary_actor_index];
         let mut scene = city_scene.clone();
@@ -800,20 +808,18 @@ fn main() {
             debug_overlay == TrafficDebugOverlay::default(),
         );
         // The onboard camera sees the world, not the LiDAR debug overlay, so it is
-        // rendered from the scene before the point cloud markers are appended.
-        let onboard_view = vehicle_camera_transform(primary);
-        let onboard = backend
-            .render_scene_camera(
-                &onboard_camera,
-                &MathTransform3 {
-                    translation: onboard_view.translation,
-                    rotation: onboard_view.rotation,
-                    scale: onboard_view.scale,
-                },
-                &scene,
-                CAMERA_CLEAR_COLOR,
-            )
-            .expect("render onboard camera frame");
+        // sampled from the scene before the point cloud markers are appended. Routing it
+        // through the sensor model means the inset shows the real lens distortion,
+        // rolling shutter, exposure, noise and vignetting, not a clean render.
+        let onboard = sample_camera_rgbd_swept(
+            &mut backend,
+            &city_camera_sweep(previous_camera_pose, primary),
+            &camera_spec,
+            SimTime::from_ticks(frame as u64),
+            &scene,
+            city_camera_noise_key(frame),
+        );
+        previous_camera_pose = Some(vehicle_camera_transform(primary));
 
         append_lidar_intensity_overlay(&mut scene, &lidar_capture.frames[frame]);
         let car_camera = follow_camera(primary);
@@ -828,10 +834,16 @@ fn main() {
             camera.far_m as f32,
         );
         blit_camera_insets(
-            &mut presented,
-            output.color.width,
-            output.color.height,
-            &onboard.color,
+            &mut FrameBuffer {
+                pixels: &mut presented,
+                width: output.color.width,
+                height: output.color.height,
+            },
+            InsetImage {
+                pixels: &onboard.rgb.rgba8,
+                width: onboard.rgb.width,
+                height: onboard.rgb.height,
+            },
             &onboard.depth.depth_m,
             onboard_camera.far_m as f32,
         );
@@ -1726,7 +1738,42 @@ fn city_camera_spec() -> CameraSpec {
         height: CAMERA_HEIGHT,
         fov_y_rad: CAMERA_FOV_Y_RAD,
         seed: CAMERA_STREAM_ID,
+        // Mild barrel distortion typical of a wide automotive lens.
+        distortion: CameraDistortion {
+            k1: -0.26,
+            k2: 0.07,
+            ..CameraDistortion::default()
+        },
+        // A CMOS sensor reads the frame out in roughly 20 ms while the car drives.
+        readout_time_s: CAMERA_READOUT_TIME_S,
+        rolling_shutter_bands: CAMERA_ROLLING_SHUTTER_BANDS,
+        auto_exposure_target_luminance: 0.42,
+        auto_exposure_max_ev: 2.0,
+        shot_noise_scale: 0.0006,
+        read_noise_stddev: 0.003,
+        vignette_strength: 0.35,
+        ..CameraSpec::default()
     }
+}
+
+/// Returns the readout sweep for one frame of the onboard camera.
+///
+/// The sensor scans its rows out while the car drives, so the sweep runs from the pose
+/// at the previous frame to the pose now. The first frame has no predecessor and is
+/// captured as a global shutter.
+fn city_camera_sweep(previous_pose: Option<Transform3>, primary: VehicleFrame) -> CameraSweep {
+    let pose = vehicle_camera_transform(primary);
+    CameraSweep::new(previous_pose.unwrap_or(pose), pose)
+}
+
+/// Returns the deterministic noise key for the onboard camera at `frame_index`.
+fn city_camera_noise_key(frame_index: usize) -> SensorNoiseKey {
+    SensorNoiseKey::new(
+        CITY_WORLD_SEED,
+        CAMERA_STREAM_ID,
+        CAMERA_STREAM_ID,
+        frame_index as u64 + 1,
+    )
 }
 
 /// Returns the pose of the forward camera mounted behind the windshield.
@@ -1767,6 +1814,7 @@ fn capture_city_camera_frames(
     let mut pixels_per_frame = 0_usize;
     let mut nearest_depth_m = f32::INFINITY;
     let mut center_depth_sum = 0.0_f64;
+    let mut previous_pose: Option<Transform3> = None;
 
     for (frame_index, vehicles) in traffic_frames.iter().enumerate() {
         let primary = vehicles[primary_actor_index];
@@ -1778,13 +1826,15 @@ fn capture_city_camera_frames(
             primary_actor_index,
             false,
         );
-        let sample = sample_camera_rgbd(
+        let sample = sample_camera_rgbd_swept(
             &mut render,
-            &vehicle_camera_transform(primary),
+            &city_camera_sweep(previous_pose, primary),
             &spec,
             SimTime::from_ticks(frame_index as u64),
             &scene,
+            city_camera_noise_key(frame_index),
         );
+        previous_pose = Some(vehicle_camera_transform(primary));
 
         pixels_per_frame = sample.depth.depth_m.len();
         let center_depth_m = sample.depth.center_depth_m();
@@ -3385,25 +3435,18 @@ fn blit_inset(frame: &mut FrameBuffer<'_>, inset: InsetImage<'_>, origin: (u32, 
 
 /// Draws the onboard RGB and depth camera views into the bottom-left of a frame.
 fn blit_camera_insets(
-    frame: &mut [u8],
-    frame_width: u32,
-    frame_height: u32,
-    color: &ImageFrame,
+    target: &mut FrameBuffer<'_>,
+    color: InsetImage<'_>,
     depth_m: &[f32],
     far_m: f32,
 ) {
     let margin = CAMERA_INSET_MARGIN_PX;
-    let inset_top = frame_height.saturating_sub(margin + color.height);
-    let mut target = FrameBuffer {
-        pixels: frame,
-        width: frame_width,
-        height: frame_height,
-    };
+    let inset_top = target.height.saturating_sub(margin + color.height);
 
     blit_inset(
-        &mut target,
+        target,
         InsetImage {
-            pixels: &color.rgba8,
+            pixels: color.pixels,
             width: color.width,
             height: color.height,
         },
@@ -3412,7 +3455,7 @@ fn blit_camera_insets(
 
     let depth_rgba = depth_ramp_rgba(depth_m, far_m);
     blit_inset(
-        &mut target,
+        target,
         InsetImage {
             pixels: &depth_rgba,
             width: color.width,
@@ -3967,20 +4010,22 @@ mod tests {
         let frame_width = 1_280_u32;
         let frame_height = 720_u32;
         let mut frame = vec![0_u8; (frame_width * frame_height * 4) as usize];
-        let color = ImageFrame {
-            width: CAMERA_WIDTH,
-            height: CAMERA_HEIGHT,
-            rgba8: (0..CAMERA_WIDTH * CAMERA_HEIGHT)
-                .flat_map(|_| [9_u8, 9, 9, 255])
-                .collect(),
-        };
+        let color_rgba8 = (0..CAMERA_WIDTH * CAMERA_HEIGHT)
+            .flat_map(|_| [9_u8, 9, 9, 255])
+            .collect::<Vec<_>>();
         let depth_m = vec![25.0_f32; (CAMERA_WIDTH * CAMERA_HEIGHT) as usize];
 
         blit_camera_insets(
-            &mut frame,
-            frame_width,
-            frame_height,
-            &color,
+            &mut FrameBuffer {
+                pixels: &mut frame,
+                width: frame_width,
+                height: frame_height,
+            },
+            InsetImage {
+                pixels: &color_rgba8,
+                width: CAMERA_WIDTH,
+                height: CAMERA_HEIGHT,
+            },
             &depth_m,
             80.0,
         );

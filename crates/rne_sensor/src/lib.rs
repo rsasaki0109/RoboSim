@@ -10,7 +10,10 @@ pub mod noise;
 pub mod systems;
 pub mod wheel_encoder;
 
-pub use camera::{sample_camera, sample_camera_rgbd, CameraRgbdSample, CameraSpec};
+pub use camera::{
+    sample_camera, sample_camera_rgbd, sample_camera_rgbd_keyed, sample_camera_rgbd_swept,
+    CameraDistortion, CameraRgbdSample, CameraSpec, CameraSweep,
+};
 pub use components::{LidarMaterial, Sensor, SensorKind, SensorState};
 pub use imu::{sample_imu, sample_imu_keyed, ImuSpec};
 pub use lidar::{

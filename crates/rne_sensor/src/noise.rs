@@ -75,6 +75,20 @@ impl NoiseModel {
     }
 }
 
+/// Draws two independent standard normals from one Box-Muller pair.
+///
+/// Consumes slots `slot` and `slot + 1`, so callers must allocate slots in pairs and
+/// keep every logical draw in a disjoint slot to stay deterministic.
+pub(crate) fn gaussian_pair(random: &KeyedRandom, key: SensorNoiseKey, slot: u64) -> (f64, f64) {
+    let u1 = random
+        .sample_unit_f64(key.stable_sensor_id, key.sample_index, slot)
+        .max(f64::MIN_POSITIVE);
+    let u2 = random.sample_unit_f64(key.stable_sensor_id, key.sample_index, slot + 1);
+    let magnitude = (-2.0 * u1.ln()).sqrt();
+    let angle = std::f64::consts::TAU * u2;
+    (magnitude * angle.cos(), magnitude * angle.sin())
+}
+
 fn keyed_unit(key: SensorNoiseKey) -> Vec3 {
     let random = KeyedRandom::new(key.root_seed, IMU_NOISE_DOMAIN_V1 ^ mix64(key.sensor_seed));
     Vec3::new(
