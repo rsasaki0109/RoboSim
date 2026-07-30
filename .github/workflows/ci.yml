@@ -24,16 +24,25 @@ jobs:
       - name: Format, boundaries, clippy
         run: cargo run -p xtask -- ci-lint
 
+  # The episode suites in rne_ai dominate pure test runtime, and caching cannot
+  # shorten execution — so the tests themselves are sharded across parallel jobs
+  # with nextest's deterministic hash partitioning. Asset validation runs on the
+  # first shard only.
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
-      - name: Workspace tests and asset validation
-        run: cargo run -p xtask -- ci-test
+      - name: Workspace tests (shard ${{ matrix.partition }}/3) and asset validation
+        run: cargo run -p xtask -- ci-test ${{ matrix.partition }}/3
 
   smoke:
     runs-on: ubuntu-latest
