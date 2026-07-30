@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub trait FramePayload: Clone + Send + Sync + 'static {}
 
 impl FramePayload for crate::payloads::ImuSample {}
+impl FramePayload for crate::payloads::PoseSample {}
 impl FramePayload for crate::payloads::PointCloud {}
 impl FramePayload for crate::payloads::WheelEncoderSample {}
 impl FramePayload for crate::payloads::JointState {}

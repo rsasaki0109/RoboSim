@@ -2,6 +2,7 @@
 
 use crate::frame::{Frame, FramePayload};
 use crate::StreamId;
+use rne_core::SimTime;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -38,7 +39,19 @@ pub trait DataBus {
     fn publish<T: FramePayload>(&mut self, frame: Frame<T>);
 
     /// Returns the latest frame for a stream, if any.
+    ///
+    /// This ignores [`Frame::available_time`] and therefore sees data the consumer
+    /// could not physically have yet. Use it for logging and offline analysis; a
+    /// controller in the loop must use [`Self::latest_available`] instead.
     fn latest<T: FramePayload>(&self, stream: StreamId) -> Option<Frame<T>>;
+
+    /// Returns the newest frame whose [`Frame::available_time`] is at or before `now`.
+    ///
+    /// This is the read a real system performs: a sensor frame exists from its capture
+    /// instant but cannot influence a controller until transport and processing latency
+    /// have elapsed. Returns `None` when nothing has arrived yet.
+    fn latest_available<T: FramePayload>(&self, stream: StreamId, now: SimTime)
+        -> Option<Frame<T>>;
 
     /// Reads the next frame after the cursor for a stream.
     fn next<T: FramePayload>(
@@ -109,6 +122,23 @@ impl DataBus for InMemoryDataBus {
             .cloned()
     }
 
+    fn latest_available<T: FramePayload>(
+        &self,
+        stream: StreamId,
+        now: SimTime,
+    ) -> Option<Frame<T>> {
+        let stream_state = self.stream::<T>(stream).ok()?;
+        // Frames are published in order, so scan from the newest end for the first
+        // one that has arrived.
+        stream_state
+            .frames
+            .iter()
+            .rev()
+            .filter_map(|frame| frame.downcast_ref::<Frame<T>>())
+            .find(|frame| frame.available_time <= now)
+            .cloned()
+    }
+
     fn next<T: FramePayload>(
         &self,
         stream: StreamId,
@@ -169,5 +199,38 @@ mod tests {
 
         let latest = bus.latest::<ImuSample>(stream).unwrap();
         assert_eq!(latest.sim_time, time);
+    }
+
+    #[test]
+    fn latest_available_respects_frame_latency() {
+        let mut world = rne_ecs::World::new();
+        let entity = rne_ecs::spawn_named(&mut world, "source");
+        let mut bus = InMemoryDataBus::new();
+        let stream = StreamId::new(9);
+        let latency = rne_core::SimDuration::from_seconds(Seconds::new(0.1));
+        for sequence in 0..3_u64 {
+            let capture = SimTime::from_seconds(Seconds::new(sequence as f64 * 0.1));
+            bus.publish(
+                Frame::new(stream, entity, sequence, capture, ImuSample::default())
+                    .with_latency(latency),
+            );
+        }
+
+        // Before anything has arrived there is no readable frame, even though
+        // `latest` already sees one.
+        let early = SimTime::from_seconds(Seconds::new(0.05));
+        assert!(bus.latest_available::<ImuSample>(stream, early).is_none());
+        assert!(bus.latest::<ImuSample>(stream).is_some());
+
+        // At 0.25 s the frames captured at 0.0 and 0.1 have arrived; the newest
+        // arrived frame wins, not the newest published one.
+        let mid = SimTime::from_seconds(Seconds::new(0.25));
+        let frame = bus.latest_available::<ImuSample>(stream, mid).unwrap();
+        assert_eq!(frame.sequence, 1);
+
+        // Far in the future every frame has arrived.
+        let late = SimTime::from_seconds(Seconds::new(10.0));
+        let frame = bus.latest_available::<ImuSample>(stream, late).unwrap();
+        assert_eq!(frame.sequence, 2);
     }
 }
