@@ -190,7 +190,7 @@ cast from the interpolated pose of the moving host vehicle.
 The headless acceptance test captures twelve frames twice with opposite
 traffic-collider spawn order and requires:
 
-- stable hash `16655478738827555718`;
+- stable hash `17799227134853352305`;
 - identical point, multiple-return, and saturated-return counts;
 - aligned point attributes;
 - at least one transmitted later return;
@@ -204,9 +204,25 @@ multiple-return count, saturated-return count, mean intensity, scan duration,
 stable hash, traffic safety KPIs, and measured scan throughput. Its wgpu output
 uses three intensity color bands and writes `docs/media/plateau-lidar.gif` plus
 the reduced-motion `docs/media/plateau-lidar.png` poster. The committed
-144-frame capture contains 285,666 returns, including 19,339 later returns and
-488 saturated returns, with mean normalized intensity `0.097`, a per-scan
-duration of `0.0831 s`, and stable full-capture hash `11611048955455473063`.
+144-frame capture contains 546,615 returns, including 63,009 later returns and
+530 saturated returns, with mean normalized intensity `0.061`, a per-scan
+duration of `0.0831 s`, and stable full-capture hash `6321383548646989021`.
+
+The capture world adds a large ground-plane collider with a dim diffuse grass
+material under the whole tile: the imported road surfaces only cover the
+carriageway, and without ground everywhere the downward elevation channels
+return nothing over grass and sidewalks, leaving the signature concentric
+rings as a partial crescent. The atmosphere matches the rendered clear sunny
+day — trace haze and dust, no precipitation, no aerosol backscatter — so no
+returns float in visibly clear air; rain and backscatter remain covered by the
+`rne_sensor` unit tests.
+
+The mount rides a [dynamic-bicycle](VEHICLE_DYNAMICS.md) chassis rather than the
+kinematic traffic actor itself: the tracked vehicle's traffic trajectory becomes
+a ghost that a `VehicleDynamics` vehicle chases with pure pursuit and a short
+steering-actuator lag, staying within 0.19 m of it at these urban speeds. The
+swap lives in the example layer, so `rne_traffic` keeps its backend-free
+contract and the other 99 actors are bit-identical to the pure-traffic replay.
 
 ### Onboard camera
 
@@ -233,7 +249,7 @@ Capture runs twice for different purposes:
   sensors read against one legend.
 
 The committed 144-frame headless capture reports a nearest observed depth of
-`12.53 m`, a mean center depth of `43.47 m`, and stable hash
-`6959649481969108202`. The acceptance test additionally requires the capture to
+`12.53 m`, a mean center depth of `43.60 m`, and stable hash
+`10455576295794772416`. The acceptance test additionally requires the capture to
 repeat exactly, to fill every pixel of the configured resolution, and to change
 between frames as the host vehicle drives.
