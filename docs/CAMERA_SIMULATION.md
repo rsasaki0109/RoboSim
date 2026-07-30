@@ -115,6 +115,34 @@ factor = 1 - vignette_strength * (1 - cos^4(theta))
 `vignette_strength = 0` disables it; `1.0` applies the full cos^4 law. `cos(theta)` is
 derived from the pixel's tangent-space offset and the vertical field of view.
 
+## Sanjo onboard camera
+
+Example 46 mounts this model on the tracked vehicle in the official Sanjo PLATEAU
+scene, beside the 16-channel LiDAR:
+
+| parameter | value | rationale |
+| --- | --- | --- |
+| `distortion.k1` / `k2` | `-0.26` / `0.07` | mild barrel, typical of a wide automotive lens |
+| `readout_time_s` | `0.02` | a CMOS sensor reads out in roughly 20 ms |
+| `rolling_shutter_bands` | `8` | the car covers real ground during readout |
+| `auto_exposure_target_luminance` | `0.42` | normalizes the raw render, which reads bright |
+| `auto_exposure_max_ev` | `2.0` | keeps the gain from chasing a dark frame |
+| `shot_noise_scale` | `0.0006` | restrained daylight shot noise |
+| `read_noise_stddev` | `0.003` | sensor read floor |
+| `vignette_strength` | `0.35` | partial cos^4 falloff |
+
+The readout sweep runs from the camera pose at the previous frame to the pose now, so
+rolling-shutter skew tracks the actual vehicle motion. The first frame has no
+predecessor and is captured as a global shutter.
+
+Both capture paths go through the same model. The headless path uses
+`HeadlessRenderBackend` and is the GPU-free determinism signal CI checks; the wgpu path
+produces the color and depth insets composited into `docs/media/plateau-lidar.gif`, so
+those insets show real sensor output rather than a clean render.
+
+The committed 144-frame headless capture reports a nearest observed depth of `12.53 m`,
+a mean center depth of `43.47 m`, and stable hash `6959649481969108202`.
+
 ## Known simplification
 
 The render backend returns 8-bit RGBA, so exposure and noise operate on a quantized

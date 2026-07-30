@@ -216,6 +216,11 @@ view. It is a second sensor on the same actor rather than a presentation camera:
 it observes the world without the LiDAR debug overlay, and its pose is derived
 from the vehicle heading exactly like the LiDAR mount.
 
+Both capture paths run the full [physics-aware camera](CAMERA_SIMULATION.md)
+model, so the insets show real sensor output rather than a clean render: barrel
+distortion, an 8-band rolling shutter swept across the platform motion, auto
+exposure, shot and read noise, and vignetting.
+
 Capture runs twice for different purposes:
 
 * **Headless.** `HeadlessRenderBackend` resolves geometry through the shared
@@ -228,7 +233,7 @@ Capture runs twice for different purposes:
   sensors read against one legend.
 
 The committed 144-frame headless capture reports a nearest observed depth of
-`12.54 m`, a mean center depth of `43.58 m`, and stable hash
-`8873769722900379237`. The acceptance test additionally requires the capture to
+`12.53 m`, a mean center depth of `43.47 m`, and stable hash
+`6959649481969108202`. The acceptance test additionally requires the capture to
 repeat exactly, to fill every pixel of the configured resolution, and to change
 between frames as the host vehicle drives.

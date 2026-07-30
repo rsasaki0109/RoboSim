@@ -66,9 +66,16 @@ snow attenuate, backscatter, and occlude; and the scanner sweeps a full
 revolution per frame, so each azimuth column is cast from the moving vehicle's
 interpolated pose and every point carries its own emission time. All
 randomization derives from `WorldRandom`. Blue, green, and yellow points show
-increasing normalized return intensity. The same vehicle also carries a forward
-RGB-D camera; its raw color and linear-depth views are composited as the two
-insets, and the depth ramp reuses the LiDAR intensity legend.
+increasing normalized return intensity.
+
+The same vehicle carries a forward RGB-D camera that is modeled to the same
+standard. Brown-Conrady barrel distortion resamples both color and depth, an
+eight-band rolling shutter is swept across the platform motion so the frame skews
+as the car drives, auto exposure tracks mean luminance, and signal-dependent shot
+noise, a read-noise floor and cos&#8308; vignetting are applied on top — all
+deterministic from the same `WorldRandom` stream. The two insets are that sensor's
+real output, not a clean render, and the depth ramp reuses the LiDAR intensity
+legend.
 
 <p align="center">
   <picture>
@@ -76,7 +83,7 @@ insets, and the depth ramp reuses the LiDAR intensity legend.
     <img src="docs/media/plateau-lidar.gif" alt="Physics-aware LiDAR returns from a moving vehicle in official PLATEAU Sanjo traffic" width="960">
   </picture>
   <br>
-  <sub>Real 12-second/144-frame wgpu capture of 285,666 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,339 later returns, 488 saturated retroreflective returns; stable scan hash <code>11611048955455473063</code>) plus a vehicle-mounted RGB-D camera (stable hash <code>8873769722900379237</code>), while 100 deterministic vehicles share the official Sanjo scene.</sub>
+  <sub>Real 12-second/144-frame wgpu capture of 285,666 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,339 later returns, 488 saturated retroreflective returns; stable scan hash <code>11611048955455473063</code>) plus a vehicle-mounted RGB-D camera with lens distortion, rolling shutter, auto exposure and sensor noise (stable hash <code>6959649481969108202</code>), while 100 deterministic vehicles share the official Sanjo scene.</sub>
 </p>
 
 ```bash
@@ -106,7 +113,9 @@ KPIs, and at least 60 Hz. See
 [deterministic traffic runtime](docs/TRAFFIC_RUNTIME.md).
 The LiDAR equations, timestamp and failure behavior, deterministic weather
 randomization, payload attributes, and Sanjo acceptance hash are documented in
-[physics-aware LiDAR](docs/LIDAR_SIMULATION.md).
+[physics-aware LiDAR](docs/LIDAR_SIMULATION.md). The camera pipeline, distortion
+and noise equations, rolling-shutter contract, and its Sanjo settings are
+documented in [physics-aware camera](docs/CAMERA_SIMULATION.md).
 
 ## Official Unitree Go2 URDF
 
