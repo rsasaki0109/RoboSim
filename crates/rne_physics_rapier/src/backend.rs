@@ -47,6 +47,8 @@ struct RapierWorldState {
     entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
     entity_to_multibody_joint: HashMap<Entity, MultibodyJointHandle>,
     contacts: Vec<ContactEvent>,
+    /// Bodies carrying a one-step disturbance force, cleared after the next step.
+    impulse_forced: Vec<RigidBodyHandle>,
 }
 
 impl RapierBackend {
@@ -67,35 +69,39 @@ impl RapierBackend {
         self.worlds.get_mut(&id).ok_or(PhysicsError::WorldNotFound)
     }
 
-    /// Applies a velocity-equivalent impulse to an entity's rigid body.
+    /// Applies a velocity-equivalent disturbance to an entity's rigid body over the
+    /// next physics step.
     ///
-    /// Multibody link velocities are derived from the articulation's generalized joint
-    /// velocities, so writing a link's linear velocity directly is overwritten by the
-    /// next solve. An impulse of `mass * delta_v` instead enters the solver as an
-    /// external force, which shoves plain dynamic bodies and multibody links alike —
-    /// the deterministic disturbance primitive. Returns false when the entity has no
-    /// body in this world or the delta is non-finite.
+    /// Direct velocity writes do not survive on articulated links: multibody
+    /// velocities are recomputed from generalized joint state, and `sync_from_ecs`
+    /// overwrites plain-body velocities from the ECS every step. A force of
+    /// `mass * delta_v / dt` held for exactly one step instead enters the solver
+    /// itself, shoving plain dynamic bodies and multibody links alike — the
+    /// deterministic disturbance primitive. The force is cleared automatically after
+    /// the next [`PhysicsBackend::step`]. Returns false when the entity has no body
+    /// in this world or the delta is non-finite.
     pub fn apply_velocity_impulse(
         &mut self,
         physics_world: PhysicsWorldId,
         entity: Entity,
         delta_v_m_s: Vec3,
     ) -> bool {
-        if !delta_v_m_s.x.is_finite() || !delta_v_m_s.y.is_finite() || !delta_v_m_s.z.is_finite()
-        {
+        if !delta_v_m_s.x.is_finite() || !delta_v_m_s.y.is_finite() || !delta_v_m_s.z.is_finite() {
             return false;
         }
         let Ok(state) = self.world_mut(physics_world) else {
             return false;
         };
+        let dt = state.integration_parameters.dt.max(f32::EPSILON);
         let Some(body_handle) = state.entity_to_body.get(&entity).copied() else {
             return false;
         };
         let Some(body) = state.bodies.get_mut(body_handle) else {
             return false;
         };
-        let impulse = vec3_to_rapier(delta_v_m_s) * body.mass();
-        body.apply_impulse(impulse, true);
+        let force = vec3_to_rapier(delta_v_m_s) * (body.mass() / dt);
+        body.add_force(force, true);
+        state.impulse_forced.push(body_handle);
         true
     }
 
@@ -149,6 +155,7 @@ impl PhysicsBackend for RapierBackend {
                 entity_to_joint: HashMap::new(),
                 entity_to_multibody_joint: HashMap::new(),
                 contacts: Vec::new(),
+                impulse_forced: Vec::new(),
             },
         );
 
@@ -254,6 +261,14 @@ impl PhysicsBackend for RapierBackend {
             &(),
             &(),
         );
+
+        // One-step disturbance forces have done their work; clear them so they do
+        // not integrate a second time.
+        for body_handle in state.impulse_forced.drain(..) {
+            if let Some(body) = state.bodies.get_mut(body_handle) {
+                body.reset_forces(true);
+            }
+        }
 
         state.query_pipeline.update(&state.colliders);
 

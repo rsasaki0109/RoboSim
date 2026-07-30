@@ -9,13 +9,17 @@ const SETTLE_STEPS: u64 = 120;
 const NOMINAL_HEIGHT_M: f64 = 0.23;
 const FALLEN_HEIGHT_M: f64 = 0.12;
 
-/// A deterministic velocity shove applied to the Go2 base during an episode.
+/// A deterministic shove applied to the Go2 base during an episode.
+///
+/// Expressed as a base displacement because Rapier multibody links do not respond to
+/// body-level forces or velocity writes; the articulation accepts a root pose change
+/// through the regular synchronization, and the legs must catch the body afterwards.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitreeGo2Push {
     /// Controlled step at which the shove lands.
     pub step: u64,
-    /// Velocity change applied to the base link, in meters per second.
-    pub velocity_m_s: [f64; 3],
+    /// Displacement applied to the base link, in meters.
+    pub offset_m: [f64; 3],
 }
 
 /// Configuration for the official Unitree Go2 trot episode.
@@ -193,7 +197,7 @@ impl Episode for UnitreeGo2Episode {
         // shove that arrives between two controller ticks.
         if let Some(push) = self.config.push {
             if push.step == self.step_in_episode {
-                self.sim.add_named_body_velocity_m_s("base", push.velocity_m_s);
+                self.sim.displace_named_body_m("base", push.offset_m);
             }
         }
         let command = UnitreeGo2GaitCommand {
@@ -289,14 +293,14 @@ mod tests {
     }
 
     fn run_pushed_trot(
-        push_velocity_m_s: [f64; 3],
+        push_offset_m: [f64; 3],
         controller: impl Fn(&UnitreeGo2Observation) -> UnitreeGo2Action,
     ) -> PushOutcome {
         let config = UnitreeGo2EpisodeConfig {
             max_steps: 420,
             push: Some(UnitreeGo2Push {
                 step: 180,
-                velocity_m_s: push_velocity_m_s,
+                offset_m: push_offset_m,
             }),
             ..Default::default()
         };
@@ -354,27 +358,47 @@ mod tests {
             .expect("load Go2 scene");
         let before = sim.observe();
         let landed = sim.add_named_body_velocity_m_s("base", [0.0, 0.0, 1.5]);
+        assert!(landed, "the Go2 base link must accept a velocity impulse");
+
+        // The impulse enters the articulation solver, so it shows up in the
+        // observation only after the next physics step, shared with the legs.
+        sim.step_joint_position_targets(&[]);
         let after = sim.observe();
         println!(
             "landed={landed} vz_before={:.3} vz_after={:.3}",
             before.base_linear_velocity_z_m_s, after.base_linear_velocity_z_m_s
         );
-        assert!(landed, "the Go2 base link must accept a velocity impulse");
+
+        // Displacement probe: shift the base pose laterally through the ECS.
+        let start_z = sim.observe().base_z_m;
+        let pose = sim.named_transform("base").expect("base transform");
+        let moved = sim.set_named_body_translation_m(
+            "base",
+            [
+                pose.translation.x,
+                pose.translation.y,
+                pose.translation.z + 0.06,
+            ],
+        );
+        sim.step_joint_position_targets(&[]);
+        let displaced = sim.observe().base_z_m;
+        println!("moved={moved} dz={:.4}", displaced - start_z);
+        assert!(moved);
         assert!(
-            (after.base_linear_velocity_z_m_s - before.base_linear_velocity_z_m_s - 1.5).abs()
-                < 1e-9,
-            "observed base velocity must include the impulse"
+            (displaced - start_z) > 0.03,
+            "a base displacement must survive the articulation step, got {:.4}",
+            displaced - start_z
         );
     }
 
     #[test]
     fn push_tuning_probe() {
-        for push in [2.0, 3.0, 4.0] {
+        for push in [0.05, 0.09, 0.13] {
             let open = run_pushed_trot([0.0, 0.0, push], open_loop);
             let positive = run_pushed_trot([0.0, 0.0, push], posture_feedback_with(1.2));
             let negative = run_pushed_trot([0.0, 0.0, push], posture_feedback_with(-1.2));
             println!(
-                "push={push:.1}: open fell={} tilt={:.2} steps={} | +g fell={} tilt={:.2} steps={} | -g fell={} tilt={:.2} steps={}",
+                "push={push:.2}: open fell={} tilt={:.2} steps={} | +g fell={} tilt={:.2} steps={} | -g fell={} tilt={:.2} steps={}",
                 open.fell,
                 open.max_tilt_rad,
                 open.steps_survived,
