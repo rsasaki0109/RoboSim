@@ -1301,7 +1301,10 @@ fn align_to(value: u32, alignment: u32) -> u32 {
     value.div_ceil(alignment) * alignment
 }
 
-const MAX_SCENE_ITEMS: u32 = 512;
+// Sizes the per-draw dynamic-offset uniform buffer (stride x count, ~256 KB at
+// 1024). The Sanjo capture's static tile + 100-vehicle fleet + colormapped point
+// cloud overlay legitimately exceeds the previous 512.
+const MAX_SCENE_ITEMS: u32 = 1_024;
 const SHADOW_MAP_SIZE: u32 = 2_048;
 const SHADOW_BOUNDS_MARGIN_M: f64 = 3.0;
 

@@ -180,7 +180,7 @@ cloud without partially publishing malformed attributes.
 
 Example 46 imports the official Sanjo PLATEAU tile, runs the deterministic
 100-vehicle/eight-route traffic scenario, mounts a 905 nm 16-channel spinning
-LiDAR (360 azimuth columns, +/-15 degrees vertical, 5,760 rays per revolution)
+LiDAR (720 azimuth columns, +/-15 degrees vertical, 11,520 rays per revolution)
 on the tracked vehicle, and raycasts against 213 imported building colliders,
 the other 99 vehicles, and their retroreflective licence plates. Concrete,
 glass, asphalt, painted-metal, and retroreflective properties are non-visual ECS
@@ -190,7 +190,7 @@ cast from the interpolated pose of the moving host vehicle.
 The headless acceptance test captures twelve frames twice with opposite
 traffic-collider spawn order and requires:
 
-- stable hash `17799227134853352305`;
+- stable hash `13248311255248989536`;
 - identical point, multiple-return, and saturated-return counts;
 - aligned point attributes;
 - at least one transmitted later return;
@@ -202,11 +202,12 @@ traffic-collider spawn order and requires:
 The full example reports column and channel counts, return count,
 multiple-return count, saturated-return count, mean intensity, scan duration,
 stable hash, traffic safety KPIs, and measured scan throughput. Its wgpu output
-uses three intensity color bands and writes `docs/media/plateau-lidar.gif` plus
+colors the cloud with the turbo intensity colormap real point-cloud
+viewers use and writes `docs/media/plateau-lidar.gif` plus
 the reduced-motion `docs/media/plateau-lidar.png` poster. The committed
-144-frame capture contains 546,615 returns, including 63,009 later returns and
-530 saturated returns, with mean normalized intensity `0.061`, a per-scan
-duration of `0.0831 s`, and stable full-capture hash `6321383548646989021`.
+144-frame capture contains 1,092,806 returns, including 125,734 later returns and
+1,064 saturated returns, with mean normalized intensity `0.060`, a per-scan
+duration of `0.0832 s`, and stable full-capture hash `16814780024698753365`.
 
 The capture world adds a large ground-plane collider with a dim diffuse grass
 material under the whole tile: the imported road surfaces only cover the

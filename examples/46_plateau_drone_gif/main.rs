@@ -66,7 +66,7 @@ const CITY_ACTOR_COUNT: usize = 100;
 const CITY_REPLAY_STEPS: u64 = 720;
 const CITY_SIGNAL_COUNT: usize = 3;
 const CITY_ROUTE_COUNT: usize = 8;
-const LIDAR_RAY_COUNT: u32 = 360;
+const LIDAR_RAY_COUNT: u32 = 720;
 /// Elevation channels, matching a 16-beam spinning scanner.
 const LIDAR_CHANNEL_COUNT: u16 = 16;
 /// Vertical field of view, matching the +/-15 degrees of a VLP-16 class sensor.
@@ -2232,53 +2232,88 @@ fn append_traffic_debug_overlay(
     }
 }
 
+/// Number of quantized turbo-colormap buckets used for the point cloud.
+const LIDAR_COLORMAP_BUCKETS: usize = 10;
+/// Intensity mapped to the top of the colormap; retroreflective hits clip to red.
+const LIDAR_COLORMAP_FULL_SCALE: f64 = 0.30;
+
+/// Google's turbo colormap polynomial approximation.
+///
+/// Turbo is the perceptually even rainbow used by real point-cloud viewers
+/// (Rerun, the KITTI/nuScenes toolchains): dim returns read as deep blue, mid
+/// returns pass through green and orange, and saturated retroreflective hits
+/// land on red, with no banding between them.
+fn turbo_colormap(t: f64) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    let polynomial = |c: [f64; 6]| -> f32 {
+        (c[0] + t * (c[1] + t * (c[2] + t * (c[3] + t * (c[4] + t * c[5]))))).clamp(0.0, 1.0) as f32
+    };
+    [
+        polynomial([
+            0.135_721_38,
+            4.615_392_60,
+            -42.660_322_58,
+            132.131_082_34,
+            -152.942_393_96,
+            59.286_379_43,
+        ]),
+        polynomial([
+            0.091_402_61,
+            2.194_188_39,
+            4.842_966_58,
+            -14.185_033_33,
+            4.277_298_57,
+            2.829_566_04,
+        ]),
+        polynomial([
+            0.106_673_30,
+            12.641_946_08,
+            -60.582_048_36,
+            110.362_767_71,
+            -89.903_109_12,
+            27.348_249_73,
+        ]),
+        1.0,
+    ]
+}
+
+/// Draws the point cloud the way a real LiDAR viewer would.
+///
+/// Continuous turbo colormap over intensity instead of discrete bands, no drawn
+/// beams (viewers show returns, not rays), and small markers that grow slightly
+/// with range so distant rings survive perspective. The square-root intensity
+/// normalization spreads the crowded low end of the radiometric distribution
+/// across the palette.
 fn append_lidar_intensity_overlay(scene: &mut RenderScene, frame: &CityLidarFrame) {
-    const COLORS: [[f32; 4]; 3] = [
-        [0.08, 0.42, 1.0, 1.0],
-        [0.04, 1.0, 0.52, 1.0],
-        [1.0, 0.86, 0.08, 1.0],
-    ];
-    let mut bins = [
-        DebugMeshBuilder::default(),
-        DebugMeshBuilder::default(),
-        DebugMeshBuilder::default(),
-    ];
-    // Bin thresholds follow the radiometric scale of this scene: distant grazing
-    // ground returns are dim, the near ground rings and side walls sit in the middle,
-    // and close facades plus retroreflective plates carry the strong bin.
+    let mut buckets: Vec<DebugMeshBuilder> = (0..LIDAR_COLORMAP_BUCKETS)
+        .map(|_| DebugMeshBuilder::default())
+        .collect();
+
     for (point, intensity) in frame
         .cloud
         .points_m
         .iter()
         .zip(frame.cloud.intensities.iter().copied())
     {
-        let bin = if intensity < 0.02 {
-            0
-        } else if intensity < 0.06 {
-            1
-        } else {
-            2
-        };
-        // A 16-channel cloud is dense, so markers stay small to keep returns legible.
-        bins[bin].add_point_marker(*point, 0.11);
+        let normalized = (f64::from(intensity) / LIDAR_COLORMAP_FULL_SCALE)
+            .clamp(0.0, 1.0)
+            .sqrt();
+        let bucket = ((normalized * (LIDAR_COLORMAP_BUCKETS - 1) as f64).round() as usize)
+            .min(LIDAR_COLORMAP_BUCKETS - 1);
+        let range_m = (*point - frame.mount.translation).length();
+        // World-space markers shrink with perspective; a mild range term keeps the
+        // far rings visible the way constant-size screen points do in a viewer.
+        let size = (0.075 + range_m * 0.002).min(0.16);
+        buckets[bucket].add_point_marker(*point, size);
     }
-    // A slightly downward channel (-7 deg) so the drawn beams terminate on the
-    // nearby ground ring instead of running to the horizon.
-    let beam_channel = LIDAR_CHANNEL_COUNT / 4;
-    for (((point, ray_index), return_index), channel) in frame
-        .cloud
-        .points_m
-        .iter()
-        .zip(&frame.cloud.ray_indices)
-        .zip(&frame.cloud.return_indices)
-        .zip(&frame.cloud.channel_indices)
-    {
-        if *return_index == 1 && *channel == beam_channel && ray_index.is_multiple_of(24) {
-            bins[0].add_beam(frame.mount.translation, *point, 0.005);
+
+    for (bucket, mesh) in buckets.into_iter().enumerate() {
+        // Empty buckets would still cost a scene item; skip them.
+        if mesh.positions.is_empty() {
+            continue;
         }
-    }
-    for (mesh, color) in bins.into_iter().zip(COLORS) {
-        push_debug_mesh(scene, mesh, color);
+        let t = bucket as f64 / (LIDAR_COLORMAP_BUCKETS - 1) as f64;
+        push_debug_mesh(scene, mesh, turbo_colormap(t));
     }
 }
 
@@ -2321,27 +2356,6 @@ impl DebugMeshBuilder {
         self.add_quad(center - x, center + y, center - y, center + x);
         self.add_quad(center - z, center + y, center - y, center + z);
         self.add_quad(center - x, center + z, center - z, center + x);
-    }
-
-    fn add_beam(&mut self, start: Vec3, end: Vec3, half_width_m: f64) {
-        let direction = (end - start).normalize_or_zero();
-        if direction == Vec3::ZERO {
-            return;
-        }
-        let horizontal = Vec3::Y.cross(direction).normalize_or_zero() * half_width_m;
-        let vertical = Vec3::Y * half_width_m;
-        self.add_quad(
-            start - horizontal,
-            start + horizontal,
-            end - horizontal,
-            end + horizontal,
-        );
-        self.add_quad(
-            start - vertical,
-            start + vertical,
-            end - vertical,
-            end + vertical,
-        );
     }
 
     fn add_quad(&mut self, first: Vec3, second: Vec3, third: Vec3, fourth: Vec3) {
@@ -3835,7 +3849,7 @@ mod tests {
             true,
         );
         assert_eq!(forward_lidar.stable_hash, reverse_lidar.stable_hash);
-        assert_eq!(forward_lidar.stable_hash, 17_799_227_134_853_352_305);
+        assert_eq!(forward_lidar.stable_hash, 13_248_311_255_248_989_536);
         assert_eq!(forward_lidar.total_returns, reverse_lidar.total_returns);
         assert_eq!(forward_lidar.multi_returns, reverse_lidar.multi_returns);
         assert_eq!(
