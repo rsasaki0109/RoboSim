@@ -210,3 +210,120 @@ impl Default for Inertial {
         }
     }
 }
+
+/// Planar dynamic bicycle model state and parameters for an Ackermann vehicle.
+///
+/// [`crate::ackermann_kinematics`] assumes the tires never slip, which makes every
+/// controller look perfect: the vehicle goes exactly where the steering points it.
+/// Attaching this component opts a vehicle into the single-track *dynamic* model
+/// instead, where lateral tire forces are finite. Understeer, oversteer, and the
+/// widening of a line with speed all emerge from the force balance rather than being
+/// scripted.
+///
+/// The model runs in the ground plane. Front and rear slip angles produce lateral
+/// forces through a linear tire that saturates at the friction limit, and longitudinal
+/// weight transfer shifts that limit between the axles under acceleration and braking.
+/// Below [`Self::blend_low_speed_m_s`] the update blends into the kinematic solution,
+/// because slip angles divide by forward speed and become singular near standstill.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VehicleDynamics {
+    /// Vehicle mass in kilograms.
+    pub mass_kg: f64,
+    /// Yaw moment of inertia in kilogram square meters.
+    pub yaw_inertia_kg_m2: f64,
+    /// Distance from the center of mass to the front axle in meters.
+    pub front_axle_m: f64,
+    /// Distance from the center of mass to the rear axle in meters.
+    pub rear_axle_m: f64,
+    /// Height of the center of mass above ground in meters, for load transfer.
+    pub center_of_mass_height_m: f64,
+    /// Front axle cornering stiffness in newtons per radian.
+    pub front_cornering_stiffness_n_rad: f64,
+    /// Rear axle cornering stiffness in newtons per radian.
+    pub rear_cornering_stiffness_n_rad: f64,
+    /// Tire-road friction coefficient.
+    pub friction_coefficient: f64,
+    /// Forward speed below which the kinematic solution takes over, in meters per second.
+    pub blend_low_speed_m_s: f64,
+    /// Current lateral velocity at the center of mass in meters per second.
+    pub lateral_velocity_m_s: f64,
+    /// Current yaw rate in radians per second.
+    pub yaw_rate_rad_s: f64,
+    /// Front slip angle of the last step in radians, for telemetry.
+    pub front_slip_rad: f64,
+    /// Rear slip angle of the last step in radians, for telemetry.
+    pub rear_slip_rad: f64,
+    /// Whether the front axle saturated its friction limit during the last step.
+    pub front_saturated: bool,
+    /// Whether the rear axle saturated its friction limit during the last step.
+    pub rear_saturated: bool,
+}
+
+impl Default for VehicleDynamics {
+    fn default() -> Self {
+        Self {
+            // A mid-size sedan; cornering stiffness values are per axle.
+            mass_kg: 1_500.0,
+            yaw_inertia_kg_m2: 2_250.0,
+            front_axle_m: 1.2,
+            rear_axle_m: 1.5,
+            center_of_mass_height_m: 0.55,
+            front_cornering_stiffness_n_rad: 80_000.0,
+            rear_cornering_stiffness_n_rad: 88_000.0,
+            friction_coefficient: 0.9,
+            blend_low_speed_m_s: 2.0,
+            lateral_velocity_m_s: 0.0,
+            yaw_rate_rad_s: 0.0,
+            front_slip_rad: 0.0,
+            rear_slip_rad: 0.0,
+            front_saturated: false,
+            rear_saturated: false,
+        }
+    }
+}
+
+impl VehicleDynamics {
+    /// Returns whether all parameters are finite and physically valid.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.mass_kg,
+            self.yaw_inertia_kg_m2,
+            self.front_axle_m,
+            self.rear_axle_m,
+            self.center_of_mass_height_m,
+            self.front_cornering_stiffness_n_rad,
+            self.rear_cornering_stiffness_n_rad,
+            self.friction_coefficient,
+            self.blend_low_speed_m_s,
+            self.lateral_velocity_m_s,
+            self.yaw_rate_rad_s,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.mass_kg > 0.0
+            && self.yaw_inertia_kg_m2 > 0.0
+            && self.front_axle_m > 0.0
+            && self.rear_axle_m > 0.0
+            && self.center_of_mass_height_m >= 0.0
+            && self.front_cornering_stiffness_n_rad > 0.0
+            && self.rear_cornering_stiffness_n_rad > 0.0
+            && self.friction_coefficient > 0.0
+            && self.blend_low_speed_m_s >= 0.0
+    }
+
+    /// Wheelbase implied by the axle distances, in meters.
+    pub fn wheelbase_m(&self) -> f64 {
+        self.front_axle_m + self.rear_axle_m
+    }
+
+    /// Static front axle load in newtons under standard gravity.
+    pub fn static_front_load_n(&self) -> f64 {
+        self.mass_kg * 9.81 * self.rear_axle_m / self.wheelbase_m()
+    }
+
+    /// Static rear axle load in newtons under standard gravity.
+    pub fn static_rear_load_n(&self) -> f64 {
+        self.mass_kg * 9.81 * self.front_axle_m / self.wheelbase_m()
+    }
+}

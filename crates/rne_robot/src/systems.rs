@@ -2,7 +2,7 @@
 
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
-use crate::components::{AckermannDrive, Actuator, Joint, JointKind};
+use crate::components::{AckermannDrive, Actuator, Joint, JointKind, VehicleDynamics};
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
 use bevy_ecs::prelude::{Entity, World};
@@ -66,7 +66,13 @@ pub fn ackermann_kinematics(world: &mut World, dt: SimDuration) {
     }
     let mut vehicles: Vec<Entity> = world
         .iter_entities()
-        .filter(|entity| entity.contains::<AckermannDrive>() && entity.contains::<Transform3>())
+        .filter(|entity| {
+            entity.contains::<AckermannDrive>()
+                && entity.contains::<Transform3>()
+                // Vehicles carrying VehicleDynamics are integrated by the dynamic
+                // model instead; running both would double-integrate the chassis.
+                && !entity.contains::<VehicleDynamics>()
+        })
         .map(|entity| entity.id())
         .collect();
     vehicles.sort_by_key(|entity| entity.to_bits());
@@ -133,6 +139,149 @@ pub fn pure_pursuit_steering(
     }
     let local_target = transform.rotation.conjugate() * (target_m - transform.translation);
     (-2.0 * wheelbase_m * local_target.z).atan2(lookahead_m * lookahead_m)
+}
+
+/// Advances vehicles that carry both [`AckermannDrive`] and [`VehicleDynamics`] with a
+/// planar dynamic bicycle model.
+///
+/// [`ackermann_kinematics`] must not also run over these vehicles; this system is the
+/// dynamic replacement, not a correction pass. Command shaping (speed and steering rate
+/// limits) is shared with the kinematic path so the two models receive identical inputs
+/// and differ only in how the chassis answers them.
+///
+/// Per step, for forward speed `vx`, lateral speed `vy`, yaw rate `r`, steering `delta`,
+/// axle distances `a`/`b`, and per-axle cornering stiffness `C`:
+///
+/// ```text
+/// alpha_f = atan((vy + a r) / vx) - delta      front slip angle
+/// alpha_r = atan((vy - b r) / vx)              rear slip angle
+/// Fy      = clamp(-C alpha, +/- mu Fz)         linear tire, friction saturated
+/// m (vy' + vx r) = Fyf cos(delta) + Fyr        lateral balance
+/// Iz r'          = a Fyf cos(delta) - b Fyr    yaw balance
+/// ```
+///
+/// `Fz` per axle includes longitudinal load transfer `m ax h / L`, so braking loads the
+/// front tires and throttle loads the rear — which is why the same corner behaves
+/// differently on and off the power. Below [`VehicleDynamics::blend_low_speed_m_s`] the
+/// lateral states relax toward the kinematic solution to avoid the `1/vx` singularity.
+pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
+    let dt_s = dt.as_seconds().value();
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return;
+    }
+    let mut vehicles: Vec<Entity> = world
+        .iter_entities()
+        .filter(|entity| {
+            entity.contains::<AckermannDrive>()
+                && entity.contains::<VehicleDynamics>()
+                && entity.contains::<Transform3>()
+        })
+        .map(|entity| entity.id())
+        .collect();
+    vehicles.sort_by_key(|entity| entity.to_bits());
+
+    for vehicle in vehicles {
+        let Some(mut drive) = world.get::<AckermannDrive>(vehicle).cloned() else {
+            continue;
+        };
+        let Some(mut dynamics) = world.get::<VehicleDynamics>(vehicle).copied() else {
+            continue;
+        };
+        if !drive.is_valid() || !dynamics.is_valid() {
+            continue;
+        }
+
+        // Shared command shaping, identical to the kinematic path.
+        let accelerating = drive.target_speed_m_s.signum() == drive.speed_m_s.signum()
+            && drive.target_speed_m_s.abs() > drive.speed_m_s.abs();
+        let speed_rate_m_s2 = if accelerating {
+            drive.max_acceleration_m_s2
+        } else {
+            drive.max_deceleration_m_s2
+        };
+        let previous_speed_m_s = drive.speed_m_s;
+        drive.speed_m_s = move_towards(
+            drive.speed_m_s,
+            drive.target_speed_m_s,
+            speed_rate_m_s2 * dt_s,
+        );
+        drive.steering_rad = move_towards(
+            drive.steering_rad,
+            drive.target_steering_rad,
+            drive.max_steering_rate_rad_s * dt_s,
+        );
+
+        let vx = drive.speed_m_s;
+        let ax = (drive.speed_m_s - previous_speed_m_s) / dt_s;
+        let delta = drive.steering_rad;
+        let wheelbase = dynamics.wheelbase_m();
+
+        // Axle loads with longitudinal transfer; clamped so neither axle lifts.
+        let transfer_n = dynamics.mass_kg * ax * dynamics.center_of_mass_height_m / wheelbase;
+        let front_load_n = (dynamics.static_front_load_n() - transfer_n).max(0.0);
+        let rear_load_n = (dynamics.static_rear_load_n() + transfer_n).max(0.0);
+
+        let kinematic_yaw_rate = vx / wheelbase * delta.tan();
+        let speed_abs = vx.abs();
+
+        if speed_abs <= dynamics.blend_low_speed_m_s.max(f64::EPSILON) {
+            // Kinematic regime: slip angles are undefined, so the lateral states take
+            // the no-slip solution directly.
+            dynamics.yaw_rate_rad_s = kinematic_yaw_rate;
+            dynamics.lateral_velocity_m_s = kinematic_yaw_rate * dynamics.rear_axle_m;
+            dynamics.front_slip_rad = 0.0;
+            dynamics.rear_slip_rad = 0.0;
+            dynamics.front_saturated = false;
+            dynamics.rear_saturated = false;
+        } else {
+            let vy = dynamics.lateral_velocity_m_s;
+            let r = dynamics.yaw_rate_rad_s;
+
+            let alpha_f = ((vy + dynamics.front_axle_m * r) / vx).atan() - delta;
+            let alpha_r = ((vy - dynamics.rear_axle_m * r) / vx).atan();
+
+            let front_limit_n = dynamics.friction_coefficient * front_load_n;
+            let rear_limit_n = dynamics.friction_coefficient * rear_load_n;
+            let front_force_n = (-dynamics.front_cornering_stiffness_n_rad * alpha_f)
+                .clamp(-front_limit_n, front_limit_n);
+            let rear_force_n = (-dynamics.rear_cornering_stiffness_n_rad * alpha_r)
+                .clamp(-rear_limit_n, rear_limit_n);
+
+            dynamics.front_slip_rad = alpha_f;
+            dynamics.rear_slip_rad = alpha_r;
+            dynamics.front_saturated =
+                (dynamics.front_cornering_stiffness_n_rad * alpha_f).abs() > front_limit_n;
+            dynamics.rear_saturated =
+                (dynamics.rear_cornering_stiffness_n_rad * alpha_r).abs() > rear_limit_n;
+
+            let lateral_acceleration =
+                (front_force_n * delta.cos() + rear_force_n) / dynamics.mass_kg - vx * r;
+            let yaw_acceleration = (dynamics.front_axle_m * front_force_n * delta.cos()
+                - dynamics.rear_axle_m * rear_force_n)
+                / dynamics.yaw_inertia_kg_m2;
+
+            dynamics.lateral_velocity_m_s += lateral_acceleration * dt_s;
+            dynamics.yaw_rate_rad_s += yaw_acceleration * dt_s;
+        }
+
+        let yaw_delta_rad = dynamics.yaw_rate_rad_s * dt_s;
+        let mut velocity_world = Vec3::ZERO;
+        if let Some(mut transform) = world.get_mut::<Transform3>(vehicle) {
+            let midpoint_rotation =
+                (Quat::from_rotation_y(yaw_delta_rad * 0.5) * transform.rotation).normalize();
+            // The body carries both forward and lateral velocity; slip is precisely
+            // the difference between where the nose points and where the car goes.
+            velocity_world = midpoint_rotation * Vec3::new(vx, 0.0, -dynamics.lateral_velocity_m_s);
+            transform.translation += velocity_world * dt_s;
+            transform.rotation =
+                (Quat::from_rotation_y(yaw_delta_rad) * transform.rotation).normalize();
+        }
+        if let Some(mut body) = world.get_mut::<RigidBody>(vehicle) {
+            body.linear_velocity_m_s = velocity_world;
+            body.angular_velocity_rad_s = Vec3::new(0.0, dynamics.yaw_rate_rad_s, 0.0);
+        }
+        world.entity_mut(vehicle).insert((drive, dynamics));
+    }
 }
 
 fn move_towards(current: f64, target: f64, max_delta: f64) -> f64 {
@@ -578,5 +727,195 @@ mod tests {
         let transform = Transform3::default();
         let steering = pure_pursuit_steering(&transform, Vec3::new(5.0, 0.0, 2.0), 2.7, 5.0);
         assert!(steering < 0.0);
+    }
+
+    fn spawn_dynamic_vehicle(
+        world: &mut World,
+        drive: AckermannDrive,
+        dynamics: VehicleDynamics,
+    ) -> Entity {
+        let vehicle = world.spawn_empty().id();
+        world.entity_mut(vehicle).insert((
+            drive,
+            dynamics,
+            Transform3::IDENTITY,
+            RigidBody::default(),
+        ));
+        vehicle
+    }
+
+    fn hot_lap_drive(speed_m_s: f64, steering_rad: f64) -> AckermannDrive {
+        AckermannDrive {
+            max_speed_m_s: 60.0,
+            max_acceleration_m_s2: 1_000.0,
+            max_deceleration_m_s2: 1_000.0,
+            max_steering_rate_rad_s: 1_000.0,
+            speed_m_s,
+            target_speed_m_s: speed_m_s,
+            steering_rad,
+            target_steering_rad: steering_rad,
+            ..AckermannDrive::default()
+        }
+    }
+
+    fn step_seconds(world: &mut World, seconds: f64) {
+        let dt = SimDuration::from_seconds(rne_math::Seconds::new(1.0 / 240.0));
+        for _ in 0..(seconds * 240.0) as usize {
+            vehicle_dynamics(world, dt);
+        }
+    }
+
+    #[test]
+    fn dynamic_model_matches_kinematics_at_low_speed() {
+        // 1.5 m/s is inside the blend region, so the no-slip solution applies.
+        let speed = 1.5;
+        let steering = 0.3;
+
+        let mut dynamic_world = World::new();
+        let vehicle = spawn_dynamic_vehicle(
+            &mut dynamic_world,
+            hot_lap_drive(speed, steering),
+            VehicleDynamics::default(),
+        );
+        step_seconds(&mut dynamic_world, 2.0);
+
+        let mut kinematic_world = World::new();
+        let reference = kinematic_world.spawn_empty().id();
+        kinematic_world.entity_mut(reference).insert((
+            hot_lap_drive(speed, steering),
+            Transform3::IDENTITY,
+            RigidBody::default(),
+        ));
+        let dt = SimDuration::from_seconds(rne_math::Seconds::new(1.0 / 240.0));
+        for _ in 0..480 {
+            ackermann_kinematics(&mut kinematic_world, dt);
+        }
+
+        let dynamic_transform = *dynamic_world.get::<Transform3>(vehicle).unwrap();
+        let kinematic_transform = *kinematic_world.get::<Transform3>(reference).unwrap();
+
+        // Headings must agree: the blend takes the no-slip yaw rate exactly.
+        let dynamic_forward = dynamic_transform.rotation * Vec3::X;
+        let kinematic_forward = kinematic_transform.rotation * Vec3::X;
+        assert!(dynamic_forward.dot(kinematic_forward) > 0.999_999);
+
+        // The two models track different chassis points — the dynamic model follows the
+        // center of mass, the kinematic one its reference axle — so their paths differ
+        // laterally by at most the CG offset times the accumulated yaw.
+        let total_yaw = 1.5 / VehicleDynamics::default().wheelbase_m() * 0.3_f64.tan() * 2.0;
+        let bound = VehicleDynamics::default().rear_axle_m * total_yaw + 0.05;
+        let divergence = (dynamic_transform.translation - kinematic_transform.translation).length();
+        assert!(
+            divergence < bound,
+            "low-speed divergence {divergence:.3} m exceeds the CG-offset bound {bound:.3} m"
+        );
+    }
+
+    #[test]
+    fn tire_slip_widens_the_line_as_speed_rises() {
+        // Identical steering at rising speeds; the no-slip model would keep the turn
+        // radius constant, tire slip must widen it. Gentle enough that neither axle
+        // reaches the friction limit: the widening is pure slip, not saturation.
+        let steering = 0.08;
+        let radius_at = |speed: f64| {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                hot_lap_drive(speed, steering),
+                VehicleDynamics::default(),
+            );
+            step_seconds(&mut world, 6.0);
+            let dynamics = world.get::<VehicleDynamics>(vehicle).unwrap();
+            // Steady-state turn radius follows from speed over yaw rate.
+            (speed / dynamics.yaw_rate_rad_s, *dynamics)
+        };
+
+        let (slow_radius, slow_dynamics) = radius_at(5.0);
+        let (fast_radius, fast_dynamics) = radius_at(12.0);
+
+        assert!(slow_radius > 0.0 && fast_radius > 0.0);
+        assert!(
+            fast_radius > slow_radius * 1.05,
+            "line must widen with speed: {slow_radius:.2} m -> {fast_radius:.2} m"
+        );
+        // The widening comes from real slip angles, not from saturation.
+        assert!(fast_dynamics.front_slip_rad.abs() > slow_dynamics.front_slip_rad.abs());
+        assert!(!fast_dynamics.front_saturated);
+    }
+
+    #[test]
+    fn friction_limit_saturates_the_front_axle_and_understeers() {
+        // A hard corner at speed exceeds mu Fz on the front axle.
+        let mut world = World::new();
+        let vehicle = spawn_dynamic_vehicle(
+            &mut world,
+            hot_lap_drive(24.0, 0.5),
+            VehicleDynamics::default(),
+        );
+        step_seconds(&mut world, 4.0);
+
+        let dynamics = *world.get::<VehicleDynamics>(vehicle).unwrap();
+        assert!(dynamics.front_saturated, "front axle must saturate");
+
+        // Saturated fronts cannot deliver the kinematic yaw rate: understeer.
+        let kinematic_yaw = 24.0 / VehicleDynamics::default().wheelbase_m() * 0.5_f64.tan();
+        assert!(
+            dynamics.yaw_rate_rad_s < kinematic_yaw * 0.5,
+            "yaw rate {:.3} should be far below the no-slip {:.3}",
+            dynamics.yaw_rate_rad_s,
+            kinematic_yaw
+        );
+    }
+
+    #[test]
+    fn load_transfer_shifts_grip_between_axles() {
+        let dynamics = VehicleDynamics::default();
+        let total = dynamics.static_front_load_n() + dynamics.static_rear_load_n();
+        assert!((total - dynamics.mass_kg * 9.81).abs() < 1e-9);
+        // The default sedan is nose-heavy: more static load on the front axle.
+        assert!(dynamics.static_front_load_n() > dynamics.static_rear_load_n());
+    }
+
+    #[test]
+    fn vehicle_dynamics_is_deterministic() {
+        let run = || {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                hot_lap_drive(18.0, 0.35),
+                VehicleDynamics::default(),
+            );
+            step_seconds(&mut world, 5.0);
+            (
+                world.get::<Transform3>(vehicle).unwrap().translation,
+                *world.get::<VehicleDynamics>(vehicle).unwrap(),
+            )
+        };
+
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn rigid_body_velocity_includes_the_lateral_component() {
+        let mut world = World::new();
+        let vehicle = spawn_dynamic_vehicle(
+            &mut world,
+            hot_lap_drive(12.0, 0.08),
+            VehicleDynamics::default(),
+        );
+        step_seconds(&mut world, 3.0);
+
+        let dynamics = *world.get::<VehicleDynamics>(vehicle).unwrap();
+        let transform = *world.get::<Transform3>(vehicle).unwrap();
+        let body = world.get::<RigidBody>(vehicle).unwrap();
+
+        // Velocity is not aligned with the nose: the slip is visible in the world state,
+        // which is what a mounted IMU or wheel-speed sensor would observe. The velocity
+        // uses the mid-step attitude, so the comparison allows the half-step of yaw.
+        let forward = transform.rotation * Vec3::X;
+        let along = body.linear_velocity_m_s.dot(forward);
+        let across = (body.linear_velocity_m_s - forward * along).length();
+        assert!(dynamics.lateral_velocity_m_s.abs() > 0.01);
+        assert!((across - dynamics.lateral_velocity_m_s.abs()).abs() < 0.05);
     }
 }

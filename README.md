@@ -150,6 +150,38 @@ The measurement equations, Allan-variance term table, determinism scheme, and
 acceptance numbers are documented in
 [physics-aware IMU](docs/IMU_SIMULATION.md).
 
+## Dynamic vehicle model
+
+The no-slip kinematic bicycle makes every controller look perfect: the vehicle goes
+exactly where the steering points it. Adding a `VehicleDynamics` component opts a
+vehicle into a planar dynamic bicycle model instead — front and rear slip angles, a
+linear tire that saturates at the friction limit `mu Fz`, and longitudinal weight
+transfer — so understeer emerges from the force balance. Below a configurable speed
+the model blends into the kinematic solution, avoiding the low-speed slip-angle
+singularity, and `ackermann_kinematics` automatically skips dynamic vehicles so the
+two models coexist in one schedule.
+
+Example 49 runs the same pure-pursuit controller through the same course at the same
+14 m/s on both plants. The corner demands ~10.9 m/s² of lateral acceleration; the
+tires can deliver 8.8.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/vehicle-dynamics.png">
+    <img src="docs/media/vehicle-dynamics.gif" alt="Kinematic and dynamic bicycle models under the same pure-pursuit controller; the dynamic vehicle understeers wide in the fast corner" width="960">
+  </picture>
+  <br>
+  <sub>Same controller, same commands, different plants. The kinematic car (green) tracks the sweeper within <code>0.78 m</code>; the dynamic car saturates its front axle for 92 steps (trail turns red), runs up to <code>17.1 m</code> wide, and rejoins on the exit. On the entry straight the two trails are identical — the divergence is entirely the vehicle model.</sub>
+</p>
+
+```bash
+cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+```
+
+The tire equations, load transfer, the low-speed blend, and the acceptance numbers
+are documented in [vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
+
 ## Official Unitree Go2 URDF
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
