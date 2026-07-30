@@ -1655,6 +1655,26 @@ fn capture_city_lidar_frames(
     reverse_vehicle_spawn_order: bool,
 ) -> CityLidarCapture {
     assign_city_lidar_materials(world);
+
+    // Ground plane under the whole tile. The imported road surfaces only cover the
+    // carriageway, so without this the downward elevation channels return nothing
+    // over grass and sidewalks and the signature concentric LiDAR rings appear as a
+    // partial crescent. Real ground reflects everywhere; grass is diffuse and dim.
+    let ground = spawn_named(world, "lidar_ground_plane");
+    world.entity_mut(ground).insert((
+        RigidBody {
+            body_type: RigidBodyType::Kinematic,
+            ..RigidBody::default()
+        },
+        Collider {
+            shape: ColliderShape::Cuboid {
+                half_extents_m: Vec3::new(400.0, 0.05, 400.0),
+            },
+            ..Collider::default()
+        },
+        LidarMaterial::new(0.14, 0.0, 0.95),
+        Transform3::from_translation_rotation(Vec3::new(0.0, -0.06, 0.0), Quat::IDENTITY),
+    ));
     let actor_count = traffic_frames
         .first()
         .map(Vec::len)
@@ -1821,19 +1841,23 @@ fn city_lidar_spec() -> LidarSpec {
         saturation_intensity: LIDAR_SATURATION_INTENSITY,
         bloom_gain: 0.06,
         bloom_column_radius: 2,
-        backscatter_probability_scale: 0.35,
+        backscatter_probability_scale: 0.0,
         minimum_intensity: 0.002,
         seed: 46_905,
+        // The rendered scene is a clear sunny day, so the atmosphere matches it: a
+        // trace of haze and dust, no precipitation, and no aerosol backscatter.
+        // Rain and backscatter are exercised by the rne_sensor unit tests; enabling
+        // them here would sprinkle floating returns through visibly clear air.
         atmosphere: LidarAtmosphere {
-            fog_extinction_per_m: 0.001,
-            rain_rate_mm_h: 1.5,
-            dust_density_mg_m3: 0.4,
+            fog_extinction_per_m: 0.000_2,
+            rain_rate_mm_h: 0.0,
+            dust_density_mg_m3: 0.2,
             snow_rate_mm_h: 0.0,
         },
         domain_randomization: LidarDomainRandomization {
-            fog_extinction_range_per_m: [0.0, 0.002],
-            rain_rate_range_mm_h: [0.0, 2.5],
-            dust_density_range_mg_m3: [0.0, 0.8],
+            fog_extinction_range_per_m: [0.0, 0.000_4],
+            rain_rate_range_mm_h: [0.0, 0.0],
+            dust_density_range_mg_m3: [0.0, 0.4],
             snow_rate_range_mm_h: [0.0, 0.0],
         },
         ..LidarSpec::default()
@@ -2219,17 +2243,18 @@ fn append_lidar_intensity_overlay(scene: &mut RenderScene, frame: &CityLidarFram
         DebugMeshBuilder::default(),
         DebugMeshBuilder::default(),
     ];
-    // Bin thresholds follow the radiometric scale: weak far returns, ordinary diffuse
-    // surfaces, and near-saturation retroreflective hits.
+    // Bin thresholds follow the radiometric scale of this scene: distant grazing
+    // ground returns are dim, the near ground rings and side walls sit in the middle,
+    // and close facades plus retroreflective plates carry the strong bin.
     for (point, intensity) in frame
         .cloud
         .points_m
         .iter()
         .zip(frame.cloud.intensities.iter().copied())
     {
-        let bin = if intensity < 0.05 {
+        let bin = if intensity < 0.02 {
             0
-        } else if intensity < 0.30 {
+        } else if intensity < 0.06 {
             1
         } else {
             2
@@ -2237,7 +2262,9 @@ fn append_lidar_intensity_overlay(scene: &mut RenderScene, frame: &CityLidarFram
         // A 16-channel cloud is dense, so markers stay small to keep returns legible.
         bins[bin].add_point_marker(*point, 0.11);
     }
-    let beam_channel = LIDAR_CHANNEL_COUNT / 2;
+    // A slightly downward channel (-7 deg) so the drawn beams terminate on the
+    // nearby ground ring instead of running to the horizon.
+    let beam_channel = LIDAR_CHANNEL_COUNT / 4;
     for (((point, ray_index), return_index), channel) in frame
         .cloud
         .points_m
@@ -3808,7 +3835,7 @@ mod tests {
             true,
         );
         assert_eq!(forward_lidar.stable_hash, reverse_lidar.stable_hash);
-        assert_eq!(forward_lidar.stable_hash, 7_688_105_174_862_316_538);
+        assert_eq!(forward_lidar.stable_hash, 17_799_227_134_853_352_305);
         assert_eq!(forward_lidar.total_returns, reverse_lidar.total_returns);
         assert_eq!(forward_lidar.multi_returns, reverse_lidar.multi_returns);
         assert_eq!(

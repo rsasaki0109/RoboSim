@@ -8,15 +8,24 @@ headless CI, and real wgpu rendering.
 
 <p align="center">
   <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-lidar.png">
+    <img src="docs/media/plateau-lidar.gif" alt="Physics-aware 16-channel LiDAR rings sweeping official PLATEAU Sanjo city traffic from a moving vehicle, with onboard camera color and depth insets" width="960">
+  </picture>
+  <br>
+  <sub>Physics-aware sensing over official PLATEAU Sanjo City data: a 16-channel spinning LiDAR paints its concentric elevation rings across ground, buildings, and 99 deterministic traffic vehicles — inverse-square radiometry, material response, multi-returns, and retroreflective saturation, 546,615 returns in one 12-second wgpu capture (stable hash <code>6321383548646989021</code>). The insets are the same vehicle's RGB-D camera with lens distortion, rolling shutter, auto exposure, and sensor noise. The mount rides a dynamic-bicycle chassis; everything replays bit-identically from one seed.</sub>
+</p>
+
+RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
+embodied AI, synthetic sensor data, and policy evaluation.
+
+<p align="center">
+  <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
     <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object" width="960">
   </picture>
   <br>
   <sub>Real capture: the detailed <code>mm_mobile</code> URDF robot drives, grasps a physics cube with its two-finger gripper, carries it ~2.5&nbsp;m, and drops it on the tray — one deterministic wgpu run, no keyframes, no object teleports. (<a href="docs/media/rne-hero.json">how it's made</a> · <a href="docs/media/generate-hero.sh">regenerate</a>)</sub>
 </p>
-
-RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
-embodied AI, synthetic sensor data, and policy evaluation.
 
 ## PLATEAU city tiles
 
@@ -77,14 +86,13 @@ deterministic from the same `WorldRandom` stream. The two insets are that sensor
 real output, not a clean render, and the depth ramp reuses the LiDAR intensity
 legend.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-lidar.png">
-    <img src="docs/media/plateau-lidar.gif" alt="Physics-aware LiDAR returns from a moving vehicle in official PLATEAU Sanjo traffic" width="960">
-  </picture>
-  <br>
-  <sub>Real 12-second/144-frame wgpu capture of 285,718 material-aware, incidence-aware, weather-attenuated LiDAR returns across 16 elevation channels (19,375 later returns, 514 saturated retroreflective returns; stable scan hash <code>1015973553409876591</code>) plus a vehicle-mounted RGB-D camera with lens distortion, rolling shutter, auto exposure and sensor noise (stable hash <code>10455576295794772416</code>). The sensors ride a dynamic-bicycle chassis chasing its kinematic traffic ghost (max deviation 0.19 m), while the other 99 deterministic vehicles keep the untouched traffic contract.</sub>
-</p>
+The capture is shown at the top of this page: 546,615 returns over 144 frames
+(63,009 later returns, 530 saturated retroreflective hits; stable scan hash
+<code>6321383548646989021</code>), with the onboard RGB-D camera composited as the
+two insets (stable hash <code>10455576295794772416</code>). The sensors ride a
+dynamic-bicycle chassis chasing its kinematic traffic ghost (max deviation
+0.19 m), while the other 99 deterministic vehicles keep the untouched traffic
+contract.
 
 ```bash
 cargo run -p rne_plateau_import -- path/to/tile.gml \

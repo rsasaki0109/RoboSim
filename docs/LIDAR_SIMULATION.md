@@ -190,7 +190,7 @@ cast from the interpolated pose of the moving host vehicle.
 The headless acceptance test captures twelve frames twice with opposite
 traffic-collider spawn order and requires:
 
-- stable hash `7688105174862316538`;
+- stable hash `17799227134853352305`;
 - identical point, multiple-return, and saturated-return counts;
 - aligned point attributes;
 - at least one transmitted later return;
@@ -204,9 +204,18 @@ multiple-return count, saturated-return count, mean intensity, scan duration,
 stable hash, traffic safety KPIs, and measured scan throughput. Its wgpu output
 uses three intensity color bands and writes `docs/media/plateau-lidar.gif` plus
 the reduced-motion `docs/media/plateau-lidar.png` poster. The committed
-144-frame capture contains 285,718 returns, including 19,375 later returns and
-514 saturated returns, with mean normalized intensity `0.097`, a per-scan
-duration of `0.0831 s`, and stable full-capture hash `1015973553409876591`.
+144-frame capture contains 546,615 returns, including 63,009 later returns and
+530 saturated returns, with mean normalized intensity `0.061`, a per-scan
+duration of `0.0831 s`, and stable full-capture hash `6321383548646989021`.
+
+The capture world adds a large ground-plane collider with a dim diffuse grass
+material under the whole tile: the imported road surfaces only cover the
+carriageway, and without ground everywhere the downward elevation channels
+return nothing over grass and sidewalks, leaving the signature concentric
+rings as a partial crescent. The atmosphere matches the rendered clear sunny
+day — trace haze and dust, no precipitation, no aerosol backscatter — so no
+returns float in visibly clear air; rain and backscatter remain covered by the
+`rne_sensor` unit tests.
 
 The mount rides a [dynamic-bicycle](VEHICLE_DYNAMICS.md) chassis rather than the
 kinematic traffic actor itself: the tracked vehicle's traffic trajectory becomes
