@@ -27,7 +27,10 @@ fn run() -> anyhow::Result<()> {
     match command.as_str() {
         "ci" => ci(),
         "ci-lint" => ci_lint(),
-        "ci-test" => ci_test(),
+        "ci-test" => match args.next() {
+            Some(partition) => ci_test_partition(Some(&partition)),
+            None => ci_test(),
+        },
         "ci-smoke" => ci_smoke(),
         "ci-rl" => ci_rl(),
         "ci-ros2" => ci_ros2(),
@@ -155,9 +158,36 @@ fn ci_lint() -> anyhow::Result<()> {
 
 /// Workspace tests, optional Pinocchio goldens, and asset validation.
 fn ci_test() -> anyhow::Result<()> {
-    run_step("cargo test --workspace")?;
-    pinocchio_golden_optional()?;
-    validate_repo_assets()
+    ci_test_partition(None)
+}
+
+/// Workspace tests, optionally as one deterministic nextest partition.
+///
+/// `partition` is `PART/TOTAL`, forwarded to `cargo nextest run --partition
+/// hash:PART/TOTAL` so CI can shard the long-running episode suites across parallel
+/// jobs. Without a partition (the local `ci` path) plain `cargo test` runs, so
+/// contributors do not need nextest installed. The repository has no doctests, so
+/// nextest's lack of doctest support loses no coverage; the asset checks run only on
+/// the first partition to avoid duplicating them per shard.
+fn ci_test_partition(partition: Option<&str>) -> anyhow::Result<()> {
+    match partition {
+        None => run_step("cargo test --workspace")?,
+        Some(spec) => {
+            anyhow::ensure!(
+                spec.split('/').count() == 2
+                    && spec.split('/').all(|part| part.parse::<u32>().is_ok()),
+                "partition must be PART/TOTAL, got {spec}"
+            );
+            run_step(&format!(
+                "cargo nextest run --workspace --partition hash:{spec}"
+            ))?;
+        }
+    }
+    if partition.is_none_or(|spec| spec.starts_with("1/")) {
+        pinocchio_golden_optional()?;
+        validate_repo_assets()?;
+    }
+    Ok(())
 }
 
 /// Example smokes and media checks.
