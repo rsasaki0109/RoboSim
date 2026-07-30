@@ -574,6 +574,87 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Applies a velocity-equivalent impulse to a named rigid body.
+    ///
+    /// Works for plain dynamic bodies. Links of a Rapier multibody derive their
+    /// velocities from the articulation's generalized joint state and do not respond
+    /// to body-level forces or velocity writes; disturb those with
+    /// [`Self::displace_named_body_m`] instead. Returns false when the delta is
+    /// non-finite or the named entity has no body in the physics world.
+    pub fn add_named_body_velocity_m_s(&mut self, name: &str, delta_m_s: [f64; 3]) -> bool {
+        if delta_m_s.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        self.backend.apply_velocity_impulse(
+            self.physics_world,
+            entity,
+            rne_math::Vec3::new(delta_m_s[0], delta_m_s[1], delta_m_s[2]),
+        )
+    }
+
+    /// Tilts a named root rigid body about a world-frame axis, preserving velocities.
+    ///
+    /// This is the disturbance that genuinely upsets an articulated robot: unlike a
+    /// root translation — which forward kinematics turns into a whole-tree teleport
+    /// that moves the feet with the body — a rotation changes the contact
+    /// configuration. Feet on one side press into the ground while the other side
+    /// lifts, and gravity plus the contact solver produce real tipping dynamics the
+    /// controller must catch. Returns false when the axis-angle is non-finite or the
+    /// named entity is not a root rigid body.
+    pub fn tilt_named_body_rad(&mut self, name: &str, axis_angle_rad: [f64; 3]) -> bool {
+        if axis_angle_rad.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        if self.world.get::<Parent>(entity).is_some()
+            || self.world.get::<RigidBody>(entity).is_none()
+        {
+            return false;
+        }
+        let axis_angle =
+            rne_math::Vec3::new(axis_angle_rad[0], axis_angle_rad[1], axis_angle_rad[2]);
+        let angle = axis_angle.length();
+        if angle <= f64::EPSILON {
+            return true;
+        }
+        let rotation = rne_math::Quat::from_axis_angle(axis_angle / angle, angle);
+        let mut transform = world_transform_of(&self.world, entity);
+        transform.rotation = (rotation * transform.rotation).normalize();
+        self.world.entity_mut(entity).insert(transform);
+        true
+    }
+
+    /// Displaces a named rigid body by an offset, preserving its velocities.
+    ///
+    /// This is the deterministic disturbance primitive that works for articulated
+    /// bodies: the articulation accepts a root pose change through the regular ECS
+    /// synchronization, so a lateral shove is a step change in position applied at an
+    /// explicit simulation step. Unlike [`Self::set_named_body_translation_m`] the
+    /// body keeps its momentum. Returns false when the offset is non-finite or the
+    /// named entity is not a root rigid body.
+    pub fn displace_named_body_m(&mut self, name: &str, offset_m: [f64; 3]) -> bool {
+        if offset_m.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        if self.world.get::<Parent>(entity).is_some()
+            || self.world.get::<RigidBody>(entity).is_none()
+        {
+            return false;
+        }
+        let mut transform = world_transform_of(&self.world, entity);
+        transform.translation += rne_math::Vec3::new(offset_m[0], offset_m[1], offset_m[2]);
+        self.world.entity_mut(entity).insert(transform);
+        true
+    }
+
     /// Switches a named rigid body between kinematic following and dynamic simulation.
     ///
     /// Velocities are cleared on every transition so releasing a pose-followed
@@ -1546,6 +1627,7 @@ mod tests {
                 stride_rad: 0.0,
                 foot_lift_rad: 0.0,
                 cycle_steps: 90,
+                ..UnitreeGo2GaitCommand::default()
             },
         );
         for _ in 0..120 {

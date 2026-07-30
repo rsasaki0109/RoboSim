@@ -9,6 +9,21 @@ const SETTLE_STEPS: u64 = 120;
 const NOMINAL_HEIGHT_M: f64 = 0.23;
 const FALLEN_HEIGHT_M: f64 = 0.12;
 
+/// A deterministic shove applied to the Go2 base during an episode.
+///
+/// Expressed as a roll tilt about the body's forward axis. Rapier multibody links do
+/// not respond to body-level forces or velocity writes, and a root translation
+/// teleports the whole tree feet-included; a rotation instead changes the contact
+/// configuration — feet on one side press into the ground, the other side lifts —
+/// which produces the tipping dynamics a balance controller must catch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2Push {
+    /// Controlled step at which the shove lands.
+    pub step: u64,
+    /// Roll tilt about the body forward axis, in radians.
+    pub roll_tilt_rad: f64,
+}
+
 /// Configuration for the official Unitree Go2 trot episode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnitreeGo2EpisodeConfig {
@@ -20,6 +35,8 @@ pub struct UnitreeGo2EpisodeConfig {
     pub cycle_steps: u64,
     /// Maximum relative pitch/roll magnitude before termination in radians.
     pub max_tilt_rad: f64,
+    /// Optional disturbance shove; `None` reproduces the undisturbed episode exactly.
+    pub push: Option<UnitreeGo2Push>,
 }
 
 impl Default for UnitreeGo2EpisodeConfig {
@@ -29,6 +46,7 @@ impl Default for UnitreeGo2EpisodeConfig {
             max_steps: 600,
             cycle_steps: 90,
             max_tilt_rad: 1.2,
+            push: None,
         }
     }
 }
@@ -40,6 +58,13 @@ pub struct UnitreeGo2Action {
     pub stride_rad: f64,
     /// Swing-leg calf flexion in radians, clamped to `[0, 0.4]`.
     pub foot_lift_rad: f64,
+    /// Hip-abduction posture correction in radians, clamped to `[-0.35, 0.35]`.
+    ///
+    /// A balance controller feeds measured body roll back through this term; the
+    /// open-loop trot leaves it at zero.
+    pub roll_correction_rad: f64,
+    /// Thigh-pitch posture correction in radians, clamped to `[-0.3, 0.3]`.
+    pub pitch_correction_rad: f64,
 }
 
 impl Default for UnitreeGo2Action {
@@ -47,6 +72,8 @@ impl Default for UnitreeGo2Action {
         Self {
             stride_rad: 0.12,
             foot_lift_rad: 0.16,
+            roll_correction_rad: 0.0,
+            pitch_correction_rad: 0.0,
         }
     }
 }
@@ -168,10 +195,27 @@ impl Episode for UnitreeGo2Episode {
 
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let before = self.sim.observe();
+        // The disturbance lands before the control targets apply, exactly like a
+        // shove that arrives between two controller ticks.
+        if let Some(push) = self.config.push {
+            if push.step == self.step_in_episode {
+                // Tilt about the body X axis: physically the lateral lean, which this
+                // observation convention reports on `base_relative_pitch_rad`, and
+                // exactly the axis the hip-abduction correction actuates.
+                if let Some(pose) = self.sim.named_transform("base") {
+                    let axis = (pose.rotation * rne_math::Vec3::X).normalize_or_zero();
+                    let axis_angle = axis * push.roll_tilt_rad;
+                    self.sim
+                        .tilt_named_body_rad("base", [axis_angle.x, axis_angle.y, axis_angle.z]);
+                }
+            }
+        }
         let command = UnitreeGo2GaitCommand {
             stride_rad: action.stride_rad.clamp(0.0, 0.3),
             foot_lift_rad: action.foot_lift_rad.clamp(0.0, 0.4),
             cycle_steps: self.config.cycle_steps,
+            roll_correction_rad: action.roll_correction_rad.clamp(-0.35, 0.35),
+            pitch_correction_rad: action.pitch_correction_rad.clamp(-0.3, 0.3),
         };
         self.sim
             .step_joint_position_targets(&unitree_go2_trot_targets(self.step_in_episode, command));
@@ -215,6 +259,7 @@ fn settle(sim: &mut UrdfSceneSim, cycle_steps: u64) {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
             cycle_steps,
+            ..UnitreeGo2GaitCommand::default()
         },
     );
     for _ in 0..SETTLE_STEPS {
@@ -248,5 +293,225 @@ mod tests {
         assert!(!last.terminated);
         assert!(total_reward > 0.0);
         assert!(last.observation.gait_phase > 0.0);
+    }
+
+    /// Outcome of one pushed trot run.
+    struct PushOutcome {
+        fell: bool,
+        max_tilt_rad: f64,
+        steps_survived: u64,
+    }
+
+    fn run_pushed_trot(
+        push_roll_tilt_rad: f64,
+        mut controller: impl FnMut(&UnitreeGo2Observation) -> UnitreeGo2Action,
+    ) -> PushOutcome {
+        let config = UnitreeGo2EpisodeConfig {
+            max_steps: 420,
+            push: Some(UnitreeGo2Push {
+                step: 180,
+                roll_tilt_rad: push_roll_tilt_rad,
+            }),
+            ..Default::default()
+        };
+        let mut episode = UnitreeGo2Episode::new(config).expect("pushed Go2 episode");
+        let mut observation = episode.reset().observation;
+        let mut max_tilt_rad = 0.0_f64;
+        let mut steps_survived = 0;
+        loop {
+            let step = episode.step(controller(&observation));
+            observation = step.observation;
+            max_tilt_rad = max_tilt_rad.max(
+                observation
+                    .base_relative_pitch_rad
+                    .hypot(observation.base_relative_roll_rad),
+            );
+            steps_survived += 1;
+            if step.terminated {
+                return PushOutcome {
+                    fell: true,
+                    max_tilt_rad,
+                    steps_survived,
+                };
+            }
+            if step.truncated {
+                return PushOutcome {
+                    fell: false,
+                    max_tilt_rad,
+                    steps_survived,
+                };
+            }
+        }
+    }
+
+    fn open_loop(_: &UnitreeGo2Observation) -> UnitreeGo2Action {
+        UnitreeGo2Action::default()
+    }
+
+    /// Proportional-derivative posture feedback from the measured base attitude.
+    fn posture_feedback_with(
+        roll_gain: f64,
+    ) -> impl Fn(&UnitreeGo2Observation) -> UnitreeGo2Action {
+        move |observation| {
+            let roll = observation.base_relative_roll_rad;
+            let roll_rate = observation.base_angular_velocity_rad_s[0];
+            UnitreeGo2Action {
+                roll_correction_rad: roll_gain * (roll + 0.1 * roll_rate),
+                ..UnitreeGo2Action::default()
+            }
+        }
+    }
+
+    #[test]
+    fn axis_derivation_probe() {
+        // Two empirical measurements fix the feedback signs without guessing
+        // conventions: which observation axis a body-forward-axis tilt lands on, and
+        // which way a constant hip correction leans the standing body.
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        settle(&mut sim, 90);
+        let pose = sim.named_transform("base").expect("base pose");
+        // Empirically, rotation about the body X axis registers as relative PITCH in
+        // this observation convention, so the roll axis is the body Z axis.
+        let roll_axis = (pose.rotation * rne_math::Vec3::Z).normalize_or_zero();
+        assert!(sim.tilt_named_body_rad(
+            "base",
+            [roll_axis.x * 0.15, roll_axis.y * 0.15, roll_axis.z * 0.15]
+        ));
+        sim.step_joint_position_targets(&[]);
+        let tilted = sim.observe();
+        println!(
+            "body-roll tilt +0.15: rel_roll={:.3} rel_pitch={:.3}",
+            tilted.base_relative_roll_rad, tilted.base_relative_pitch_rad
+        );
+        // A body-forward-axis tilt must land on the relative roll observation.
+        assert!(
+            tilted.base_relative_roll_rad.abs() > 0.05,
+            "roll tilt must register on rel_roll, got {:.3}",
+            tilted.base_relative_roll_rad
+        );
+
+        // Which actuation pattern moves which observation axis? Measure uniform
+        // hip, uniform thigh, and front/back differential thigh on a standing robot.
+        let lean_of = |targets: [crate::env::urdf_scene::UrdfJointPositionTarget<'static>; 12]| {
+            let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+                .expect("load Go2 scene");
+            settle(&mut sim, 90);
+            for _ in 0..240 {
+                sim.step_joint_position_targets(&targets);
+            }
+            let observed = sim.observe();
+            (
+                observed.base_relative_roll_rad,
+                observed.base_relative_pitch_rad,
+            )
+        };
+
+        let uniform_hip = lean_of(unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+                roll_correction_rad: 0.2,
+                pitch_correction_rad: 0.0,
+            },
+        ));
+        println!(
+            "uniform hip +0.2: roll={:.3} pitch={:.3}",
+            uniform_hip.0, uniform_hip.1
+        );
+
+        let uniform_thigh = lean_of(unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+                roll_correction_rad: 0.0,
+                pitch_correction_rad: 0.2,
+            },
+        ));
+        println!(
+            "uniform thigh +0.2: roll={:.3} pitch={:.3}",
+            uniform_thigh.0, uniform_thigh.1
+        );
+
+        // Front/back differential thigh, hand-built.
+        let mut differential = unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+                roll_correction_rad: 0.0,
+                pitch_correction_rad: 0.0,
+            },
+        );
+        for target in differential.iter_mut() {
+            if target.link_name.ends_with("_thigh") {
+                let front = target.link_name.starts_with('F');
+                target.position += if front { 0.15 } else { -0.15 };
+            }
+        }
+        let differential_thigh = lean_of(differential);
+        println!(
+            "diff thigh F+0.15/R-0.15: roll={:.3} pitch={:.3}",
+            differential_thigh.0, differential_thigh.1
+        );
+
+        // Pin the measured actuation map the feedback pairing relies on: uniform
+        // hip abduction actuates the same axis a body-X tilt disturbs (labelled
+        // relative pitch by this observation), no leg pattern actuates the
+        // orthogonal rel_roll axis, and thigh offsets barely move the attitude.
+        assert!(
+            uniform_hip.1.abs() > 0.05,
+            "uniform hip must actuate the lean axis, got {:.3}",
+            uniform_hip.1
+        );
+        assert!(uniform_hip.0.abs() < 0.05);
+        assert!(uniform_thigh.0.abs() < 0.05 && uniform_thigh.1.abs() < 0.05);
+        assert!(differential_thigh.0.abs() < 0.05 && differential_thigh.1.abs() < 0.05);
+    }
+
+    #[test]
+    fn pushed_trot_registers_recovers_and_feedback_reduces_peak_lean() {
+        // A 0.4 rad lean is a hard shove; the scripted trot's stiff position motors
+        // and wide stance make it passively stable against instantaneous tilts, so
+        // the assertions pin the quantitative story rather than a staged fall: the
+        // disturbance registers fully, the robot recovers, correctly signed posture
+        // feedback strictly reduces the peak lean, and the wrong sign increases it.
+        let tilt = 0.40;
+        let open = run_pushed_trot(tilt, open_loop);
+        let corrected = run_pushed_trot(tilt, posture_feedback_with(1.2));
+        let inverted = run_pushed_trot(tilt, posture_feedback_with(-1.2));
+
+        // The tilt lands in full: peak lean reaches at least the applied angle.
+        assert!(
+            open.max_tilt_rad >= tilt,
+            "push did not register: {:.2}",
+            open.max_tilt_rad
+        );
+        // Passive stability: the open-loop trot survives to truncation.
+        assert!(!open.fell && open.steps_survived == 420);
+        // Correct feedback strictly improves the peak; inverted strictly worsens it.
+        assert!(
+            corrected.max_tilt_rad < open.max_tilt_rad,
+            "feedback must reduce peak lean: {:.3} vs {:.3}",
+            corrected.max_tilt_rad,
+            open.max_tilt_rad
+        );
+        assert!(
+            inverted.max_tilt_rad > open.max_tilt_rad,
+            "inverted feedback must worsen peak lean: {:.3} vs {:.3}",
+            inverted.max_tilt_rad,
+            open.max_tilt_rad
+        );
+        // Determinism: the same run reproduces bit-identically.
+        let again = run_pushed_trot(tilt, posture_feedback_with(1.2));
+        assert_eq!(
+            corrected.max_tilt_rad.to_bits(),
+            again.max_tilt_rad.to_bits()
+        );
     }
 }
