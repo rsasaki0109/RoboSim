@@ -12,7 +12,7 @@ headless CI, and real wgpu rendering.
     <img src="docs/media/plateau-lidar.gif" alt="Physics-aware 16-channel LiDAR rings sweeping official PLATEAU Sanjo city traffic from a moving vehicle, with onboard camera color and depth insets" width="960">
   </picture>
   <br>
-  <sub>Physics-aware sensing over official PLATEAU Sanjo City data: a 16-channel spinning LiDAR paints its concentric elevation rings across ground, buildings, and 99 deterministic traffic vehicles — inverse-square radiometry, material response, multi-returns, and retroreflective saturation, 546,615 returns in one 12-second wgpu capture (stable hash <code>6321383548646989021</code>). The insets are the same vehicle's RGB-D camera with lens distortion, rolling shutter, auto exposure, and sensor noise. The mount rides a dynamic-bicycle chassis; everything replays bit-identically from one seed.</sub>
+  <sub>Physics-aware sensing over official PLATEAU Sanjo City data: a 16-channel spinning LiDAR paints its concentric elevation rings across ground, buildings, and 99 deterministic traffic vehicles — inverse-square radiometry, material response, multi-returns, and retroreflective saturation, 1,092,806 returns in one 12-second wgpu capture (stable hash <code>16814780024698753365</code>). The insets are the same vehicle's RGB-D camera with lens distortion, rolling shutter, auto exposure, and sensor noise. The mount rides a dynamic-bicycle chassis; everything replays bit-identically from one seed.</sub>
 </p>
 
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
@@ -74,8 +74,9 @@ footprint is integrated so silhouettes produce mixed pixels; fog, rain, dust, an
 snow attenuate, backscatter, and occlude; and the scanner sweeps a full
 revolution per frame, so each azimuth column is cast from the moving vehicle's
 interpolated pose and every point carries its own emission time. All
-randomization derives from `WorldRandom`. Blue, green, and yellow points show
-increasing normalized return intensity.
+randomization derives from `WorldRandom`. The cloud is colored with the turbo
+intensity colormap real point-cloud viewers use: deep blue for dim grazing
+returns through green and orange to red for saturated retroreflective hits.
 
 The same vehicle carries a forward RGB-D camera that is modeled to the same
 standard. Brown-Conrady barrel distortion resamples both color and depth, an
@@ -86,9 +87,9 @@ deterministic from the same `WorldRandom` stream. The two insets are that sensor
 real output, not a clean render, and the depth ramp reuses the LiDAR intensity
 legend.
 
-The capture is shown at the top of this page: 546,615 returns over 144 frames
-(63,009 later returns, 530 saturated retroreflective hits; stable scan hash
-<code>6321383548646989021</code>), with the onboard RGB-D camera composited as the
+The capture is shown at the top of this page: 1,092,806 returns over 144 frames
+(125,734 later returns, 1,064 saturated retroreflective hits; stable scan hash
+<code>16814780024698753365</code>), with the onboard RGB-D camera composited as the
 two insets (stable hash <code>10455576295794772416</code>). The sensors ride a
 dynamic-bicycle chassis chasing its kinematic traffic ghost (max deviation
 0.19 m), while the other 99 deterministic vehicles keep the untouched traffic
@@ -140,14 +141,9 @@ seconds while its IMU is integrated with a textbook strapdown update and nothing
 corrects the result — the gap that opens up is exactly what the sensor model
 produces.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/imu-dead-reckoning.png">
-    <img src="docs/media/imu-dead-reckoning.gif" alt="Unaided IMU dead reckoning drifting away from ground truth along a circular track" width="960">
-  </picture>
-  <br>
-  <sub>Green is ground truth, orange is the unaided inertial estimate, and the red link is the live position error. Over 96.0 m the modeled consumer-grade MEMS IMU drifts <code>5.54 m</code> (5.8 % of distance) while an ideal <code>ImuSpec::default()</code> integrates back to within <code>0.160 m</code> — that 0.17 % bounds how much of the run is numerical rather than physical.</sub>
-</p>
+**[Watch the drift GIF](docs/media/imu-dead-reckoning.gif)** — green is ground
+truth, orange the unaided estimate, red the live error: `5.54 m` over 96.0 m
+(5.8 % of distance) for the modeled MEMS IMU, `0.160 m` for the ideal one.
 
 ```bash
 cargo run --release -p imu_dead_reckoning --example 48_imu_dead_reckoning
@@ -204,14 +200,9 @@ initial offset (±1.5 m), and steering actuator lag (50–180 ms), on both plant
 | kinematic | 0.507 ± 0.066 m | 0 % | 0 / 10 |
 | dynamic | 5.03 ± 2.29 m | 59 % | 7 / 10 |
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/control-eval.png">
-    <img src="docs/media/control-eval.gif" alt="Ten randomized seeds of the same pure-pursuit controller fanning out over the course on the dynamic plant" width="960">
-  </picture>
-  <br>
-  <sub>Ten seeds, one controller. On the entry straight every trail overlaps; through the corner friction and actuator-lag differences fan them out. The no-slip plant reports a competent controller; the dynamic plant exposes what it lacks — no slowdown before the corner, no lag compensation. The <code>±2.29 m</code> spread is why multi-seed evaluation exists.</sub>
-</p>
+**[Watch the ten-seed fan GIF](docs/media/control-eval.gif)** — every trail
+overlaps on the entry straight; friction and actuator-lag differences fan them
+out through the corner. The `±2.29 m` spread is why multi-seed evaluation exists.
 
 ```bash
 cargo run --release -p control_eval_demo --example 50_control_eval
@@ -236,14 +227,9 @@ result has the shape feedback delay really has — a threshold, not a linear tax
 | 120 ms | 0.460 m | yes |
 | 240 ms | 2.05 m | **never** |
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/latency-loop.png">
-    <img src="docs/media/latency-loop.gif" alt="Three identical control loops fed pose feedback at increasing latency; the heavily delayed loop oscillates across the course" width="960">
-  </picture>
-  <br>
-  <sub>Same vehicle, same controller, same course — only the age of the pose feedback differs. Green (0 ms) and amber (120 ms) sit inside the loop's phase margin and overlap; red (240 ms) covers most of the 5 m lookahead before its feedback arrives and weaves across the line for the whole run.</sub>
-</p>
+**[Watch the latency GIF](docs/media/latency-loop.gif)** — green (0 ms) and
+amber (120 ms) overlap inside the phase margin; red (240 ms) covers most of the
+5 m lookahead before its feedback arrives and weaves across the line all run.
 
 ```bash
 cargo run --release -p latency_in_the_loop --example 51_latency_in_the_loop
