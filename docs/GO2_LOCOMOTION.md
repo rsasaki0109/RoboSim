@@ -222,10 +222,17 @@ the trajectory is locally contracting, an attractor rather than a knife edge
 (`robust_torque_turn_survives_perturbation` pins both the turn and the
 contraction).
 
-The limit of what was bought, also measured: contraction holds at the ulp
+The limits of what was bought, also measured. Contraction holds at the ulp
 scale the objective sampled, but a 10⁻⁶ coefficient change is still a
 different trajectory (`--ensemble` prints the spread for both winners), so
-the 12-decimal pinning discipline stays. Parameter-scale robustness — a turn
-that survives *gait-level* variation — is a different objective for a later
-search. The other openings are unchanged: aerial-duty gaits, foot
-geometry/friction, and state-feedback torque policies.
+the 12-decimal pinning discipline stays. And a *persistent* per-step
+perturbation — running the identical binary against a different OS libm —
+settles the walk onto a nearby orbit rather than the same one: Linux CI
+measures +0.146/+0.121 where Windows measures +0.250/+0.274. Both windows
+stay positive on both platforms (the fragile winner categorically fails
+that bar — its second window reverses), so the cross-platform guarantee is
+the sustained turn itself, while its exact rate is platform-local.
+Parameter-scale robustness — a turn that survives *gait-level* variation —
+is a different objective for a later search. The other openings are
+unchanged: aerial-duty gaits, foot geometry/friction, and state-feedback
+torque policies.
