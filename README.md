@@ -258,10 +258,12 @@ cargo run --release -p go2_fall_vs_save --example 52_go2_fall_vs_save
 the same push with no controller on either side: the slow trot capsizes while
 the fast walking trot shrugs it off, because cyclic foot replanting is itself a
 stabilizer. [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md) holds the full
-measurement campaign: speed maps, the six-way steering null result, and a
-deterministic cross-entropy search whose anti-cheat objective produced the
-platform's first genuinely sustained (if small) learned turn — and the measured
-case that practical steering needs contact-schedule control.
+measurement campaign: speed maps, nine hand-designed steering nulls across two
+actuation regimes, three position-space searches that plateau at ~0.02 rad/s —
+and the torque-level actuation pathway that finally breaks that plateau: a
+low-bandwidth torque PD walks the trot, and a contact-gated feed-forward torque
+search turns at 0.038 rad/s where no joint-space control could — along with the
+measured chaos horizon that bounds what any single trajectory can claim.
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
 pipeline. Its dynamic multibody scene includes self-collision filtering, 12

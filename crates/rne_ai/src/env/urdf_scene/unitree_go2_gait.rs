@@ -173,6 +173,170 @@ pub fn unitree_go2_trot_targets_with_overlay(
     targets
 }
 
+/// Contact-gated Fourier feed-forward *torque* overlay on the torque-PD walk.
+///
+/// This is the force-level mirror of [`UnitreeGo2GaitOverlay`]: for every joint
+/// it adds `g·(stance gate) + c + s₁·sin(2π·p) + k₁·cos(2π·p) + s₂·sin(π·p) +
+/// k₂·cos(π·p)` newton-meters of feed-forward torque on top of the tracking
+/// PD, where `p` is the two-cycle gait phase and the stance gate is the leg's
+/// *measured* foot contact — a coupling to the actual contact state that no
+/// position-space overlay can express. Nine hand-designed steering mechanisms
+/// across both actuation regimes produce no sustained yaw on this platform
+/// (see `docs/GO2_LOCOMOTION.md`); the twelve joints × six coefficients give
+/// the 72-dimensional space the torque-space search runs in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2TorqueOverlay {
+    /// Per-joint `[stance_const, constant, sin, cos, half_sin, half_cos]`
+    /// torque coefficients in N·m; legs ordered FL, FR, RL, RR, joints ordered
+    /// hip, thigh, calf within each leg.
+    pub coefficients: [[f64; 6]; 12],
+}
+
+impl UnitreeGo2TorqueOverlay {
+    /// The neutral overlay: reproduces the plain torque-PD walk exactly.
+    pub const ZERO: Self = Self {
+        coefficients: [[0.0; 6]; 12],
+    };
+
+    /// A turning gait found by deterministic cross-entropy search (seed 42,
+    /// `examples/56_go2_torque_turn -- --train`) on the torque-PD walking trot.
+    ///
+    /// This is the measurement the torque arc exists for: three position-space
+    /// searches and a five-fold torque scan all plateaued at ~0.02 rad/s, which
+    /// localized the steering boundary in the contact mechanics under hard
+    /// position servos. This overlay sustains ~0.034 rad/s — above every
+    /// position-space result — while the robot keeps walking, by shaping
+    /// stance-leg torques the servos could never express;
+    /// `learned_torque_overlay_out_turns_the_position_plateau` pins it.
+    /// The coefficients are pinned at the search state's full 12-decimal
+    /// precision: the contact-gated rollout is chaotic enough that rounding
+    /// them to 6 decimals lands on a different (non-turning) trajectory.
+    pub const LEARNED_TURN: Self = Self {
+        coefficients: [
+            [
+                -1.327191630960,
+                -0.443702376317,
+                0.107819976633,
+                -0.171779321719,
+                -0.632204009006,
+                -0.049557599946,
+            ],
+            [
+                -0.932011779890,
+                -0.652217401467,
+                -0.935988874340,
+                -0.042604218599,
+                -0.298732599012,
+                -0.474388218727,
+            ],
+            [
+                -2.261866843812,
+                -0.707556500989,
+                1.509843263500,
+                -0.663352488635,
+                -0.218519778592,
+                0.525062510185,
+            ],
+            [
+                -0.501438491381,
+                -0.670995319983,
+                0.696193324812,
+                -0.417298785439,
+                -0.398595223810,
+                0.384560587744,
+            ],
+            [
+                0.374943544521,
+                -2.841783218489,
+                -0.178455015705,
+                -0.013116078914,
+                -0.616831677540,
+                -1.429023665516,
+            ],
+            [
+                -1.777217236609,
+                -0.268534735568,
+                -1.697381895963,
+                -0.454282621106,
+                -0.480144779936,
+                0.088435830409,
+            ],
+            [
+                -0.405104492760,
+                0.962020679169,
+                -0.102913928300,
+                -0.943228596202,
+                0.224753254702,
+                -1.117856295123,
+            ],
+            [
+                -0.247448823776,
+                -2.196627917665,
+                -0.423107552283,
+                -0.226034176651,
+                1.963312881826,
+                0.260406823170,
+            ],
+            [
+                -0.421418640647,
+                -0.840759197393,
+                0.061748964210,
+                -0.925564774779,
+                -0.744693016349,
+                1.936534693867,
+            ],
+            [
+                0.759346604287,
+                0.241073789704,
+                1.528121788456,
+                -1.112941656111,
+                -0.595139709508,
+                -0.998664941771,
+            ],
+            [
+                -0.487578942316,
+                0.258013847934,
+                0.425145137766,
+                -0.157244158329,
+                0.173974596728,
+                0.441134060631,
+            ],
+            [
+                0.718453115860,
+                -0.503509358315,
+                -0.008691286076,
+                -0.261935190200,
+                0.689870925884,
+                0.931042114500,
+            ],
+        ],
+    };
+
+    /// Feed-forward joint torques at a two-cycle gait phase in `[0, 1)` with
+    /// the measured per-leg stance gates (legs ordered FL, FR, RL, RR), each
+    /// clamped to ±8 N·m so no candidate can out-shout the tracking PD.
+    pub fn torques_nm(&self, two_cycle_phase: f64, stance: [bool; 4]) -> [f64; 12] {
+        let full = 4.0 * std::f64::consts::PI * two_cycle_phase;
+        let half = 2.0 * std::f64::consts::PI * two_cycle_phase;
+        let (sin, cos) = full.sin_cos();
+        let (half_sin, half_cos) = half.sin_cos();
+        let mut torques = [0.0; 12];
+        for (index, (torque, coefficient)) in
+            torques.iter_mut().zip(self.coefficients.iter()).enumerate()
+        {
+            let gate = if stance[index / 3] { 1.0 } else { 0.0 };
+            *torque = (coefficient[0] * gate
+                + coefficient[1]
+                + coefficient[2] * sin
+                + coefficient[3] * cos
+                + coefficient[4] * half_sin
+                + coefficient[5] * half_cos)
+                .clamp(-8.0, 8.0);
+        }
+        torques
+    }
+}
+
 fn gait_wave(phase: f64) -> (f64, f64) {
     gait_wave_with_duty(phase, 0.7)
 }

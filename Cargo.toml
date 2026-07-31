@@ -75,6 +75,7 @@ members = [
   "examples/53_go2_walk_vs_stand_push",
   "examples/54_go2_learned_turn",
   "examples/55_go2_stepped_turn",
+  "examples/56_go2_torque_turn",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

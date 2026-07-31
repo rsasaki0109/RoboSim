@@ -169,5 +169,44 @@ walk's drift, so any force-level steering signal must clear a noisier plant.
 Nine hand mechanisms across two actuation regimes now agree: this morphology
 does not steer through any single joint-space or torque-space channel. What
 remains is coordination — torque patterns coupled across legs and phase, which
-is a search problem, not a design problem. That search (the torque-space
-mirror of the overlay CEM) is the next measurement.
+is a search problem, not a design problem.
+
+## Breaking the plateau in torque space
+
+`examples/56_go2_torque_turn` runs that search: the same deterministic,
+resumable, parallel CEM harness, now over `UnitreeGo2TorqueOverlay` — per-joint
+contact-gated Fourier feed-forward torques (72 coefficients, ±8 N·m) added to
+the torque-PD walk, scored by the same anti-cheat two-window objective. The
+stance gate couples each term to the leg's *measured* foot contact, a coupling
+no position overlay can express.
+
+The search breaks the plateau — within a boundary the measurement itself
+revealed. The seed-42 winner (`UnitreeGo2TorqueOverlay::LEARNED_TURN`) turns
+at **0.038 rad/s** through the first measurement window (+0.304 rad over
+steps 480–960) while the robot keeps walking (2.9 m per 24 s, upright
+throughout). That window is *robust*: identical across coefficient
+perturbations at the 1e-9 scale and across operating systems, and a bounded
+elastic twist saturates before it opens, so the number is twist-proof. Every
+position-space result sat at or below 0.025 rad/s in the same window; shaping
+*when and how* stance torques act does what raw actuator force (the five-fold
+scan) could not (`learned_torque_overlay_out_turns_the_position_plateau` pins
+the comparison).
+
+The boundary: the compliant torque walk has a **chaos horizon of roughly
+16 s**. Beyond it, single-ulp differences — a 1e-9 coefficient nudge, or the
+libm rounding differences between operating systems — swing the second
+window's yaw by ±0.3 rad (measured ensemble: +0.27, +0.20, +0.11, −0.07
+across perturbations and platforms; `--ensemble` reproduces the spread). This
+is the third objective-gaming lesson of the campaign: *chaos games
+single-trajectory objectives*. A score read from one trajectory past the
+horizon is noise, so the pinned test asserts the robust window and pins the
+horizon itself (no catastrophic reversal), and the pinned coefficients carry
+the search state's full 12-decimal precision — 6-decimal rounding is already
+a different trajectory.
+
+The honest margins: 52 % over the old plateau in the robust window, not an
+order of magnitude, and provably sustained for 16 s rather than indefinitely.
+The concrete next steps this measurement sets up: ensemble-averaged
+objectives (score the median of perturbed replays, so the search must find
+*robust* turners), aerial-duty gaits, foot geometry/friction, and
+state-feedback torque policies.
