@@ -110,3 +110,38 @@ servos shed their tangential impulse in slip, and no joint-space pattern
 changes that. What remains genuinely untested: torque-level control (shaping
 contact forces instead of positions), aerial-duty gaits below 0.55, and foot
 geometry — the concrete openings for the full learned-locomotion arc.
+
+## Torque-level control
+
+The pathway the plateau points at now exists.
+`UrdfSceneSim::step_joint_torques` drives any subset of joints with feed-forward
+torques inside the real actuator envelope (23.7 N·m, 30.1 rad/s speed ceiling)
+while the rest stay position-held, and `named_joint_position` /
+`named_joint_velocity` read the reduced-coordinate joint state back in the same
+convention the position targets use — everything a closed-loop torque controller
+needs. Under the hood a force-capped velocity motor whose target sits at the
+actuator's speed ceiling *is* a torque source: the backend applies exactly the
+commanded magnitude below the ceiling and brakes with it above, with no new
+physics-backend machinery.
+
+Four pinned measurements establish that the servo constraint is genuinely gone
+(`unitree_go2_episode.rs`):
+
+- the readback agrees with the position-target convention on every standing
+  joint (`joint_state_readback_matches_the_position_convention`);
+- a ±8 N·m feed-forward on one calf moves it with the commanded sign while the
+  other eleven joints hold (`feed_forward_torque_moves_a_calf_with_the_commanded_sign`);
+- zero torque on all twelve joints collapses the stand — torque mode really
+  turns the servos off (`zero_torque_frees_every_joint_and_the_stand_collapses`);
+- a joint-space PD computed entirely in torque space (kp 25, kd 0.5) holds the
+  stand quietly — 0.212 m height, peak tilt 0.023 rad — and replays bit-exactly
+  (`torque_pd_holds_the_stand_and_replays_exactly`).
+
+The tuning boundary is itself a pinned result: at the 60 Hz control rate the
+explicit velocity feedback destabilizes once kd exceeds roughly `2·I/dt` for the
+light distal links — kd 1.0 turns the same quiet stand into a 0.56 rad thrash
+(kp 60–200 with kd 2–10, the classic position-servo-like gains, thrash harder
+still). Low-rate explicit torque control demands low-bandwidth gains; the
+implicit speed-ceiling brake is what keeps the light links bounded. Whether
+torque-shaped stance forces can finally beat the ~0.02 rad/s steering plateau is
+the next measurement.

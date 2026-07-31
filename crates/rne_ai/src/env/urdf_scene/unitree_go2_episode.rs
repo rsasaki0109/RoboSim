@@ -1027,4 +1027,206 @@ mod tests {
             again.max_tilt_rad.to_bits()
         );
     }
+
+    fn stand_targets() -> [crate::env::urdf_scene::UrdfJointPositionTarget<'static>; 12] {
+        unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                ..UnitreeGo2GaitCommand::default()
+            },
+        )
+    }
+
+    /// Official Go2 actuator speed ceiling in rad/s.
+    const GO2_JOINT_SPEED_LIMIT_RAD_S: f64 = 30.1;
+
+    /// A Go2 settled into a static stand on the default stiff position motors.
+    fn settled_stand() -> UrdfSceneSim {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
+        let stand = stand_targets();
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
+        sim
+    }
+
+    #[test]
+    fn joint_state_readback_matches_the_position_convention() {
+        // The reduced-coordinate readback must agree with the position-target
+        // convention on every joint of the settled stand — this is what makes
+        // closed-loop torque control possible at all.
+        let sim = settled_stand();
+        for target in stand_targets() {
+            let position = sim
+                .named_joint_position(target.link_name)
+                .expect("multibody joint position");
+            assert!(
+                (position - target.position).abs() < 0.15,
+                "{}: read {position:+.3} vs held target {:+.3}",
+                target.link_name,
+                target.position
+            );
+            let velocity = sim
+                .named_joint_velocity(target.link_name)
+                .expect("multibody joint velocity");
+            assert!(
+                velocity.abs() < 0.5,
+                "{}: settled joint should be near rest, velocity {velocity:+.3}",
+                target.link_name
+            );
+        }
+        assert_eq!(sim.named_joint_position("no_such_link"), None);
+        // The multibody root is not a single-DoF joint.
+        assert_eq!(sim.named_joint_position("base"), None);
+    }
+
+    #[test]
+    fn feed_forward_torque_moves_a_calf_with_the_commanded_sign() {
+        use super::super::UrdfJointTorqueTarget;
+
+        // Torque one calf while the other eleven joints stay position-held
+        // (unlisted joints keep their motor configuration). Eight newton-meters
+        // clears the stance gravity load in either direction, so the joint must
+        // move with the commanded sign.
+        let probe = |torque_nm: f64| {
+            let mut sim = settled_stand();
+            let start = sim.named_joint_position("FL_calf").expect("calf position");
+            for _ in 0..40 {
+                sim.step_joint_torques(&[UrdfJointTorqueTarget {
+                    link_name: "FL_calf",
+                    torque_nm,
+                    max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                }]);
+            }
+            sim.named_joint_position("FL_calf").expect("calf position") - start
+        };
+        let extended = probe(8.0);
+        let flexed = probe(-8.0);
+        println!("calf delta at +8 N*m: {extended:+.3}, at -8 N*m: {flexed:+.3}");
+        assert!(
+            extended > 0.03,
+            "positive torque must drive the calf positive, got {extended:+.3}"
+        );
+        assert!(
+            flexed < -0.03,
+            "negative torque must drive the calf negative, got {flexed:+.3}"
+        );
+    }
+
+    #[test]
+    fn zero_torque_frees_every_joint_and_the_stand_collapses() {
+        use super::super::UrdfJointTorqueTarget;
+
+        // Zero torque on all twelve joints must leave them genuinely free — the
+        // robot collapses under gravity, proving torque mode really turns the
+        // position servos off instead of falling back to a default motor.
+        let mut sim = settled_stand();
+        let standing_height = sim.observe().base_y_m;
+        assert!(
+            standing_height > 0.2,
+            "stand must start at height, got {standing_height:.3}"
+        );
+        let zero: Vec<UrdfJointTorqueTarget<'_>> = stand_targets()
+            .iter()
+            .map(|target| UrdfJointTorqueTarget {
+                link_name: target.link_name,
+                torque_nm: 0.0,
+                max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+            })
+            .collect();
+        for _ in 0..180 {
+            sim.step_joint_torques(&zero);
+        }
+        let height = sim.observe().base_y_m;
+        assert!(
+            height < 0.15,
+            "unpowered joints must collapse the stand, base height {height:.3}"
+        );
+    }
+
+    #[test]
+    fn torque_pd_holds_the_stand_and_replays_exactly() {
+        use super::super::UrdfJointTorqueTarget;
+
+        // Closed-loop control entirely in torque space: a joint-level PD
+        // computes feed-forward torques from the readback, clamped to the real
+        // 23.7 N*m actuator limit. This is the actuation pathway the measured
+        // steering plateau points at — the servo constraint is gone, and the
+        // contact forces are shaped by commanded torques alone.
+        // Returns (min height, end height, end tilt, max tilt) of a 360-step
+        // torque-PD stand. Tilt is yaw-invariant: the angle between the body
+        // direction that points up at the settled stand and world up (the Euler
+        // observations wrap between branches when the body yaws).
+        let run = |kp: f64, kd: f64| {
+            let mut sim = settled_stand();
+            let up_body = {
+                let pose = sim.named_transform("base").expect("base pose");
+                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+            };
+            let true_tilt = |sim: &UrdfSceneSim| {
+                let pose = sim.named_transform("base").expect("base pose");
+                let up = (pose.rotation * up_body).normalize_or_zero();
+                up.y.clamp(-1.0, 1.0).acos()
+            };
+            let stand = stand_targets();
+            let mut min_height = f64::MAX;
+            let mut max_tilt = 0.0_f64;
+            for _ in 0..360 {
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = stand
+                    .iter()
+                    .map(|target| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (kp * (target.position - q) - kd * qd).clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                min_height = min_height.min(sim.observe().base_y_m);
+                max_tilt = max_tilt.max(true_tilt(&sim));
+            }
+            let end_height = sim.observe().base_y_m;
+            (min_height, end_height, true_tilt(&sim), max_tilt)
+        };
+
+        let (min_height, end_height, end_tilt, max_tilt) = run(25.0, 0.5);
+        println!(
+            "torque PD stand kp=25 kd=0.5: min_height {min_height:.3} end_height {end_height:.3} end_tilt {end_tilt:.3} max_tilt {max_tilt:.3}"
+        );
+        assert!(
+            min_height > 0.18 && end_height > 0.2,
+            "torque PD must keep the robot standing: min {min_height:.3} end {end_height:.3}"
+        );
+        assert!(
+            max_tilt < 0.1,
+            "torque PD stand must stay level throughout, max tilt {max_tilt:.3}"
+        );
+
+        // The stability boundary is the *velocity* feedback: at 60 Hz an
+        // explicit kd larger than roughly 2I/dt for the light distal links
+        // turns damping into excitation. Doubling kd must destabilize the same
+        // stand — the discrete-rate lesson pinned so it cannot rot.
+        let (_, _, _, overdamped_max_tilt) = run(25.0, 1.0);
+        println!("overdamped kd=1 max tilt: {overdamped_max_tilt:.3}");
+        assert!(
+            overdamped_max_tilt > 3.0 * max_tilt,
+            "explicit damping past the discrete stability bound must destabilize: {overdamped_max_tilt:.3} vs {max_tilt:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_min, again_end, _, _) = run(25.0, 0.5);
+        assert_eq!(min_height.to_bits(), again_min.to_bits());
+        assert_eq!(end_height.to_bits(), again_end.to_bits());
+    }
 }
