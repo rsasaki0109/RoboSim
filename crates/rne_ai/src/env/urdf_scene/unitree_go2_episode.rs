@@ -1405,6 +1405,107 @@ mod tests {
     }
 
     #[test]
+    fn learned_torque_overlay_out_turns_the_position_plateau() {
+        use super::super::{UnitreeGo2TorqueOverlay, UrdfJointTorqueTarget};
+
+        // The measurement the torque arc exists for. Three position-space
+        // searches and a five-fold torque scan plateaued at ~0.02 rad/s and
+        // localized the steering boundary in the contact mechanics under hard
+        // position servos. The CEM-found contact-gated torque overlay
+        // (examples/56_go2_torque_turn --train, seed 42) sustains ~0.034 rad/s
+        // — above every position-space result — while the robot keeps walking:
+        // force-level coordination genuinely moves the boundary joint-space
+        // control could not.
+        let run = |overlay: &UnitreeGo2TorqueOverlay| {
+            let mut sim = settled_stand();
+            let up_body = {
+                let pose = sim.named_transform("base").expect("base pose");
+                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+            };
+            let true_tilt = |sim: &UrdfSceneSim| {
+                let pose = sim.named_transform("base").expect("base pose");
+                let up = (pose.rotation * up_body).normalize_or_zero();
+                up.y.clamp(-1.0, 1.0).acos()
+            };
+            let start = sim.observe();
+            let mut previous_yaw = start.base_relative_yaw_rad;
+            let mut window_a = 0.0;
+            let mut window_b = 0.0;
+            let mut max_tilt = 0.0_f64;
+            let mut min_height = f64::MAX;
+            let cycle = fast_walk_command().cycle_steps;
+            for step in 0..1440_u64 {
+                let targets = unitree_go2_trot_targets(step, fast_walk_command());
+                let stance = [
+                    sim.link_contact_impulse_ns("FL_foot") > 0.0,
+                    sim.link_contact_impulse_ns("FR_foot") > 0.0,
+                    sim.link_contact_impulse_ns("RL_foot") > 0.0,
+                    sim.link_contact_impulse_ns("RR_foot") > 0.0,
+                ];
+                let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+                let feed_forward = overlay.torques_nm(two_cycle_phase, stance);
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .zip(feed_forward.iter())
+                    .map(|(target, extra)| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                                .clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                let observed = sim.observe();
+                let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+                while delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                }
+                while delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                if (480..960).contains(&step) {
+                    window_a += delta;
+                } else if step >= 960 {
+                    window_b += delta;
+                }
+                previous_yaw = observed.base_relative_yaw_rad;
+                max_tilt = max_tilt.max(true_tilt(&sim));
+                min_height = min_height.min(observed.base_y_m);
+            }
+            (window_a, window_b, max_tilt, min_height)
+        };
+
+        let (window_a, window_b, max_tilt, min_height) =
+            run(&UnitreeGo2TorqueOverlay::LEARNED_TURN);
+        println!(
+            "learned torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
+        );
+        // Sustained above the position-space searches' honest 0.12 bar with
+        // margin — 0.2 rad per 8 s window is ~0.025 rad/s, the old plateau.
+        assert!(
+            window_a > 0.2 && window_b > 0.2,
+            "torque turn must out-turn the position plateau in both windows: {window_a:+.3}/{window_b:+.3}"
+        );
+        assert!(
+            max_tilt < 0.8 && min_height > 0.1,
+            "torque turn must stay walking upright: tilt {max_tilt:.3} height {min_height:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) = run(&UnitreeGo2TorqueOverlay::LEARNED_TURN);
+        assert_eq!(window_a.to_bits(), again_a.to_bits());
+        assert_eq!(window_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
         // Force-level steering, hand-designed, measured and refuted — the
         // torque-space mirror of the six position-space steering nulls. Three

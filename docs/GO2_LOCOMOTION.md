@@ -169,5 +169,30 @@ walk's drift, so any force-level steering signal must clear a noisier plant.
 Nine hand mechanisms across two actuation regimes now agree: this morphology
 does not steer through any single joint-space or torque-space channel. What
 remains is coordination — torque patterns coupled across legs and phase, which
-is a search problem, not a design problem. That search (the torque-space
-mirror of the overlay CEM) is the next measurement.
+is a search problem, not a design problem.
+
+## Breaking the plateau in torque space
+
+`examples/56_go2_torque_turn` runs that search: the same deterministic,
+resumable, parallel CEM harness, now over `UnitreeGo2TorqueOverlay` — per-joint
+contact-gated Fourier feed-forward torques (72 coefficients, ±8 N·m) added to
+the torque-PD walk, scored by the same anti-cheat two-window objective. The
+stance gate couples each term to the leg's *measured* foot contact, a coupling
+no position overlay can express.
+
+The search breaks the plateau. The seed-42 winner
+(`UnitreeGo2TorqueOverlay::LEARNED_TURN`) sustains **~0.034 rad/s** — windows
++0.304/+0.274 rad per 8 s — while the robot keeps walking (2.9 m per 24 s,
+upright throughout). Every position-space result sat at or below 0.025 rad/s,
+and the five-fold torque scan proved raw actuator force wasn't the lever;
+shaping *when and how* stance torques act is. Force-level coordination
+genuinely moves the boundary that joint-space control could not
+(`learned_torque_overlay_out_turns_the_position_plateau` pins the comparison).
+
+Two honest caveats, both measured: the margin is 37 % over the old plateau,
+not an order of magnitude — practical steering (>0.2 rad/s) remains open — and
+the contact-gated rollout is chaotic enough that the pinned coefficients must
+carry the search state's full 12-decimal precision; rounding to 6 decimals
+lands on a different, non-turning trajectory. The remaining openings are
+unchanged: aerial-duty gaits, foot geometry/friction, and richer torque
+policies (state feedback instead of phase-indexed feed-forward).
