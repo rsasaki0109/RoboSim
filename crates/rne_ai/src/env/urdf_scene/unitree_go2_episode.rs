@@ -708,6 +708,88 @@ mod tests {
     }
 
     #[test]
+    fn learned_overlay_turns_the_walking_trot() {
+        // The CEM-found overlay (examples/54_go2_learned_turn --train, seed 42)
+        // must produce a *sustained* yaw rate — not the bounded elastic twist
+        // every hand-scripted hip pattern produced. The gait winds up over the
+        // first few seconds, so the assertions measure two disjoint late
+        // windows: a saturating twist scores zero in both, a genuine turn keeps
+        // rotating through each.
+        use super::super::unitree_go2_trot_targets_with_overlay;
+        use super::super::UnitreeGo2GaitOverlay;
+
+        // Returns (yaw in steps 480..960, yaw in steps 960..1440, max tilt,
+        // min height) over a 1440-step walk — the same protocol the search
+        // scored, so the pinned coefficients are verified on their own terms.
+        let run = |overlay: &UnitreeGo2GaitOverlay| {
+            let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+                .expect("load Go2 scene");
+            settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
+            let command = UnitreeGo2GaitCommand {
+                stride_rad: 0.24,
+                cycle_steps: 45,
+                ..UnitreeGo2GaitCommand::default()
+            };
+            let start = sim.observe();
+            let mut previous_yaw = start.base_relative_yaw_rad;
+            let mut window_a = 0.0;
+            let mut window_b = 0.0;
+            let mut max_tilt = 0.0_f64;
+            let mut min_height = f64::MAX;
+            for step in 0..1440_u64 {
+                sim.step_joint_position_targets(&unitree_go2_trot_targets_with_overlay(
+                    step, command, overlay,
+                ));
+                let observed = sim.observe();
+                let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+                while delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                }
+                while delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                if (480..960).contains(&step) {
+                    window_a += delta;
+                } else if step >= 960 {
+                    window_b += delta;
+                }
+                previous_yaw = observed.base_relative_yaw_rad;
+                max_tilt = max_tilt.max(
+                    observed
+                        .base_relative_pitch_rad
+                        .hypot(observed.base_relative_roll_rad),
+                );
+                min_height = min_height.min(observed.base_y_m);
+            }
+            (window_a, window_b, max_tilt, min_height)
+        };
+
+        let (window_a, window_b, max_tilt, min_height) = run(&UnitreeGo2GaitOverlay::LEARNED_TURN);
+        // A sustained turn keeps rotating through both eight-second windows.
+        assert!(
+            window_a > 0.12 && window_b > 0.12,
+            "learned gait must keep turning: windows {window_a:+.3} / {window_b:+.3}"
+        );
+        assert!(
+            max_tilt < 0.8 && min_height > 0.15,
+            "learned gait must stay upright: tilt {max_tilt:.2} height {min_height:.3}"
+        );
+
+        let (straight_a, straight_b, _, _) = run(&UnitreeGo2GaitOverlay::ZERO);
+        assert!(
+            (window_a + window_b).abs() > 4.0 * (straight_a + straight_b).abs(),
+            "the overlay must out-turn the plain trot: {:+.3} vs {:+.3}",
+            window_a + window_b,
+            straight_a + straight_b
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) = run(&UnitreeGo2GaitOverlay::LEARNED_TURN);
+        assert_eq!(window_a.to_bits(), again_a.to_bits());
+        assert_eq!(window_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn sustained_push_topples_weak_motor_trot_and_two_channel_feedback_saves_it() {
         // On torque-limited motors (8 N*m versus the stiff 23.7) a 1.8 rad flank
         // push spread over 20 steps beats the passive recovery rate. The honest
