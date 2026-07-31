@@ -55,8 +55,8 @@ pub use unitree_go2_episode::{
     UnitreeGo2Push,
 };
 pub use unitree_go2_gait::{
-    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, UnitreeGo2GaitCommand,
-    UnitreeGo2GaitOverlay,
+    unitree_go2_scheduled_targets, unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay,
+    UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule,
 };
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
