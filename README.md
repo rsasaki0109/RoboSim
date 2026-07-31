@@ -241,11 +241,25 @@ The reading contract and the threshold analysis are documented in
 
 ## Official Unitree Go2 URDF
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-fall-vs-save.png">
+    <img src="docs/media/go2-fall-vs-save.gif" alt="Two identical Unitree Go2 robots receive the same sustained flank push on torque-limited motors; the open-loop trot on the left capsizes onto its side while the lean-rate hip feedback on the right braces the fall and stays on its feet" width="960">
+  </picture>
+  <br>
+  <sub>Fall versus save: both Go2s trot on 8 N·m torque-limited motors and take the identical sustained 1.8 rad flank push. The open-loop robot (red) capsizes flat onto its side; the robot feeding its measured lean back through two channels — hip abduction plus "push up with the downhill legs" differential leg extension (green) — rides the push out standing. The boundary is measured, not staged: instantaneous shoves cannot topple this plant, hip correction alone saturates into a deep brace, and only the stacked channels keep the peak lean inside the capture region (see <a href="docs/DISTURBANCE_INJECTION.md">disturbance injection</a>).</sub>
+</p>
+
+```bash
+cargo run --release -p go2_fall_vs_save --example 52_go2_fall_vs_save
+```
+
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
 pipeline. Its dynamic multibody scene includes self-collision filtering, 12
 force-limited joints, primitive foot contacts, and a headless four-foot standing
-test. `UnitreeGo2Episode` exposes stride and lift actions, four-foot loads, gait
-phase, and a locomotion/upright reward. Model source:
+test. `UnitreeGo2Episode` exposes stride, lift, and posture-correction actions,
+deterministic sustained-push disturbances, four-foot loads, gait phase, and a
+locomotion/upright reward. Model source:
 [Unitree Robotics unitree_ros](https://github.com/unitreerobotics/unitree_ros)
 (BSD-3-Clause).
 

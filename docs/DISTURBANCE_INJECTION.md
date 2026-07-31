@@ -27,8 +27,13 @@ world-frame axis, preserving velocities. Unlike a translation, a rotation change
 lifts, and gravity plus the contact solver produce genuine tipping dynamics the
 controller must catch. A 0.4 rad tilt registers in full on the attitude observation.
 
-`UnitreeGo2Push { step, roll_tilt_rad }` schedules one such tilt at an explicit
-episode step, about the body X axis.
+`UnitreeGo2Push { step, roll_tilt_rad, duration_steps }` schedules one such tilt
+at an explicit episode step, about the body X axis. With `duration_steps > 1` the
+total tilt spreads evenly across consecutive steps — a *sustained* lean rather
+than a slap. Measured caveat: a sustained injection below roughly the plant's
+own recovery rate simply never accumulates (0.9 rad spread over 90 steps at
+60 Hz produced *less* peak tilt than undisturbed trotting); a push that is meant
+to matter must beat the recovery rate, e.g. the same 0.9 rad within 15 steps.
 
 Two velocity-preserving primitives from the same investigation remain available for
 plain (non-articulated) dynamic bodies: `RapierBackend::apply_velocity_impulse`
@@ -55,9 +60,9 @@ pattern actuates the orthogonal axis at all. Mirrored hip signs merely widen the
 stance, which stabilizes nothing; the correction therefore applies the **same** angle
 to all four hips.
 
-## What the acceptance test pins
+## What the acceptance tests pin
 
-`pushed_trot_registers_recovers_and_feedback_reduces_peak_lean`:
+`pushed_trot_registers_recovers_and_feedback_reduces_peak_lean` (stiff motors):
 
 - a 0.4 rad shove registers in full on the attitude observation;
 - the scripted open-loop trot **recovers by itself** — stiff position motors and a
@@ -67,10 +72,46 @@ to all four hips.
   sign strictly increases it;
 - runs are bit-identical on repeat.
 
+`sustained_push_topples_weak_motor_trot_and_two_channel_feedback_saves_it` (the
+fall-versus-save scenario, rendered by `examples/52_go2_fall_vs_save`):
+
+- on 8 N·m torque-limited motors, a 1.8 rad flank push spread over 20 steps
+  topples the open-loop trot — it crosses the 1.2 rad termination tilt and ends
+  flat on its side (final tilt > 1.3 rad);
+- two-channel lean feedback — hip abduction (`1.6·lean + 6·lean_rate`) plus
+  differential leg-length extension (`−(2.5·lean + 5·lean_rate)` on the calves)
+  — holds the peak lean under a third of the open-loop excursion and ends
+  **standing at full height**;
+- the inverted feedback sign does not save the robot;
+- runs are bit-identical on repeat.
+
+Why two channels: the correction-versus-lean equilibrium map of the hip channel
+is monotonic but saturates — hip correction 0.34 props the body at 1.14 rad,
+0.5 at 0.97, and the full ±0.8 rad clamp at 0.67 — so hip abduction alone can
+only *brace* a toppling push in a deep propped lean, and pure damping injection
+saves nothing at all. The measured way out is a second, independent authority
+on the same lean axis: left/right differential calf extension ("push up with
+the downhill legs", ±0.4 rad differential ≈ 0.25 rad of lean, pinned by
+`axis_derivation_probe`). Stacked, the two channels cap the peak lean inside
+the passive capture region and the trot walks itself back upright.
+
+## Motor compliance: what the stiffness knob actually does
+
+Making the gait compliant enough to be toppleable exposed a Rapier property that
+cost a full measurement campaign: joint motors default to
+`MotorModel::AccelerationBased`, whose effective position gain is
+`1 / (dt + damping/stiffness)`. Absolute stiffness cancels out — stiffness
+180/damping 18 and stiffness 0.5/damping 0.05 are **bit-identical**, and a
+"compliance scan" that keeps the ratio fixed is a no-op (the tell, once again:
+identical results across the whole scan). The two real knobs are the
+`damping/stiffness` ratio and `max_force`; of the two, only the torque limit
+produces honest weak-actuator dynamics, which is why
+`UnitreeGo2EpisodeConfig::motor_max_force_n` is the compliance lever the
+fall-versus-save setup uses.
+
 ## Where this goes next
 
-Instantaneous tilts cannot topple this plant. A controller-versus-fall demonstration
-needs disturbances that outlast the passive recovery — sustained pushes across
-several gait cycles, ground-plane perturbation, or a compliant (lower-stiffness)
-gait whose stability genuinely depends on feedback. That is the planned entry point
-for the legged-locomotion arc.
+The measured saturation boundary makes the next step concrete: a recovery
+*step* — swing a leg toward the fall to move the support polygon under the
+body — is the only strategy that can turn the brace into an upright recovery.
+Ground-plane perturbation remains the other open disturbance channel.

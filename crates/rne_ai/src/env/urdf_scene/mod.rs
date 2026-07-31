@@ -52,6 +52,7 @@ pub use unitree_g1_parts_episode::{
 };
 pub use unitree_go2_episode::{
     UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+    UnitreeGo2Push,
 };
 pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
 
