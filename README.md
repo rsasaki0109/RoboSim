@@ -262,7 +262,8 @@ measurement campaign: speed maps, nine hand-designed steering nulls across two
 actuation regimes, three position-space searches that plateau at ~0.02 rad/s —
 and the torque-level actuation pathway that finally breaks that plateau: a
 low-bandwidth torque PD walks the trot, and a contact-gated feed-forward torque
-search sustains 0.034 rad/s where no joint-space control could.
+search turns at 0.038 rad/s where no joint-space control could — along with the
+measured chaos horizon that bounds what any single trajectory can claim.
 
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
 pipeline. Its dynamic multibody scene includes self-collision filtering, 12

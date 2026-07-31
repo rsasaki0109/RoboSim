@@ -180,19 +180,33 @@ the torque-PD walk, scored by the same anti-cheat two-window objective. The
 stance gate couples each term to the leg's *measured* foot contact, a coupling
 no position overlay can express.
 
-The search breaks the plateau. The seed-42 winner
-(`UnitreeGo2TorqueOverlay::LEARNED_TURN`) sustains **~0.034 rad/s** — windows
-+0.304/+0.274 rad per 8 s — while the robot keeps walking (2.9 m per 24 s,
-upright throughout). Every position-space result sat at or below 0.025 rad/s,
-and the five-fold torque scan proved raw actuator force wasn't the lever;
-shaping *when and how* stance torques act is. Force-level coordination
-genuinely moves the boundary that joint-space control could not
-(`learned_torque_overlay_out_turns_the_position_plateau` pins the comparison).
+The search breaks the plateau — within a boundary the measurement itself
+revealed. The seed-42 winner (`UnitreeGo2TorqueOverlay::LEARNED_TURN`) turns
+at **0.038 rad/s** through the first measurement window (+0.304 rad over
+steps 480–960) while the robot keeps walking (2.9 m per 24 s, upright
+throughout). That window is *robust*: identical across coefficient
+perturbations at the 1e-9 scale and across operating systems, and a bounded
+elastic twist saturates before it opens, so the number is twist-proof. Every
+position-space result sat at or below 0.025 rad/s in the same window; shaping
+*when and how* stance torques act does what raw actuator force (the five-fold
+scan) could not (`learned_torque_overlay_out_turns_the_position_plateau` pins
+the comparison).
 
-Two honest caveats, both measured: the margin is 37 % over the old plateau,
-not an order of magnitude — practical steering (>0.2 rad/s) remains open — and
-the contact-gated rollout is chaotic enough that the pinned coefficients must
-carry the search state's full 12-decimal precision; rounding to 6 decimals
-lands on a different, non-turning trajectory. The remaining openings are
-unchanged: aerial-duty gaits, foot geometry/friction, and richer torque
-policies (state feedback instead of phase-indexed feed-forward).
+The boundary: the compliant torque walk has a **chaos horizon of roughly
+16 s**. Beyond it, single-ulp differences — a 1e-9 coefficient nudge, or the
+libm rounding differences between operating systems — swing the second
+window's yaw by ±0.3 rad (measured ensemble: +0.27, +0.20, +0.11, −0.07
+across perturbations and platforms; `--ensemble` reproduces the spread). This
+is the third objective-gaming lesson of the campaign: *chaos games
+single-trajectory objectives*. A score read from one trajectory past the
+horizon is noise, so the pinned test asserts the robust window and pins the
+horizon itself (no catastrophic reversal), and the pinned coefficients carry
+the search state's full 12-decimal precision — 6-decimal rounding is already
+a different trajectory.
+
+The honest margins: 52 % over the old plateau in the robust window, not an
+order of magnitude, and provably sustained for 16 s rather than indefinitely.
+The concrete next steps this measurement sets up: ensemble-averaged
+objectives (score the median of perturbed replays, so the search must find
+*robust* turners), aerial-duty gaits, foot geometry/friction, and
+state-feedback torque policies.
