@@ -16,12 +16,20 @@ const FALLEN_HEIGHT_M: f64 = 0.12;
 /// teleports the whole tree feet-included; a rotation instead changes the contact
 /// configuration — feet on one side press into the ground, the other side lifts —
 /// which produces the tipping dynamics a balance controller must catch.
+///
+/// With `duration_steps > 1` the total tilt is spread evenly across consecutive
+/// steps, which models a *sustained* lean — someone pressing on the flank across
+/// several gait cycles rather than slapping it once. Stiff position motors snap
+/// back from any instantaneous tilt, so only a sustained push can separate a
+/// balance controller from an open-loop gait.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitreeGo2Push {
-    /// Controlled step at which the shove lands.
+    /// Controlled step at which the shove starts.
     pub step: u64,
-    /// Roll tilt about the body forward axis, in radians.
+    /// Total roll tilt about the body forward axis, in radians.
     pub roll_tilt_rad: f64,
+    /// Steps the shove is spread across; `1` is an instantaneous slap.
+    pub duration_steps: u64,
 }
 
 /// Configuration for the official Unitree Go2 trot episode.
@@ -37,6 +45,17 @@ pub struct UnitreeGo2EpisodeConfig {
     pub max_tilt_rad: f64,
     /// Optional disturbance shove; `None` reproduces the undisturbed episode exactly.
     pub push: Option<UnitreeGo2Push>,
+    /// Joint position-motor stiffness (proportional gain).
+    ///
+    /// The default `180` is stiff enough to make the scripted trot passively stable
+    /// against instantaneous tilts. Lowering it produces a *compliant* gait whose
+    /// balance genuinely depends on feedback — the regime a fall-versus-save
+    /// evaluation needs.
+    pub motor_stiffness: f64,
+    /// Joint position-motor damping (derivative gain).
+    pub motor_damping: f64,
+    /// Joint motor force limit in newtons, matching the real Go2 actuator.
+    pub motor_max_force_n: f64,
 }
 
 impl Default for UnitreeGo2EpisodeConfig {
@@ -47,6 +66,9 @@ impl Default for UnitreeGo2EpisodeConfig {
             cycle_steps: 90,
             max_tilt_rad: 1.2,
             push: None,
+            motor_stiffness: 180.0,
+            motor_damping: 18.0,
+            motor_max_force_n: 23.7,
         }
     }
 }
@@ -58,13 +80,18 @@ pub struct UnitreeGo2Action {
     pub stride_rad: f64,
     /// Swing-leg calf flexion in radians, clamped to `[0, 0.4]`.
     pub foot_lift_rad: f64,
-    /// Hip-abduction posture correction in radians, clamped to `[-0.35, 0.35]`.
+    /// Hip-abduction posture correction in radians, clamped to `[-0.8, 0.8]`.
     ///
     /// A balance controller feeds measured body roll back through this term; the
     /// open-loop trot leaves it at zero.
     pub roll_correction_rad: f64,
     /// Thigh-pitch posture correction in radians, clamped to `[-0.3, 0.3]`.
     pub pitch_correction_rad: f64,
+    /// Left/right differential calf extension in radians, clamped to `[-0.5, 0.5]`.
+    ///
+    /// The leg-length recovery channel: positive lengthens the left legs and
+    /// shortens the right legs, rolling the body toward the right.
+    pub lateral_extension_rad: f64,
 }
 
 impl Default for UnitreeGo2Action {
@@ -74,6 +101,7 @@ impl Default for UnitreeGo2Action {
             foot_lift_rad: 0.16,
             roll_correction_rad: 0.0,
             pitch_correction_rad: 0.0,
+            lateral_extension_rad: 0.0,
         }
     }
 }
@@ -131,13 +159,18 @@ impl UnitreeGo2Episode {
     /// Loads and settles the dynamic Go2 multibody.
     pub fn new(config: UnitreeGo2EpisodeConfig) -> Result<Self, AssetError> {
         let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
-        settle(&mut sim, config.cycle_steps);
+        settle(&mut sim, &config);
         Ok(Self {
             config,
             sim,
             episode_index: 0,
             step_in_episode: 0,
         })
+    }
+
+    /// Read access to the underlying scene simulation, for rendering the episode.
+    pub fn sim(&self) -> &UrdfSceneSim {
+        &self.sim
     }
 
     fn observation(&self, locomotion_delta_m: f64) -> UnitreeGo2Observation {
@@ -182,7 +215,7 @@ impl Episode for UnitreeGo2Episode {
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
         self.sim = UrdfSceneSim::from_scene_path(&self.config.scene_path)
             .expect("reload Unitree Go2 episode scene");
-        settle(&mut self.sim, self.config.cycle_steps);
+        settle(&mut self.sim, &self.config);
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;
         EpisodeStep {
@@ -196,15 +229,19 @@ impl Episode for UnitreeGo2Episode {
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let before = self.sim.observe();
         // The disturbance lands before the control targets apply, exactly like a
-        // shove that arrives between two controller ticks.
+        // shove that arrives between two controller ticks. A sustained push spreads
+        // the total tilt evenly across `duration_steps` consecutive steps.
         if let Some(push) = self.config.push {
-            if push.step == self.step_in_episode {
+            let duration = push.duration_steps.max(1);
+            let active =
+                self.step_in_episode >= push.step && self.step_in_episode < push.step + duration;
+            if active {
                 // Tilt about the body X axis: physically the lateral lean, which this
                 // observation convention reports on `base_relative_pitch_rad`, and
                 // exactly the axis the hip-abduction correction actuates.
                 if let Some(pose) = self.sim.named_transform("base") {
                     let axis = (pose.rotation * rne_math::Vec3::X).normalize_or_zero();
-                    let axis_angle = axis * push.roll_tilt_rad;
+                    let axis_angle = axis * (push.roll_tilt_rad / duration as f64);
                     self.sim
                         .tilt_named_body_rad("base", [axis_angle.x, axis_angle.y, axis_angle.z]);
                 }
@@ -214,8 +251,9 @@ impl Episode for UnitreeGo2Episode {
             stride_rad: action.stride_rad.clamp(0.0, 0.3),
             foot_lift_rad: action.foot_lift_rad.clamp(0.0, 0.4),
             cycle_steps: self.config.cycle_steps,
-            roll_correction_rad: action.roll_correction_rad.clamp(-0.35, 0.35),
+            roll_correction_rad: action.roll_correction_rad.clamp(-0.8, 0.8),
             pitch_correction_rad: action.pitch_correction_rad.clamp(-0.3, 0.3),
+            lateral_extension_rad: action.lateral_extension_rad.clamp(-0.5, 0.5),
         };
         self.sim
             .step_joint_position_targets(&unitree_go2_trot_targets(self.step_in_episode, command));
@@ -251,14 +289,18 @@ impl Episode for UnitreeGo2Episode {
     }
 }
 
-fn settle(sim: &mut UrdfSceneSim, cycle_steps: u64) {
-    sim.configure_position_motors(180.0, 18.0, 23.7);
+fn settle(sim: &mut UrdfSceneSim, config: &UnitreeGo2EpisodeConfig) {
+    sim.configure_position_motors(
+        config.motor_stiffness,
+        config.motor_damping,
+        config.motor_max_force_n,
+    );
     let stand = unitree_go2_trot_targets(
         0,
         UnitreeGo2GaitCommand {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
-            cycle_steps,
+            cycle_steps: config.cycle_steps,
             ..UnitreeGo2GaitCommand::default()
         },
     );
@@ -302,18 +344,10 @@ mod tests {
         steps_survived: u64,
     }
 
-    fn run_pushed_trot(
-        push_roll_tilt_rad: f64,
+    fn run_trot(
+        config: UnitreeGo2EpisodeConfig,
         mut controller: impl FnMut(&UnitreeGo2Observation) -> UnitreeGo2Action,
     ) -> PushOutcome {
-        let config = UnitreeGo2EpisodeConfig {
-            max_steps: 420,
-            push: Some(UnitreeGo2Push {
-                step: 180,
-                roll_tilt_rad: push_roll_tilt_rad,
-            }),
-            ..Default::default()
-        };
         let mut episode = UnitreeGo2Episode::new(config).expect("pushed Go2 episode");
         let mut observation = episode.reset().observation;
         let mut max_tilt_rad = 0.0_f64;
@@ -348,6 +382,19 @@ mod tests {
         UnitreeGo2Action::default()
     }
 
+    /// Stiff-motor config with a single instantaneous slap at step 180.
+    fn stiff_push_config(roll_tilt_rad: f64) -> UnitreeGo2EpisodeConfig {
+        UnitreeGo2EpisodeConfig {
+            max_steps: 420,
+            push: Some(UnitreeGo2Push {
+                step: 180,
+                roll_tilt_rad,
+                duration_steps: 1,
+            }),
+            ..Default::default()
+        }
+    }
+
     /// Proportional-derivative posture feedback from the measured base attitude.
     fn posture_feedback_with(
         roll_gain: f64,
@@ -369,7 +416,7 @@ mod tests {
         // which way a constant hip correction leans the standing body.
         let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
             .expect("load Go2 scene");
-        settle(&mut sim, 90);
+        settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
         let pose = sim.named_transform("base").expect("base pose");
         // Empirically, rotation about the body X axis registers as relative PITCH in
         // this observation convention, so the roll axis is the body Z axis.
@@ -396,7 +443,7 @@ mod tests {
         let lean_of = |targets: [crate::env::urdf_scene::UrdfJointPositionTarget<'static>; 12]| {
             let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
                 .expect("load Go2 scene");
-            settle(&mut sim, 90);
+            settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
             for _ in 0..240 {
                 sim.step_joint_position_targets(&targets);
             }
@@ -415,6 +462,7 @@ mod tests {
                 cycle_steps: 90,
                 roll_correction_rad: 0.2,
                 pitch_correction_rad: 0.0,
+                lateral_extension_rad: 0.0,
             },
         ));
         println!(
@@ -430,6 +478,7 @@ mod tests {
                 cycle_steps: 90,
                 roll_correction_rad: 0.0,
                 pitch_correction_rad: 0.2,
+                lateral_extension_rad: 0.0,
             },
         ));
         println!(
@@ -446,6 +495,7 @@ mod tests {
                 cycle_steps: 90,
                 roll_correction_rad: 0.0,
                 pitch_correction_rad: 0.0,
+                lateral_extension_rad: 0.0,
             },
         );
         for target in differential.iter_mut() {
@@ -460,6 +510,23 @@ mod tests {
             differential_thigh.0, differential_thigh.1
         );
 
+        // Left/right differential calf extension: the leg-length channel.
+        let differential_calf = lean_of(unitree_go2_trot_targets(
+            0,
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 90,
+                roll_correction_rad: 0.0,
+                pitch_correction_rad: 0.0,
+                lateral_extension_rad: 0.4,
+            },
+        ));
+        println!(
+            "diff calf L+0.4/R-0.4: roll={:.3} pitch={:.3}",
+            differential_calf.0, differential_calf.1
+        );
+
         // Pin the measured actuation map the feedback pairing relies on: uniform
         // hip abduction actuates the same axis a body-X tilt disturbs (labelled
         // relative pitch by this observation), no leg pattern actuates the
@@ -472,6 +539,152 @@ mod tests {
         assert!(uniform_hip.0.abs() < 0.05);
         assert!(uniform_thigh.0.abs() < 0.05 && uniform_thigh.1.abs() < 0.05);
         assert!(differential_thigh.0.abs() < 0.05 && differential_thigh.1.abs() < 0.05);
+        // The leg-length channel actuates the same lean axis, independently of the
+        // hips — the second authority the two-channel save controller relies on.
+        assert!(
+            differential_calf.1 > 0.15,
+            "differential calf must actuate the lean axis, got {:.3}",
+            differential_calf.1
+        );
+        assert!(differential_calf.0.abs() < 0.1);
+    }
+
+    /// End state of a run stepped to a fixed horizon, ignoring termination — the
+    /// physical outcome after the episode has already scored the fall.
+    struct FullRunOutcome {
+        max_tilt_rad: f64,
+        end_height_m: f64,
+        end_tilt_rad: f64,
+    }
+
+    fn run_to_horizon(
+        config: UnitreeGo2EpisodeConfig,
+        mut controller: impl FnMut(&UnitreeGo2Observation) -> UnitreeGo2Action,
+        horizon_steps: u64,
+    ) -> FullRunOutcome {
+        let mut episode = UnitreeGo2Episode::new(config).expect("full-horizon Go2 episode");
+        let mut observation = episode.reset().observation;
+        let mut max_tilt_rad = 0.0_f64;
+        for _ in 0..horizon_steps {
+            observation = episode.step(controller(&observation)).observation;
+            max_tilt_rad = max_tilt_rad.max(
+                observation
+                    .base_relative_pitch_rad
+                    .hypot(observation.base_relative_roll_rad),
+            );
+        }
+        FullRunOutcome {
+            max_tilt_rad,
+            end_height_m: observation.base_y_m,
+            end_tilt_rad: observation
+                .base_relative_pitch_rad
+                .hypot(observation.base_relative_roll_rad),
+        }
+    }
+
+    /// The empirically probed fall/save boundary: torque-limited motors and a
+    /// sustained flank push strong enough to beat the passive recovery rate.
+    fn weak_motor_push_config() -> UnitreeGo2EpisodeConfig {
+        UnitreeGo2EpisodeConfig {
+            max_steps: 480,
+            push: Some(UnitreeGo2Push {
+                step: 180,
+                roll_tilt_rad: 1.8,
+                duration_steps: 20,
+            }),
+            motor_max_force_n: 8.0,
+            ..Default::default()
+        }
+    }
+
+    /// The save controller for the fall-versus-save scenario.
+    ///
+    /// Hip abduction alone saturates its ±0.8 rad clamp and can only brace the
+    /// fall in a deep propped lean; adding the independent leg-length channel is
+    /// what turns the brace into a standing save.
+    fn save_feedback() -> impl FnMut(&UnitreeGo2Observation) -> UnitreeGo2Action {
+        two_channel_feedback(2.5, 5.0)
+    }
+
+    /// Two-channel recovery feedback: hip abduction plus differential calf
+    /// extension, both driven from the measured lean.
+    fn two_channel_feedback(
+        ext_p_gain: f64,
+        ext_d_gain: f64,
+    ) -> impl FnMut(&UnitreeGo2Observation) -> UnitreeGo2Action {
+        let mut previous_lean = 0.0_f64;
+        move |observation| {
+            let lean = observation.base_relative_pitch_rad;
+            let lean_rate = lean - previous_lean;
+            previous_lean = lean;
+            UnitreeGo2Action {
+                roll_correction_rad: 1.6 * lean + 6.0 * lean_rate,
+                lateral_extension_rad: -(ext_p_gain * lean + ext_d_gain * lean_rate),
+                ..UnitreeGo2Action::default()
+            }
+        }
+    }
+
+    #[test]
+    fn sustained_push_topples_weak_motor_trot_and_two_channel_feedback_saves_it() {
+        // On torque-limited motors (8 N*m versus the stiff 23.7) a 1.8 rad flank
+        // push spread over 20 steps beats the passive recovery rate. The honest
+        // physics this test pins: the open-loop trot capsizes and ends flat on its
+        // side, while two-channel feedback — hip abduction plus differential
+        // leg-length extension, both driven from the measured lean — keeps the
+        // peak lean under a third of the open-loop excursion and ends standing at
+        // full height. Hip correction alone saturates and can only brace in a
+        // deep propped lean; the leg-length channel is what makes it a save.
+        let open_scored = run_trot(weak_motor_push_config(), open_loop);
+        assert!(
+            open_scored.fell && open_scored.steps_survived < 480,
+            "open loop must fall: fell={} steps={}",
+            open_scored.fell,
+            open_scored.steps_survived
+        );
+
+        let open = run_to_horizon(weak_motor_push_config(), open_loop, 480);
+        assert!(
+            open.end_tilt_rad > 1.3,
+            "open loop must end flat on its side, got tilt {:.2}",
+            open.end_tilt_rad
+        );
+
+        let saved_scored = run_trot(weak_motor_push_config(), save_feedback());
+        assert!(
+            !saved_scored.fell && saved_scored.steps_survived == 480,
+            "saved run must survive to truncation: fell={} steps={}",
+            saved_scored.fell,
+            saved_scored.steps_survived
+        );
+        let saved = run_to_horizon(weak_motor_push_config(), save_feedback(), 480);
+        assert!(
+            saved.max_tilt_rad < 0.5 * open.max_tilt_rad,
+            "feedback must at least halve the peak lean: {:.2} vs {:.2}",
+            saved.max_tilt_rad,
+            open.max_tilt_rad
+        );
+        assert!(
+            saved.end_tilt_rad < 0.55 && saved.end_height_m > 0.2,
+            "saved run must end standing: tilt {:.2} height {:.3}",
+            saved.end_tilt_rad,
+            saved.end_height_m
+        );
+
+        // The inverted sign must not save the robot — pins the feedback pairing.
+        let mut inner = two_channel_feedback(2.5, 5.0);
+        let inverted = run_trot(weak_motor_push_config(), move |observation| {
+            let mut action = inner(observation);
+            action.roll_correction_rad = -action.roll_correction_rad;
+            action.lateral_extension_rad = -action.lateral_extension_rad;
+            action
+        });
+        assert!(inverted.fell, "inverted feedback must not save the robot");
+
+        // Determinism: the saved run reproduces bit-identically.
+        let again = run_to_horizon(weak_motor_push_config(), save_feedback(), 480);
+        assert_eq!(saved.max_tilt_rad.to_bits(), again.max_tilt_rad.to_bits());
+        assert_eq!(saved.end_tilt_rad.to_bits(), again.end_tilt_rad.to_bits());
     }
 
     #[test]
@@ -482,9 +695,9 @@ mod tests {
         // disturbance registers fully, the robot recovers, correctly signed posture
         // feedback strictly reduces the peak lean, and the wrong sign increases it.
         let tilt = 0.40;
-        let open = run_pushed_trot(tilt, open_loop);
-        let corrected = run_pushed_trot(tilt, posture_feedback_with(1.2));
-        let inverted = run_pushed_trot(tilt, posture_feedback_with(-1.2));
+        let open = run_trot(stiff_push_config(tilt), open_loop);
+        let corrected = run_trot(stiff_push_config(tilt), posture_feedback_with(1.2));
+        let inverted = run_trot(stiff_push_config(tilt), posture_feedback_with(-1.2));
 
         // The tilt lands in full: peak lean reaches at least the applied angle.
         assert!(
@@ -508,7 +721,7 @@ mod tests {
             open.max_tilt_rad
         );
         // Determinism: the same run reproduces bit-identically.
-        let again = run_pushed_trot(tilt, posture_feedback_with(1.2));
+        let again = run_trot(stiff_push_config(tilt), posture_feedback_with(1.2));
         assert_eq!(
             corrected.max_tilt_rad.to_bits(),
             again.max_tilt_rad.to_bits()

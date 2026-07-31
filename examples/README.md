@@ -40,6 +40,7 @@
 | Vehicle dynamics comparison | `cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics` | Same pure-pursuit controller on the kinematic and dynamic bicycle models; the dynamic car saturates its tires and understeers wide |
 | Controller evaluation | `cargo run --release -p control_eval_demo --example 50_control_eval` | Multi-seed statistical evaluation of one controller across randomized friction, offset, and actuator lag, with JSON metric reports |
 | Latency in the loop | `cargo run --release -p latency_in_the_loop --example 51_latency_in_the_loop` | Pose feedback consumed through DataBus available_time; 120 ms is free, 240 ms never settles |
+| Go2 fall versus save | `cargo run --release -p go2_fall_vs_save --example 52_go2_fall_vs_save` | Identical sustained flank push on weak motors, side by side: the open-loop trot capsizes while lean-rate hip feedback braces the fall |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | PLATEAU import CLI | `cargo run -p rne_plateau_import -- path/to/tile.gml --output target/plateau/tile --tile-name tile` | Convert bounded PLATEAU CityGML building and road LOD1 to OBJ, RNE scene, and stable lane metadata |
