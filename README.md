@@ -254,6 +254,12 @@ The reading contract and the threshold analysis are documented in
 cargo run --release -p go2_fall_vs_save --example 52_go2_fall_vs_save
 ```
 
+**[Watch the motion-is-stability GIF](docs/media/go2-walk-vs-stand-push.gif)** —
+the same push with no controller on either side: the slow trot capsizes while
+the fast walking trot shrugs it off, because cyclic foot replanting is itself a
+stabilizer. Speed maps and the measured steering boundary of the scripted gait
+are in [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
+
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
 pipeline. Its dynamic multibody scene includes self-collision filtering, 12
 force-limited joints, primitive foot contacts, and a headless four-foot standing

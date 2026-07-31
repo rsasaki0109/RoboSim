@@ -114,4 +114,9 @@ fall-versus-save setup uses.
 The measured saturation boundary makes the next step concrete: a recovery
 *step* — swing a leg toward the fall to move the support polygon under the
 body — is the only strategy that can turn the brace into an upright recovery.
-Ground-plane perturbation remains the other open disturbance channel.
+[GO2_LOCOMOTION.md](GO2_LOCOMOTION.md) measures the flip side: a *walking*
+trot already does this implicitly (it shrugs off the push that topples the
+slow trot with no controller at all), and the same campaign shows scripted
+joint-space gaits cannot steer this 3-DoF-per-leg platform — both point at
+learned or model-based gaits. Ground-plane perturbation remains the other open
+disturbance channel.
