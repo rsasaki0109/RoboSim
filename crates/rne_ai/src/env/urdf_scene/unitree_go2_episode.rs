@@ -1229,4 +1229,217 @@ mod tests {
         assert_eq!(min_height.to_bits(), again_min.to_bits());
         assert_eq!(end_height.to_bits(), again_end.to_bits());
     }
+
+    #[test]
+    fn torque_pd_tracks_the_walking_trot() {
+        use super::super::UrdfJointTorqueTarget;
+
+        // The low-bandwidth torque PD (kd pinned at 0.5 by the 60 Hz discrete
+        // stability bound) genuinely tracks the cycle-45 walking trot: kp 40
+        // walks at position-servo speed while staying up, and pushing kp to 80
+        // crosses the same discrete stability boundary the stand test pinned —
+        // the gait thrashes and falls.
+        let run = |kp: f64, kd: f64| {
+            let mut sim = settled_stand();
+            let up_body = {
+                let pose = sim.named_transform("base").expect("base pose");
+                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+            };
+            let true_tilt = |sim: &UrdfSceneSim| {
+                let pose = sim.named_transform("base").expect("base pose");
+                let up = (pose.rotation * up_body).normalize_or_zero();
+                up.y.clamp(-1.0, 1.0).acos()
+            };
+            let start = sim.observe();
+            let mut min_height = f64::MAX;
+            let mut max_tilt = 0.0_f64;
+            for step in 0..720_u64 {
+                let targets = unitree_go2_trot_targets(step, fast_walk_command());
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .map(|target| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (kp * (target.position - q) - kd * qd).clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                min_height = min_height.min(sim.observe().base_y_m);
+                max_tilt = max_tilt.max(true_tilt(&sim));
+            }
+            let end = sim.observe();
+            let distance = (end.base_x_m - start.base_x_m).hypot(end.base_z_m - start.base_z_m);
+            (distance, min_height, max_tilt)
+        };
+        let (distance, min_height, max_tilt) = run(40.0, 0.5);
+        println!(
+            "torque PD walk kp=40 kd=0.5: distance {distance:.3} m min_height {min_height:.3} max_tilt {max_tilt:.3}"
+        );
+        assert!(
+            distance > 1.4,
+            "torque-PD walk must cover ground, got {distance:.2} m"
+        );
+        assert!(
+            min_height > 0.15 && max_tilt < 0.8,
+            "torque-PD walk must stay up: height {min_height:.3} tilt {max_tilt:.3}"
+        );
+
+        // The discrete stability boundary applies to the gait exactly as it did
+        // to the stand: doubling kp past it makes the walk thrash and fall.
+        let (_, _, unstable_tilt) = run(80.0, 0.5);
+        println!("torque PD walk kp=80 kd=0.5: max_tilt {unstable_tilt:.3}");
+        assert!(
+            unstable_tilt > 1.2,
+            "kp past the discrete bound must destabilize the walk, tilt {unstable_tilt:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_distance, again_height, _) = run(40.0, 0.5);
+        assert_eq!(distance.to_bits(), again_distance.to_bits());
+        assert_eq!(min_height.to_bits(), again_height.to_bits());
+    }
+
+    /// Windowed-yaw run of the torque-PD walking trot (kp 40, kd 0.5) with
+    /// contact-gated feed-forward torques added on stance legs: `twist_hip` with
+    /// diagonal-pair signs on the hips, `drive_diff` with left/right signs on
+    /// the thighs. When `yaw_rate_gain` is non-zero the drive term is instead a
+    /// feedback law: `drive = clamp(yaw_rate_gain * (0.3 - yaw_rate), 8)`.
+    /// Returns (window_a, window_b, max_tilt, min_height, distance).
+    fn torque_steer_run_with_feedback(
+        twist_hip: f64,
+        drive_diff: f64,
+        yaw_rate_gain: f64,
+    ) -> (f64, f64, f64, f64, f64) {
+        use super::super::UrdfJointTorqueTarget;
+
+        const KP: f64 = 40.0;
+        const KD: f64 = 0.5;
+        let mut sim = settled_stand();
+        let up_body = {
+            let pose = sim.named_transform("base").expect("base pose");
+            (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+        };
+        let true_tilt = |sim: &UrdfSceneSim| {
+            let pose = sim.named_transform("base").expect("base pose");
+            let up = (pose.rotation * up_body).normalize_or_zero();
+            up.y.clamp(-1.0, 1.0).acos()
+        };
+        let start = sim.observe();
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut max_tilt = 0.0_f64;
+        let mut min_height = f64::MAX;
+        for step in 0..1440_u64 {
+            let targets = unitree_go2_trot_targets(step, fast_walk_command());
+            let stance = [
+                sim.link_contact_impulse_ns("FL_foot") > 0.0,
+                sim.link_contact_impulse_ns("FR_foot") > 0.0,
+                sim.link_contact_impulse_ns("RL_foot") > 0.0,
+                sim.link_contact_impulse_ns("RR_foot") > 0.0,
+            ];
+            let drive_diff = if yaw_rate_gain != 0.0 {
+                let yaw_rate = sim.observe().base_angular_velocity_y_rad_s;
+                (yaw_rate_gain * (0.3 - yaw_rate)).clamp(-8.0, 8.0)
+            } else {
+                drive_diff
+            };
+            // Legs ordered FL, FR, RL, RR; joints hip, thigh, calf within each.
+            let diag_sign = [1.0, -1.0, -1.0, 1.0];
+            let side_sign = [1.0, -1.0, 1.0, -1.0];
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                .iter()
+                .enumerate()
+                .map(|(index, target)| {
+                    let q = sim
+                        .named_joint_position(target.link_name)
+                        .expect("joint position");
+                    let qd = sim
+                        .named_joint_velocity(target.link_name)
+                        .expect("joint velocity");
+                    let mut torque = KP * (target.position - q) - KD * qd;
+                    let leg = index / 3;
+                    if stance[leg] {
+                        match index % 3 {
+                            0 => torque += twist_hip * diag_sign[leg],
+                            1 => torque += drive_diff * side_sign[leg],
+                            _ => {}
+                        }
+                    }
+                    UrdfJointTorqueTarget {
+                        link_name: target.link_name,
+                        torque_nm: torque.clamp(-23.7, 23.7),
+                        max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            sim.step_joint_torques(&torques);
+            let observed = sim.observe();
+            let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+            while delta > std::f64::consts::PI {
+                delta -= 2.0 * std::f64::consts::PI;
+            }
+            while delta < -std::f64::consts::PI {
+                delta += 2.0 * std::f64::consts::PI;
+            }
+            if (480..960).contains(&step) {
+                window_a += delta;
+            } else if step >= 960 {
+                window_b += delta;
+            }
+            previous_yaw = observed.base_relative_yaw_rad;
+            max_tilt = max_tilt.max(true_tilt(&sim));
+            min_height = min_height.min(observed.base_y_m);
+        }
+        let end = sim.observe();
+        let distance = (end.base_x_m - start.base_x_m).hypot(end.base_z_m - start.base_z_m);
+        (window_a, window_b, max_tilt, min_height, distance)
+    }
+
+    #[test]
+    fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
+        // Force-level steering, hand-designed, measured and refuted — the
+        // torque-space mirror of the six position-space steering nulls. Three
+        // mechanisms position control cannot express at all: contact-gated
+        // diagonal hip twist torque, contact-gated left/right differential
+        // stance thrust, and yaw-rate feedback through the thrust channel.
+        // None sustains a turn through both measurement windows in either
+        // direction (the overlay's honest 0.12 rad per window is the bar), and
+        // the feed-forward thrust asymmetry stalls forward progress instead of
+        // steering — the gait's own propulsion cycle absorbs it.
+        let configs: [(&str, f64, f64, f64); 4] = [
+            ("baseline", 0.0, 0.0, 0.0),
+            ("diag hip twist 4", 4.0, 0.0, 0.0),
+            ("diff thrust 4", 0.0, 4.0, 0.0),
+            ("yaw-rate feedback 25", 0.0, 0.0, 25.0),
+        ];
+        for (label, twist, drive, gain) in configs {
+            let (a, b, tilt, height, distance) = torque_steer_run_with_feedback(twist, drive, gain);
+            println!(
+                "steer [{label}]: windows {a:+.3}/{b:+.3} tilt {tilt:.3} height {height:.3} dist {distance:.2}"
+            );
+            assert!(
+                a.min(b) < 0.12 && (-a).min(-b) < 0.12,
+                "[{label}] must not sustain a turn either way: {a:+.3}/{b:+.3}"
+            );
+            assert!(
+                tilt < 0.85 && height > 0.1,
+                "[{label}] walk must survive the pattern: tilt {tilt:.3} height {height:.3}"
+            );
+            if label == "baseline" {
+                assert!(
+                    distance > 3.0,
+                    "baseline torque walk must keep walking, got {distance:.2} m"
+                );
+            }
+        }
+    }
 }

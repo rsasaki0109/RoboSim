@@ -142,6 +142,32 @@ explicit velocity feedback destabilizes once kd exceeds roughly `2·I/dt` for th
 light distal links — kd 1.0 turns the same quiet stand into a 0.56 rad thrash
 (kp 60–200 with kd 2–10, the classic position-servo-like gains, thrash harder
 still). Low-rate explicit torque control demands low-bandwidth gains; the
-implicit speed-ceiling brake is what keeps the light links bounded. Whether
-torque-shaped stance forces can finally beat the ~0.02 rad/s steering plateau is
-the next measurement.
+implicit speed-ceiling brake is what keeps the light links bounded.
+
+## Torque-level walking, and the steering nulls repeat at force level
+
+The same low-bandwidth PD **walks**: kp 40 / kd 0.5 tracks the cycle-45 walking
+trot at position-servo speed (2.1 m per 12 s) while staying up, and kp 80
+crosses the discrete stability bound exactly as the stand did — the gait
+thrashes and falls (`torque_pd_tracks_the_walking_trot`). A softer kp 25 walks
+faster still (3.3 m) but rides visibly lower. Dynamic locomotion under pure
+feed-forward torque commands is real on this platform.
+
+Steering, however, repeats its position-space history at force level.
+Three hand-designed mechanisms that position control cannot express at all —
+contact-gated diagonal hip twist torque (±4 N·m on stance hips), contact-gated
+left/right differential stance thrust (±4/8 N·m on stance thighs, the
+tank-steer couple), and yaw-rate feedback through the thrust channel (gains
+10/25 toward 0.3 rad/s) — all fail the two-window sustained-turn bar in both
+directions, and the feed-forward thrust asymmetry stalls forward progress
+(4.7 m → 0.3 m) instead of steering: the gait's own propulsion cycle absorbs
+the couple (`contact_gated_hand_torques_do_not_steer_the_torque_walk` pins all
+four runs). One more honest boundary: the torque-PD walk's open-loop yaw noise
+(~±0.1 rad per 8 s window) is itself an order of magnitude above the position
+walk's drift, so any force-level steering signal must clear a noisier plant.
+
+Nine hand mechanisms across two actuation regimes now agree: this morphology
+does not steer through any single joint-space or torque-space channel. What
+remains is coordination — torque patterns coupled across legs and phase, which
+is a search problem, not a design problem. That search (the torque-space
+mirror of the overlay CEM) is the next measurement.
