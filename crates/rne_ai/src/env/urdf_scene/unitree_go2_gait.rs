@@ -174,12 +174,158 @@ pub fn unitree_go2_trot_targets_with_overlay(
 }
 
 fn gait_wave(phase: f64) -> (f64, f64) {
-    if phase < 0.7 {
-        (1.0 - 2.0 * phase / 0.7, 0.0)
+    gait_wave_with_duty(phase, 0.7)
+}
+
+/// Stance/swing waveform with an explicit duty factor: the thigh ramps
+/// backward through stance (`phase < duty`) and returns with a lifted calf
+/// through swing.
+fn gait_wave_with_duty(phase: f64, duty: f64) -> (f64, f64) {
+    if phase < duty {
+        (1.0 - 2.0 * phase / duty, 0.0)
     } else {
-        let swing = (phase - 0.7) / 0.3;
+        let swing = (phase - duty) / (1.0 - duty);
         (-1.0 + 2.0 * swing, (std::f64::consts::PI * swing).sin())
     }
+}
+
+/// Per-leg contact-schedule parameters for the generalized Go2 gait.
+///
+/// This is the search space the fixed trot cannot express: *when* each leg is
+/// on the ground (`phase_offset`, `duty`), how far it strides
+/// (`stride_scale`), and where it is planted laterally (`hip_offset_rad` at
+/// touchdown, swept by `hip_stance_sweep_rad` through stance). Re-sequencing
+/// contacts is what steering requires on a platform without hip-yaw joints
+/// (see `docs/GO2_LOCOMOTION.md`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2LegSchedule {
+    /// Gait-phase offset of this leg in `[0, 1)`.
+    pub phase_offset: f64,
+    /// Stance fraction of the cycle, clamped to `[0.5, 0.85]`.
+    pub duty: f64,
+    /// Multiplier on the commanded stride, clamped to `[0.3, 1.6]`.
+    pub stride_scale: f64,
+    /// Constant hip-abduction placement offset in radians, clamped to ±0.4.
+    pub hip_offset_rad: f64,
+    /// Hip sweep through stance in radians, clamped to ±0.35: the hip is at
+    /// `+sweep` at touchdown and `-sweep` at liftoff, dragging the stance foot
+    /// laterally under the body and repositioning it during swing.
+    pub hip_stance_sweep_rad: f64,
+}
+
+impl UnitreeGo2LegSchedule {
+    /// The scripted trot's schedule for a leg with the given phase offset.
+    pub const fn trot(phase_offset: f64) -> Self {
+        Self {
+            phase_offset,
+            duty: 0.7,
+            stride_scale: 1.0,
+            hip_offset_rad: 0.0,
+            hip_stance_sweep_rad: 0.0,
+        }
+    }
+}
+
+/// Full contact schedule for all four legs, ordered FL, FR, RL, RR.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2GaitSchedule {
+    /// Per-leg schedules ordered FL, FR, RL, RR.
+    pub legs: [UnitreeGo2LegSchedule; 4],
+}
+
+impl UnitreeGo2GaitSchedule {
+    /// The diagonal-pair trot: reproduces [`unitree_go2_trot_targets`] exactly.
+    pub const TROT: Self = Self {
+        legs: [
+            UnitreeGo2LegSchedule::trot(0.0),
+            UnitreeGo2LegSchedule::trot(0.5),
+            UnitreeGo2LegSchedule::trot(0.5),
+            UnitreeGo2LegSchedule::trot(0.0),
+        ],
+    };
+
+    /// The best turning contact schedule found by deterministic cross-entropy
+    /// search (seed 42, `examples/55_go2_stepped_turn -- --train`).
+    ///
+    /// This is a *negative-result pin*: the schedule sustains a turn
+    /// (~0.015 rad/s, positive through disjoint measurement windows) but does
+    /// **not** beat the fixed-schedule joint-offset overlay
+    /// ([`UnitreeGo2GaitOverlay::LEARNED_TURN`], ~0.025 rad/s) — refuting the
+    /// hypothesis that re-sequencing contacts within walkable schedules
+    /// unlocks steering, and, together with the torque-limit scan in
+    /// `docs/GO2_LOCOMOTION.md`, pointing at contact friction and morphology
+    /// as the plateau's cause.
+    pub const LEARNED_TURN: Self = Self {
+        legs: [
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.074632,
+                duty: 0.550000,
+                stride_scale: 1.351674,
+                hip_offset_rad: 0.171945,
+                hip_stance_sweep_rad: 0.128867,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.567315,
+                duty: 0.721690,
+                stride_scale: 0.755357,
+                hip_offset_rad: 0.033470,
+                hip_stance_sweep_rad: 0.053825,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.526908,
+                duty: 0.627953,
+                stride_scale: 0.897632,
+                hip_offset_rad: -0.296140,
+                hip_stance_sweep_rad: -0.024478,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.983421,
+                duty: 0.709291,
+                stride_scale: 1.059287,
+                hip_offset_rad: -0.254034,
+                hip_stance_sweep_rad: -0.031375,
+            },
+        ],
+    };
+}
+
+/// Force-limited targets for all 12 joints under an explicit contact schedule.
+pub fn unitree_go2_scheduled_targets(
+    step: u64,
+    command: UnitreeGo2GaitCommand,
+    schedule: &UnitreeGo2GaitSchedule,
+) -> [UrdfJointPositionTarget<'static>; 12] {
+    let stride = command.stride_rad.clamp(0.0, 0.3);
+    let lift = command.foot_lift_rad.clamp(0.0, 0.4);
+    let cycle = command.cycle_steps.clamp(40, 180);
+    let roll = command.roll_correction_rad.clamp(-0.8, 0.8);
+    let pitch = command.pitch_correction_rad.clamp(-0.3, 0.3);
+    let extension = command.lateral_extension_rad.clamp(-0.5, 0.5);
+    let phase = (step % cycle) as f64 / cycle as f64;
+    let names: [(&'static str, &'static str, &'static str, f64); 4] = [
+        ("FL_hip", "FL_thigh", "FL_calf", 1.0),
+        ("FR_hip", "FR_thigh", "FR_calf", -1.0),
+        ("RL_hip", "RL_thigh", "RL_calf", 1.0),
+        ("RR_hip", "RR_thigh", "RR_calf", -1.0),
+    ];
+    let mut targets = [target("FL_hip", 0.0); 12];
+    for (leg_index, ((hip, thigh, calf, side), leg)) in
+        names.iter().zip(schedule.legs.iter()).enumerate()
+    {
+        let leg_phase = (phase + leg.phase_offset.rem_euclid(1.0)).rem_euclid(1.0);
+        let duty = leg.duty.clamp(0.5, 0.85);
+        let wave = gait_wave_with_duty(leg_phase, duty);
+        let leg_stride = stride * leg.stride_scale.clamp(0.3, 1.6);
+        // Hip: base correction + placement offset + stance sweep. The sweep
+        // follows the same stance ramp as the thigh, so the foot is planted at
+        // `+sweep` and dragged to `-sweep` before lifting.
+        let sweep = leg.hip_stance_sweep_rad.clamp(-0.35, 0.35);
+        let hip_position = roll + leg.hip_offset_rad.clamp(-0.4, 0.4) + sweep * wave.0;
+        targets[leg_index * 3] = target(hip, hip_position);
+        targets[leg_index * 3 + 1] = target(thigh, 0.8 + leg_stride * wave.0 + pitch);
+        targets[leg_index * 3 + 2] = target(calf, -1.5 - lift * wave.1 + side * extension);
+    }
+    targets
 }
 
 fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'static> {
@@ -192,6 +338,29 @@ fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trot_schedule_reproduces_the_scripted_trot() {
+        let commands = [
+            UnitreeGo2GaitCommand::default(),
+            UnitreeGo2GaitCommand {
+                stride_rad: 0.24,
+                cycle_steps: 45,
+                roll_correction_rad: 0.2,
+                lateral_extension_rad: -0.1,
+                ..UnitreeGo2GaitCommand::default()
+            },
+        ];
+        for command in commands {
+            for step in [0, 13, 44, 89, 130] {
+                assert_eq!(
+                    unitree_go2_trot_targets(step, command),
+                    unitree_go2_scheduled_targets(step, command, &UnitreeGo2GaitSchedule::TROT),
+                    "step {step}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn zero_overlay_reproduces_the_scripted_trot() {

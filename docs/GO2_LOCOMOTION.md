@@ -86,8 +86,27 @@ half-cycle symmetry. Three findings, each pinned or reproducible with
    the first sustained yaw this platform has produced under any control in
    these measurements. `learned_overlay_turns_the_walking_trot` pins it.
 3. **The boundary stands.** 0.025 rad/s is an order of magnitude short of
-   practical steering. Sixty dimensions of joint-space freedom cannot
-   re-sequence the contacts; the trot's fixed stance/swing schedule is the
-   binding constraint. Steering this platform requires controlling the contact
-   schedule itself — stepping timing and placement — which is precisely the
-   province of full learned or model-based locomotion.
+   practical steering. The obvious next hypothesis — that the trot's fixed
+   contact schedule is the binding constraint — was then tested directly.
+
+## Testing the contact-schedule hypothesis
+
+`UnitreeGo2GaitSchedule` generalizes the gait generator itself: per-leg phase
+offsets, duty factors (0.55–0.85), stride scales, and hip placement/sweep —
+contact re-sequencing, the freedom the overlay lacks by construction
+(`trot_schedule_reproduces_the_scripted_trot` pins that the trot is the
+identity point of this space). `examples/55_go2_stepped_turn` searches its
+20 dimensions with the same anti-cheat objective. The result **refutes the
+hypothesis** within walkable schedules: the best schedule sustains ~0.015 rad/s
+— *below* the overlay's 0.025 — pinned by
+`learned_schedule_turn_is_sustained_but_does_not_beat_the_overlay`.
+
+A torque scan closes the remaining obvious explanation: running the overlay's
+turn on 23.7, 60, and 120 N·m actuators leaves the yaw rate unchanged
+(`yaw_plateau_is_not_torque_limited`). Three search spaces and a five-fold
+torque range all plateau at ~0.02 rad/s, which localizes the constraint in the
+contact mechanics and morphology: four point feet dragging under hard position
+servos shed their tangential impulse in slip, and no joint-space pattern
+changes that. What remains genuinely untested: torque-level control (shaping
+contact forces instead of positions), aerial-duty gaits below 0.55, and foot
+geometry — the concrete openings for the full learned-locomotion arc.

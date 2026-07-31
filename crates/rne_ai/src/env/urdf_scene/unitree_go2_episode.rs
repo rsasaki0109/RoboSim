@@ -707,6 +707,142 @@ mod tests {
         );
     }
 
+    /// Windowed yaw of a 1440-step walk under joint targets produced by
+    /// `targets_of(step)`, with the given motor force limit.
+    fn windowed_yaw(
+        max_force: f64,
+        targets_of: impl Fn(u64) -> [crate::env::urdf_scene::UrdfJointPositionTarget<'static>; 12],
+    ) -> (f64, f64, f64, f64) {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        settle(
+            &mut sim,
+            &UnitreeGo2EpisodeConfig {
+                motor_max_force_n: max_force,
+                ..Default::default()
+            },
+        );
+        let start = sim.observe();
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut max_tilt = 0.0_f64;
+        let mut min_height = f64::MAX;
+        for step in 0..1440_u64 {
+            sim.step_joint_position_targets(&targets_of(step));
+            let observed = sim.observe();
+            let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+            while delta > std::f64::consts::PI {
+                delta -= 2.0 * std::f64::consts::PI;
+            }
+            while delta < -std::f64::consts::PI {
+                delta += 2.0 * std::f64::consts::PI;
+            }
+            if (480..960).contains(&step) {
+                window_a += delta;
+            } else if step >= 960 {
+                window_b += delta;
+            }
+            previous_yaw = observed.base_relative_yaw_rad;
+            max_tilt = max_tilt.max(
+                observed
+                    .base_relative_pitch_rad
+                    .hypot(observed.base_relative_roll_rad),
+            );
+            min_height = min_height.min(observed.base_y_m);
+        }
+        (window_a, window_b, max_tilt, min_height)
+    }
+
+    fn fast_walk_command() -> UnitreeGo2GaitCommand {
+        UnitreeGo2GaitCommand {
+            stride_rad: 0.24,
+            cycle_steps: 45,
+            ..UnitreeGo2GaitCommand::default()
+        }
+    }
+
+    #[test]
+    fn yaw_plateau_is_not_torque_limited() {
+        // Five times the actuator torque must not meaningfully change the
+        // learned overlay's sustained yaw — the plateau is a contact/morphology
+        // property, not an actuation-force limit.
+        use super::super::unitree_go2_trot_targets_with_overlay;
+        use super::super::UnitreeGo2GaitOverlay;
+
+        let overlay_targets = |step: u64| {
+            unitree_go2_trot_targets_with_overlay(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitOverlay::LEARNED_TURN,
+            )
+        };
+        let (nominal_a, nominal_b, _, _) = windowed_yaw(23.7, overlay_targets);
+        let (strong_a, strong_b, _, _) = windowed_yaw(120.0, overlay_targets);
+        let nominal = nominal_a.min(nominal_b);
+        let strong = strong_a.min(strong_b);
+        assert!(
+            nominal > 0.12,
+            "overlay must turn at nominal torque, got {nominal:+.3}"
+        );
+        assert!(
+            strong < 1.5 * nominal,
+            "yaw must not scale with torque: {strong:+.3} at 120 N*m vs {nominal:+.3} at 23.7"
+        );
+    }
+
+    #[test]
+    fn learned_schedule_turn_is_sustained_but_does_not_beat_the_overlay() {
+        // The contact-schedule hypothesis, tested and refuted: the best
+        // schedule the search found sustains a turn but stays below the
+        // fixed-schedule overlay's rate. Pinning the comparison keeps the
+        // negative result from silently rotting.
+        use super::super::unitree_go2_scheduled_targets;
+        use super::super::unitree_go2_trot_targets_with_overlay;
+        use super::super::UnitreeGo2GaitOverlay;
+        use super::super::UnitreeGo2GaitSchedule;
+
+        let (schedule_a, schedule_b, max_tilt, min_height) = windowed_yaw(23.7, |step| {
+            unitree_go2_scheduled_targets(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitSchedule::LEARNED_TURN,
+            )
+        });
+        assert!(
+            schedule_a > 0.06 && schedule_b > 0.06,
+            "schedule turn must be sustained: windows {schedule_a:+.3}/{schedule_b:+.3}"
+        );
+        assert!(
+            max_tilt < 0.85 && min_height > 0.15,
+            "schedule turn must stay upright: tilt {max_tilt:.2} height {min_height:.3}"
+        );
+
+        let (overlay_a, overlay_b, _, _) = windowed_yaw(23.7, |step| {
+            unitree_go2_trot_targets_with_overlay(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitOverlay::LEARNED_TURN,
+            )
+        });
+        assert!(
+            schedule_a.min(schedule_b) < overlay_a.min(overlay_b),
+            "the schedule search did not beat the overlay in these measurements: {:+.3} vs {:+.3}",
+            schedule_a.min(schedule_b),
+            overlay_a.min(overlay_b)
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, _, _, _) = windowed_yaw(23.7, |step| {
+            unitree_go2_scheduled_targets(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitSchedule::LEARNED_TURN,
+            )
+        });
+        assert_eq!(schedule_a.to_bits(), again_a.to_bits());
+    }
+
     #[test]
     fn learned_overlay_turns_the_walking_trot() {
         // The CEM-found overlay (examples/54_go2_learned_turn --train, seed 42)
