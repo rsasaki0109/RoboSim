@@ -1406,7 +1406,7 @@ mod tests {
 
     #[test]
     fn learned_torque_overlay_out_turns_the_position_plateau() {
-        use super::super::{UnitreeGo2TorqueOverlay, UrdfJointTorqueTarget};
+        use super::super::UnitreeGo2TorqueOverlay;
 
         // The measurement the torque arc exists for. Three position-space
         // searches and a five-fold torque scan plateaued at ~0.02 rad/s and
@@ -1416,75 +1416,8 @@ mod tests {
         // — above every position-space result — while the robot keeps walking:
         // force-level coordination genuinely moves the boundary joint-space
         // control could not.
-        let run = |overlay: &UnitreeGo2TorqueOverlay| {
-            let mut sim = settled_stand();
-            let up_body = {
-                let pose = sim.named_transform("base").expect("base pose");
-                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
-            };
-            let true_tilt = |sim: &UrdfSceneSim| {
-                let pose = sim.named_transform("base").expect("base pose");
-                let up = (pose.rotation * up_body).normalize_or_zero();
-                up.y.clamp(-1.0, 1.0).acos()
-            };
-            let start = sim.observe();
-            let mut previous_yaw = start.base_relative_yaw_rad;
-            let mut window_a = 0.0;
-            let mut window_b = 0.0;
-            let mut max_tilt = 0.0_f64;
-            let mut min_height = f64::MAX;
-            let cycle = fast_walk_command().cycle_steps;
-            for step in 0..1440_u64 {
-                let targets = unitree_go2_trot_targets(step, fast_walk_command());
-                let stance = [
-                    sim.link_contact_impulse_ns("FL_foot") > 0.0,
-                    sim.link_contact_impulse_ns("FR_foot") > 0.0,
-                    sim.link_contact_impulse_ns("RL_foot") > 0.0,
-                    sim.link_contact_impulse_ns("RR_foot") > 0.0,
-                ];
-                let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
-                let feed_forward = overlay.torques_nm(two_cycle_phase, stance);
-                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
-                    .iter()
-                    .zip(feed_forward.iter())
-                    .map(|(target, extra)| {
-                        let q = sim
-                            .named_joint_position(target.link_name)
-                            .expect("joint position");
-                        let qd = sim
-                            .named_joint_velocity(target.link_name)
-                            .expect("joint velocity");
-                        UrdfJointTorqueTarget {
-                            link_name: target.link_name,
-                            torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
-                                .clamp(-23.7, 23.7),
-                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
-                        }
-                    })
-                    .collect();
-                sim.step_joint_torques(&torques);
-                let observed = sim.observe();
-                let mut delta = observed.base_relative_yaw_rad - previous_yaw;
-                while delta > std::f64::consts::PI {
-                    delta -= 2.0 * std::f64::consts::PI;
-                }
-                while delta < -std::f64::consts::PI {
-                    delta += 2.0 * std::f64::consts::PI;
-                }
-                if (480..960).contains(&step) {
-                    window_a += delta;
-                } else if step >= 960 {
-                    window_b += delta;
-                }
-                previous_yaw = observed.base_relative_yaw_rad;
-                max_tilt = max_tilt.max(true_tilt(&sim));
-                min_height = min_height.min(observed.base_y_m);
-            }
-            (window_a, window_b, max_tilt, min_height)
-        };
-
         let (window_a, window_b, max_tilt, min_height) =
-            run(&UnitreeGo2TorqueOverlay::LEARNED_TURN);
+            torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_TURN, 0.0);
         println!(
             "learned torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
         );
@@ -1510,7 +1443,125 @@ mod tests {
         );
 
         // Determinism: bit-identical repeat.
-        let (again_a, again_b, _, _) = run(&UnitreeGo2TorqueOverlay::LEARNED_TURN);
+        let (again_a, again_b, _, _) =
+            torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_TURN, 0.0);
+        assert_eq!(window_a.to_bits(), again_a.to_bits());
+        assert_eq!(window_b.to_bits(), again_b.to_bits());
+    }
+
+    /// Windowed-yaw run of a torque overlay on the torque-PD walk, with an
+    /// optional perturbation on the first coefficient (the chaos probe).
+    fn torque_overlay_run(
+        overlay: &super::super::UnitreeGo2TorqueOverlay,
+        perturbation: f64,
+    ) -> (f64, f64, f64, f64) {
+        use super::super::UrdfJointTorqueTarget;
+
+        let mut overlay = *overlay;
+        overlay.coefficients[0][0] += perturbation;
+        let mut sim = settled_stand();
+        let up_body = {
+            let pose = sim.named_transform("base").expect("base pose");
+            (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+        };
+        let true_tilt = |sim: &UrdfSceneSim| {
+            let pose = sim.named_transform("base").expect("base pose");
+            let up = (pose.rotation * up_body).normalize_or_zero();
+            up.y.clamp(-1.0, 1.0).acos()
+        };
+        let start = sim.observe();
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut max_tilt = 0.0_f64;
+        let mut min_height = f64::MAX;
+        let cycle = fast_walk_command().cycle_steps;
+        for step in 0..1440_u64 {
+            let targets = unitree_go2_trot_targets(step, fast_walk_command());
+            let stance = [
+                sim.link_contact_impulse_ns("FL_foot") > 0.0,
+                sim.link_contact_impulse_ns("FR_foot") > 0.0,
+                sim.link_contact_impulse_ns("RL_foot") > 0.0,
+                sim.link_contact_impulse_ns("RR_foot") > 0.0,
+            ];
+            let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+            let feed_forward = overlay.torques_nm(two_cycle_phase, stance);
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                .iter()
+                .zip(feed_forward.iter())
+                .map(|(target, extra)| {
+                    let q = sim
+                        .named_joint_position(target.link_name)
+                        .expect("joint position");
+                    let qd = sim
+                        .named_joint_velocity(target.link_name)
+                        .expect("joint velocity");
+                    UrdfJointTorqueTarget {
+                        link_name: target.link_name,
+                        torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                            .clamp(-23.7, 23.7),
+                        max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            sim.step_joint_torques(&torques);
+            let observed = sim.observe();
+            let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+            while delta > std::f64::consts::PI {
+                delta -= 2.0 * std::f64::consts::PI;
+            }
+            while delta < -std::f64::consts::PI {
+                delta += 2.0 * std::f64::consts::PI;
+            }
+            if (480..960).contains(&step) {
+                window_a += delta;
+            } else if step >= 960 {
+                window_b += delta;
+            }
+            previous_yaw = observed.base_relative_yaw_rad;
+            max_tilt = max_tilt.max(true_tilt(&sim));
+            min_height = min_height.min(observed.base_y_m);
+        }
+        (window_a, window_b, max_tilt, min_height)
+    }
+
+    #[test]
+    fn robust_torque_turn_survives_perturbation() {
+        use super::super::UnitreeGo2TorqueOverlay;
+
+        // The ensemble-median search's answer to the chaos horizon: a turn
+        // that lives on a locally *contracting* trajectory. Both measurement
+        // windows stay positive — genuinely sustained, unlike the fragile
+        // winner whose second window swings ±0.3 rad under one-ulp noise —
+        // and a 3-ulp-scale coefficient nudge lands on the same windows
+        // instead of diverging. The contraction is what the ensemble
+        // objective bought; parameter-scale (1e-6) sensitivity remains, which
+        // is why the coefficients are pinned at 12 decimals.
+        let (window_a, window_b, max_tilt, min_height) =
+            torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, 0.0);
+        println!(
+            "robust torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
+        );
+        assert!(
+            window_a > 0.15 && window_b > 0.15,
+            "robust turn must sustain both windows: {window_a:+.3}/{window_b:+.3}"
+        );
+        assert!(
+            max_tilt < 0.8 && min_height > 0.1,
+            "robust turn must stay walking upright: tilt {max_tilt:.3} height {min_height:.3}"
+        );
+
+        let (nudged_a, nudged_b, _, _) =
+            torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, 3.0e-9);
+        println!("nudged robust turn: windows {nudged_a:+.3}/{nudged_b:+.3}");
+        assert!(
+            (nudged_a - window_a).abs() < 0.05 && (nudged_b - window_b).abs() < 0.05,
+            "the robust turn must contract under ulp-scale perturbation: {nudged_a:+.3}/{nudged_b:+.3} vs {window_a:+.3}/{window_b:+.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) =
+            torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, 0.0);
         assert_eq!(window_a.to_bits(), again_a.to_bits());
         assert_eq!(window_b.to_bits(), again_b.to_bits());
     }

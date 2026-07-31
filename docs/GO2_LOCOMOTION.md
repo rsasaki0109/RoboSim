@@ -206,7 +206,26 @@ a different trajectory.
 
 The honest margins: 52 % over the old plateau in the robust window, not an
 order of magnitude, and provably sustained for 16 s rather than indefinitely.
-The concrete next steps this measurement sets up: ensemble-averaged
-objectives (score the median of perturbed replays, so the search must find
-*robust* turners), aerial-duty gaits, foot geometry/friction, and
-state-feedback torque policies.
+
+## Buying robustness with the objective
+
+If chaos games single-trajectory objectives, make the objective sample the
+chaos: `--train-robust` re-runs the CEM scoring each candidate by the
+**median of three replays** whose coefficients differ by one part in 10⁹,
+warm-started from the fragile winner. The search pays 3× per candidate and
+buys exactly what it measures. Its winner
+(`UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN`) turns at **~0.031 rad/s
+with both windows positive** (+0.250/+0.274 rad per 8 s) — genuinely
+sustained past the horizon that broke the fragile winner — and its perturbed
+replays land on the *same* windows to three decimals instead of scattering:
+the trajectory is locally contracting, an attractor rather than a knife edge
+(`robust_torque_turn_survives_perturbation` pins both the turn and the
+contraction).
+
+The limit of what was bought, also measured: contraction holds at the ulp
+scale the objective sampled, but a 10⁻⁶ coefficient change is still a
+different trajectory (`--ensemble` prints the spread for both winners), so
+the 12-decimal pinning discipline stays. Parameter-scale robustness — a turn
+that survives *gait-level* variation — is a different objective for a later
+search. The other openings are unchanged: aerial-duty gaits, foot
+geometry/friction, and state-feedback torque policies.
