@@ -54,7 +54,10 @@ pub use unitree_go2_episode::{
     UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
     UnitreeGo2Push,
 };
-pub use unitree_go2_gait::{unitree_go2_trot_targets, UnitreeGo2GaitCommand};
+pub use unitree_go2_gait::{
+    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, UnitreeGo2GaitCommand,
+    UnitreeGo2GaitOverlay,
+};
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};

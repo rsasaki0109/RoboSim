@@ -63,5 +63,31 @@ yawing it, so every hip-based pattern turns into a lean or a bounded twist:
 
 The one honest conclusion: a 3-DoF-per-leg quadruped steers by coordinating
 foot placement with body dynamics — exactly what scripted joint-space gaits
-cannot express and learned or model-based gaits can. This measurement campaign
-is the concrete case for the learned-locomotion arc.
+cannot express. The learned-gait experiment below quantifies how far a learned
+*overlay* can push that boundary, and where it too stops.
+
+## Learning against the boundary
+
+`examples/54_go2_learned_turn` runs a deterministic, resumable, parallel
+cross-entropy search over `UnitreeGo2GaitOverlay` — Fourier joint offsets on the
+walking trot, including half-frequency terms that deliberately break the trot's
+half-cycle symmetry. Three findings, each pinned or reproducible with
+`--train` (seed 42):
+
+1. **Objectives get gamed by twist physics.** Maximizing total yaw rediscovered
+   the bounded elastic twist (0.32 rad in 8 s, zero thereafter). Maximizing yaw
+   in a single late window found a *slow oscillation* whose reversal hid beyond
+   the rollout horizon. The objective that survives both: score the **minimum**
+   yaw over two disjoint late windows of a 24-second rollout — a twist scores
+   zero there and an oscillation goes negative.
+2. **The honest optimum is real but small.** The best anti-cheat-scored overlay
+   (`UnitreeGo2GaitOverlay::LEARNED_TURN`) turns at a genuinely sustained
+   ~0.025 rad/s — positive through every measurement window, upright, walking —
+   the first sustained yaw this platform has produced under any control in
+   these measurements. `learned_overlay_turns_the_walking_trot` pins it.
+3. **The boundary stands.** 0.025 rad/s is an order of magnitude short of
+   practical steering. Sixty dimensions of joint-space freedom cannot
+   re-sequence the contacts; the trot's fixed stance/swing schedule is the
+   binding constraint. Steering this platform requires controlling the contact
+   schedule itself — stepping timing and placement — which is precisely the
+   province of full learned or model-based locomotion.

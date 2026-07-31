@@ -85,6 +85,94 @@ pub fn unitree_go2_trot_targets(
     ]
 }
 
+/// Fourier joint-offset overlay on the official trot.
+///
+/// This is the search space for optimized gaits: for every joint the overlay
+/// adds `c + s₁·sin(2π·p) + k₁·cos(2π·p) + s₂·sin(π·p) + k₂·cos(π·p)` to the
+/// scripted trot target, where `p` is the gait phase over a **two-cycle**
+/// period. The half-frequency terms deliberately break the trot's half-cycle
+/// symmetry — the symmetry that cancels every hand-scripted steering pattern —
+/// and the twelve joints × five coefficients give a 60-dimensional space that
+/// can express per-leg phase, asymmetry, and cycle-to-cycle alternation (see
+/// `docs/GO2_LOCOMOTION.md` for the measured steering boundary motivating it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2GaitOverlay {
+    /// Per-joint `[constant, sin, cos, half_sin, half_cos]` coefficients; legs
+    /// ordered FL, FR, RL, RR, joints ordered hip, thigh, calf within each leg.
+    pub coefficients: [[f64; 5]; 12],
+}
+
+impl UnitreeGo2GaitOverlay {
+    /// The neutral overlay: reproduces the scripted trot exactly.
+    pub const ZERO: Self = Self {
+        coefficients: [[0.0; 5]; 12],
+    };
+
+    /// A turning gait found by deterministic cross-entropy search (seed 42,
+    /// `examples/54_go2_learned_turn -- --train`) on the fast walking trot.
+    ///
+    /// Every hand-scripted steering mechanism measured in
+    /// `docs/GO2_LOCOMOTION.md` fails to yaw this platform. This overlay is the
+    /// first gait that turns it at a genuinely *sustained* rate — about
+    /// 0.025 rad/s, positive across disjoint measurement windows — while
+    /// staying upright; `learned_overlay_turns_the_walking_trot` pins that
+    /// behavior. The magnitude is also the honest boundary: an order of
+    /// magnitude short of practical steering, because additive joint offsets on
+    /// a fixed contact schedule cannot re-sequence the contacts.
+    pub const LEARNED_TURN: Self = Self {
+        coefficients: [
+            [0.129912, -0.217959, 0.002348, -0.189749, 0.064767],
+            [0.071184, -0.071463, -0.212554, -0.046149, 0.032646],
+            [-0.233136, -0.043006, -0.039531, 0.077401, -0.024237],
+            [0.078918, -0.039693, 0.089503, -0.046611, 0.045946],
+            [-0.166883, 0.103000, 0.176065, 0.094167, 0.000696],
+            [0.001261, -0.017031, 0.062574, -0.052474, -0.150523],
+            [-0.128368, -0.062886, 0.046139, -0.018919, 0.022867],
+            [-0.020196, -0.053897, -0.047735, -0.066953, 0.051198],
+            [0.008270, -0.045094, -0.144627, -0.154906, -0.014030],
+            [-0.230480, 0.192577, 0.051289, -0.210476, -0.151049],
+            [-0.080313, -0.050767, -0.048977, 0.080942, -0.007959],
+            [0.045380, -0.051971, -0.030212, 0.129360, -0.120137],
+        ],
+    };
+
+    /// Joint offsets at a two-cycle gait phase in `[0, 1)`, each clamped to
+    /// ±0.5 rad so no candidate can command a joint far outside the gait's
+    /// working range.
+    pub fn offsets(&self, two_cycle_phase: f64) -> [f64; 12] {
+        let full = 4.0 * std::f64::consts::PI * two_cycle_phase;
+        let half = 2.0 * std::f64::consts::PI * two_cycle_phase;
+        let (sin, cos) = full.sin_cos();
+        let (half_sin, half_cos) = half.sin_cos();
+        let mut offsets = [0.0; 12];
+        for (offset, coefficient) in offsets.iter_mut().zip(self.coefficients.iter()) {
+            *offset = (coefficient[0]
+                + coefficient[1] * sin
+                + coefficient[2] * cos
+                + coefficient[3] * half_sin
+                + coefficient[4] * half_cos)
+                .clamp(-0.5, 0.5);
+        }
+        offsets
+    }
+}
+
+/// The official trot with a Fourier overlay added joint by joint.
+pub fn unitree_go2_trot_targets_with_overlay(
+    step: u64,
+    command: UnitreeGo2GaitCommand,
+    overlay: &UnitreeGo2GaitOverlay,
+) -> [UrdfJointPositionTarget<'static>; 12] {
+    let mut targets = unitree_go2_trot_targets(step, command);
+    let cycle = command.cycle_steps.clamp(40, 180);
+    let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+    let offsets = overlay.offsets(two_cycle_phase);
+    for (target, offset) in targets.iter_mut().zip(offsets.iter()) {
+        target.position += offset;
+    }
+    targets
+}
+
 fn gait_wave(phase: f64) -> (f64, f64) {
     if phase < 0.7 {
         (1.0 - 2.0 * phase / 0.7, 0.0)
@@ -104,6 +192,27 @@ fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_overlay_reproduces_the_scripted_trot() {
+        let command = UnitreeGo2GaitCommand::default();
+        for step in [0, 17, 45, 89] {
+            assert_eq!(
+                unitree_go2_trot_targets(step, command),
+                unitree_go2_trot_targets_with_overlay(step, command, &UnitreeGo2GaitOverlay::ZERO)
+            );
+        }
+    }
+
+    #[test]
+    fn overlay_offsets_are_clamped() {
+        let overlay = UnitreeGo2GaitOverlay {
+            coefficients: [[1.0, 1.0, 1.0, 1.0, 1.0]; 12],
+        };
+        for offset in overlay.offsets(0.13) {
+            assert!(offset.abs() <= 0.5);
+        }
+    }
 
     #[test]
     fn official_go2_trot_is_periodic_and_bounded() {

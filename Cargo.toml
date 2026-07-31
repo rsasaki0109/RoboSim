@@ -73,6 +73,7 @@ members = [
   "examples/51_latency_in_the_loop",
   "examples/52_go2_fall_vs_save",
   "examples/53_go2_walk_vs_stand_push",
+  "examples/54_go2_learned_turn",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
