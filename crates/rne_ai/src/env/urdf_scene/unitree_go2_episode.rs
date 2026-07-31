@@ -625,6 +625,88 @@ mod tests {
         }
     }
 
+    /// Mid-walk shove shared by the motion-is-stability test and example 53.
+    fn mid_walk_push_config(cycle_steps: u64) -> UnitreeGo2EpisodeConfig {
+        UnitreeGo2EpisodeConfig {
+            max_steps: 900,
+            cycle_steps,
+            push: Some(UnitreeGo2Push {
+                step: 450,
+                roll_tilt_rad: 1.8,
+                duration_steps: 20,
+            }),
+            motor_max_force_n: 8.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn walking_trot_shrugs_off_the_push_that_topples_the_slow_trot() {
+        // Same 8 N*m motors, same sustained 1.8 rad flank push. The slow trot
+        // (90-step cycle, 0.12 stride) capsizes; the fast walking trot (45-step
+        // cycle, 0.24 stride, ~0.17 m/s) leans to ~0.9 rad and recovers with no
+        // controller at all — cyclic foot replanting is itself a stabilizer.
+        // This is measured plant physics, not a tuned demo.
+        let slow = run_to_horizon(mid_walk_push_config(90), open_loop, 900);
+        assert!(
+            slow.end_tilt_rad > 1.3,
+            "slow trot must capsize, got end tilt {:.2}",
+            slow.end_tilt_rad
+        );
+
+        let walk_action = |_: &UnitreeGo2Observation| UnitreeGo2Action {
+            stride_rad: 0.24,
+            ..UnitreeGo2Action::default()
+        };
+        let mut episode =
+            UnitreeGo2Episode::new(mid_walk_push_config(45)).expect("walking Go2 episode");
+        let mut observation = episode.reset().observation;
+        let start = (observation.base_x_m, observation.base_z_m);
+        let mut max_tilt = 0.0_f64;
+        for _ in 0..900 {
+            observation = episode.step(walk_action(&observation)).observation;
+            max_tilt = max_tilt.max(
+                observation
+                    .base_relative_pitch_rad
+                    .hypot(observation.base_relative_roll_rad),
+            );
+        }
+        let end_tilt = observation
+            .base_relative_pitch_rad
+            .hypot(observation.base_relative_roll_rad);
+        let forward_m = (observation.base_x_m - start.0).hypot(observation.base_z_m - start.1);
+        // The push registers hard but never crosses the termination tilt.
+        assert!(
+            max_tilt > 0.5 && max_tilt < 1.2,
+            "walking peak lean should register without falling, got {max_tilt:.2}"
+        );
+        // The walk recovers upright and keeps covering ground.
+        assert!(
+            end_tilt < 0.15,
+            "walking trot must end upright, got {end_tilt:.2}"
+        );
+        assert!(
+            forward_m > 2.0,
+            "walking trot must keep walking, got {forward_m:.2} m"
+        );
+
+        // Determinism: bit-identical repeat.
+        let mut second =
+            UnitreeGo2Episode::new(mid_walk_push_config(45)).expect("second walking episode");
+        let mut second_observation = second.reset().observation;
+        for _ in 0..900 {
+            second_observation = second.step(walk_action(&second_observation)).observation;
+        }
+        assert_eq!(
+            observation.base_x_m.to_bits(),
+            second_observation.base_x_m.to_bits()
+        );
+        assert_eq!(
+            observation.base_relative_pitch_rad.to_bits(),
+            second_observation.base_relative_pitch_rad.to_bits()
+        );
+    }
+
     #[test]
     fn sustained_push_topples_weak_motor_trot_and_two_channel_feedback_saves_it() {
         // On torque-limited motors (8 N*m versus the stiff 23.7) a 1.8 rad flank
