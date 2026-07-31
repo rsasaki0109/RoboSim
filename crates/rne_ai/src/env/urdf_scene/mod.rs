@@ -140,6 +140,25 @@ pub struct UrdfJointPositionTarget<'a> {
     pub position: f64,
 }
 
+/// Feed-forward torque command for a named actuated URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointTorqueTarget<'a> {
+    /// Child link name whose articulation joint owns the motor.
+    pub link_name: &'a str,
+    /// Joint torque in N·m (revolute) or force in N (prismatic). Positive drives
+    /// the joint coordinate positive, matching the position-target convention.
+    pub torque_nm: f64,
+    /// Actuator speed ceiling in rad/s (revolute) or m/s (prismatic).
+    ///
+    /// Real actuators cannot push torque into a joint that already spins at
+    /// their no-load speed; modelling the ceiling also gives the solver an
+    /// implicit brake above it, which is what keeps explicit low-rate torque
+    /// controllers from spinning light distal links up without bound. Values
+    /// that are non-positive or non-finite fall back to an effectively
+    /// unbounded 1000.
+    pub max_velocity_rad_s: f64,
+}
+
 /// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
 pub struct UrdfSceneSim {
     world: World,
@@ -1171,6 +1190,81 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Applies named feed-forward joint torques and steps one simulation tick.
+    ///
+    /// Torque mode reuses the joint velocity motor saturated on purpose: the
+    /// motor's velocity target is set to the actuator speed ceiling in the
+    /// torque's direction while `max_force` is set to the torque magnitude, so
+    /// the backend applies exactly `|torque_nm|` in the commanded direction
+    /// whenever the joint is below the ceiling (a force-capped motor at an
+    /// unreached velocity target *is* a torque source), and brakes with up to
+    /// the same torque above it — the real actuator envelope. A zero torque
+    /// leaves the joint effectively free.
+    ///
+    /// Unknown link names, links without a [`JointMotor`], and non-finite
+    /// torques are ignored. Joints not listed keep their current motor
+    /// configuration, so torque-controlled and position-held joints can be
+    /// mixed in one step. Switching a joint back to position control requires
+    /// re-running [`Self::configure_position_motors`] (or the named variant),
+    /// because torque mode clears the position gains.
+    pub fn step_joint_torques(&mut self, torques: &[UrdfJointTorqueTarget<'_>]) {
+        // Fallback ceiling far above any physical joint speed, for callers that
+        // want an ideal torque source.
+        const UNBOUNDED_VELOCITY_RAD_S: f64 = 1.0e3;
+        // Non-zero floor so the backend's "0 = default cap" convention cannot
+        // turn a zero-torque command into a strong default motor.
+        const TORQUE_MODE_MIN_FORCE: f64 = 1.0e-9;
+        for target in torques {
+            if !target.torque_nm.is_finite() {
+                continue;
+            }
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            let ceiling =
+                if target.max_velocity_rad_s.is_finite() && target.max_velocity_rad_s > 0.0 {
+                    target.max_velocity_rad_s.min(UNBOUNDED_VELOCITY_RAD_S)
+                } else {
+                    UNBOUNDED_VELOCITY_RAD_S
+                };
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.stiffness = 0.0;
+                motor.target_position = 0.0;
+                motor.gain = 1.0;
+                motor.velocity_rad_s = if target.torque_nm == 0.0 {
+                    0.0
+                } else {
+                    target.torque_nm.signum() * ceiling
+                };
+                motor.max_force = target.torque_nm.abs().max(TORQUE_MODE_MIN_FORCE);
+            }
+        }
+        self.step_physics();
+    }
+
+    /// Reads the generalized position of a named link's articulation joint:
+    /// radians (revolute, wrapped to `(-PI, PI]`) or meters (prismatic).
+    ///
+    /// The value is read from the reduced-coordinate joint state, in the same
+    /// convention as [`UrdfJointPositionTarget::position`]. Returns `None` for
+    /// unknown links and links not simulated as single-DoF multibody joints.
+    pub fn named_joint_position(&self, link_name: &str) -> Option<f64> {
+        let entity = find_link_by_name(&self.world, link_name)?;
+        self.backend
+            .multibody_joint_position(self.physics_world, entity)
+    }
+
+    /// Reads the generalized velocity of a named link's articulation joint in
+    /// rad/s (revolute) or m/s (prismatic).
+    ///
+    /// Returns `None` under the same conditions as
+    /// [`Self::named_joint_position`].
+    pub fn named_joint_velocity(&self, link_name: &str) -> Option<f64> {
+        let entity = find_link_by_name(&self.world, link_name)?;
+        self.backend
+            .multibody_joint_velocity(self.physics_world, entity)
+    }
+
     /// Configures every actuated joint as a force-limited position motor.
     ///
     /// `stiffness` and `damping` use the backend-neutral [`JointMotor`] gains;
@@ -1466,6 +1560,38 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.target_position, 0.35);
         assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn named_joint_torque_configures_saturated_velocity_motor() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        sim.step_joint_torques(&[UrdfJointTorqueTarget {
+            link_name: "shoulder_link",
+            torque_nm: -2.5,
+            max_velocity_rad_s: 30.0,
+        }]);
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        let motor = sim
+            .world()
+            .get::<JointMotor>(shoulder)
+            .expect("shoulder motor");
+        assert_eq!(motor.stiffness, 0.0);
+        assert_eq!(motor.velocity_rad_s, -30.0);
+        assert_eq!(motor.max_force, 2.5);
+        // A zero torque must leave the joint effectively free rather than fall
+        // back to the backend's default force cap through `max_force == 0`.
+        sim.step_joint_torques(&[UrdfJointTorqueTarget {
+            link_name: "shoulder_link",
+            torque_nm: 0.0,
+            max_velocity_rad_s: 30.0,
+        }]);
+        let motor = sim
+            .world()
+            .get::<JointMotor>(shoulder)
+            .expect("shoulder motor");
+        assert_eq!(motor.velocity_rad_s, 0.0);
+        assert!(motor.max_force > 0.0 && motor.max_force < 1.0e-6);
     }
 
     #[test]

@@ -108,6 +108,67 @@ impl RapierBackend {
     fn world(&self, id: PhysicsWorldId) -> Result<&RapierWorldState, PhysicsError> {
         self.worlds.get(&id).ok_or(PhysicsError::WorldNotFound)
     }
+
+    /// Reads the generalized position of an entity's single-DoF multibody joint:
+    /// radians for revolute joints, meters for prismatic joints.
+    ///
+    /// The angle is recovered from the joint's internal rotation state, so it is
+    /// exact under the reduced-coordinate integrator (no drift against the motor's
+    /// `target_position` convention) but wraps to `(-PI, PI]`. Returns `None` for
+    /// entities without a multibody joint in this world and for joints with more
+    /// or fewer than one degree of freedom.
+    pub fn multibody_joint_position(
+        &self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+    ) -> Option<f64> {
+        let state = self.worlds.get(&physics_world)?;
+        let handle = state.entity_to_multibody_joint.get(&entity)?;
+        let (multibody, link_id) = state.multibody_joints.get(*handle)?;
+        let link = multibody.link(link_id)?;
+        let joint = &link.joint;
+        if joint.ndofs() != 1 {
+            return None;
+        }
+        let data = &joint.data;
+        // body_to_parent = local_frame1 * translation(coords) * joint_rot * local_frame2^-1,
+        // so conjugating by the local frames leaves exactly the joint coordinate.
+        let rel = data.local_frame1.inverse() * joint.body_to_parent() * data.local_frame2;
+        let free_bits = (!data.locked_axes.bits()) & 0b11_1111;
+        let dof = free_bits.trailing_zeros() as usize;
+        if dof < 3 {
+            Some(rel.translation.vector[dof] as f64)
+        } else {
+            let quat = rel.rotation.quaternion();
+            let mut angle = 2.0 * (quat.imag()[dof - 3] as f64).atan2(quat.w as f64);
+            if angle > std::f64::consts::PI {
+                angle -= 2.0 * std::f64::consts::PI;
+            } else if angle < -std::f64::consts::PI {
+                angle += 2.0 * std::f64::consts::PI;
+            }
+            Some(angle)
+        }
+    }
+
+    /// Reads the generalized velocity of an entity's single-DoF multibody joint:
+    /// rad/s for revolute joints, m/s for prismatic joints.
+    ///
+    /// Returns `None` under the same conditions as
+    /// [`Self::multibody_joint_position`].
+    pub fn multibody_joint_velocity(
+        &self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+    ) -> Option<f64> {
+        let state = self.worlds.get(&physics_world)?;
+        let handle = state.entity_to_multibody_joint.get(&entity)?;
+        let (multibody, link_id) = state.multibody_joints.get(*handle)?;
+        let link = multibody.link(link_id)?;
+        if link.joint.ndofs() != 1 {
+            return None;
+        }
+        Some(multibody.joint_velocity(link)[0] as f64)
+    }
 }
 
 impl Default for RapierBackend {
