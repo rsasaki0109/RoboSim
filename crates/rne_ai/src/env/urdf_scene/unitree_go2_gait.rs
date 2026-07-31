@@ -208,6 +208,119 @@ impl UnitreeGo2TorqueOverlay {
     /// position-space result — while the robot keeps walking, by shaping
     /// stance-leg torques the servos could never express;
     /// `learned_torque_overlay_out_turns_the_position_plateau` pins it.
+    /// A chaos-robust turning gait found by the *ensemble-median* CEM
+    /// (`examples/56_go2_torque_turn -- --train-robust`, seed 42, warm-started
+    /// from [`Self::LEARNED_TURN`]).
+    ///
+    /// The single-trajectory winner turned out to live on a knife edge: its
+    /// second measurement window swings ±0.3 rad under one-ulp perturbations
+    /// (the ~16 s chaos horizon in `docs/GO2_LOCOMOTION.md`). Scoring the
+    /// median of three perturbed replays instead selects for gaits whose turn
+    /// survives trajectory-level noise — and the winner it found is locally
+    /// *contracting*: its perturbed replays land on the same windows
+    /// (+0.250/+0.274 rad per 8 s, ~0.031 rad/s) instead of diverging.
+    /// `robust_torque_turn_survives_perturbation` pins that property.
+    pub const LEARNED_ROBUST_TURN: Self = Self {
+        coefficients: [
+            [
+                -1.344032192829,
+                -0.800645266699,
+                -0.119000789846,
+                0.260304857208,
+                -0.604194423541,
+                -0.272409233533,
+            ],
+            [
+                -1.113048181238,
+                0.137764794535,
+                -0.927880548188,
+                -0.400064359385,
+                -0.592582951512,
+                -0.467594143673,
+            ],
+            [
+                -2.630116511638,
+                -0.908808017816,
+                1.343855005722,
+                -0.197648017923,
+                -0.336050769397,
+                0.564757379100,
+            ],
+            [
+                -0.347502081487,
+                -0.109015627985,
+                0.645110936273,
+                -0.881021767904,
+                -0.646562242222,
+                0.509986312813,
+            ],
+            [
+                0.177568417164,
+                -2.981399368489,
+                0.363701821573,
+                -0.318981206426,
+                -0.208701515043,
+                -1.958031908291,
+            ],
+            [
+                -1.819395566336,
+                -0.387826861631,
+                -1.791286440581,
+                -0.458175260573,
+                -0.555312597872,
+                0.226706496853,
+            ],
+            [
+                -0.542436115975,
+                0.862706137390,
+                -0.763200481265,
+                -0.589259219427,
+                0.773874160789,
+                -1.606538970087,
+            ],
+            [
+                -0.067741171244,
+                -2.136433969606,
+                -0.776040000364,
+                -0.354388027298,
+                2.383252183144,
+                0.514102596678,
+            ],
+            [
+                -0.063743487961,
+                0.020082243324,
+                0.245389314781,
+                -1.266169200995,
+                -0.738189468682,
+                2.157687929519,
+            ],
+            [
+                0.575858501217,
+                0.005801549348,
+                1.695861443421,
+                -0.780431331315,
+                -1.232766041230,
+                -1.021659781892,
+            ],
+            [
+                -0.970284937507,
+                0.041379702001,
+                0.237385054745,
+                -1.383587224545,
+                -0.489221759291,
+                0.627853387139,
+            ],
+            [
+                0.938686719533,
+                -1.518392179889,
+                -0.402910488196,
+                -0.448164145462,
+                0.876773734300,
+                0.635796162852,
+            ],
+        ],
+    };
+
     /// The coefficients are pinned at the search state's full 12-decimal
     /// precision: the contact-gated rollout is chaotic enough that rounding
     /// them to 6 decimals lands on a different (non-turning) trajectory.

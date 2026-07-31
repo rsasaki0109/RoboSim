@@ -168,10 +168,31 @@ fn gaussian(rng: &mut rne_ai::DeterministicRng) -> f64 {
 const ITERATIONS_PER_RUN: usize = 6;
 const PARALLEL_ROLLOUTS: usize = 16;
 
+/// Ensemble score for the robust search: the *median* min-window score of
+/// three replays whose first coefficient differs by one part in 1e9. A
+/// knife-edge trajectory that only turns under exact replay scores whatever
+/// its perturbed neighbors score — which is the point: chaos games
+/// single-trajectory objectives, so the objective must sample the chaos.
+fn ensemble_score(params: &[f64; DIM]) -> f64 {
+    let mut scores: Vec<f64> = (0..3)
+        .map(|k| {
+            let mut overlay = overlay_from(params);
+            overlay.coefficients[0][0] += k as f64 * 1.0e-9;
+            rollout(&overlay, ROLLOUT_STEPS).score
+        })
+        .collect();
+    scores.sort_by(|a, b| a.partial_cmp(b).expect("finite scores"));
+    scores[1]
+}
+
 type TrainState = (usize, [f64; DIM], [f64; DIM], (f64, [f64; DIM]));
 
 fn state_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/go2_torque_cem_state.txt")
+}
+
+fn robust_state_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/go2_robust_cem_state.txt")
 }
 
 fn load_state(path: &Path) -> Option<TrainState> {
@@ -210,11 +231,40 @@ fn save_state(path: &Path, state: &TrainState) {
     fs::write(path, text).expect("write CEM state");
 }
 
-fn train() {
-    let path = state_path();
+fn train(robust: bool) {
+    let path = if robust {
+        robust_state_path()
+    } else {
+        state_path()
+    };
+    // The robust search warm-starts from the fragile winner: the question is
+    // whether a chaos-robust turn exists near (or anywhere reachable from)
+    // the single-trajectory optimum.
+    let default_mean = if robust {
+        let mut mean = [0.0; DIM];
+        for joint in 0..12 {
+            for term in 0..6 {
+                mean[joint * 6 + term] =
+                    UnitreeGo2TorqueOverlay::LEARNED_TURN.coefficients[joint][term];
+            }
+        }
+        mean
+    } else {
+        [0.0; DIM]
+    };
+    let default_sigma = if robust { [0.5; DIM] } else { [1.0; DIM] };
+    let iterations_per_run = if robust { 3 } else { ITERATIONS_PER_RUN };
+    let score_of = |params: &[f64; DIM]| {
+        if robust {
+            ensemble_score(params)
+        } else {
+            rollout(&overlay_from(params), ROLLOUT_STEPS).score
+        }
+    };
+    let score_of = &score_of;
     let (start_iteration, mut mean, mut sigma, mut best) =
-        load_state(&path).unwrap_or((0, [0.0; DIM], [1.0; DIM], (f64::MIN, [0.0; DIM])));
-    let end_iteration = (start_iteration + ITERATIONS_PER_RUN).min(ITERATIONS);
+        load_state(&path).unwrap_or((0, default_mean, default_sigma, (f64::MIN, default_mean)));
+    let end_iteration = (start_iteration + iterations_per_run).min(ITERATIONS);
     for iteration in start_iteration..end_iteration {
         // Sequential sampling from a per-iteration seed keeps the search
         // deterministic and resumable; only the physics rollouts parallelize.
@@ -233,9 +283,7 @@ fn train() {
             let scores = std::thread::scope(|scope| {
                 let handles: Vec<_> = chunk
                     .iter()
-                    .map(|params| {
-                        scope.spawn(move || rollout(&overlay_from(params), ROLLOUT_STEPS).score)
-                    })
+                    .map(|params| scope.spawn(move || score_of(params)))
                     .collect();
                 handles
                     .into_iter()
@@ -277,8 +325,23 @@ fn train() {
         save_state(&path, &(iteration + 1, mean, sigma, best));
     }
     if end_iteration < ITERATIONS {
-        println!("checkpointed at iteration {end_iteration}/{ITERATIONS}; run --train again");
+        println!("checkpointed at iteration {end_iteration}/{ITERATIONS}; run again to continue");
         return;
+    }
+    if robust {
+        // Report the winner's ensemble, not just one trajectory.
+        for k in 0..3 {
+            let mut overlay = overlay_from(&best.1);
+            overlay.coefficients[0][0] += k as f64 * 1.0e-9;
+            let outcome = rollout(&overlay, ROLLOUT_STEPS);
+            println!(
+                "ensemble member {k}: windows {:+.3}/{:+.3} fwd {:.2} tilt {:.2}",
+                outcome.window_a_yaw_rad,
+                outcome.window_b_yaw_rad,
+                outcome.forward_m,
+                outcome.max_tilt_rad
+            );
+        }
     }
     let final_outcome = rollout(&overlay_from(&best.1), ROLLOUT_STEPS);
     println!(
@@ -311,50 +374,65 @@ fn train() {
 }
 
 fn main() {
+    if std::env::args().any(|argument| argument == "--train-robust") {
+        train(true);
+        return;
+    }
     if std::env::args().any(|argument| argument == "--train") {
-        train();
+        train(false);
         return;
     }
     if std::env::args().any(|argument| argument == "--ensemble") {
-        // Robustness probe: does the pinned winner's turn survive trajectory
+        // Robustness probe: does each pinned winner's turn survive trajectory
         // perturbation, or is it a knife-edge chaos artifact?
-        for k in 0..8 {
-            let mut overlay = UnitreeGo2TorqueOverlay::LEARNED_TURN;
-            overlay.coefficients[0][0] += k as f64 * 1.0e-9;
-            let outcome = rollout(&overlay, ROLLOUT_STEPS);
-            println!(
-                "perturb {k}e-9: windows {:+.3}/{:+.3} fwd {:.2} tilt {:.2}",
-                outcome.window_a_yaw_rad,
-                outcome.window_b_yaw_rad,
-                outcome.forward_m,
-                outcome.max_tilt_rad
-            );
+        for (label, base) in [
+            ("fragile", UnitreeGo2TorqueOverlay::LEARNED_TURN),
+            ("robust", UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN),
+        ] {
+            for perturbation in [0.0, 1.0e-9, 3.0e-9, 1.0e-6, 1.0e-5] {
+                let mut overlay = base;
+                overlay.coefficients[0][0] += perturbation;
+                let outcome = rollout(&overlay, ROLLOUT_STEPS);
+                println!(
+                    "{label} perturb {perturbation:.0e}: windows {:+.3}/{:+.3} fwd {:.2} tilt {:.2}",
+                    outcome.window_a_yaw_rad,
+                    outcome.window_b_yaw_rad,
+                    outcome.forward_m,
+                    outcome.max_tilt_rad
+                );
+            }
         }
         return;
     }
 
-    // Default: replay the pinned winner headlessly and verify the plateau
-    // break in the chaos-robust window (A is stable across perturbations and
-    // platforms; B lies beyond the compliant walk's ~16 s chaos horizon —
-    // measure it with `--ensemble`).
-    let outcome = rollout(&UnitreeGo2TorqueOverlay::LEARNED_TURN, ROLLOUT_STEPS);
+    // Default: replay the ensemble-search winner headlessly and verify the
+    // genuinely sustained turn — both windows positive on a locally
+    // contracting trajectory (`--ensemble` measures the contrast with the
+    // fragile single-trajectory winner).
+    let outcome = rollout(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, ROLLOUT_STEPS);
+    // The sustained turn survives cross-platform; its exact rate does not
+    // (persistent libm ulp differences settle onto a nearby orbit — measured
+    // +0.250/+0.274 on Windows, +0.146/+0.121 on Linux).
     assert!(
-        outcome.window_a_yaw_rad > 0.25 && outcome.window_b_yaw_rad > -0.35,
-        "learned torque turn must hold the robust window, windows {:+.3}/{:+.3}",
+        outcome.window_a_yaw_rad > 0.08 && outcome.window_b_yaw_rad > 0.08,
+        "robust torque turn must sustain both windows, got {:+.3}/{:+.3}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad
     );
     assert!(
         outcome.max_tilt_rad < 0.8 && outcome.min_height_m > 0.1,
-        "learned torque turn must stay up: tilt {:.2} height {:.3}",
+        "robust torque turn must stay up: tilt {:.2} height {:.3}",
         outcome.max_tilt_rad,
         outcome.min_height_m
     );
     println!(
-        "learned torque turn verified: windows {:+.3}/{:+.3} rad per 8 s ({:.3} rad/s in the robust window), fwd {:.2} m, maxTilt {:.2}",
+        "robust torque turn verified: windows {:+.3}/{:+.3} rad per 8 s ({:.3} rad/s sustained), fwd {:.2} m, maxTilt {:.2}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad,
-        outcome.window_a_yaw_rad / 8.0,
+        outcome
+            .window_a_yaw_rad
+            .min(outcome.window_b_yaw_rad)
+            / 8.0,
         outcome.forward_m,
         outcome.max_tilt_rad
     );
