@@ -80,6 +80,7 @@ members = [
   "examples/58_go2_steered_turn",
   "examples/59_go2_authority_turn",
   "examples/60_go2_turn_gif",
+  "examples/61_go2_learned_sprint",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

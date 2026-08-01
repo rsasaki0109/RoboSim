@@ -346,6 +346,28 @@ now friction all measured out, the ~0.02–0.04 rad/s plateau is as
 localized as this platform can make it: it is what these legs, this
 stance, and this contact geometry can do.
 
+## Learning to outwalk the trot
+
+The steering campaign's tooling — the torque pathway, the deterministic
+resumable CEM, the ensemble-median objective, the anti-cheat window
+structure — pointed at *transport* instead of yaw for the first time
+(`examples/61_go2_learned_sprint`, seed 42). The objective is the minimum
+**straight-line displacement** over the two disjoint late windows (lateral
+shimmy scores nothing, a dive scores its bad window; per the campaign's
+lessons the score is the ensemble median of three ulp-perturbed replays),
+with the usual fall/crouch penalties plus a straightness penalty.
+
+The learned-locomotion chapter opens with a decisive result
+(`UnitreeGo2TorqueOverlay::LEARNED_SPRINT`, pinned by
+`learned_torques_out_walk_the_scripted_trot`): on the same torque-PD walk,
+the zero overlay covers 4.65 m per 24 s (0.19 m/s) and the learned overlay
+covers **11.79 m (0.49 m/s)** — 2.5× the torque baseline and 3× the
+position-servo scripted trot — while staying straight (|yaw| ≈ 0.1 rad),
+upright (tilt ≤ 0.37), at height, with ulp-perturbed replays landing on
+identical windows. Where every steering search collided with a geometric
+ceiling, the transport objective found headroom the hand-scripted gait
+never used: learning beats the hand gait at the hand gait's own job.
+
 ## The search declines to fly
 
 The first morphological lever, tested: the schedule duty range opens from
