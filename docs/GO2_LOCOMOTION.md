@@ -233,6 +233,29 @@ stay positive on both platforms (the fragile winner categorically fails
 that bar — its second window reverses), so the cross-platform guarantee is
 the sustained turn itself, while its exact rate is platform-local.
 Parameter-scale robustness — a turn that survives *gait-level* variation —
-is a different objective for a later search. The other openings are
-unchanged: aerial-duty gaits, foot geometry/friction, and state-feedback
-torque policies.
+is a different objective for a later search.
+
+## Closing the loop: a state-feedback torque policy
+
+Every controller above is a clock — phase-indexed offsets or torques
+replayed open-loop. `examples/57_go2_torque_policy` closes the loop: a
+linear [`UnitreeGo2TorquePolicy`] maps the measured body state (yaw-invariant
+up-vector lean components, body-frame lean rates, world yaw rate, two-cycle
+phase, bias — eight features, 96 weights) to per-joint feed-forward torques
+on the torque-PD walk, searched by the same ensemble-median CEM.
+
+The result refines rather than breaks the rate boundary: the policy's turn
+(+0.226/+0.346 rad per 8 s) matches the feed-forward overlay's rate instead
+of beating it — three different controller families now deliver
+0.03-0.04 rad/s, which is starting to look like the platform's honest
+turn-in-place capability under this gait. What the closed loop uniquely
+buys is the *operating point*: the policy turns **while walking** — 3.8 m
+per 24 s of forward progress against the overlay's 1.4 m — the first
+controller here that steers without largely stalling the gait, and its
+ulp-perturbed replays land on identical windows (the contraction the
+ensemble objective selects for). `torque_policy_turns_while_walking` pins
+the turn, the preserved walk, the contraction, and a bit-exact replay.
+
+The other openings are unchanged: aerial-duty gaits, foot
+geometry/friction, and richer policies (nonlinear features, joint-state
+feedback) on this now-proven closed-loop pathway.
