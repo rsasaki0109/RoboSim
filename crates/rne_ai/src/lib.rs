@@ -77,14 +77,15 @@ pub use env::{
     UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeGo2Action, UnitreeGo2Episode,
     UnitreeGo2EpisodeConfig, UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule,
     UnitreeGo2LegSchedule, UnitreeGo2Observation, UnitreeGo2Push, UnitreeGo2TorqueOverlay,
-    UrdfArmAction, UrdfCartAction, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfKiwiAction,
-    UrdfSceneObservation, UrdfSceneSim, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
-    VectorizedDiffDriveSnapshot, VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep,
-    VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
-    VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
-    VectorizedMobileManipulatorStep, LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD,
-    LEKIWI_WHEEL_JOINT_SIGN, LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
-    QUADRUPED_FOOT_LINKS,
+    UnitreeGo2TorquePolicy, UrdfArmAction, UrdfCartAction, UrdfJointPositionTarget,
+    UrdfJointTorqueTarget, UrdfKiwiAction, UrdfSceneObservation, UrdfSceneSim,
+    VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveSnapshot,
+    VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig,
+    VectorizedMobileManipulatorEnv, VectorizedMobileManipulatorSnapshot,
+    VectorizedMobileManipulatorSnapshotError, VectorizedMobileManipulatorStep,
+    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,
+    UNITREE_GO2_POLICY_FEATURES,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{

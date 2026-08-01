@@ -1573,6 +1573,146 @@ mod tests {
     }
 
     #[test]
+    fn torque_policy_turns_while_walking() {
+        use super::super::{UnitreeGo2TorquePolicy, UrdfJointTorqueTarget};
+
+        // The first closed-loop controller of the steering campaign: a linear
+        // state-feedback torque policy (body-frame up-vector lean, body-frame
+        // lean rates, yaw rate, gait phase, bias -> joint torques). Its turn
+        // rate matches the feed-forward overlay's; what it uniquely holds is
+        // the operating point — it turns *while walking* (3.8 m per 24 s
+        // versus the overlay's 1.4 m) — and its ulp-perturbed replays land on
+        // identical windows. Cross-platform the exact rates are orbit-local,
+        // so the sustained turn and the preserved walk are the bars.
+        let run = |perturbation: f64| {
+            let mut policy = UnitreeGo2TorquePolicy::LEARNED_TURN;
+            policy.weights[0][0] += perturbation;
+            let mut sim = settled_stand();
+            let up_body = {
+                let pose = sim.named_transform("base").expect("base pose");
+                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+            };
+            let true_tilt = |sim: &UrdfSceneSim| {
+                let pose = sim.named_transform("base").expect("base pose");
+                let up = (pose.rotation * up_body).normalize_or_zero();
+                up.y.clamp(-1.0, 1.0).acos()
+            };
+            let start = sim.observe();
+            let mut previous_yaw = start.base_relative_yaw_rad;
+            let mut window_a = 0.0;
+            let mut window_b = 0.0;
+            let mut max_tilt = 0.0_f64;
+            let mut min_height = f64::MAX;
+            let cycle = fast_walk_command().cycle_steps;
+            for step in 0..1440_u64 {
+                let observed = sim.observe();
+                let pose = sim.named_transform("base").expect("base pose");
+                let inverse = pose.rotation.inverse();
+                let live_up = (inverse * rne_math::Vec3::Y).normalize_or_zero();
+                let omega_world = rne_math::Vec3::new(
+                    observed.base_angular_velocity_x_rad_s,
+                    observed.base_angular_velocity_y_rad_s,
+                    observed.base_angular_velocity_z_rad_s,
+                );
+                let omega_body = inverse * omega_world;
+                let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+                let (phase_sin, phase_cos) =
+                    (2.0 * std::f64::consts::PI * two_cycle_phase).sin_cos();
+                let features = [
+                    live_up.x,
+                    live_up.z,
+                    omega_body.x,
+                    omega_body.z,
+                    omega_world.y,
+                    phase_sin,
+                    phase_cos,
+                    1.0,
+                ];
+                let feed_forward = policy.torques_nm(&features);
+                let targets = unitree_go2_trot_targets(step, fast_walk_command());
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .zip(feed_forward.iter())
+                    .map(|(target, extra)| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                                .clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                let after = sim.observe();
+                let mut delta = after.base_relative_yaw_rad - previous_yaw;
+                while delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                }
+                while delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                if (480..960).contains(&step) {
+                    window_a += delta;
+                } else if step >= 960 {
+                    window_b += delta;
+                }
+                previous_yaw = after.base_relative_yaw_rad;
+                max_tilt = max_tilt.max(true_tilt(&sim));
+                min_height = min_height.min(after.base_y_m);
+            }
+            let end = sim.observe();
+            let forward = (end.base_x_m - start.base_x_m).hypot(end.base_z_m - start.base_z_m);
+            (window_a, window_b, max_tilt, min_height, forward)
+        };
+
+        let (window_a, window_b, max_tilt, min_height, forward) = run(0.0);
+        println!(
+            "policy turn: windows {window_a:+.3}/{window_b:+.3} fwd {forward:.2} tilt {max_tilt:.3} height {min_height:.3}"
+        );
+        // Cross-platform measurement: the policy sustains a *coherent* turn
+        // while walking, but its direction is chaos-selected — Windows
+        // measures +0.226/+0.346 where Linux measures -0.168/-0.380. The
+        // closed loop feeds the chaotic body state back into the control, so
+        // the OS-libm orbit difference selects which turning attractor the
+        // walk settles into. A linear policy with no reference input shapes
+        // the dynamics; it does not encode a turn *command*. The pinned bars
+        // are therefore direction-free: both windows share a sign and clear a
+        // magnitude, and the walk survives.
+        assert!(
+            window_a.signum() == window_b.signum()
+                && window_a.abs() > 0.08
+                && window_b.abs() > 0.08,
+            "policy must sustain a coherent turn: {window_a:+.3}/{window_b:+.3}"
+        );
+        assert!(
+            forward > 1.5,
+            "policy turn must keep walking, got {forward:.2} m"
+        );
+        assert!(
+            max_tilt < 0.8 && min_height > 0.1,
+            "policy turn must stay upright: tilt {max_tilt:.3} height {min_height:.3}"
+        );
+
+        let (nudged_a, nudged_b, _, _, _) = run(3.0e-9);
+        println!("nudged policy turn: windows {nudged_a:+.3}/{nudged_b:+.3}");
+        assert!(
+            (nudged_a - window_a).abs() < 0.15 && (nudged_b - window_b).abs() < 0.15,
+            "the policy turn must contract under ulp-scale perturbation: {nudged_a:+.3}/{nudged_b:+.3} vs {window_a:+.3}/{window_b:+.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _, _) = run(0.0);
+        assert_eq!(window_a.to_bits(), again_a.to_bits());
+        assert_eq!(window_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
         // Force-level steering, hand-designed, measured and refuted — the
         // torque-space mirror of the six position-space steering nulls. Three

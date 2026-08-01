@@ -450,6 +450,186 @@ impl UnitreeGo2TorqueOverlay {
     }
 }
 
+/// Number of features a [`UnitreeGo2TorquePolicy`] consumes.
+pub const UNITREE_GO2_POLICY_FEATURES: usize = 8;
+
+/// State-feedback torque policy: a linear map from body-state features to
+/// per-joint feed-forward torques on the torque-PD walk.
+///
+/// Where [`UnitreeGo2TorqueOverlay`] indexes its torques by gait *phase*, this
+/// policy reads the *state* — the actual lean, lean rates, and yaw rate — so
+/// it can react to what the body is doing instead of replaying a clock. The
+/// features (assembled by the caller, see `examples/57_go2_torque_policy`)
+/// are chosen yaw-invariant and wrap-free: body-frame components of the
+/// world-up direction and of the angular velocity, the world yaw rate, the
+/// two-cycle gait phase as sine/cosine, and a bias term.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2TorquePolicy {
+    /// Per-joint feature weights in N·m per unit feature; legs ordered FL,
+    /// FR, RL, RR, joints ordered hip, thigh, calf within each leg.
+    pub weights: [[f64; UNITREE_GO2_POLICY_FEATURES]; 12],
+}
+
+impl UnitreeGo2TorquePolicy {
+    /// The neutral policy: reproduces the plain torque-PD walk exactly.
+    pub const ZERO: Self = Self {
+        weights: [[0.0; UNITREE_GO2_POLICY_FEATURES]; 12],
+    };
+
+    /// A turning policy found by the ensemble-median CEM
+    /// (`examples/57_go2_torque_policy -- --train`, seed 42).
+    ///
+    /// The first closed-loop controller in the steering campaign. Its turn
+    /// rate matches the feed-forward torque overlay's rather than beating it
+    /// (+0.226/+0.346 rad per 8 s window versus the overlay's
+    /// +0.250/+0.274), but it holds a different operating point: it keeps
+    /// walking while it turns (3.8 m per 24 s versus the overlay's 1.4 m),
+    /// and its ulp-perturbed replays land on identical windows — the
+    /// contraction the ensemble objective selects for.
+    /// `torque_policy_turns_while_walking` pins it. Weights carry the search
+    /// state's full 12-decimal precision (contact-gated rollouts diverge
+    /// under 6-decimal rounding).
+    pub const LEARNED_TURN: Self = Self {
+        weights: [
+            [
+                -2.145808389623,
+                -1.126046872952,
+                -0.597103148949,
+                -0.675189417817,
+                -0.997585472110,
+                -0.095727755957,
+                -1.959122908352,
+                -0.720299659313,
+            ],
+            [
+                -1.367480630837,
+                -0.319674298622,
+                1.239810137798,
+                0.475987165301,
+                0.103277581848,
+                -1.161936863572,
+                0.529762757140,
+                0.890245118620,
+            ],
+            [
+                -2.489505543492,
+                1.290223704962,
+                0.940870247097,
+                1.127111067814,
+                -0.369626844344,
+                -1.358777203364,
+                0.015121827241,
+                2.180899511817,
+            ],
+            [
+                0.135790941006,
+                -0.094514014930,
+                0.737233032536,
+                1.423106908225,
+                0.013667574758,
+                1.037591389899,
+                -1.876302102809,
+                1.010061036492,
+            ],
+            [
+                -0.756340285587,
+                1.301265161921,
+                0.506445238849,
+                -0.232824764885,
+                0.708145248270,
+                0.351430617467,
+                0.367686568878,
+                -0.132993113046,
+            ],
+            [
+                0.996535207636,
+                0.644884301717,
+                1.820296793995,
+                0.458033586880,
+                1.110328516048,
+                0.451426198316,
+                0.152377370601,
+                0.821719231219,
+            ],
+            [
+                -3.262660835022,
+                0.667865331261,
+                0.845412970022,
+                -0.624704643637,
+                -0.380117740803,
+                1.389751112707,
+                -0.719805195352,
+                0.265655581028,
+            ],
+            [
+                2.179340315300,
+                -0.084067895669,
+                -0.105718113365,
+                -0.895470863883,
+                2.355916010865,
+                0.104000843679,
+                0.352087088152,
+                0.633060777704,
+            ],
+            [
+                0.312117351201,
+                -0.445618663938,
+                0.162126868301,
+                -1.599995214348,
+                0.028208550419,
+                -0.790196627072,
+                0.183677776535,
+                -0.059207232171,
+            ],
+            [
+                -0.026682593897,
+                0.428415407107,
+                0.328180598002,
+                0.487196584186,
+                1.633253497041,
+                2.029198752019,
+                -0.963719791062,
+                -1.262231035611,
+            ],
+            [
+                0.536803995574,
+                -1.070932574760,
+                1.365875830251,
+                -1.008598350931,
+                0.774291418253,
+                1.024874565899,
+                -1.508930873931,
+                1.694697197859,
+            ],
+            [
+                -0.396876276988,
+                1.332780914849,
+                0.755480039540,
+                0.877023416338,
+                0.328901863491,
+                0.556788231928,
+                0.857358232396,
+                -0.016185092323,
+            ],
+        ],
+    };
+
+    /// Feed-forward joint torques for a feature vector, each clamped to
+    /// ±8 N·m so the policy cannot out-shout the tracking PD.
+    pub fn torques_nm(&self, features: &[f64; UNITREE_GO2_POLICY_FEATURES]) -> [f64; 12] {
+        let mut torques = [0.0; 12];
+        for (torque, weights) in torques.iter_mut().zip(self.weights.iter()) {
+            *torque = weights
+                .iter()
+                .zip(features.iter())
+                .map(|(weight, feature)| weight * feature)
+                .sum::<f64>()
+                .clamp(-8.0, 8.0);
+        }
+        torques
+    }
+}
+
 fn gait_wave(phase: f64) -> (f64, f64) {
     gait_wave_with_duty(phase, 0.7)
 }

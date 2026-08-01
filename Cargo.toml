@@ -76,6 +76,7 @@ members = [
   "examples/54_go2_learned_turn",
   "examples/55_go2_stepped_turn",
   "examples/56_go2_torque_turn",
+  "examples/57_go2_torque_policy",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
