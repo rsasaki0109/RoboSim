@@ -253,9 +253,21 @@ buys is the *operating point*: the policy turns **while walking** — 3.8 m
 per 24 s of forward progress against the overlay's 1.4 m — the first
 controller here that steers without largely stalling the gait, and its
 ulp-perturbed replays land on identical windows (the contraction the
-ensemble objective selects for). `torque_policy_turns_while_walking` pins
-the turn, the preserved walk, the contraction, and a bit-exact replay.
+ensemble objective selects for).
+
+Linux CI then supplied the arc's sharpest finding: on the other OS libm the
+same policy walks even further (5.6 m) and still sustains a coherent turn —
+**in the opposite direction** (−0.17/−0.38 rad per window versus Windows'
++0.23/+0.35). Closing the loop feeds the chaotic body state back into the
+control, so the orbit difference selects *which* turning attractor the walk
+settles into. A linear policy with no reference input shapes the dynamics;
+it does not encode a turn *command*. `torque_policy_turns_while_walking`
+therefore pins the direction-free claims — a coherent sustained turn, the
+preserved walk, same-platform contraction, and a bit-exact replay — and the
+next rung is explicit: a commanded yaw-rate *reference* in the feedback (an
+error term, not raw state), which is what turns dynamics-shaping into
+steering.
 
 The other openings are unchanged: aerial-duty gaits, foot
-geometry/friction, and richer policies (nonlinear features, joint-state
-feedback) on this now-proven closed-loop pathway.
+geometry/friction, and richer policies (reference tracking, nonlinear
+features, joint-state feedback) on this now-proven closed-loop pathway.

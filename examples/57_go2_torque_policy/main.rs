@@ -361,9 +361,13 @@ fn main() {
     // Cross-platform, the exact rates are platform-local (persistent libm ulp
     // differences settle onto nearby orbits); the sustained turn is the bar.
     let outcome = rollout(&UnitreeGo2TorquePolicy::LEARNED_TURN, ROLLOUT_STEPS);
+    // The turn's direction is chaos-selected across platforms (Windows turns
+    // one way, Linux the other), so the bar is a coherent sustained turn.
     assert!(
-        outcome.window_a_yaw_rad > 0.08 && outcome.window_b_yaw_rad > 0.08,
-        "policy turn must sustain both windows, got {:+.3}/{:+.3}",
+        outcome.window_a_yaw_rad.signum() == outcome.window_b_yaw_rad.signum()
+            && outcome.window_a_yaw_rad.abs() > 0.08
+            && outcome.window_b_yaw_rad.abs() > 0.08,
+        "policy must sustain a coherent turn, got {:+.3}/{:+.3}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad
     );
