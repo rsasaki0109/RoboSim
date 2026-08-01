@@ -230,7 +230,238 @@ fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'st
 
 #[cfg(test)]
 mod tests {
+    use super::super::{UnitreeG1GaitCommand, UrdfJointTorqueTarget};
     use super::*;
+
+    /// Conservative actuator speed ceiling for torque mode.
+    const G1_SPEED_LIMIT_RAD_S: f64 = 30.0;
+
+    fn g1_stand_targets() -> [UrdfJointPositionTarget<'static>; 23] {
+        unitree_g1_gait_targets(
+            0,
+            UnitreeG1GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 120,
+            },
+        )
+    }
+
+    /// A G1 settled into its stand on the episode's stiff position motors.
+    fn g1_settled_stand() -> UrdfSceneSim {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("load dynamic G1");
+        settle(&mut sim);
+        let stand = g1_stand_targets();
+        for _ in 0..120 {
+            sim.step_joint_position_targets(&stand);
+        }
+        sim
+    }
+
+    #[test]
+    fn g1_joint_state_readback_matches_the_position_convention() {
+        // The Go2 torque pathway, ported: the reduced-coordinate readback
+        // must agree with the position-target convention on the settled
+        // 23-DoF humanoid stand.
+        let sim = g1_settled_stand();
+        for target in g1_stand_targets() {
+            let position = sim
+                .named_joint_position(target.link_name)
+                .expect("multibody joint position");
+            assert!(
+                (position - target.position).abs() < 0.2,
+                "{}: read {position:+.3} vs held target {:+.3}",
+                target.link_name,
+                target.position
+            );
+            let velocity = sim
+                .named_joint_velocity(target.link_name)
+                .expect("multibody joint velocity");
+            assert!(
+                velocity.abs() < 0.5,
+                "{}: settled joint should be near rest, velocity {velocity:+.3}",
+                target.link_name
+            );
+        }
+        assert_eq!(sim.named_joint_position("no_such_link"), None);
+        assert_eq!(sim.named_joint_position("pelvis"), None);
+    }
+
+    /// Proximal torque joints of the hybrid architecture: hips and knees.
+    /// The ankles' small inertia puts their discrete 60 Hz damping bound
+    /// near zero, so they (and the light arms) stay position-held.
+    const G1_TORQUE_LINKS: [&str; 8] = [
+        "left_knee_link",
+        "right_knee_link",
+        "left_hip_pitch_link",
+        "right_hip_pitch_link",
+        "left_hip_roll_link",
+        "right_hip_roll_link",
+        "left_hip_yaw_link",
+        "right_hip_yaw_link",
+    ];
+
+    /// Torque-PD stand on the proximal joints; returns (min height, finite).
+    fn g1_torque_stand(kp: f64, kd: f64, steps: u64) -> (f64, bool) {
+        let mut sim = g1_settled_stand();
+        let stand: Vec<_> = g1_stand_targets()
+            .into_iter()
+            .filter(|target| G1_TORQUE_LINKS.contains(&target.link_name))
+            .collect();
+        let mut min_height = f64::MAX;
+        for _ in 0..steps {
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = stand
+                .iter()
+                .map(|target| {
+                    let q = sim
+                        .named_joint_position(target.link_name)
+                        .expect("joint position");
+                    let qd = sim
+                        .named_joint_velocity(target.link_name)
+                        .expect("joint velocity");
+                    UrdfJointTorqueTarget {
+                        link_name: target.link_name,
+                        torque_nm: (kp * (target.position - q) - kd * qd).clamp(-88.0, 88.0),
+                        max_velocity_rad_s: G1_SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            if torques.iter().any(|torque| !torque.torque_nm.is_finite()) {
+                return (min_height, false);
+            }
+            sim.step_joint_torques(&torques);
+            let height = sim.observe().base_y_m;
+            if !height.is_finite() {
+                return (min_height, false);
+            }
+            min_height = min_height.min(height);
+        }
+        (min_height, true)
+    }
+
+    #[test]
+    fn g1_feed_forward_torque_moves_a_knee_with_the_commanded_sign() {
+        // The Go2 sign probe, ported: torque one knee both ways with every
+        // other joint position-held, and it must move with the commanded
+        // sign - the pathway is sound joint by joint on the humanoid too.
+        let probe = |torque_nm: f64| {
+            let mut sim = g1_settled_stand();
+            let start = sim
+                .named_joint_position("left_knee_link")
+                .expect("knee position");
+            for _ in 0..40 {
+                sim.step_joint_torques(&[UrdfJointTorqueTarget {
+                    link_name: "left_knee_link",
+                    torque_nm,
+                    max_velocity_rad_s: G1_SPEED_LIMIT_RAD_S,
+                }]);
+            }
+            sim.named_joint_position("left_knee_link")
+                .expect("knee position")
+                - start
+        };
+        let extended = probe(20.0);
+        let flexed = probe(-20.0);
+        println!("knee delta at +20 N*m: {extended:+.3}, at -20 N*m: {flexed:+.3}");
+        assert!(
+            extended > 0.2,
+            "positive torque must drive the knee positive, got {extended:+.3}"
+        );
+        assert!(
+            flexed < -0.2,
+            "negative torque must drive the knee negative, got {flexed:+.3}"
+        );
+    }
+
+    #[test]
+    fn g1_torque_pd_stand_needs_humanoid_gains() {
+        // The gain lesson the explosions taught: the humanoid hip carries an
+        // order of magnitude more gravity torque than the quadruped's, so
+        // the Go2-scale gains that walk the dog FOLD the humanoid (sag ->
+        // fall -> ground chatter -> solver blow-up), while hip-scale gains
+        // stand it quietly. The hips' large driven inertia is what makes the
+        // higher damping discretely stable at the same 60 Hz.
+        let (folded_height, _) = g1_torque_stand(60.0, 2.0, 360);
+        println!("kp60 kd2: minH {folded_height:.3}");
+        assert!(
+            folded_height < 0.5,
+            "quadruped-scale gains must fold the humanoid, minH {folded_height:.3}"
+        );
+
+        let (standing_height, finite) = g1_torque_stand(300.0, 10.0, 360);
+        println!("kp300 kd10: minH {standing_height:.3}");
+        assert!(
+            finite && standing_height > 0.7,
+            "humanoid-scale gains must hold the stand, minH {standing_height:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_height, _) = g1_torque_stand(300.0, 10.0, 360);
+        assert_eq!(standing_height.to_bits(), again_height.to_bits());
+    }
+
+    #[test]
+    fn g1_hybrid_torque_gait_steps_in_place() {
+        // The hybrid walking tick: ankles and arms servo-follow the scripted
+        // gait targets (updated without stepping), hips and knees track the
+        // same targets through torque PD, one physics step per tick. At the
+        // scripted gait's stable operating point (its default near-stationary
+        // step) the hybrid marches at full height. (At stride 0.20 the
+        // scripted gait falls under BOTH regimes - a limit of the gait, not
+        // of the torque pathway.)
+        let run = || {
+            let mut sim = g1_settled_stand();
+            let command = UnitreeG1GaitCommand::default();
+            let start_x = sim.observe().base_x_m;
+            let mut min_height = f64::MAX;
+            for step in 0..720_u64 {
+                let targets = unitree_g1_gait_targets(step, command);
+                let servo: Vec<_> = targets
+                    .iter()
+                    .filter(|target| !G1_TORQUE_LINKS.contains(&target.link_name))
+                    .copied()
+                    .collect();
+                sim.set_joint_position_targets(&servo);
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .filter(|target| G1_TORQUE_LINKS.contains(&target.link_name))
+                    .map(|target| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (300.0 * (target.position - q) - 10.0 * qd)
+                                .clamp(-88.0, 88.0),
+                            max_velocity_rad_s: G1_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                min_height = min_height.min(sim.observe().base_y_m);
+            }
+            (sim.observe().base_x_m - start_x, min_height)
+        };
+        let (drift, min_height) = run();
+        println!("hybrid step-in-place: drift {drift:+.3} m minH {min_height:.3}");
+        assert!(
+            min_height > 0.7,
+            "the hybrid gait must keep stepping at height, minH {min_height:.3}"
+        );
+        assert!(
+            drift.abs() < 0.4,
+            "the near-stationary gait must not wander, drift {drift:+.3} m"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_drift, again_height) = run();
+        assert_eq!(drift.to_bits(), again_drift.to_bits());
+        assert_eq!(min_height.to_bits(), again_height.to_bits());
+    }
 
     #[test]
     fn gait_episode_replays_short_rollout_exactly() {

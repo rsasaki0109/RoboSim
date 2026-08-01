@@ -1212,6 +1212,26 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Updates named joint position targets **without stepping** the
+    /// simulation.
+    ///
+    /// This is the hybrid-control companion to [`Self::step_joint_torques`]:
+    /// update the servo-held joints' targets first, then step once through
+    /// the torque call, so position-held and torque-driven joints advance in
+    /// the same physics tick. Unknown links and links without a
+    /// [`JointMotor`] are ignored, exactly like the stepping variant.
+    pub fn set_joint_position_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
+                motor.target_position = target.position;
+                motor.velocity_rad_s = 0.0;
+            }
+        }
+    }
+
     /// Applies named feed-forward joint torques and steps one simulation tick.
     ///
     /// Torque mode reuses the joint velocity motor saturated on purpose: the
