@@ -105,11 +105,13 @@ A torque scan closes the remaining obvious explanation: running the overlay's
 turn on 23.7, 60, and 120 N·m actuators leaves the yaw rate unchanged
 (`yaw_plateau_is_not_torque_limited`). Three search spaces and a five-fold
 torque range all plateau at ~0.02 rad/s, which localizes the constraint in the
-contact mechanics and morphology: four point feet dragging under hard position
-servos shed their tangential impulse in slip, and no joint-space pattern
-changes that. What remains genuinely untested: torque-level control (shaping
-contact forces instead of positions), aerial-duty gaits below 0.55, and foot
-geometry — the concrete openings for the full learned-locomotion arc.
+contact mechanics and morphology. (The working hypothesis at this point —
+point feet shedding tangential impulse in slip — was later tested directly
+and refuted; see "The feet are not slipping" below. The localization stands,
+the mechanism turned out to be geometric.) What remained untested here:
+torque-level control (shaping contact forces instead of positions),
+aerial-duty gaits below 0.55, and foot geometry/friction — the concrete
+openings the following sections work through.
 
 ## Torque-level control
 
@@ -318,6 +320,31 @@ boundary diagnosis stands at the end as at the beginning: the remaining
 levers are morphological — aerial-duty gaits, foot geometry/friction —
 plus richer policies for other objectives on the now-proven closed-loop
 pathway.
+
+## The feet are not slipping
+
+The last morphological lever — foot friction — dies at its root, and takes
+the campaign's oldest explanation with it. The earlier sections attribute
+the yaw plateau to point feet "shedding tangential impulse in slip". Tested
+directly (`UrdfSceneSim::set_named_collider_friction` reaches the live
+collider, verified by its own test): an **eight-fold foot-friction range
+(μ 0.25 → 2.0) produces bit-identical turning trajectories**. The friction
+cones stay interior through the entire walking turn — the feet never slip.
+Even on near-ice (feet *and* ground at μ 0.02, where the cones finally
+bind) the trot keeps walking and keeps turning (+0.155/+0.233 rad windows).
+`the_feet_are_not_slipping` pins all of it.
+
+The corrected mechanism: a sphere contact transmits no torsion about the
+vertical, so yaw torque can only come from force *couples* between
+separated point contacts — and those couples sit comfortably inside the
+friction cones at every μ measured. The plateau is **geometric**: stance
+width sets the couple's lever arms and the morphology has no hip-yaw axis
+to reorient the stance. Friction was never the constraint; slip was never
+the loss. With actuation (5× torque), gait shape (three search spaces),
+control regime (position, torque, closed-loop), duty (flight phases), and
+now friction all measured out, the ~0.02–0.04 rad/s plateau is as
+localized as this platform can make it: it is what these legs, this
+stance, and this contact geometry can do.
 
 ## The search declines to fly
 

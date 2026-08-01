@@ -943,6 +943,27 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Sets the Coulomb friction coefficient of a named entity's collider.
+    ///
+    /// Updates both the backend-neutral component and the live backend
+    /// collider (colliders materialize at scene load). Returns true only when
+    /// the live collider was reached, so a false return means the physics
+    /// did not change.
+    pub fn set_named_collider_friction(&mut self, name: &str, friction: f64) -> bool {
+        if !friction.is_finite() || friction < 0.0 {
+            return false;
+        }
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return false;
+        };
+        let Some(mut collider) = self.world.get_mut::<Collider>(entity) else {
+            return false;
+        };
+        collider.material.friction = friction as f32;
+        self.backend
+            .set_collider_friction(self.physics_world, entity, friction as f32)
+    }
+
     /// Sets backend-neutral collision membership and filter masks on a named entity.
     ///
     /// Returns false if the entity is missing. The masks take effect on the next
@@ -1561,6 +1582,22 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.target_position, 0.35);
         assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn named_collider_friction_reaches_the_live_collider() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&UrdfSceneSim::unitree_go2_dynamic_scene_path())
+                .expect("spawn Go2");
+        for name in ["FL_foot", "FR_foot", "RL_foot", "RR_foot", "ground"] {
+            assert!(
+                sim.set_named_collider_friction(name, 1.25),
+                "live friction update must reach {name}"
+            );
+        }
+        assert!(!sim.set_named_collider_friction("no_such_link", 1.0));
+        assert!(!sim.set_named_collider_friction("ground", f64::NAN));
+        assert!(!sim.set_named_collider_friction("ground", -1.0));
     }
 
     #[test]
