@@ -122,6 +122,12 @@ The local tangent conversion is intended for bounded city tiles, not
 country-scale reprojection. Pre-tile large datasets or supply projected
 coordinates before import.
 
+Because the mapping is exactly invertible, scene positions can be projected
+back to latitude/longitude: example 46 does this to place the tracked vehicle
+on real OpenStreetMap raster tiles in its GIF minimap (tiles are fetched once
+through an on-disk cache with OSM attribution rendered on the panel; without a
+network the panel falls back to a plain background with the same geometry).
+
 ## Physics and headless use
 
 Each building becomes a fixed RNE object. Its visual uses the generated LOD1 or
