@@ -799,6 +799,23 @@ fn main() {
     let onboard_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FOV_Y_RAD);
     let camera_spec = city_camera_spec();
     let mut previous_camera_pose: Option<Transform3> = None;
+    // The tracked vehicle's full ground track, known before rendering starts,
+    // sizes the OSM minimap and draws the growing trail.
+    let track_xz_m: Vec<[f64; 2]> = city_traffic
+        .iter()
+        .take(render_frame_count)
+        .map(|vehicles| {
+            let translation = vehicles[primary_actor_index].transform.translation;
+            [translation.x, translation.z]
+        })
+        .collect();
+    let osm_cache_dir = repo_root.join("target/osm-tile-cache");
+    let minimap = build_minimap(&track_xz_m, |zoom, x, y| {
+        fetch_osm_tile(&osm_cache_dir, zoom, x, y)
+    });
+    if !minimap.from_osm {
+        println!("OSM tiles unavailable; minimap falls back to a plain panel");
+    }
     for (frame, vehicles) in city_traffic.iter().take(render_frame_count).enumerate() {
         let primary = vehicles[primary_actor_index];
         let mut scene = city_scene.clone();
@@ -854,6 +871,24 @@ fn main() {
             },
             &onboard.depth.depth_m,
             onboard_camera.far_m as f32,
+        );
+        blit_minimap_panel(
+            &mut FrameBuffer {
+                pixels: &mut presented,
+                width: output.color.width,
+                height: output.color.height,
+            },
+            &minimap,
+            &track_xz_m,
+            frame,
+        );
+        blit_vehicle_hud(
+            &mut FrameBuffer {
+                pixels: &mut presented,
+                width: output.color.width,
+                height: output.color.height,
+            },
+            primary,
         );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
@@ -3652,6 +3687,382 @@ fn blit_camera_insets(
     );
 }
 
+/// Minimap panel edge length in pixels.
+const MINIMAP_SIZE_PX: u32 = 240;
+/// Padding kept between the vehicle track and the minimap edge, in pixels.
+const MINIMAP_TRACK_PAD_PX: f64 = 24.0;
+/// Earth radius used by the PLATEAU importer's local tangent mapping.
+const MINIMAP_EARTH_RADIUS_M: f64 = 6_378_137.0;
+/// Web-mercator tile edge in pixels.
+const OSM_TILE_PX: u32 = 256;
+
+/// Inverts the PLATEAU importer's local tangent mapping for the Sanjo tile:
+/// scene `+X` is east of the origin longitude, scene `-Z` is north of the
+/// origin latitude.
+fn sanjo_latlon(x_m: f64, z_m: f64) -> (f64, f64) {
+    let origin_lat_rad = SANJO_ORIGIN.first_deg_or_m.to_radians();
+    let latitude = SANJO_ORIGIN.first_deg_or_m - (z_m / MINIMAP_EARTH_RADIUS_M).to_degrees();
+    let longitude = SANJO_ORIGIN.second_deg_or_m
+        + (x_m / (MINIMAP_EARTH_RADIUS_M * origin_lat_rad.cos())).to_degrees();
+    (latitude, longitude)
+}
+
+/// Global web-mercator pixel coordinates of a latitude/longitude at a zoom.
+fn mercator_px(latitude_deg: f64, longitude_deg: f64, zoom: u32) -> [f64; 2] {
+    let n = f64::from(OSM_TILE_PX) * f64::from(1_u32 << zoom);
+    let latitude_rad = latitude_deg.to_radians();
+    [
+        (longitude_deg + 180.0) / 360.0 * n,
+        (1.0 - ((latitude_rad.tan() + 1.0 / latitude_rad.cos()).ln()) / std::f64::consts::PI) / 2.0
+            * n,
+    ]
+}
+
+/// OSM minimap mosaic with the mapping needed to place scene positions on it.
+struct Minimap {
+    pixels: Vec<u8>,
+    origin_px: [f64; 2],
+    zoom: u32,
+    from_osm: bool,
+}
+
+impl Minimap {
+    /// Panel pixel position of a scene XZ position (may lie outside the panel).
+    fn panel_px(&self, x_m: f64, z_m: f64) -> [f64; 2] {
+        let (latitude, longitude) = sanjo_latlon(x_m, z_m);
+        let global = mercator_px(latitude, longitude, self.zoom);
+        [global[0] - self.origin_px[0], global[1] - self.origin_px[1]]
+    }
+}
+
+/// Fetches one OSM raster tile through an on-disk cache. Fetching uses `curl`
+/// (the GIF pipeline already shells out to `ffmpeg`), identifies itself per
+/// the OSM tile usage policy, and never re-downloads a cached tile.
+fn fetch_osm_tile(cache_dir: &Path, zoom: u32, x: u64, y: u64) -> Option<image::RgbaImage> {
+    let path = cache_dir.join(format!("{zoom}-{x}-{y}.png"));
+    if !path.is_file() {
+        fs::create_dir_all(cache_dir).ok()?;
+        let url = format!("https://tile.openstreetmap.org/{zoom}/{x}/{y}.png");
+        let status = std::process::Command::new("curl")
+            .args([
+                "-sf",
+                "--max-time",
+                "20",
+                "-A",
+                "RoboSim-plateau-example/1.0 (+https://github.com/rsasaki0109/RoboSim)",
+                "-o",
+            ])
+            .arg(&path)
+            .arg(&url)
+            .status()
+            .ok()?;
+        if !status.success() {
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+    }
+    Some(image::open(&path).ok()?.to_rgba8())
+}
+
+/// Builds the minimap mosaic around a scene-space track. The zoom is the
+/// largest that keeps the whole track inside the panel; tiles come from the
+/// injected fetcher so the offline fallback (a plain dark panel with the same
+/// geo mapping) is testable without a network.
+fn build_minimap(
+    track_xz_m: &[[f64; 2]],
+    fetch: impl Fn(u32, u64, u64) -> Option<image::RgbaImage>,
+) -> Minimap {
+    let latlon: Vec<(f64, f64)> = track_xz_m
+        .iter()
+        .map(|point| sanjo_latlon(point[0], point[1]))
+        .collect();
+    let mut zoom = 12;
+    for candidate in (12..=18).rev() {
+        let mut min = [f64::INFINITY; 2];
+        let mut max = [f64::NEG_INFINITY; 2];
+        for (latitude, longitude) in &latlon {
+            let px = mercator_px(*latitude, *longitude, candidate);
+            for axis in 0..2 {
+                min[axis] = min[axis].min(px[axis]);
+                max[axis] = max[axis].max(px[axis]);
+            }
+        }
+        let span = (max[0] - min[0]).max(max[1] - min[1]);
+        if span + 2.0 * MINIMAP_TRACK_PAD_PX <= f64::from(MINIMAP_SIZE_PX) {
+            zoom = candidate;
+            break;
+        }
+    }
+    let mut center = [0.0, 0.0];
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for (latitude, longitude) in &latlon {
+        let px = mercator_px(*latitude, *longitude, zoom);
+        for axis in 0..2 {
+            min[axis] = min[axis].min(px[axis]);
+            max[axis] = max[axis].max(px[axis]);
+        }
+    }
+    for axis in 0..2 {
+        center[axis] = (min[axis] + max[axis]) / 2.0;
+    }
+    let origin_px = [
+        center[0] - f64::from(MINIMAP_SIZE_PX) / 2.0,
+        center[1] - f64::from(MINIMAP_SIZE_PX) / 2.0,
+    ];
+
+    let size = MINIMAP_SIZE_PX as usize;
+    let mut pixels = vec![0_u8; size * size * 4];
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&[38, 42, 48, 255]);
+    }
+    let mut from_osm = false;
+    let tile = f64::from(OSM_TILE_PX);
+    let first_tile = [
+        (origin_px[0] / tile).floor() as i64,
+        (origin_px[1] / tile).floor() as i64,
+    ];
+    let last_tile = [
+        ((origin_px[0] + f64::from(MINIMAP_SIZE_PX)) / tile).floor() as i64,
+        ((origin_px[1] + f64::from(MINIMAP_SIZE_PX)) / tile).floor() as i64,
+    ];
+    for tile_y in first_tile[1]..=last_tile[1] {
+        for tile_x in first_tile[0]..=last_tile[0] {
+            if tile_x < 0 || tile_y < 0 {
+                continue;
+            }
+            let Some(image) = fetch(zoom, tile_x as u64, tile_y as u64) else {
+                continue;
+            };
+            from_osm = true;
+            for (source_y, row) in image.rows().enumerate() {
+                let panel_y = tile_y as f64 * tile + source_y as f64 - origin_px[1];
+                if !(0.0..f64::from(MINIMAP_SIZE_PX)).contains(&panel_y) {
+                    continue;
+                }
+                for (source_x, pixel) in row.enumerate() {
+                    let panel_x = tile_x as f64 * tile + source_x as f64 - origin_px[0];
+                    if !(0.0..f64::from(MINIMAP_SIZE_PX)).contains(&panel_x) {
+                        continue;
+                    }
+                    let offset = (panel_y as usize * size + panel_x as usize) * 4;
+                    pixels[offset..offset + 4].copy_from_slice(&pixel.0);
+                }
+            }
+        }
+    }
+    Minimap {
+        pixels,
+        origin_px,
+        zoom,
+        from_osm,
+    }
+}
+
+/// 5x7 pixel glyphs for the HUD and attribution text. Rows are 5-bit masks,
+/// leftmost pixel in bit 4. Unknown characters render as blanks.
+fn hud_glyph(character: char) -> [u8; 7] {
+    match character {
+        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
+        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        '2' => [0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F],
+        '3' => [0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E],
+        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
+        '5' => [0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E],
+        '6' => [0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E],
+        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
+        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C],
+        'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'S' => [0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E],
+        'M' => [0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11],
+        'a' => [0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F],
+        'b' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x1E],
+        'c' => [0x00, 0x00, 0x0E, 0x10, 0x10, 0x11, 0x0E],
+        'd' => [0x01, 0x01, 0x0D, 0x13, 0x11, 0x11, 0x0F],
+        'e' => [0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E],
+        'g' => [0x00, 0x0F, 0x11, 0x11, 0x0F, 0x01, 0x0E],
+        'h' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11],
+        'k' => [0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12],
+        'm' => [0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x15],
+        'n' => [0x00, 0x00, 0x16, 0x19, 0x11, 0x11, 0x11],
+        'p' => [0x00, 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10],
+        'r' => [0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10],
+        's' => [0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E],
+        't' => [0x08, 0x08, 0x1C, 0x08, 0x08, 0x09, 0x06],
+        '(' => [0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02],
+        ')' => [0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08],
+        '/' => [0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10],
+        '+' => [0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00],
+        '-' => [0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
+        _ => [0x00; 7],
+    }
+}
+
+/// Draws text with the 5x7 HUD font at an integer scale.
+fn draw_hud_text(
+    frame: &mut FrameBuffer<'_>,
+    origin: (u32, u32),
+    scale: u32,
+    color: [u8; 4],
+    text: &str,
+) {
+    let mut pen_x = origin.0;
+    for character in text.chars() {
+        let glyph = hud_glyph(character);
+        for (row, bits) in glyph.iter().enumerate() {
+            for column in 0..5_u32 {
+                if bits & (1 << (4 - column)) == 0 {
+                    continue;
+                }
+                for dy in 0..scale {
+                    for dx in 0..scale {
+                        let x = pen_x + column * scale + dx;
+                        let y = origin.1 + row as u32 * scale + dy;
+                        if x >= frame.width || y >= frame.height {
+                            continue;
+                        }
+                        let offset = (y as usize * frame.width as usize + x as usize) * 4;
+                        frame.pixels[offset..offset + 4].copy_from_slice(&color);
+                    }
+                }
+            }
+        }
+        pen_x += 6 * scale;
+    }
+}
+
+/// Fills an axis-aligned rectangle with a solid color.
+fn fill_hud_rect(
+    frame: &mut FrameBuffer<'_>,
+    origin: (u32, u32),
+    size: (u32, u32),
+    color: [u8; 4],
+) {
+    for y in origin.1..(origin.1 + size.1).min(frame.height) {
+        for x in origin.0..(origin.0 + size.0).min(frame.width) {
+            let offset = (y as usize * frame.width as usize + x as usize) * 4;
+            frame.pixels[offset..offset + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+/// Composes the minimap panel for one frame — mosaic, driven trail, current
+/// position marker, and OSM attribution — and blits it into the top-right
+/// corner with the shared inset border.
+fn blit_minimap_panel(
+    frame: &mut FrameBuffer<'_>,
+    minimap: &Minimap,
+    track_xz_m: &[[f64; 2]],
+    current_frame: usize,
+) {
+    const TRAIL: [u8; 4] = [64, 156, 255, 255];
+    const MARKER: [u8; 4] = [236, 62, 46, 255];
+    const MARKER_RING: [u8; 4] = [255, 255, 255, 255];
+    let size = MINIMAP_SIZE_PX as usize;
+    let mut panel = minimap.pixels.clone();
+    let put = |pixels: &mut Vec<u8>, x: i64, y: i64, color: [u8; 4]| {
+        if x < 0 || y < 0 || x >= size as i64 || y >= size as i64 {
+            return;
+        }
+        let offset = (y as usize * size + x as usize) * 4;
+        pixels[offset..offset + 4].copy_from_slice(&color);
+    };
+    for point in track_xz_m.iter().take(current_frame + 1) {
+        let px = minimap.panel_px(point[0], point[1]);
+        for dy in -1_i64..=0 {
+            for dx in -1_i64..=0 {
+                put(&mut panel, px[0] as i64 + dx, px[1] as i64 + dy, TRAIL);
+            }
+        }
+    }
+    if let Some(current) = track_xz_m.get(current_frame) {
+        let px = minimap.panel_px(current[0], current[1]);
+        for dy in -3_i64..=3 {
+            for dx in -3_i64..=3 {
+                let ring = dx.abs().max(dy.abs()) == 3;
+                let color = if ring { MARKER_RING } else { MARKER };
+                put(&mut panel, px[0] as i64 + dx, px[1] as i64 + dy, color);
+            }
+        }
+    }
+    let panel_origin = (
+        frame.width - CAMERA_INSET_MARGIN_PX - MINIMAP_SIZE_PX,
+        CAMERA_INSET_MARGIN_PX,
+    );
+    blit_inset(
+        frame,
+        InsetImage {
+            pixels: &panel,
+            width: MINIMAP_SIZE_PX,
+            height: MINIMAP_SIZE_PX,
+        },
+        panel_origin,
+    );
+    if minimap.from_osm {
+        // OSM raster tiles require visible attribution.
+        let text = "(c) OpenStreetMap";
+        let text_width = text.chars().count() as u32 * 6 + 4;
+        fill_hud_rect(
+            frame,
+            (panel_origin.0, panel_origin.1 + MINIMAP_SIZE_PX - 11),
+            (text_width, 11),
+            [16, 20, 24, 255],
+        );
+        draw_hud_text(
+            frame,
+            (panel_origin.0 + 3, panel_origin.1 + MINIMAP_SIZE_PX - 9),
+            1,
+            [235, 240, 248, 255],
+            text,
+        );
+    }
+}
+
+/// Draws the tracked vehicle's speed, steering angle, and brake state under
+/// the minimap.
+fn blit_vehicle_hud(frame: &mut FrameBuffer<'_>, vehicle: VehicleFrame) {
+    let hud_origin = (
+        frame.width - CAMERA_INSET_MARGIN_PX - MINIMAP_SIZE_PX - CAMERA_INSET_BORDER_PX,
+        CAMERA_INSET_MARGIN_PX + MINIMAP_SIZE_PX + 12,
+    );
+    let lines = [
+        format!("{:5.1} km/h", vehicle.speed_m_s * 3.6),
+        format!("steer {:+5.1} deg", vehicle.steering_rad.to_degrees()),
+    ];
+    let width = MINIMAP_SIZE_PX + 2 * CAMERA_INSET_BORDER_PX;
+    let line_height = 18;
+    let brake_rows = u32::from(vehicle.braking);
+    fill_hud_rect(
+        frame,
+        hud_origin,
+        (width, 8 + line_height * (2 + brake_rows)),
+        [16, 20, 24, 235],
+    );
+    for (index, line) in lines.iter().enumerate() {
+        draw_hud_text(
+            frame,
+            (
+                hud_origin.0 + 8,
+                hud_origin.1 + 6 + line_height * index as u32,
+            ),
+            2,
+            [235, 240, 248, 255],
+            line,
+        );
+    }
+    if vehicle.braking {
+        draw_hud_text(
+            frame,
+            (hud_origin.0 + 8, hud_origin.1 + 6 + line_height * 2),
+            2,
+            [236, 62, 46, 255],
+            "brake",
+        );
+    }
+}
+
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
     let file = fs::File::create(path)?;
     let mut encoder = Encoder::new(file, width, height);
@@ -3664,6 +4075,69 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanjo_latlon_inverts_the_import_tangent_mapping() {
+        // Forward mapping per rne_plateau::source_to_local (geographic mode):
+        // x = (lon - lon0)·R·cos(lat0), z = -(lat - lat0)·R.
+        let (latitude, longitude) =
+            sanjo_latlon(KITA_SANJO_STATION_XZ_M[0], KITA_SANJO_STATION_XZ_M[1]);
+        let origin_lat_rad = SANJO_ORIGIN.first_deg_or_m.to_radians();
+        let x = (longitude - SANJO_ORIGIN.second_deg_or_m).to_radians()
+            * MINIMAP_EARTH_RADIUS_M
+            * origin_lat_rad.cos();
+        let z = -(latitude - SANJO_ORIGIN.first_deg_or_m).to_radians() * MINIMAP_EARTH_RADIUS_M;
+        assert!((x - KITA_SANJO_STATION_XZ_M[0]).abs() < 1.0e-6);
+        assert!((z - KITA_SANJO_STATION_XZ_M[1]).abs() < 1.0e-6);
+        // The station must land in Sanjo City, not somewhere absurd.
+        assert!((37.0..38.0).contains(&latitude) && (138.0..140.0).contains(&longitude));
+    }
+
+    #[test]
+    fn mercator_px_matches_reference_points() {
+        let center = mercator_px(0.0, 0.0, 0);
+        assert!((center[0] - 128.0).abs() < 1.0e-9);
+        assert!((center[1] - 128.0).abs() < 1.0e-9);
+        // North-east of the origin is right of and above the center pixel.
+        let sanjo = mercator_px(37.63, 138.96, 16);
+        assert!(sanjo[0] > 128.0 * 65_536.0 / 256.0);
+        assert!(sanjo[1] < 128.0 * 65_536.0);
+    }
+
+    #[test]
+    fn hud_font_covers_the_rendered_charset() {
+        for character in "0123456789+-./() OSMabcdeghkmnprst".chars() {
+            if character == ' ' {
+                continue;
+            }
+            assert!(
+                hud_glyph(character).iter().any(|row| *row != 0),
+                "missing HUD glyph for {character:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn minimap_offline_fallback_is_deterministic_and_centers_the_track() {
+        let track = [[0.0, 0.0], [120.0, -80.0], [59.46, -77.17]];
+        let first = build_minimap(&track, |_, _, _| None);
+        let second = build_minimap(&track, |_, _, _| None);
+        assert!(!first.from_osm);
+        assert_eq!(first.pixels, second.pixels);
+        assert_eq!(first.zoom, second.zoom);
+        // Every track point must land inside the panel with the track pad.
+        for point in track {
+            let px = first.panel_px(point[0], point[1]);
+            for axis in 0..2 {
+                assert!(
+                    (MINIMAP_TRACK_PAD_PX - 1.0
+                        ..=f64::from(MINIMAP_SIZE_PX) + 1.0 - MINIMAP_TRACK_PAD_PX)
+                        .contains(&px[axis]),
+                    "track point {point:?} at panel {px:?} axis {axis}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn official_sanjo_subset_imports_and_selects_station_road() {

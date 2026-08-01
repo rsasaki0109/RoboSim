@@ -12,7 +12,7 @@ headless CI, and real wgpu rendering.
     <img src="docs/media/plateau-lidar.gif" alt="Physics-aware 16-channel LiDAR rings sweeping official PLATEAU Sanjo city traffic from a moving vehicle, with onboard camera color and depth insets" width="960">
   </picture>
   <br>
-  <sub>Physics-aware sensing over official PLATEAU Sanjo City data: a 16-channel spinning LiDAR paints its concentric elevation rings across ground, buildings, and 99 deterministic traffic vehicles — inverse-square radiometry, material response, multi-returns, and retroreflective saturation, 1,092,806 returns in one 12-second wgpu capture (stable hash <code>16814780024698753365</code>). The insets are the same vehicle's RGB-D camera with lens distortion, rolling shutter, auto exposure, and sensor noise. The mount rides a dynamic-bicycle chassis; everything replays bit-identically from one seed.</sub>
+  <sub>Physics-aware sensing over official PLATEAU Sanjo City data: a 16-channel spinning LiDAR paints its concentric elevation rings across ground, buildings, and 99 deterministic traffic vehicles — inverse-square radiometry, material response, multi-returns, and retroreflective saturation, 1,092,806 returns in one 12-second wgpu capture (stable hash <code>16814780024698753365</code>). The insets are the same vehicle's RGB-D camera with lens distortion, rolling shutter, auto exposure, and sensor noise. The top-right minimap places the vehicle live on real OpenStreetMap tiles by inverting the importer's geo mapping, with its driven trail and a speed/steering/brake HUD. The mount rides a dynamic-bicycle chassis; everything replays bit-identically from one seed.</sub>
 </p>
 
 RNE is a Rust-based, robot-native, AI-native game engine for robotics simulation,
