@@ -1,0 +1,13 @@
+[package]
+name = "go2_authority_turn"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_math = { path = "../../crates/rne_math" }
+
+[[example]]
+name = "59_go2_authority_turn"
+path = "main.rs"

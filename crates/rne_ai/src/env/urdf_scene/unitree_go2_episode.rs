@@ -1842,6 +1842,117 @@ mod tests {
     }
 
     #[test]
+    fn authority_and_integral_do_not_lift_the_commanded_turn() {
+        use super::super::{UnitreeGo2TorquePolicy, UrdfJointTorqueTarget};
+
+        // The authority hypothesis, tested and refuted: a ±12 N·m
+        // feed-forward clamp plus an integral yaw-error feature (a learned
+        // PI structure, example 59) does not lift the commanded turn's
+        // absolute amplitude above the ±0.3 rad cross-platform chaos floor —
+        // its search scored 0.094 against the ±8 winner's 0.188, and the
+        // pinned winner's sign-corrected windows stay far below the floor.
+        // The commanded amplitude is bounded by the platform's turn
+        // capability, which is itself the size of the floor; the remaining
+        // levers are morphological (aerial-duty gaits, foot geometry).
+        let run = |yaw_rate_ref: f64| {
+            let policy = UnitreeGo2TorquePolicy::LEARNED_AUTHORITY_TURN;
+            let mut sim = settled_stand();
+            let start = sim.observe();
+            let mut previous_yaw = start.base_relative_yaw_rad;
+            let mut window_a = 0.0;
+            let mut window_b = 0.0;
+            let mut min_height = f64::MAX;
+            let mut error_integral = 0.0_f64;
+            let cycle = fast_walk_command().cycle_steps;
+            for step in 0..1440_u64 {
+                let observed = sim.observe();
+                let pose = sim.named_transform("base").expect("base pose");
+                let inverse = pose.rotation.inverse();
+                let live_up = (inverse * rne_math::Vec3::Y).normalize_or_zero();
+                let omega_world = rne_math::Vec3::new(
+                    observed.base_angular_velocity_x_rad_s,
+                    observed.base_angular_velocity_y_rad_s,
+                    observed.base_angular_velocity_z_rad_s,
+                );
+                let omega_body = inverse * omega_world;
+                let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+                let (phase_sin, phase_cos) =
+                    (2.0 * std::f64::consts::PI * two_cycle_phase).sin_cos();
+                let features = [
+                    live_up.x,
+                    live_up.z,
+                    omega_body.x,
+                    error_integral,
+                    yaw_rate_ref - omega_world.y,
+                    phase_sin,
+                    phase_cos,
+                    1.0,
+                ];
+                let feed_forward = policy.torques_nm_with_limit(&features, 12.0);
+                let targets = unitree_go2_trot_targets(step, fast_walk_command());
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .zip(feed_forward.iter())
+                    .map(|(target, extra)| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                                .clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                let after = sim.observe();
+                error_integral = (error_integral
+                    + (yaw_rate_ref - after.base_angular_velocity_y_rad_s) / 60.0)
+                    .clamp(-0.5, 0.5);
+                let mut delta = after.base_relative_yaw_rad - previous_yaw;
+                while delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                }
+                while delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                if (480..960).contains(&step) {
+                    window_a += delta;
+                } else if step >= 960 {
+                    window_b += delta;
+                }
+                previous_yaw = after.base_relative_yaw_rad;
+                min_height = min_height.min(after.base_y_m);
+            }
+            (window_a, window_b, min_height)
+        };
+
+        let (positive_a, positive_b, positive_height) = run(0.25);
+        let (negative_a, negative_b, negative_height) = run(-0.25);
+        println!(
+            "authority +0.25: {positive_a:+.3}/{positive_b:+.3}  -0.25: {negative_a:+.3}/{negative_b:+.3}"
+        );
+        let worst_obedient_window = positive_a.min(positive_b).min(-negative_a).min(-negative_b);
+        assert!(
+            worst_obedient_window < 0.25,
+            "the refutation must hold: authority did not clear the chaos floor, got {worst_obedient_window:+.3}"
+        );
+        assert!(
+            positive_height > 0.1 && negative_height > 0.1,
+            "authority runs must not collapse"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _) = run(0.25);
+        assert_eq!(positive_a.to_bits(), again_a.to_bits());
+        assert_eq!(positive_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
         // Force-level steering, hand-designed, measured and refuted — the
         // torque-space mirror of the six position-space steering nulls. Three

@@ -476,6 +476,144 @@ impl UnitreeGo2TorquePolicy {
         weights: [[0.0; UNITREE_GO2_POLICY_FEATURES]; 12],
     };
 
+    /// The authority-hypothesis winner, pinned as a NEGATIVE result
+    /// (`examples/59_go2_authority_turn -- --train`, seed 42).
+    ///
+    /// Hypothesis: raising the feed-forward clamp to ±12 N·m and giving the
+    /// policy an integral of the yaw-rate error (a learned PI structure)
+    /// would lift the commanded turn's absolute amplitude above the ±0.3 rad
+    /// cross-platform chaos floor. Refuted: the best commanded score reached
+    /// 0.094 — *below* the ±8 N·m winner's 0.188 — and its windows stay an
+    /// order of the floor's size too small. Feed-forward authority is not the
+    /// lever; the commanded amplitude is bounded by the platform's turn
+    /// capability, which is itself the size of the chaos floor.
+    /// `authority_and_integral_do_not_lift_the_commanded_turn` pins this so
+    /// it cannot rot. Feature convention is example 59's (integral in slot 3).
+    pub const LEARNED_AUTHORITY_TURN: Self = Self {
+        weights: [
+            [
+                -1.534138230421,
+                -0.132141010923,
+                -1.062841252385,
+                -0.474775042218,
+                1.892636448202,
+                1.522633656909,
+                -0.664034108358,
+                -0.631362118104,
+            ],
+            [
+                -1.718918285029,
+                -0.167284275788,
+                0.303720103870,
+                0.878512918009,
+                -2.735702424900,
+                0.351427463906,
+                -0.084000392633,
+                -0.258257454501,
+            ],
+            [
+                -2.511522836997,
+                -3.613633533479,
+                -0.523856650618,
+                1.102879288365,
+                -0.706826935142,
+                1.117531315895,
+                -1.022285346689,
+                1.596013184925,
+            ],
+            [
+                1.154745548106,
+                1.087787284766,
+                -0.739044886930,
+                0.462592131641,
+                -0.403166183408,
+                0.084559640298,
+                -0.382928177918,
+                1.675236479140,
+            ],
+            [
+                -0.339901690568,
+                1.057314244967,
+                0.954465590395,
+                0.119369548089,
+                -0.662067234987,
+                1.664634657162,
+                -1.815742410559,
+                -1.043454592531,
+            ],
+            [
+                -0.250928707739,
+                -0.179620749098,
+                0.421336481399,
+                -0.425869368478,
+                0.479545805094,
+                0.522511010513,
+                0.302131897525,
+                0.071531477564,
+            ],
+            [
+                -1.057228387278,
+                -0.187792700480,
+                -0.996016168503,
+                -1.200153561819,
+                1.321231823670,
+                1.770771636899,
+                -1.445715139297,
+                -1.426693162415,
+            ],
+            [
+                0.235378782920,
+                0.348076263633,
+                -0.830929354804,
+                0.369296928355,
+                0.249073436351,
+                0.564813932215,
+                -0.281517398510,
+                -1.036497915140,
+            ],
+            [
+                -0.017997379958,
+                1.995558601062,
+                0.257553246001,
+                0.259013742974,
+                -0.256097002148,
+                1.402095880290,
+                0.116927270736,
+                -1.269646035614,
+            ],
+            [
+                0.659953906830,
+                -2.348031396800,
+                -1.554121833621,
+                -0.196765514887,
+                -1.111252469945,
+                1.252056338837,
+                0.651813785942,
+                -3.306221977909,
+            ],
+            [
+                -1.068576505778,
+                0.780814681691,
+                -0.640639621364,
+                0.520039981546,
+                -1.790539942253,
+                -0.067172913986,
+                -0.416175852522,
+                -0.522452980420,
+            ],
+            [
+                0.127404776239,
+                1.013712489546,
+                0.693524254715,
+                0.571840440332,
+                -1.061780056238,
+                -0.812121876085,
+                -1.097808084893,
+                -1.374078787373,
+            ],
+        ],
+    };
+
     /// A commanded yaw-rate tracking policy found by the two-direction CEM
     /// (`examples/58_go2_steered_turn -- --train`, seed 42).
     ///
@@ -755,6 +893,21 @@ impl UnitreeGo2TorquePolicy {
     /// Feed-forward joint torques for a feature vector, each clamped to
     /// ±8 N·m so the policy cannot out-shout the tracking PD.
     pub fn torques_nm(&self, features: &[f64; UNITREE_GO2_POLICY_FEATURES]) -> [f64; 12] {
+        self.torques_nm_with_limit(features, 8.0)
+    }
+
+    /// Feed-forward joint torques with an explicit per-joint clamp in N·m.
+    ///
+    /// The commanded-authority search uses a higher clamp than the original
+    /// ±8 N·m: the absolute obedience of the ±8 winner sits below the
+    /// cross-platform chaos floor, and authority is one of its levers. The
+    /// clamp is part of a pinned policy's operating contract — replaying a
+    /// constant with a different limit is a different controller.
+    pub fn torques_nm_with_limit(
+        &self,
+        features: &[f64; UNITREE_GO2_POLICY_FEATURES],
+        limit_nm: f64,
+    ) -> [f64; 12] {
         let mut torques = [0.0; 12];
         for (torque, weights) in torques.iter_mut().zip(self.weights.iter()) {
             *torque = weights
@@ -762,7 +915,7 @@ impl UnitreeGo2TorquePolicy {
                 .zip(features.iter())
                 .map(|(weight, feature)| weight * feature)
                 .sum::<f64>()
-                .clamp(-8.0, 8.0);
+                .clamp(-limit_nm, limit_nm);
         }
         torques
     }

@@ -296,8 +296,25 @@ stays a same-platform observation. The general lesson now appears twice:
 **a learned behavior is only as portable as its margin above the chaos
 floor** — and this behavior's margin is differential, not absolute.
 
-The remaining openings: raising the commanded authority until absolute
-obedience clears the floor (integral action, higher torque share,
-gait-level command coupling), aerial-duty gaits, foot geometry/friction,
-and richer policies (nonlinear features, joint-state feedback) on this
-now-proven closed-loop pathway.
+## Authority is not the lever
+
+The obvious next hypothesis — raise the feed-forward clamp (±8 → ±12 N·m)
+and give the policy an integral of the yaw-rate error (a learned PI
+structure), and absolute obedience will clear the floor — was tested by
+`examples/59_go2_authority_turn` and **refuted**. The higher-authority
+search's best commanded score reached 0.094, *below* the ±8 winner's
+0.188, and the pinned winner's sign-corrected windows stay far below the
+±0.3 rad floor (`authority_and_integral_do_not_lift_the_commanded_turn`
+pins the refutation; the winner's obedience did not even survive its own
+12-decimal state round-trip, more evidence of sub-floor fragility).
+
+This closes the torque-policy chapter with a clean localization. The
+commanded amplitude is bounded by the platform's turn capability
+(~0.03–0.04 rad/s, established across three controller families), and
+that capability is itself the size of the cross-platform chaos floor —
+so absolute commanded obedience cannot clear the floor *within this gait
+and morphology*, no matter the controller. The campaign's original
+boundary diagnosis stands at the end as at the beginning: the remaining
+levers are morphological — aerial-duty gaits, foot geometry/friction —
+plus richer policies for other objectives on the now-proven closed-loop
+pathway.
