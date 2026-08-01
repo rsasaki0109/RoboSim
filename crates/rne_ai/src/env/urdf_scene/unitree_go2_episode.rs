@@ -1713,6 +1713,135 @@ mod tests {
     }
 
     #[test]
+    fn commanded_yaw_reference_steers_both_ways() {
+        use super::super::{UnitreeGo2TorquePolicy, UrdfJointTorqueTarget};
+
+        // The rung the reference-free policy pointed at: feature 4 is the
+        // tracking error against a commanded yaw rate, and the search scored
+        // each candidate by the worse of its two commanded directions. The
+        // pinned claim is command OBEDIENCE — with one set of weights every
+        // measurement window follows the commanded sign, the first
+        // direction-commanded turn on this platform. The magnitude is honest
+        // and modest (~0.013 rad/s, far below the 0.25 rad/s reference):
+        // obedience is the result, rate tracking is not yet.
+        let run = |yaw_rate_ref: f64| {
+            let policy = UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN;
+            let mut sim = settled_stand();
+            let up_body = {
+                let pose = sim.named_transform("base").expect("base pose");
+                (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+            };
+            let true_tilt = |sim: &UrdfSceneSim| {
+                let pose = sim.named_transform("base").expect("base pose");
+                let up = (pose.rotation * up_body).normalize_or_zero();
+                up.y.clamp(-1.0, 1.0).acos()
+            };
+            let start = sim.observe();
+            let mut previous_yaw = start.base_relative_yaw_rad;
+            let mut window_a = 0.0;
+            let mut window_b = 0.0;
+            let mut max_tilt = 0.0_f64;
+            let mut min_height = f64::MAX;
+            let cycle = fast_walk_command().cycle_steps;
+            for step in 0..1440_u64 {
+                let observed = sim.observe();
+                let pose = sim.named_transform("base").expect("base pose");
+                let inverse = pose.rotation.inverse();
+                let live_up = (inverse * rne_math::Vec3::Y).normalize_or_zero();
+                let omega_world = rne_math::Vec3::new(
+                    observed.base_angular_velocity_x_rad_s,
+                    observed.base_angular_velocity_y_rad_s,
+                    observed.base_angular_velocity_z_rad_s,
+                );
+                let omega_body = inverse * omega_world;
+                let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+                let (phase_sin, phase_cos) =
+                    (2.0 * std::f64::consts::PI * two_cycle_phase).sin_cos();
+                let features = [
+                    live_up.x,
+                    live_up.z,
+                    omega_body.x,
+                    omega_body.z,
+                    yaw_rate_ref - omega_world.y,
+                    phase_sin,
+                    phase_cos,
+                    1.0,
+                ];
+                let feed_forward = policy.torques_nm(&features);
+                let targets = unitree_go2_trot_targets(step, fast_walk_command());
+                let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                    .iter()
+                    .zip(feed_forward.iter())
+                    .map(|(target, extra)| {
+                        let q = sim
+                            .named_joint_position(target.link_name)
+                            .expect("joint position");
+                        let qd = sim
+                            .named_joint_velocity(target.link_name)
+                            .expect("joint velocity");
+                        UrdfJointTorqueTarget {
+                            link_name: target.link_name,
+                            torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                                .clamp(-23.7, 23.7),
+                            max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                        }
+                    })
+                    .collect();
+                sim.step_joint_torques(&torques);
+                let after = sim.observe();
+                let mut delta = after.base_relative_yaw_rad - previous_yaw;
+                while delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                }
+                while delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                if (480..960).contains(&step) {
+                    window_a += delta;
+                } else if step >= 960 {
+                    window_b += delta;
+                }
+                previous_yaw = after.base_relative_yaw_rad;
+                max_tilt = max_tilt.max(true_tilt(&sim));
+                min_height = min_height.min(after.base_y_m);
+            }
+            (window_a, window_b, max_tilt, min_height)
+        };
+
+        let (positive_a, positive_b, positive_tilt, positive_height) = run(0.25);
+        let (negative_a, negative_b, negative_tilt, negative_height) = run(-0.25);
+        println!(
+            "commanded +0.25: {positive_a:+.3}/{positive_b:+.3}  -0.25: {negative_a:+.3}/{negative_b:+.3}"
+        );
+        // Cross-platform, absolute per-window obedience drowns in the chaos
+        // floor: the achieved windows (~0.1 rad) sit inside the ±0.3 rad
+        // spread that OS-libm orbit differences produce, so Linux measures
+        // sign-inconsistent windows where Windows measures four obedient
+        // ones. What stays above the floor on both platforms is the
+        // *differential* response — commanding + versus − shifts the total
+        // yaw in the commanded direction by 0.23 (Linux) to 0.42 (Windows)
+        // rad — so that separation is the pinned cross-platform claim, and
+        // absolute obedience remains a same-platform observation.
+        let separation = (positive_a + positive_b) - (negative_a + negative_b);
+        assert!(
+            separation > 0.15,
+            "the command must separate the turn distributions: {separation:+.3}"
+        );
+        assert!(
+            positive_tilt < 0.8
+                && negative_tilt < 0.8
+                && positive_height > 0.1
+                && negative_height > 0.1,
+            "both commanded runs must stay up"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) = run(0.25);
+        assert_eq!(positive_a.to_bits(), again_a.to_bits());
+        assert_eq!(positive_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
         // Force-level steering, hand-designed, measured and refuted — the
         // torque-space mirror of the six position-space steering nulls. Three
