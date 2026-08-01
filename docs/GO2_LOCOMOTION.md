@@ -366,7 +366,9 @@ position-servo scripted trot — while staying straight (|yaw| ≈ 0.1 rad),
 upright (tilt ≤ 0.37), at height, with ulp-perturbed replays landing on
 identical windows. Where every steering search collided with a geometric
 ceiling, the transport objective found headroom the hand-scripted gait
-never used: learning beats the hand gait at the hand gait's own job.
+never used: learning beats the hand gait at the hand gait's own job. The
+same torque pathway also ports to the G1 humanoid — gains scale with the
+plant, ankles stay servo — see [G1_LOCOMOTION.md](G1_LOCOMOTION.md).
 
 ## The search declines to fly
 
