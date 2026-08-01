@@ -278,18 +278,26 @@ orbit scores its bad direction, so only genuine command obedience survives,
 and the two commands double as a diverse ensemble against
 single-trajectory objective gaming.
 
-The winner (`UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN`) is the
-platform's first controller whose turn **direction obeys a command**: one
-set of weights turns +0.094/+0.117 rad per window when told +0.25 rad/s and
-−0.095/−0.109 when told −0.25
-(`commanded_yaw_reference_steers_both_ways` pins both directions and a
-bit-exact replay). The honest margins: the achieved magnitude is
-~0.013 rad/s — command *obedience* is the result; rate *tracking* is not
-yet — and the two commanded operating points are asymmetric (the positive
-command nearly stops the walk where the negative one keeps 1.7 m of
-progress).
+The winner (`UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN`) responds to
+the command: one set of weights turns +0.094/+0.117 rad per window when
+told +0.25 rad/s and −0.095/−0.109 when told −0.25 — four obedient windows
+on the training platform.
 
-The remaining openings: closing the tracking gap (integral action, higher
-authority, or gait-level command coupling), aerial-duty gaits, foot
-geometry/friction, and richer policies (nonlinear features, joint-state
-feedback) on this now-proven closed-loop pathway.
+Linux CI then priced that claim against the chaos floor. The achieved
+windows (~0.1 rad) sit *inside* the ±0.3 rad spread that cross-OS libm
+orbit differences produce, so on the other platform the per-window signs
+scatter (+ref measured −0.02/+0.03 there). What stays above the floor on
+both platforms is the **differential response**: commanding + versus −
+shifts the total yaw in the commanded direction by 0.23 rad (Linux) to
+0.42 rad (Windows) over the measurement horizon.
+`commanded_yaw_reference_steers_both_ways` pins that separation, both
+runs' uprightness, and a bit-exact replay; absolute four-window obedience
+stays a same-platform observation. The general lesson now appears twice:
+**a learned behavior is only as portable as its margin above the chaos
+floor** — and this behavior's margin is differential, not absolute.
+
+The remaining openings: raising the commanded authority until absolute
+obedience clears the floor (integral action, higher torque share,
+gait-level command coupling), aerial-duty gaits, foot geometry/friction,
+and richer policies (nonlinear features, joint-state feedback) on this
+now-proven closed-loop pathway.
