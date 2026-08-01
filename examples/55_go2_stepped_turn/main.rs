@@ -143,16 +143,20 @@ fn rollout(schedule: &UnitreeGo2GaitSchedule, steps: u64) -> RolloutOutcome {
 
 /// Maps 20 search parameters onto a schedule kept within a walkable
 /// neighborhood of the trot: per leg `[phase_delta, duty_delta, stride_delta,
-/// hip_offset, hip_sweep]`.
-fn schedule_from(params: &[f64; DIM]) -> UnitreeGo2GaitSchedule {
+/// hip_offset, hip_sweep]`. The aerial variant opens the duty range down to
+/// 0.30, where the diagonal pairs no longer cover the cycle and the gait
+/// acquires flight phases — the morphological lever the chaos-floor closure
+/// named.
+fn schedule_from(params: &[f64; DIM], aerial: bool) -> UnitreeGo2GaitSchedule {
     let trot_phases = [0.0, 0.5, 0.5, 0.0];
+    let duty_floor = if aerial { -0.40 } else { -0.15 };
     let mut legs = [UnitreeGo2LegSchedule::trot(0.0); 4];
     for (leg_index, leg) in legs.iter_mut().enumerate() {
         let base = leg_index * 5;
         *leg = UnitreeGo2LegSchedule {
             phase_offset: (trot_phases[leg_index] + params[base].clamp(-0.25, 0.25))
                 .rem_euclid(1.0),
-            duty: 0.7 + params[base + 1].clamp(-0.15, 0.15),
+            duty: 0.7 + params[base + 1].clamp(duty_floor, 0.15),
             stride_scale: 1.0 + params[base + 2].clamp(-0.6, 0.6),
             hip_offset_rad: params[base + 3].clamp(-0.4, 0.4),
             hip_stance_sweep_rad: params[base + 4].clamp(-0.35, 0.35),
@@ -175,8 +179,13 @@ const PARALLEL_ROLLOUTS: usize = 16;
 
 type TrainState = (usize, [f64; DIM], [f64; DIM], (f64, [f64; DIM]));
 
-fn state_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/go2_schedule_cem_state.txt")
+fn state_path(aerial: bool) -> PathBuf {
+    let file = if aerial {
+        "../../target/go2_aerial_cem_state.txt"
+    } else {
+        "../../target/go2_schedule_cem_state.txt"
+    };
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(file)
 }
 
 fn load_state(path: &Path) -> Option<TrainState> {
@@ -215,8 +224,8 @@ fn save_state(path: &Path, state: &TrainState) {
     fs::write(path, text).expect("write schedule CEM state");
 }
 
-fn train() {
-    let path = state_path();
+fn train(aerial: bool) {
+    let path = state_path(aerial);
     let (start_iteration, mut mean, mut sigma, mut best) =
         load_state(&path).unwrap_or((0, [0.0; DIM], [0.1; DIM], (f64::MIN, [0.0; DIM])));
     let end_iteration = (start_iteration + ITERATIONS_PER_RUN).min(ITERATIONS);
@@ -237,7 +246,9 @@ fn train() {
                 let handles: Vec<_> = chunk
                     .iter()
                     .map(|params| {
-                        scope.spawn(move || rollout(&schedule_from(params), ROLLOUT_STEPS).score)
+                        scope.spawn(move || {
+                            rollout(&schedule_from(params, aerial), ROLLOUT_STEPS).score
+                        })
                     })
                     .collect();
                 handles
@@ -267,7 +278,7 @@ fn train() {
             mean[dimension] = elite_mean;
             sigma[dimension] = elite_variance.sqrt().max(0.02);
         }
-        let probe = rollout(&schedule_from(&scored[0].1), ROLLOUT_STEPS);
+        let probe = rollout(&schedule_from(&scored[0].1, aerial), ROLLOUT_STEPS);
         println!(
             "iter {iteration:2}: best score {:.3} (windows {:+.3}/{:+.3} totalYaw {:+.3} fwd {:.2} minH {:.3} maxTilt {:.2})",
             scored[0].0,
@@ -284,7 +295,7 @@ fn train() {
         println!("checkpointed at iteration {end_iteration}/{ITERATIONS}; run --train again");
         return;
     }
-    let final_outcome = rollout(&schedule_from(&best.1), ROLLOUT_STEPS);
+    let final_outcome = rollout(&schedule_from(&best.1, aerial), ROLLOUT_STEPS);
     println!(
         "final best: score {:.3} windows {:+.3}/{:+.3} rad per 8 s ({:.3} rad/s sustained), totalYaw {:+.3}",
         best.0,
@@ -296,7 +307,7 @@ fn train() {
             / 8.0,
         final_outcome.total_yaw_rad
     );
-    let schedule = schedule_from(&best.1);
+    let schedule = schedule_from(&best.1, aerial);
     println!("legs: [");
     for leg in schedule.legs {
         println!(
@@ -308,8 +319,12 @@ fn train() {
 }
 
 fn main() {
+    if std::env::args().any(|argument| argument == "--train-aerial") {
+        train(true);
+        return;
+    }
     if std::env::args().any(|argument| argument == "--train") {
-        train();
+        train(false);
         return;
     }
 
@@ -334,6 +349,30 @@ fn main() {
         outcome.window_a_yaw_rad.min(outcome.window_b_yaw_rad) / 8.0,
         outcome.total_yaw_rad,
         outcome.max_tilt_rad
+    );
+
+    // The aerial-duty negative result: given duty freedom down to 0.30 the
+    // search declined flight phases, and its turn stays on the schedule
+    // plateau.
+    for leg in UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN.legs {
+        assert!(
+            leg.duty > 0.5,
+            "the aerial search declined flight phases, duty {}",
+            leg.duty
+        );
+    }
+    let aerial = rollout(&UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN, ROLLOUT_STEPS);
+    assert!(
+        aerial.window_a_yaw_rad > 0.06
+            && aerial.window_b_yaw_rad > 0.06
+            && aerial.window_a_yaw_rad.min(aerial.window_b_yaw_rad) < 0.2,
+        "aerial winner must sustain a plateau-bound turn, windows {:+.3}/{:+.3}",
+        aerial.window_a_yaw_rad,
+        aerial.window_b_yaw_rad
+    );
+    println!(
+        "aerial-duty refutation verified: windows {:+.3}/{:+.3}, duties stay walkable",
+        aerial.window_a_yaw_rad, aerial.window_b_yaw_rad
     );
     if !std::env::args().any(|argument| argument == "--gif") {
         return;

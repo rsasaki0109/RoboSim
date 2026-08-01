@@ -318,3 +318,17 @@ boundary diagnosis stands at the end as at the beginning: the remaining
 levers are morphological — aerial-duty gaits, foot geometry/friction —
 plus richer policies for other objectives on the now-proven closed-loop
 pathway.
+
+## The search declines to fly
+
+The first morphological lever, tested: the schedule duty range opens from
+0.5 down to **0.30** — below 0.5 the diagonal pairs no longer cover the
+cycle and the gait acquires flight phases
+(`examples/55_go2_stepped_turn -- --train-aerial`, same anti-cheat
+objective, seed 42). The result is a double negative, pinned by
+`aerial_duty_freedom_is_declined_by_the_search`: given the freedom to fly,
+**the search declines it** — every winning leg settles at duty ≥ 0.52 —
+and the winner's turn (~0.014 rad/s, windows +0.126/+0.111) lands exactly
+on the walkable-schedule plateau rather than beating the overlay. Under
+position servos, flight phases cost stability and buy no steering; the
+foot-geometry/friction lever is the one still standing.

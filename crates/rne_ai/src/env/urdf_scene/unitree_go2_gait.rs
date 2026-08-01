@@ -949,7 +949,11 @@ fn gait_wave_with_duty(phase: f64, duty: f64) -> (f64, f64) {
 pub struct UnitreeGo2LegSchedule {
     /// Gait-phase offset of this leg in `[0, 1)`.
     pub phase_offset: f64,
-    /// Stance fraction of the cycle, clamped to `[0.5, 0.85]`.
+    /// Stance fraction of the cycle, clamped to `[0.3, 0.85]`.
+    ///
+    /// Below 0.5 the two diagonal pairs no longer cover the cycle and the
+    /// gait acquires flight phases — the aerial-duty region the steering
+    /// campaign's chaos-floor closure named as a morphological lever.
     pub duty: f64,
     /// Multiplier on the commanded stride, clamped to `[0.3, 1.6]`.
     pub stride_scale: f64,
@@ -989,6 +993,49 @@ impl UnitreeGo2GaitSchedule {
             UnitreeGo2LegSchedule::trot(0.5),
             UnitreeGo2LegSchedule::trot(0.5),
             UnitreeGo2LegSchedule::trot(0.0),
+        ],
+    };
+
+    /// The best schedule found with the duty range opened into the aerial
+    /// region (seed 42, `examples/55_go2_stepped_turn -- --train-aerial`) —
+    /// pinned as a NEGATIVE result.
+    ///
+    /// Hypothesis: flight phases (duty < 0.5) change the contact mechanics
+    /// enough to unlock the steering the walkable-schedule search could not
+    /// find. Given duty freedom down to 0.30, the search *declined it*: every
+    /// winning leg settles at duty ≥ 0.52, and the turn (~0.014 rad/s)
+    /// matches the walkable-schedule plateau instead of beating the overlay.
+    /// `aerial_duty_freedom_is_declined_by_the_search` pins both facts.
+    pub const LEARNED_AERIAL_TURN: Self = Self {
+        legs: [
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.062048197426,
+                duty: 0.570963923682,
+                stride_scale: 1.146743054174,
+                hip_offset_rad: 0.279447872946,
+                hip_stance_sweep_rad: 0.153158270918,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.553895383458,
+                duty: 0.726038444645,
+                stride_scale: 0.783766212154,
+                hip_offset_rad: -0.012107707832,
+                hip_stance_sweep_rad: 0.024374181638,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.518305094098,
+                duty: 0.523228125717,
+                stride_scale: 1.319286988452,
+                hip_offset_rad: -0.186675330533,
+                hip_stance_sweep_rad: 0.015823524804,
+            },
+            UnitreeGo2LegSchedule {
+                phase_offset: 0.937095795797,
+                duty: 0.688457233373,
+                stride_scale: 1.043668205007,
+                hip_offset_rad: -0.224230297737,
+                hip_stance_sweep_rad: 0.157045850775,
+            },
         ],
     };
 
@@ -1061,7 +1108,7 @@ pub fn unitree_go2_scheduled_targets(
         names.iter().zip(schedule.legs.iter()).enumerate()
     {
         let leg_phase = (phase + leg.phase_offset.rem_euclid(1.0)).rem_euclid(1.0);
-        let duty = leg.duty.clamp(0.5, 0.85);
+        let duty = leg.duty.clamp(0.3, 0.85);
         let wave = gait_wave_with_duty(leg_phase, duty);
         let leg_stride = stride * leg.stride_scale.clamp(0.3, 1.6);
         // Hip: base correction + placement offset + stance sweep. The sweep
