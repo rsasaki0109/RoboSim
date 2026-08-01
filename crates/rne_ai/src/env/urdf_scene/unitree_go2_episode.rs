@@ -888,6 +888,127 @@ mod tests {
         (window_a, window_b, min_height)
     }
 
+    /// Torque-overlay rollout measuring straight-line window displacements
+    /// (the learned-locomotion transport metric) instead of yaw.
+    fn torque_overlay_transport(
+        overlay: &super::super::UnitreeGo2TorqueOverlay,
+    ) -> (f64, f64, f64, f64, f64) {
+        use super::super::UrdfJointTorqueTarget;
+
+        let mut sim = settled_stand();
+        let up_body = {
+            let pose = sim.named_transform("base").expect("base pose");
+            (pose.rotation.inverse() * rne_math::Vec3::Y).normalize_or_zero()
+        };
+        let true_tilt = |sim: &UrdfSceneSim| {
+            let pose = sim.named_transform("base").expect("base pose");
+            let up = (pose.rotation * up_body).normalize_or_zero();
+            up.y.clamp(-1.0, 1.0).acos()
+        };
+        let start = sim.observe();
+        let mut window_start = [start.base_x_m, start.base_z_m];
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut total_yaw = 0.0;
+        let mut max_tilt = 0.0_f64;
+        let mut min_height = f64::MAX;
+        let cycle = fast_walk_command().cycle_steps;
+        for step in 0..1440_u64 {
+            let targets = unitree_go2_trot_targets(step, fast_walk_command());
+            let stance = [
+                sim.link_contact_impulse_ns("FL_foot") > 0.0,
+                sim.link_contact_impulse_ns("FR_foot") > 0.0,
+                sim.link_contact_impulse_ns("RL_foot") > 0.0,
+                sim.link_contact_impulse_ns("RR_foot") > 0.0,
+            ];
+            let two_cycle_phase = (step % (2 * cycle)) as f64 / (2 * cycle) as f64;
+            let feed_forward = overlay.torques_nm(two_cycle_phase, stance);
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = targets
+                .iter()
+                .zip(feed_forward.iter())
+                .map(|(target, extra)| {
+                    let q = sim
+                        .named_joint_position(target.link_name)
+                        .expect("joint position");
+                    let qd = sim
+                        .named_joint_velocity(target.link_name)
+                        .expect("joint velocity");
+                    UrdfJointTorqueTarget {
+                        link_name: target.link_name,
+                        torque_nm: (40.0 * (target.position - q) - 0.5 * qd + extra)
+                            .clamp(-23.7, 23.7),
+                        max_velocity_rad_s: GO2_JOINT_SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            sim.step_joint_torques(&torques);
+            let observed = sim.observe();
+            let mut yaw_delta = observed.base_relative_yaw_rad - previous_yaw;
+            while yaw_delta > std::f64::consts::PI {
+                yaw_delta -= 2.0 * std::f64::consts::PI;
+            }
+            while yaw_delta < -std::f64::consts::PI {
+                yaw_delta += 2.0 * std::f64::consts::PI;
+            }
+            total_yaw += yaw_delta;
+            previous_yaw = observed.base_relative_yaw_rad;
+            if step + 1 == 480 {
+                window_start = [observed.base_x_m, observed.base_z_m];
+            } else if step + 1 == 960 {
+                window_a = (observed.base_x_m - window_start[0])
+                    .hypot(observed.base_z_m - window_start[1]);
+                window_start = [observed.base_x_m, observed.base_z_m];
+            } else if step + 1 == 1440 {
+                window_b = (observed.base_x_m - window_start[0])
+                    .hypot(observed.base_z_m - window_start[1]);
+            }
+            max_tilt = max_tilt.max(true_tilt(&sim));
+            min_height = min_height.min(observed.base_y_m);
+        }
+        (window_a, window_b, total_yaw, max_tilt, min_height)
+    }
+
+    #[test]
+    fn learned_torques_out_walk_the_scripted_trot() {
+        use super::super::UnitreeGo2TorqueOverlay;
+
+        // The learned-locomotion chapter's first pinned result: pointed at
+        // transport instead of yaw, the same torque-overlay search out-walks
+        // the hand-scripted trot at its own job. The zero overlay (the plain
+        // torque-PD walk) covers ~1.4-1.9 m per 8 s window; the learned
+        // overlay covers ~4 m per window (0.49 m/s total, 2.5x the torque
+        // baseline and 3x the position-servo trot) while staying straight
+        // and upright. The window-displacement metric is anti-cheat: lateral
+        // shimmy scores nothing and a dive scores its bad window.
+        let (base_a, base_b, _, _, _) = torque_overlay_transport(&UnitreeGo2TorqueOverlay::ZERO);
+        let (sprint_a, sprint_b, sprint_yaw, sprint_tilt, sprint_height) =
+            torque_overlay_transport(&UnitreeGo2TorqueOverlay::LEARNED_SPRINT);
+        println!(
+            "baseline {base_a:.2}/{base_b:.2} m  sprint {sprint_a:.2}/{sprint_b:.2} m yaw {sprint_yaw:+.2} tilt {sprint_tilt:.2}"
+        );
+        let baseline_min = base_a.min(base_b);
+        let sprint_min = sprint_a.min(sprint_b);
+        assert!(
+            sprint_min > 1.4 * baseline_min && sprint_min > 2.8,
+            "the learned overlay must out-walk the trot: {sprint_min:.2} m vs {baseline_min:.2} m"
+        );
+        assert!(
+            sprint_yaw.abs() < 0.4,
+            "the sprint must stay straight, yaw {sprint_yaw:+.2}"
+        );
+        assert!(
+            sprint_tilt < 0.8 && sprint_height > 0.15,
+            "the sprint must stay up: tilt {sprint_tilt:.2} height {sprint_height:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _, _) =
+            torque_overlay_transport(&UnitreeGo2TorqueOverlay::LEARNED_SPRINT);
+        assert_eq!(sprint_a.to_bits(), again_a.to_bits());
+        assert_eq!(sprint_b.to_bits(), again_b.to_bits());
+    }
+
     #[test]
     fn the_feet_are_not_slipping() {
         // The slip hypothesis, tested and refuted at its root. If the yaw

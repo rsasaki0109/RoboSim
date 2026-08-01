@@ -321,6 +321,118 @@ impl UnitreeGo2TorqueOverlay {
         ],
     };
 
+    /// The learned-locomotion chapter's first result: a torque overlay that
+    /// out-walks the hand-scripted trot at its own job
+    /// (`examples/61_go2_learned_sprint -- --train`, seed 42, ensemble-median
+    /// CEM with an anti-cheat window-displacement objective).
+    ///
+    /// On the same torque-PD walk the zero overlay covers 4.65 m per 24 s
+    /// (0.19 m/s); this overlay covers **11.79 m (0.49 m/s)** — 2.5× the
+    /// torque baseline and 3× the position-servo scripted trot — while
+    /// staying straight (|yaw| ≈ 0.1 rad), upright (tilt ≤ 0.37), and at
+    /// height, with ulp-perturbed replays landing on identical windows.
+    /// `learned_torques_out_walk_the_scripted_trot` pins the comparison.
+    pub const LEARNED_SPRINT: Self = Self {
+        coefficients: [
+            [
+                -0.462768651790,
+                0.159392910345,
+                -0.539023695239,
+                0.122521604272,
+                0.132333835380,
+                0.251721073673,
+            ],
+            [
+                -3.292014213963,
+                -1.927813411275,
+                -0.391752055005,
+                1.569703740174,
+                0.419262443554,
+                -0.729045637234,
+            ],
+            [
+                0.303590389650,
+                1.358011055755,
+                -0.111487916633,
+                -2.245536800820,
+                -0.073255825368,
+                -0.021636850169,
+            ],
+            [
+                0.491926682049,
+                1.155617729782,
+                -1.469319841222,
+                -1.523708824390,
+                0.539508733011,
+                -0.474218977400,
+            ],
+            [
+                -2.579016406098,
+                -3.994261995569,
+                0.898626214727,
+                -0.942953727702,
+                0.437550614978,
+                -0.126113464618,
+            ],
+            [
+                3.106217399641,
+                0.284353876442,
+                0.282680733804,
+                1.486840092166,
+                -0.176990608110,
+                -1.766299204858,
+            ],
+            [
+                -0.124398798823,
+                0.819531295568,
+                0.649663687462,
+                -0.073637850707,
+                -0.456940047950,
+                0.761217191039,
+            ],
+            [
+                0.705683109573,
+                -3.222707755098,
+                -0.314960676075,
+                -0.547290797066,
+                1.473202370878,
+                -0.817904820416,
+            ],
+            [
+                -1.480127580678,
+                -0.652923889599,
+                0.010727471234,
+                0.922572513890,
+                0.814072762825,
+                0.937001919113,
+            ],
+            [
+                -0.756248198654,
+                -0.851996592374,
+                0.982009278161,
+                -0.041539586780,
+                0.309854339362,
+                0.693949922074,
+            ],
+            [
+                -1.719968564512,
+                0.571532999845,
+                -0.434178577731,
+                2.707595336300,
+                0.035462725914,
+                0.355560206070,
+            ],
+            [
+                -0.371754419614,
+                -4.000000000000,
+                -0.695503641284,
+                -0.911926413719,
+                0.587029548251,
+                1.460192955525,
+            ],
+        ],
+    };
+
     /// The coefficients are pinned at the search state's full 12-decimal
     /// precision: the contact-gated rollout is chaotic enough that rounding
     /// them to 6 decimals lands on a different (non-turning) trajectory.
