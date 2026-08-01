@@ -1,0 +1,13 @@
+[package]
+name = "g1_learned_stride"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rne_ai = { path = "../../crates/rne_ai" }
+rne_math = { path = "../../crates/rne_math" }
+
+[[example]]
+name = "62_g1_learned_stride"
+path = "main.rs"

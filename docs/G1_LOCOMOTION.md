@@ -39,8 +39,29 @@ marches at full height with bounded drift
 
 ## Honest limits
 
-The scripted G1 gait itself is a near-stationary stepper: at its full
-stride (0.20 rad) it falls under **both** control regimes, so striding
-locomotion on the G1 is a gait problem, not a torque-pathway problem. That
-is the next chapter's work — the transport-objective search that out-walked
-the Go2's scripted trot (`examples/61_go2_learned_sprint`) is the template.
+The scripted G1 gait itself is a near-stationary stepper across its entire
+stable envelope: measured transport is under 0.1 m per 12 s at every stride
+that stands, and 0.15 rad falls — under **both** control regimes. Striding
+locomotion on the G1 is therefore a gait problem, not a torque-pathway
+problem.
+
+## The first real steps
+
+`examples/62_g1_learned_stride` answers it with the Go2 transport search's
+structure: a contact-gated Fourier torque overlay
+(`UnitreeG1TorqueOverlay`, 48 coefficients on the eight proximal joints)
+rides the hybrid tick, and the anti-cheat window-displacement objective —
+scored as the ensemble median of ulp-perturbed replays, with solver
+blow-ups from wild candidates deterministically scored at the floor —
+searches for transport the stepper does not have.
+
+The winner (`UnitreeG1TorqueOverlay::LEARNED_STRIDE`) is the first G1 gait
+in these measurements that genuinely covers ground: **0.26 m per 8 s window
+(3.5× the stepper), 0.68 m per 24 s**, at full height (0.784 m), dead
+straight (|yaw| ≈ 0.01 rad), with ulp-perturbed replays inside a centimeter
+of each other. It is a slow shuffle (0.028 m/s), honestly reported as such —
+but the humanoid walks, and every tool that carried the Go2 campaign
+(torque pathway, deterministic resumable CEM, ensemble objectives,
+12-decimal pinning) carried straight over.
+`learned_torques_make_the_g1_stride` pins the comparison, uprightness,
+straightness, and a bit-exact replay.

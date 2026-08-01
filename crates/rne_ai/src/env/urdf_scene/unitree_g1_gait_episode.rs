@@ -401,6 +401,147 @@ mod tests {
         assert_eq!(standing_height.to_bits(), again_height.to_bits());
     }
 
+    /// Hybrid rollout with a torque overlay, measuring straight-line window
+    /// displacements — the transport metric of the learned-stride search.
+    fn g1_hybrid_transport(overlay: &super::super::UnitreeG1TorqueOverlay) -> (f64, f64, f64, f64) {
+        // Exact mirror of example 62's settle: the learned constants live on
+        // the trajectory that protocol produces.
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("load dynamic G1");
+        sim.configure_position_motors(220.0, 24.0, 88.0);
+        let stand = unitree_g1_gait_targets(
+            0,
+            UnitreeG1GaitCommand {
+                stride_rad: 0.0,
+                foot_lift_rad: 0.0,
+                cycle_steps: 120,
+            },
+        );
+        for _ in 0..240 {
+            sim.step_joint_position_targets(&stand);
+        }
+        let command = UnitreeG1GaitCommand {
+            stride_rad: 0.05,
+            foot_lift_rad: 0.08,
+            cycle_steps: 120,
+        };
+        let start = sim.observe();
+        let mut window_start = [start.base_x_m, start.base_z_m];
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut min_height = f64::MAX;
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut total_yaw = 0.0;
+        for step in 0..1440_u64 {
+            let targets = unitree_g1_gait_targets(step, command);
+            let servo: Vec<_> = targets
+                .iter()
+                .filter(|target| !G1_TORQUE_LINKS.contains(&target.link_name))
+                .copied()
+                .collect();
+            sim.set_joint_position_targets(&servo);
+            let stance = [
+                sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
+                sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
+            ];
+            let two_cycle_phase = (step % 240) as f64 / 240.0;
+            // The overlay's joint order: left hip pitch/roll/yaw, left knee,
+            // then the right leg — matched here explicitly.
+            const OVERLAY_ORDER: [&str; 8] = [
+                "left_hip_pitch_link",
+                "left_hip_roll_link",
+                "left_hip_yaw_link",
+                "left_knee_link",
+                "right_hip_pitch_link",
+                "right_hip_roll_link",
+                "right_hip_yaw_link",
+                "right_knee_link",
+            ];
+            let feed_forward = overlay.torques_nm(two_cycle_phase, stance);
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = OVERLAY_ORDER
+                .iter()
+                .enumerate()
+                .map(|(index, link_name)| {
+                    let target_position = targets
+                        .iter()
+                        .find(|target| target.link_name == *link_name)
+                        .expect("torque link in gait targets")
+                        .position;
+                    let q = sim.named_joint_position(link_name).expect("joint position");
+                    let qd = sim.named_joint_velocity(link_name).expect("joint velocity");
+                    UrdfJointTorqueTarget {
+                        link_name,
+                        torque_nm: (300.0 * (target_position - q) - 10.0 * qd
+                            + feed_forward[index])
+                            .clamp(-88.0, 88.0),
+                        max_velocity_rad_s: G1_SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            sim.step_joint_torques(&torques);
+            let observed = sim.observe();
+            let mut yaw_delta = observed.base_relative_yaw_rad - previous_yaw;
+            while yaw_delta > std::f64::consts::PI {
+                yaw_delta -= 2.0 * std::f64::consts::PI;
+            }
+            while yaw_delta < -std::f64::consts::PI {
+                yaw_delta += 2.0 * std::f64::consts::PI;
+            }
+            total_yaw += yaw_delta;
+            previous_yaw = observed.base_relative_yaw_rad;
+            if step + 1 == 480 {
+                window_start = [observed.base_x_m, observed.base_z_m];
+            } else if step + 1 == 960 {
+                window_a = (observed.base_x_m - window_start[0])
+                    .hypot(observed.base_z_m - window_start[1]);
+                window_start = [observed.base_x_m, observed.base_z_m];
+            } else if step + 1 == 1440 {
+                window_b = (observed.base_x_m - window_start[0])
+                    .hypot(observed.base_z_m - window_start[1]);
+            }
+            min_height = min_height.min(observed.base_y_m);
+        }
+        (window_a, window_b, min_height, total_yaw)
+    }
+
+    #[test]
+    fn learned_torques_make_the_g1_stride() {
+        use super::super::UnitreeG1TorqueOverlay;
+
+        // The humanoid's first real steps. The scripted G1 gait is a
+        // near-stationary stepper across its whole stable envelope, so
+        // transport had to be CREATED by learned stance torques — the same
+        // search structure that out-walked the Go2's trot. The learned
+        // overlay turns the stepper into a slow genuine walk: ~0.26 m per
+        // 8 s window versus the stepper's ~0.08, at full height and dead
+        // straight.
+        let (base_a, base_b, _, _) = g1_hybrid_transport(&UnitreeG1TorqueOverlay::ZERO);
+        let (stride_a, stride_b, stride_height, stride_yaw) =
+            g1_hybrid_transport(&UnitreeG1TorqueOverlay::LEARNED_STRIDE);
+        println!(
+            "stepper {base_a:.2}/{base_b:.2} m  stride {stride_a:.2}/{stride_b:.2} m yaw {stride_yaw:+.2} minH {stride_height:.3}"
+        );
+        let baseline_min = base_a.min(base_b);
+        let stride_min = stride_a.min(stride_b);
+        assert!(
+            stride_min > 2.0 * baseline_min && stride_min > 0.15,
+            "the learned overlay must make the stepper stride: {stride_min:.2} m vs {baseline_min:.2} m"
+        );
+        assert!(
+            stride_height > 0.7,
+            "the stride must stay at height, minH {stride_height:.3}"
+        );
+        assert!(
+            stride_yaw.abs() < 0.3,
+            "the stride must stay straight, yaw {stride_yaw:+.2}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) = g1_hybrid_transport(&UnitreeG1TorqueOverlay::LEARNED_STRIDE);
+        assert_eq!(stride_a.to_bits(), again_a.to_bits());
+        assert_eq!(stride_b.to_bits(), again_b.to_bits());
+    }
+
     #[test]
     fn g1_hybrid_torque_gait_steps_in_place() {
         // The hybrid walking tick: ankles and arms servo-follow the scripted
