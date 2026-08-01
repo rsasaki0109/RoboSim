@@ -844,6 +844,59 @@ mod tests {
     }
 
     #[test]
+    fn aerial_duty_freedom_is_declined_by_the_search() {
+        use super::super::unitree_go2_scheduled_targets;
+        use super::super::UnitreeGo2GaitSchedule;
+
+        // The aerial-duty hypothesis, tested and refuted: with the schedule
+        // duty range opened down to 0.30 (flight phases), the search settles
+        // every winning leg at duty >= 0.52 — it declines the freedom — and
+        // its turn matches the walkable-schedule plateau instead of beating
+        // the overlay. Both facts pinned here.
+        for leg in UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN.legs {
+            assert!(
+                leg.duty > 0.5,
+                "the aerial search declined flight phases, duty {}",
+                leg.duty
+            );
+        }
+        let (window_a, window_b, max_tilt, min_height) = windowed_yaw(23.7, |step| {
+            unitree_go2_scheduled_targets(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN,
+            )
+        });
+        println!(
+            "aerial schedule: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.2} height {min_height:.3}"
+        );
+        assert!(
+            window_a > 0.06 && window_b > 0.06,
+            "aerial winner must sustain its (small) turn: {window_a:+.3}/{window_b:+.3}"
+        );
+        assert!(
+            window_a.min(window_b) < 0.2,
+            "the plateau must hold: aerial min window {:+.3} stays below the overlay's",
+            window_a.min(window_b)
+        );
+        assert!(
+            max_tilt < 0.85 && min_height > 0.15,
+            "aerial winner must stay upright: tilt {max_tilt:.2} height {min_height:.3}"
+        );
+
+        // Determinism: bit-identical repeat.
+        let (again_a, again_b, _, _) = windowed_yaw(23.7, |step| {
+            unitree_go2_scheduled_targets(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN,
+            )
+        });
+        assert_eq!(window_a.to_bits(), again_a.to_bits());
+        assert_eq!(window_b.to_bits(), again_b.to_bits());
+    }
+
+    #[test]
     fn learned_overlay_turns_the_walking_trot() {
         // The CEM-found overlay (examples/54_go2_learned_turn --train, seed 42)
         // must produce a *sustained* yaw rate — not the bounded elastic twist
