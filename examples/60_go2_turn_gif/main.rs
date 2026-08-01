@@ -90,7 +90,7 @@ impl TorqueWalker {
     fn step_frame(&mut self, steps: u64) {
         let cycle = walk_command().cycle_steps;
         for _ in 0..steps {
-            if self.step % TRAIL_EVERY_STEPS == 0 {
+            if self.step.is_multiple_of(TRAIL_EVERY_STEPS) {
                 let observed = self.sim.observe();
                 self.trail_m.push([observed.base_x_m, observed.base_z_m]);
             }
