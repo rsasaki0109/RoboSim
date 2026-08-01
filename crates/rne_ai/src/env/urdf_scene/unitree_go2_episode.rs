@@ -843,6 +843,92 @@ mod tests {
         assert_eq!(schedule_a.to_bits(), again_a.to_bits());
     }
 
+    /// Overlay-turn rollout with a friction override applied to the given
+    /// named colliders before settling.
+    fn overlay_turn_with_friction(names: &[&str], friction: f64) -> (f64, f64, f64) {
+        use super::super::unitree_go2_trot_targets_with_overlay;
+        use super::super::UnitreeGo2GaitOverlay;
+
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        for name in names {
+            assert!(
+                sim.set_named_collider_friction(name, friction),
+                "live friction update must reach {name}"
+            );
+        }
+        settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
+        let start = sim.observe();
+        let mut previous_yaw = start.base_relative_yaw_rad;
+        let mut window_a = 0.0;
+        let mut window_b = 0.0;
+        let mut min_height = f64::MAX;
+        for step in 0..1440_u64 {
+            sim.step_joint_position_targets(&unitree_go2_trot_targets_with_overlay(
+                step,
+                fast_walk_command(),
+                &UnitreeGo2GaitOverlay::LEARNED_TURN,
+            ));
+            let observed = sim.observe();
+            let mut delta = observed.base_relative_yaw_rad - previous_yaw;
+            while delta > std::f64::consts::PI {
+                delta -= 2.0 * std::f64::consts::PI;
+            }
+            while delta < -std::f64::consts::PI {
+                delta += 2.0 * std::f64::consts::PI;
+            }
+            if (480..960).contains(&step) {
+                window_a += delta;
+            } else if step >= 960 {
+                window_b += delta;
+            }
+            previous_yaw = observed.base_relative_yaw_rad;
+            min_height = min_height.min(observed.base_y_m);
+        }
+        (window_a, window_b, min_height)
+    }
+
+    #[test]
+    fn the_feet_are_not_slipping() {
+        // The slip hypothesis, tested and refuted at its root. If the yaw
+        // plateau came from point feet shedding tangential impulse in Coulomb
+        // slip, the overlay turn would scale with foot friction. Measured
+        // instead: an EIGHT-FOLD foot-friction range produces bit-identical
+        // trajectories — the friction cones stay interior through the entire
+        // walking turn, i.e. the feet never slip. The yaw torque comes from
+        // force couples between separated point contacts (a sphere contact
+        // transmits no torsion about the vertical), those couples sit inside
+        // the cones, and no friction value changes them: the plateau is
+        // geometric — stance geometry and the missing hip-yaw axis — not
+        // frictional.
+        const FEET: [&str; 4] = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"];
+        let low = overlay_turn_with_friction(&FEET, 0.25);
+        let high = overlay_turn_with_friction(&FEET, 2.0);
+        println!(
+            "mu 0.25: {:+.3}/{:+.3}  mu 2.0: {:+.3}/{:+.3}",
+            low.0, low.1, high.0, high.1
+        );
+        assert_eq!(
+            low.0.to_bits(),
+            high.0.to_bits(),
+            "an 8x foot-friction range must not change the turn at all: {:+.6} vs {:+.6}",
+            low.0,
+            high.0
+        );
+        assert_eq!(low.1.to_bits(), high.1.to_bits());
+
+        // Even on near-ice — feet AND ground at mu 0.02, where the cones do
+        // finally bind — the trot keeps walking and keeps turning: the
+        // couples barely graze the friction limit.
+        const ALL: [&str; 5] = ["FL_foot", "FR_foot", "RL_foot", "RR_foot", "ground"];
+        let (ice_a, ice_b, ice_height) = overlay_turn_with_friction(&ALL, 0.02);
+        println!("ice: {ice_a:+.3}/{ice_b:+.3} minH {ice_height:.3}");
+        assert!(
+            ice_a > 0.05 && ice_b > 0.05 && ice_height > 0.15,
+            "the turn must survive near-ice: {ice_a:+.3}/{ice_b:+.3} height {ice_height:.3}"
+        );
+    }
+
     #[test]
     fn aerial_duty_freedom_is_declined_by_the_search() {
         use super::super::unitree_go2_scheduled_targets;

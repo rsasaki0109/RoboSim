@@ -109,6 +109,30 @@ impl RapierBackend {
         self.worlds.get(&id).ok_or(PhysicsError::WorldNotFound)
     }
 
+    /// Updates the Coulomb friction of an entity's already-created collider.
+    ///
+    /// Collider materials are otherwise applied only at creation, so runtime
+    /// friction changes (e.g. a foot-friction scan) must reach the live
+    /// collider. Returns false when the entity has no collider in this world.
+    pub fn set_collider_friction(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+        friction: f32,
+    ) -> bool {
+        let Ok(state) = self.world_mut(physics_world) else {
+            return false;
+        };
+        let Some(handle) = state.entity_to_collider.get(&entity).copied() else {
+            return false;
+        };
+        let Some(collider) = state.colliders.get_mut(handle) else {
+            return false;
+        };
+        collider.set_friction(friction);
+        true
+    }
+
     /// Reads the generalized position of an entity's single-DoF multibody joint:
     /// radians for revolute joints, meters for prismatic joints.
     ///
