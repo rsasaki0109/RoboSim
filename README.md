@@ -257,7 +257,10 @@ cargo run --release -p go2_fall_vs_save --example 52_go2_fall_vs_save
 **[Watch the motion-is-stability GIF](docs/media/go2-walk-vs-stand-push.gif)** —
 the same push with no controller on either side: the slow trot capsizes while
 the fast walking trot shrugs it off, because cyclic foot replanting is itself a
-stabilizer. [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md) holds the full
+stabilizer. **[Watch the torque-steering GIF](docs/media/go2-torque-turn.gif)**
+— the identical torque-PD walk twice: zero feed-forward goes straight, the
+chaos-robust contact-gated torque overlay carves the arc no joint-space
+controller could produce. [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md) holds the full
 measurement campaign: speed maps, nine hand-designed steering nulls across two
 actuation regimes, three position-space searches that plateau at ~0.02 rad/s —
 and the torque-level actuation pathway that finally breaks that plateau: a
