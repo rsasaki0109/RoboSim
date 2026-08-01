@@ -268,6 +268,28 @@ next rung is explicit: a commanded yaw-rate *reference* in the feedback (an
 error term, not raw state), which is what turns dynamics-shaping into
 steering.
 
-The other openings are unchanged: aerial-duty gaits, foot
-geometry/friction, and richer policies (reference tracking, nonlinear
-features, joint-state feedback) on this now-proven closed-loop pathway.
+## Commanding the turn
+
+`examples/58_go2_steered_turn` climbs the rung the direction finding named:
+the yaw-rate feature becomes a *tracking error* against a commanded
+reference, and the CEM scores every candidate by the **worse of its two
+commanded directions** (+0.25 and −0.25 rad/s) — a chaos-selected one-way
+orbit scores its bad direction, so only genuine command obedience survives,
+and the two commands double as a diverse ensemble against
+single-trajectory objective gaming.
+
+The winner (`UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN`) is the
+platform's first controller whose turn **direction obeys a command**: one
+set of weights turns +0.094/+0.117 rad per window when told +0.25 rad/s and
+−0.095/−0.109 when told −0.25
+(`commanded_yaw_reference_steers_both_ways` pins both directions and a
+bit-exact replay). The honest margins: the achieved magnitude is
+~0.013 rad/s — command *obedience* is the result; rate *tracking* is not
+yet — and the two commanded operating points are asymmetric (the positive
+command nearly stops the walk where the negative one keeps 1.7 m of
+progress).
+
+The remaining openings: closing the tracking gap (integral action, higher
+authority, or gait-level command coupling), aerial-duty gaits, foot
+geometry/friction, and richer policies (nonlinear features, joint-state
+feedback) on this now-proven closed-loop pathway.
