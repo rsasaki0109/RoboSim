@@ -1036,6 +1036,76 @@ impl UnitreeGo2TorquePolicy {
 /// Number of samples in a phase-conditioned pure-torque policy.
 pub const UNITREE_GO2_PURE_TORQUE_PHASE_BINS: usize = 45;
 
+/// Body-forward velocity command for the Go2 pure-torque policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UnitreeGo2VelocityCommand {
+    /// Desired velocity along the learned body-forward axis, in m/s.
+    pub forward_m_s: f64,
+}
+
+/// Low-dimensional terrain observation assembled from contacting Go2 feet.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UnitreeGo2TerrainObservation {
+    /// Mean world elevation of the front feet that are in contact, in m.
+    pub front_elevation_m: f64,
+    /// Mean world elevation of the rear feet that are in contact, in m.
+    pub rear_elevation_m: f64,
+    /// Maximum-minus-minimum elevation across contacting feet, in m.
+    pub roughness_m: f64,
+    /// Estimated front-to-rear terrain slope, in rad.
+    pub slope_rad: f64,
+}
+
+/// Complete state and command input for one pure-torque policy evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2VelocityPolicyInput {
+    /// Normalized gait phase in cycles.
+    pub phase: f64,
+    /// Current joint positions in radians, ordered FL, FR, RL, RR and then
+    /// hip, thigh, calf.
+    pub joint_positions_rad: [f64; 12],
+    /// Current joint velocities in rad/s in the same order as positions.
+    pub joint_velocities_rad_s: [f64; 12],
+    /// Requested body-forward velocity.
+    pub command: UnitreeGo2VelocityCommand,
+    /// Measured velocity along the learned body-forward axis, in m/s.
+    pub measured_forward_velocity_m_s: f64,
+    /// Latest contact-derived terrain observation.
+    pub terrain: UnitreeGo2TerrainObservation,
+    /// Policy gains and operating limits.
+    pub config: UnitreeGo2VelocityPolicyConfig,
+}
+
+/// Gains and limits for velocity-commanded pure-torque locomotion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2VelocityPolicyConfig {
+    /// Nominal forward velocity represented by one phase-table cycle, in m/s.
+    pub nominal_forward_velocity_m_s: f64,
+    /// Proportional velocity-error gain used to scale the phase action.
+    pub velocity_feedback_gain: f64,
+    /// Maximum magnitude of the phase-action scale relative to nominal speed.
+    pub max_phase_scale: f64,
+    /// Swing-calf lift gain per metre of terrain roughness.
+    pub terrain_lift_gain_per_m: f64,
+    /// Additional swing-calf lift gain per radian of terrain slope.
+    pub terrain_slope_lift_gain_per_rad: f64,
+    /// Maximum swing-calf torque scale on rough terrain.
+    pub max_terrain_lift_scale: f64,
+}
+
+impl Default for UnitreeGo2VelocityPolicyConfig {
+    fn default() -> Self {
+        Self {
+            nominal_forward_velocity_m_s: 0.14,
+            velocity_feedback_gain: 0.8,
+            max_phase_scale: 1.6,
+            terrain_lift_gain_per_m: 4.0,
+            terrain_slope_lift_gain_per_rad: 0.8,
+            max_terrain_lift_scale: 2.0,
+        }
+    }
+}
+
 /// Direct-torque locomotion policy for the official Unitree Go2.
 ///
 /// The policy combines a small joint-state feedback term with a learned
@@ -1200,18 +1270,122 @@ impl UnitreeGo2PureTorquePolicy {
         joint_velocities_rad_s: &[f64; 12],
         limit_nm: f64,
     ) -> [f64; 12] {
+        self.torques_nm_with_phase_modifiers(
+            phase,
+            joint_positions_rad,
+            joint_velocities_rad_s,
+            1.0,
+            1.0,
+            limit_nm,
+        )
+    }
+
+    /// Computes direct torque commands from a forward-velocity command and a
+    /// contact-derived terrain observation.
+    ///
+    /// The command scales the learned phase action around its nominal walking
+    /// speed and reverses the phase progression for a negative command. A zero
+    /// command suppresses the phase action and leaves only the local joint
+    /// state feedback, allowing the robot to settle instead of continuing to
+    /// walk. Terrain roughness and slope increase swing-calf authority so a
+    /// foot can clear a modest step or ramp. `measured_forward_velocity_m_s`
+    /// is expected along the learned body-forward axis; non-finite inputs are
+    /// treated as zero.
+    pub fn torques_nm_for_velocity_command(
+        &self,
+        input: UnitreeGo2VelocityPolicyInput,
+        limit_nm: f64,
+    ) -> [f64; 12] {
+        let desired_m_s = if input.command.forward_m_s.is_finite() {
+            input.command.forward_m_s.clamp(-0.28, 0.28)
+        } else {
+            0.0
+        };
+        let measured_m_s = if input.measured_forward_velocity_m_s.is_finite() {
+            input.measured_forward_velocity_m_s
+        } else {
+            0.0
+        };
+        let nominal_m_s = finite_positive_or(input.config.nominal_forward_velocity_m_s, 0.14);
+        let velocity_gain = finite_nonnegative_or(input.config.velocity_feedback_gain, 0.8);
+        let max_phase_scale = finite_positive_or(input.config.max_phase_scale, 1.6).clamp(1.0, 4.0);
+        let direction = desired_m_s.signum();
+        let command_magnitude_m_s = desired_m_s.abs();
+        let phase_scale = if command_magnitude_m_s < 0.01 {
+            0.0
+        } else {
+            let measured_in_command_direction = measured_m_s * direction;
+            let error_m_s = command_magnitude_m_s - measured_in_command_direction;
+            let driven_m_s = (command_magnitude_m_s + velocity_gain * error_m_s).max(0.0);
+            (driven_m_s / nominal_m_s).clamp(0.0, max_phase_scale)
+        };
+        let directional_phase = if direction < 0.0 {
+            1.0 - input.phase
+        } else {
+            input.phase
+        };
+
+        let roughness_m = finite_nonnegative_or(input.terrain.roughness_m, 0.0);
+        let slope_rad = if input.terrain.slope_rad.is_finite() {
+            input.terrain.slope_rad.abs()
+        } else {
+            0.0
+        };
+        let roughness_gain = finite_nonnegative_or(input.config.terrain_lift_gain_per_m, 4.0);
+        let slope_gain = finite_nonnegative_or(input.config.terrain_slope_lift_gain_per_rad, 0.8);
+        let max_lift_scale =
+            finite_positive_or(input.config.max_terrain_lift_scale, 2.0).clamp(1.0, 4.0);
+        let calf_phase_scale =
+            (1.0 + roughness_gain * roughness_m + slope_gain * slope_rad).min(max_lift_scale);
+
+        self.torques_nm_with_phase_modifiers(
+            directional_phase,
+            &input.joint_positions_rad,
+            &input.joint_velocities_rad_s,
+            phase_scale,
+            calf_phase_scale,
+            limit_nm,
+        )
+    }
+
+    fn torques_nm_with_phase_modifiers(
+        &self,
+        phase: f64,
+        joint_positions_rad: &[f64; 12],
+        joint_velocities_rad_s: &[f64; 12],
+        phase_scale: f64,
+        calf_phase_scale: f64,
+        limit_nm: f64,
+    ) -> [f64; 12] {
         let limit = if limit_nm.is_finite() && limit_nm >= 0.0 {
             limit_nm
         } else {
             f64::INFINITY
+        };
+        let phase_scale = if phase_scale.is_finite() {
+            phase_scale.max(0.0)
+        } else {
+            0.0
+        };
+        let calf_phase_scale = if calf_phase_scale.is_finite() {
+            calf_phase_scale.max(0.0)
+        } else {
+            1.0
         };
         let mut torques = [0.0; 12];
         for joint in 0..12 {
             let leg = joint / 3;
             let local_phase = (phase + self.phase_offsets[leg]).rem_euclid(1.0);
             let phase_action = match joint % 3 {
-                1 => interpolate_phase_action(&self.thigh_phase_torques_nm, local_phase),
-                2 => interpolate_phase_action(&self.calf_phase_torques_nm, local_phase),
+                1 => {
+                    phase_scale
+                        * interpolate_phase_action(&self.thigh_phase_torques_nm, local_phase)
+                }
+                2 => {
+                    phase_scale
+                        * calf_phase_scale
+                        * interpolate_phase_action(&self.calf_phase_torques_nm, local_phase)
+                }
                 _ => 0.0,
             };
             torques[joint] = (self.position_kp_nm_per_rad
@@ -1221,6 +1395,22 @@ impl UnitreeGo2PureTorquePolicy {
                 .clamp(-limit, limit);
         }
         torques
+    }
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
+}
+
+fn finite_nonnegative_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value >= 0.0 {
+        value
+    } else {
+        fallback
     }
 }
 
@@ -1515,6 +1705,110 @@ mod tests {
         assert_eq!(at_zero[0], 0.0);
         assert!(at_zero[1] > 0.0);
         assert_eq!(at_zero[2], 0.0);
+    }
+
+    #[test]
+    fn velocity_command_zero_suppresses_phase_action() {
+        let policy = UnitreeGo2PureTorquePolicy::LEARNED_WALK;
+        let stopped = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.73,
+                UnitreeGo2VelocityCommand::default(),
+                0.0,
+                UnitreeGo2TerrainObservation::default(),
+            ),
+            23.7,
+        );
+        assert!(stopped.iter().all(|torque| torque.abs() < 1.0e-12));
+
+        let walking = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.73,
+                UnitreeGo2VelocityCommand { forward_m_s: 0.14 },
+                0.0,
+                UnitreeGo2TerrainObservation::default(),
+            ),
+            23.7,
+        );
+        assert!(walking[1..].iter().any(|torque| torque.abs() > 0.1));
+    }
+
+    #[test]
+    fn terrain_observation_scales_swing_calf_torque() {
+        let policy = UnitreeGo2PureTorquePolicy::LEARNED_WALK;
+        let flat = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.82,
+                UnitreeGo2VelocityCommand { forward_m_s: 0.14 },
+                0.0,
+                UnitreeGo2TerrainObservation::default(),
+            ),
+            23.7,
+        );
+        let rough = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.82,
+                UnitreeGo2VelocityCommand { forward_m_s: 0.14 },
+                0.0,
+                UnitreeGo2TerrainObservation {
+                    roughness_m: 0.08,
+                    slope_rad: 0.12,
+                    ..UnitreeGo2TerrainObservation::default()
+                },
+            ),
+            23.7,
+        );
+        assert!(rough[2].abs() > flat[2].abs());
+        assert!(rough.iter().all(|torque| torque.is_finite()));
+        assert!(rough.iter().all(|torque| torque.abs() <= 23.7));
+    }
+
+    #[test]
+    fn negative_velocity_command_reverses_phase_progression() {
+        let policy = UnitreeGo2PureTorquePolicy::LEARNED_WALK;
+        let forward = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.21,
+                UnitreeGo2VelocityCommand { forward_m_s: 0.14 },
+                0.0,
+                UnitreeGo2TerrainObservation::default(),
+            ),
+            23.7,
+        );
+        let backward = policy.torques_nm_for_velocity_command(
+            velocity_policy_input(
+                &policy,
+                0.79,
+                UnitreeGo2VelocityCommand { forward_m_s: -0.14 },
+                0.0,
+                UnitreeGo2TerrainObservation::default(),
+            ),
+            23.7,
+        );
+        assert_eq!(forward, backward);
+    }
+
+    fn velocity_policy_input(
+        policy: &UnitreeGo2PureTorquePolicy,
+        phase: f64,
+        command: UnitreeGo2VelocityCommand,
+        measured_forward_velocity_m_s: f64,
+        terrain: UnitreeGo2TerrainObservation,
+    ) -> UnitreeGo2VelocityPolicyInput {
+        UnitreeGo2VelocityPolicyInput {
+            phase,
+            joint_positions_rad: policy.joint_position_targets_rad,
+            joint_velocities_rad_s: [0.0; 12],
+            command,
+            measured_forward_velocity_m_s,
+            terrain,
+            config: UnitreeGo2VelocityPolicyConfig::default(),
+        }
     }
 
     #[test]

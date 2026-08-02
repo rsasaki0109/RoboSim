@@ -57,8 +57,9 @@ pub use unitree_go2_episode::{
 pub use unitree_go2_gait::{
     unitree_go2_scheduled_targets, unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay,
     UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule,
-    UnitreeGo2PureTorquePolicy, UnitreeGo2TorqueOverlay, UnitreeGo2TorquePolicy,
-    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+    UnitreeGo2PureTorquePolicy, UnitreeGo2TerrainObservation, UnitreeGo2TorqueOverlay,
+    UnitreeGo2TorquePolicy, UnitreeGo2VelocityCommand, UnitreeGo2VelocityPolicyConfig,
+    UnitreeGo2VelocityPolicyInput, UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
@@ -340,6 +341,11 @@ impl UrdfSceneSim {
     /// Vendored official Unitree Go2 dynamic multibody scene path.
     pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
         unitree_go2_dynamic_scene_path()
+    }
+
+    /// Built-in official Unitree Go2 scene with a fixed sloped terrain patch.
+    pub fn unitree_go2_terrain_scene_path() -> PathBuf {
+        unitree_go2_terrain_scene_path()
     }
 
     /// Vendored official Unitree G1 23-DoF scene path.
@@ -1513,6 +1519,11 @@ pub fn unitree_go2_scene_path() -> PathBuf {
 /// Vendored official Unitree Go2 dynamic multibody scene path.
 pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
     assets_scene_path("unitree_go2_dynamic.rne.scene.toml")
+}
+
+/// Built-in official Unitree Go2 scene with a fixed sloped terrain patch.
+pub fn unitree_go2_terrain_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2_terrain.rne.scene.toml")
 }
 
 /// Vendored official Unitree G1 23-DoF scene path.
