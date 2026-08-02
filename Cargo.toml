@@ -130,5 +130,7 @@ earcutr = "0.5"
 [profile.dev]
 opt-level = 1
 
+# Test binaries include the long chaotic physics rollouts. Use release codegen
+# while retaining the test profile's debug assertions and symbols.
 [profile.test]
-opt-level = 1
+opt-level = 3
