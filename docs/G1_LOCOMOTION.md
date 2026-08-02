@@ -87,8 +87,11 @@ discard and measured-window protocol, with colored trails showing the late
 window displacement. The current capture measures 0.196 m and 0.235 m in the
 orange panel's two windows at 0.784 m minimum height. It writes
 `docs/media/unitree-g1-learned-stride.gif` and the reduced-motion
-`docs/media/unitree-g1-learned-stride.png`. The example's `--smoke` mode runs
-the commanded physics path without a renderer so CI does not depend on a GPU.
+`docs/media/unitree-g1-learned-stride.png`. The capture now uses a render-only
+robotics test bay: matte floor panels, safety lane markings, an equipment wall,
+service rail, and suspended LED fixtures. These visual props do not enter the
+physics scene; the example's `--smoke` mode still runs the commanded physics
+path without a renderer so CI does not depend on a GPU.
 
 The development profile uses `opt-level = 1` and the test profile uses
 `opt-level = 3`, while retaining debug assertions and symbols. Fully

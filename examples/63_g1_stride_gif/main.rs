@@ -39,7 +39,7 @@ const WALK_STRIDE_RAD: f64 = 0.065;
 const WALK_FOOT_LIFT_RAD: f64 = 0.12;
 const WALK_CYCLE_STEPS: u64 = 100;
 const TRAIL_EVERY_STEPS: u64 = 36;
-const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.025, 0.035, 0.05, 1.0];
 const COMMAND_MIN_WINDOW_M: f64 = 0.12;
 
 const TORQUE_LINKS: [&str; 8] = [
@@ -362,11 +362,10 @@ fn render_panel(
     scene.items.retain(|item| {
         !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
     });
-    append_checker_floor(
+    append_realistic_test_bay(
         &mut scene,
         walker.capture_start_xz_m[0],
         walker.capture_start_xz_m[1],
-        0.12,
     );
     for position in &walker.trail_m {
         scene.items.push(RenderSceneItem {
@@ -400,32 +399,159 @@ fn render_panel(
     output.color.rgba8
 }
 
-fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {
-    let snap = |value: f64| (value / (2.0 * tile_m)).floor() * 2.0 * tile_m;
-    for row in -9..=9 {
-        for column in -9..=9 {
-            let color = if (row + column) & 1 == 0 {
-                [0.11, 0.15, 0.21, 1.0]
-            } else {
-                [0.055, 0.075, 0.11, 1.0]
-            };
-            scene.items.push(RenderSceneItem {
-                transform: Transform3 {
-                    translation: Vec3::new(
-                        snap(center_x_m) + column as f64 * tile_m,
-                        -0.008,
-                        snap(center_z_m) + row as f64 * tile_m,
-                    ),
-                    rotation: rne_math::Quat::IDENTITY,
-                    scale: Vec3::new(tile_m * 0.96, 0.008, tile_m * 0.96),
-                },
-                shape: VisualShape::Box { size_m: Vec3::ONE },
-                color_rgba: color,
-                mesh: None,
-                base_color_texture: None,
-            });
-        }
+fn append_realistic_test_bay(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64) {
+    // The G1 physics scene intentionally stays minimal. These render-only props make the
+    // hero capture read as a real robotics test bay without changing contacts or dynamics.
+    const FLOOR: [f32; 4] = [0.19, 0.21, 0.22, 1.0];
+    const FLOOR_SEAM: [f32; 4] = [0.075, 0.09, 0.10, 1.0];
+    const SAFETY_YELLOW: [f32; 4] = [0.72, 0.46, 0.08, 1.0];
+    const WALL: [f32; 4] = [0.14, 0.17, 0.20, 1.0];
+    const WALL_PANEL: [f32; 4] = [0.09, 0.13, 0.17, 1.0];
+    const METAL: [f32; 4] = [0.30, 0.34, 0.36, 1.0];
+    const WINDOW: [f32; 4] = [0.035, 0.10, 0.14, 1.0];
+    const LIGHT: [f32; 4] = [0.82, 0.86, 0.78, 1.0];
+    const STATUS: [f32; 4] = [0.10, 0.74, 0.48, 1.0];
+
+    let floor_center = Vec3::new(center_x_m + 0.25, -0.035, center_z_m - 0.35);
+    push_box(scene, floor_center, Vec3::new(5.4, 0.07, 4.6), FLOOR);
+
+    for x_offset in [-1.8, -0.9, 0.0, 0.9, 1.8] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + x_offset, 0.004, center_z_m - 0.35),
+            Vec3::new(0.012, 0.006, 4.35),
+            FLOOR_SEAM,
+        );
     }
+    for z_offset in [-1.4, -0.45, 0.5, 1.45] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.25, 0.004, center_z_m + z_offset),
+            Vec3::new(5.25, 0.006, 0.012),
+            FLOOR_SEAM,
+        );
+    }
+
+    // A pair of inset safety lines gives the walking lane a scale cue and keeps the
+    // measured trails readable against the matte floor.
+    for z_offset in [-0.82, 0.82] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.25, 0.009, center_z_m + z_offset),
+            Vec3::new(4.8, 0.008, 0.035),
+            SAFETY_YELLOW,
+        );
+    }
+
+    // Corner walls: the camera looks into the corner, so the clear color is only a
+    // narrow upper margin rather than an empty flat backdrop.
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 2.45, 1.35, center_z_m - 0.35),
+        Vec3::new(0.10, 2.7, 4.7),
+        WALL,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 0.25, 1.35, center_z_m - 2.25),
+        Vec3::new(4.5, 2.7, 0.10),
+        WALL,
+    );
+
+    // Recessed blue wall panels and a few narrow metal mullions suggest a real
+    // calibration room while remaining cheap primitive geometry.
+    for z_offset in [-1.55, -0.55, 0.45, 1.45] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.385, 1.42, center_z_m + z_offset),
+            Vec3::new(0.018, 2.15, 0.84),
+            WALL_PANEL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.32, 1.42, center_z_m + z_offset - 0.5),
+            Vec3::new(0.025, 2.18, 0.018),
+            METAL,
+        );
+    }
+    for z_offset in [-1.05, -0.05, 0.95] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.31, 1.55, center_z_m + z_offset),
+            Vec3::new(0.026, 1.18, 0.68),
+            WINDOW,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.285, 1.55, center_z_m + z_offset - 0.36),
+            Vec3::new(0.032, 0.025, 0.72),
+            METAL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.285, 1.55, center_z_m + z_offset + 0.36),
+            Vec3::new(0.032, 0.025, 0.72),
+            METAL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.275, 1.55, center_z_m + z_offset),
+            Vec3::new(0.035, 1.18, 0.025),
+            METAL,
+        );
+    }
+
+    // A low service rail and a few status strips add depth behind the robot without
+    // competing with the white G1 body.
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 1.95, 0.42, center_z_m - 2.17),
+        Vec3::new(0.08, 0.78, 0.08),
+        METAL,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 1.95, 0.78, center_z_m - 2.17),
+        Vec3::new(0.08, 0.06, 0.08),
+        STATUS,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 2.38, 0.22, center_z_m - 1.92),
+        Vec3::new(0.04, 0.16, 0.52),
+        SAFETY_YELLOW,
+    );
+
+    // Suspended LED panels catch the existing directional shadows and make the
+    // ceiling area feel intentional without adding a second render pass.
+    for z_offset in [-1.2, 0.0, 1.2] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.20, 2.55, center_z_m + z_offset),
+            Vec3::new(0.72, 0.035, 0.18),
+            LIGHT,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.20, 2.49, center_z_m + z_offset),
+            Vec3::new(0.06, 0.12, 0.06),
+            METAL,
+        );
+    }
+}
+
+fn push_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {
+    scene.items.push(RenderSceneItem {
+        transform: Transform3 {
+            translation,
+            rotation: rne_math::Quat::IDENTITY,
+            scale: size_m,
+        },
+        shape: VisualShape::Box { size_m: Vec3::ONE },
+        color_rgba,
+        mesh: None,
+        base_color_texture: None,
+    });
 }
 
 fn composite_side_by_side(left: &[u8], right: &[u8]) -> Vec<u8> {
