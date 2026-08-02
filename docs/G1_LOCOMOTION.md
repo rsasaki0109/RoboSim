@@ -64,4 +64,9 @@ but the humanoid walks, and every tool that carried the Go2 campaign
 (torque pathway, deterministic resumable CEM, ensemble objectives,
 12-decimal pinning) carried straight over.
 `learned_torques_make_the_g1_stride` pins the comparison, uprightness,
-straightness, and a bit-exact replay.
+straightness, and a bit-exact replay — at the cross-platform bar the Go2
+campaign's chaos-floor doctrine demands: a degraded humanoid orbit does not
+merely score less, it can blow the solver up mid-step (the ulp-shifted
+orbit on Linux CI did exactly that), so every replay runs under
+catch-unwind (a panic is a fall) and the pinned claim is the **median of
+three ulp-perturbed replays**.
