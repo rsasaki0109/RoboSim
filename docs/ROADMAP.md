@@ -52,11 +52,11 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 
 | Phase | Area | Deliverable | Status |
 |-------|------|-------------|--------|
-| A | URDF / Physics | Generic named joint-position targets and per-link contact impulse observations for URDF articulations | In progress (`UrdfSceneSim::step_joint_position_targets`, `link_contact_impulse_ns`) |
+| A | URDF / Physics | Generic named joint-position targets and per-link contact impulse observations for URDF articulations | Done (`UrdfSceneSim::step_joint_position_targets`, `link_contact_impulse_ns`, and seeded scene loading) |
 | B | Quadruped | Vendored 12-DoF quadruped URDF, deterministic standing controller, four-foot contact test, headless example | Done (`rne_quadruped`, example 36; 12 motors and four loaded feet validated headlessly) |
-| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | In progress: seeded gait-phase resets, action/observation/reward episode, four-foot impulses, exact action replay, stable positive-X trot; broader gait-speed optimization remains |
+| C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | Done: seeded gait-phase resets, action/observation/reward episode, four-foot impulses, exact action replay, pure-torque velocity/terrain control, and deterministic speed validation |
 | D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Done: 12-DoF URDF, force-limited standing, bilateral foot loads, balance action/observation/reward episode, exact replay test, and example 37 |
-| E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Pending |
+| E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Done: shared `LocomotionPolicy`, seeded Go2/G1 vectorized batches, replay checkpoints/digests, native Go2 Python adapter, dependency-free CEM smoke, and SB3 PPO smoke |
 
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
@@ -78,7 +78,13 @@ and leg contacts while excluding unstable mesh-AABB collision approximations.
 Its deterministic balance episode exposes pelvis pose, bilateral foot loads,
 progress, four low-dimensional controls, and an upright/load-balance reward.
 A bounded, periodic G1 gait generator now supplies asymmetric stance/swing leg
-trajectories and arm counter-swing; translating contact locomotion remains next.
+trajectories and arm counter-swing. The learned locomotion foundation is now
+shared: `LocomotionPolicy` separates typed policy inputs from episode ownership,
+`VectorizedUnitreeGo2GaitEnv` and `VectorizedUnitreeG1GaitEnv` preserve
+environment order and per-environment seeds, and replay checkpoints reconstruct
+transitions through reset-and-replay with a stable digest. The native Go2 gait
+episode is also exposed to the Python RL adapter; example 66 covers vectorized
+Rust, CEM, and SB3 PPO smoke paths without requiring a renderer.
 Backend-neutral collision groups can now disable same-robot link contacts while
 preserving environment contacts. Reduced-coordinate multibody articulation is now
 selectable per URDF asset; G1 uses it for real dynamic standing, balance replay,

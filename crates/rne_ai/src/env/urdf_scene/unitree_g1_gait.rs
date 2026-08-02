@@ -1,4 +1,5 @@
 use super::UrdfJointPositionTarget;
+use crate::LocomotionPolicy;
 
 /// Command for the deterministic Unitree G1 walking gait generator.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,6 +126,15 @@ pub struct UnitreeG1TorqueOverlay {
     pub coefficients: [[f64; 6]; 8],
 }
 
+/// Typed observation consumed by the G1 feed-forward torque policy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeG1TorquePolicyInput {
+    /// Continuous normalized phase over the two-cycle gait period.
+    pub two_cycle_phase: f64,
+    /// Measured left and right foot stance contacts.
+    pub stance: [bool; 2],
+}
+
 impl UnitreeG1TorqueOverlay {
     /// The neutral overlay: reproduces the plain hybrid gait exactly.
     pub const ZERO: Self = Self {
@@ -235,6 +245,15 @@ impl UnitreeG1TorqueOverlay {
                 .clamp(-40.0, 40.0);
         }
         torques
+    }
+}
+
+impl LocomotionPolicy for UnitreeG1TorqueOverlay {
+    type Observation = UnitreeG1TorquePolicyInput;
+    type Action = [f64; 8];
+
+    fn act(&mut self, observation: &Self::Observation) -> Self::Action {
+        self.torques_nm(observation.two_cycle_phase, observation.stance)
     }
 }
 

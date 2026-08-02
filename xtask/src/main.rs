@@ -247,6 +247,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
     )?;
     run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
     run_step("cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke")?;
+    run_step("cargo run -p locomotion_vectorized --example 66_locomotion_vectorized -- --smoke")?;
     run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }
@@ -935,6 +936,10 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
         "train_ppo.py",
     ] {
         let script_path = format!("examples/27_mobile_manipulator_rl/{script}");
+        run_program(&venv_py, &[&script_path, "--smoke"])?;
+    }
+    for script in ["run.py", "train_cem.py", "train_ppo.py"] {
+        let script_path = format!("examples/66_locomotion_rl/{script}");
         run_program(&venv_py, &[&script_path, "--smoke"])?;
     }
     Ok(())

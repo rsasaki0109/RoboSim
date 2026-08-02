@@ -304,6 +304,21 @@ locomotion/upright reward. Model source:
 [Unitree Robotics unitree_ros](https://github.com/unitreerobotics/unitree_ros)
 (BSD-3-Clause).
 
+### Shared locomotion learning boundary
+
+`examples/66_locomotion_vectorized` demonstrates seeded Go2/G1 batches, replay
+checkpoints, and stable transition digests through the common `LocomotionPolicy`
+contract. The native Go2 gait episode is also available to Python adapters:
+
+```bash
+cargo run --release -p locomotion_vectorized --example 66_locomotion_vectorized
+.venv/Scripts/python.exe examples/66_locomotion_rl/train_cem.py --smoke
+.venv/Scripts/python.exe examples/66_locomotion_rl/train_ppo.py --smoke
+```
+
+The CEM and PPO paths are CPU/headless smoke integrations; physics remains in
+the Rust environment and no ROS2 dependency enters the core crates.
+
 ## Official Unitree G1 URDF
 
 <p align="center">

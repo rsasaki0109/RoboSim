@@ -24,6 +24,7 @@ pub mod render;
 pub mod reward;
 pub mod rng;
 pub mod transport;
+pub mod vectorized;
 
 pub use action::{DiffDriveAction, MobileManipulatorAction};
 pub use agent::{
@@ -75,20 +76,24 @@ pub use env::{
     UnitreeG1GaitObservation, UnitreeG1InspectionAction, UnitreeG1InspectionEpisode,
     UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation, UnitreeG1Observation,
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
-    UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeG1TorqueOverlay, UnitreeGo2Action,
-    UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay,
-    UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule, UnitreeGo2Observation,
-    UnitreeGo2PureTorquePolicy, UnitreeGo2Push, UnitreeGo2TerrainObservation,
-    UnitreeGo2TorqueOverlay, UnitreeGo2TorquePolicy, UnitreeGo2VelocityCommand,
-    UnitreeGo2VelocityPolicyConfig, UnitreeGo2VelocityPolicyInput, UrdfArmAction, UrdfCartAction,
-    UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfKiwiAction, UrdfSceneObservation,
-    UrdfSceneSim, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv, VectorizedDiffDriveSnapshot,
-    VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep, VectorizedMobileManipulatorConfig,
-    VectorizedMobileManipulatorEnv, VectorizedMobileManipulatorSnapshot,
-    VectorizedMobileManipulatorSnapshotError, VectorizedMobileManipulatorStep,
-    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
-    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,
-    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+    UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeG1TorqueOverlay,
+    UnitreeG1TorquePolicyInput, UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig,
+    UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule,
+    UnitreeGo2Observation, UnitreeGo2PureTorquePolicy, UnitreeGo2Push,
+    UnitreeGo2TerrainObservation, UnitreeGo2TorqueOverlay, UnitreeGo2TorquePolicy,
+    UnitreeGo2VelocityCommand, UnitreeGo2VelocityPolicyConfig, UnitreeGo2VelocityPolicyInput,
+    UrdfArmAction, UrdfCartAction, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfKiwiAction,
+    UrdfSceneObservation, UrdfSceneSim, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
+    VectorizedDiffDriveSnapshot, VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep,
+    VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
+    VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
+    VectorizedMobileManipulatorStep, VectorizedUnitreeG1GaitCheckpoint,
+    VectorizedUnitreeG1GaitConfig, VectorizedUnitreeG1GaitEnv, VectorizedUnitreeG1GaitStep,
+    VectorizedUnitreeGo2GaitCheckpoint, VectorizedUnitreeGo2GaitConfig,
+    VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep, LEKIWI_DRIVE_WHEEL_LINKS,
+    LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN, LEKIWI_WHEEL_PIVOT_RADIUS_M,
+    LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS, UNITREE_GO2_POLICY_FEATURES,
+    UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{
@@ -117,7 +122,8 @@ pub use multi_robot::{
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{
     ConstantVelocityPolicy, IkClutterPickPlacePolicy, IkLiftPickPlacePolicy,
-    IkMobileClutterPickPlacePolicy, LiftPickPlacePolicy, Policy, VisuomotorReachPolicy,
+    IkMobileClutterPickPlacePolicy, LiftPickPlacePolicy, LocomotionPolicy, Policy,
+    VisuomotorReachPolicy,
 };
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
@@ -133,4 +139,8 @@ pub use rng::DeterministicRng;
 pub use transport::{
     body_moved_at_least_m, body_within_zone_m, displacement_m, had_finger_contact,
     named_translation_m, TRANSPORT_SUCCESS_M,
+};
+pub use vectorized::{
+    VectorizedEpisode, VectorizedEpisodeCheckpoint, VectorizedEpisodeCheckpointError,
+    VectorizedEpisodeConfig, VectorizedEpisodeStep,
 };
