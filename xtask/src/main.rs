@@ -248,6 +248,9 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
     run_step("cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke")?;
     run_step("cargo run -p locomotion_vectorized --example 66_locomotion_vectorized -- --smoke")?;
+    run_step(
+        "cargo run -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --smoke",
+    )?;
     run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }
