@@ -15,6 +15,7 @@ mod unitree_g1_inspection_episode;
 mod unitree_g1_parts_episode;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
+mod vectorized;
 
 pub use humanoid_episode::{
     HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation,
@@ -37,7 +38,10 @@ pub use unitree_g1_dex3_episode::{
 pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
-pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand, UnitreeG1TorqueOverlay};
+pub use unitree_g1_gait::{
+    unitree_g1_gait_targets, UnitreeG1GaitCommand, UnitreeG1TorqueOverlay,
+    UnitreeG1TorquePolicyInput,
+};
 pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
@@ -61,8 +65,16 @@ pub use unitree_go2_gait::{
     UnitreeGo2TorquePolicy, UnitreeGo2VelocityCommand, UnitreeGo2VelocityPolicyConfig,
     UnitreeGo2VelocityPolicyInput, UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
+pub use vectorized::{
+    VectorizedUnitreeG1GaitCheckpoint, VectorizedUnitreeG1GaitConfig, VectorizedUnitreeG1GaitEnv,
+    VectorizedUnitreeG1GaitStep, VectorizedUnitreeGo2GaitCheckpoint,
+    VectorizedUnitreeGo2GaitConfig, VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep,
+};
 
-use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
+use rne_assets::{
+    load_and_spawn_scene, load_scene_bundle, mesh_package_roots, spawn_scene_bundle, AssetError,
+    SpawnSceneOptions,
+};
 use rne_core::{SimDuration, SimTime};
 use rne_deformable::{
     release_deformable_attachment, step_deformable_world, try_attach_deformable_at_colliders,
@@ -188,6 +200,16 @@ impl UrdfSceneSim {
         Self::from_scene_path_with_options(scene_path, 0, &[])
     }
 
+    /// Loads a URDF scene with an explicit deterministic world seed.
+    ///
+    /// The seed is applied before scene spawning, so every world-level random
+    /// stream starts from the requested value. This is useful for vectorized
+    /// locomotion batches whose environments share topology but need distinct
+    /// reproducible seeds.
+    pub fn from_scene_path_with_seed(scene_path: &Path, seed: u64) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_options_and_seed(scene_path, 0, &[], Some(seed))
+    }
+
     /// Loads a URDF scene with an explicit constraint-solver iteration count.
     ///
     /// `solver_iterations == 0` selects the backend default. Higher values are
@@ -217,8 +239,28 @@ impl UrdfSceneSim {
         solver_iterations: usize,
         fixed_link_names: &[&str],
     ) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_options_and_seed(
+            scene_path,
+            solver_iterations,
+            fixed_link_names,
+            None,
+        )
+    }
+
+    fn from_scene_path_with_options_and_seed(
+        scene_path: &Path,
+        solver_iterations: usize,
+        fixed_link_names: &[&str],
+        seed: Option<u64>,
+    ) -> Result<Self, AssetError> {
         let mut world = World::new();
-        let spawned = load_and_spawn_scene(&mut world, scene_path)?;
+        let spawned = if let Some(seed) = seed {
+            let mut bundle = load_scene_bundle(scene_path)?;
+            bundle.scene.world.seed = seed;
+            spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())?
+        } else {
+            load_and_spawn_scene(&mut world, scene_path)?
+        };
         let world_seed = world
             .get::<rne_world::WorldEntity>(spawned.world)
             .map(|world_entity| world_entity.seed)

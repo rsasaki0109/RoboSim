@@ -5,7 +5,8 @@ mod sim;
 use pyo3::prelude::*;
 use rne_ai::{
     DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
-    IkMobileClutterPickPlacePolicy, Policy,
+    IkMobileClutterPickPlacePolicy, Policy, UnitreeGo2Action, UnitreeGo2Episode,
+    UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
@@ -282,6 +283,150 @@ impl From<rne_ai::EpisodeStep<DiffDriveObservation>> for PyStepResult {
             terminated: value.terminated,
             truncated: value.truncated,
         }
+    }
+}
+
+fn unitree_go2_observation_vector(observation: UnitreeGo2Observation) -> Vec<f64> {
+    vec![
+        observation.base_x_m,
+        observation.base_y_m,
+        observation.base_z_m,
+        observation.base_yaw_rad,
+        observation.base_pitch_rad,
+        observation.base_roll_rad,
+        observation.base_linear_velocity_m_s[0],
+        observation.base_linear_velocity_m_s[1],
+        observation.base_linear_velocity_m_s[2],
+        observation.base_angular_velocity_rad_s[0],
+        observation.base_angular_velocity_rad_s[1],
+        observation.base_angular_velocity_rad_s[2],
+        observation.base_relative_yaw_rad,
+        observation.base_relative_pitch_rad,
+        observation.base_relative_roll_rad,
+        observation.fl_foot_impulse_ns,
+        observation.fr_foot_impulse_ns,
+        observation.rl_foot_impulse_ns,
+        observation.rr_foot_impulse_ns,
+        observation.gait_phase,
+        observation.progress,
+    ]
+}
+
+/// Result of a Unitree Go2 gait reset or step.
+#[pyclass(name = "UnitreeGo2StepResult")]
+#[derive(Clone)]
+struct PyUnitreeGo2StepResult {
+    observation: Vec<f64>,
+    reward: f64,
+    terminated: bool,
+    truncated: bool,
+}
+
+#[pymethods]
+impl PyUnitreeGo2StepResult {
+    #[getter]
+    fn observation(&self) -> Vec<f64> {
+        self.observation.clone()
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.reward
+    }
+
+    #[getter]
+    fn terminated(&self) -> bool {
+        self.terminated
+    }
+
+    #[getter]
+    fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    #[getter]
+    fn done(&self) -> bool {
+        self.terminated || self.truncated
+    }
+}
+
+fn unitree_go2_step_result(
+    step: rne_ai::EpisodeStep<UnitreeGo2Observation>,
+) -> PyUnitreeGo2StepResult {
+    PyUnitreeGo2StepResult {
+        observation: unitree_go2_observation_vector(step.observation),
+        reward: step.reward,
+        terminated: step.terminated,
+        truncated: step.truncated,
+    }
+}
+
+/// Headless Unitree Go2 gait episode exposed to Python RL adapters.
+#[pyclass(name = "UnitreeGo2GaitEpisode")]
+struct PyUnitreeGo2GaitEpisode {
+    inner: UnitreeGo2Episode,
+}
+
+#[pymethods]
+impl PyUnitreeGo2GaitEpisode {
+    /// Creates a seeded Go2 gait episode with a maximum step budget.
+    #[new]
+    #[pyo3(signature = (max_steps=600, seed=1))]
+    fn new(max_steps: u64, seed: u64) -> PyResult<Self> {
+        let config = UnitreeGo2EpisodeConfig {
+            max_steps,
+            ..UnitreeGo2EpisodeConfig::default()
+        };
+        let inner = UnitreeGo2Episode::new_with_seed(config, seed).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to load Unitree Go2 gait scene: {error:?}"
+            ))
+        })?;
+        Ok(Self { inner })
+    }
+
+    /// Resets the episode and returns its 21-element numeric observation.
+    fn reset(&mut self) -> PyUnitreeGo2StepResult {
+        self.inner.reset().into()
+    }
+
+    /// Applies the five continuous gait controls and advances one 60 Hz tick.
+    #[pyo3(signature = (
+        stride_rad=0.12,
+        foot_lift_rad=0.16,
+        roll_correction_rad=0.0,
+        pitch_correction_rad=0.0,
+        lateral_extension_rad=0.0,
+    ))]
+    fn step(
+        &mut self,
+        stride_rad: f64,
+        foot_lift_rad: f64,
+        roll_correction_rad: f64,
+        pitch_correction_rad: f64,
+        lateral_extension_rad: f64,
+    ) -> PyUnitreeGo2StepResult {
+        self.inner
+            .step(UnitreeGo2Action {
+                stride_rad,
+                foot_lift_rad,
+                roll_correction_rad,
+                pitch_correction_rad,
+                lateral_extension_rad,
+            })
+            .into()
+    }
+
+    /// Number of completed control ticks in the current episode.
+    #[getter]
+    fn step_in_episode(&self) -> u64 {
+        self.inner.step_in_episode()
+    }
+}
+
+impl From<rne_ai::EpisodeStep<UnitreeGo2Observation>> for PyUnitreeGo2StepResult {
+    fn from(value: rne_ai::EpisodeStep<UnitreeGo2Observation>) -> Self {
+        unitree_go2_step_result(value)
     }
 }
 
@@ -1115,6 +1260,8 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDiffDriveEpisode>()?;
     m.add_class::<PyObservation>()?;
     m.add_class::<PyStepResult>()?;
+    m.add_class::<PyUnitreeGo2GaitEpisode>()?;
+    m.add_class::<PyUnitreeGo2StepResult>()?;
     m.add_class::<PyMmLiftJointTarget>()?;
     m.add_class::<PyMmLiftGripperTarget>()?;
     m.add_class::<PyMmLiftKinematics>()?;
@@ -1227,6 +1374,18 @@ mod tests {
             step = env.step(sim::DiffDriveAction::forward(6.0));
         }
         assert!(step.terminated);
+    }
+
+    #[test]
+    fn python_go2_gait_api_returns_finite_observation_and_reward() {
+        let mut env = PyUnitreeGo2GaitEpisode::new(8, 6602).unwrap();
+        let reset = env.reset();
+        assert_eq!(reset.observation.len(), 21);
+        assert!(reset.observation.iter().all(|value| value.is_finite()));
+        let step = env.step(0.12, 0.16, 0.0, 0.0, 0.0);
+        assert_eq!(step.observation.len(), 21);
+        assert!(step.reward.is_finite());
+        assert_eq!(env.step_in_episode(), 1);
     }
 
     #[test]

@@ -3,6 +3,7 @@ use super::{
 };
 use crate::{Episode, EpisodeStep};
 use rne_assets::AssetError;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const SETTLE_STEPS: u64 = 120;
@@ -74,7 +75,7 @@ impl Default for UnitreeGo2EpisodeConfig {
 }
 
 /// Continuous gait action for the official Go2.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnitreeGo2Action {
     /// Thigh stride amplitude in radians, clamped to `[0, 0.3]`.
     pub stride_rad: f64,
@@ -151,6 +152,7 @@ pub struct UnitreeGo2Observation {
 pub struct UnitreeGo2Episode {
     config: UnitreeGo2EpisodeConfig,
     sim: UrdfSceneSim,
+    scene_seed: Option<u64>,
     episode_index: u32,
     step_in_episode: u64,
 }
@@ -158,11 +160,31 @@ pub struct UnitreeGo2Episode {
 impl UnitreeGo2Episode {
     /// Loads and settles the dynamic Go2 multibody.
     pub fn new(config: UnitreeGo2EpisodeConfig) -> Result<Self, AssetError> {
-        let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
+        Self::new_with_scene_seed(config, None)
+    }
+
+    /// Loads and settles the dynamic Go2 multibody with an explicit world seed.
+    ///
+    /// This constructor is intended for deterministic vectorized batches. The
+    /// scene topology and control configuration stay identical while the
+    /// world-level random stream is offset per environment.
+    pub fn new_with_seed(config: UnitreeGo2EpisodeConfig, seed: u64) -> Result<Self, AssetError> {
+        Self::new_with_scene_seed(config, Some(seed))
+    }
+
+    fn new_with_scene_seed(
+        config: UnitreeGo2EpisodeConfig,
+        scene_seed: Option<u64>,
+    ) -> Result<Self, AssetError> {
+        let mut sim = match scene_seed {
+            Some(seed) => UrdfSceneSim::from_scene_path_with_seed(&config.scene_path, seed)?,
+            None => UrdfSceneSim::from_scene_path(&config.scene_path)?,
+        };
         settle(&mut sim, &config);
         Ok(Self {
             config,
             sim,
+            scene_seed,
             episode_index: 0,
             step_in_episode: 0,
         })
@@ -213,8 +235,12 @@ impl Episode for UnitreeGo2Episode {
     type Action = UnitreeGo2Action;
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
-        self.sim = UrdfSceneSim::from_scene_path(&self.config.scene_path)
-            .expect("reload Unitree Go2 episode scene");
+        self.sim = match self.scene_seed {
+            Some(seed) => UrdfSceneSim::from_scene_path_with_seed(&self.config.scene_path, seed)
+                .expect("reload seeded Unitree Go2 episode scene"),
+            None => UrdfSceneSim::from_scene_path(&self.config.scene_path)
+                .expect("reload Unitree Go2 episode scene"),
+        };
         settle(&mut self.sim, &self.config);
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;

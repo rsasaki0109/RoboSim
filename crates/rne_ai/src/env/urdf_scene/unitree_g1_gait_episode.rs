@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{Episode, EpisodeStep};
 use rne_assets::AssetError;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const SETTLE_STEPS: u64 = 120;
@@ -35,7 +36,7 @@ impl Default for UnitreeG1GaitEpisodeConfig {
 }
 
 /// Continuous gait parameters applied on the next physics step.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnitreeG1GaitAction {
     /// Hip-pitch stride amplitude in radians, clamped to `[0, 0.20]`.
     pub stride_rad: f64,
@@ -96,6 +97,7 @@ pub struct UnitreeG1GaitObservation {
 pub struct UnitreeG1GaitEpisode {
     config: UnitreeG1GaitEpisodeConfig,
     sim: UrdfSceneSim,
+    scene_seed: Option<u64>,
     episode_index: u32,
     step_in_episode: u64,
 }
@@ -103,11 +105,39 @@ pub struct UnitreeG1GaitEpisode {
 impl UnitreeG1GaitEpisode {
     /// Loads the dynamic G1 and settles it into the nominal standing pose.
     pub fn new(config: UnitreeG1GaitEpisodeConfig) -> Result<Self, AssetError> {
-        let mut sim = UrdfSceneSim::from_scene_path(&config.scene_path)?;
+        Self::new_with_scene_seed(config, None)
+    }
+
+    /// Loads the dynamic G1 with an explicit deterministic world seed.
+    ///
+    /// This constructor is intended for vectorized batches. Each environment
+    /// can use a different seed while retaining the same robot and controller
+    /// configuration.
+    pub fn new_with_seed(
+        config: UnitreeG1GaitEpisodeConfig,
+        seed: u64,
+    ) -> Result<Self, AssetError> {
+        Self::new_with_scene_seed(config, Some(seed))
+    }
+
+    /// Returns read access to the underlying scene simulation.
+    pub fn sim(&self) -> &UrdfSceneSim {
+        &self.sim
+    }
+
+    fn new_with_scene_seed(
+        config: UnitreeG1GaitEpisodeConfig,
+        scene_seed: Option<u64>,
+    ) -> Result<Self, AssetError> {
+        let mut sim = match scene_seed {
+            Some(seed) => UrdfSceneSim::from_scene_path_with_seed(&config.scene_path, seed)?,
+            None => UrdfSceneSim::from_scene_path(&config.scene_path)?,
+        };
         settle(&mut sim);
         Ok(Self {
             config,
             sim,
+            scene_seed,
             episode_index: 0,
             step_in_episode: 0,
         })
@@ -151,8 +181,12 @@ impl Episode for UnitreeG1GaitEpisode {
     type Action = UnitreeG1GaitAction;
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
-        self.sim = UrdfSceneSim::from_scene_path(&self.config.scene_path)
-            .expect("reload Unitree G1 gait scene");
+        self.sim = match self.scene_seed {
+            Some(seed) => UrdfSceneSim::from_scene_path_with_seed(&self.config.scene_path, seed)
+                .expect("reload seeded Unitree G1 gait scene"),
+            None => UrdfSceneSim::from_scene_path(&self.config.scene_path)
+                .expect("reload Unitree G1 gait scene"),
+        };
         settle(&mut self.sim);
         self.episode_index = self.episode_index.wrapping_add(1);
         self.step_in_episode = 0;

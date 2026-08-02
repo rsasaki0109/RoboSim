@@ -1,4 +1,5 @@
 use super::UrdfJointPositionTarget;
+use crate::LocomotionPolicy;
 
 /// Command for the official Unitree Go2 diagonal-pair trot generator.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1395,6 +1396,15 @@ impl UnitreeGo2PureTorquePolicy {
                 .clamp(-limit, limit);
         }
         torques
+    }
+}
+
+impl LocomotionPolicy for UnitreeGo2PureTorquePolicy {
+    type Observation = UnitreeGo2VelocityPolicyInput;
+    type Action = [f64; 12];
+
+    fn act(&mut self, observation: &Self::Observation) -> Self::Action {
+        self.torques_nm_for_velocity_command(*observation, 23.7)
     }
 }
 

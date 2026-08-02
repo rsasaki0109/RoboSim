@@ -7,6 +7,22 @@ use crate::mm_minimal_kinematics::{
 };
 use crate::observation::MobileManipulatorObservation;
 
+/// Maps a typed locomotion observation to a typed actuator action.
+///
+/// Unlike [`Policy`], this trait is not tied to an [`Episode`]. URDF locomotion
+/// rollouts often own a scene simulator directly because they mix position-held
+/// and torque-driven joints, while learning code still needs one stable policy
+/// boundary for Go2, G1, and future legged robots.
+pub trait LocomotionPolicy {
+    /// Observation consumed by the policy.
+    type Observation;
+    /// Action emitted by the policy.
+    type Action;
+
+    /// Computes the next action without advancing a simulator.
+    fn act(&mut self, observation: &Self::Observation) -> Self::Action;
+}
+
 /// Maps observations to actions for a specific episode type.
 pub trait Policy<E: Episode> {
     /// Chooses the next action from the latest observation.
