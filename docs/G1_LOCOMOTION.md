@@ -56,15 +56,19 @@ blow-ups from wild candidates deterministically scored at the floor —
 searches for transport the stepper does not have.
 
 The winner (`UnitreeG1TorqueOverlay::LEARNED_STRIDE`) is the first G1 gait
-in these measurements that genuinely covers ground: **0.19 m per 8 s window
-(over 2× the stepper), 0.55 m per 24 s**, at full height (0.785 m), dead
+in these measurements that genuinely covers ground: **0.22 m per 8 s window
+(over 2× the stepper), 0.64 m per 24 s**, at full height (0.784 m), dead
 straight (|yaw| ≈ 0.01 rad), with ulp-perturbed replays inside a few
-centimeters of each other. It is a slow shuffle (0.023 m/s), honestly
+centimeters of each other. It is a slow shuffle (0.027 m/s), honestly
 reported as such — but the humanoid walks, and every tool that carried the
 Go2 campaign (torque pathway, deterministic resumable CEM, ensemble
-objectives, 12-decimal pinning) carried straight over. The raw CEM winner is
-scaled to 60% in the pinned overlay so the gait remains in the stable contact
-basin on both local and Linux CI physics builds.
+objectives, 12-decimal pinning) carried straight over.
+
+The speed-up pass is a deterministic sweep around the CEM winner: the pinned
+command is `stride_rad = 0.07`, `foot_lift_rad = 0.10`, and `cycle_steps = 100`, with
+the learned feed-forward at 66% strength. This is about 17% faster than the
+first stable cross-platform stride while retaining the three-member median
+and full-height constraints.
 `learned_torques_make_the_g1_stride` pins the comparison, uprightness,
 straightness, and a bit-exact replay — at the cross-platform bar the Go2
 campaign's chaos-floor doctrine demands: a degraded humanoid orbit does not
