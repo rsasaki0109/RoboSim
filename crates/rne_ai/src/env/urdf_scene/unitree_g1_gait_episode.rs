@@ -511,8 +511,9 @@ mod tests {
         // The humanoid's first real steps, pinned at their cross-platform
         // bar. The scripted G1 gait is a near-stationary stepper, so
         // transport had to be CREATED by learned stance torques. On the
-        // training platform the winner walks 0.26 m per window (3.5x the
-        // stepper); on other platforms the ulp-shifted orbit can degrade —
+        // The unscaled training-platform winner walked 0.26 m per window;
+        // the cross-platform 60% overlay walks about 0.19 m (over 2x the
+        // stepper). On other platforms the ulp-shifted orbit can degrade —
         // and a degraded humanoid orbit does not merely score less, it can
         // blow the solver up mid-step. So the test applies the search's own
         // discipline: each replay runs under catch_unwind (a panic is a
