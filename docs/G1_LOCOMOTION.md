@@ -39,8 +39,42 @@ marches at full height with bounded drift
 
 ## Honest limits
 
-The scripted G1 gait itself is a near-stationary stepper: at its full
-stride (0.20 rad) it falls under **both** control regimes, so striding
-locomotion on the G1 is a gait problem, not a torque-pathway problem. That
-is the next chapter's work — the transport-objective search that out-walked
-the Go2's scripted trot (`examples/61_go2_learned_sprint`) is the template.
+The scripted G1 gait itself is a near-stationary stepper across its entire
+stable envelope: measured transport is under 0.1 m per 12 s at every stride
+that stands, and 0.15 rad falls — under **both** control regimes. Striding
+locomotion on the G1 is therefore a gait problem, not a torque-pathway
+problem.
+
+## The first real steps
+
+`examples/62_g1_learned_stride` answers it with the Go2 transport search's
+structure: a contact-gated Fourier torque overlay
+(`UnitreeG1TorqueOverlay`, 48 coefficients on the eight proximal joints)
+rides the hybrid tick, and the anti-cheat window-displacement objective —
+scored as the ensemble median of ulp-perturbed replays, with solver
+blow-ups from wild candidates deterministically scored at the floor —
+searches for transport the stepper does not have.
+
+The winner (`UnitreeG1TorqueOverlay::LEARNED_STRIDE`) is the first G1 gait
+in these measurements that genuinely covers ground: **0.19 m per 8 s window
+(over 2× the stepper), 0.55 m per 24 s**, at full height (0.785 m), dead
+straight (|yaw| ≈ 0.01 rad), with ulp-perturbed replays inside a few
+centimeters of each other. It is a slow shuffle (0.023 m/s), honestly
+reported as such — but the humanoid walks, and every tool that carried the
+Go2 campaign (torque pathway, deterministic resumable CEM, ensemble
+objectives, 12-decimal pinning) carried straight over. The raw CEM winner is
+scaled to 60% in the pinned overlay so the gait remains in the stable contact
+basin on both local and Linux CI physics builds.
+`learned_torques_make_the_g1_stride` pins the comparison, uprightness,
+straightness, and a bit-exact replay — at the cross-platform bar the Go2
+campaign's chaos-floor doctrine demands: a degraded humanoid orbit does not
+merely score less, it can blow the solver up mid-step (the ulp-shifted
+orbit on Linux CI did exactly that), so every replay runs under
+catch-unwind (a panic is a fall) and the pinned claim is the **median of
+three ulp-perturbed replays**.
+
+The development profile uses `opt-level = 1` and the test profile uses
+`opt-level = 3`, while retaining debug assertions and symbols. Fully
+unoptimized physics builds can take a different chaotic orbit and turn a long
+G1 replay into a solver blow-up; the optimized test codegen keeps local and CI
+headless validation on the same practical simulation path.

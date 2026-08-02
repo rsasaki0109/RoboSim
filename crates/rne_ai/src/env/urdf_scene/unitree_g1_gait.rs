@@ -107,6 +107,137 @@ fn gait_wave(phase: f64) -> (f64, f64) {
     }
 }
 
+/// Contact-gated Fourier feed-forward torque overlay for the G1's hybrid
+/// walking tick (hips and knees under torque PD, ankles and arms servo-held).
+///
+/// The scripted G1 gait is a near-stationary stepper across its entire
+/// stable envelope, so transport must be *created* by stance torques — the
+/// force-level freedom the Go2 transport search proved out. For each of the
+/// eight proximal joints the overlay adds the same Fourier form as the Go2
+/// overlay (a stance-gated constant plus full- and half-frequency harmonics
+/// over the two-cycle gait phase) in newton-meters on top of the tracking
+/// PD; the gate is that leg's *measured* foot contact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeG1TorqueOverlay {
+    /// Per-joint `[stance_const, constant, sin, cos, half_sin, half_cos]`
+    /// torque coefficients in N·m; joints ordered left hip pitch/roll/yaw,
+    /// left knee, then the same for the right leg.
+    pub coefficients: [[f64; 6]; 8],
+}
+
+impl UnitreeG1TorqueOverlay {
+    /// The neutral overlay: reproduces the plain hybrid gait exactly.
+    pub const ZERO: Self = Self {
+        coefficients: [[0.0; 6]; 8],
+    };
+
+    /// The first G1 gait in these measurements that genuinely covers ground
+    /// (`examples/62_g1_learned_stride -- --train`, seed 42, ensemble-median
+    /// CEM with the anti-cheat window-displacement objective).
+    ///
+    /// The scripted G1 gait is a near-stationary stepper across its entire
+    /// stable envelope; this overlay turns it into a slow but real walk —
+    /// 0.19 m per 8 s window (over 2× the stepper), 0.55 m per 24 s, at full
+    /// height (0.785 m) and dead straight, with ulp-perturbed replays inside
+    /// a few centimeters of each other. The learned search winner is scaled
+    /// to 60% so the same gait remains inside the stable contact basin across
+    /// physics code-generation targets. Pinned at the search state's
+    /// 12-decimal precision per the chaos discipline;
+    /// `learned_torques_make_the_g1_stride` pins the comparison.
+    pub const LEARNED_STRIDE: Self = Self {
+        coefficients: [
+            [
+                2.183423847375,
+                1.099672694429,
+                0.713601360280,
+                7.601773621958,
+                0.971313554558,
+                -0.886237577470,
+            ],
+            [
+                -2.242321363135,
+                -0.132917247534,
+                3.460676862800,
+                -4.579411590525,
+                -1.590537671801,
+                0.945705619594,
+            ],
+            [
+                0.864093192051,
+                1.820514203380,
+                -2.210321453230,
+                -11.458286893298,
+                0.071326415395,
+                -0.348851193974,
+            ],
+            [
+                -1.997961869730,
+                -5.315884397976,
+                -3.411052114382,
+                -0.209928893263,
+                -0.277245911936,
+                2.090928042845,
+            ],
+            [
+                -1.277826853522,
+                -1.403044591888,
+                -0.436806343376,
+                -0.843403703612,
+                0.938346354383,
+                1.385294109821,
+            ],
+            [
+                0.579345691136,
+                -1.924126763206,
+                1.850393163574,
+                -1.395903469306,
+                -0.066748652452,
+                -0.354893563999,
+            ],
+            [
+                -0.994546454779,
+                0.200918572812,
+                -12.000000000000,
+                -1.165447330229,
+                -2.391622558308,
+                1.851324880236,
+            ],
+            [
+                -0.955898725388,
+                -8.353438371270,
+                -1.676198157251,
+                2.073778680562,
+                -0.814283496586,
+                0.310121189583,
+            ],
+        ],
+    };
+
+    /// Feed-forward joint torques at a two-cycle gait phase in `[0, 1)` with
+    /// the measured per-leg stance gates `[left, right]`, each clamped to
+    /// ±40 N·m so the overlay stays inside the hip actuators' authority.
+    pub fn torques_nm(&self, two_cycle_phase: f64, stance: [bool; 2]) -> [f64; 8] {
+        let full = 4.0 * std::f64::consts::PI * two_cycle_phase;
+        let half = 2.0 * std::f64::consts::PI * two_cycle_phase;
+        let (sin, cos) = full.sin_cos();
+        let (half_sin, half_cos) = half.sin_cos();
+        let mut torques = [0.0; 8];
+        for (index, (torque, coefficient)) in
+            torques.iter_mut().zip(self.coefficients.iter()).enumerate()
+        {
+            let gate = if stance[index / 4] { 1.0 } else { 0.0 };
+            *torque = (coefficient[0] * gate
+                + coefficient[1]
+                + coefficient[2] * sin
+                + coefficient[3] * cos
+                + coefficient[4] * half_sin
+                + coefficient[5] * half_cos)
+                .clamp(-40.0, 40.0);
+        }
+        torques
+    }
+}
+
 fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'static> {
     UrdfJointPositionTarget {
         link_name,

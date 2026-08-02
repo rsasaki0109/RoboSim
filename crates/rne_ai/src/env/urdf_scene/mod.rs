@@ -37,7 +37,7 @@ pub use unitree_g1_dex3_episode::{
 pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
-pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand};
+pub use unitree_g1_gait::{unitree_g1_gait_targets, UnitreeG1GaitCommand, UnitreeG1TorqueOverlay};
 pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };

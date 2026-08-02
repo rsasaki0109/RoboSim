@@ -81,6 +81,7 @@ members = [
   "examples/59_go2_authority_turn",
   "examples/60_go2_turn_gif",
   "examples/61_go2_learned_sprint",
+  "examples/62_g1_learned_stride",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
@@ -121,3 +122,15 @@ roxmltree = "0.20"
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 earcutr = "0.5"
+
+# Long-running legged rollouts are chaotic even before the intended ULP
+# perturbations. Keeping debug assertions and symbols while using modest
+# optimization prevents the unoptimized physics code path from selecting a
+# different solver orbit (or taking many minutes per replay).
+[profile.dev]
+opt-level = 1
+
+# Test binaries include the long chaotic physics rollouts. Use release codegen
+# while retaining the test profile's debug assertions and symbols.
+[profile.test]
+opt-level = 3
