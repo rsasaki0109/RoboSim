@@ -1,4 +1,4 @@
-//! Learns the first G1 walk that actually covers ground.
+//! Replays and optionally learns a faster G1 walk that actually covers ground.
 //!
 //! The scripted G1 gait is a near-stationary stepper across its entire
 //! stable envelope (measured: ≤0.1 m of transport per 12 s at any stride
@@ -11,7 +11,7 @@
 //! the anti-cheat minimum window displacement with fall, tilt, and
 //! straightness penalties, each candidate scored by the median of three
 //! ulp-perturbed replays. `--train` reproduces the search (seed 42); the
-//! default mode replays the pinned winner against the stepper baseline.
+//! default mode replays the pinned speed-up winner against the stepper baseline.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +30,10 @@ const KP: f64 = 300.0;
 const KD: f64 = 10.0;
 const TORQUE_LIMIT_NM: f64 = 88.0;
 const SPEED_LIMIT_RAD_S: f64 = 30.0;
+const WALK_STRIDE_RAD: f64 = 0.07;
+const WALK_FOOT_LIFT_RAD: f64 = 0.10;
+const WALK_CYCLE_STEPS: u64 = 100;
+const SPEEDUP_MIN_WINDOW_M: f64 = 0.20;
 const DIM: usize = 48;
 const POPULATION: usize = 64;
 const ELITE: usize = 16;
@@ -48,9 +52,9 @@ const TORQUE_LINKS: [&str; 8] = [
 
 fn walk_command() -> UnitreeG1GaitCommand {
     UnitreeG1GaitCommand {
-        stride_rad: 0.05,
-        foot_lift_rad: 0.08,
-        cycle_steps: 120,
+        stride_rad: WALK_STRIDE_RAD,
+        foot_lift_rad: WALK_FOOT_LIFT_RAD,
+        cycle_steps: WALK_CYCLE_STEPS,
     }
 }
 
@@ -71,7 +75,7 @@ fn settle(sim: &mut UrdfSceneSim) {
         UnitreeG1GaitCommand {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
-            cycle_steps: 120,
+            cycle_steps: WALK_CYCLE_STEPS,
         },
     );
     for _ in 0..SETTLE_STEPS {
@@ -233,7 +237,9 @@ const PARALLEL_ROLLOUTS: usize = 16;
 type TrainState = (usize, [f64; DIM], [f64; DIM], (f64, [f64; DIM]));
 
 fn state_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/g1_stride_cem_state.txt")
+    // The speed-up command is a different plant trajectory from the first
+    // stride search, so its resumable CEM state must not be mixed with it.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/g1_stride_speedup_cem_state.txt")
 }
 
 fn load_state(path: &Path) -> Option<TrainState> {
@@ -427,7 +433,7 @@ fn main() {
     let median = min_windows[1];
     let baseline_min = baseline.window_a_forward_m.min(baseline.window_b_forward_m);
     assert!(
-        median > 2.0 * baseline_min && median > 0.15,
-        "the median replay must stride: {median:.2} m vs stepper {baseline_min:.2} m"
+        median > 2.0 * baseline_min && median > SPEEDUP_MIN_WINDOW_M,
+        "the median replay must hit the speed-up envelope: {median:.2} m vs stepper {baseline_min:.2} m"
     );
 }

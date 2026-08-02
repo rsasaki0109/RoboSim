@@ -235,6 +235,7 @@ mod tests {
 
     /// Conservative actuator speed ceiling for torque mode.
     const G1_SPEED_LIMIT_RAD_S: f64 = 30.0;
+    const G1_SPEEDUP_MIN_WINDOW_M: f64 = 0.20;
 
     fn g1_stand_targets() -> [UrdfJointPositionTarget<'static>; 23] {
         unitree_g1_gait_targets(
@@ -404,6 +405,10 @@ mod tests {
     /// Hybrid rollout with a torque overlay, measuring straight-line window
     /// displacements — the transport metric of the learned-stride search.
     fn g1_hybrid_transport(overlay: &super::super::UnitreeG1TorqueOverlay) -> (f64, f64, f64, f64) {
+        const SPEEDUP_STRIDE_RAD: f64 = 0.07;
+        const SPEEDUP_FOOT_LIFT_RAD: f64 = 0.10;
+        const SPEEDUP_CYCLE_STEPS: u64 = 100;
+
         // Exact mirror of example 62's settle: the learned constants live on
         // the trajectory that protocol produces.
         let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
@@ -414,16 +419,16 @@ mod tests {
             UnitreeG1GaitCommand {
                 stride_rad: 0.0,
                 foot_lift_rad: 0.0,
-                cycle_steps: 120,
+                cycle_steps: SPEEDUP_CYCLE_STEPS,
             },
         );
         for _ in 0..240 {
             sim.step_joint_position_targets(&stand);
         }
         let command = UnitreeG1GaitCommand {
-            stride_rad: 0.05,
-            foot_lift_rad: 0.08,
-            cycle_steps: 120,
+            stride_rad: SPEEDUP_STRIDE_RAD,
+            foot_lift_rad: SPEEDUP_FOOT_LIFT_RAD,
+            cycle_steps: SPEEDUP_CYCLE_STEPS,
         };
         let start = sim.observe();
         let mut window_start = [start.base_x_m, start.base_z_m];
@@ -444,7 +449,8 @@ mod tests {
                 sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
                 sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
             ];
-            let two_cycle_phase = (step % 240) as f64 / 240.0;
+            let two_cycle_steps = 2 * command.cycle_steps;
+            let two_cycle_phase = (step % two_cycle_steps) as f64 / two_cycle_steps as f64;
             // The overlay's joint order: left hip pitch/roll/yaw, left knee,
             // then the right leg — matched here explicitly.
             const OVERLAY_ORDER: [&str; 8] = [
@@ -510,10 +516,11 @@ mod tests {
 
         // The humanoid's first real steps, pinned at their cross-platform
         // bar. The scripted G1 gait is a near-stationary stepper, so
-        // transport had to be CREATED by learned stance torques. On the
-        // The unscaled training-platform winner walked 0.26 m per window;
-        // the cross-platform 60% overlay walks about 0.19 m (over 2x the
-        // stepper). On other platforms the ulp-shifted orbit can degrade —
+        // transport had to come from learned stance torques. The speed-
+        // envelope sweep uses the learned winner at 66% strength
+        // with stride 0.07, lift 0.10, and cycle 100: it walks about 0.22 m
+        // per window (over 2x the stepper). On other platforms the
+        // ulp-shifted orbit can degrade —
         // and a degraded humanoid orbit does not merely score less, it can
         // blow the solver up mid-step. So the test applies the search's own
         // discipline: each replay runs under catch_unwind (a panic is a
@@ -549,8 +556,8 @@ mod tests {
         let median = min_windows[1];
         let baseline_min = base_a.min(base_b);
         assert!(
-            median > 2.0 * baseline_min && median > 0.15,
-            "the median replay must stride: {median:.2} m vs stepper {baseline_min:.2} m"
+            median > 2.0 * baseline_min && median > G1_SPEEDUP_MIN_WINDOW_M,
+            "the median replay must hit the speed-up envelope: {median:.2} m vs stepper {baseline_min:.2} m"
         );
 
         // The median member (or better) must also be upright and straight.
