@@ -30,8 +30,8 @@ const KP: f64 = 300.0;
 const KD: f64 = 10.0;
 const TORQUE_LIMIT_NM: f64 = 88.0;
 const SPEED_LIMIT_RAD_S: f64 = 30.0;
-const WALK_STRIDE_RAD: f64 = 0.07;
-const WALK_FOOT_LIFT_RAD: f64 = 0.10;
+const WALK_STRIDE_RAD: f64 = 0.065;
+const WALK_FOOT_LIFT_RAD: f64 = 0.12;
 const WALK_CYCLE_STEPS: u64 = 100;
 const SPEEDUP_MIN_WINDOW_M: f64 = 0.20;
 const DIM: usize = 48;
@@ -58,6 +58,7 @@ fn walk_command() -> UnitreeG1GaitCommand {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 struct RolloutOutcome {
     window_a_forward_m: f64,
     window_b_forward_m: f64,
@@ -68,14 +69,14 @@ struct RolloutOutcome {
     score: f64,
 }
 
-fn settle(sim: &mut UrdfSceneSim) {
+fn settle(sim: &mut UrdfSceneSim, cycle_steps: u64) {
     sim.configure_position_motors(220.0, 24.0, TORQUE_LIMIT_NM);
     let stand = unitree_g1_gait_targets(
         0,
         UnitreeG1GaitCommand {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
-            cycle_steps: WALK_CYCLE_STEPS,
+            cycle_steps,
         },
     );
     for _ in 0..SETTLE_STEPS {
@@ -83,10 +84,14 @@ fn settle(sim: &mut UrdfSceneSim) {
     }
 }
 
-fn rollout(overlay: &UnitreeG1TorqueOverlay, steps: u64) -> RolloutOutcome {
+fn rollout(
+    command: UnitreeG1GaitCommand,
+    overlay: &UnitreeG1TorqueOverlay,
+    steps: u64,
+) -> RolloutOutcome {
     let mut sim =
         UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path()).expect("load dynamic G1");
-    settle(&mut sim);
+    settle(&mut sim, command.cycle_steps);
     let up_body_reference = {
         let pose = sim.named_transform("pelvis").expect("pelvis pose");
         (pose.rotation.inverse() * Vec3::Y).normalize_or_zero()
@@ -104,9 +109,9 @@ fn rollout(overlay: &UnitreeG1TorqueOverlay, steps: u64) -> RolloutOutcome {
     let mut total_yaw_rad = 0.0;
     let mut min_height_m = f64::MAX;
     let mut max_tilt_rad = 0.0_f64;
-    let cycle = walk_command().cycle_steps;
+    let cycle = command.cycle_steps;
     for step in 0..steps {
-        let targets = unitree_g1_gait_targets(step, walk_command());
+        let targets = unitree_g1_gait_targets(step, command);
         let servo: Vec<UrdfJointPositionTarget<'_>> = targets
             .iter()
             .filter(|target| !TORQUE_LINKS.contains(&target.link_name))
@@ -205,24 +210,198 @@ fn overlay_from(params: &[f64; DIM]) -> UnitreeG1TorqueOverlay {
     UnitreeG1TorqueOverlay { coefficients }
 }
 
-/// Ensemble score: the median score of three ulp-perturbed replays — the
-/// chaos-floor discipline from the Go2 campaign.
-fn ensemble_score(params: &[f64; DIM]) -> f64 {
-    let mut scores: Vec<f64> = (0..3)
-        .map(|k| {
-            let mut overlay = overlay_from(params);
-            overlay.coefficients[0][0] += k as f64 * 1.0e-9;
+/// Verification ensemble: three ulp-perturbed replays — the chaos-floor
+/// discipline from the Go2 campaign.
+fn ensemble_outcomes(
+    command: UnitreeG1GaitCommand,
+    overlay: UnitreeG1TorqueOverlay,
+) -> Vec<Option<RolloutOutcome>> {
+    [0.0_f64, 1.0e-9, 3.0e-9]
+        .iter()
+        .map(|perturbation| {
+            let mut member = overlay;
+            member.coefficients[0][0] += *perturbation;
             // Wild candidates can blow the solver up inside a step (the
             // humanoid explosion mode); a panicking rollout deterministically
-            // scores the floor instead of killing the search.
+            // becomes a fall instead of killing the search.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                rollout(&overlay, ROLLOUT_STEPS).score
+                rollout(command, &member, ROLLOUT_STEPS)
+            }))
+            .ok()
+        })
+        .collect()
+}
+
+fn median(mut values: Vec<f64>) -> f64 {
+    values.sort_by(|a, b| a.partial_cmp(b).expect("finite ensemble metric"));
+    values[values.len() / 2]
+}
+
+fn ensemble_score_for(command: UnitreeG1GaitCommand, overlay: UnitreeG1TorqueOverlay) -> f64 {
+    // Keep the original resumable CEM stream (0/1/2e-9) stable. The
+    // verification and command-sweep ensemble above uses the pinned
+    // cross-platform bar (0/1/3e-9).
+    let mut scores: Vec<f64> = (0..3)
+        .map(|k| {
+            let mut member = overlay;
+            member.coefficients[0][0] += k as f64 * 1.0e-9;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                rollout(command, &member, ROLLOUT_STEPS).score
             }))
             .unwrap_or(-100.0)
         })
         .collect();
     scores.sort_by(|a, b| a.partial_cmp(b).expect("finite scores"));
     scores[1]
+}
+
+fn ensemble_score(params: &[f64; DIM]) -> f64 {
+    ensemble_score_for(walk_command(), overlay_from(params))
+}
+
+/// Ensemble summary used by the deterministic gait-command speed sweep.
+#[derive(Clone, Copy, Debug)]
+struct SweepSummary {
+    command: UnitreeG1GaitCommand,
+    median_score: f64,
+    median_min_window_m: f64,
+    median_total_forward_m: f64,
+    median_min_height_m: f64,
+    median_abs_yaw_rad: f64,
+    panics: usize,
+}
+
+fn summarize_sweep_candidate(
+    command: UnitreeG1GaitCommand,
+    overlay: UnitreeG1TorqueOverlay,
+) -> SweepSummary {
+    let outcomes = ensemble_outcomes(command, overlay);
+    let panics = outcomes.iter().filter(|outcome| outcome.is_none()).count();
+    let scores = outcomes
+        .iter()
+        .map(|outcome| outcome.map_or(-100.0, |value| value.score))
+        .collect();
+    let min_windows = outcomes
+        .iter()
+        .map(|outcome| {
+            outcome.map_or(0.0, |value| {
+                value.window_a_forward_m.min(value.window_b_forward_m)
+            })
+        })
+        .collect();
+    let total_forward = outcomes
+        .iter()
+        .map(|outcome| outcome.map_or(0.0, |value| value.total_forward_m))
+        .collect();
+    let min_heights = outcomes
+        .iter()
+        .map(|outcome| outcome.map_or(-1.0, |value| value.min_height_m))
+        .collect();
+    let abs_yaw = outcomes
+        .iter()
+        .map(|outcome| outcome.map_or(10.0, |value| value.total_yaw_rad.abs()))
+        .collect();
+    SweepSummary {
+        command,
+        median_score: median(scores),
+        median_min_window_m: median(min_windows),
+        median_total_forward_m: median(total_forward),
+        median_min_height_m: median(min_heights),
+        median_abs_yaw_rad: median(abs_yaw),
+        panics,
+    }
+}
+
+fn speed_sweep_commands() -> Vec<UnitreeG1GaitCommand> {
+    let mut commands = Vec::new();
+    for stride_rad in [0.060, 0.065, 0.070, 0.075, 0.080, 0.085] {
+        for foot_lift_rad in [0.08, 0.10, 0.12] {
+            for cycle_steps in [90, 100, 110] {
+                commands.push(UnitreeG1GaitCommand {
+                    stride_rad,
+                    foot_lift_rad,
+                    cycle_steps,
+                });
+            }
+        }
+    }
+    commands
+}
+
+fn speed_sweep() {
+    // Solver panics from candidates outside the contact basin are expected
+    // and scored as falls, not printed as a wall of panic diagnostics.
+    std::panic::set_hook(Box::new(|_| {}));
+    let commands = speed_sweep_commands();
+    let overlay = UnitreeG1TorqueOverlay::LEARNED_STRIDE;
+    let mut summaries = Vec::with_capacity(commands.len());
+    for chunk in commands.chunks(PARALLEL_ROLLOUTS) {
+        let chunk_summaries = std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|command| {
+                    let command = *command;
+                    scope.spawn(move || summarize_sweep_candidate(command, overlay))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("speed sweep rollout thread"))
+                .collect::<Vec<_>>()
+        });
+        summaries.extend(chunk_summaries);
+    }
+    summaries.sort_by(|a, b| {
+        b.median_score
+            .partial_cmp(&a.median_score)
+            .expect("finite sweep scores")
+            .then_with(|| {
+                b.median_min_window_m
+                    .partial_cmp(&a.median_min_window_m)
+                    .expect("finite sweep windows")
+            })
+    });
+    println!(
+        "G1 speed sweep: {} commands, fixed overlay, ranking by ensemble median score",
+        summaries.len()
+    );
+    for summary in summaries.iter().take(12) {
+        println!(
+            "stride={:.3} lift={:.2} cycle={:3} score={:+.3} windows={:.3} m total={:.3} m speed={:.4} m/s minH={:.3} |yaw|={:.3} panics={}",
+            summary.command.stride_rad,
+            summary.command.foot_lift_rad,
+            summary.command.cycle_steps,
+            summary.median_score,
+            summary.median_min_window_m,
+            summary.median_total_forward_m,
+            summary.median_total_forward_m / 24.0,
+            summary.median_min_height_m,
+            summary.median_abs_yaw_rad,
+            summary.panics,
+        );
+    }
+    let fastest_valid = summaries
+        .iter()
+        .filter(|summary| {
+            summary.panics <= 1
+                && summary.median_min_height_m > 0.7
+                && summary.median_abs_yaw_rad < 0.3
+        })
+        .max_by(|a, b| {
+            a.median_total_forward_m
+                .partial_cmp(&b.median_total_forward_m)
+                .expect("finite sweep transport")
+        })
+        .expect("speed sweep must find a valid candidate");
+    println!(
+        "fastest valid: stride={:.3} lift={:.2} cycle={} median windows={:.3} m total={:.3} m ({:.4} m/s)",
+        fastest_valid.command.stride_rad,
+        fastest_valid.command.foot_lift_rad,
+        fastest_valid.command.cycle_steps,
+        fastest_valid.median_min_window_m,
+        fastest_valid.median_total_forward_m,
+        fastest_valid.median_total_forward_m / 24.0,
+    );
 }
 
 fn gaussian(rng: &mut rne_ai::DeterministicRng) -> f64 {
@@ -333,7 +512,7 @@ fn train() {
             mean[dimension] = elite_mean;
             sigma[dimension] = elite_variance.sqrt().max(0.5);
         }
-        let probe = rollout(&overlay_from(&scored[0].1), ROLLOUT_STEPS);
+        let probe = rollout(walk_command(), &overlay_from(&scored[0].1), ROLLOUT_STEPS);
         println!(
             "iter {iteration:2}: best median score {:.3} (windows {:.2}/{:.2} m total {:.2} m yaw {:+.2} minH {:.3} maxTilt {:.2})",
             scored[0].0,
@@ -353,7 +532,7 @@ fn train() {
     for k in 0..3 {
         let mut overlay = overlay_from(&best.1);
         overlay.coefficients[0][0] += k as f64 * 1.0e-9;
-        let outcome = rollout(&overlay, ROLLOUT_STEPS);
+        let outcome = rollout(walk_command(), &overlay, ROLLOUT_STEPS);
         println!(
             "ensemble member {k}: windows {:.2}/{:.2} m total {:.2} m minH {:.3} tilt {:.2}",
             outcome.window_a_forward_m,
@@ -363,7 +542,7 @@ fn train() {
             outcome.max_tilt_rad
         );
     }
-    let final_outcome = rollout(&overlay_from(&best.1), ROLLOUT_STEPS);
+    let final_outcome = rollout(walk_command(), &overlay_from(&best.1), ROLLOUT_STEPS);
     println!(
         "final best: median score {:.3} total {:.2} m over 24 s ({:.3} m/s)",
         best.0,
@@ -382,6 +561,10 @@ fn train() {
 }
 
 fn main() {
+    if std::env::args().any(|argument| argument == "--sweep") {
+        speed_sweep();
+        return;
+    }
     if std::env::args().any(|argument| argument == "--train") {
         train();
         return;
@@ -392,18 +575,8 @@ fn main() {
     // on another OS did exactly that in CI), so each replay runs under
     // catch_unwind - a panic is a fall - and the claim is the MEDIAN of
     // three ulp-perturbed replays.
-    let baseline = rollout(&UnitreeG1TorqueOverlay::ZERO, ROLLOUT_STEPS);
-    let members: Vec<Option<RolloutOutcome>> = [0.0, 1.0e-9, 3.0e-9]
-        .iter()
-        .map(|perturbation| {
-            std::panic::catch_unwind(|| {
-                let mut overlay = UnitreeG1TorqueOverlay::LEARNED_STRIDE;
-                overlay.coefficients[0][0] += perturbation;
-                rollout(&overlay, ROLLOUT_STEPS)
-            })
-            .ok()
-        })
-        .collect();
+    let baseline = rollout(walk_command(), &UnitreeG1TorqueOverlay::ZERO, ROLLOUT_STEPS);
+    let members = ensemble_outcomes(walk_command(), UnitreeG1TorqueOverlay::LEARNED_STRIDE);
     println!(
         "stepper baseline: windows {:.2}/{:.2} m total {:.2} m",
         baseline.window_a_forward_m, baseline.window_b_forward_m, baseline.total_forward_m,

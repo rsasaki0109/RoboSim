@@ -439,8 +439,8 @@ mod tests {
     /// Hybrid rollout with a torque overlay, measuring straight-line window
     /// displacements — the transport metric of the learned-stride search.
     fn g1_hybrid_transport(overlay: &super::super::UnitreeG1TorqueOverlay) -> (f64, f64, f64, f64) {
-        const SPEEDUP_STRIDE_RAD: f64 = 0.07;
-        const SPEEDUP_FOOT_LIFT_RAD: f64 = 0.10;
+        const SPEEDUP_STRIDE_RAD: f64 = 0.065;
+        const SPEEDUP_FOOT_LIFT_RAD: f64 = 0.12;
         const SPEEDUP_CYCLE_STEPS: u64 = 100;
 
         // Exact mirror of example 62's settle: the learned constants live on
@@ -552,7 +552,7 @@ mod tests {
         // bar. The scripted G1 gait is a near-stationary stepper, so
         // transport had to come from learned stance torques. The speed-
         // envelope sweep uses the learned winner at 66% strength
-        // with stride 0.07, lift 0.10, and cycle 100: it walks about 0.22 m
+        // with stride 0.065, lift 0.12, and cycle 100: it walks about 0.22 m
         // per window (over 2x the stepper). On other platforms the
         // ulp-shifted orbit can degrade —
         // and a degraded humanoid orbit does not merely score less, it can
