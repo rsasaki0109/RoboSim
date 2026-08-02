@@ -147,11 +147,11 @@ impl UnitreeG1TorqueOverlay {
     ///
     /// The scripted G1 gait is a near-stationary stepper across its entire
     /// stable envelope; this overlay turns it into a slow but real walk —
-    /// 0.22 m per 8 s window (over 2× the stepper), 0.64 m per 24 s, at full
+    /// 0.22 m per 8 s window (over 2× the stepper), 0.66 m per 24 s, at full
     /// height (0.784 m) and dead straight, with ulp-perturbed replays inside
     /// a few centimeters of each other. The speed-envelope sweep uses the
-    /// learned search winner at 66% feed-forward strength with a 0.07 rad,
-    /// 0.10 rad, 100-step gait command. Pinned at the search state's
+    /// learned search winner at 66% feed-forward strength with a 0.065 rad,
+    /// 0.12 rad, 100-step gait command. Pinned at the search state's
     /// 12-decimal precision per the chaos discipline;
     /// `learned_torques_make_the_g1_stride` pins the comparison.
     pub const LEARNED_STRIDE: Self = Self {
