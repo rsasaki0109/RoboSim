@@ -245,6 +245,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
     )?;
+    run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }
 
@@ -266,6 +267,8 @@ fn hero_media_check() -> anyhow::Result<()> {
     let dex3_png_path = root.join("docs/media/unitree-g1-dex3.png");
     let cloth_gif_path = root.join("docs/media/unitree-g1-cloth.gif");
     let cloth_png_path = root.join("docs/media/unitree-g1-cloth.png");
+    let learned_g1_gif_path = root.join("docs/media/unitree-g1-learned-stride.gif");
+    let learned_g1_png_path = root.join("docs/media/unitree-g1-learned-stride.png");
     let readme = fs::read_to_string(&readme_path)?;
     anyhow::ensure!(
         readme.contains("srcset=\"docs/media/rne-hero.png\""),
@@ -319,6 +322,22 @@ fn hero_media_check() -> anyhow::Result<()> {
         "README G1 cloth GIF is missing or malformed"
     );
     anyhow::ensure!(cloth_png_path.is_file(), "README G1 cloth PNG is missing");
+    anyhow::ensure!(
+        readme.contains("srcset=\"docs/media/unitree-g1-learned-stride.png\"")
+            && readme.contains("<img src=\"docs/media/unitree-g1-learned-stride.gif\""),
+        "README learned G1 stride media references are missing"
+    );
+    let learned_g1_gif = fs::read(&learned_g1_gif_path)?;
+    anyhow::ensure!(
+        learned_g1_gif.starts_with(b"GIF8")
+            && learned_g1_gif.ends_with(b";")
+            && learned_g1_gif.len() > 100_000,
+        "README learned G1 stride GIF is missing or malformed"
+    );
+    anyhow::ensure!(
+        learned_g1_png_path.is_file(),
+        "README learned G1 stride PNG is missing"
+    );
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     anyhow::ensure!(
         metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
