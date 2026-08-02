@@ -70,3 +70,9 @@ merely score less, it can blow the solver up mid-step (the ulp-shifted
 orbit on Linux CI did exactly that), so every replay runs under
 catch-unwind (a panic is a fall) and the pinned claim is the **median of
 three ulp-perturbed replays**.
+
+The development and test profiles use `opt-level = 1` while retaining debug
+assertions and symbols. Fully unoptimized physics builds can take a different
+chaotic orbit and turn a long G1 replay into a solver blow-up; this modest
+optimization keeps local and CI headless validation on the same practical
+simulation path.

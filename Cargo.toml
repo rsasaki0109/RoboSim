@@ -122,3 +122,13 @@ roxmltree = "0.20"
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 earcutr = "0.5"
+
+# Long-running legged rollouts are chaotic even before the intended ULP
+# perturbations. Keeping debug assertions and symbols while using modest
+# optimization prevents the unoptimized physics code path from selecting a
+# different solver orbit (or taking many minutes per replay).
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1
