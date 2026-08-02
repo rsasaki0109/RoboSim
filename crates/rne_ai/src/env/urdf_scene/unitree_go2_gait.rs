@@ -1033,6 +1033,208 @@ impl UnitreeGo2TorquePolicy {
     }
 }
 
+/// Number of samples in a phase-conditioned pure-torque policy.
+pub const UNITREE_GO2_PURE_TORQUE_PHASE_BINS: usize = 45;
+
+/// Direct-torque locomotion policy for the official Unitree Go2.
+///
+/// The policy combines a small joint-state feedback term with a learned
+/// phase-conditioned torque action. It emits all twelve actuator commands
+/// directly; the locomotion rollout does not construct a trot pose or add a
+/// position-target PD term. The phase table is linearly interpolated so callers
+/// can use a continuous normalized phase rather than an integer step counter.
+///
+/// This representation deliberately keeps the actuator contract visible:
+/// position feedback is a stabilizing state feature, while the phase action is
+/// the policy output in N·m. It is therefore useful for headless policy tests
+/// and for adapters that need to inspect the final torque command before it
+/// reaches a backend.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeGo2PureTorquePolicy {
+    /// Neutral joint positions used by the policy's local state feedback,
+    /// ordered FL, FR, RL, RR and then hip, thigh, calf.
+    pub joint_position_targets_rad: [f64; 12],
+    /// Position feedback gain in N·m/rad.
+    pub position_kp_nm_per_rad: f64,
+    /// Velocity feedback gain in N·m/(rad/s).
+    pub velocity_kd_nm_per_rad_s: f64,
+    /// Per-leg phase offsets, ordered FL, FR, RL, RR, in cycles.
+    pub phase_offsets: [f64; 4],
+    /// Learned thigh torque action over one normalized phase cycle, in N·m.
+    pub thigh_phase_torques_nm: [f64; UNITREE_GO2_PURE_TORQUE_PHASE_BINS],
+    /// Learned calf torque action over one normalized phase cycle, in N·m.
+    pub calf_phase_torques_nm: [f64; UNITREE_GO2_PURE_TORQUE_PHASE_BINS],
+}
+
+impl UnitreeGo2PureTorquePolicy {
+    /// A zero policy that emits no torque when its state feedback gains are
+    /// also zero.
+    pub const ZERO: Self = Self {
+        joint_position_targets_rad: [0.0; 12],
+        position_kp_nm_per_rad: 0.0,
+        velocity_kd_nm_per_rad_s: 0.0,
+        phase_offsets: [0.0; 4],
+        thigh_phase_torques_nm: [0.0; UNITREE_GO2_PURE_TORQUE_PHASE_BINS],
+        calf_phase_torques_nm: [0.0; UNITREE_GO2_PURE_TORQUE_PHASE_BINS],
+    };
+
+    /// A direct-torque walk learned from a deterministic phase-policy search.
+    ///
+    /// The policy uses the Go2's 45-step gait period but does not call the
+    /// scripted trot generator. The action table is frozen at twelve decimal
+    /// places so headless replays can compare the resulting torque stream. It
+    /// is intentionally a modest transport gait rather than a claim of
+    /// command tracking: explicit velocity commands and terrain adaptation
+    /// are separate follow-on policy inputs.
+    pub const LEARNED_WALK: Self = Self {
+        joint_position_targets_rad: [
+            0.0, 0.8, -1.5, 0.0, 0.8, -1.5, 0.0, 0.8, -1.5, 0.0, 0.8, -1.5,
+        ],
+        position_kp_nm_per_rad: 40.0,
+        velocity_kd_nm_per_rad_s: 0.5,
+        phase_offsets: [0.0, 0.5, 0.5, 0.0],
+        thigh_phase_torques_nm: [
+            9.600000000000,
+            8.990476190476,
+            8.380952380952,
+            7.771428571429,
+            7.161904761905,
+            6.552380952381,
+            5.942857142857,
+            5.333333333333,
+            4.723809523810,
+            4.114285714286,
+            3.504761904762,
+            2.895238095238,
+            2.285714285714,
+            1.676190476190,
+            1.066666666667,
+            0.457142857143,
+            -0.152380952381,
+            -0.761904761905,
+            -1.371428571429,
+            -1.980952380952,
+            -2.590476190476,
+            -3.200000000000,
+            -3.809523809524,
+            -4.419047619048,
+            -5.028571428571,
+            -5.638095238095,
+            -6.247619047619,
+            -6.857142857143,
+            -7.466666666667,
+            -8.076190476190,
+            -8.685714285714,
+            -9.295238095238,
+            -8.888888888889,
+            -7.466666666667,
+            -6.044444444444,
+            -4.622222222222,
+            -3.200000000000,
+            -1.777777777778,
+            -0.355555555556,
+            1.066666666667,
+            2.488888888889,
+            3.911111111111,
+            5.333333333333,
+            6.755555555556,
+            8.177777777778,
+        ],
+        calf_phase_torques_nm: [
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            0.000000000000,
+            -0.742994650401,
+            -2.188928917284,
+            -3.516857459653,
+            -4.655191306068,
+            -5.542562584220,
+            -6.131132878819,
+            -6.389172212936,
+            -6.302769619278,
+            -5.876583084034,
+            -5.133588433632,
+            -4.113840701994,
+            -2.872314753283,
+            -1.475941572752,
+        ],
+    };
+
+    /// Computes all twelve direct torque commands from normalized phase and
+    /// joint state. `phase` is wrapped to `[0, 1)`. A finite non-negative
+    /// `limit_nm` clamps every actuator command; a non-finite or negative limit
+    /// leaves the policy's physical command unbounded.
+    pub fn torques_nm(
+        &self,
+        phase: f64,
+        joint_positions_rad: &[f64; 12],
+        joint_velocities_rad_s: &[f64; 12],
+        limit_nm: f64,
+    ) -> [f64; 12] {
+        let limit = if limit_nm.is_finite() && limit_nm >= 0.0 {
+            limit_nm
+        } else {
+            f64::INFINITY
+        };
+        let mut torques = [0.0; 12];
+        for joint in 0..12 {
+            let leg = joint / 3;
+            let local_phase = (phase + self.phase_offsets[leg]).rem_euclid(1.0);
+            let phase_action = match joint % 3 {
+                1 => interpolate_phase_action(&self.thigh_phase_torques_nm, local_phase),
+                2 => interpolate_phase_action(&self.calf_phase_torques_nm, local_phase),
+                _ => 0.0,
+            };
+            torques[joint] = (self.position_kp_nm_per_rad
+                * (self.joint_position_targets_rad[joint] - joint_positions_rad[joint])
+                - self.velocity_kd_nm_per_rad_s * joint_velocities_rad_s[joint]
+                + phase_action)
+                .clamp(-limit, limit);
+        }
+        torques
+    }
+}
+
+fn interpolate_phase_action(
+    actions_nm: &[f64; UNITREE_GO2_PURE_TORQUE_PHASE_BINS],
+    phase: f64,
+) -> f64 {
+    let position = phase.rem_euclid(1.0) * UNITREE_GO2_PURE_TORQUE_PHASE_BINS as f64;
+    let lower = position.floor() as usize % UNITREE_GO2_PURE_TORQUE_PHASE_BINS;
+    let upper = (lower + 1) % UNITREE_GO2_PURE_TORQUE_PHASE_BINS;
+    let fraction = position - lower as f64;
+    actions_nm[lower] * (1.0 - fraction) + actions_nm[upper] * fraction
+}
+
 fn gait_wave(phase: f64) -> (f64, f64) {
     gait_wave_with_duty(phase, 0.7)
 }
@@ -1288,6 +1490,31 @@ mod tests {
         for offset in overlay.offsets(0.13) {
             assert!(offset.abs() <= 0.5);
         }
+    }
+
+    #[test]
+    fn pure_torque_policy_emits_all_finite_limited_commands() {
+        let policy = UnitreeGo2PureTorquePolicy::LEARNED_WALK;
+        let positions = [0.0; 12];
+        let velocities = [0.0; 12];
+        for phase in [-1.0, 0.0, 0.37, 1.0, 2.25] {
+            let torques = policy.torques_nm(phase, &positions, &velocities, 23.7);
+            assert!(torques.iter().all(|torque| torque.is_finite()));
+            assert!(torques.iter().all(|torque| torque.abs() <= 23.7));
+        }
+    }
+
+    #[test]
+    fn pure_torque_policy_wraps_phase_without_position_targets() {
+        let policy = UnitreeGo2PureTorquePolicy::LEARNED_WALK;
+        let positions = policy.joint_position_targets_rad;
+        let velocities = [0.0; 12];
+        let at_zero = policy.torques_nm(0.0, &positions, &velocities, 23.7);
+        let at_one = policy.torques_nm(1.0, &positions, &velocities, 23.7);
+        assert_eq!(at_zero, at_one);
+        assert_eq!(at_zero[0], 0.0);
+        assert!(at_zero[1] > 0.0);
+        assert_eq!(at_zero[2], 0.0);
     }
 
     #[test]
