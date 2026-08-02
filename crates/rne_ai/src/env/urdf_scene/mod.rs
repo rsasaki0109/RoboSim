@@ -57,7 +57,8 @@ pub use unitree_go2_episode::{
 pub use unitree_go2_gait::{
     unitree_go2_scheduled_targets, unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay,
     UnitreeGo2GaitCommand, UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule,
-    UnitreeGo2TorqueOverlay, UnitreeGo2TorquePolicy, UNITREE_GO2_POLICY_FEATURES,
+    UnitreeGo2PureTorquePolicy, UnitreeGo2TorqueOverlay, UnitreeGo2TorquePolicy,
+    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};

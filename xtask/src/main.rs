@@ -245,6 +245,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
     )?;
+    run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
     run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }

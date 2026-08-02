@@ -370,6 +370,32 @@ never used: learning beats the hand gait at the hand gait's own job. The
 same torque pathway also ports to the G1 humanoid — gains scale with the
 plant, ankles stay servo — see [G1_LOCOMOTION.md](G1_LOCOMOTION.md).
 
+## Removing the scripted trot
+
+The torque overlay still used the scripted trot as a hidden position reference:
+the overlay shaped force, but a position target and PD term supplied the main
+walking action. `UnitreeGo2PureTorquePolicy` removes that dependency. After a
+repeatable startup stand, `examples/64_go2_pure_torque` reads the twelve joint
+states, evaluates a phase-conditioned action table plus local joint feedback,
+and sends all twelve `UrdfJointTorqueTarget` values directly. No locomotion
+step calls `unitree_go2_trot_targets`, and no example-side position-PD torque is
+assembled.
+
+The pinned Windows replay covers **1.235/1.182 m** in the two late 8 s windows,
+travels 3.418 m total, stays above **0.187 m**, and keeps the measured true tilt
+below **0.424 rad**. Exact rates are platform-local under Rapier/libm, so the
+headless contract is the two-window transport, height margin, and actuator
+limit rather than a cross-platform speed claim. The policy's phase table is a
+compact teacher-seeded baseline for this structural arc; explicit velocity
+commands and terrain observations are intentionally left to the next policy
+arc.
+
+The startup stand is not part of the locomotion controller: it uses the
+existing position motors only to put both replay and policy in the same initial
+configuration. Once the 240-step settle finishes, the example sends every
+joint through `step_joint_torques`; the pure policy test therefore exercises the
+actual all-joint torque path rather than a hybrid fallback.
+
 ## The search declines to fly
 
 The first morphological lever, tested: the schedule duty range opens from

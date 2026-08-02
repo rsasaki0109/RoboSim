@@ -1,0 +1,14 @@
+[package]
+name = "go2_pure_torque"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+rne_ai = { path = "../../crates/rne_ai" }
+rne_math = { path = "../../crates/rne_math" }
+
+[[example]]
+name = "64_go2_pure_torque"
+path = "main.rs"

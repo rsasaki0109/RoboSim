@@ -270,6 +270,21 @@ answers the measured chaos horizon with a sustained turn on a genuinely
 contracting trajectory, and the campaign's first closed-loop policy — linear
 state feedback in torque space — turns while keeping the walk.
 
+### Go2 pure-torque policy
+
+`examples/64_go2_pure_torque` closes the structural gap left by the torque
+overlay: after a repeatable startup stand, a phase-conditioned policy emits
+commands for all twelve joints through `step_joint_torques`. The locomotion
+loop does not call `unitree_go2_trot_targets` and does not assemble a position
+PD torque. Its modest joint-state feedback keeps the frozen phase action table
+stable; the default headless replay covers about 1.2 m in each late 8 s window
+while staying above 0.18 m. This is a pure-torque policy baseline, not yet a
+velocity-command or terrain-conditioned policy.
+
+```bash
+cargo run --release -p go2_pure_torque --example 64_go2_pure_torque
+```
+
 The official Unitree Go2 URDF and meshes load through RNE's generic articulation
 pipeline. Its dynamic multibody scene includes self-collision filtering, 12
 force-limited joints, primitive foot contacts, and a headless four-foot standing
