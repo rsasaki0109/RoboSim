@@ -82,6 +82,7 @@ members = [
   "examples/60_go2_turn_gif",
   "examples/61_go2_learned_sprint",
   "examples/62_g1_learned_stride",
+  "examples/63_g1_stride_gif",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
