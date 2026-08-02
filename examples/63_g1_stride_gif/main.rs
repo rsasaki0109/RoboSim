@@ -1,19 +1,20 @@
-//! Renders the learned G1 stride as a side-by-side hero GIF.
+//! Renders the commanded G1 locomotion milestone as a side-by-side hero GIF.
 //!
 //! The blue panel is the plain hybrid stepper and the orange panel is the
-//! pinned [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] at the speed-up command
-//! used by the headless regression test. Both panels settle, discard the same
-//! 8 s transient, and then render the two measured 8 s windows. `--smoke`
-//! exercises that physics path without initializing a renderer.
+//! pinned [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] under the command
+//! boundary's positive differential-steering request. Both panels settle,
+//! discard the same 8 s transient, and then render the measured windows.
+//! `--smoke` exercises that physics path without initializing a renderer.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
-    UnitreeG1GaitCommand, UnitreeG1TorqueOverlay, UrdfJointPositionTarget, UrdfJointTorqueTarget,
-    UrdfSceneSim,
+    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets_for_velocity,
+    UnitreeG1CommandedTorquePolicy, UnitreeG1GaitCommand, UnitreeG1TorqueOverlay,
+    UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput, UrdfJointPositionTarget,
+    UrdfJointTorqueTarget, UrdfSceneSim,
 };
 use rne_math::{Transform3, Vec3};
 use rne_render::{
@@ -39,7 +40,7 @@ const WALK_FOOT_LIFT_RAD: f64 = 0.12;
 const WALK_CYCLE_STEPS: u64 = 100;
 const TRAIL_EVERY_STEPS: u64 = 36;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
-const SPEEDUP_MIN_WINDOW_M: f64 = 0.20;
+const COMMAND_MIN_WINDOW_M: f64 = 0.12;
 
 const TORQUE_LINKS: [&str; 8] = [
     "left_hip_pitch_link",
@@ -62,7 +63,8 @@ fn walk_command() -> UnitreeG1GaitCommand {
 
 struct G1Walker {
     sim: UrdfSceneSim,
-    overlay: UnitreeG1TorqueOverlay,
+    policy: UnitreeG1CommandedTorquePolicy,
+    command: UnitreeG1VelocityCommand,
     step: u64,
     capture_step: u64,
     capture_start_xz_m: [f64; 2],
@@ -75,17 +77,14 @@ struct G1Walker {
 }
 
 impl G1Walker {
-    fn new(overlay: UnitreeG1TorqueOverlay) -> Self {
+    fn new(overlay: UnitreeG1TorqueOverlay, command: UnitreeG1VelocityCommand) -> Self {
         let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
             .expect("load dynamic G1");
         sim.configure_position_motors(220.0, 24.0, TORQUE_LIMIT_NM);
-        let stand = unitree_g1_gait_targets(
+        let stand = unitree_g1_gait_targets_for_velocity(
             0,
-            UnitreeG1GaitCommand {
-                stride_rad: 0.0,
-                foot_lift_rad: 0.0,
-                cycle_steps: WALK_CYCLE_STEPS,
-            },
+            walk_command(),
+            UnitreeG1VelocityCommand::default(),
         );
         for _ in 0..SETTLE_STEPS {
             sim.step_joint_position_targets(&stand);
@@ -93,7 +92,12 @@ impl G1Walker {
         let observed = sim.observe();
         Self {
             sim,
-            overlay,
+            policy: UnitreeG1CommandedTorquePolicy {
+                overlay,
+                forward_velocity_feedback_gain: 0.0,
+                ..UnitreeG1CommandedTorquePolicy::default()
+            },
+            command,
             step: 0,
             capture_step: 0,
             capture_start_xz_m: [observed.base_x_m, observed.base_z_m],
@@ -124,7 +128,8 @@ impl G1Walker {
             if self.capture_active && self.capture_step.is_multiple_of(TRAIL_EVERY_STEPS) {
                 self.record_trail();
             }
-            let targets = unitree_g1_gait_targets(self.step, walk_command());
+            let targets =
+                unitree_g1_gait_targets_for_velocity(self.step, walk_command(), self.command);
             let servo: Vec<UrdfJointPositionTarget<'_>> = targets
                 .iter()
                 .filter(|target| !TORQUE_LINKS.contains(&target.link_name))
@@ -135,9 +140,26 @@ impl G1Walker {
                 self.sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
                 self.sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
             ];
-            let two_cycle_steps = 2 * WALK_CYCLE_STEPS;
-            let two_cycle_phase = (self.step % two_cycle_steps) as f64 / two_cycle_steps as f64;
-            let feed_forward = self.overlay.torques_nm(two_cycle_phase, stance);
+            let observation = self.sim.observe();
+            let world_velocity = Vec3::new(
+                observation.base_linear_velocity_x_m_s,
+                observation.base_linear_velocity_y_m_s,
+                observation.base_linear_velocity_z_m_s,
+            );
+            let body_rotation = self
+                .sim
+                .named_transform("pelvis")
+                .expect("G1 pelvis pose")
+                .rotation;
+            let input = UnitreeG1VelocityPolicyInput {
+                two_cycle_phase: (self.step % (2 * WALK_CYCLE_STEPS)) as f64
+                    / (2 * WALK_CYCLE_STEPS) as f64,
+                stance,
+                command: self.command,
+                measured_forward_velocity_m_s: (body_rotation.inverse() * world_velocity).z,
+                measured_yaw_rate_rad_s: observation.base_angular_velocity_y_rad_s,
+            };
+            let feed_forward = self.policy.torques_nm_for_command(input, TORQUE_LIMIT_NM);
             let torques: Vec<UrdfJointTorqueTarget<'_>> = TORQUE_LINKS
                 .iter()
                 .enumerate()
@@ -224,8 +246,16 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create learned G1 frame directory");
 
-    let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO);
-    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE);
+    let forward = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: 0.0,
+    };
+    let steering = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: 0.05,
+    };
+    let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO, forward);
+    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, steering);
     baseline.step_frame(PREROLL_STEPS);
     learned.step_frame(PREROLL_STEPS);
     baseline.begin_capture();
@@ -269,8 +299,8 @@ fn main() {
     let baseline_min = baseline.minimum_window_m();
     let learned_min = learned.minimum_window_m();
     assert!(
-        learned_min > 2.0 * baseline_min && learned_min > SPEEDUP_MIN_WINDOW_M,
-        "learned G1 must clear the speed-up bar: {learned_min:.3} m vs stepper {baseline_min:.3} m"
+        learned_min > 2.0 * baseline_min && learned_min > COMMAND_MIN_WINDOW_M,
+        "commanded G1 must clear the path bar: {learned_min:.3} m vs stepper {baseline_min:.3} m"
     );
     assert!(
         learned.min_height_m > 0.7,
@@ -297,7 +327,13 @@ fn main() {
 }
 
 fn run_smoke() {
-    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE);
+    let mut learned = G1Walker::new(
+        UnitreeG1TorqueOverlay::LEARNED_STRIDE,
+        UnitreeG1VelocityCommand {
+            forward_m_s: 0.0276,
+            yaw_rate_rad_s: 0.05,
+        },
+    );
     learned.step_frame(PREROLL_STEPS);
     learned.begin_capture();
     learned.step_frame(96);

@@ -57,6 +57,7 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 | C | Quadruped locomotion | Seeded gait episode, action/observation/reward API, deterministic forward-walk baseline | Done: seeded gait-phase resets, action/observation/reward episode, four-foot impulses, exact action replay, pure-torque velocity/terrain control, and deterministic speed validation |
 | D | Humanoid | Humanoid URDF standing/balance episode reusing the same named-joint and foot-contact APIs | Done: 12-DoF URDF, force-limited standing, bilateral foot loads, balance action/observation/reward episode, exact replay test, and example 37 |
 | E | Learning | Vectorized quadruped/humanoid environments and CEM/PPO smoke baselines | Done: shared `LocomotionPolicy`, seeded Go2/G1 vectorized batches, replay checkpoints/digests, native Go2 Python adapter, dependency-free CEM smoke, and SB3 PPO smoke |
+| F | Humanoid locomotion v0.1 | Typed forward/stop/differential-steering commands, robust CEM overlay search, light-disturbance and exact-replay benchmark, example 67, and refreshed G1 hero/docs/CI | Done |
 
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are

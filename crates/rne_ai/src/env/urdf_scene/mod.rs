@@ -4,6 +4,7 @@ mod humanoid_episode;
 mod lekiwi_drive;
 mod quadruped;
 mod quadruped_episode;
+mod unitree_g1_commanded_gait;
 mod unitree_g1_dex3;
 mod unitree_g1_dex3_behavior;
 mod unitree_g1_dex3_episode;
@@ -29,6 +30,12 @@ pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
 pub use quadruped_episode::{
     QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation,
 };
+pub use unitree_g1_commanded_gait::{
+    run_unitree_g1_commanded_gait, run_unitree_g1_commanded_gait_with_policy,
+    UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome, UNITREE_G1_POSITION_DAMPING,
+    UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM,
+    UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
+};
 pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
 pub use unitree_g1_dex3_behavior::{UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario};
 pub use unitree_g1_dex3_episode::{
@@ -39,8 +46,11 @@ pub use unitree_g1_episode::{
     UnitreeG1Action, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1Observation,
 };
 pub use unitree_g1_gait::{
-    unitree_g1_gait_targets, UnitreeG1GaitCommand, UnitreeG1TorqueOverlay,
-    UnitreeG1TorquePolicyInput,
+    unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride,
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, UnitreeG1CommandedTorquePolicy,
+    UnitreeG1GaitCommand, UnitreeG1TorqueOverlay, UnitreeG1TorquePolicyInput,
+    UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
 };
 pub use unitree_g1_gait_episode::{
     UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,

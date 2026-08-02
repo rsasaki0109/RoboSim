@@ -86,6 +86,7 @@ members = [
   "examples/64_go2_pure_torque",
   "examples/65_go2_velocity_terrain",
   "examples/66_locomotion_vectorized",
+  "examples/67_g1_commanded_locomotion",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
