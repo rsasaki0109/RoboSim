@@ -84,6 +84,7 @@ members = [
   "examples/62_g1_learned_stride",
   "examples/63_g1_stride_gif",
   "examples/64_go2_pure_torque",
+  "examples/65_go2_velocity_terrain",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",

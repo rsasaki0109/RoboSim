@@ -246,6 +246,7 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
     )?;
     run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
+    run_step("cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke")?;
     run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }
@@ -850,6 +851,8 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/deformable_cable.rne.scene.toml"),
         root.join("assets/scenes/deformable_cloth.rne.scene.toml"),
         root.join("assets/scenes/unitree_g1_cloth_handling.rne.scene.toml"),
+        root.join("assets/scenes/unitree_go2_dynamic.rne.scene.toml"),
+        root.join("assets/scenes/unitree_go2_terrain.rne.scene.toml"),
     ];
     let robots = [
         root.join("assets/robots/diff_drive.rne.robot.toml"),

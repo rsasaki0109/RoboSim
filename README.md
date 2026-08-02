@@ -278,8 +278,18 @@ commands for all twelve joints through `step_joint_torques`. The locomotion
 loop does not call `unitree_go2_trot_targets` and does not assemble a position
 PD torque. Its modest joint-state feedback keeps the frozen phase action table
 stable; the default headless replay covers about 1.2 m in each late 8 s window
-while staying above 0.18 m. This is a pure-torque policy baseline, not yet a
-velocity-command or terrain-conditioned policy.
+while staying above 0.18 m. The next headless example adds a 0.14 m/s body-
+forward command and contact-derived ramp observation to the same all-joint
+torque path:
+
+```bash
+cargo run --release -p go2_velocity_terrain --example 65_go2_velocity_terrain
+```
+
+`UnitreeGo2VelocityPolicyInput` carries measured velocity and the front/rear
+contact elevations. The policy scales or suppresses its phase action from the
+velocity error and raises swing-calf authority from terrain slope/span; the
+flat and fixed-ramp replay is also covered by the GPU-free `--smoke` path.
 
 ```bash
 cargo run --release -p go2_pure_torque --example 64_go2_pure_torque

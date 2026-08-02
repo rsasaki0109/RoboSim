@@ -386,15 +386,45 @@ travels 3.418 m total, stays above **0.187 m**, and keeps the measured true tilt
 below **0.424 rad**. Exact rates are platform-local under Rapier/libm, so the
 headless contract is the two-window transport, height margin, and actuator
 limit rather than a cross-platform speed claim. The policy's phase table is a
-compact teacher-seeded baseline for this structural arc; explicit velocity
-commands and terrain observations are intentionally left to the next policy
-arc.
+compact teacher-seeded baseline for this structural arc; the next section adds
+explicit velocity commands and terrain observations around that same actuator
+path.
 
 The startup stand is not part of the locomotion controller: it uses the
 existing position motors only to put both replay and policy in the same initial
 configuration. Once the 240-step settle finishes, the example sends every
 joint through `step_joint_torques`; the pure policy test therefore exercises the
 actual all-joint torque path rather than a hybrid fallback.
+
+## Commanding speed over terrain
+
+The pure-torque baseline now accepts a [`UnitreeGo2VelocityPolicyInput`]: a
+forward-speed command, measured body velocity, joint state, and a compact
+contact-derived terrain observation. `UnitreeGo2PureTorquePolicy` uses the
+velocity error to scale its phase action around a nominal 0.14 m/s walk, stops
+the phase action for a zero command, and reverses phase progression for a
+negative command. This is speed control around the learned walk, not a new
+position-servo path.
+
+The terrain observation contains front/rear contact elevations, their
+front-to-rear slope, and the elevation span across contacting feet. The policy
+uses slope and span to increase swing-calf torque, giving the foot clearance
+authority a terrain-conditioned input without placing a physics-backend type
+in `rne_ai`. `assets/scenes/unitree_go2_terrain.rne.scene.toml` supplies a
+fixed, low-angle ramp; `examples/65_go2_velocity_terrain` runs the same
+headless controller on the flat and ramp scenes and checks speed, height,
+terrain observation, and the 23.7 N·m actuator limit.
+
+```bash
+cargo run --release -p go2_velocity_terrain --example 65_go2_velocity_terrain
+cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke
+```
+
+On the pinned Windows release replay, the 0.14 m/s command averages about
+0.18 m/s on the flat scene and 0.16 m/s across the ramp rollout. Exact rates
+remain platform-local under Rapier/libm; the portable contract is positive
+transport, bounded torque, upright height, and a non-zero contact terrain
+signal.
 
 ## The search declines to fly
 
