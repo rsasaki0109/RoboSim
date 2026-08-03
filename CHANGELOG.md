@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Photoreal environment lighting (v0.3-B)**: `rne_render` now loads
+  Radiance `.hdr` equirectangular maps as validated linear RGB32F data, while
+  `rne_render_wgpu` provides opt-in sky, diffuse IBL, and view-dependent
+  specular IBL with configurable intensity and world-Y rotation. The G1
+  photoreal capture accepts `RNE_HDRI_PATH`, `RNE_HDRI_INTENSITY`, and
+  `RNE_HDRI_ROTATION_RAD`; no third-party HDRI is vendored.
 - **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
   90-meter, ten-building PLATEAU-style showcase and renders varied facades,
   sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The

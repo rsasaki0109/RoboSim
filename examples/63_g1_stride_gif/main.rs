@@ -5,6 +5,8 @@
 //! boundary's positive differential-steering request. Both panels settle,
 //! discard the same 8 s transient, and then render the measured windows.
 //! `--smoke` exercises that physics path without initializing a renderer.
+//! Set `RNE_HDRI_PATH` to a Radiance `.hdr` equirectangular map to enable the
+//! photoreal environment background and image-based lighting.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,8 +21,8 @@ use rne_ai::{
 };
 use rne_math::{Transform3, Vec3};
 use rne_render::{
-    Camera, ImageFrame, MeshRenderCache, PbrMaterial, RenderBackend, RenderScene, RenderSceneItem,
-    TriangleMesh, VisualShape,
+    Camera, EnvironmentLighting, EnvironmentMap, ImageFrame, MeshRenderCache, PbrMaterial,
+    RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
@@ -281,6 +283,7 @@ fn main() {
     learned.begin_capture();
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
+    configure_environment(&mut backend);
     let camera = Camera::new(PANEL_WIDTH, PANEL_HEIGHT, std::f64::consts::FRAC_PI_4);
     let mesh_roots: Vec<PathBuf> = baseline.sim.mesh_package_roots().to_vec();
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
@@ -349,6 +352,28 @@ fn main() {
         learned.window_b_m,
         learned.min_height_m,
     );
+}
+
+fn configure_environment(backend: &mut WgpuRenderBackend) {
+    let Some(path) = std::env::var_os("RNE_HDRI_PATH") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let map = EnvironmentMap::load(&path)
+        .unwrap_or_else(|error| panic!("load HDRI environment {}: {error}", path.display()));
+    let mut lighting = EnvironmentLighting::from_map(Arc::new(map));
+    if let Ok(value) = std::env::var("RNE_HDRI_INTENSITY") {
+        lighting.intensity = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_HDRI_INTENSITY={value:?}: {error}"));
+    }
+    if let Ok(value) = std::env::var("RNE_HDRI_ROTATION_RAD") {
+        lighting.rotation_rad = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_HDRI_ROTATION_RAD={value:?}: {error}"));
+    }
+    backend.set_environment(lighting);
+    println!("using HDRI environment {}", path.display());
 }
 
 fn run_smoke() {

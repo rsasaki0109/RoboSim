@@ -61,6 +61,7 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 | G | Humanoid heading-yaw v0.2 | Bounded true-heading target/error metrics, stance/swing-aware hybrid control, deterministic bilateral CEM candidate search, example 68, and updated G1 docs/CI | Done (240-tick envelope; sustained long-horizon tracking remains future work) |
 | H | Photoreal material maps v0.2 | Backend-neutral normal/roughness maps, OBJ/MTL map loading, tangent-frame GGX shading, and mapped G1 test-bay floor | Done (HDRI and TAA remain future rendering work) |
 | I | Photoreal asset foundation v0.3-A | Static glTF/GLB scene import, node-transform baking, packed metallic-roughness/emissive/occlusion maps, and backend-neutral PBR texture semantics | Done (HDRI, TAA, skinning, and animation remain future rendering work) |
+| J | Photoreal environment lighting v0.3-B | Backend-neutral Radiance HDR loading, opt-in WGPU equirectangular sky, diffuse/specular image-based lighting, map caching, and G1 capture integration | Done |
 
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
