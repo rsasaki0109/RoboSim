@@ -374,6 +374,7 @@ fn run_smoke() {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_panel(
     backend: &mut WgpuRenderBackend,
     camera: &Camera,
