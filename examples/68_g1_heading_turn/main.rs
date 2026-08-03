@@ -34,6 +34,7 @@ impl Candidate {
         UnitreeG1CommandedTorquePolicy {
             yaw_rate_kp_nm_per_rad_s: 32.0,
             max_yaw_torque_nm: 16.0,
+            negative_yaw_rate_gain_scale: 2.0,
             yaw_overlay: self.yaw_overlay,
             yaw_overlay_gain: 8.0,
             mirror_yaw_overlay_negative: false,
@@ -50,6 +51,8 @@ fn config(command: UnitreeG1VelocityCommand, steps: u64) -> UnitreeG1CommandedGa
         // The nominal gait keeps its v0.1 learned-stride mirror. The v0.2
         // command targets use the explicit signed hip-yaw channel instead.
         mirror_negative_yaw: false,
+        yaw_hip_yaw_right_sign: -1.0,
+        yaw_hip_yaw_target_rad_per_rad_s: 0.0,
         // A bounded target makes this first heading contract a stable turn
         // reference instead of letting a small-rate plant error integrate
         // into an unbounded pose request.

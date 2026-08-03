@@ -605,6 +605,7 @@ mod tests {
         let candidate = UnitreeG1CommandedTorquePolicy {
             yaw_rate_kp_nm_per_rad_s: 32.0,
             max_yaw_torque_nm: 16.0,
+            negative_yaw_rate_gain_scale: 2.0,
             mirror_yaw_overlay_negative: false,
             ..UnitreeG1CommandedTorquePolicy::default()
         };
@@ -612,6 +613,8 @@ mod tests {
             settle_steps: 60,
             rollout_steps: 240,
             mirror_negative_yaw: false,
+            yaw_hip_yaw_right_sign: -1.0,
+            yaw_hip_yaw_target_rad_per_rad_s: 0.0,
             heading_target_clamp_rad: 0.08,
             ..UnitreeG1CommandedGaitConfig::default()
         };

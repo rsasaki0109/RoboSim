@@ -160,9 +160,11 @@ corrections; ankles, arms, and waist remain position-servoed because their
 60 Hz torque-PD path is not stable on this plant. Foot impulse observations are
 sampled before each tick: the learned Fourier overlay is gated per supporting
 leg, and optional direct yaw correction/swing target terms can be gated by the
-stance/swing state. The policy also exposes an accumulated-heading correction,
-but the pinned candidate uses yaw-rate feedback because it is the stable
-short-horizon result.
+stance/swing state. The policy also exposes an accumulated-heading correction.
+The pinned candidate uses bounded yaw-rate feedback plus a calibrated
+negative-turn gain of `2.0`: the official model's contact schedule is
+directionally asymmetric, so the negative channel gets extra authority while
+the final motor command remains inside the same torque ceiling.
 
 Example 68 pins the current acceptance envelope at 240 locomotion ticks (4 s),
 `forward_m_s = 0.0276`, `yaw_rate_rad_s = ±0.05`, and a bounded target of
@@ -171,7 +173,7 @@ Example 68 pins the current acceptance envelope at 240 locomotion ticks (4 s),
 | command | target heading | body yaw | final error | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
-| right `(+0.0276, -0.05)` | −0.080 rad | −0.007 rad | −0.073 rad | 0.266 rad/s | 0.022 m | 0.784 m | 0.085 rad | 25.92 N·m | no |
+| right `(+0.0276, -0.05)` | −0.080 rad | −0.009 rad | −0.071 rad | 0.283 rad/s | 0.023 m | 0.784 m | 0.090 rad | 27.69 N·m | no |
 
 The sign reversal, height above 0.75 m, no-fall result, finite metrics, torque
 ceiling of 88 N·m, and bit-exact replay are pinned by the library test and the
@@ -181,10 +183,10 @@ contact schedule can lose heading sign. A follow-up should improve the contact
 schedule and validate a longer envelope before widening the command contract.
 
 Example 68 also provides a deterministic 48-dimensional CEM over the optional
-eight-joint yaw overlay. It evaluates both turn directions, scores the median of
-three ULP-perturbed replays, catches deterministic solver panics as rejected
-candidates, and falls back to the validated zero-overlay candidate when search
-does not improve it:
+eight-joint yaw overlay on top of that bounded calibration. It evaluates both
+turn directions, scores the median of three ULP-perturbed replays, catches
+deterministic solver panics as rejected candidates, and falls back to the
+validated zero-overlay candidate when search does not improve it:
 
 ```bash
 cargo run --release -p g1_heading_turn --example 68_g1_heading_turn

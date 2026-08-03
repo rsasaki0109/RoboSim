@@ -433,6 +433,11 @@ pub struct UnitreeG1CommandedTorquePolicy {
     pub forward_velocity_feedback_gain: f64,
     /// Hip-yaw torque gain on yaw-rate error in N·m/(rad/s).
     pub yaw_rate_kp_nm_per_rad_s: f64,
+    /// Additional bounded gain scale for negative commanded turns.
+    ///
+    /// This permits a calibrated contact asymmetry without changing the
+    /// positive-turn channel. A finite value is clamped to `[0, 2]`.
+    pub negative_yaw_rate_gain_scale: f64,
     /// Differential hip-yaw torque gain on accumulated heading error in
     /// N·m/rad.
     pub heading_kp_nm_per_rad: f64,
@@ -477,6 +482,7 @@ impl Default for UnitreeG1CommandedTorquePolicy {
             nominal_forward_velocity_m_s: 0.0276,
             forward_velocity_feedback_gain: 0.25,
             yaw_rate_kp_nm_per_rad_s: 16.0,
+            negative_yaw_rate_gain_scale: 1.0,
             heading_kp_nm_per_rad: 0.0,
             max_yaw_torque_nm: 8.0,
             max_heading_torque_nm: 8.0,
@@ -568,7 +574,14 @@ impl UnitreeG1CommandedTorquePolicy {
         } else {
             command.yaw_rate_rad_s - measured_yaw_rate_rad_s
         };
-        let yaw_torque = (yaw_gain * yaw_rate_error).clamp(-yaw_limit, yaw_limit);
+        let negative_turn_scale =
+            if command.yaw_rate_rad_s < 0.0 && self.negative_yaw_rate_gain_scale.is_finite() {
+                self.negative_yaw_rate_gain_scale.clamp(0.0, 2.0)
+            } else {
+                1.0
+            };
+        let yaw_torque =
+            (yaw_gain * negative_turn_scale * yaw_rate_error).clamp(-yaw_limit, yaw_limit);
         let heading_gain = if self.heading_kp_nm_per_rad.is_finite() {
             self.heading_kp_nm_per_rad.max(0.0)
         } else {
