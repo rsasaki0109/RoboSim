@@ -33,6 +33,8 @@ pub const UNITREE_G1_TORQUE_PD_DAMPING: f64 = 10.0;
 pub const UNITREE_G1_TORQUE_LIMIT_NM: f64 = 88.0;
 /// G1 joint speed ceiling used while converting torque commands to motor targets.
 pub const UNITREE_G1_SPEED_LIMIT_RAD_S: f64 = 30.0;
+/// Fixed simulation interval used by the commanded G1 evaluation in seconds.
+pub const UNITREE_G1_SIM_DT_S: f64 = 1.0 / 60.0;
 
 /// Configuration for one deterministic, headless command-conditioned G1 run.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +51,15 @@ pub struct UnitreeG1CommandedGaitConfig {
     pub yaw_torso_target_rad_per_rad_s: f64,
     /// Differential hip-roll target per commanded yaw rate in rad/(rad/s).
     pub yaw_hip_roll_target_rad_per_rad_s: f64,
+    /// Additional differential hip-yaw target per commanded yaw rate in
+    /// rad/(rad/s), applied to the swing/stance leg targets.
+    pub yaw_hip_yaw_target_rad_per_rad_s: f64,
+    /// Differential hip-yaw target per commanded yaw rate applied only while
+    /// the corresponding foot is in swing, in rad/(rad/s).
+    pub yaw_swing_hip_yaw_target_rad_per_rad_s: f64,
+    /// Differential hip-roll target per commanded yaw rate applied only to
+    /// the swing leg, in rad/(rad/s).
+    pub yaw_swing_hip_roll_target_rad_per_rad_s: f64,
     /// Right hip-yaw target sign; `-1` is differential and `+1` is common-mode.
     pub yaw_hip_yaw_right_sign: f64,
     /// Mirrors the nominal gait for negative yaw commands.
@@ -59,6 +70,10 @@ pub struct UnitreeG1CommandedGaitConfig {
     pub settle_steps: u64,
     /// Number of 60 Hz locomotion ticks to evaluate.
     pub rollout_steps: u64,
+    /// Optional absolute accumulated-heading target clamp in radians. A
+    /// positive finite value creates a bounded heading hold; non-finite values
+    /// retain the integrated yaw-rate reference.
+    pub heading_target_clamp_rad: f64,
     /// Position-motor stiffness for the hybrid gait's servo-held joints.
     pub position_stiffness: f64,
     /// Position-motor damping for the hybrid gait's servo-held joints.
@@ -94,6 +109,9 @@ impl Default for UnitreeG1CommandedGaitConfig {
             yaw_phase_offset_s_per_rad_s: 0.0,
             yaw_torso_target_rad_per_rad_s: 0.0,
             yaw_hip_roll_target_rad_per_rad_s: 0.0,
+            yaw_hip_yaw_target_rad_per_rad_s: 0.0,
+            yaw_swing_hip_yaw_target_rad_per_rad_s: 0.0,
+            yaw_swing_hip_roll_target_rad_per_rad_s: 0.0,
             yaw_hip_yaw_right_sign: -1.0,
             mirror_negative_yaw: true,
             command: UnitreeG1VelocityCommand {
@@ -102,6 +120,7 @@ impl Default for UnitreeG1CommandedGaitConfig {
             },
             settle_steps: 240,
             rollout_steps: 1440,
+            heading_target_clamp_rad: f64::INFINITY,
             position_stiffness: UNITREE_G1_POSITION_STIFFNESS,
             position_damping: UNITREE_G1_POSITION_DAMPING,
             torque_pd_stiffness: UNITREE_G1_TORQUE_PD_STIFFNESS,
@@ -135,6 +154,17 @@ pub struct UnitreeG1CommandedGaitOutcome {
     pub mean_yaw_rate_rad_s: f64,
     /// Unwrapped accumulated body yaw in radians.
     pub total_yaw_rad: f64,
+    /// Target accumulated body heading at the end of the rollout in radians.
+    pub target_heading_rad: f64,
+    /// Final heading error `target_heading_rad - total_yaw_rad` in radians.
+    pub heading_error_rad: f64,
+    /// Mean absolute accumulated-heading error in radians.
+    pub mean_abs_heading_error_rad: f64,
+    /// Mean absolute yaw-rate tracking error in rad/s.
+    pub mean_abs_yaw_rate_error_rad_s: f64,
+    /// Estimated turn radius from mean forward speed and absolute yaw rate.
+    /// `None` denotes a near-zero measured yaw rate.
+    pub turn_radius_m: Option<f64>,
     /// Lowest observed pelvis height in meters.
     pub min_height_m: f64,
     /// Largest true body-up tilt from the settled reference in radians.
@@ -189,6 +219,9 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
     let start = sim.observe();
     let mut previous_yaw = start.base_relative_yaw_rad;
     let mut total_yaw_rad = 0.0;
+    let mut heading_error_sum_rad = 0.0;
+    let mut yaw_rate_error_sum_rad_s = 0.0;
+    let mut abs_yaw_rate_sum_rad_s = 0.0;
     let mut forward_velocity_sum = 0.0;
     let mut yaw_rate_sum = 0.0;
     let mut min_height_m = start.base_y_m;
@@ -205,6 +238,10 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
                 sim.tilt_named_body_rad("pelvis", config.disturbance_axis_angle_rad);
         }
 
+        let stance = [
+            sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
+            sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
+        ];
         let mut targets = unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase(
             step,
             config.base_command,
@@ -219,6 +256,34 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
             let hip_roll = config.yaw_hip_roll_target_rad_per_rad_s * command.yaw_rate_rad_s;
             targets[1].position += hip_roll;
             targets[7].position -= hip_roll;
+        }
+        if config.yaw_hip_yaw_target_rad_per_rad_s.is_finite() {
+            let hip_yaw = (config.yaw_hip_yaw_target_rad_per_rad_s * command.yaw_rate_rad_s)
+                .clamp(-0.35, 0.35);
+            targets[2].position += hip_yaw;
+            targets[8].position -= hip_yaw;
+        }
+        if config.yaw_swing_hip_yaw_target_rad_per_rad_s.is_finite() {
+            let swing_hip_yaw = (config.yaw_swing_hip_yaw_target_rad_per_rad_s
+                * command.yaw_rate_rad_s)
+                .clamp(-0.35, 0.35);
+            if !stance[0] {
+                targets[2].position += swing_hip_yaw;
+            }
+            if !stance[1] {
+                targets[8].position -= swing_hip_yaw;
+            }
+        }
+        if config.yaw_swing_hip_roll_target_rad_per_rad_s.is_finite() {
+            let swing_hip_roll = (config.yaw_swing_hip_roll_target_rad_per_rad_s
+                * command.yaw_rate_rad_s)
+                .clamp(-0.30, 0.30);
+            if !stance[0] {
+                targets[1].position += swing_hip_roll;
+            }
+            if !stance[1] {
+                targets[7].position -= swing_hip_roll;
+            }
         }
         if config.yaw_hip_yaw_right_sign.is_finite() {
             let target_gain = 0.45 * command.yaw_rate_rad_s;
@@ -247,15 +312,20 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
             .rotation;
         let measured_forward_velocity_m_s = (body_rotation.inverse() * world_velocity).z;
         let measured_yaw_rate_rad_s = observation.base_angular_velocity_y_rad_s;
+        let target_heading_rad = bounded_heading_target(
+            command.yaw_rate_rad_s * (step + 1) as f64 * UNITREE_G1_SIM_DT_S,
+            config.heading_target_clamp_rad,
+        );
         let input = UnitreeG1VelocityPolicyInput {
             two_cycle_phase: two_cycle_phase(step, config.base_command.cycle_steps),
-            stance: [
-                sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
-                sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
-            ],
+            stance,
             command,
             measured_forward_velocity_m_s,
             measured_yaw_rate_rad_s,
+            target_heading_rad,
+            measured_heading_rad: total_yaw_rad,
+            heading_error_rad: target_heading_rad - total_yaw_rad,
+            yaw_rate_error_rad_s: command.yaw_rate_rad_s - measured_yaw_rate_rad_s,
         };
         let feed_forward = policy.torques_nm_for_command(input, config.torque_limit_nm);
         max_command_nm = max_command_nm.max(
@@ -315,6 +385,10 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
         let post_forward_velocity_m_s = (post_rotation.inverse() * post_world_velocity).z;
         forward_velocity_sum += post_forward_velocity_m_s;
         yaw_rate_sum += observed.base_angular_velocity_y_rad_s;
+        heading_error_sum_rad += (target_heading_rad - total_yaw_rad).abs();
+        yaw_rate_error_sum_rad_s +=
+            (command.yaw_rate_rad_s - observed.base_angular_velocity_y_rad_s).abs();
+        abs_yaw_rate_sum_rad_s += observed.base_angular_velocity_y_rad_s.abs();
         min_height_m = min_height_m.min(observed.base_y_m);
         max_tilt_rad = max_tilt_rad.max(tilt_rad);
         fell |= observed.base_y_m < config.fall_height_m || tilt_rad > config.fall_tilt_rad;
@@ -335,15 +409,30 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
     }
 
     let end = sim.observe();
+    let completed_steps = config.rollout_steps.max(1) as f64;
+    let mean_forward_velocity_m_s = forward_velocity_sum / completed_steps;
+    let mean_abs_yaw_rate_rad_s = abs_yaw_rate_sum_rad_s / completed_steps;
     Ok(UnitreeG1CommandedGaitOutcome {
         command,
         steps: config.rollout_steps,
         base_x_displacement_m: end.base_x_m - start.base_x_m,
         base_z_displacement_m: end.base_z_m - start.base_z_m,
         total_displacement_m: (end.base_x_m - start.base_x_m).hypot(end.base_z_m - start.base_z_m),
-        mean_forward_velocity_m_s: forward_velocity_sum / config.rollout_steps.max(1) as f64,
-        mean_yaw_rate_rad_s: yaw_rate_sum / config.rollout_steps.max(1) as f64,
+        mean_forward_velocity_m_s,
+        mean_yaw_rate_rad_s: yaw_rate_sum / completed_steps,
         total_yaw_rad,
+        target_heading_rad: bounded_heading_target(
+            command.yaw_rate_rad_s * config.rollout_steps as f64 * UNITREE_G1_SIM_DT_S,
+            config.heading_target_clamp_rad,
+        ),
+        heading_error_rad: bounded_heading_target(
+            command.yaw_rate_rad_s * config.rollout_steps as f64 * UNITREE_G1_SIM_DT_S,
+            config.heading_target_clamp_rad,
+        ) - total_yaw_rad,
+        mean_abs_heading_error_rad: heading_error_sum_rad / completed_steps,
+        mean_abs_yaw_rate_error_rad_s: yaw_rate_error_sum_rad_s / completed_steps,
+        turn_radius_m: (mean_abs_yaw_rate_rad_s > 1.0e-9)
+            .then_some(mean_forward_velocity_m_s.abs() / mean_abs_yaw_rate_rad_s),
         min_height_m,
         max_tilt_rad,
         max_command_nm,
@@ -351,6 +440,14 @@ pub fn run_unitree_g1_commanded_gait_with_policy(
         disturbance_applied,
         replay_digest,
     })
+}
+
+fn bounded_heading_target(integrated_heading_rad: f64, clamp_rad: f64) -> f64 {
+    if clamp_rad.is_finite() && clamp_rad > 0.0 {
+        integrated_heading_rad.clamp(-clamp_rad, clamp_rad)
+    } else {
+        integrated_heading_rad
+    }
 }
 
 fn two_cycle_phase(step: u64, cycle_steps: u64) -> f64 {
@@ -501,5 +598,79 @@ mod tests {
         assert!(!outcome.fell);
         assert!(outcome.min_height_m > 0.70);
         assert!(outcome.max_tilt_rad < 0.50);
+    }
+
+    #[test]
+    fn v02_heading_candidate_flips_body_yaw_sign_and_reports_turn_metrics() {
+        let candidate = UnitreeG1CommandedTorquePolicy {
+            yaw_rate_kp_nm_per_rad_s: 32.0,
+            max_yaw_torque_nm: 16.0,
+            mirror_yaw_overlay_negative: false,
+            ..UnitreeG1CommandedTorquePolicy::default()
+        };
+        let base = UnitreeG1CommandedGaitConfig {
+            settle_steps: 60,
+            rollout_steps: 240,
+            mirror_negative_yaw: false,
+            heading_target_clamp_rad: 0.08,
+            ..UnitreeG1CommandedGaitConfig::default()
+        };
+        let left = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: 0.05,
+                },
+                ..base.clone()
+            },
+            candidate,
+        )
+        .expect("left heading replay");
+        let right = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: -0.05,
+                },
+                ..base.clone()
+            },
+            candidate,
+        )
+        .expect("right heading replay");
+
+        for outcome in [left, right] {
+            assert!(!outcome.fell);
+            assert!(outcome.min_height_m > 0.75);
+            assert!(outcome.max_command_nm <= 88.0);
+            assert!(outcome.target_heading_rad.is_finite());
+            assert!(outcome.heading_error_rad.is_finite());
+            assert!(outcome.mean_abs_yaw_rate_error_rad_s.is_finite());
+            assert!(outcome.turn_radius_m.is_some());
+        }
+        assert!(
+            left.total_yaw_rad > 0.01,
+            "left body yaw {:+.4}",
+            left.total_yaw_rad
+        );
+        assert!(
+            right.total_yaw_rad < -0.001,
+            "right body yaw {:+.4}",
+            right.total_yaw_rad
+        );
+        assert!(left.target_heading_rad > 0.0);
+        assert!(right.target_heading_rad < 0.0);
+
+        let replay = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: 0.05,
+                },
+                ..base
+            },
+            candidate,
+        )
+        .expect("deterministic heading replay");
+        assert_eq!(left, replay);
     }
 }

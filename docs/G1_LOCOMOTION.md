@@ -134,9 +134,9 @@ current contact schedule. This distinction is intentional: the ±0.05 rad/s
 commands produce opposite signed paths, while measured accumulated body yaw is
 still close to zero (`+0.018` and `+0.006` rad in the pinned left/right run).
 Therefore v0.1 is a robust differential-steering/path milestone, not yet a
-claim of true heading-yaw tracking. A future all-joint torque/contact-schedule
-pass must close that gap before the command can be advertised as a genuine
-turn-rate controller.
+claim of true heading-yaw tracking. The bounded v0.2 candidate below closes
+that gap for a short, explicitly limited heading envelope; sustained long-
+horizon tracking remains future work.
 
 The example's `--train` mode runs a seeded CEM over a 24-dimensional,
 contact-gated differential Fourier overlay. Its objective rewards opposite
@@ -145,3 +145,54 @@ rejecting falls. The library test
 `commanded_gait_replay_digest_is_deterministic` runs the same scene twice and
 requires byte-for-byte-equal outcome metrics and digest; the full example also
 injects and validates a light pelvis tilt disturbance.
+
+## v0.2 bounded heading-yaw candidate
+
+The v0.2 control boundary keeps v0.1 as a regression and adds true body-frame
+heading measurements to `UnitreeG1VelocityPolicyInput`: the accumulated target,
+measured accumulated yaw, heading error, and yaw-rate error. The 60 Hz harness
+reports the final and mean absolute heading error, mean absolute yaw-rate error,
+and an estimated turn radius (`|mean forward velocity| / mean |yaw rate|`).
+
+The actuator boundary is deliberately hybrid. The eight proximal leg joints
+(hip pitch/roll/yaw and knees) receive torque-PD plus bounded command
+corrections; ankles, arms, and waist remain position-servoed because their
+60 Hz torque-PD path is not stable on this plant. Foot impulse observations are
+sampled before each tick: the learned Fourier overlay is gated per supporting
+leg, and optional direct yaw correction/swing target terms can be gated by the
+stance/swing state. The policy also exposes an accumulated-heading correction,
+but the pinned candidate uses yaw-rate feedback because it is the stable
+short-horizon result.
+
+Example 68 pins the current acceptance envelope at 240 locomotion ticks (4 s),
+`forward_m_s = 0.0276`, `yaw_rate_rad_s = ±0.05`, and a bounded target of
+`±0.08 rad`. The optimized release run measures:
+
+| command | target heading | body yaw | final error | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
+| right `(+0.0276, -0.05)` | −0.080 rad | −0.007 rad | −0.073 rad | 0.266 rad/s | 0.022 m | 0.784 m | 0.085 rad | 25.92 N·m | no |
+
+The sign reversal, height above 0.75 m, no-fall result, finite metrics, torque
+ceiling of 88 N·m, and bit-exact replay are pinned by the library test and the
+full example. These values are a bounded candidate result, not a claim that a
+G1 can hold the requested yaw rate indefinitely; at longer horizons the current
+contact schedule can lose heading sign. A follow-up should improve the contact
+schedule and validate a longer envelope before widening the command contract.
+
+Example 68 also provides a deterministic 48-dimensional CEM over the optional
+eight-joint yaw overlay. It evaluates both turn directions, scores the median of
+three ULP-perturbed replays, catches deterministic solver panics as rejected
+candidates, and falls back to the validated zero-overlay candidate when search
+does not improve it:
+
+```bash
+cargo run --release -p g1_heading_turn --example 68_g1_heading_turn
+cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --train
+cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --smoke
+```
+
+The existing `examples/63_g1_stride_gif` capture remains the visual hero for
+the learned-stride/path baseline: its realistic robotics test bay is render-
+only, while example 68 is intentionally headless so heading evaluation stays
+usable in CI without a GPU.

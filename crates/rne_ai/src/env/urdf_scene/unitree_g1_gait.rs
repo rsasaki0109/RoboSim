@@ -141,8 +141,9 @@ pub struct UnitreeG1TorquePolicyInput {
 /// The v0.1 G1 command contract supports forward motion, stopping, and
 /// differential steering. `yaw_rate_rad_s` is retained as the conventional
 /// command name and is also exposed to the policy as a yaw-rate request. The
-/// current hybrid contact schedule validates sign-correct left/right path
-/// steering; it does not yet promise sign-correct body-heading rotation.
+/// v0.2 headless harness additionally evaluates it against a bounded body-
+/// heading reference; the wider command range remains an input envelope, not
+/// a promise of sustained heading tracking.
 /// Reverse walking is deliberately outside this first contract because the
 /// current gait generator has no validated backward contact schedule; negative
 /// forward inputs clamp to zero.
@@ -187,6 +188,14 @@ pub struct UnitreeG1VelocityPolicyInput {
     /// Measured body yaw rate in rad/s; this remains a diagnostic feedback
     /// channel even when the command is being used for path steering.
     pub measured_yaw_rate_rad_s: f64,
+    /// Desired accumulated body heading at the current tick in radians.
+    pub target_heading_rad: f64,
+    /// Unwrapped accumulated body heading measured from rollout start.
+    pub measured_heading_rad: f64,
+    /// Heading tracking error `target_heading_rad - measured_heading_rad`.
+    pub heading_error_rad: f64,
+    /// Yaw-rate tracking error in rad/s.
+    pub yaw_rate_error_rad_s: f64,
 }
 
 impl UnitreeG1TorqueOverlay {
@@ -409,10 +418,11 @@ impl UnitreeG1TorqueOverlay {
 ///
 /// The policy preserves the validated learned overlay as its nominal forward
 /// gait, scales its phase action from the requested/measured forward speed,
-/// and adds bounded differential channels from the steering/yaw-rate error.
-/// Ankles and arms remain position-held by the hybrid rollout. This keeps the
-/// command contract reusable without claiming that the G1 has already reached
-/// fully direct, all-joint torque locomotion or closed-loop heading control.
+/// and adds bounded differential channels from the steering/yaw-rate and
+/// accumulated-heading errors. Ankles and arms remain position-held by the
+/// hybrid rollout. The optional stance gate routes the direct yaw correction
+/// through the supporting leg while the learned overlay remains contact-gated
+/// for every proximal joint.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitreeG1CommandedTorquePolicy {
     /// Nominal phase-overlay gait.
@@ -423,8 +433,16 @@ pub struct UnitreeG1CommandedTorquePolicy {
     pub forward_velocity_feedback_gain: f64,
     /// Hip-yaw torque gain on yaw-rate error in N·m/(rad/s).
     pub yaw_rate_kp_nm_per_rad_s: f64,
+    /// Differential hip-yaw torque gain on accumulated heading error in
+    /// N·m/rad.
+    pub heading_kp_nm_per_rad: f64,
     /// Maximum differential yaw torque in N·m.
     pub max_yaw_torque_nm: f64,
+    /// Maximum differential heading-correction torque in N·m.
+    pub max_heading_torque_nm: f64,
+    /// Routes the commanded yaw torque through the currently supporting leg;
+    /// swing-leg yaw torque is suppressed when enabled.
+    pub stance_gated_yaw: bool,
     /// Differential hip-pitch torque gain for yaw-rate commands in N·m/(rad/s).
     pub yaw_hip_pitch_kp_nm_per_rad_s: f64,
     /// Differential hip-roll torque gain for yaw-rate commands in N·m/(rad/s).
@@ -446,6 +464,10 @@ pub struct UnitreeG1CommandedTorquePolicy {
     pub yaw_overlay_gain: f64,
     /// Per-joint multipliers for the optional yaw overlay.
     pub yaw_overlay_joint_gains: [f64; 8],
+    /// Mirrors the optional differential overlay torque for negative yaw
+    /// commands. A heading candidate may disable this when its coefficients
+    /// are already sign-conditioned by the commanded yaw-rate error.
+    pub mirror_yaw_overlay_negative: bool,
 }
 
 impl Default for UnitreeG1CommandedTorquePolicy {
@@ -455,7 +477,10 @@ impl Default for UnitreeG1CommandedTorquePolicy {
             nominal_forward_velocity_m_s: 0.0276,
             forward_velocity_feedback_gain: 0.25,
             yaw_rate_kp_nm_per_rad_s: 16.0,
+            heading_kp_nm_per_rad: 0.0,
             max_yaw_torque_nm: 8.0,
+            max_heading_torque_nm: 8.0,
+            stance_gated_yaw: false,
             yaw_hip_pitch_kp_nm_per_rad_s: 0.0,
             yaw_hip_roll_kp_nm_per_rad_s: 0.0,
             yaw_knee_kp_nm_per_rad_s: 0.0,
@@ -464,6 +489,7 @@ impl Default for UnitreeG1CommandedTorquePolicy {
             yaw_overlay: UnitreeG1TorqueOverlay::ZERO,
             yaw_overlay_gain: 1.0,
             yaw_overlay_joint_gains: [1.0; 8],
+            mirror_yaw_overlay_negative: true,
         }
     }
 }
@@ -537,8 +563,28 @@ impl UnitreeG1CommandedTorquePolicy {
         } else {
             0.0
         };
-        let yaw_torque = (yaw_gain * (command.yaw_rate_rad_s - measured_yaw_rate_rad_s))
-            .clamp(-yaw_limit, yaw_limit);
+        let yaw_rate_error = if input.yaw_rate_error_rad_s.is_finite() {
+            input.yaw_rate_error_rad_s
+        } else {
+            command.yaw_rate_rad_s - measured_yaw_rate_rad_s
+        };
+        let yaw_torque = (yaw_gain * yaw_rate_error).clamp(-yaw_limit, yaw_limit);
+        let heading_gain = if self.heading_kp_nm_per_rad.is_finite() {
+            self.heading_kp_nm_per_rad.max(0.0)
+        } else {
+            0.0
+        };
+        let heading_limit = if self.max_heading_torque_nm.is_finite() {
+            self.max_heading_torque_nm.max(0.0)
+        } else {
+            0.0
+        };
+        let heading_error = if input.heading_error_rad.is_finite() {
+            input.heading_error_rad.clamp(-1.5, 1.5)
+        } else {
+            0.0
+        };
+        let heading_torque = (heading_gain * heading_error).clamp(-heading_limit, heading_limit);
         let yaw_rate = command.yaw_rate_rad_s;
         let yaw_error = command.yaw_rate_rad_s - measured_yaw_rate_rad_s;
         let hip_pitch_gain = if self.yaw_hip_pitch_kp_nm_per_rad_s.is_finite() {
@@ -580,7 +626,7 @@ impl UnitreeG1CommandedTorquePolicy {
         } else {
             0.0
         };
-        let turn_overlay = if command.yaw_rate_rad_s < 0.0 {
+        let turn_overlay = if self.mirror_yaw_overlay_negative && command.yaw_rate_rad_s < 0.0 {
             self.yaw_overlay.mirrored_sagittally()
         } else {
             self.yaw_overlay
@@ -600,13 +646,26 @@ impl UnitreeG1CommandedTorquePolicy {
         // Hip-yaw joints are indices 2 and 6 in the overlay order. The
         // opposite signs create a differential yaw couple while preserving
         // the nominal forward overlay on the other six proximal joints.
-        torques[2] += yaw_torque;
         let right_sign = if self.yaw_torque_right_sign.is_finite() {
             self.yaw_torque_right_sign.clamp(-1.0, 1.0)
         } else {
             -1.0
         };
-        torques[6] += right_sign * yaw_torque;
+        let mut left_yaw_torque = yaw_torque + heading_torque;
+        let mut right_yaw_torque = right_sign * (yaw_torque + heading_torque);
+        if self.stance_gated_yaw {
+            match input.stance {
+                [true, false] => right_yaw_torque = 0.0,
+                [false, true] => left_yaw_torque = 0.0,
+                [false, false] => {
+                    left_yaw_torque = 0.0;
+                    right_yaw_torque = 0.0;
+                }
+                [true, true] => {}
+            }
+        }
+        torques[2] += left_yaw_torque;
+        torques[6] += right_yaw_torque;
         let limit = if limit_nm.is_finite() && limit_nm >= 0.0 {
             limit_nm
         } else {
@@ -798,6 +857,10 @@ mod tests {
             command: UnitreeG1VelocityCommand::default(),
             measured_forward_velocity_m_s: 0.0,
             measured_yaw_rate_rad_s: 0.0,
+            target_heading_rad: 0.0,
+            measured_heading_rad: 0.0,
+            heading_error_rad: 0.0,
+            yaw_rate_error_rad_s: 0.0,
         };
         let stopped = policy.act(&input);
         assert!(stopped.iter().all(|value| value.is_finite()));
@@ -814,6 +877,49 @@ mod tests {
         assert!(torques.iter().all(|value| value.is_finite()));
         assert!(torques.iter().all(|value| value.abs() <= 88.0));
         assert_ne!(torques, stopped);
+    }
+
+    #[test]
+    fn heading_torque_is_differential_and_can_be_stance_gated() {
+        let policy = UnitreeG1CommandedTorquePolicy {
+            overlay: UnitreeG1TorqueOverlay::ZERO,
+            yaw_rate_kp_nm_per_rad_s: 1.0,
+            heading_kp_nm_per_rad: 1.0,
+            max_yaw_torque_nm: 10.0,
+            max_heading_torque_nm: 10.0,
+            stance_gated_yaw: true,
+            ..UnitreeG1CommandedTorquePolicy::default()
+        };
+        let input = UnitreeG1VelocityPolicyInput {
+            command: UnitreeG1VelocityCommand::default(),
+            heading_error_rad: 0.2,
+            yaw_rate_error_rad_s: 0.1,
+            stance: [true, false],
+            ..UnitreeG1VelocityPolicyInput {
+                two_cycle_phase: 0.0,
+                stance: [false, false],
+                command: UnitreeG1VelocityCommand::default(),
+                measured_forward_velocity_m_s: 0.0,
+                measured_yaw_rate_rad_s: 0.0,
+                target_heading_rad: 0.0,
+                measured_heading_rad: 0.0,
+                heading_error_rad: 0.0,
+                yaw_rate_error_rad_s: 0.0,
+            }
+        };
+        let left_stance = policy.torques_nm_for_command(input, 88.0);
+        assert!((left_stance[2] - 0.3).abs() < 1.0e-12);
+        assert_eq!(left_stance[6], 0.0);
+
+        let right_stance = policy.torques_nm_for_command(
+            UnitreeG1VelocityPolicyInput {
+                stance: [false, true],
+                ..input
+            },
+            88.0,
+        );
+        assert_eq!(right_stance[2], 0.0);
+        assert!((right_stance[6] + 0.3).abs() < 1.0e-12);
     }
 
     #[test]
