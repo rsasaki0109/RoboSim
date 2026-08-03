@@ -34,7 +34,7 @@ impl Candidate {
         UnitreeG1CommandedTorquePolicy {
             yaw_rate_kp_nm_per_rad_s: 32.0,
             max_yaw_torque_nm: 16.0,
-            negative_yaw_rate_gain_scale: 2.0,
+            negative_yaw_rate_gain_scale: 0.5,
             yaw_overlay: self.yaw_overlay,
             yaw_overlay_gain: 8.0,
             mirror_yaw_overlay_negative: false,

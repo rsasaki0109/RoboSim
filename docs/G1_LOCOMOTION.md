@@ -162,7 +162,7 @@ sampled before each tick: the learned Fourier overlay is gated per supporting
 leg, and optional direct yaw correction/swing target terms can be gated by the
 stance/swing state. The policy also exposes an accumulated-heading correction.
 The pinned candidate uses bounded yaw-rate feedback plus a calibrated
-negative-turn gain of `2.0`: the official model's contact schedule is
+negative-turn gain of `0.5`: the official model's contact schedule is
 directionally asymmetric, so the negative channel gets extra authority while
 the final motor command remains inside the same torque ceiling.
 
@@ -173,7 +173,7 @@ Example 68 pins the current acceptance envelope at 240 locomotion ticks (4 s),
 | command | target heading | body yaw | final error | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
-| right `(+0.0276, -0.05)` | −0.080 rad | −0.009 rad | −0.071 rad | 0.283 rad/s | 0.023 m | 0.784 m | 0.090 rad | 27.69 N·m | no |
+| right `(+0.0276, -0.05)` | −0.080 rad | −0.002 rad | −0.078 rad | 0.266 rad/s | 0.026 m | 0.784 m | 0.090 rad | 18.05 N·m | no |
 
 The sign reversal, height above 0.75 m, no-fall result, finite metrics, torque
 ceiling of 88 N·m, and bit-exact replay are pinned by the library test and the
