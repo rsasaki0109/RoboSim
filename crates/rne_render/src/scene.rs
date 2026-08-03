@@ -86,7 +86,8 @@ impl RenderScene {
         item
     }
 
-    /// Loads STL or OBJ files referenced by mesh visuals in this scene.
+    /// Loads STL, OBJ, glTF, or GLB files referenced by mesh visuals in this
+    /// scene.
     pub fn resolve_mesh_assets(&mut self, package_root: &Path) -> Result<(), MeshLoadError> {
         self.resolve_mesh_assets_with_roots(&[package_root])
     }

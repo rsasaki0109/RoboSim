@@ -1,6 +1,7 @@
 //! Triangle mesh loading for render backends.
 
 use crate::{ImageFrame, PbrMaterial};
+use rne_math::{DVec3, Mat4};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -42,17 +43,17 @@ pub struct LoadedMeshPart {
 
 /// Loads a supported triangle mesh based on its file extension.
 ///
-/// STL and Wavefront OBJ files are supported. Extension matching is
-/// case-insensitive.
+/// STL, Wavefront OBJ, and glTF 2.0 files are supported. Extension matching
+/// is case-insensitive.
 pub fn load_mesh(path: &Path) -> Result<TriangleMesh, MeshLoadError> {
     let parts = load_mesh_parts(path)?;
     merge_mesh_parts(parts)
 }
 
-/// Loads material-homogeneous mesh parts and their optional base-color textures.
+/// Loads material-homogeneous mesh parts and their optional PBR textures.
 ///
-/// STL produces one untextured part. OBJ object/material boundaries are
-/// preserved in source order so callers can draw each diffuse texture
+/// STL produces one untextured part. OBJ and glTF object/material boundaries
+/// are preserved in source order so callers can draw each material
 /// independently.
 pub fn load_mesh_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
     match path
@@ -68,9 +69,10 @@ pub fn load_mesh_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError
             material: PbrMaterial::default(),
         }]),
         Some("obj") => load_obj_parts(path),
+        Some("gltf") | Some("glb") => load_gltf_parts(path),
         _ => Err(invalid_mesh(
             &path.display().to_string(),
-            "unsupported mesh extension; expected .stl or .obj",
+            "unsupported mesh extension; expected .stl, .obj, .gltf, or .glb",
         )),
     }
 }
@@ -207,6 +209,308 @@ fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
         ));
     }
     Ok(parts)
+}
+
+fn load_gltf_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
+    let (document, buffers, images) =
+        gltf::import(path).map_err(|error| MeshLoadError::Invalid {
+            path: path.display().to_string(),
+            message: format!("could not import glTF: {error}"),
+        })?;
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+        .ok_or_else(|| invalid_mesh(&path.display().to_string(), "glTF contains no scene"))?;
+    let mut texture_cache = HashMap::<usize, ImageFrame>::new();
+    let mut parts = Vec::new();
+    for node in scene.nodes() {
+        append_gltf_node(
+            path,
+            node,
+            Mat4::IDENTITY,
+            &buffers,
+            &images,
+            &mut texture_cache,
+            &mut parts,
+        )?;
+    }
+    if parts.is_empty() {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            "glTF scene contains no triangle primitives",
+        ));
+    }
+    Ok(parts)
+}
+
+fn append_gltf_node(
+    path: &Path,
+    node: gltf::Node<'_>,
+    parent_transform: Mat4,
+    buffers: &[gltf::buffer::Data],
+    images: &[gltf::image::Data],
+    texture_cache: &mut HashMap<usize, ImageFrame>,
+    parts: &mut Vec<LoadedMeshPart>,
+) -> Result<(), MeshLoadError> {
+    let transform = parent_transform * gltf_matrix_to_mat4(node.transform().matrix());
+    if let Some(mesh) = node.mesh() {
+        for primitive in mesh.primitives() {
+            if primitive.mode() != gltf::mesh::Mode::Triangles {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    format!(
+                        "unsupported glTF primitive mode {:?}; only triangles are supported",
+                        primitive.mode()
+                    ),
+                ));
+            }
+            let reader = primitive
+                .reader(|buffer| buffers.get(buffer.index()).map(|data| data.0.as_slice()));
+            let positions: Vec<[f32; 3]> = reader
+                .read_positions()
+                .ok_or_else(|| {
+                    invalid_mesh(
+                        &path.display().to_string(),
+                        "glTF primitive has no positions",
+                    )
+                })?
+                .collect();
+            let texcoords: Vec<[f32; 2]> = reader
+                .read_tex_coords(0)
+                .map(|coords| coords.into_f32().collect())
+                .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+            let indices: Vec<u32> = reader
+                .read_indices()
+                .map(|indices| indices.into_u32().collect())
+                .unwrap_or_else(|| (0..positions.len() as u32).collect());
+            if texcoords.len() != positions.len() {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF TEXCOORD_0 count does not match POSITION count",
+                ));
+            }
+            let mut triangle_mesh = if let Some(normals) = reader.read_normals() {
+                let normals: Vec<[f32; 3]> = normals.collect();
+                if normals.len() != positions.len() {
+                    return Err(invalid_mesh(
+                        &path.display().to_string(),
+                        "glTF NORMAL count does not match POSITION count",
+                    ));
+                }
+                TriangleMesh {
+                    positions,
+                    normals,
+                    texcoords,
+                    indices,
+                }
+            } else {
+                mesh_with_flat_normals(&positions, &texcoords, &indices)
+            };
+            transform_triangle_mesh(&mut triangle_mesh, transform);
+            validate_triangle_mesh(path, &triangle_mesh)?;
+
+            let material = primitive.material();
+            let pbr = material.pbr_metallic_roughness();
+            let base_color_texture = pbr
+                .base_color_texture()
+                .map(|info| load_gltf_texture(path, info.texture(), images, texture_cache))
+                .transpose()?;
+            let metallic_roughness_texture = pbr
+                .metallic_roughness_texture()
+                .map(|info| load_gltf_texture(path, info.texture(), images, texture_cache))
+                .transpose()?;
+            let normal_info = material.normal_texture();
+            let normal_strength = normal_info.as_ref().map(|info| info.scale()).unwrap_or(1.0);
+            let normal_texture = normal_info
+                .map(|info| load_gltf_texture(path, info.texture(), images, texture_cache))
+                .transpose()?;
+            let occlusion_info = material.occlusion_texture();
+            let occlusion_strength = occlusion_info
+                .as_ref()
+                .map(|info| info.strength())
+                .unwrap_or(1.0);
+            let occlusion_texture = occlusion_info
+                .map(|info| load_gltf_texture(path, info.texture(), images, texture_cache))
+                .transpose()?;
+            let emissive_texture = material
+                .emissive_texture()
+                .map(|info| load_gltf_texture(path, info.texture(), images, texture_cache))
+                .transpose()?;
+            let base_color_rgba = pbr.base_color_factor();
+            let material = PbrMaterial::new(
+                base_color_rgba,
+                pbr.roughness_factor(),
+                pbr.metallic_factor(),
+                material.emissive_factor(),
+            )
+            .with_texture_maps(normal_texture.map(Arc::new), None)
+            .with_normal_strength(normal_strength)
+            .with_pbr_texture_maps(
+                metallic_roughness_texture.map(Arc::new),
+                emissive_texture.map(Arc::new),
+                occlusion_texture.map(Arc::new),
+                occlusion_strength,
+            );
+            parts.push(LoadedMeshPart {
+                mesh: triangle_mesh,
+                base_color_texture,
+                base_color_rgba: Some(base_color_rgba),
+                material,
+            });
+        }
+    }
+    for child in node.children() {
+        append_gltf_node(
+            path,
+            child,
+            transform,
+            buffers,
+            images,
+            texture_cache,
+            parts,
+        )?;
+    }
+    Ok(())
+}
+
+fn gltf_matrix_to_mat4(matrix: [[f32; 4]; 4]) -> Mat4 {
+    Mat4::from_cols_array(&[
+        matrix[0][0] as f64,
+        matrix[0][1] as f64,
+        matrix[0][2] as f64,
+        matrix[0][3] as f64,
+        matrix[1][0] as f64,
+        matrix[1][1] as f64,
+        matrix[1][2] as f64,
+        matrix[1][3] as f64,
+        matrix[2][0] as f64,
+        matrix[2][1] as f64,
+        matrix[2][2] as f64,
+        matrix[2][3] as f64,
+        matrix[3][0] as f64,
+        matrix[3][1] as f64,
+        matrix[3][2] as f64,
+        matrix[3][3] as f64,
+    ])
+}
+
+fn transform_triangle_mesh(mesh: &mut TriangleMesh, transform: Mat4) {
+    for position in &mut mesh.positions {
+        let transformed = transform.transform_point3(DVec3::new(
+            f64::from(position[0]),
+            f64::from(position[1]),
+            f64::from(position[2]),
+        ));
+        *position = [
+            transformed.x as f32,
+            transformed.y as f32,
+            transformed.z as f32,
+        ];
+    }
+    let normal_transform = transform.inverse().transpose();
+    for normal in &mut mesh.normals {
+        let transformed = normal_transform
+            .transform_vector3(DVec3::new(
+                f64::from(normal[0]),
+                f64::from(normal[1]),
+                f64::from(normal[2]),
+            ))
+            .normalize_or_zero();
+        *normal = [
+            transformed.x as f32,
+            transformed.y as f32,
+            transformed.z as f32,
+        ];
+    }
+}
+
+fn load_gltf_texture(
+    path: &Path,
+    texture: gltf::Texture<'_>,
+    images: &[gltf::image::Data],
+    cache: &mut HashMap<usize, ImageFrame>,
+) -> Result<ImageFrame, MeshLoadError> {
+    let image_index = texture.source().index();
+    if let Some(image) = cache.get(&image_index) {
+        return Ok(image.clone());
+    }
+    let image = images.get(image_index).ok_or_else(|| {
+        invalid_mesh(
+            &path.display().to_string(),
+            format!("glTF texture references missing image {image_index}"),
+        )
+    })?;
+    let decoded = gltf_image_to_frame(path, image_index, image)?;
+    cache.insert(image_index, decoded.clone());
+    Ok(decoded)
+}
+
+fn gltf_image_to_frame(
+    path: &Path,
+    image_index: usize,
+    image: &gltf::image::Data,
+) -> Result<ImageFrame, MeshLoadError> {
+    let (channels, bytes_per_channel, is_float) = match image.format {
+        gltf::image::Format::R8 => (1, 1, false),
+        gltf::image::Format::R8G8 => (2, 1, false),
+        gltf::image::Format::R8G8B8 => (3, 1, false),
+        gltf::image::Format::R8G8B8A8 => (4, 1, false),
+        gltf::image::Format::R16 => (1, 2, false),
+        gltf::image::Format::R16G16 => (2, 2, false),
+        gltf::image::Format::R16G16B16 => (3, 2, false),
+        gltf::image::Format::R16G16B16A16 => (4, 2, false),
+        gltf::image::Format::R32G32B32FLOAT => (3, 4, true),
+        gltf::image::Format::R32G32B32A32FLOAT => (4, 4, true),
+    };
+    let pixel_stride = channels * bytes_per_channel;
+    let expected_len = image.width as usize * image.height as usize * pixel_stride;
+    if image.pixels.len() != expected_len {
+        return Err(invalid_mesh(
+            &path.display().to_string(),
+            format!(
+                "glTF image {image_index} has {} bytes; expected {expected_len}",
+                image.pixels.len()
+            ),
+        ));
+    }
+    let mut rgba8 = Vec::with_capacity(image.width as usize * image.height as usize * 4);
+    for pixel in image.pixels.chunks_exact(pixel_stride) {
+        let mut values = [0.0_f32; 4];
+        for (channel, value) in values.iter_mut().enumerate().take(channels) {
+            let offset = channel * bytes_per_channel;
+            *value = if is_float {
+                f32::from_le_bytes(pixel[offset..offset + 4].try_into().expect("f32 channel"))
+            } else if bytes_per_channel == 2 {
+                f32::from(u16::from_le_bytes(
+                    pixel[offset..offset + 2].try_into().expect("u16 channel"),
+                )) / 65535.0
+            } else {
+                f32::from(pixel[offset]) / 255.0
+            };
+        }
+        let alpha = match channels {
+            2 | 4 => values[channels - 1],
+            _ => 1.0,
+        };
+        let red = values[0];
+        let green = if channels >= 3 { values[1] } else { red };
+        let blue = if channels >= 3 { values[2] } else { red };
+        rgba8.extend([
+            normalized_channel_to_u8(red),
+            normalized_channel_to_u8(green),
+            normalized_channel_to_u8(blue),
+            normalized_channel_to_u8(alpha),
+        ]);
+    }
+    Ok(ImageFrame::from_rgba8(image.width, image.height, rgba8))
+}
+
+fn normalized_channel_to_u8(value: f32) -> u8 {
+    if value.is_finite() {
+        (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    } else {
+        0
+    }
 }
 
 fn merge_mesh_parts(parts: Vec<LoadedMeshPart>) -> Result<TriangleMesh, MeshLoadError> {
@@ -614,8 +918,184 @@ endsolid box
     }
 
     #[test]
+    fn gltf_imports_scene_transforms_and_pbr_material_maps() {
+        let root = std::env::temp_dir().join(format!("rne-render-pbr-gltf-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale glTF test");
+        }
+        fs::create_dir_all(&root).expect("create glTF test");
+        let geometry = test_triangle_geometry();
+        fs::write(root.join("mesh.bin"), &geometry).expect("write glTF buffer");
+        write_test_texture(&root, "base.png", [24, 80, 160, 255]);
+        write_test_texture(&root, "metallic_roughness.png", [0, 128, 200, 255]);
+        write_test_texture(&root, "normal.png", [128, 128, 255, 255]);
+        write_test_texture(&root, "emissive.png", [12, 24, 48, 255]);
+        write_test_texture(&root, "occlusion.png", [160, 160, 160, 255]);
+        fs::write(
+            root.join("panel.gltf"),
+            test_gltf_json(Some("mesh.bin"), geometry.len(), true),
+        )
+        .expect("write glTF document");
+
+        let parts = load_mesh_parts(&root.join("panel.gltf")).expect("load glTF");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].mesh.triangle_count(), 1);
+        assert_eq!(parts[0].mesh.positions[0], [1.0, 2.0, 3.0]);
+        assert_eq!(parts[0].mesh.positions[1], [2.0, 2.0, 3.0]);
+        assert_eq!(
+            parts[0].mesh.texcoords,
+            vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        );
+        assert_eq!(
+            parts[0]
+                .base_color_texture
+                .as_ref()
+                .expect("base-color texture")
+                .rgba8,
+            vec![24, 80, 160, 255]
+        );
+        assert_eq!(parts[0].material.base_color_rgba, [0.25, 0.5, 0.75, 0.8]);
+        assert_eq!(parts[0].material.roughness, 0.35);
+        assert_eq!(parts[0].material.metallic, 0.6);
+        assert_eq!(parts[0].material.emissive_rgb, [0.1, 0.2, 0.3]);
+        assert_eq!(parts[0].material.normal_strength, 0.65);
+        assert_eq!(
+            parts[0]
+                .material
+                .normal_texture
+                .as_ref()
+                .expect("normal texture")
+                .rgba8,
+            vec![128, 128, 255, 255]
+        );
+        assert_eq!(
+            parts[0]
+                .material
+                .metallic_roughness_texture
+                .as_ref()
+                .expect("metallic-roughness texture")
+                .rgba8,
+            vec![0, 128, 200, 255]
+        );
+        assert_eq!(
+            parts[0]
+                .material
+                .emissive_texture
+                .as_ref()
+                .expect("emissive texture")
+                .rgba8,
+            vec![12, 24, 48, 255]
+        );
+        assert_eq!(
+            parts[0]
+                .material
+                .occlusion_texture
+                .as_ref()
+                .expect("occlusion texture")
+                .rgba8,
+            vec![160, 160, 160, 255]
+        );
+        assert_eq!(parts[0].material.occlusion_strength, 0.45);
+
+        fs::remove_dir_all(root).expect("remove glTF test");
+    }
+
+    #[test]
+    fn glb_imports_embedded_triangle_buffer() {
+        let root =
+            std::env::temp_dir().join(format!("rne-render-embedded-glb-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale GLB test");
+        }
+        fs::create_dir_all(&root).expect("create GLB test");
+        let geometry = test_triangle_geometry();
+        let json = test_gltf_json(None, geometry.len(), false);
+        fs::write(root.join("panel.glb"), make_test_glb(&json, &geometry)).expect("write GLB");
+
+        let parts = load_mesh_parts(&root.join("panel.glb")).expect("load GLB");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].mesh.triangle_count(), 1);
+        assert_eq!(parts[0].material.base_color_rgba, [1.0; 4]);
+        assert_eq!(parts[0].material.roughness, 1.0);
+        assert_eq!(parts[0].material.metallic, 1.0);
+        assert!(parts[0].material.normal_texture.is_none());
+        assert!(parts[0].material.metallic_roughness_texture.is_none());
+
+        fs::remove_dir_all(root).expect("remove GLB test");
+    }
+
+    fn write_test_texture(root: &Path, name: &str, rgba: [u8; 4]) {
+        image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba))
+            .save(root.join(name))
+            .expect("write glTF test texture");
+    }
+
+    fn test_triangle_geometry() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for position in [[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            for component in position {
+                bytes.extend(component.to_le_bytes());
+            }
+        }
+        for _ in 0..3 {
+            bytes.extend(0.0_f32.to_le_bytes());
+            bytes.extend(0.0_f32.to_le_bytes());
+            bytes.extend(1.0_f32.to_le_bytes());
+        }
+        for uv in [[0.0_f32, 0.0], [1.0, 0.0], [0.0, 1.0]] {
+            for component in uv {
+                bytes.extend(component.to_le_bytes());
+            }
+        }
+        for index in [0_u16, 1, 2] {
+            bytes.extend(index.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn test_gltf_json(buffer_uri: Option<&str>, buffer_len: usize, textured: bool) -> String {
+        let buffer = buffer_uri
+            .map(|uri| format!(r#"{{"uri":"{uri}","byteLength":{buffer_len}}}"#))
+            .unwrap_or_else(|| format!(r#"{{"byteLength":{buffer_len}}}"#));
+        let material = if textured {
+            r#","materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.25,0.5,0.75,0.8],"baseColorTexture":{"index":0},"metallicFactor":0.6,"roughnessFactor":0.35,"metallicRoughnessTexture":{"index":1}},"normalTexture":{"index":2,"scale":0.65},"occlusionTexture":{"index":4,"strength":0.45},"emissiveFactor":[0.1,0.2,0.3],"emissiveTexture":{"index":3}}],"images":[{"uri":"base.png"},{"uri":"metallic_roughness.png"},{"uri":"normal.png"},{"uri":"emissive.png"},{"uri":"occlusion.png"}],"textures":[{"source":0},{"source":1},{"source":2},{"source":3},{"source":4}]"#
+        } else {
+            ""
+        };
+        let primitive_material = if textured { ",\"material\":0" } else { "" };
+        format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,1,2,3,1]}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2}},"indices":3{primitive_material}}}]}}],"buffers":[{buffer}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},{{"buffer":0,"byteOffset":72,"byteLength":24}},{{"buffer":0,"byteOffset":96,"byteLength":6}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}},{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},{{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"}},{{"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}}]{material}}}"#
+        )
+    }
+
+    fn make_test_glb(json: &str, binary: &[u8]) -> Vec<u8> {
+        let mut json_bytes = json.as_bytes().to_vec();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+        let mut binary = binary.to_vec();
+        while !binary.len().is_multiple_of(4) {
+            binary.push(0);
+        }
+        let total_length = 12 + 8 + json_bytes.len() + 8 + binary.len();
+        let mut glb = Vec::with_capacity(total_length);
+        glb.extend(0x46546c67_u32.to_le_bytes());
+        glb.extend(2_u32.to_le_bytes());
+        glb.extend((total_length as u32).to_le_bytes());
+        glb.extend((json_bytes.len() as u32).to_le_bytes());
+        glb.extend(0x4e4f534a_u32.to_le_bytes());
+        glb.extend(json_bytes);
+        glb.extend((binary.len() as u32).to_le_bytes());
+        glb.extend(0x004e4942_u32.to_le_bytes());
+        glb.extend(binary);
+        glb
+    }
+
+    #[test]
     fn generic_mesh_loader_rejects_unknown_extensions() {
-        let error = load_mesh(Path::new("factory.glb")).expect_err("unsupported mesh");
-        assert!(error.to_string().contains("expected .stl or .obj"));
+        let error = load_mesh(Path::new("factory.ply")).expect_err("unsupported mesh");
+        assert!(error
+            .to_string()
+            .contains("expected .stl, .obj, .gltf, or .glb"));
     }
 }
