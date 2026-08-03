@@ -142,6 +142,7 @@ fn append_checker_floor(scene: &mut RenderScene, tile_m: f64) {
                 color_rgba: color,
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

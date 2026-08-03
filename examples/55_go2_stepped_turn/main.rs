@@ -500,6 +500,7 @@ fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f6
                 color_rgba: color,
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

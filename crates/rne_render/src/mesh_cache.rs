@@ -85,6 +85,7 @@ mod tests {
                 color_rgba: [1.0, 1.0, 1.0, 1.0],
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             }],
         };
 

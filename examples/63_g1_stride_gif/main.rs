@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
@@ -18,7 +19,8 @@ use rne_ai::{
 };
 use rne_math::{Transform3, Vec3};
 use rne_render::{
-    Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
+    Camera, ImageFrame, MeshRenderCache, PbrMaterial, RenderBackend, RenderScene, RenderSceneItem,
+    TriangleMesh, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
@@ -247,6 +249,10 @@ fn main() {
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let media_dir = repo_root.join("docs/media");
+    let floor_texture =
+        load_texture(&repo_root.join(
+            "examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_basecolor.png",
+        ));
     let frames_dir = media_dir.join("unitree-g1-learned-stride-frames");
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create learned G1 frame directory");
@@ -281,6 +287,7 @@ fn main() {
             &mut mesh_cache,
             &mesh_root_refs,
             &baseline,
+            &floor_texture,
             [0.16, 0.58, 0.96, 1.0],
         );
         let right = render_panel(
@@ -289,6 +296,7 @@ fn main() {
             &mut mesh_cache,
             &mesh_root_refs,
             &learned,
+            &floor_texture,
             [0.98, 0.54, 0.16, 1.0],
         );
         let composite = composite_side_by_side(&left, &right);
@@ -360,6 +368,7 @@ fn render_panel(
     mesh_cache: &mut MeshRenderCache,
     mesh_root_refs: &[&Path],
     walker: &G1Walker,
+    floor_texture: &Arc<ImageFrame>,
     trail_color: [f32; 4],
 ) -> Vec<u8> {
     let observed = walker.sim.observe();
@@ -371,6 +380,7 @@ fn render_panel(
         &mut scene,
         walker.capture_start_xz_m[0],
         walker.capture_start_xz_m[1],
+        floor_texture,
     );
     for position in &walker.trail_m {
         scene.items.push(RenderSceneItem {
@@ -383,6 +393,7 @@ fn render_panel(
             color_rgba: trail_color,
             mesh: None,
             base_color_texture: None,
+            material: Default::default(),
         });
     }
     mesh_cache
@@ -404,7 +415,12 @@ fn render_panel(
     output.color.rgba8
 }
 
-fn append_realistic_test_bay(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64) {
+fn append_realistic_test_bay(
+    scene: &mut RenderScene,
+    center_x_m: f64,
+    center_z_m: f64,
+    floor_texture: &Arc<ImageFrame>,
+) {
     // The G1 physics scene intentionally stays minimal. These render-only props make the
     // hero capture read as a real robotics test bay without changing contacts or dynamics.
     const FLOOR: [f32; 4] = [0.19, 0.21, 0.22, 1.0];
@@ -419,6 +435,7 @@ fn append_realistic_test_bay(scene: &mut RenderScene, center_x_m: f64, center_z_
 
     let floor_center = Vec3::new(center_x_m + 0.25, -0.035, center_z_m - 0.35);
     push_box(scene, floor_center, Vec3::new(5.4, 0.07, 4.6), FLOOR);
+    push_textured_floor(scene, floor_center, Vec3::new(5.4, 0.0, 4.6), floor_texture);
 
     for x_offset in [-1.8, -0.9, 0.0, 0.9, 1.8] {
         push_box(
@@ -545,6 +562,58 @@ fn append_realistic_test_bay(scene: &mut RenderScene, center_x_m: f64, center_z_
     }
 }
 
+fn load_texture(path: &Path) -> Arc<ImageFrame> {
+    let rgba = image::open(path)
+        .unwrap_or_else(|error| panic!("load render texture {}: {error}", path.display()))
+        .into_rgba8();
+    Arc::new(ImageFrame::from_rgba8(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
+}
+
+fn push_textured_floor(
+    scene: &mut RenderScene,
+    center: Vec3,
+    footprint_m: Vec3,
+    texture: &Arc<ImageFrame>,
+) {
+    let half_x_m = footprint_m.x * 0.5;
+    let half_z_m = footprint_m.z * 0.5;
+    let repeat_x = (footprint_m.x / 0.75).max(1.0) as f32;
+    let repeat_z = (footprint_m.z / 0.75).max(1.0) as f32;
+    let top_y_m = 0.038;
+    let mesh = TriangleMesh {
+        positions: vec![
+            [-half_x_m as f32, top_y_m, -half_z_m as f32],
+            [half_x_m as f32, top_y_m, -half_z_m as f32],
+            [half_x_m as f32, top_y_m, half_z_m as f32],
+            [-half_x_m as f32, top_y_m, half_z_m as f32],
+        ],
+        normals: vec![[0.0, 1.0, 0.0]; 4],
+        texcoords: vec![
+            [0.0, 0.0],
+            [repeat_x, 0.0],
+            [repeat_x, repeat_z],
+            [0.0, repeat_z],
+        ],
+        indices: vec![0, 1, 2, 0, 2, 3],
+    };
+    scene.items.push(RenderSceneItem {
+        transform: Transform3 {
+            translation: center,
+            rotation: rne_math::Quat::IDENTITY,
+            scale: Vec3::ONE,
+        },
+        shape: VisualShape::DynamicMesh,
+        color_rgba: [1.0; 4],
+        mesh: Some(Arc::new(mesh)),
+        base_color_texture: Some(Arc::clone(texture)),
+        material: PbrMaterial::new([1.0; 4], 0.9, 0.0, [0.0; 3]),
+    });
+}
+
 fn push_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {
     scene.items.push(RenderSceneItem {
         transform: Transform3 {
@@ -556,6 +625,7 @@ fn push_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color_rgba
         color_rgba,
         mesh: None,
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 

@@ -35,6 +35,7 @@ impl RenderScene {
                 color_rgba,
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

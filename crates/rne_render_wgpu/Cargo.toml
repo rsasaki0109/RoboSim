@@ -20,6 +20,7 @@ wgpu = "24"
 winit = { version = "0.30", optional = true }
 
 [dev-dependencies]
+naga = "24"
 approx = "0.5"
 rne_ecs = { path = "../rne_ecs" }
 rne_urdf_import = { path = "../rne_urdf_import" }

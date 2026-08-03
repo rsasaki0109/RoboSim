@@ -289,6 +289,7 @@ mod tests {
                 color_rgba: [0.8, 0.2, 0.2, 1.0],
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             }],
         };
 
@@ -350,6 +351,7 @@ mod tests {
                     color_rgba: [0.2, 0.8, 0.3, 1.0],
                     mesh: None,
                     base_color_texture: None,
+                    material: Default::default(),
                 },
                 RenderSceneItem {
                     transform: Transform3 {
@@ -364,6 +366,7 @@ mod tests {
                     color_rgba: [0.2, 0.3, 0.9, 1.0],
                     mesh: None,
                     base_color_texture: None,
+                    material: Default::default(),
                 },
             ],
         };
@@ -424,6 +427,7 @@ mod tests {
                 color_rgba: [0.35, 0.55, 0.95, 1.0],
                 mesh: Some(mesh),
                 base_color_texture: None,
+                material: Default::default(),
             }],
         };
 
@@ -549,6 +553,7 @@ mod tests {
                 color_rgba: [0.8, 0.2, 0.2, 1.0],
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             }],
         };
 
@@ -609,6 +614,7 @@ mod tests {
                 color_rgba: [0.35, 0.55, 0.95, 1.0],
                 mesh: Some(mesh),
                 base_color_texture: None,
+                material: Default::default(),
             }],
         };
 

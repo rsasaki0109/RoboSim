@@ -113,6 +113,7 @@ fn append_box(scene: &mut RenderScene, center: Vec3, size_m: Vec3, color_rgba: [
         color_rgba,
         mesh: None,
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 

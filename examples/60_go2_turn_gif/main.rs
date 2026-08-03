@@ -256,6 +256,7 @@ fn render_panel(
             color_rgba: trail_color,
             mesh: None,
             base_color_texture: None,
+            material: Default::default(),
         });
     }
     mesh_cache
@@ -329,6 +330,7 @@ fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f6
                 color_rgba: color,
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

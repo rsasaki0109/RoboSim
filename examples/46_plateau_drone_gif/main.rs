@@ -2421,6 +2421,7 @@ fn push_debug_mesh(scene: &mut RenderScene, mesh: DebugMeshBuilder, color_rgba: 
             indices: mesh.indices,
         })),
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 
@@ -3318,6 +3319,7 @@ fn append_fleet_body(
         color_rgba: [1.0; 4],
         mesh: Some(Arc::clone(mesh)),
         base_color_texture: Some(Arc::clone(body_texture)),
+        material: Default::default(),
     });
 }
 
@@ -3404,6 +3406,7 @@ fn append_vehicle_meshes(
             color_rgba: [1.0; 4],
             mesh: Some(Arc::clone(mesh)),
             base_color_texture: Some(Arc::clone(texture)),
+            material: Default::default(),
         });
     }
 }
@@ -3425,6 +3428,7 @@ fn push_box(
         color_rgba,
         mesh: None,
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 
@@ -3446,6 +3450,7 @@ fn push_cylinder(
         color_rgba,
         mesh: None,
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 
@@ -3460,6 +3465,7 @@ fn push_sphere(scene: &mut RenderScene, translation: Vec3, radius_m: f64, color_
         color_rgba,
         mesh: None,
         base_color_texture: None,
+        material: Default::default(),
     });
 }
 
