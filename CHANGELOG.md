@@ -12,6 +12,10 @@ All notable changes to Robot Native Engine are documented in this file.
   specular IBL with configurable intensity and world-Y rotation. The G1
   photoreal capture accepts `RNE_HDRI_PATH`, `RNE_HDRI_INTENSITY`, and
   `RNE_HDRI_ROTATION_RAD`; no third-party HDRI is vendored.
+- **Photoreal temporal anti-aliasing (v0.3-C)**: `rne_render_wgpu` now
+  provides opt-in deterministic Halton camera jitter, depth-based reprojection,
+  neighborhood history clamping, resize-safe accumulation, and G1 capture
+  controls through `RNE_TAA`, `RNE_TAA_FEEDBACK`, and `RNE_TAA_JITTER_PX`.
 - **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
   90-meter, ten-building PLATEAU-style showcase and renders varied facades,
   sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The

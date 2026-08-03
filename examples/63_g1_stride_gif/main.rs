@@ -7,6 +7,8 @@
 //! `--smoke` exercises that physics path without initializing a renderer.
 //! Set `RNE_HDRI_PATH` to a Radiance `.hdr` equirectangular map to enable the
 //! photoreal environment background and image-based lighting.
+//! Set `RNE_TAA=1` to enable deterministic temporal anti-aliasing for static
+//! or slowly changing captures.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,7 +26,7 @@ use rne_render::{
     Camera, EnvironmentLighting, EnvironmentMap, ImageFrame, MeshRenderCache, PbrMaterial,
     RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, VisualShape,
 };
-use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+use rne_render_wgpu::{CameraOrbit, TaaSettings, WgpuRenderBackend};
 
 const PANEL_WIDTH: u32 = 480;
 const PANEL_HEIGHT: u32 = 520;
@@ -284,6 +286,7 @@ fn main() {
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     configure_environment(&mut backend);
+    configure_taa(&mut backend);
     let camera = Camera::new(PANEL_WIDTH, PANEL_HEIGHT, std::f64::consts::FRAC_PI_4);
     let mesh_roots: Vec<PathBuf> = baseline.sim.mesh_package_roots().to_vec();
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
@@ -374,6 +377,38 @@ fn configure_environment(backend: &mut WgpuRenderBackend) {
     }
     backend.set_environment(lighting);
     println!("using HDRI environment {}", path.display());
+}
+
+fn configure_taa(backend: &mut WgpuRenderBackend) {
+    let enabled = std::env::var("RNE_TAA")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    let mut settings = TaaSettings::enabled();
+    if let Ok(value) = std::env::var("RNE_TAA_FEEDBACK") {
+        settings.feedback = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_TAA_FEEDBACK={value:?}: {error}"));
+    }
+    if let Ok(value) = std::env::var("RNE_TAA_JITTER_PX") {
+        settings.jitter_scale_px = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_TAA_JITTER_PX={value:?}: {error}"));
+    }
+    backend.set_taa(settings);
+    println!(
+        "using temporal anti-aliasing (feedback {:.2}, jitter {:.2}px)",
+        backend.taa().feedback,
+        backend.taa().jitter_scale_px,
+    );
 }
 
 fn run_smoke() {

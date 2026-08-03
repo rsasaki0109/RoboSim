@@ -1,6 +1,7 @@
 //! wgpu render backend implementation.
 
 use crate::primitive::{PrimitiveRenderPass, PrimitiveRenderer};
+use crate::taa::TaaSettings;
 use pollster::block_on;
 use rne_math::Transform3;
 use rne_render::{
@@ -14,6 +15,7 @@ pub struct WgpuRenderBackend {
     queue: wgpu::Queue,
     primitive: Option<PrimitiveRenderer>,
     environment: EnvironmentLighting,
+    taa: TaaSettings,
 }
 
 impl WgpuRenderBackend {
@@ -52,17 +54,42 @@ impl WgpuRenderBackend {
             queue,
             primitive: None,
             environment: EnvironmentLighting::default(),
+            taa: TaaSettings::default(),
         })
     }
 
     /// Replaces the HDR environment used for subsequent scene renders.
     pub fn set_environment(&mut self, environment: EnvironmentLighting) {
-        self.environment = environment.sanitized();
+        let environment = environment.sanitized();
+        if self.environment != environment {
+            self.environment = environment;
+            self.reset_taa_history();
+        }
     }
 
     /// Returns the current environment-lighting settings.
     pub fn environment(&self) -> &EnvironmentLighting {
         &self.environment
+    }
+
+    /// Replaces the temporal anti-aliasing settings for subsequent renders.
+    pub fn set_taa(&mut self, settings: TaaSettings) {
+        self.taa = settings.sanitized();
+        if let Some(renderer) = self.primitive.as_mut() {
+            renderer.set_taa(self.taa);
+        }
+    }
+
+    /// Returns the current temporal anti-aliasing settings.
+    pub fn taa(&self) -> TaaSettings {
+        self.taa
+    }
+
+    /// Discards temporal history before the next scene render.
+    pub fn reset_taa_history(&mut self) {
+        if let Some(renderer) = self.primitive.as_mut() {
+            renderer.reset_taa_history();
+        }
     }
 
     fn render_clear_inner(
@@ -135,11 +162,13 @@ impl RenderBackend for WgpuRenderBackend {
         clear_color: [f32; 4],
     ) -> Result<CameraPassOutput, RenderError> {
         if self.primitive.is_none() {
-            self.primitive = Some(PrimitiveRenderer::new(
+            let mut renderer = PrimitiveRenderer::new(
                 &self.device,
                 &self.queue,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
-            ));
+            );
+            renderer.set_taa(self.taa);
+            self.primitive = Some(renderer);
         }
         let renderer = self.primitive.as_mut().expect("primitive renderer");
         renderer.render(PrimitiveRenderPass {
@@ -320,6 +349,52 @@ mod tests {
             .depth_m
             .iter()
             .all(|depth| *depth == camera.far_m as f32));
+    }
+
+    #[test]
+    fn wgpu_taa_renders_static_scene_with_history() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+        backend.set_taa(TaaSettings::enabled());
+
+        let camera = Camera::new(64, 48, std::f64::consts::FRAC_PI_4);
+        let view = Transform3::from_translation_rotation(Vec3::new(0.0, 0.8, 2.5), Quat::IDENTITY);
+        let scene = RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3 {
+                    translation: Vec3::new(0.0, 0.0, 0.0),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::new(0.7, 0.7, 0.7),
+                },
+                shape: VisualShape::Sphere { radius_m: 0.5 },
+                color_rgba: [0.8, 0.4, 0.1, 1.0],
+                mesh: None,
+                base_color_texture: None,
+                material: Default::default(),
+            }],
+        };
+
+        let first = backend
+            .render_scene_camera(&camera, &view, &scene, [0.02, 0.03, 0.04, 1.0])
+            .expect("first TAA frame");
+        let second = backend
+            .render_scene_camera(&camera, &view, &scene, [0.02, 0.03, 0.04, 1.0])
+            .expect("second TAA frame");
+
+        assert_ne!(hash_rgba8(&first.color.rgba8), 0);
+        assert_ne!(hash_rgba8(&second.color.rgba8), 0);
+        assert!(second
+            .depth
+            .depth_m
+            .iter()
+            .any(|depth| *depth < camera.far_m as f32));
     }
 
     #[test]
