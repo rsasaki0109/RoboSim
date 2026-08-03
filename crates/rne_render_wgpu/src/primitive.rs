@@ -24,6 +24,10 @@ struct DrawUniform {
 @group(2) @binding(1) var base_color_sampler: sampler;
 @group(3) @binding(0) var shadow_texture: texture_depth_2d;
 @group(3) @binding(1) var shadow_sampler: sampler_comparison;
+@group(4) @binding(0) var normal_texture: texture_2d<f32>;
+@group(4) @binding(1) var normal_sampler: sampler;
+@group(5) @binding(0) var roughness_texture: texture_2d<f32>;
+@group(5) @binding(1) var roughness_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -116,20 +120,63 @@ fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
     return color / (vec3<f32>(1.0) + color);
 }
 
+fn fallback_tangent_frame(normal: vec3<f32>) -> mat3x3<f32> {
+    var reference = vec3<f32>(0.0, 1.0, 0.0);
+    if (abs(normal.y) > 0.9) {
+        reference = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    let tangent = normalize(cross(reference, normal));
+    let bitangent = normalize(cross(normal, tangent));
+    return mat3x3<f32>(tangent, bitangent, normal);
+}
+
+fn tangent_frame(normal: vec3<f32>, world_position: vec3<f32>, uv: vec2<f32>) -> mat3x3<f32> {
+    let position_dx = dpdx(world_position);
+    let position_dy = dpdy(world_position);
+    let uv_dx = dpdx(uv);
+    let uv_dy = dpdy(uv);
+    let determinant = uv_dx.x * uv_dy.y - uv_dx.y * uv_dy.x;
+    if (abs(determinant) < 1e-5) {
+        return fallback_tangent_frame(normal);
+    }
+    let tangent = normalize(
+        (position_dx * uv_dy.y - position_dy * uv_dx.y) / determinant,
+    );
+    let bitangent = normalize(
+        (position_dy * uv_dx.x - position_dx * uv_dy.x) / determinant,
+    );
+    return mat3x3<f32>(tangent, bitangent, normal);
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(camera.light_ambient.xyz);
-    let normal = normalize(input.world_normal);
-    let ndotl = max(dot(normal, light_dir), 0.0);
-    let visibility = shadow_visibility(input, ndotl);
+    let geometric_normal = normalize(input.world_normal);
+    let geometric_ndotl = max(dot(geometric_normal, light_dir), 0.0);
+    let visibility = shadow_visibility(input, geometric_ndotl);
     let shadowed = mix(1.0 - camera.diffuse_shadow.y, 1.0, visibility);
+    let uv = vec2<f32>(input.texcoord.x, 1.0 - input.texcoord.y);
     let texture_color = textureSample(
         base_color_texture,
         base_color_sampler,
-        vec2<f32>(input.texcoord.x, 1.0 - input.texcoord.y),
+        uv,
     );
+    let tangent_normal_sample = textureSample(normal_texture, normal_sampler, uv).xyz * 2.0 - 1.0;
+    let tangent_normal = normalize(vec3<f32>(
+        tangent_normal_sample.xy * clamp(draw.material_params.w, 0.0, 2.0),
+        tangent_normal_sample.z,
+    ));
+    let normal = normalize(
+        tangent_frame(geometric_normal, input.world_position, uv) * tangent_normal,
+    );
+    let mapped_ndotl = max(dot(normal, light_dir), 0.0);
     let albedo = input.color.rgb * draw.base_color.rgb * texture_color.rgb;
-    let roughness = clamp(draw.material_params.x, 0.04, 1.0);
+    let roughness_sample = textureSample(roughness_texture, roughness_sampler, uv).r;
+    let roughness = clamp(
+        mix(draw.material_params.x, roughness_sample, draw.material_params.z),
+        0.04,
+        1.0,
+    );
     let metallic = clamp(draw.material_params.y, 0.0, 1.0);
     let view_dir = normalize(camera.camera_position.xyz - input.world_position);
     let half_dir = normalize(view_dir + light_dir);
@@ -139,12 +186,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let fresnel = fresnel_schlick(vdoth, f0);
     let distribution = distribution_ggx(ndoth, roughness);
-    let geometry = geometry_smith(ndotv, ndotl, roughness);
+    let geometry = geometry_smith(ndotv, mapped_ndotl, roughness);
     let specular = fresnel * distribution * geometry /
-        max(4.0 * ndotv * ndotl, 1e-4);
+        max(4.0 * ndotv * mapped_ndotl, 1e-4);
     let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) * albedo /
         3.14159265;
-    let direct = (diffuse + specular) * ndotl * camera.diffuse_shadow.x * 3.2 * shadowed;
+    let direct = (diffuse + specular) * mapped_ndotl * camera.diffuse_shadow.x * 3.2 * shadowed;
     let ambient = albedo * camera.light_ambient.w * (1.0 - metallic);
     let hdr_color = ambient + direct + draw.emissive.rgb;
     return vec4<f32>(
@@ -282,6 +329,10 @@ pub struct PrimitiveRenderer {
     texture_layout: wgpu::BindGroupLayout,
     fallback_texture: GpuTexture,
     texture_cache: HashMap<usize, GpuTexture>,
+    fallback_normal_texture: GpuTexture,
+    normal_texture_cache: HashMap<usize, GpuTexture>,
+    fallback_roughness_texture: GpuTexture,
+    roughness_texture_cache: HashMap<usize, GpuTexture>,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     shadow_bind_group: wgpu::BindGroup,
@@ -450,6 +501,8 @@ impl PrimitiveRenderer {
                 &draw_layout,
                 &texture_layout,
                 &shadow_texture_layout,
+                &texture_layout,
+                &texture_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -599,6 +652,23 @@ impl PrimitiveRenderer {
             &texture_layout,
             "rne_white_texture",
             &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        let fallback_normal_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_flat_normal_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![128, 128, 255, 255]),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let fallback_roughness_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_white_roughness_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+            wgpu::TextureFormat::Rgba8Unorm,
         );
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("rne_directional_shadow_map"),
@@ -658,6 +728,10 @@ impl PrimitiveRenderer {
             texture_layout,
             fallback_texture,
             texture_cache: HashMap::new(),
+            fallback_normal_texture,
+            normal_texture_cache: HashMap::new(),
+            fallback_roughness_texture,
+            roughness_texture_cache: HashMap::new(),
             _shadow_texture: shadow_texture,
             shadow_view,
             shadow_bind_group,
@@ -721,7 +795,12 @@ impl PrimitiveRenderer {
                 normal_col2: normal_cols[2],
                 color: item.color_rgba,
                 base_color: material.base_color_rgba,
-                material_params: [material.roughness, material.metallic, 0.0, 0.0],
+                material_params: [
+                    material.roughness,
+                    material.metallic,
+                    f32::from(material.roughness_texture.is_some()),
+                    material.normal_strength,
+                ],
                 emissive: [
                     material.emissive_rgb[0],
                     material.emissive_rgb[1],
@@ -759,8 +838,37 @@ impl PrimitiveRenderer {
                         &self.texture_layout,
                         "rne_base_color_texture",
                         texture,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
                     );
                     self.texture_cache.insert(key, uploaded);
+                }
+            }
+            if let Some(texture) = &item.material.normal_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.normal_texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_normal_texture",
+                        texture,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    );
+                    self.normal_texture_cache.insert(key, uploaded);
+                }
+            }
+            if let Some(texture) = &item.material.roughness_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.roughness_texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_roughness_texture",
+                        texture,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    );
+                    self.roughness_texture_cache.insert(key, uploaded);
                 }
             }
         }
@@ -876,7 +984,27 @@ impl PrimitiveRenderer {
                     .as_ref()
                     .and_then(|texture| self.texture_cache.get(&(Arc::as_ptr(texture) as usize)))
                     .unwrap_or(&self.fallback_texture);
+                let normal_texture = item
+                    .material
+                    .normal_texture
+                    .as_ref()
+                    .and_then(|texture| {
+                        self.normal_texture_cache
+                            .get(&(Arc::as_ptr(texture) as usize))
+                    })
+                    .unwrap_or(&self.fallback_normal_texture);
+                let roughness_texture = item
+                    .material
+                    .roughness_texture
+                    .as_ref()
+                    .and_then(|texture| {
+                        self.roughness_texture_cache
+                            .get(&(Arc::as_ptr(texture) as usize))
+                    })
+                    .unwrap_or(&self.fallback_roughness_texture);
                 pass.set_bind_group(2, &texture.bind_group, &[]);
+                pass.set_bind_group(4, &normal_texture.bind_group, &[]);
+                pass.set_bind_group(5, &roughness_texture.bind_group, &[]);
 
                 if let Some(gpu_mesh) = &dynamic_meshes[index] {
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
@@ -1118,6 +1246,7 @@ fn upload_texture(
     layout: &wgpu::BindGroupLayout,
     label: &str,
     image: &ImageFrame,
+    format: wgpu::TextureFormat,
 ) -> GpuTexture {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
@@ -1129,7 +1258,7 @@ fn upload_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -1154,7 +1283,7 @@ fn upload_texture(
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("rne_base_color_sampler"),
+        label: Some(label),
         address_mode_u: wgpu::AddressMode::Repeat,
         address_mode_v: wgpu::AddressMode::Repeat,
         mag_filter: wgpu::FilterMode::Linear,
@@ -1162,7 +1291,7 @@ fn upload_texture(
         ..Default::default()
     });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("rne_base_color_texture_bind_group"),
+        label: Some(label),
         layout,
         entries: &[
             wgpu::BindGroupEntry {

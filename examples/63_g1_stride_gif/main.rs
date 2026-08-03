@@ -253,6 +253,14 @@ fn main() {
         load_texture(&repo_root.join(
             "examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_basecolor.png",
         ));
+    let floor_normal_texture = load_texture(
+        &repo_root
+            .join("examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_normal.png"),
+    );
+    let floor_roughness_texture =
+        load_texture(&repo_root.join(
+            "examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_roughness.png",
+        ));
     let frames_dir = media_dir.join("unitree-g1-learned-stride-frames");
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create learned G1 frame directory");
@@ -288,6 +296,8 @@ fn main() {
             &mesh_root_refs,
             &baseline,
             &floor_texture,
+            &floor_normal_texture,
+            &floor_roughness_texture,
             [0.16, 0.58, 0.96, 1.0],
         );
         let right = render_panel(
@@ -297,6 +307,8 @@ fn main() {
             &mesh_root_refs,
             &learned,
             &floor_texture,
+            &floor_normal_texture,
+            &floor_roughness_texture,
             [0.98, 0.54, 0.16, 1.0],
         );
         let composite = composite_side_by_side(&left, &right);
@@ -362,6 +374,7 @@ fn run_smoke() {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_panel(
     backend: &mut WgpuRenderBackend,
     camera: &Camera,
@@ -369,6 +382,8 @@ fn render_panel(
     mesh_root_refs: &[&Path],
     walker: &G1Walker,
     floor_texture: &Arc<ImageFrame>,
+    floor_normal_texture: &Arc<ImageFrame>,
+    floor_roughness_texture: &Arc<ImageFrame>,
     trail_color: [f32; 4],
 ) -> Vec<u8> {
     let observed = walker.sim.observe();
@@ -381,6 +396,8 @@ fn render_panel(
         walker.capture_start_xz_m[0],
         walker.capture_start_xz_m[1],
         floor_texture,
+        floor_normal_texture,
+        floor_roughness_texture,
     );
     for position in &walker.trail_m {
         scene.items.push(RenderSceneItem {
@@ -420,6 +437,8 @@ fn append_realistic_test_bay(
     center_x_m: f64,
     center_z_m: f64,
     floor_texture: &Arc<ImageFrame>,
+    floor_normal_texture: &Arc<ImageFrame>,
+    floor_roughness_texture: &Arc<ImageFrame>,
 ) {
     // The G1 physics scene intentionally stays minimal. These render-only props make the
     // hero capture read as a real robotics test bay without changing contacts or dynamics.
@@ -435,7 +454,14 @@ fn append_realistic_test_bay(
 
     let floor_center = Vec3::new(center_x_m + 0.25, -0.035, center_z_m - 0.35);
     push_box(scene, floor_center, Vec3::new(5.4, 0.07, 4.6), FLOOR);
-    push_textured_floor(scene, floor_center, Vec3::new(5.4, 0.0, 4.6), floor_texture);
+    push_textured_floor(
+        scene,
+        floor_center,
+        Vec3::new(5.4, 0.0, 4.6),
+        floor_texture,
+        floor_normal_texture,
+        floor_roughness_texture,
+    );
 
     for x_offset in [-1.8, -0.9, 0.0, 0.9, 1.8] {
         push_box(
@@ -578,6 +604,8 @@ fn push_textured_floor(
     center: Vec3,
     footprint_m: Vec3,
     texture: &Arc<ImageFrame>,
+    normal_texture: &Arc<ImageFrame>,
+    roughness_texture: &Arc<ImageFrame>,
 ) {
     let half_x_m = footprint_m.x * 0.5;
     let half_z_m = footprint_m.z * 0.5;
@@ -610,7 +638,10 @@ fn push_textured_floor(
         color_rgba: [1.0; 4],
         mesh: Some(Arc::new(mesh)),
         base_color_texture: Some(Arc::clone(texture)),
-        material: PbrMaterial::new([1.0; 4], 0.9, 0.0, [0.0; 3]),
+        material: PbrMaterial::new([1.0; 4], 0.9, 0.0, [0.0; 3]).with_texture_maps(
+            Some(Arc::clone(normal_texture)),
+            Some(Arc::clone(roughness_texture)),
+        ),
     });
 }
 
