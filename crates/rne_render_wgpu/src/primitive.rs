@@ -1,3 +1,4 @@
+use crate::environment_filter::{prefilter_environment, SPECULAR_MIP_LEVELS};
 use crate::taa::{TaaSettings, TemporalAntiAliasing};
 
 const SHADER: &str = r#"
@@ -40,6 +41,8 @@ struct DrawUniform {
 @group(8) @binding(0) var occlusion_texture: texture_2d<f32>;
 @group(8) @binding(1) var occlusion_sampler: sampler;
 @group(9) @binding(0) var environment_texture: texture_2d<f32>;
+@group(9) @binding(1) var prefiltered_environment_texture: texture_2d<f32>;
+@group(9) @binding(2) var diffuse_environment_texture: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -147,14 +150,14 @@ fn wrap_environment_index(index: i32, size: i32) -> i32 {
     return select(wrapped, wrapped + size, wrapped < 0);
 }
 
-fn sample_environment(direction: vec3<f32>) -> vec3<f32> {
+fn sample_prefiltered_level(direction: vec3<f32>, level: i32) -> vec3<f32> {
     let rotated = rotate_environment_direction(
         normalize(direction),
         camera.environment.z,
     );
     let u = atan2(rotated.z, rotated.x) / 6.28318530 + 0.5;
     let v = acos(clamp(rotated.y, -1.0, 1.0)) / 3.14159265;
-    let dimensions = textureDimensions(environment_texture);
+    let dimensions = textureDimensions(prefiltered_environment_texture, level);
     let width = max(i32(dimensions.x), 1);
     let height = max(i32(dimensions.y), 1);
     let x = u * f32(width) - 0.5;
@@ -165,10 +168,48 @@ fn sample_environment(direction: vec3<f32>) -> vec3<f32> {
     let y1 = clamp(y0 + 1, 0, height - 1);
     let fx = fract(x);
     let fy = clamp(fract(y), 0.0, 1.0);
-    let c00 = textureLoad(environment_texture, vec2<i32>(x0, y0), 0).rgb;
-    let c10 = textureLoad(environment_texture, vec2<i32>(x1, y0), 0).rgb;
-    let c01 = textureLoad(environment_texture, vec2<i32>(x0, y1), 0).rgb;
-    let c11 = textureLoad(environment_texture, vec2<i32>(x1, y1), 0).rgb;
+    let c00 = textureLoad(prefiltered_environment_texture, vec2<i32>(x0, y0), level).rgb;
+    let c10 = textureLoad(prefiltered_environment_texture, vec2<i32>(x1, y0), level).rgb;
+    let c01 = textureLoad(prefiltered_environment_texture, vec2<i32>(x0, y1), level).rgb;
+    let c11 = textureLoad(prefiltered_environment_texture, vec2<i32>(x1, y1), level).rgb;
+    return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
+}
+
+fn sample_prefiltered_environment(direction: vec3<f32>, lod: f32) -> vec3<f32> {
+    let max_level = 4.0;
+    let clamped_lod = clamp(lod, 0.0, max_level);
+    let level0 = i32(floor(clamped_lod));
+    let level1 = min(level0 + 1, 4);
+    let blend = fract(clamped_lod);
+    return mix(
+        sample_prefiltered_level(direction, level0),
+        sample_prefiltered_level(direction, level1),
+        blend,
+    );
+}
+
+fn sample_diffuse_environment(direction: vec3<f32>) -> vec3<f32> {
+    let rotated = rotate_environment_direction(
+        normalize(direction),
+        camera.environment.z,
+    );
+    let u = atan2(rotated.z, rotated.x) / 6.28318530 + 0.5;
+    let v = acos(clamp(rotated.y, -1.0, 1.0)) / 3.14159265;
+    let dimensions = textureDimensions(diffuse_environment_texture);
+    let width = max(i32(dimensions.x), 1);
+    let height = max(i32(dimensions.y), 1);
+    let x = u * f32(width) - 0.5;
+    let y = v * f32(height) - 0.5;
+    let x0 = wrap_environment_index(i32(floor(x)), width);
+    let x1 = wrap_environment_index(x0 + 1, width);
+    let y0 = clamp(i32(floor(y)), 0, height - 1);
+    let y1 = clamp(y0 + 1, 0, height - 1);
+    let fx = fract(x);
+    let fy = clamp(fract(y), 0.0, 1.0);
+    let c00 = textureLoad(diffuse_environment_texture, vec2<i32>(x0, y0), 0).rgb;
+    let c10 = textureLoad(diffuse_environment_texture, vec2<i32>(x1, y0), 0).rgb;
+    let c01 = textureLoad(diffuse_environment_texture, vec2<i32>(x0, y1), 0).rgb;
+    let c11 = textureLoad(diffuse_environment_texture, vec2<i32>(x1, y1), 0).rgb;
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
 }
 
@@ -264,11 +305,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let emissive = draw.emissive.rgb *
         mix(vec3<f32>(1.0), emissive_sample, draw.map_params.w);
     let environment_factor = camera.environment.w;
-    let environment_diffuse = sample_environment(normal) *
+    let environment_diffuse = sample_diffuse_environment(normal) *
         camera.environment.x * environment_factor * albedo * (1.0 - metallic) * occlusion;
     let environment_reflection = reflect(-view_dir, normal);
     let environment_fresnel = fresnel_schlick(ndotv, f0);
-    let environment_specular = sample_environment(environment_reflection) *
+    let environment_specular = sample_prefiltered_environment(environment_reflection, roughness * 4.0) *
         camera.environment.y * environment_factor * environment_fresnel * occlusion;
     let ambient = albedo * camera.light_ambient.w * (1.0 - metallic) * occlusion;
     let hdr_color = ambient + environment_diffuse + environment_specular + direct + emissive;
@@ -549,6 +590,8 @@ struct GpuTexture {
 
 struct GpuEnvironmentTexture {
     _texture: wgpu::Texture,
+    _prefiltered_texture: wgpu::Texture,
+    _diffuse_texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -710,8 +753,8 @@ impl PrimitiveRenderer {
         let environment_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("rne_environment_texture_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                entries: &[0, 1, 2].map(|binding| wgpu::BindGroupLayoutEntry {
+                    binding,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
@@ -719,7 +762,7 @@ impl PrimitiveRenderer {
                         multisampled: false,
                     },
                     count: None,
-                }],
+                }),
             });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1795,6 +1838,7 @@ fn upload_environment_texture(
     label: &str,
     map: &EnvironmentMap,
 ) -> GpuEnvironmentTexture {
+    let prefiltered = prefilter_environment(map);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -1828,17 +1872,103 @@ fn upload_environment_texture(
             depth_or_array_layers: 1,
         },
     );
+
+    let prefiltered_base = &prefiltered.specular_levels[0];
+    let prefiltered_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(&format!("{label}_specular_prefiltered")),
+        size: wgpu::Extent3d {
+            width: prefiltered_base.width,
+            height: prefiltered_base.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: SPECULAR_MIP_LEVELS,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (level_index, level) in prefiltered.specular_levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &prefiltered_texture,
+                mip_level: level_index as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&level.rgba32f),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(level.width * 4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(level.height),
+            },
+            wgpu::Extent3d {
+                width: level.width,
+                height: level.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(&format!("{label}_diffuse_prefiltered")),
+        size: wgpu::Extent3d {
+            width: prefiltered.diffuse.width,
+            height: prefiltered.diffuse.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &diffuse_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(&prefiltered.diffuse.rgba32f),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(prefiltered.diffuse.width * 4 * std::mem::size_of::<f32>() as u32),
+            rows_per_image: Some(prefiltered.diffuse.height),
+        },
+        wgpu::Extent3d {
+            width: prefiltered.diffuse.width,
+            height: prefiltered.diffuse.height,
+            depth_or_array_layers: 1,
+        },
+    );
+
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let prefiltered_view = prefiltered_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let diffuse_view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&view),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&prefiltered_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&diffuse_view),
+            },
+        ],
     });
     GpuEnvironmentTexture {
         _texture: texture,
+        _prefiltered_texture: prefiltered_texture,
+        _diffuse_texture: diffuse_texture,
         bind_group,
     }
 }

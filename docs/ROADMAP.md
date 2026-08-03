@@ -63,6 +63,7 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 | I | Photoreal asset foundation v0.3-A | Static glTF/GLB scene import, node-transform baking, packed metallic-roughness/emissive/occlusion maps, and backend-neutral PBR texture semantics | Done (HDRI and TAA were added in later increments; skinning and animation remain future work) |
 | J | Photoreal environment lighting v0.3-B | Backend-neutral Radiance HDR loading, opt-in WGPU equirectangular sky, diffuse/specular image-based lighting, map caching, and G1 capture integration | Done |
 | K | Photoreal temporal anti-aliasing v0.3-C | Opt-in deterministic camera jitter, depth reprojection, history clamping, resize-safe accumulation, and G1 capture integration | Done |
+| L | Photoreal prefiltered IBL v0.3-D | Deterministic GGX/Hammersley specular mip pyramid, cosine-weighted diffuse environment map, and roughness-driven WGPU sampling | Done |
 
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are

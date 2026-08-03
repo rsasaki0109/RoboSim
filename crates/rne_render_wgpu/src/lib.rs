@@ -4,6 +4,7 @@
 
 pub mod backend;
 pub mod camera;
+mod environment_filter;
 mod primitive;
 pub mod taa;
 
