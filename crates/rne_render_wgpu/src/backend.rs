@@ -4,7 +4,8 @@ use crate::primitive::{PrimitiveRenderPass, PrimitiveRenderer};
 use pollster::block_on;
 use rne_math::Transform3;
 use rne_render::{
-    Camera, CameraPassOutput, ImageFrame, RenderBackend, RenderError, RenderScene, RenderTarget,
+    Camera, CameraPassOutput, EnvironmentLighting, ImageFrame, RenderBackend, RenderError,
+    RenderScene, RenderTarget,
 };
 
 /// wgpu-backed renderer with off-screen render targets.
@@ -12,6 +13,7 @@ pub struct WgpuRenderBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
     primitive: Option<PrimitiveRenderer>,
+    environment: EnvironmentLighting,
 }
 
 impl WgpuRenderBackend {
@@ -49,7 +51,18 @@ impl WgpuRenderBackend {
             device,
             queue,
             primitive: None,
+            environment: EnvironmentLighting::default(),
         })
+    }
+
+    /// Replaces the HDR environment used for subsequent scene renders.
+    pub fn set_environment(&mut self, environment: EnvironmentLighting) {
+        self.environment = environment.sanitized();
+    }
+
+    /// Returns the current environment-lighting settings.
+    pub fn environment(&self) -> &EnvironmentLighting {
+        &self.environment
     }
 
     fn render_clear_inner(
@@ -136,6 +149,7 @@ impl RenderBackend for WgpuRenderBackend {
             camera,
             view,
             scene,
+            environment: &self.environment,
             clear_color,
         })
     }
@@ -236,7 +250,10 @@ fn unique_colors(rgba8: &[u8]) -> usize {
 mod tests {
     use super::*;
     use rne_math::{Quat, Vec3};
-    use rne_render::{hash_depth_f32, hash_rgba8, RenderScene, RenderSceneItem, VisualShape};
+    use rne_render::{
+        hash_depth_f32, hash_rgba8, EnvironmentLighting, EnvironmentMap, RenderScene,
+        RenderSceneItem, VisualShape,
+    };
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -260,6 +277,49 @@ mod tests {
         assert_eq!(frame.height, 8);
         assert_eq!(frame.rgba8.len(), 8 * 8 * 4);
         assert_ne!(hash_rgba8(&frame.rgba8), 0);
+    }
+
+    #[test]
+    fn wgpu_environment_renders_hdr_sky_without_geometry() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+        let map = EnvironmentMap::from_rgba32f(
+            2,
+            2,
+            vec![
+                6.0, 1.0, 0.2, 1.0, 0.2, 1.5, 6.0, 1.0, 0.1, 0.2, 0.8, 1.0, 4.0, 4.0, 1.0, 1.0,
+            ],
+        )
+        .expect("synthetic HDR map");
+        backend.set_environment(EnvironmentLighting::from_map(Arc::new(map)));
+
+        let camera = Camera::new(32, 24, std::f64::consts::FRAC_PI_4);
+        let output = backend
+            .render_scene_camera(
+                &camera,
+                &Transform3::IDENTITY,
+                &RenderScene::new(),
+                [0.0, 0.0, 0.0, 1.0],
+            )
+            .expect("environment sky render");
+
+        assert_ne!(hash_rgba8(&output.color.rgba8), 0);
+        assert!(
+            unique_colors(&output.color.rgba8) > 1,
+            "expected environment gradient in the sky"
+        );
+        assert!(output
+            .depth
+            .depth_m
+            .iter()
+            .all(|depth| *depth == camera.far_m as f32));
     }
 
     #[test]

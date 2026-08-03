@@ -1,10 +1,12 @@
 const SHADER: &str = r#"
 struct CameraUniform {
     view_proj: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
     light_view_proj: mat4x4<f32>,
     light_ambient: vec4<f32>,
     diffuse_shadow: vec4<f32>,
     camera_position: vec4<f32>,
+    environment: vec4<f32>,
 }
 
 struct DrawUniform {
@@ -35,6 +37,7 @@ struct DrawUniform {
 @group(7) @binding(1) var emissive_sampler: sampler;
 @group(8) @binding(0) var occlusion_texture: texture_2d<f32>;
 @group(8) @binding(1) var occlusion_sampler: sampler;
+@group(9) @binding(0) var environment_texture: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -125,6 +128,46 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
 
 fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
     return color / (vec3<f32>(1.0) + color);
+}
+
+fn rotate_environment_direction(direction: vec3<f32>, rotation_rad: f32) -> vec3<f32> {
+    let cosine = cos(rotation_rad);
+    let sine = sin(rotation_rad);
+    return vec3<f32>(
+        cosine * direction.x - sine * direction.z,
+        direction.y,
+        sine * direction.x + cosine * direction.z,
+    );
+}
+
+fn wrap_environment_index(index: i32, size: i32) -> i32 {
+    let wrapped = index % size;
+    return select(wrapped, wrapped + size, wrapped < 0);
+}
+
+fn sample_environment(direction: vec3<f32>) -> vec3<f32> {
+    let rotated = rotate_environment_direction(
+        normalize(direction),
+        camera.environment.z,
+    );
+    let u = atan2(rotated.z, rotated.x) / 6.28318530 + 0.5;
+    let v = acos(clamp(rotated.y, -1.0, 1.0)) / 3.14159265;
+    let dimensions = textureDimensions(environment_texture);
+    let width = max(i32(dimensions.x), 1);
+    let height = max(i32(dimensions.y), 1);
+    let x = u * f32(width) - 0.5;
+    let y = v * f32(height) - 0.5;
+    let x0 = wrap_environment_index(i32(floor(x)), width);
+    let x1 = wrap_environment_index(x0 + 1, width);
+    let y0 = clamp(i32(floor(y)), 0, height - 1);
+    let y1 = clamp(y0 + 1, 0, height - 1);
+    let fx = fract(x);
+    let fy = clamp(fract(y), 0.0, 1.0);
+    let c00 = textureLoad(environment_texture, vec2<i32>(x0, y0), 0).rgb;
+    let c10 = textureLoad(environment_texture, vec2<i32>(x1, y0), 0).rgb;
+    let c01 = textureLoad(environment_texture, vec2<i32>(x0, y1), 0).rgb;
+    let c11 = textureLoad(environment_texture, vec2<i32>(x1, y1), 0).rgb;
+    return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
 }
 
 fn fallback_tangent_frame(normal: vec3<f32>) -> mat3x3<f32> {
@@ -218,12 +261,109 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let emissive_sample = textureSample(emissive_texture, emissive_sampler, uv).rgb;
     let emissive = draw.emissive.rgb *
         mix(vec3<f32>(1.0), emissive_sample, draw.map_params.w);
+    let environment_factor = camera.environment.w;
+    let environment_diffuse = sample_environment(normal) *
+        camera.environment.x * environment_factor * albedo * (1.0 - metallic) * occlusion;
+    let environment_reflection = reflect(-view_dir, normal);
+    let environment_fresnel = fresnel_schlick(ndotv, f0);
+    let environment_specular = sample_environment(environment_reflection) *
+        camera.environment.y * environment_factor * environment_fresnel * occlusion;
     let ambient = albedo * camera.light_ambient.w * (1.0 - metallic) * occlusion;
-    let hdr_color = ambient + direct + emissive;
+    let hdr_color = ambient + environment_diffuse + environment_specular + direct + emissive;
     return vec4<f32>(
         reinhard_tonemap(hdr_color),
         input.color.a * draw.base_color.a * texture_color.a,
     );
+}
+"#;
+
+const SKY_SHADER: &str = r#"
+struct CameraUniform {
+    view_proj: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    light_view_proj: mat4x4<f32>,
+    light_ambient: vec4<f32>,
+    diffuse_shadow: vec4<f32>,
+    camera_position: vec4<f32>,
+    environment: vec4<f32>,
+}
+
+@group(0) @binding(0) var<uniform> camera: CameraUniform;
+@group(1) @binding(0) var environment_texture: texture_2d<f32>;
+
+struct SkyVertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) ndc_position: vec2<f32>,
+}
+
+@vertex
+fn vs_sky(@builtin(vertex_index) vertex_index: u32) -> SkyVertexOutput {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var output: SkyVertexOutput;
+    output.clip_position = vec4<f32>(positions[vertex_index], 1.0, 1.0);
+    output.ndc_position = positions[vertex_index];
+    return output;
+}
+
+fn rotate_environment_direction(direction: vec3<f32>, rotation_rad: f32) -> vec3<f32> {
+    let cosine = cos(rotation_rad);
+    let sine = sin(rotation_rad);
+    return vec3<f32>(
+        cosine * direction.x - sine * direction.z,
+        direction.y,
+        sine * direction.x + cosine * direction.z,
+    );
+}
+
+fn wrap_environment_index(index: i32, size: i32) -> i32 {
+    let wrapped = index % size;
+    return select(wrapped, wrapped + size, wrapped < 0);
+}
+
+fn sample_environment(direction: vec3<f32>) -> vec3<f32> {
+    let rotated = rotate_environment_direction(
+        normalize(direction),
+        camera.environment.z,
+    );
+    let u = atan2(rotated.z, rotated.x) / 6.28318530 + 0.5;
+    let v = acos(clamp(rotated.y, -1.0, 1.0)) / 3.14159265;
+    let dimensions = textureDimensions(environment_texture);
+    let width = max(i32(dimensions.x), 1);
+    let height = max(i32(dimensions.y), 1);
+    let x = u * f32(width) - 0.5;
+    let y = v * f32(height) - 0.5;
+    let x0 = wrap_environment_index(i32(floor(x)), width);
+    let x1 = wrap_environment_index(x0 + 1, width);
+    let y0 = clamp(i32(floor(y)), 0, height - 1);
+    let y1 = clamp(y0 + 1, 0, height - 1);
+    let fx = fract(x);
+    let fy = clamp(fract(y), 0.0, 1.0);
+    let c00 = textureLoad(environment_texture, vec2<i32>(x0, y0), 0).rgb;
+    let c10 = textureLoad(environment_texture, vec2<i32>(x1, y0), 0).rgb;
+    let c01 = textureLoad(environment_texture, vec2<i32>(x0, y1), 0).rgb;
+    let c11 = textureLoad(environment_texture, vec2<i32>(x1, y1), 0).rgb;
+    return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
+}
+
+fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
+    return color / (vec3<f32>(1.0) + color);
+}
+
+@fragment
+fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
+    let near_clip = vec4<f32>(input.ndc_position, 0.0, 1.0);
+    let far_clip = vec4<f32>(input.ndc_position, 1.0, 1.0);
+    let near_world = camera.inv_view_proj * near_clip;
+    let far_world = camera.inv_view_proj * far_clip;
+    let near_position = near_world.xyz / near_world.w;
+    let far_position = far_world.xyz / far_world.w;
+    let direction = normalize(far_position - near_position);
+    let color = sample_environment(direction) * camera.environment.w;
+    return vec4<f32>(reinhard_tonemap(color), 1.0);
 }
 "#;
 
@@ -256,8 +396,8 @@ fn vs_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 use bytemuck::{Pod, Zeroable};
 use rne_math::{Mat4, Transform3, Vec3};
 use rne_render::{
-    Camera, CameraPassOutput, DepthFrame, ImageFrame, RenderError, RenderScene, RenderTarget,
-    TriangleMesh, VisualShape,
+    Camera, CameraPassOutput, DepthFrame, EnvironmentLighting, EnvironmentMap, ImageFrame,
+    RenderError, RenderScene, RenderTarget, TriangleMesh, VisualShape,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -275,10 +415,12 @@ struct Vertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    inv_view_proj: [[f32; 4]; 4],
     light_view_proj: [[f32; 4]; 4],
     light_ambient: [f32; 4],
     diffuse_shadow: [f32; 4],
     camera_position: [f32; 4],
+    environment: [f32; 4],
 }
 
 /// Default directional light for primitive shading (world space, not normalized).
@@ -292,11 +434,15 @@ pub const DEFAULT_SHADOW_STRENGTH: f32 = 0.82;
 
 fn default_camera_uniform(
     view_proj: rne_math::Mat4,
+    inv_view_proj: rne_math::Mat4,
     light_view_proj: rne_math::Mat4,
     camera_position: Vec3,
+    environment: &EnvironmentLighting,
 ) -> CameraUniform {
+    let environment = environment.sanitized();
     CameraUniform {
         view_proj: mat4_to_cols(view_proj),
+        inv_view_proj: mat4_to_cols(inv_view_proj),
         light_view_proj: mat4_to_cols(light_view_proj),
         light_ambient: [
             DEFAULT_LIGHT_DIR[0],
@@ -310,6 +456,16 @@ fn default_camera_uniform(
             camera_position.y as f32,
             camera_position.z as f32,
             1.0,
+        ],
+        environment: [
+            environment.diffuse_strength,
+            environment.specular_strength,
+            environment.rotation_rad,
+            if environment.map.is_some() {
+                environment.intensity
+            } else {
+                0.0
+            },
         ],
     }
 }
@@ -342,8 +498,10 @@ struct BuiltPrimitiveMesh {
 
 pub struct PrimitiveRenderer {
     pipeline: wgpu::RenderPipeline,
+    sky_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     camera_layout: wgpu::BindGroupLayout,
+    environment_layout: wgpu::BindGroupLayout,
     shadow_camera_layout: wgpu::BindGroupLayout,
     draw_bind_group: wgpu::BindGroup,
     draw_uniform_stride: u32,
@@ -367,6 +525,8 @@ pub struct PrimitiveRenderer {
     emissive_texture_cache: HashMap<usize, GpuTexture>,
     fallback_occlusion_texture: GpuTexture,
     occlusion_texture_cache: HashMap<usize, GpuTexture>,
+    fallback_environment: GpuEnvironmentTexture,
+    environment_texture_cache: HashMap<usize, GpuEnvironmentTexture>,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     shadow_bind_group: wgpu::BindGroup,
@@ -380,6 +540,11 @@ struct GpuMesh {
 }
 
 struct GpuTexture {
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+}
+
+struct GpuEnvironmentTexture {
     _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
@@ -404,6 +569,8 @@ pub struct PrimitiveSurfacePass<'a> {
     pub view: &'a Transform3,
     /// Scene primitives to draw.
     pub scene: &'a RenderScene,
+    /// HDR environment lighting and background settings.
+    pub environment: &'a EnvironmentLighting,
     /// Clear color for empty pixels.
     pub clear_color: [f32; 4],
     /// Render targets.
@@ -424,6 +591,8 @@ pub struct PrimitiveRenderPass<'a> {
     pub view: &'a Transform3,
     /// Scene primitives to draw.
     pub scene: &'a RenderScene,
+    /// HDR environment lighting and background settings.
+    pub environment: &'a EnvironmentLighting,
     /// Clear color for empty pixels.
     pub clear_color: [f32; 4],
 }
@@ -437,6 +606,10 @@ impl PrimitiveRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rne_primitive_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rne_environment_sky_shader"),
+            source: wgpu::ShaderSource::Wgsl(SKY_SHADER.into()),
         });
         let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rne_shadow_shader"),
@@ -527,6 +700,20 @@ impl PrimitiveRenderer {
                     },
                 ],
             });
+        let environment_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("rne_environment_texture_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rne_primitive_pipeline_layout"),
@@ -540,6 +727,7 @@ impl PrimitiveRenderer {
                 &texture_layout,
                 &texture_layout,
                 &texture_layout,
+                &environment_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -597,6 +785,42 @@ impl PrimitiveRenderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("rne_environment_sky_pipeline_layout"),
+            bind_group_layouts: &[&camera_layout, &environment_layout],
+            push_constant_ranges: &[],
+        });
+        let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rne_environment_sky_pipeline"),
+            layout: Some(&sky_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sky_shader,
+                entry_point: Some("vs_sky"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sky_shader,
+                entry_point: Some("fs_sky"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
             cache: None,
@@ -731,6 +955,13 @@ impl PrimitiveRenderer {
             &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
             wgpu::TextureFormat::Rgba8Unorm,
         );
+        let fallback_environment = upload_environment_texture(
+            device,
+            queue,
+            &environment_layout,
+            "rne_fallback_environment",
+            &EnvironmentMap::solid([0.0, 0.0, 0.0, 1.0]).expect("valid fallback environment"),
+        );
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("rne_directional_shadow_map"),
             size: wgpu::Extent3d {
@@ -774,8 +1005,10 @@ impl PrimitiveRenderer {
 
         Self {
             pipeline,
+            sky_pipeline,
             shadow_pipeline,
             camera_layout,
+            environment_layout,
             shadow_camera_layout,
             draw_bind_group,
             draw_uniform_stride,
@@ -799,6 +1032,8 @@ impl PrimitiveRenderer {
             emissive_texture_cache: HashMap::new(),
             fallback_occlusion_texture,
             occlusion_texture_cache: HashMap::new(),
+            fallback_environment,
+            environment_texture_cache: HashMap::new(),
             _shadow_texture: shadow_texture,
             shadow_view,
             shadow_bind_group,
@@ -822,17 +1057,21 @@ impl PrimitiveRenderer {
         let camera = pass.camera;
         let view = pass.view;
         let scene = pass.scene;
+        let environment = pass.environment;
         let clear_color = pass.clear_color;
         let targets = pass.targets;
         let view_proj = camera.view_projection(view);
+        let inv_view_proj = view_proj.inverse();
         let light_view_proj = directional_light_view_projection(scene);
         queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::bytes_of(&default_camera_uniform(
                 view_proj,
+                inv_view_proj,
                 light_view_proj,
                 view.translation,
+                environment,
             )),
         );
         queue.write_buffer(
@@ -988,6 +1227,11 @@ impl PrimitiveRenderer {
             }
         }
 
+        let environment_bind_group = self
+            .environment_texture(device, queue, environment)
+            .bind_group
+            .clone();
+
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rne_camera_bind_group"),
             layout: &self.camera_layout,
@@ -1084,9 +1328,16 @@ impl PrimitiveRenderer {
                 occlusion_query_set: None,
             });
 
+            if environment.is_enabled() {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_bind_group(0, &camera_bind_group, &[]);
+                pass.set_bind_group(1, &environment_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &camera_bind_group, &[]);
             pass.set_bind_group(3, &self.shadow_bind_group, &[]);
+            pass.set_bind_group(9, &environment_bind_group, &[]);
 
             for (index, item) in scene.items.iter().enumerate() {
                 pass.set_bind_group(
@@ -1187,6 +1438,7 @@ impl PrimitiveRenderer {
         let camera = pass.camera;
         let view = pass.view;
         let scene = pass.scene;
+        let environment = pass.environment;
         let clear_color = pass.clear_color;
         let device = pass.device;
         let queue = pass.queue;
@@ -1228,6 +1480,7 @@ impl PrimitiveRenderer {
             camera,
             view,
             scene,
+            environment,
             clear_color,
             targets: &PrimitiveRenderViews {
                 color_view: &color_view,
@@ -1311,6 +1564,31 @@ impl PrimitiveRenderer {
         self.mesh_cache
             .entry(key)
             .or_insert_with(|| upload_mesh(device, mesh))
+    }
+
+    fn environment_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        lighting: &EnvironmentLighting,
+    ) -> &GpuEnvironmentTexture {
+        let Some(map) = lighting.map.as_ref() else {
+            return &self.fallback_environment;
+        };
+        let key = Arc::as_ptr(map) as usize;
+        if !self.environment_texture_cache.contains_key(&key) {
+            let uploaded = upload_environment_texture(
+                device,
+                queue,
+                &self.environment_layout,
+                "rne_environment_texture",
+                map,
+            );
+            self.environment_texture_cache.insert(key, uploaded);
+        }
+        self.environment_texture_cache
+            .get(&key)
+            .expect("environment texture uploaded")
     }
 }
 
@@ -1450,6 +1728,61 @@ fn upload_texture(
         ],
     });
     GpuTexture {
+        _texture: texture,
+        bind_group,
+    }
+}
+
+fn upload_environment_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    label: &str,
+    map: &EnvironmentMap,
+) -> GpuEnvironmentTexture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: map.width,
+            height: map.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(&map.rgba32f),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(map.width * 4 * std::mem::size_of::<f32>() as u32),
+            rows_per_image: Some(map.height),
+        },
+        wgpu::Extent3d {
+            width: map.width,
+            height: map.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&view),
+        }],
+    });
+    GpuEnvironmentTexture {
         _texture: texture,
         bind_group,
     }
@@ -1798,13 +2131,17 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
 mod mesh_tests {
     use super::{
         directional_light_view_projection, unit_cube, unit_cylinder, unit_sphere, RenderScene,
-        Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER,
+        Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER, SKY_SHADER,
     };
     use rne_render::RenderSceneItem;
 
     #[test]
     fn shaders_validate_without_gpu() {
-        for (label, source) in [("primitive", SHADER), ("shadow", SHADOW_SHADER)] {
+        for (label, source) in [
+            ("primitive", SHADER),
+            ("shadow", SHADOW_SHADER),
+            ("sky", SKY_SHADER),
+        ] {
             let module = naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|error| panic!("{label} WGSL parse failed: {error}"));
             let mut validator = naga::valid::Validator::new(

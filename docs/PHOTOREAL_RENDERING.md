@@ -14,6 +14,28 @@ present; `Ns` is converted to a GGX roughness estimate and the legacy
 shininess map is inverted into a linear roughness map. STL and primitive items
 use flat-normal and white-map fallback textures.
 
+## HDR environment lighting
+
+`EnvironmentMap::load` reads a Radiance `.hdr` equirectangular image into a
+backend-neutral linear RGB32F map. `EnvironmentLighting` adds explicit map
+intensity, diffuse/specular image-based-lighting strengths, and world-Y
+rotation. The WGPU backend samples the map for the sky background, diffuse
+ambient response, and view-dependent specular response while retaining the
+existing directional shadow path. Environment textures are cached by immutable
+map identity, so repeated frames do not re-upload the HDR pixels.
+
+Applications opt in without changing simulation or headless APIs:
+
+```rust
+let map = Arc::new(EnvironmentMap::load("studio.hdr")?);
+backend.set_environment(EnvironmentLighting::from_map(map));
+```
+
+The G1 photoreal capture accepts the same path through `RNE_HDRI_PATH` and
+optional `RNE_HDRI_INTENSITY` / `RNE_HDRI_ROTATION_RAD` variables. No HDRI is
+vendored in the repository; applications remain responsible for the source
+map's license and attribution.
+
 ## glTF/GLB asset path
 
 `rne_render::load_mesh_parts` and `RenderScene::resolve_mesh_assets` accept
@@ -51,5 +73,6 @@ Its corresponding linear maps are
 `concrete_floor_normal.png` and `concrete_floor_roughness.png` in the same
 directory. The maps are sampled with repeat addressing and are not part of the
 physics scene. Normal/roughness maps and glTF PBR maps are now part of the
-material path; HDR environment lighting and temporal anti-aliasing are later
-rendering increments.
+material path. HDR environment lighting is available through the opt-in WGPU
+path; temporal anti-aliasing, prefiltered environment convolution, skinning,
+and animation remain later rendering increments.

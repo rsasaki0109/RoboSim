@@ -3,7 +3,7 @@
 use crate::overlay::{ImageOverlay, ImageOverlayDraw};
 use crate::primitive::{PrimitiveRenderViews, PrimitiveRenderer, PrimitiveSurfacePass};
 use rne_math::Transform3;
-use rne_render::{Camera, RenderError, RenderScene};
+use rne_render::{Camera, EnvironmentLighting, RenderError, RenderScene};
 use std::sync::Arc;
 use thiserror::Error;
 use winit::window::Window;
@@ -40,6 +40,7 @@ pub struct InteractiveViewer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     primitive: PrimitiveRenderer,
+    environment: EnvironmentLighting,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     overlay: ImageOverlay,
@@ -118,6 +119,7 @@ impl InteractiveViewer {
             queue,
             config,
             primitive,
+            environment: EnvironmentLighting::default(),
             depth_texture,
             depth_view,
             overlay,
@@ -132,6 +134,11 @@ impl InteractiveViewer {
     /// Returns the current drawable size in pixels.
     pub fn size(&self) -> (u32, u32) {
         (self.config.width, self.config.height)
+    }
+
+    /// Replaces the HDR environment used for subsequent frames.
+    pub fn set_environment(&mut self, environment: EnvironmentLighting) {
+        self.environment = environment.sanitized();
     }
 
     /// Builds a pinhole camera matching the window size.
@@ -192,6 +199,7 @@ impl InteractiveViewer {
                 camera: &camera,
                 view,
                 scene,
+                environment: &self.environment,
                 clear_color,
                 targets: &PrimitiveRenderViews {
                     color_view: &color_view,
