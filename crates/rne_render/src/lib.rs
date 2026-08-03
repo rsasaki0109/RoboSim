@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod animation;
 pub mod backend;
 pub mod camera;
 pub mod depth;
@@ -17,6 +18,11 @@ pub mod path;
 pub mod scene;
 pub mod visual;
 
+pub use animation::{
+    AnimationChannel, AnimationClip, AnimationInterpolation, AnimationProperty,
+    AnimationSampleError, GltfNode, GltfSceneAsset, GltfScenePart, GltfSkin, GltfSkinJoint,
+    SkinWeights,
+};
 pub use backend::{RenderBackend, RenderError};
 pub use camera::Camera;
 pub use depth::{hash_depth_f32, scene_depth_probe, DepthFrame};
@@ -25,8 +31,8 @@ pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};
 pub use material::PbrMaterial;
 pub use mesh::{
-    load_mesh, load_mesh_parts, load_stl, load_stl_bytes, LoadedMeshPart, MeshLoadError,
-    TriangleMesh,
+    load_gltf_scene, load_mesh, load_mesh_parts, load_stl, load_stl_bytes, LoadedMeshPart,
+    MeshLoadError, TriangleMesh,
 };
 pub use mesh_cache::MeshRenderCache;
 pub use pass::CameraPassOutput;
