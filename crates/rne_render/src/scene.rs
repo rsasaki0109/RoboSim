@@ -206,7 +206,7 @@ mod tests {
             VisualShape::Box { size_m: Vec3::ONE },
             [1.0; 4],
             WorldTransform3::IDENTITY,
-            material,
+            material.clone(),
         );
 
         assert_eq!(item.material, material);

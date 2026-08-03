@@ -1,12 +1,15 @@
 //! Backend-neutral physically based material parameters.
 
+use crate::image::ImageFrame;
+use std::sync::Arc;
+
 /// Material parameters shared by render backends.
 ///
 /// The values describe a metallic-roughness workflow. `base_color_rgba` is
 /// linear-space albedo and opacity; textures are sampled separately by the
 /// backend and multiplied by this value. Backends should use [`Self::sanitized`]
 /// before uploading the parameters to a GPU.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PbrMaterial {
     /// Linear-space base color and opacity.
     pub base_color_rgba: [f32; 4],
@@ -16,6 +19,12 @@ pub struct PbrMaterial {
     pub metallic: f32,
     /// Linear-space emissive RGB contribution.
     pub emissive_rgb: [f32; 3],
+    /// Optional tangent-space normal map sampled with mesh UV coordinates.
+    pub normal_texture: Option<Arc<ImageFrame>>,
+    /// Optional linear roughness map sampled with mesh UV coordinates.
+    pub roughness_texture: Option<Arc<ImageFrame>>,
+    /// Strength applied to tangent-space normal-map XY components.
+    pub normal_strength: f32,
 }
 
 impl Default for PbrMaterial {
@@ -25,6 +34,9 @@ impl Default for PbrMaterial {
             roughness: 0.7,
             metallic: 0.0,
             emissive_rgb: [0.0; 3],
+            normal_texture: None,
+            roughness_texture: None,
+            normal_strength: 1.0,
         }
     }
 }
@@ -42,11 +54,25 @@ impl PbrMaterial {
             roughness,
             metallic,
             emissive_rgb,
+            normal_texture: None,
+            roughness_texture: None,
+            normal_strength: 1.0,
         }
     }
 
+    /// Attaches optional tangent-space normal and linear roughness textures.
+    pub fn with_texture_maps(
+        mut self,
+        normal_texture: Option<Arc<ImageFrame>>,
+        roughness_texture: Option<Arc<ImageFrame>>,
+    ) -> Self {
+        self.normal_texture = normal_texture;
+        self.roughness_texture = roughness_texture;
+        self
+    }
+
     /// Returns finite, shader-safe material parameters.
-    pub fn sanitized(self) -> Self {
+    pub fn sanitized(&self) -> Self {
         Self {
             base_color_rgba: self
                 .base_color_rgba
@@ -56,6 +82,9 @@ impl PbrMaterial {
             emissive_rgb: self
                 .emissive_rgb
                 .map(|value| finite_or(value, 0.0).max(0.0)),
+            normal_texture: self.normal_texture.clone(),
+            roughness_texture: self.roughness_texture.clone(),
+            normal_strength: finite_or(self.normal_strength, 1.0).clamp(0.0, 2.0),
         }
     }
 }
@@ -79,6 +108,9 @@ mod tests {
         assert_eq!(material.roughness, 0.7);
         assert_eq!(material.metallic, 0.0);
         assert_eq!(material.emissive_rgb, [0.0; 3]);
+        assert!(material.normal_texture.is_none());
+        assert!(material.roughness_texture.is_none());
+        assert_eq!(material.normal_strength, 1.0);
     }
 
     #[test]
@@ -94,5 +126,19 @@ mod tests {
         assert_eq!(material.roughness, 0.7);
         assert_eq!(material.metallic, 0.0);
         assert_eq!(material.emissive_rgb, [0.0, 0.0, 2.0]);
+        assert!(material.normal_texture.is_none());
+        assert!(material.roughness_texture.is_none());
+        assert_eq!(material.normal_strength, 1.0);
+    }
+
+    #[test]
+    fn texture_maps_are_preserved_through_sanitization() {
+        let normal = Arc::new(ImageFrame::from_rgba8(1, 1, vec![128, 128, 255, 255]));
+        let roughness = Arc::new(ImageFrame::from_rgba8(1, 1, vec![180, 180, 180, 255]));
+        let material = PbrMaterial::default()
+            .with_texture_maps(Some(Arc::clone(&normal)), Some(Arc::clone(&roughness)));
+        let sanitized = material.sanitized();
+        assert_eq!(sanitized.normal_texture, Some(normal));
+        assert_eq!(sanitized.roughness_texture, Some(roughness));
     }
 }

@@ -4,6 +4,7 @@ use crate::{ImageFrame, PbrMaterial};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// CPU-side triangle mesh with per-vertex normals and optional UV coordinates.
@@ -164,12 +165,34 @@ fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
         });
         let base_color_texture = material
             .and_then(|material| material.diffuse_texture.as_deref())
-            .map(|texture_path| load_base_color_texture(path, texture_path, &mut texture_cache))
+            .map(|texture_path| load_material_texture(path, texture_path, &mut texture_cache))
             .transpose()?;
-        let material = PbrMaterial {
-            base_color_rgba: base_color_rgba.unwrap_or([1.0; 4]),
-            ..PbrMaterial::default()
-        };
+        let normal_texture = material
+            .and_then(|material| material.normal_texture.as_deref())
+            .map(|texture_path| load_material_texture(path, texture_path, &mut texture_cache))
+            .transpose()?;
+        let roughness_texture = material
+            .and_then(|material| material.shininess_texture.as_deref())
+            .map(|texture_path| load_material_texture(path, texture_path, &mut texture_cache))
+            .transpose()?
+            .map(invert_shininess_texture);
+        let roughness = material
+            .and_then(|material| material.shininess)
+            .map(|shininess| (2.0 / (shininess.max(0.0) + 2.0)).sqrt())
+            .unwrap_or(PbrMaterial::default().roughness);
+        let emissive_rgb = material
+            .and_then(|material| material.emissive)
+            .unwrap_or([0.0; 3]);
+        let material = PbrMaterial::new(
+            base_color_rgba.unwrap_or([1.0; 4]),
+            roughness,
+            0.0,
+            emissive_rgb,
+        )
+        .with_texture_maps(
+            normal_texture.map(Arc::new),
+            roughness_texture.map(Arc::new),
+        );
         parts.push(LoadedMeshPart {
             mesh: triangle_mesh,
             base_color_texture,
@@ -238,7 +261,7 @@ fn validate_triangle_mesh(path: &Path, mesh: &TriangleMesh) -> Result<(), MeshLo
     Ok(())
 }
 
-fn load_base_color_texture(
+fn load_material_texture(
     obj_path: &Path,
     texture_path: &str,
     cache: &mut HashMap<String, ImageFrame>,
@@ -252,12 +275,22 @@ fn load_base_color_texture(
         .join(texture_path);
     let decoded = image::open(&path).map_err(|error| MeshLoadError::Invalid {
         path: path.display().to_string(),
-        message: format!("could not decode diffuse texture: {error}"),
+        message: format!("could not decode material texture: {error}"),
     })?;
     let rgba8 = decoded.to_rgba8();
     let texture = ImageFrame::from_rgba8(rgba8.width(), rgba8.height(), rgba8.into_raw());
     cache.insert(texture_path.to_owned(), texture.clone());
     Ok(texture)
+}
+
+fn invert_shininess_texture(mut texture: ImageFrame) -> ImageFrame {
+    for pixel in texture.rgba8.chunks_exact_mut(4) {
+        let roughness = 255_u8.saturating_sub(pixel[0]);
+        pixel[0] = roughness;
+        pixel[1] = roughness;
+        pixel[2] = roughness;
+    }
+    texture
 }
 
 fn mesh_with_flat_normals(
@@ -541,12 +574,18 @@ endsolid box
         .expect("write OBJ");
         fs::write(
             root.join("panel.mtl"),
-            "newmtl facade\nKd 0.25 0.5 0.75\nmap_Kd facade.png\n",
+            "newmtl facade\nKd 0.25 0.5 0.75\nNs 32\nmap_Kd facade.png\nmap_Bump facade_normal.png\nmap_Ns facade_roughness.png\n",
         )
         .expect("write MTL");
         image::RgbaImage::from_pixel(2, 1, image::Rgba([24, 80, 160, 255]))
             .save(root.join("facade.png"))
             .expect("write texture");
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([128, 128, 255, 255]))
+            .save(root.join("facade_normal.png"))
+            .expect("write normal texture");
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([180, 180, 180, 255]))
+            .save(root.join("facade_roughness.png"))
+            .expect("write roughness texture");
 
         let parts = load_mesh_parts(&root.join("panel.obj")).expect("load textured OBJ");
         assert_eq!(parts.len(), 1);
@@ -561,6 +600,15 @@ endsolid box
         assert_eq!((texture.width, texture.height), (2, 1));
         assert_eq!(&texture.rgba8[..4], &[24, 80, 160, 255]);
         assert_eq!(parts[0].material.base_color_rgba, [0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(parts[0].material.emissive_rgb, [0.0, 0.0, 0.0]);
+        assert!(parts[0].material.normal_texture.is_some());
+        let roughness_texture = parts[0]
+            .material
+            .roughness_texture
+            .as_ref()
+            .expect("shininess texture converted to roughness");
+        assert_eq!(&roughness_texture.rgba8[..4], &[75, 75, 75, 255]);
+        assert!((parts[0].material.roughness - (2.0_f32 / 34.0).sqrt()).abs() < 1.0e-6);
 
         fs::remove_dir_all(root).expect("remove textured OBJ test");
     }
