@@ -25,6 +25,16 @@ pub struct PbrMaterial {
     pub roughness_texture: Option<Arc<ImageFrame>>,
     /// Strength applied to tangent-space normal-map XY components.
     pub normal_strength: f32,
+    /// Optional packed glTF metallic-roughness texture. Green is roughness;
+    /// blue is metallic, both in linear space.
+    pub metallic_roughness_texture: Option<Arc<ImageFrame>>,
+    /// Optional sRGB glTF emissive texture.
+    pub emissive_texture: Option<Arc<ImageFrame>>,
+    /// Optional linear glTF occlusion texture sampled from the red channel.
+    pub occlusion_texture: Option<Arc<ImageFrame>>,
+    /// Strength applied to the occlusion texture in the inclusive `[0, 1]`
+    /// range.
+    pub occlusion_strength: f32,
 }
 
 impl Default for PbrMaterial {
@@ -37,6 +47,10 @@ impl Default for PbrMaterial {
             normal_texture: None,
             roughness_texture: None,
             normal_strength: 1.0,
+            metallic_roughness_texture: None,
+            emissive_texture: None,
+            occlusion_texture: None,
+            occlusion_strength: 1.0,
         }
     }
 }
@@ -57,6 +71,10 @@ impl PbrMaterial {
             normal_texture: None,
             roughness_texture: None,
             normal_strength: 1.0,
+            metallic_roughness_texture: None,
+            emissive_texture: None,
+            occlusion_texture: None,
+            occlusion_strength: 1.0,
         }
     }
 
@@ -68,6 +86,27 @@ impl PbrMaterial {
     ) -> Self {
         self.normal_texture = normal_texture;
         self.roughness_texture = roughness_texture;
+        self
+    }
+
+    /// Attaches packed metallic-roughness, emissive, and occlusion maps.
+    pub fn with_pbr_texture_maps(
+        mut self,
+        metallic_roughness_texture: Option<Arc<ImageFrame>>,
+        emissive_texture: Option<Arc<ImageFrame>>,
+        occlusion_texture: Option<Arc<ImageFrame>>,
+        occlusion_strength: f32,
+    ) -> Self {
+        self.metallic_roughness_texture = metallic_roughness_texture;
+        self.emissive_texture = emissive_texture;
+        self.occlusion_texture = occlusion_texture;
+        self.occlusion_strength = occlusion_strength;
+        self
+    }
+
+    /// Sets the tangent-space normal-map scale used by a backend.
+    pub fn with_normal_strength(mut self, normal_strength: f32) -> Self {
+        self.normal_strength = normal_strength;
         self
     }
 
@@ -85,6 +124,10 @@ impl PbrMaterial {
             normal_texture: self.normal_texture.clone(),
             roughness_texture: self.roughness_texture.clone(),
             normal_strength: finite_or(self.normal_strength, 1.0).clamp(0.0, 2.0),
+            metallic_roughness_texture: self.metallic_roughness_texture.clone(),
+            emissive_texture: self.emissive_texture.clone(),
+            occlusion_texture: self.occlusion_texture.clone(),
+            occlusion_strength: finite_or(self.occlusion_strength, 1.0).clamp(0.0, 1.0),
         }
     }
 }
@@ -111,6 +154,10 @@ mod tests {
         assert!(material.normal_texture.is_none());
         assert!(material.roughness_texture.is_none());
         assert_eq!(material.normal_strength, 1.0);
+        assert!(material.metallic_roughness_texture.is_none());
+        assert!(material.emissive_texture.is_none());
+        assert!(material.occlusion_texture.is_none());
+        assert_eq!(material.occlusion_strength, 1.0);
     }
 
     #[test]
@@ -129,16 +176,36 @@ mod tests {
         assert!(material.normal_texture.is_none());
         assert!(material.roughness_texture.is_none());
         assert_eq!(material.normal_strength, 1.0);
+        assert!(material.metallic_roughness_texture.is_none());
+        assert!(material.emissive_texture.is_none());
+        assert!(material.occlusion_texture.is_none());
+        assert_eq!(material.occlusion_strength, 1.0);
     }
 
     #[test]
     fn texture_maps_are_preserved_through_sanitization() {
         let normal = Arc::new(ImageFrame::from_rgba8(1, 1, vec![128, 128, 255, 255]));
         let roughness = Arc::new(ImageFrame::from_rgba8(1, 1, vec![180, 180, 180, 255]));
+        let metallic_roughness = Arc::new(ImageFrame::from_rgba8(1, 1, vec![0, 128, 200, 255]));
+        let emissive = Arc::new(ImageFrame::from_rgba8(1, 1, vec![12, 24, 48, 255]));
+        let occlusion = Arc::new(ImageFrame::from_rgba8(1, 1, vec![160, 160, 160, 255]));
         let material = PbrMaterial::default()
-            .with_texture_maps(Some(Arc::clone(&normal)), Some(Arc::clone(&roughness)));
+            .with_texture_maps(Some(Arc::clone(&normal)), Some(Arc::clone(&roughness)))
+            .with_pbr_texture_maps(
+                Some(Arc::clone(&metallic_roughness)),
+                Some(Arc::clone(&emissive)),
+                Some(Arc::clone(&occlusion)),
+                0.65,
+            );
         let sanitized = material.sanitized();
         assert_eq!(sanitized.normal_texture, Some(normal));
         assert_eq!(sanitized.roughness_texture, Some(roughness));
+        assert_eq!(
+            sanitized.metallic_roughness_texture,
+            Some(metallic_roughness)
+        );
+        assert_eq!(sanitized.emissive_texture, Some(emissive));
+        assert_eq!(sanitized.occlusion_texture, Some(occlusion));
+        assert_eq!(sanitized.occlusion_strength, 0.65);
     }
 }

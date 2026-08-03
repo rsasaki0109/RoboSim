@@ -16,6 +16,7 @@ struct DrawUniform {
     base_color: vec4<f32>,
     material_params: vec4<f32>,
     emissive: vec4<f32>,
+    map_params: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -28,6 +29,12 @@ struct DrawUniform {
 @group(4) @binding(1) var normal_sampler: sampler;
 @group(5) @binding(0) var roughness_texture: texture_2d<f32>;
 @group(5) @binding(1) var roughness_sampler: sampler;
+@group(6) @binding(0) var metallic_roughness_texture: texture_2d<f32>;
+@group(6) @binding(1) var metallic_roughness_sampler: sampler;
+@group(7) @binding(0) var emissive_texture: texture_2d<f32>;
+@group(7) @binding(1) var emissive_sampler: sampler;
+@group(8) @binding(0) var occlusion_texture: texture_2d<f32>;
+@group(8) @binding(1) var occlusion_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -172,12 +179,22 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let mapped_ndotl = max(dot(normal, light_dir), 0.0);
     let albedo = input.color.rgb * draw.base_color.rgb * texture_color.rgb;
     let roughness_sample = textureSample(roughness_texture, roughness_sampler, uv).r;
+    let metallic_roughness_sample = textureSample(
+        metallic_roughness_texture,
+        metallic_roughness_sampler,
+        uv,
+    );
     let roughness = clamp(
-        mix(draw.material_params.x, roughness_sample, draw.material_params.z),
+        mix(draw.material_params.x, roughness_sample, draw.material_params.z) *
+            mix(1.0, metallic_roughness_sample.g, draw.map_params.x),
         0.04,
         1.0,
     );
-    let metallic = clamp(draw.material_params.y, 0.0, 1.0);
+    let metallic = clamp(
+        draw.material_params.y * mix(1.0, metallic_roughness_sample.b, draw.map_params.x),
+        0.0,
+        1.0,
+    );
     let view_dir = normalize(camera.camera_position.xyz - input.world_position);
     let half_dir = normalize(view_dir + light_dir);
     let ndotv = max(dot(normal, view_dir), 0.0);
@@ -192,8 +209,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) * albedo /
         3.14159265;
     let direct = (diffuse + specular) * mapped_ndotl * camera.diffuse_shadow.x * 3.2 * shadowed;
-    let ambient = albedo * camera.light_ambient.w * (1.0 - metallic);
-    let hdr_color = ambient + direct + draw.emissive.rgb;
+    let occlusion_sample = textureSample(occlusion_texture, occlusion_sampler, uv).r;
+    let occlusion = mix(
+        1.0,
+        occlusion_sample,
+        clamp(draw.map_params.y, 0.0, 1.0) * draw.map_params.z,
+    );
+    let emissive_sample = textureSample(emissive_texture, emissive_sampler, uv).rgb;
+    let emissive = draw.emissive.rgb *
+        mix(vec3<f32>(1.0), emissive_sample, draw.map_params.w);
+    let ambient = albedo * camera.light_ambient.w * (1.0 - metallic) * occlusion;
+    let hdr_color = ambient + direct + emissive;
     return vec4<f32>(
         reinhard_tonemap(hdr_color),
         input.color.a * draw.base_color.a * texture_color.a,
@@ -215,6 +241,7 @@ struct DrawUniform {
     base_color: vec4<f32>,
     material_params: vec4<f32>,
     emissive: vec4<f32>,
+    map_params: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> shadow: ShadowUniform;
@@ -304,6 +331,7 @@ struct DrawUniform {
     base_color: [f32; 4],
     material_params: [f32; 4],
     emissive: [f32; 4],
+    map_params: [f32; 4],
 }
 
 struct BuiltPrimitiveMesh {
@@ -333,6 +361,12 @@ pub struct PrimitiveRenderer {
     normal_texture_cache: HashMap<usize, GpuTexture>,
     fallback_roughness_texture: GpuTexture,
     roughness_texture_cache: HashMap<usize, GpuTexture>,
+    fallback_metallic_roughness_texture: GpuTexture,
+    metallic_roughness_texture_cache: HashMap<usize, GpuTexture>,
+    fallback_emissive_texture: GpuTexture,
+    emissive_texture_cache: HashMap<usize, GpuTexture>,
+    fallback_occlusion_texture: GpuTexture,
+    occlusion_texture_cache: HashMap<usize, GpuTexture>,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     shadow_bind_group: wgpu::BindGroup,
@@ -503,6 +537,9 @@ impl PrimitiveRenderer {
                 &shadow_texture_layout,
                 &texture_layout,
                 &texture_layout,
+                &texture_layout,
+                &texture_layout,
+                &texture_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -670,6 +707,30 @@ impl PrimitiveRenderer {
             &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
             wgpu::TextureFormat::Rgba8Unorm,
         );
+        let fallback_metallic_roughness_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_white_metallic_roughness_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let fallback_emissive_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_white_emissive_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        let fallback_occlusion_texture = upload_texture(
+            device,
+            queue,
+            &texture_layout,
+            "rne_white_occlusion_texture",
+            &ImageFrame::from_rgba8(1, 1, vec![255, 255, 255, 255]),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("rne_directional_shadow_map"),
             size: wgpu::Extent3d {
@@ -732,6 +793,12 @@ impl PrimitiveRenderer {
             normal_texture_cache: HashMap::new(),
             fallback_roughness_texture,
             roughness_texture_cache: HashMap::new(),
+            fallback_metallic_roughness_texture,
+            metallic_roughness_texture_cache: HashMap::new(),
+            fallback_emissive_texture,
+            emissive_texture_cache: HashMap::new(),
+            fallback_occlusion_texture,
+            occlusion_texture_cache: HashMap::new(),
             _shadow_texture: shadow_texture,
             shadow_view,
             shadow_bind_group,
@@ -807,6 +874,12 @@ impl PrimitiveRenderer {
                     material.emissive_rgb[2],
                     0.0,
                 ],
+                map_params: [
+                    f32::from(material.metallic_roughness_texture.is_some()),
+                    material.occlusion_strength,
+                    f32::from(material.occlusion_texture.is_some()),
+                    f32::from(material.emissive_texture.is_some()),
+                ],
             };
             let offset = index * self.draw_uniform_stride as usize;
             draw_bytes[offset..offset + std::mem::size_of::<DrawUniform>()]
@@ -869,6 +942,48 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8Unorm,
                     );
                     self.roughness_texture_cache.insert(key, uploaded);
+                }
+            }
+            if let Some(texture) = &item.material.metallic_roughness_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.metallic_roughness_texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_metallic_roughness_texture",
+                        texture,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    );
+                    self.metallic_roughness_texture_cache.insert(key, uploaded);
+                }
+            }
+            if let Some(texture) = &item.material.emissive_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.emissive_texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_emissive_texture",
+                        texture,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                    );
+                    self.emissive_texture_cache.insert(key, uploaded);
+                }
+            }
+            if let Some(texture) = &item.material.occlusion_texture {
+                let key = Arc::as_ptr(texture) as usize;
+                if !self.occlusion_texture_cache.contains_key(&key) {
+                    let uploaded = upload_texture(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        "rne_occlusion_texture",
+                        texture,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    );
+                    self.occlusion_texture_cache.insert(key, uploaded);
                 }
             }
         }
@@ -1002,9 +1117,39 @@ impl PrimitiveRenderer {
                             .get(&(Arc::as_ptr(texture) as usize))
                     })
                     .unwrap_or(&self.fallback_roughness_texture);
+                let metallic_roughness_texture = item
+                    .material
+                    .metallic_roughness_texture
+                    .as_ref()
+                    .and_then(|texture| {
+                        self.metallic_roughness_texture_cache
+                            .get(&(Arc::as_ptr(texture) as usize))
+                    })
+                    .unwrap_or(&self.fallback_metallic_roughness_texture);
+                let emissive_texture = item
+                    .material
+                    .emissive_texture
+                    .as_ref()
+                    .and_then(|texture| {
+                        self.emissive_texture_cache
+                            .get(&(Arc::as_ptr(texture) as usize))
+                    })
+                    .unwrap_or(&self.fallback_emissive_texture);
+                let occlusion_texture = item
+                    .material
+                    .occlusion_texture
+                    .as_ref()
+                    .and_then(|texture| {
+                        self.occlusion_texture_cache
+                            .get(&(Arc::as_ptr(texture) as usize))
+                    })
+                    .unwrap_or(&self.fallback_occlusion_texture);
                 pass.set_bind_group(2, &texture.bind_group, &[]);
                 pass.set_bind_group(4, &normal_texture.bind_group, &[]);
                 pass.set_bind_group(5, &roughness_texture.bind_group, &[]);
+                pass.set_bind_group(6, &metallic_roughness_texture.bind_group, &[]);
+                pass.set_bind_group(7, &emissive_texture.bind_group, &[]);
+                pass.set_bind_group(8, &occlusion_texture.bind_group, &[]);
 
                 if let Some(gpu_mesh) = &dynamic_meshes[index] {
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
