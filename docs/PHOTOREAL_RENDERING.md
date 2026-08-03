@@ -36,6 +36,23 @@ optional `RNE_HDRI_INTENSITY` / `RNE_HDRI_ROTATION_RAD` variables. No HDRI is
 vendored in the repository; applications remain responsible for the source
 map's license and attribution.
 
+## Temporal anti-aliasing
+
+`rne_render_wgpu::TaaSettings` enables a deterministic Halton camera-jitter
+sequence, depth-based reprojection, neighborhood history clamping, and a
+configurable feedback factor. It is opt-in so existing captures and headless
+render paths remain unchanged:
+
+```rust
+backend.set_taa(TaaSettings::enabled());
+```
+
+The history is discarded when the scene's visible transforms or material
+colors change, which prevents moving-robot ghosting. Camera motion is
+reprojected through the previous view-projection matrix; static scenes gain
+the strongest edge-quality improvement. The G1 capture exposes the same path
+with `RNE_TAA=1` and optional `RNE_TAA_FEEDBACK` / `RNE_TAA_JITTER_PX`.
+
 ## glTF/GLB asset path
 
 `rne_render::load_mesh_parts` and `RenderScene::resolve_mesh_assets` accept
@@ -73,6 +90,6 @@ Its corresponding linear maps are
 `concrete_floor_normal.png` and `concrete_floor_roughness.png` in the same
 directory. The maps are sampled with repeat addressing and are not part of the
 physics scene. Normal/roughness maps and glTF PBR maps are now part of the
-material path. HDR environment lighting is available through the opt-in WGPU
-path; temporal anti-aliasing, prefiltered environment convolution, skinning,
-and animation remain later rendering increments.
+material path. HDR environment lighting and temporal anti-aliasing are
+available through the opt-in WGPU path; prefiltered environment convolution,
+skinning, and animation remain later rendering increments.

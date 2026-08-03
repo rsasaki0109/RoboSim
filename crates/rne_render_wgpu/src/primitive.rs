@@ -1,3 +1,5 @@
+use crate::taa::{TaaSettings, TemporalAntiAliasing};
+
 const SHADER: &str = r#"
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -527,6 +529,7 @@ pub struct PrimitiveRenderer {
     occlusion_texture_cache: HashMap<usize, GpuTexture>,
     fallback_environment: GpuEnvironmentTexture,
     environment_texture_cache: HashMap<usize, GpuEnvironmentTexture>,
+    taa: TemporalAntiAliasing,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     shadow_bind_group: wgpu::BindGroup,
@@ -551,6 +554,10 @@ struct GpuEnvironmentTexture {
 
 /// Color and depth views for an on-screen or off-screen render pass.
 pub struct PrimitiveRenderViews<'a> {
+    /// Width of the color and depth attachments in pixels.
+    pub width: u32,
+    /// Height of the color and depth attachments in pixels.
+    pub height: u32,
     /// Color attachment view.
     pub color_view: &'a wgpu::TextureView,
     /// Depth attachment view.
@@ -1034,10 +1041,21 @@ impl PrimitiveRenderer {
             occlusion_texture_cache: HashMap::new(),
             fallback_environment,
             environment_texture_cache: HashMap::new(),
+            taa: TemporalAntiAliasing::new(device, color_format),
             _shadow_texture: shadow_texture,
             shadow_view,
             shadow_bind_group,
         }
+    }
+
+    /// Enables or configures temporal anti-aliasing for subsequent frames.
+    pub fn set_taa(&mut self, settings: TaaSettings) {
+        self.taa.set_settings(settings);
+    }
+
+    /// Discards accumulated temporal history before the next frame.
+    pub fn reset_taa_history(&mut self) {
+        self.taa.reset_history();
     }
 
     fn primitive_mesh_for(&self, shape: &VisualShape) -> &BuiltPrimitiveMesh {
@@ -1060,7 +1078,20 @@ impl PrimitiveRenderer {
         let environment = pass.environment;
         let clear_color = pass.clear_color;
         let targets = pass.targets;
-        let view_proj = camera.view_projection(view);
+        let base_view_proj = camera.view_projection(view);
+        let scene_key = scene_temporal_key(scene);
+        let taa_frame = self.taa.begin_frame(
+            device,
+            targets.width,
+            targets.height,
+            base_view_proj,
+            scene_key,
+        );
+        let view_proj = if taa_frame.enabled {
+            taa_frame.current_view_proj
+        } else {
+            base_view_proj
+        };
         let inv_view_proj = view_proj.inverse();
         let light_view_proj = directional_light_view_projection(scene);
         queue.write_buffer(
@@ -1125,6 +1156,11 @@ impl PrimitiveRenderer {
                 .copy_from_slice(bytemuck::bytes_of(&uniform));
         }
         queue.write_buffer(&self.draw_buffer, 0, &draw_bytes);
+
+        if taa_frame.enabled {
+            self.taa
+                .prepare(queue, taa_frame, targets.width, targets.height);
+        }
 
         let dynamic_meshes = scene
             .items
@@ -1253,6 +1289,13 @@ impl PrimitiveRenderer {
             label: Some("rne_scene_encoder"),
         });
 
+        let taa_scene_view = if taa_frame.enabled {
+            Some(self.taa.scene_view())
+        } else {
+            None
+        };
+        let scene_color_view = taa_scene_view.unwrap_or(targets.color_view);
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("rne_directional_shadow_pass"),
@@ -1304,7 +1347,7 @@ impl PrimitiveRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("rne_scene_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: targets.color_view,
+                    view: scene_color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1426,7 +1469,13 @@ impl PrimitiveRenderer {
             }
         }
 
+        if taa_frame.enabled {
+            self.taa
+                .encode(device, &mut encoder, targets.depth_view, targets.color_view);
+        }
+
         queue.submit(Some(encoder.finish()));
+        self.taa.commit(taa_frame);
         Ok(())
     }
 
@@ -1453,7 +1502,9 @@ impl PrimitiveRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1469,7 +1520,9 @@ impl PrimitiveRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1483,6 +1536,8 @@ impl PrimitiveRenderer {
             environment,
             clear_color,
             targets: &PrimitiveRenderViews {
+                width: target.width,
+                height: target.height,
                 color_view: &color_view,
                 depth_view: &depth_view,
             },
@@ -1972,6 +2027,32 @@ fn mat4_to_cols(matrix: Mat4) -> [[f32; 4]; 4] {
     ]
 }
 
+fn scene_temporal_key(scene: &RenderScene) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0001_0000_01b3;
+    let mut hash = OFFSET;
+    let mut mix = |value: u64| {
+        hash ^= value;
+        hash = hash.wrapping_mul(PRIME);
+    };
+
+    mix(scene.items.len() as u64);
+    for item in &scene.items {
+        for value in item.transform.to_matrix().to_cols_array() {
+            mix(value.to_bits());
+        }
+        for value in item.color_rgba {
+            mix(u64::from(value.to_bits()));
+        }
+        mix(u64::from(item.material.roughness.to_bits()));
+        mix(u64::from(item.material.metallic.to_bits()));
+        for value in item.material.emissive_rgb {
+            mix(u64::from(value.to_bits()));
+        }
+    }
+    hash
+}
+
 fn normal_matrix_cols(model: Mat4) -> [[f32; 4]; 3] {
     let cols = model.inverse().transpose().to_cols_array_2d();
     [
@@ -2133,6 +2214,7 @@ mod mesh_tests {
         directional_light_view_projection, unit_cube, unit_cylinder, unit_sphere, RenderScene,
         Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER, SKY_SHADER,
     };
+    use crate::taa::{COPY_SHADER, TAA_SHADER};
     use rne_render::RenderSceneItem;
 
     #[test]
@@ -2141,6 +2223,8 @@ mod mesh_tests {
             ("primitive", SHADER),
             ("shadow", SHADOW_SHADER),
             ("sky", SKY_SHADER),
+            ("taa", TAA_SHADER),
+            ("taa-present", COPY_SHADER),
         ] {
             let module = naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|error| panic!("{label} WGSL parse failed: {error}"));

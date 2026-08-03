@@ -2,6 +2,7 @@
 
 use crate::overlay::{ImageOverlay, ImageOverlayDraw};
 use crate::primitive::{PrimitiveRenderViews, PrimitiveRenderer, PrimitiveSurfacePass};
+use crate::taa::TaaSettings;
 use rne_math::Transform3;
 use rne_render::{Camera, EnvironmentLighting, RenderError, RenderScene};
 use std::sync::Arc;
@@ -41,6 +42,7 @@ pub struct InteractiveViewer {
     config: wgpu::SurfaceConfiguration,
     primitive: PrimitiveRenderer,
     environment: EnvironmentLighting,
+    taa: TaaSettings,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     overlay: ImageOverlay,
@@ -120,6 +122,7 @@ impl InteractiveViewer {
             config,
             primitive,
             environment: EnvironmentLighting::default(),
+            taa: TaaSettings::default(),
             depth_texture,
             depth_view,
             overlay,
@@ -138,7 +141,27 @@ impl InteractiveViewer {
 
     /// Replaces the HDR environment used for subsequent frames.
     pub fn set_environment(&mut self, environment: EnvironmentLighting) {
-        self.environment = environment.sanitized();
+        let environment = environment.sanitized();
+        if self.environment != environment {
+            self.environment = environment;
+            self.reset_taa_history();
+        }
+    }
+
+    /// Replaces the temporal anti-aliasing settings for subsequent frames.
+    pub fn set_taa(&mut self, settings: TaaSettings) {
+        self.taa = settings.sanitized();
+        self.primitive.set_taa(self.taa);
+    }
+
+    /// Returns the current temporal anti-aliasing settings.
+    pub fn taa(&self) -> TaaSettings {
+        self.taa
+    }
+
+    /// Discards temporal history before the next frame.
+    pub fn reset_taa_history(&mut self) {
+        self.primitive.reset_taa_history();
     }
 
     /// Builds a pinhole camera matching the window size.
@@ -202,6 +225,8 @@ impl InteractiveViewer {
                 environment: &self.environment,
                 clear_color,
                 targets: &PrimitiveRenderViews {
+                    width: self.config.width,
+                    height: self.config.height,
                     color_view: &color_view,
                     depth_view: &self.depth_view,
                 },
@@ -261,7 +286,7 @@ fn create_depth_target(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
