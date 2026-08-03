@@ -88,9 +88,14 @@ The v0.3-A material mapping follows the glTF metallic-roughness convention:
 | `occlusionTexture.strength` | `occlusion_strength` | R channel, linear format |
 | `emissiveFactor` / texture | `emissive_rgb` / `emissive_texture` | factor is linear; texture uses sRGB format |
 
-The importer currently targets static triangle primitives. Skinning, morph
-targets, animations, and non-triangle primitive modes remain later asset-pipeline
-work; rejecting unsupported primitive modes keeps the render result explicit.
+`load_mesh_parts` keeps the static bind-pose path compatible with existing
+callers. Applications that need humanoid motion can use `load_gltf_scene` to
+preserve the node hierarchy, inverse-bind matrices, `JOINTS_0`/`WEIGHTS_0`,
+and linear or step TRS animation clips. `GltfSceneAsset::sample_part` applies
+the selected clip and returns a fresh deformed `TriangleMesh`, which can be
+submitted through the existing dynamic-mesh path without accumulating vertex
+deformation. Cubic-spline animation, morph targets, and non-triangle primitive
+modes remain explicit unsupported cases.
 
 This change adds no third-party scene or texture asset to the repository. The
 loader preserves source pixel data but does not replace an imported asset's
@@ -106,5 +111,7 @@ Its corresponding linear maps are
 directory. The maps are sampled with repeat addressing and are not part of the
 physics scene. Normal/roughness maps and glTF PBR maps are now part of the
 material path. HDR environment lighting, prefiltered image-based lighting, and
-temporal anti-aliasing are available through the opt-in WGPU path; skinning
-and animation remain later rendering increments.
+temporal anti-aliasing are available through the opt-in WGPU path. The
+backend-neutral glTF path now also supports deterministic CPU skinning and TRS
+animation sampling; a GPU skinning player and morph targets remain future
+increments.

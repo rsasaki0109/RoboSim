@@ -20,6 +20,12 @@ All notable changes to Robot Native Engine are documented in this file.
   deterministic GGX/Hammersley specular mip levels and a cosine-weighted
   diffuse environment map. WGPU material shading selects specular blur from
   roughness while the original HDR map remains the sky source.
+- **Photoreal humanoid motion (v0.3-E)**: `rne_render::load_gltf_scene` now
+  preserves glTF node hierarchies, inverse-bind skins, four-influence vertex
+  weights, and linear/step TRS animation clips. `GltfSceneAsset::sample_part`
+  produces deterministic bind-pose-safe CPU-deformed meshes for the existing
+  dynamic-mesh render path; cubic-spline animation and morph targets remain
+  explicit unsupported cases.
 - **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
   90-meter, ten-building PLATEAU-style showcase and renders varied facades,
   sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The

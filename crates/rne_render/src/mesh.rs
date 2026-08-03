@@ -1,7 +1,11 @@
 //! Triangle mesh loading for render backends.
 
+use crate::animation::{
+    AnimationChannel, AnimationClip, AnimationInterpolation, AnimationProperty, GltfNode,
+    GltfSceneAsset, GltfScenePart, GltfSkin, GltfSkinJoint, SkinWeights,
+};
 use crate::{ImageFrame, PbrMaterial};
-use rne_math::{DVec3, Mat4};
+use rne_math::Mat4;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -212,6 +216,27 @@ fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
 }
 
 fn load_gltf_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
+    let scene = load_gltf_scene(path)?;
+    scene
+        .parts
+        .iter()
+        .enumerate()
+        .map(|(index, part)| {
+            let mut render_part = part.render_part.clone();
+            render_part.mesh = scene.sample_bind_pose(index).map_err(|error| {
+                invalid_mesh(
+                    &path.display().to_string(),
+                    format!("could not sample glTF bind pose: {error}"),
+                )
+            })?;
+            Ok(render_part)
+        })
+        .collect()
+}
+
+/// Loads a glTF scene while preserving its node hierarchy, skins, and
+/// transform animations.
+pub fn load_gltf_scene(path: &Path) -> Result<GltfSceneAsset, MeshLoadError> {
     let (document, buffers, images) =
         gltf::import(path).map_err(|error| MeshLoadError::Invalid {
             path: path.display().to_string(),
@@ -221,13 +246,83 @@ fn load_gltf_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
         .default_scene()
         .or_else(|| document.scenes().next())
         .ok_or_else(|| invalid_mesh(&path.display().to_string(), "glTF contains no scene"))?;
+
+    let document_nodes = document.nodes().collect::<Vec<_>>();
+    let mut parent_indices = vec![None; document_nodes.len()];
+    for node in &document_nodes {
+        for child in node.children() {
+            parent_indices[child.index()] = Some(node.index());
+        }
+    }
+    let nodes = document_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let (translation, rotation, scale) = node.transform().decomposed();
+            GltfNode {
+                name: node.name().map(str::to_owned),
+                parent_index: parent_indices[index],
+                bind_transform: rne_math::Transform3 {
+                    translation: rne_math::Vec3::new(
+                        f64::from(translation[0]),
+                        f64::from(translation[1]),
+                        f64::from(translation[2]),
+                    ),
+                    rotation: rne_math::Quat::from_xyzw(
+                        f64::from(rotation[0]),
+                        f64::from(rotation[1]),
+                        f64::from(rotation[2]),
+                        f64::from(rotation[3]),
+                    ),
+                    scale: rne_math::Vec3::new(
+                        f64::from(scale[0]),
+                        f64::from(scale[1]),
+                        f64::from(scale[2]),
+                    ),
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let skins = document
+        .skins()
+        .map(|skin| {
+            let joint_nodes = skin.joints().map(|joint| joint.index()).collect::<Vec<_>>();
+            let inverse_bind_matrices = skin
+                .reader(|buffer| buffers.get(buffer.index()).map(|data| data.0.as_slice()))
+                .read_inverse_bind_matrices()
+                .map(|matrices| matrices.map(gltf_matrix_to_mat4).collect::<Vec<_>>())
+                .unwrap_or_else(|| vec![rne_math::Mat4::IDENTITY; joint_nodes.len()]);
+            if inverse_bind_matrices.len() != joint_nodes.len() {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    format!(
+                        "glTF skin {} has {} inverse-bind matrices for {} joints",
+                        skin.index(),
+                        inverse_bind_matrices.len(),
+                        joint_nodes.len()
+                    ),
+                ));
+            }
+            Ok(GltfSkin {
+                joints: joint_nodes
+                    .into_iter()
+                    .zip(inverse_bind_matrices)
+                    .map(|(node_index, inverse_bind_matrix)| GltfSkinJoint {
+                        node_index,
+                        inverse_bind_matrix,
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>, MeshLoadError>>()?;
+
     let mut texture_cache = HashMap::<usize, ImageFrame>::new();
     let mut parts = Vec::new();
     for node in scene.nodes() {
         append_gltf_node(
             path,
             node,
-            Mat4::IDENTITY,
             &buffers,
             &images,
             &mut texture_cache,
@@ -240,19 +335,29 @@ fn load_gltf_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
             "glTF scene contains no triangle primitives",
         ));
     }
-    Ok(parts)
+
+    let animations = document
+        .animations()
+        .map(|animation| parse_gltf_animation(path, animation, &buffers, nodes.len()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GltfSceneAsset {
+        nodes,
+        skins,
+        animations,
+        parts,
+    })
 }
 
 fn append_gltf_node(
     path: &Path,
     node: gltf::Node<'_>,
-    parent_transform: Mat4,
     buffers: &[gltf::buffer::Data],
     images: &[gltf::image::Data],
     texture_cache: &mut HashMap<usize, ImageFrame>,
-    parts: &mut Vec<LoadedMeshPart>,
+    parts: &mut Vec<GltfScenePart>,
 ) -> Result<(), MeshLoadError> {
-    let transform = parent_transform * gltf_matrix_to_mat4(node.transform().matrix());
+    let skin_index = node.skin().map(|skin| skin.index());
     if let Some(mesh) = node.mesh() {
         for primitive in mesh.primitives() {
             if primitive.mode() != gltf::mesh::Mode::Triangles {
@@ -283,13 +388,39 @@ fn append_gltf_node(
                 .read_indices()
                 .map(|indices| indices.into_u32().collect())
                 .unwrap_or_else(|| (0..positions.len() as u32).collect());
+            let skin_weights = match (reader.read_joints(0), reader.read_weights(0)) {
+                (None, None) => None,
+                (Some(joints), Some(weights)) => {
+                    let joints = joints.into_u16().collect::<Vec<_>>();
+                    let weights = weights.into_f32().collect::<Vec<_>>();
+                    if joints.len() != positions.len() || weights.len() != positions.len() {
+                        return Err(invalid_mesh(
+                            &path.display().to_string(),
+                            "glTF JOINTS_0 and WEIGHTS_0 counts must match POSITION count",
+                        ));
+                    }
+                    Some(SkinWeights { joints, weights })
+                }
+                _ => {
+                    return Err(invalid_mesh(
+                        &path.display().to_string(),
+                        "glTF skinned primitive must provide both JOINTS_0 and WEIGHTS_0",
+                    ));
+                }
+            };
+            if skin_index.is_some() && skin_weights.is_none() {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF node skin requires JOINTS_0 and WEIGHTS_0 attributes",
+                ));
+            }
             if texcoords.len() != positions.len() {
                 return Err(invalid_mesh(
                     &path.display().to_string(),
                     "glTF TEXCOORD_0 count does not match POSITION count",
                 ));
             }
-            let mut triangle_mesh = if let Some(normals) = reader.read_normals() {
+            let triangle_mesh = if let Some(normals) = reader.read_normals() {
                 let normals: Vec<[f32; 3]> = normals.collect();
                 if normals.len() != positions.len() {
                     return Err(invalid_mesh(
@@ -306,7 +437,6 @@ fn append_gltf_node(
             } else {
                 mesh_with_flat_normals(&positions, &texcoords, &indices)
             };
-            transform_triangle_mesh(&mut triangle_mesh, transform);
             validate_triangle_mesh(path, &triangle_mesh)?;
 
             let material = primitive.material();
@@ -351,26 +481,121 @@ fn append_gltf_node(
                 occlusion_texture.map(Arc::new),
                 occlusion_strength,
             );
-            parts.push(LoadedMeshPart {
-                mesh: triangle_mesh,
-                base_color_texture,
-                base_color_rgba: Some(base_color_rgba),
-                material,
+            parts.push(GltfScenePart {
+                render_part: LoadedMeshPart {
+                    mesh: triangle_mesh,
+                    base_color_texture,
+                    base_color_rgba: Some(base_color_rgba),
+                    material,
+                },
+                node_index: node.index(),
+                skin_index,
+                skin_weights,
             });
         }
     }
     for child in node.children() {
-        append_gltf_node(
-            path,
-            child,
-            transform,
-            buffers,
-            images,
-            texture_cache,
-            parts,
-        )?;
+        append_gltf_node(path, child, buffers, images, texture_cache, parts)?;
     }
     Ok(())
+}
+
+fn parse_gltf_animation(
+    path: &Path,
+    animation: gltf::Animation<'_>,
+    buffers: &[gltf::buffer::Data],
+    node_count: usize,
+) -> Result<AnimationClip, MeshLoadError> {
+    let mut channels = Vec::new();
+    let mut duration_s = 0.0_f32;
+    for channel in animation.channels() {
+        let node_index = channel.target().node().index();
+        if node_index >= node_count {
+            return Err(invalid_mesh(
+                &path.display().to_string(),
+                format!("glTF animation targets missing node {node_index}"),
+            ));
+        }
+        let interpolation = match channel.sampler().interpolation() {
+            gltf::animation::Interpolation::Linear => AnimationInterpolation::Linear,
+            gltf::animation::Interpolation::Step => AnimationInterpolation::Step,
+            gltf::animation::Interpolation::CubicSpline => {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF CUBICSPLINE animation interpolation is not supported",
+                ));
+            }
+        };
+        let property = match channel.target().property() {
+            gltf::animation::Property::Translation => AnimationProperty::Translation,
+            gltf::animation::Property::Rotation => AnimationProperty::Rotation,
+            gltf::animation::Property::Scale => AnimationProperty::Scale,
+            gltf::animation::Property::MorphTargetWeights => {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF morph-target animation is not supported",
+                ));
+            }
+        };
+        let reader =
+            channel.reader(|buffer| buffers.get(buffer.index()).map(|data| data.0.as_slice()));
+        let times_s = reader
+            .read_inputs()
+            .ok_or_else(|| {
+                invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF animation channel has no input keyframes",
+                )
+            })?
+            .collect::<Vec<_>>();
+        let values = reader.read_outputs().ok_or_else(|| {
+            invalid_mesh(
+                &path.display().to_string(),
+                "glTF animation channel has no output keyframes",
+            )
+        })?;
+        let values = match values {
+            gltf::animation::util::ReadOutputs::Translations(values)
+            | gltf::animation::util::ReadOutputs::Scales(values) => values
+                .map(|value| [value[0], value[1], value[2], 0.0])
+                .collect::<Vec<_>>(),
+            gltf::animation::util::ReadOutputs::Rotations(values) => values
+                .into_f32()
+                .map(|value| [value[0], value[1], value[2], value[3]])
+                .collect::<Vec<_>>(),
+            gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                return Err(invalid_mesh(
+                    &path.display().to_string(),
+                    "glTF morph-target animation is not supported",
+                ));
+            }
+        };
+        if times_s.len() != values.len() {
+            return Err(invalid_mesh(
+                &path.display().to_string(),
+                format!(
+                    "glTF animation channel has {} times but {} values",
+                    times_s.len(),
+                    values.len()
+                ),
+            ));
+        }
+        if let Some(last_time_s) = times_s.last().copied() {
+            duration_s = duration_s.max(last_time_s);
+        }
+        channels.push(AnimationChannel {
+            node_index,
+            property,
+            times_s,
+            values,
+            interpolation,
+        });
+    }
+    Ok(AnimationClip {
+        name: animation.name().map(str::to_owned),
+        duration_s,
+        channels,
+    })
 }
 
 fn gltf_matrix_to_mat4(matrix: [[f32; 4]; 4]) -> Mat4 {
@@ -392,36 +617,6 @@ fn gltf_matrix_to_mat4(matrix: [[f32; 4]; 4]) -> Mat4 {
         matrix[3][2] as f64,
         matrix[3][3] as f64,
     ])
-}
-
-fn transform_triangle_mesh(mesh: &mut TriangleMesh, transform: Mat4) {
-    for position in &mut mesh.positions {
-        let transformed = transform.transform_point3(DVec3::new(
-            f64::from(position[0]),
-            f64::from(position[1]),
-            f64::from(position[2]),
-        ));
-        *position = [
-            transformed.x as f32,
-            transformed.y as f32,
-            transformed.z as f32,
-        ];
-    }
-    let normal_transform = transform.inverse().transpose();
-    for normal in &mut mesh.normals {
-        let transformed = normal_transform
-            .transform_vector3(DVec3::new(
-                f64::from(normal[0]),
-                f64::from(normal[1]),
-                f64::from(normal[2]),
-            ))
-            .normalize_or_zero();
-        *normal = [
-            transformed.x as f32,
-            transformed.y as f32,
-            transformed.z as f32,
-        ];
-    }
 }
 
 fn load_gltf_texture(
@@ -1024,6 +1219,39 @@ endsolid box
         fs::remove_dir_all(root).expect("remove GLB test");
     }
 
+    #[test]
+    fn gltf_scene_preserves_skin_and_animation_data() {
+        let root =
+            std::env::temp_dir().join(format!("rne-render-skinned-gltf-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale skinned glTF test");
+        }
+        fs::create_dir_all(&root).expect("create skinned glTF test");
+        let (binary, json) = test_skinned_gltf();
+        fs::write(root.join("skinned.bin"), binary).expect("write skinned glTF buffer");
+        fs::write(root.join("skinned.gltf"), json).expect("write skinned glTF document");
+
+        let asset = load_gltf_scene(&root.join("skinned.gltf")).expect("load skinned glTF");
+        assert_eq!(asset.nodes.len(), 3);
+        assert_eq!(asset.skins.len(), 1);
+        assert_eq!(asset.animations.len(), 1);
+        assert_eq!(asset.parts.len(), 1);
+        assert_eq!(asset.parts[0].skin_index, Some(0));
+        assert_eq!(
+            asset.parts[0].skin_weights.as_ref().unwrap().joints.len(),
+            3
+        );
+
+        let bind = asset.sample_bind_pose(0).expect("sample bind pose");
+        let animated = asset
+            .sample_part(0, Some(0), 0.5)
+            .expect("sample animated pose");
+        assert!((bind.positions[0][1] - 0.0).abs() < 1.0e-6);
+        assert!((animated.positions[0][1] - 0.5).abs() < 1.0e-6);
+
+        fs::remove_dir_all(root).expect("remove skinned glTF test");
+    }
+
     fn write_test_texture(root: &Path, name: &str, rgba: [u8; 4]) {
         image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba))
             .save(root.join(name))
@@ -1066,6 +1294,57 @@ endsolid box
         format!(
             r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,1,2,3,1]}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2}},"indices":3{primitive_material}}}]}}],"buffers":[{buffer}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},{{"buffer":0,"byteOffset":72,"byteLength":24}},{{"buffer":0,"byteOffset":96,"byteLength":6}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}},{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},{{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"}},{{"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}}]{material}}}"#
         )
+    }
+
+    fn test_skinned_gltf() -> (Vec<u8>, String) {
+        let mut binary = Vec::new();
+        let mut views = Vec::new();
+        let mut append = |bytes: &[u8]| {
+            while !binary.len().is_multiple_of(4) {
+                binary.push(0);
+            }
+            let offset = binary.len();
+            binary.extend_from_slice(bytes);
+            views.push((offset, bytes.len()));
+            views.len() - 1
+        };
+        let f32_bytes = |values: &[f32]| {
+            values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect::<Vec<_>>()
+        };
+        let u16_bytes = |values: &[u16]| {
+            values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect::<Vec<_>>()
+        };
+        let positions_view = append(&f32_bytes(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]));
+        let normals_view = append(&f32_bytes(&[0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]));
+        let joints_view = append(&u16_bytes(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        let weights_view = append(&f32_bytes(&[
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+        ]));
+        let indices_view = append(&u16_bytes(&[0, 1, 2]));
+        let inverse_bind_view = append(&f32_bytes(&[
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 1.0,
+        ]));
+        let animation_input_view = append(&f32_bytes(&[0.0, 1.0]));
+        let animation_output_view = append(&f32_bytes(&[0.0, 1.0, 0.0, 0.0, 2.0, 0.0]));
+        let view_json = views
+            .iter()
+            .map(|(offset, length)| {
+                format!(r#"{{"buffer":0,"byteOffset":{offset},"byteLength":{length}}}"#)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0,2]}}],"nodes":[{{"name":"root","children":[1]}},{{"name":"joint","translation":[0,1,0]}},{{"name":"mesh","mesh":0,"skin":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1,"JOINTS_0":2,"WEIGHTS_0":3}},"indices":4}}]}}],"skins":[{{"joints":[1],"inverseBindMatrices":5}}],"animations":[{{"name":"raise","samplers":[{{"input":6,"output":7,"interpolation":"LINEAR"}}],"channels":[{{"sampler":0,"target":{{"node":1,"path":"translation"}}}}]}}],"buffers":[{{"uri":"skinned.bin","byteLength":{}}}],"bufferViews":[{}],"accessors":[{{"bufferView":{positions_view},"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,0,1]}},{{"bufferView":{normals_view},"componentType":5126,"count":3,"type":"VEC3"}},{{"bufferView":{joints_view},"componentType":5123,"count":3,"type":"VEC4"}},{{"bufferView":{weights_view},"componentType":5126,"count":3,"type":"VEC4"}},{{"bufferView":{indices_view},"componentType":5123,"count":3,"type":"SCALAR"}},{{"bufferView":{inverse_bind_view},"componentType":5126,"count":1,"type":"MAT4"}},{{"bufferView":{animation_input_view},"componentType":5126,"count":2,"type":"SCALAR"}},{{"bufferView":{animation_output_view},"componentType":5126,"count":2,"type":"VEC3"}}]}}"#,
+            binary.len(),
+            view_json
+        );
+        (binary, json)
     }
 
     fn make_test_glb(json: &str, binary: &[u8]) -> Vec<u8> {
