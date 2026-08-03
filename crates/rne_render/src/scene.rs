@@ -1,6 +1,7 @@
 //! Primitive scene description for rendering.
 
 use crate::image::ImageFrame;
+use crate::material::PbrMaterial;
 use crate::mesh::{load_mesh_parts, MeshLoadError, TriangleMesh};
 use crate::path::resolve_package_uri;
 use crate::visual::VisualShape;
@@ -23,6 +24,8 @@ pub struct RenderSceneItem {
     pub mesh: Option<Arc<TriangleMesh>>,
     /// Optional sRGB base-color texture sampled with mesh UV coordinates.
     pub base_color_texture: Option<Arc<ImageFrame>>,
+    /// Physically based material parameters.
+    pub material: PbrMaterial,
 }
 
 /// Collection of primitives rendered in one camera pass.
@@ -54,6 +57,7 @@ impl RenderScene {
             color_rgba,
             mesh: None,
             base_color_texture: None,
+            material: PbrMaterial::default(),
         }
     }
 
@@ -65,7 +69,21 @@ impl RenderScene {
             color_rgba,
             mesh: Some(Arc::new(mesh)),
             base_color_texture: None,
+            material: PbrMaterial::default(),
         }
+    }
+
+    /// Builds a render item with explicit physically based material parameters.
+    pub fn item_from_visual_with_material(
+        world: Transform3,
+        shape: VisualShape,
+        color_rgba: [f32; 4],
+        local_offset: Transform3,
+        material: PbrMaterial,
+    ) -> RenderSceneItem {
+        let mut item = Self::item_from_visual(world, shape, color_rgba, local_offset);
+        item.material = material;
+        item
     }
 
     /// Loads STL or OBJ files referenced by mesh visuals in this scene.
@@ -89,8 +107,10 @@ impl RenderScene {
                 let mut resolved = item.clone();
                 resolved.mesh = Some(Arc::new(part.mesh));
                 resolved.base_color_texture = part.base_color_texture.map(Arc::new);
+                resolved.material = part.material;
                 if let Some(base_color_rgba) = part.base_color_rgba {
-                    resolved.color_rgba = base_color_rgba;
+                    resolved.color_rgba = [1.0; 4];
+                    resolved.material.base_color_rgba = base_color_rgba;
                 }
                 resolved_items.push(resolved);
             }
@@ -179,6 +199,20 @@ mod tests {
     }
 
     #[test]
+    fn visual_item_accepts_explicit_material() {
+        let material = PbrMaterial::new([0.2, 0.4, 0.6, 1.0], 0.35, 0.8, [0.01, 0.0, 0.0]);
+        let item = RenderScene::item_from_visual_with_material(
+            WorldTransform3::IDENTITY,
+            VisualShape::Box { size_m: Vec3::ONE },
+            [1.0; 4],
+            WorldTransform3::IDENTITY,
+            material,
+        );
+
+        assert_eq!(item.material, material);
+    }
+
+    #[test]
     fn resolve_mesh_assets_loads_stl() {
         let package_root =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mesh_diff_drive");
@@ -192,6 +226,7 @@ mod tests {
                 color_rgba: [1.0, 1.0, 1.0, 1.0],
                 mesh: None,
                 base_color_texture: None,
+                material: PbrMaterial::default(),
             }],
         };
         scene

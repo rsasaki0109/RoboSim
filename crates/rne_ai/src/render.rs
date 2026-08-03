@@ -64,6 +64,7 @@ pub fn append_task_marker_overlay(
                 color_rgba: TASK_MARKER_COLOR,
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

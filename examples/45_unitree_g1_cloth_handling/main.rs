@@ -352,6 +352,7 @@ fn append_probe_markers(scene: &mut RenderScene, sim: &UrdfSceneSim) {
             color_rgba: color,
             mesh: None,
             base_color_texture: None,
+            material: Default::default(),
         });
     }
 }
@@ -373,6 +374,7 @@ fn append_checker_floor(scene: &mut RenderScene, tile_m: f64) {
                 },
                 mesh: None,
                 base_color_texture: None,
+                material: Default::default(),
             });
         }
     }

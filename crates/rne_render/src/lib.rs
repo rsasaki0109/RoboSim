@@ -8,6 +8,7 @@ pub mod depth;
 pub mod headless;
 pub mod image;
 pub mod lidar;
+pub mod material;
 pub mod mesh;
 pub mod mesh_cache;
 pub mod pass;
@@ -20,6 +21,7 @@ pub use camera::Camera;
 pub use depth::{hash_depth_f32, scene_depth_probe, DepthFrame};
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};
+pub use material::PbrMaterial;
 pub use mesh::{
     load_mesh, load_mesh_parts, load_stl, load_stl_bytes, LoadedMeshPart, MeshLoadError,
     TriangleMesh,

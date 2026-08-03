@@ -4,6 +4,7 @@ struct CameraUniform {
     light_view_proj: mat4x4<f32>,
     light_ambient: vec4<f32>,
     diffuse_shadow: vec4<f32>,
+    camera_position: vec4<f32>,
 }
 
 struct DrawUniform {
@@ -12,6 +13,9 @@ struct DrawUniform {
     normal_col1: vec4<f32>,
     normal_col2: vec4<f32>,
     color: vec4<f32>,
+    base_color: vec4<f32>,
+    material_params: vec4<f32>,
+    emissive: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -27,6 +31,7 @@ struct VertexOutput {
     @location(1) world_normal: vec3<f32>,
     @location(2) texcoord: vec2<f32>,
     @location(3) light_clip_position: vec4<f32>,
+    @location(4) world_position: vec3<f32>,
 }
 
 @vertex
@@ -40,6 +45,7 @@ fn vs_main(
     out.clip_position = camera.view_proj * world;
     out.light_clip_position = camera.light_view_proj * world;
     out.color = draw.color;
+    out.world_position = world.xyz;
 
     let normal_matrix = mat3x3<f32>(
         draw.normal_col0.xyz,
@@ -85,21 +91,65 @@ fn shadow_visibility(input: VertexOutput, ndotl: f32) -> f32 {
     return visibility / 9.0;
 }
 
+fn distribution_ggx(ndoth: f32, roughness: f32) -> f32 {
+    let alpha = roughness * roughness;
+    let alpha_squared = alpha * alpha;
+    let denominator = ndoth * ndoth * (alpha_squared - 1.0) + 1.0;
+    return alpha_squared / max(3.14159265 * denominator * denominator, 1e-5);
+}
+
+fn geometry_schlick_ggx(ndotv: f32, roughness: f32) -> f32 {
+    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    return ndotv / max(ndotv * (1.0 - k) + k, 1e-5);
+}
+
+fn geometry_smith(ndotv: f32, ndotl: f32, roughness: f32) -> f32 {
+    return geometry_schlick_ggx(ndotv, roughness) *
+        geometry_schlick_ggx(ndotl, roughness);
+}
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
+    return color / (vec3<f32>(1.0) + color);
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(camera.light_ambient.xyz);
-    let ndotl = max(dot(normalize(input.world_normal), light_dir), 0.0);
+    let normal = normalize(input.world_normal);
+    let ndotl = max(dot(normal, light_dir), 0.0);
     let visibility = shadow_visibility(input, ndotl);
     let shadowed = mix(1.0 - camera.diffuse_shadow.y, 1.0, visibility);
-    let shade = camera.light_ambient.w + camera.diffuse_shadow.x * ndotl * shadowed;
     let texture_color = textureSample(
         base_color_texture,
         base_color_sampler,
         vec2<f32>(input.texcoord.x, 1.0 - input.texcoord.y),
     );
+    let albedo = input.color.rgb * draw.base_color.rgb * texture_color.rgb;
+    let roughness = clamp(draw.material_params.x, 0.04, 1.0);
+    let metallic = clamp(draw.material_params.y, 0.0, 1.0);
+    let view_dir = normalize(camera.camera_position.xyz - input.world_position);
+    let half_dir = normalize(view_dir + light_dir);
+    let ndotv = max(dot(normal, view_dir), 0.0);
+    let ndoth = max(dot(normal, half_dir), 0.0);
+    let vdoth = max(dot(view_dir, half_dir), 0.0);
+    let f0 = mix(vec3<f32>(0.04), albedo, metallic);
+    let fresnel = fresnel_schlick(vdoth, f0);
+    let distribution = distribution_ggx(ndoth, roughness);
+    let geometry = geometry_smith(ndotv, ndotl, roughness);
+    let specular = fresnel * distribution * geometry /
+        max(4.0 * ndotv * ndotl, 1e-4);
+    let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) * albedo /
+        3.14159265;
+    let direct = (diffuse + specular) * ndotl * camera.diffuse_shadow.x * 3.2 * shadowed;
+    let ambient = albedo * camera.light_ambient.w * (1.0 - metallic);
+    let hdr_color = ambient + direct + draw.emissive.rgb;
     return vec4<f32>(
-        input.color.rgb * texture_color.rgb * shade,
-        input.color.a * texture_color.a,
+        reinhard_tonemap(hdr_color),
+        input.color.a * draw.base_color.a * texture_color.a,
     );
 }
 "#;
@@ -115,6 +165,9 @@ struct DrawUniform {
     normal_col1: vec4<f32>,
     normal_col2: vec4<f32>,
     color: vec4<f32>,
+    base_color: vec4<f32>,
+    material_params: vec4<f32>,
+    emissive: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> shadow: ShadowUniform;
@@ -151,6 +204,7 @@ struct CameraUniform {
     light_view_proj: [[f32; 4]; 4],
     light_ambient: [f32; 4],
     diffuse_shadow: [f32; 4],
+    camera_position: [f32; 4],
 }
 
 /// Default directional light for primitive shading (world space, not normalized).
@@ -165,6 +219,7 @@ pub const DEFAULT_SHADOW_STRENGTH: f32 = 0.82;
 fn default_camera_uniform(
     view_proj: rne_math::Mat4,
     light_view_proj: rne_math::Mat4,
+    camera_position: Vec3,
 ) -> CameraUniform {
     CameraUniform {
         view_proj: mat4_to_cols(view_proj),
@@ -176,6 +231,12 @@ fn default_camera_uniform(
             DEFAULT_AMBIENT,
         ],
         diffuse_shadow: [DEFAULT_DIFFUSE, DEFAULT_SHADOW_STRENGTH, 0.0, 0.0],
+        camera_position: [
+            camera_position.x as f32,
+            camera_position.y as f32,
+            camera_position.z as f32,
+            1.0,
+        ],
     }
 }
 
@@ -193,6 +254,9 @@ struct DrawUniform {
     normal_col1: [f32; 4],
     normal_col2: [f32; 4],
     color: [f32; 4],
+    base_color: [f32; 4],
+    material_params: [f32; 4],
+    emissive: [f32; 4],
 }
 
 struct BuiltPrimitiveMesh {
@@ -624,7 +688,11 @@ impl PrimitiveRenderer {
         queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::bytes_of(&default_camera_uniform(view_proj, light_view_proj)),
+            bytemuck::bytes_of(&default_camera_uniform(
+                view_proj,
+                light_view_proj,
+                view.translation,
+            )),
         );
         queue.write_buffer(
             &self.shadow_camera_buffer,
@@ -645,12 +713,21 @@ impl PrimitiveRenderer {
         for (index, item) in scene.items.iter().enumerate() {
             let model = item.transform.to_matrix();
             let normal_cols = normal_matrix_cols(model);
+            let material = item.material.sanitized();
             let uniform = DrawUniform {
                 model: mat4_to_cols(model),
                 normal_col0: normal_cols[0],
                 normal_col1: normal_cols[1],
                 normal_col2: normal_cols[2],
                 color: item.color_rgba,
+                base_color: material.base_color_rgba,
+                material_params: [material.roughness, material.metallic, 0.0, 0.0],
+                emissive: [
+                    material.emissive_rgb[0],
+                    material.emissive_rgb[1],
+                    material.emissive_rgb[2],
+                    0.0,
+                ],
             };
             let offset = index * self.draw_uniform_stride as usize;
             draw_bytes[offset..offset + std::mem::size_of::<DrawUniform>()]
@@ -1078,8 +1155,8 @@ fn upload_texture(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("rne_base_color_sampler"),
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
@@ -1447,9 +1524,24 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
 mod mesh_tests {
     use super::{
         directional_light_view_projection, unit_cube, unit_cylinder, unit_sphere, RenderScene,
-        Transform3, Vec3, VisualShape,
+        Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER,
     };
     use rne_render::RenderSceneItem;
+
+    #[test]
+    fn shaders_validate_without_gpu() {
+        for (label, source) in [("primitive", SHADER), ("shadow", SHADOW_SHADER)] {
+            let module = naga::front::wgsl::parse_str(source)
+                .unwrap_or_else(|error| panic!("{label} WGSL parse failed: {error}"));
+            let mut validator = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            );
+            validator
+                .validate(&module)
+                .unwrap_or_else(|error| panic!("{label} WGSL validation failed: {error}"));
+        }
+    }
 
     #[test]
     fn primitive_meshes_have_triangles() {
@@ -1471,6 +1563,7 @@ mod mesh_tests {
             color_rgba: [1.0; 4],
             mesh: None,
             base_color_texture: None,
+            material: Default::default(),
         };
         let scene = RenderScene { items: vec![item] };
         let projection = directional_light_view_projection(&scene);

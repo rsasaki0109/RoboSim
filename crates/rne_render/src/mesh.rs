@@ -1,6 +1,6 @@
 //! Triangle mesh loading for render backends.
 
-use crate::ImageFrame;
+use crate::{ImageFrame, PbrMaterial};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -35,6 +35,8 @@ pub struct LoadedMeshPart {
     pub base_color_texture: Option<ImageFrame>,
     /// Optional material diffuse color and opacity.
     pub base_color_rgba: Option<[f32; 4]>,
+    /// Metallic-roughness parameters decoded from the asset or filled with defaults.
+    pub material: PbrMaterial,
 }
 
 /// Loads a supported triangle mesh based on its file extension.
@@ -62,6 +64,7 @@ pub fn load_mesh_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError
             mesh: load_stl(path)?,
             base_color_texture: None,
             base_color_rgba: None,
+            material: PbrMaterial::default(),
         }]),
         Some("obj") => load_obj_parts(path),
         _ => Err(invalid_mesh(
@@ -163,10 +166,15 @@ fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
             .and_then(|material| material.diffuse_texture.as_deref())
             .map(|texture_path| load_base_color_texture(path, texture_path, &mut texture_cache))
             .transpose()?;
+        let material = PbrMaterial {
+            base_color_rgba: base_color_rgba.unwrap_or([1.0; 4]),
+            ..PbrMaterial::default()
+        };
         parts.push(LoadedMeshPart {
             mesh: triangle_mesh,
             base_color_texture,
             base_color_rgba,
+            material,
         });
     }
     if parts.is_empty() {
@@ -533,7 +541,7 @@ endsolid box
         .expect("write OBJ");
         fs::write(
             root.join("panel.mtl"),
-            "newmtl facade\nKd 1 1 1\nmap_Kd facade.png\n",
+            "newmtl facade\nKd 0.25 0.5 0.75\nmap_Kd facade.png\n",
         )
         .expect("write MTL");
         image::RgbaImage::from_pixel(2, 1, image::Rgba([24, 80, 160, 255]))
@@ -552,6 +560,7 @@ endsolid box
             .expect("diffuse texture");
         assert_eq!((texture.width, texture.height), (2, 1));
         assert_eq!(&texture.rgba8[..4], &[24, 80, 160, 255]);
+        assert_eq!(parts[0].material.base_color_rgba, [0.25, 0.5, 0.75, 1.0]);
 
         fs::remove_dir_all(root).expect("remove textured OBJ test");
     }
