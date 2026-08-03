@@ -16,6 +16,10 @@ All notable changes to Robot Native Engine are documented in this file.
   provides opt-in deterministic Halton camera jitter, depth-based reprojection,
   neighborhood history clamping, resize-safe accumulation, and G1 capture
   controls through `RNE_TAA`, `RNE_TAA_FEEDBACK`, and `RNE_TAA_JITTER_PX`.
+- **Photoreal prefiltered IBL (v0.3-D)**: HDR environment uploads now build
+  deterministic GGX/Hammersley specular mip levels and a cosine-weighted
+  diffuse environment map. WGPU material shading selects specular blur from
+  roughness while the original HDR map remains the sky source.
 - **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
   90-meter, ten-building PLATEAU-style showcase and renders varied facades,
   sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The

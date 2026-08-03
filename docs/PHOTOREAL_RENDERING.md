@@ -53,6 +53,21 @@ reprojected through the previous view-projection matrix; static scenes gain
 the strongest edge-quality improvement. The G1 capture exposes the same path
 with `RNE_TAA=1` and optional `RNE_TAA_FEEDBACK` / `RNE_TAA_JITTER_PX`.
 
+## Prefiltered image-based lighting
+
+When an HDR environment is first uploaded, `rne_render_wgpu` builds a small,
+deterministic prefiltered representation. Five GGX/Hammersley specular levels
+cover `128x64` through `8x4`, while a `32x16` cosine-weighted diffuse map
+captures low-frequency irradiance. The original HDR texture remains available
+for the sky, and the primitive shader selects the prefiltered specular level
+from material roughness and the diffuse map for ambient response. Environment
+map identity caching means the CPU prefilter and GPU uploads happen once per
+immutable map instance.
+
+The prefilter is generated on demand and does not alter the backend-neutral
+`EnvironmentMap` API. Applications still only need to call
+`backend.set_environment(...)`; no extra asset or configuration is required.
+
 ## glTF/GLB asset path
 
 `rne_render::load_mesh_parts` and `RenderScene::resolve_mesh_assets` accept
@@ -90,6 +105,6 @@ Its corresponding linear maps are
 `concrete_floor_normal.png` and `concrete_floor_roughness.png` in the same
 directory. The maps are sampled with repeat addressing and are not part of the
 physics scene. Normal/roughness maps and glTF PBR maps are now part of the
-material path. HDR environment lighting and temporal anti-aliasing are
-available through the opt-in WGPU path; prefiltered environment convolution,
-skinning, and animation remain later rendering increments.
+material path. HDR environment lighting, prefiltered image-based lighting, and
+temporal anti-aliasing are available through the opt-in WGPU path; skinning
+and animation remain later rendering increments.
