@@ -27,7 +27,7 @@ dependency.
 | City simulation | Official PLATEAU import, traffic routing/signals, dynamic vehicles, LiDAR, RGB-D camera, and OSM HUD | [PLATEAU import](docs/PLATEAU_IMPORT.md), examples 46–47 |
 | Vehicle dynamics | Dynamic bicycle model, tire saturation, controller metrics, sensor latency, and deterministic multi-seed evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), examples 49–51 |
 | Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
-| Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67 |
+| Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
 | Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
@@ -41,14 +41,15 @@ dependency.
 </p>
 
 Example 67 evaluates typed forward, stop, and differential-steering commands
-without a renderer. The benchmark checks transport, path steering, height,
-tilt, a light disturbance, and exact replay digests. The current milestone
-validates opposite signed paths; true body-heading yaw tracking remains a
-follow-up control/contact milestone.
+without a renderer. Example 68 adds a bounded 240-tick true body-heading
+candidate with heading, yaw-rate, turn-radius, height, torque, and exact-replay
+checks. Sustained long-horizon heading tracking remains a follow-up milestone.
 
 ```bash
 cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomotion
 cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --train
+cargo run --release -p g1_heading_turn --example 68_g1_heading_turn
+cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --train
 
 # Regenerate the wgpu hero GIF and reduced-motion PNG
 cargo run --release -p g1_stride_gif --example 63_g1_stride_gif

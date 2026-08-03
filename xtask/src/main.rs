@@ -251,6 +251,8 @@ fn run_example_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --smoke",
     )?;
+    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --smoke")?;
+    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke")?;
     run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
     Ok(())
 }

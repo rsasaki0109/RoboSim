@@ -158,6 +158,11 @@ impl G1Walker {
                 command: self.command,
                 measured_forward_velocity_m_s: (body_rotation.inverse() * world_velocity).z,
                 measured_yaw_rate_rad_s: observation.base_angular_velocity_y_rad_s,
+                target_heading_rad: 0.0,
+                measured_heading_rad: 0.0,
+                heading_error_rad: 0.0,
+                yaw_rate_error_rad_s: self.command.yaw_rate_rad_s
+                    - observation.base_angular_velocity_y_rad_s,
             };
             let feed_forward = self.policy.torques_nm_for_command(input, TORQUE_LIMIT_NM);
             let torques: Vec<UrdfJointTorqueTarget<'_>> = TORQUE_LINKS
