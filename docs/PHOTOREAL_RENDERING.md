@@ -141,6 +141,30 @@ the optional `RNE_HDRI_INTENSITY`, `RNE_HDRI_ROTATION_RAD`,
 files remain external so their licensing and attribution stay with the
 application that supplies them.
 
+## Unitree G1 RGB-D sensor capture
+
+Example 71 mounts the renderer-independent `rne_sensor::CameraSpec` pipeline on
+the official G1 `head_link`. The camera publishes an `ImageRgb8` frame on
+stream `7101` and a paired `ImageDepth` frame on stream `7151` (the standard
+`CAMERA_DEPTH_STREAM_OFFSET`), with deterministic lens distortion, exposure,
+vignetting, shot/read noise, and three simulation ticks of output latency.
+The sensor entity lives in a small camera-only ECS/physics world; its transform
+is copied from G1's named head link while the render scene remains the actual
+G1 physics world. This keeps camera sampling backend-neutral and avoids adding
+sensor or ROS2 dependencies to robot core types.
+
+Run the GPU-free DataBus, depth-probe, and replay-hash check with:
+
+```text
+cargo run -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke
+```
+
+The GPU invocation writes RGB PNGs, 16-bit depth previews, raw little-endian
+float32 depth frames in meters, an RGB GIF, and `manifest.csv` below
+`target/rne-g1-rgbd-sensor/`. The manifest records capture/available simulation
+ticks and RGB/depth hashes so downstream perception experiments can associate
+each image pair with the simulator timeline.
+
 The G1 stride hero uses a render-only UV mesh for the test-bay floor and the
 tileable base-color asset at
 `examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_basecolor.png`.

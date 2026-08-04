@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Photoreal Unitree G1 RGB-D sensor loop (v0.3-I)**: example 71 mounts the
+  existing renderer-independent `CameraSpec` pipeline on G1 `head_link`,
+  publishes paired RGB/depth frames through DataBus with deterministic optical
+  effects and simulation latency, writes RGB/depth/manifest capture artifacts,
+  and validates replay hashes in the workspace smoke gate.
 - **Photoreal Unitree G1 capture (v0.3-H)**: example 70 now resolves the
   official Unitree G1 URDF/STL visual hierarchy through the existing physics
   world and `MeshRenderCache`, adds a PBR calibration room with floor normal/
