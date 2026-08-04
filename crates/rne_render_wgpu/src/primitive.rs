@@ -22,6 +22,7 @@ struct DrawUniform {
     material_params: vec4<f32>,
     emissive: vec4<f32>,
     map_params: vec4<f32>,
+    skinning: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -44,6 +45,50 @@ struct DrawUniform {
 @group(9) @binding(1) var prefiltered_environment_texture: texture_2d<f32>;
 @group(9) @binding(2) var diffuse_environment_texture: texture_2d<f32>;
 
+struct SkinStorage {
+    mesh_transform: mat4x4<f32>,
+    joint_matrices: array<mat4x4<f32>>,
+}
+
+@group(10) @binding(0) var<storage, read> skin: SkinStorage;
+
+fn mat3_from_mat4(matrix: mat4x4<f32>) -> mat3x3<f32> {
+    return mat3x3<f32>(matrix[0].xyz, matrix[1].xyz, matrix[2].xyz);
+}
+
+fn skinned_position(
+    position: vec3<f32>,
+    joints: vec4<u32>,
+    weights: vec4<f32>,
+) -> vec4<f32> {
+    if (draw.skinning.x < 0.5) {
+        return vec4<f32>(position, 1.0);
+    }
+    let source = vec4<f32>(position, 1.0);
+    var result = vec4<f32>(0.0);
+    result += skin.joint_matrices[joints.x] * source * weights.x;
+    result += skin.joint_matrices[joints.y] * source * weights.y;
+    result += skin.joint_matrices[joints.z] * source * weights.z;
+    result += skin.joint_matrices[joints.w] * source * weights.w;
+    return skin.mesh_transform * result;
+}
+
+fn skinned_normal(
+    normal: vec3<f32>,
+    joints: vec4<u32>,
+    weights: vec4<f32>,
+) -> vec3<f32> {
+    if (draw.skinning.x < 0.5) {
+        return normal;
+    }
+    var result = vec3<f32>(0.0);
+    result += mat3_from_mat4(skin.joint_matrices[joints.x]) * normal * weights.x;
+    result += mat3_from_mat4(skin.joint_matrices[joints.y]) * normal * weights.y;
+    result += mat3_from_mat4(skin.joint_matrices[joints.z]) * normal * weights.z;
+    result += mat3_from_mat4(skin.joint_matrices[joints.w]) * normal * weights.w;
+    return mat3_from_mat4(skin.mesh_transform) * result;
+}
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -58,9 +103,13 @@ fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) texcoord: vec2<f32>,
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
 ) -> VertexOutput {
     var out: VertexOutput;
-    let world = draw.model * vec4<f32>(position, 1.0);
+    let local_position = skinned_position(position, joints, weights);
+    let local_normal = skinned_normal(normal, joints, weights);
+    let world = draw.model * local_position;
     out.clip_position = camera.view_proj * world;
     out.light_clip_position = camera.light_view_proj * world;
     out.color = draw.color;
@@ -71,7 +120,7 @@ fn vs_main(
         draw.normal_col1.xyz,
         draw.normal_col2.xyz,
     );
-    var world_normal = normal_matrix * normal;
+    var world_normal = normal_matrix * local_normal;
     if (dot(world_normal, world_normal) < 1e-8) {
         world_normal = vec3<f32>(0.0, 1.0, 0.0);
     } else {
@@ -425,14 +474,43 @@ struct DrawUniform {
     material_params: vec4<f32>,
     emissive: vec4<f32>,
     map_params: vec4<f32>,
+    skinning: vec4<f32>,
+}
+
+struct SkinStorage {
+    mesh_transform: mat4x4<f32>,
+    joint_matrices: array<mat4x4<f32>>,
 }
 
 @group(0) @binding(0) var<uniform> shadow: ShadowUniform;
 @group(1) @binding(0) var<uniform> draw: DrawUniform;
+@group(2) @binding(0) var<storage, read> skin: SkinStorage;
+
+fn skinned_position(
+    position: vec3<f32>,
+    joints: vec4<u32>,
+    weights: vec4<f32>,
+) -> vec4<f32> {
+    if (draw.skinning.x < 0.5) {
+        return vec4<f32>(position, 1.0);
+    }
+    let source = vec4<f32>(position, 1.0);
+    var result = vec4<f32>(0.0);
+    result += skin.joint_matrices[joints.x] * source * weights.x;
+    result += skin.joint_matrices[joints.y] * source * weights.y;
+    result += skin.joint_matrices[joints.z] * source * weights.z;
+    result += skin.joint_matrices[joints.w] * source * weights.w;
+    return skin.mesh_transform * result;
+}
 
 @vertex
-fn vs_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return shadow.light_view_proj * draw.model * vec4<f32>(position, 1.0);
+fn vs_shadow(
+    @location(0) position: vec3<f32>,
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
+) -> @builtin(position) vec4<f32> {
+    let local_position = skinned_position(position, joints, weights);
+    return shadow.light_view_proj * draw.model * local_position;
 }
 "#;
 
@@ -440,7 +518,7 @@ use bytemuck::{Pod, Zeroable};
 use rne_math::{Mat4, Transform3, Vec3};
 use rne_render::{
     Camera, CameraPassOutput, DepthFrame, EnvironmentLighting, EnvironmentMap, ImageFrame,
-    RenderError, RenderScene, RenderTarget, TriangleMesh, VisualShape,
+    RenderError, RenderScene, RenderTarget, SkinningData, TriangleMesh, VisualShape,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -452,6 +530,8 @@ struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     texcoord: [f32; 2],
+    joints: [u16; 4],
+    weights: [f32; 4],
 }
 
 #[repr(C)]
@@ -531,6 +611,13 @@ struct DrawUniform {
     material_params: [f32; 4],
     emissive: [f32; 4],
     map_params: [f32; 4],
+    skinning: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SkinStorageHeader {
+    mesh_transform: [[f32; 4]; 4],
 }
 
 struct BuiltPrimitiveMesh {
@@ -546,6 +633,8 @@ pub struct PrimitiveRenderer {
     camera_layout: wgpu::BindGroupLayout,
     environment_layout: wgpu::BindGroupLayout,
     shadow_camera_layout: wgpu::BindGroupLayout,
+    skin_layout: wgpu::BindGroupLayout,
+    fallback_skin: GpuSkin,
     draw_bind_group: wgpu::BindGroup,
     draw_uniform_stride: u32,
     box_mesh: BuiltPrimitiveMesh,
@@ -581,6 +670,12 @@ struct GpuMesh {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     index_format: wgpu::IndexFormat,
+    skin: Option<GpuSkin>,
+}
+
+struct GpuSkin {
+    _buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 struct GpuTexture {
@@ -707,6 +802,19 @@ impl PrimitiveRenderer {
                     count: None,
                 }],
             });
+        let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rne_skin_storage_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rne_base_color_texture_layout"),
             entries: &[
@@ -778,6 +886,7 @@ impl PrimitiveRenderer {
                 &texture_layout,
                 &texture_layout,
                 &environment_layout,
+                &skin_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -806,6 +915,16 @@ impl PrimitiveRenderer {
                             format: wgpu::VertexFormat::Float32x2,
                             offset: 24,
                             shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Uint16x4,
+                            offset: 32,
+                            shader_location: 3,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 40,
+                            shader_location: 4,
                         },
                     ],
                 }],
@@ -878,7 +997,7 @@ impl PrimitiveRenderer {
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("rne_shadow_pipeline_layout"),
-                bind_group_layouts: &[&shadow_camera_layout, &draw_layout],
+                bind_group_layouts: &[&shadow_camera_layout, &draw_layout, &skin_layout],
                 push_constant_ranges: &[],
             });
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -890,11 +1009,23 @@ impl PrimitiveRenderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
-                    }],
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Uint16x4,
+                            offset: 32,
+                            shader_location: 3,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 40,
+                            shader_location: 4,
+                        },
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -957,6 +1088,16 @@ impl PrimitiveRenderer {
                 }),
             }],
         });
+        let fallback_skin = upload_skinning(
+            device,
+            &skin_layout,
+            &SkinningData {
+                mesh_transform: Mat4::IDENTITY,
+                joints: vec![[0; 4]],
+                weights: vec![[0.0; 4]],
+                joint_matrices: vec![Mat4::IDENTITY],
+            },
+        );
         let fallback_texture = upload_texture(
             device,
             queue,
@@ -1060,6 +1201,8 @@ impl PrimitiveRenderer {
             camera_layout,
             environment_layout,
             shadow_camera_layout,
+            skin_layout,
+            fallback_skin,
             draw_bind_group,
             draw_uniform_stride,
             box_mesh,
@@ -1193,6 +1336,16 @@ impl PrimitiveRenderer {
                     f32::from(material.occlusion_texture.is_some()),
                     f32::from(material.emissive_texture.is_some()),
                 ],
+                skinning: [
+                    f32::from(
+                        item.mesh
+                            .as_ref()
+                            .is_some_and(|mesh| mesh.skinning.is_some()),
+                    ),
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
             };
             let offset = index * self.draw_uniform_stride as usize;
             draw_bytes[offset..offset + std::mem::size_of::<DrawUniform>()]
@@ -1210,7 +1363,9 @@ impl PrimitiveRenderer {
             .iter()
             .map(|item| {
                 if item.shape == VisualShape::DynamicMesh {
-                    item.mesh.as_ref().map(|mesh| upload_mesh(device, mesh))
+                    item.mesh
+                        .as_ref()
+                        .map(|mesh| upload_mesh(device, mesh, &self.skin_layout))
                 } else {
                     None
                 }
@@ -1363,6 +1518,12 @@ impl PrimitiveRenderer {
                     &[index as u32 * self.draw_uniform_stride],
                 );
                 if let Some(gpu_mesh) = &dynamic_meshes[index] {
+                    let skin_bind_group = gpu_mesh
+                        .skin
+                        .as_ref()
+                        .map(|skin| &skin.bind_group)
+                        .unwrap_or(&self.fallback_skin.bind_group);
+                    pass.set_bind_group(2, skin_bind_group, &[]);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
@@ -1371,11 +1532,18 @@ impl PrimitiveRenderer {
                         .mesh_cache
                         .get(&(Arc::as_ptr(mesh) as usize))
                         .expect("mesh uploaded before shadow pass");
+                    let skin_bind_group = gpu_mesh
+                        .skin
+                        .as_ref()
+                        .map(|skin| &skin.bind_group)
+                        .unwrap_or(&self.fallback_skin.bind_group);
+                    pass.set_bind_group(2, skin_bind_group, &[]);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 } else {
                     let primitive = self.primitive_mesh_for(&item.shape);
+                    pass.set_bind_group(2, &self.fallback_skin.bind_group, &[]);
                     pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         primitive.index_buffer.slice(..),
@@ -1489,6 +1657,12 @@ impl PrimitiveRenderer {
                 pass.set_bind_group(8, &occlusion_texture.bind_group, &[]);
 
                 if let Some(gpu_mesh) = &dynamic_meshes[index] {
+                    let skin_bind_group = gpu_mesh
+                        .skin
+                        .as_ref()
+                        .map(|skin| &skin.bind_group)
+                        .unwrap_or(&self.fallback_skin.bind_group);
+                    pass.set_bind_group(10, skin_bind_group, &[]);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
@@ -1497,11 +1671,18 @@ impl PrimitiveRenderer {
                         .mesh_cache
                         .get(&(Arc::as_ptr(mesh) as usize))
                         .expect("mesh uploaded before render pass");
+                    let skin_bind_group = gpu_mesh
+                        .skin
+                        .as_ref()
+                        .map(|skin| &skin.bind_group)
+                        .unwrap_or(&self.fallback_skin.bind_group);
+                    pass.set_bind_group(10, skin_bind_group, &[]);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 } else {
                     let primitive = self.primitive_mesh_for(&item.shape);
+                    pass.set_bind_group(10, &self.fallback_skin.bind_group, &[]);
                     pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         primitive.index_buffer.slice(..),
@@ -1659,9 +1840,11 @@ impl PrimitiveRenderer {
 
     fn gpu_mesh(&mut self, device: &wgpu::Device, mesh: &Arc<TriangleMesh>) -> &GpuMesh {
         let key = Arc::as_ptr(mesh) as usize;
-        self.mesh_cache
-            .entry(key)
-            .or_insert_with(|| upload_mesh(device, mesh))
+        if !self.mesh_cache.contains_key(&key) {
+            let uploaded = upload_mesh(device, mesh, &self.skin_layout);
+            self.mesh_cache.insert(key, uploaded);
+        }
+        self.mesh_cache.get(&key).expect("mesh uploaded into cache")
     }
 
     fn environment_texture(
@@ -1713,16 +1896,31 @@ fn upload_primitive(
     }
 }
 
-fn upload_mesh(device: &wgpu::Device, mesh: &TriangleMesh) -> GpuMesh {
+fn upload_mesh(
+    device: &wgpu::Device,
+    mesh: &TriangleMesh,
+    skin_layout: &wgpu::BindGroupLayout,
+) -> GpuMesh {
     let vertices: Vec<Vertex> = mesh
         .positions
         .iter()
         .zip(mesh.normals.iter())
         .zip(mesh.texcoords.iter())
-        .map(|((position, normal), texcoord)| Vertex {
+        .enumerate()
+        .map(|(index, ((position, normal), texcoord))| Vertex {
             position: *position,
             normal: *normal,
             texcoord: *texcoord,
+            joints: mesh
+                .skinning
+                .as_ref()
+                .and_then(|skinning| skinning.joints.get(index).copied())
+                .unwrap_or([0; 4]),
+            weights: mesh
+                .skinning
+                .as_ref()
+                .and_then(|skinning| skinning.weights.get(index).copied())
+                .unwrap_or([0.0; 4]),
         })
         .collect();
 
@@ -1758,6 +1956,45 @@ fn upload_mesh(device: &wgpu::Device, mesh: &TriangleMesh) -> GpuMesh {
         index_buffer,
         index_count,
         index_format,
+        skin: mesh
+            .skinning
+            .as_ref()
+            .map(|skinning| upload_skinning(device, skin_layout, skinning)),
+    }
+}
+
+fn upload_skinning(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    skinning: &SkinningData,
+) -> GpuSkin {
+    let header = SkinStorageHeader {
+        mesh_transform: mat4_to_cols(skinning.mesh_transform),
+    };
+    let joint_matrices = skinning
+        .joint_matrices
+        .iter()
+        .copied()
+        .map(mat4_to_cols)
+        .collect::<Vec<_>>();
+    let mut bytes = bytemuck::bytes_of(&header).to_vec();
+    bytes.extend_from_slice(bytemuck::cast_slice(&joint_matrices));
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("rne_skin_storage"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rne_skin_bind_group"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        }],
+    });
+    GpuSkin {
+        _buffer: buffer,
+        bind_group,
     }
 }
 
@@ -2236,6 +2473,8 @@ fn unit_cube() -> (Vec<Vertex>, Vec<u16>) {
                 position: p[corner],
                 normal,
                 texcoord: [0.0, 0.0],
+                joints: [0; 4],
+                weights: [0.0; 4],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -2259,6 +2498,8 @@ fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
                 position: [x, y, ring],
                 normal: [angle.cos(), angle.sin(), 0.0],
                 texcoord: [0.0, 0.0],
+                joints: [0; 4],
+                weights: [0.0; 4],
             });
         }
     }
@@ -2277,12 +2518,16 @@ fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
         position: [0.0, 0.0, -0.5],
         normal: [0.0, 0.0, -1.0],
         texcoord: [0.0, 0.0],
+        joints: [0; 4],
+        weights: [0.0; 4],
     });
     let top_center = vertices.len() as u16;
     vertices.push(Vertex {
         position: [0.0, 0.0, 0.5],
         normal: [0.0, 0.0, 1.0],
         texcoord: [0.0, 0.0],
+        joints: [0; 4],
+        weights: [0.0; 4],
     });
 
     for segment in 0..SEGMENTS {
@@ -2320,6 +2565,8 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
                 position: [x * 0.5, y * 0.5, z * 0.5],
                 normal,
                 texcoord: [0.0, 0.0],
+                joints: [0; 4],
+                weights: [0.0; 4],
             });
         }
     }

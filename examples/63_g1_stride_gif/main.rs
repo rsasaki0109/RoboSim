@@ -687,6 +687,7 @@ fn push_textured_floor(
             [0.0, repeat_z],
         ],
         indices: vec![0, 1, 2, 0, 2, 3],
+        skinning: None,
     };
     scene.items.push(RenderSceneItem {
         transform: Transform3 {

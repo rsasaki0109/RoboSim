@@ -20,8 +20,8 @@ pub mod visual;
 
 pub use animation::{
     AnimationChannel, AnimationClip, AnimationInterpolation, AnimationProperty,
-    AnimationSampleError, GltfNode, GltfSceneAsset, GltfScenePart, GltfSkin, GltfSkinJoint,
-    SkinWeights,
+    AnimationSampleError, GltfAnimationPlayer, GltfNode, GltfSceneAsset, GltfScenePart, GltfSkin,
+    GltfSkinJoint, SkinWeights, SkinningData,
 };
 pub use backend::{RenderBackend, RenderError};
 pub use camera::Camera;

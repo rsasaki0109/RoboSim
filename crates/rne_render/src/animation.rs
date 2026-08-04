@@ -2,6 +2,7 @@
 
 use crate::mesh::{LoadedMeshPart, TriangleMesh};
 use rne_math::{Mat4, Quat, Transform3, Vec3};
+use std::sync::Arc;
 use thiserror::Error;
 
 /// The supported interpolation modes for glTF keyframes.
@@ -141,6 +142,61 @@ impl AnimationClip {
     }
 }
 
+/// Deterministic clock for sampling one glTF animation clip.
+///
+/// The player contains no wall-clock or renderer state. Advance it from the
+/// simulation step and pass its sampled mesh to a dynamic render item; the
+/// WGPU backend then uploads the bind-pose vertices and current joint matrices
+/// for GPU deformation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GltfAnimationPlayer {
+    /// Selected animation index, or `None` for the bind pose.
+    pub animation_index: Option<usize>,
+    /// Current clip time in seconds.
+    pub time_s: f32,
+    /// Time multiplier applied by [`Self::advance`].
+    pub playback_rate: f32,
+}
+
+impl GltfAnimationPlayer {
+    /// Creates a player for an optional glTF animation index.
+    pub fn new(animation_index: Option<usize>) -> Self {
+        Self {
+            animation_index,
+            time_s: 0.0,
+            playback_rate: 1.0,
+        }
+    }
+
+    /// Advances the deterministic player clock by a simulation delta.
+    ///
+    /// Non-finite deltas are ignored so a malformed external timestep cannot
+    /// poison subsequent render samples.
+    pub fn advance(&mut self, delta_s: f32) {
+        if delta_s.is_finite() && self.playback_rate.is_finite() {
+            self.time_s += delta_s * self.playback_rate;
+        }
+    }
+
+    /// Samples one part into a GPU-ready bind-pose mesh and skin payload.
+    pub fn sample_part_for_gpu(
+        &self,
+        asset: &GltfSceneAsset,
+        part_index: usize,
+    ) -> Result<TriangleMesh, AnimationSampleError> {
+        asset.sample_part_for_gpu(part_index, self.animation_index, self.time_s)
+    }
+
+    /// Samples one part into CPU-deformed vertices using the current player time.
+    pub fn sample_part_cpu(
+        &self,
+        asset: &GltfSceneAsset,
+        part_index: usize,
+    ) -> Result<TriangleMesh, AnimationSampleError> {
+        asset.sample_part(part_index, self.animation_index, self.time_s)
+    }
+}
+
 /// One node in the imported glTF hierarchy.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GltfNode {
@@ -177,6 +233,24 @@ pub struct SkinWeights {
     pub weights: Vec<[f32; 4]>,
 }
 
+/// Immutable GPU skinning payload for one posed mesh part.
+///
+/// The vertex data stays in bind-pose coordinates. The renderer applies each
+/// influence from `joint_matrices`, then applies `mesh_transform` for the
+/// animated glTF mesh node. Keeping this payload separate from the CPU-deformed
+/// mesh allows repeated animation samples without accumulating deformation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkinningData {
+    /// Animated mesh-node transform in the glTF scene hierarchy.
+    pub mesh_transform: Mat4,
+    /// Joint indices aligned with the mesh vertices.
+    pub joints: Vec<[u16; 4]>,
+    /// Joint weights aligned with the mesh vertices.
+    pub weights: Vec<[f32; 4]>,
+    /// Joint matrices in the skin joint order.
+    pub joint_matrices: Vec<Mat4>,
+}
+
 /// A material part from a glTF scene with its node and optional skin binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GltfScenePart {
@@ -210,6 +284,12 @@ pub enum AnimationSampleError {
     #[error("glTF mesh part index {index} is out of bounds")]
     PartIndexOutOfBounds {
         /// Requested part index.
+        index: usize,
+    },
+    /// A mesh part references a missing node.
+    #[error("glTF mesh part node {index} is out of bounds")]
+    PartNodeOutOfBounds {
+        /// Invalid node index.
         index: usize,
     },
     /// The requested animation does not exist.
@@ -280,10 +360,11 @@ impl GltfSceneAsset {
             .transpose()?
             .unwrap_or_else(|| self.nodes.iter().map(|node| node.bind_transform).collect());
         let global_transforms = global_node_matrices(&self.nodes, &local_transforms);
-        let node_transform = global_transforms
-            .get(part.node_index)
-            .copied()
-            .unwrap_or(Mat4::IDENTITY);
+        let node_transform = global_transforms.get(part.node_index).copied().ok_or(
+            AnimationSampleError::PartNodeOutOfBounds {
+                index: part.node_index,
+            },
+        )?;
         let raw_mesh = &part.render_part.mesh;
 
         let (skin, skin_weights) = match part.skin_index {
@@ -388,6 +469,7 @@ impl GltfSceneAsset {
             normals,
             texcoords: raw_mesh.texcoords.clone(),
             indices: raw_mesh.indices.clone(),
+            skinning: None,
         })
     }
 
@@ -397,6 +479,92 @@ impl GltfSceneAsset {
         part_index: usize,
     ) -> Result<TriangleMesh, AnimationSampleError> {
         self.sample_part(part_index, None, 0.0)
+    }
+
+    /// Samples a part into bind-pose vertices plus GPU skinning data.
+    ///
+    /// Unlike [`Self::sample_part`], this method does not CPU-deform vertex
+    /// positions or normals. The returned [`TriangleMesh`] retains the source
+    /// geometry and carries a [`SkinningData`] payload consumed by the WGPU
+    /// backend. Unskinned parts fall back to [`Self::sample_part`].
+    pub fn sample_part_for_gpu(
+        &self,
+        part_index: usize,
+        animation_index: Option<usize>,
+        time_s: f32,
+    ) -> Result<TriangleMesh, AnimationSampleError> {
+        let part = self
+            .parts
+            .get(part_index)
+            .ok_or(AnimationSampleError::PartIndexOutOfBounds { index: part_index })?;
+        if part.skin_index.is_none() {
+            return self.sample_part(part_index, animation_index, time_s);
+        }
+        let local_transforms = animation_index
+            .map(|index| {
+                let animation = self
+                    .animations
+                    .get(index)
+                    .ok_or(AnimationSampleError::AnimationIndexOutOfBounds { index })?;
+                Ok(animation.sample_node_transforms(&self.nodes, time_s))
+            })
+            .transpose()?
+            .unwrap_or_else(|| self.nodes.iter().map(|node| node.bind_transform).collect());
+        let global_transforms = global_node_matrices(&self.nodes, &local_transforms);
+        let node_transform = global_transforms.get(part.node_index).copied().ok_or(
+            AnimationSampleError::PartNodeOutOfBounds {
+                index: part.node_index,
+            },
+        )?;
+        let skin_index = part.skin_index.expect("checked above");
+        let skin = self
+            .skins
+            .get(skin_index)
+            .ok_or(AnimationSampleError::SkinIndexOutOfBounds { index: skin_index })?;
+        let skin_weights = part
+            .skin_weights
+            .as_ref()
+            .ok_or(AnimationSampleError::MissingSkinWeights)?;
+        let raw_mesh = &part.render_part.mesh;
+        let vertex_count = raw_mesh.positions.len();
+        if skin_weights.joints.len() != vertex_count || skin_weights.weights.len() != vertex_count {
+            return Err(AnimationSampleError::SkinVertexCountMismatch {
+                weights: skin_weights.joints.len().min(skin_weights.weights.len()),
+                vertices: vertex_count,
+            });
+        }
+        let mut joint_matrices = Vec::with_capacity(skin.joints.len());
+        for joint in &skin.joints {
+            let joint_global = global_transforms.get(joint.node_index).copied().ok_or(
+                AnimationSampleError::JointNodeOutOfBounds {
+                    index: joint.node_index,
+                },
+            )?;
+            joint_matrices.push(joint_global * joint.inverse_bind_matrix);
+        }
+        for joints in &skin_weights.joints {
+            for joint in joints {
+                let joint_index = usize::from(*joint);
+                if joint_index >= joint_matrices.len() {
+                    return Err(AnimationSampleError::JointIndexOutOfBounds {
+                        joint: joint_index,
+                        joint_count: joint_matrices.len(),
+                    });
+                }
+            }
+        }
+        Ok(TriangleMesh {
+            positions: raw_mesh.positions.clone(),
+            normals: raw_mesh.normals.clone(),
+            texcoords: raw_mesh.texcoords.clone(),
+            indices: raw_mesh.indices.clone(),
+            skinning: Some(Arc::new(SkinningData {
+                mesh_transform: node_transform,
+                joints: skin_weights.joints.clone(),
+                weights: skin_weights.weights.clone(),
+                joint_matrices,
+            })),
+        })
     }
 }
 
@@ -488,6 +656,7 @@ mod tests {
                         normals: vec![[0.0, 1.0, 0.0]],
                         texcoords: vec![[0.0, 0.0]],
                         indices: vec![],
+                        skinning: None,
                     },
                     base_color_texture: None,
                     base_color_rgba: None,
@@ -519,5 +688,30 @@ mod tests {
         assert!((animated.positions[0][1] - 1.5).abs() < 1.0e-6);
         let replay = asset.sample_part(0, Some(0), 0.5).expect("replay pose");
         assert_eq!(animated, replay);
+    }
+
+    #[test]
+    fn gpu_skinning_sample_keeps_bind_pose_and_updates_joint_matrices() {
+        let asset = two_node_asset();
+        let mesh = asset
+            .sample_part_for_gpu(0, Some(0), 0.5)
+            .expect("GPU skinning payload");
+        assert_eq!(mesh.positions[0], [0.0, 1.0, 0.0]);
+        let skinning = mesh.skinning.as_ref().expect("skinning payload");
+        assert_eq!(skinning.joints, vec![[0, 0, 0, 0]]);
+        assert!((skinning.joint_matrices[0].w_axis.y - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn animation_player_advances_gpu_pose_deterministically() {
+        let asset = two_node_asset();
+        let mut player = GltfAnimationPlayer::new(Some(0));
+        player.advance(0.5);
+        let mesh = player
+            .sample_part_for_gpu(&asset, 0)
+            .expect("player GPU sample");
+        let skinning = mesh.skinning.as_ref().expect("player skinning payload");
+        assert!((player.time_s - 0.5).abs() < 1.0e-6);
+        assert!((skinning.joint_matrices[0].w_axis.y - 0.5).abs() < 1.0e-6);
     }
 }

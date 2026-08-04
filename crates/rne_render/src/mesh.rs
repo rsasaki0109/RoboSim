@@ -2,7 +2,7 @@
 
 use crate::animation::{
     AnimationChannel, AnimationClip, AnimationInterpolation, AnimationProperty, GltfNode,
-    GltfSceneAsset, GltfScenePart, GltfSkin, GltfSkinJoint, SkinWeights,
+    GltfSceneAsset, GltfScenePart, GltfSkin, GltfSkinJoint, SkinWeights, SkinningData,
 };
 use crate::{ImageFrame, PbrMaterial};
 use rne_math::Mat4;
@@ -23,6 +23,8 @@ pub struct TriangleMesh {
     pub texcoords: Vec<[f32; 2]>,
     /// Triangle indices.
     pub indices: Vec<u32>,
+    /// Optional bind-pose skinning payload for a GPU deformable mesh.
+    pub skinning: Option<Arc<SkinningData>>,
 }
 
 impl TriangleMesh {
@@ -153,6 +155,7 @@ fn load_obj_parts(path: &Path) -> Result<Vec<LoadedMeshPart>, MeshLoadError> {
                     .collect(),
                 texcoords,
                 indices,
+                skinning: None,
             }
         } else {
             mesh_with_flat_normals(&positions, &texcoords, &indices)
@@ -433,6 +436,7 @@ fn append_gltf_node(
                     normals,
                     texcoords,
                     indices,
+                    skinning: None,
                 }
             } else {
                 mesh_with_flat_normals(&positions, &texcoords, &indices)
@@ -717,6 +721,7 @@ fn merge_mesh_parts(parts: Vec<LoadedMeshPart>) -> Result<TriangleMesh, MeshLoad
         normals: Vec::new(),
         texcoords: Vec::new(),
         indices: Vec::new(),
+        skinning: None,
     };
     for part in parts {
         let vertex_offset = merged.positions.len() as u32;
@@ -829,6 +834,7 @@ fn mesh_with_flat_normals(
         normals: flat_normals,
         texcoords: flat_texcoords,
         indices: flat_indices,
+        skinning: None,
     }
 }
 
@@ -897,6 +903,7 @@ fn parse_binary_stl(_path: &str, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadE
         positions,
         normals,
         indices,
+        skinning: None,
     })
 }
 
@@ -959,6 +966,7 @@ fn parse_ascii_stl(path: &str, bytes: &[u8]) -> Result<TriangleMesh, MeshLoadErr
         positions,
         normals,
         indices,
+        skinning: None,
     })
 }
 

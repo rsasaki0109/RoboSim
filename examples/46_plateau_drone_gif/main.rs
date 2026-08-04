@@ -2419,6 +2419,7 @@ fn push_debug_mesh(scene: &mut RenderScene, mesh: DebugMeshBuilder, color_rgba: 
             normals: mesh.normals,
             texcoords: mesh.texcoords,
             indices: mesh.indices,
+            skinning: None,
         })),
         base_color_texture: None,
         material: Default::default(),
