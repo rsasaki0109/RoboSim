@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Photoreal humanoid asset integration (v0.3-G)**: the pinned and attributed
+  Khronos Rigged Figure GLB now drives example 69 through the glTF scene loader,
+  deterministic animation player, material/texture propagation, and WGPU color
+  plus shadow skinning. `--smoke` validates the asset and GPU payload without a
+  renderer; the default example writes two rendered animation frames. The
+  workspace smoke gate runs the GPU-free asset check on every CI pass.
 - **Photoreal environment lighting (v0.3-B)**: `rne_render` now loads
   Radiance `.hdr` equirectangular maps as validated linear RGB32F data, while
   `rne_render_wgpu` provides opt-in sky, diffuse IBL, and view-dependent

@@ -102,8 +102,16 @@ deformation. The WGPU main and shadow passes consume the same `JOINTS_0` /
 Cubic-spline animation, morph targets, and non-triangle primitive modes remain
 explicit unsupported cases.
 
-This change adds no third-party scene or texture asset to the repository. The
-loader preserves source pixel data but does not replace an imported asset's
+Example 69 exercises this path with the pinned, attributed
+`assets/fixtures/rigged_figure/RiggedFigure.glb` humanoid fixture. Run
+`cargo run -p gltf_humanoid_gpu --example 69_gltf_humanoid_gpu -- --smoke` for
+the GPU-free loader/player check; the default invocation renders two animation
+frames to `target/rne-gltf-humanoid`. The asset's source, credit, license, and
+SHA-256 are recorded in `assets/fixtures/rigged_figure/ASSET_LICENSE.md`.
+
+Example 69 intentionally vendors the attributed GLB fixture above; no other
+third-party scene or texture asset is added. The loader preserves source pixel
+data but does not replace an imported asset's
 license or attribution requirements; applications should keep the glTF asset's
 provenance beside their package and verify redistribution terms before shipping
 it. The generated unit-test images are synthetic fixtures.
