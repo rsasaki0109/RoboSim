@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Photoreal industrial environment package (v0.3-J)**: examples 70 and 71
+  now default to a provenance-pinned CC0 Poly Haven Machine Shop HDRI and
+  Hand Truck glTF prop, exercise the existing PBR/glTF material path, and keep
+  procedural calibration-room and lighting fallbacks behind explicit
+  environment variables. The asset directory records source URLs, authors,
+  licenses, upstream MD5 values, and local SHA-256 hashes.
 - **Photoreal Unitree G1 RGB-D sensor loop (v0.3-I)**: example 71 mounts the
   existing renderer-independent `CameraSpec` pipeline on G1 `head_link`,
   publishes paired RGB/depth frames through DataBus with deterministic optical
