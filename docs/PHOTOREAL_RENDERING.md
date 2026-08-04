@@ -31,10 +31,13 @@ let map = Arc::new(EnvironmentMap::load("studio.hdr")?);
 backend.set_environment(EnvironmentLighting::from_map(map));
 ```
 
-The G1 photoreal capture accepts the same path through `RNE_HDRI_PATH` and
-optional `RNE_HDRI_INTENSITY` / `RNE_HDRI_ROTATION_RAD` variables. No HDRI is
-vendored in the repository; applications remain responsible for the source
-map's license and attribution.
+The G1 photoreal captures accept the same path through `RNE_HDRI_PATH` and
+optional `RNE_HDRI_INTENSITY` / `RNE_HDRI_ROTATION_RAD` variables. The examples
+also ship a small CC0 Poly Haven `Machine Shop 01` 1K HDRI as the default
+industrial environment; its source, author, download hash, and attribution are
+recorded in `assets/environments/polyhaven_machine_shop_01/UPSTREAM.md`.
+Applications supplying another map remain responsible for that map's license
+and attribution.
 
 ## Temporal anti-aliasing
 
@@ -134,12 +137,14 @@ cargo run -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke
 ```
 
 The default invocation writes twelve PNG frames and an animated GIF below
-`target/rne-g1-photoreal/`. `RNE_HDRI_PATH` enables an external Radiance HDR
-environment, while `RNE_TAA=1` enables deterministic temporal accumulation;
-the optional `RNE_HDRI_INTENSITY`, `RNE_HDRI_ROTATION_RAD`,
-`RNE_TAA_FEEDBACK`, and `RNE_TAA_JITTER_PX` variables tune those paths. HDRI
-files remain external so their licensing and attribution stay with the
-application that supplies them.
+`target/rne-g1-photoreal/`. It uses the bundled Poly Haven industrial HDRI and
+hand-truck prop by default. `RNE_HDRI_PATH` overrides the environment with an
+external Radiance HDR, while `RNE_DISABLE_BUNDLED_INDUSTRIAL_ENVIRONMENT=1`
+selects the procedural lighting fallback. `RNE_DISABLE_INDUSTRIAL_ASSETS=1`
+keeps the procedural calibration room but omits the static prop. `RNE_TAA=1`
+enables deterministic temporal accumulation; the optional
+`RNE_HDRI_INTENSITY`, `RNE_HDRI_ROTATION_RAD`, `RNE_TAA_FEEDBACK`, and
+`RNE_TAA_JITTER_PX` variables tune those paths.
 
 ## Unitree G1 RGB-D sensor capture
 
@@ -164,6 +169,16 @@ float32 depth frames in meters, an RGB GIF, and `manifest.csv` below
 `target/rne-g1-rgbd-sensor/`. The manifest records capture/available simulation
 ticks and RGB/depth hashes so downstream perception experiments can associate
 each image pair with the simulator timeline.
+
+Both examples load the same industrial environment package:
+`assets/environments/polyhaven_machine_shop_01/` contains the CC0 `Machine
+Shop 01` HDRI plus a CC0 1K glTF `Hand Truck` prop with PBR textures. The prop
+is resolved through `RenderScene::resolve_mesh_assets`, so its normal and
+metallic-roughness maps exercise the existing glTF material path while the
+headless smoke verifies that the packaged geometry is present. AWSIM and Isaac
+Sim were useful reference points for scene/asset separation, but their bundled
+assets are not redistributed here because their published asset terms are not
+equivalent to the CC0 package used by these examples.
 
 The G1 stride hero uses a render-only UV mesh for the test-bay floor and the
 tileable base-color asset at

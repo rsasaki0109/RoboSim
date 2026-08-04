@@ -57,6 +57,11 @@ struct FloorTextures {
     roughness: Arc<ImageFrame>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct IndustrialProp {
+    items: Vec<RenderSceneItem>,
+}
+
 #[derive(Clone, Debug)]
 struct RgbdCapture {
     rgb: Frame<ImageRgb8>,
@@ -155,6 +160,7 @@ fn main() {
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let floor = load_floor_textures(&repo_root);
+    let industrial_prop = load_industrial_prop(&repo_root);
     let mut sim = load_and_settle_g1();
     let mut backend = match WgpuRenderBackend::new() {
         Ok(backend) => backend,
@@ -163,7 +169,7 @@ fn main() {
             return;
         }
     };
-    configure_environment(&mut backend);
+    configure_environment(&mut backend, &repo_root);
     configure_taa(&mut backend);
 
     let mut rig = CameraRig::new(camera_spec());
@@ -182,7 +188,7 @@ fn main() {
             let step = frame_index as u64 * STEPS_PER_FRAME + substep;
             sim.step_joint_position_targets(&unitree_g1_gait_targets(step, WALK_COMMAND));
         }
-        let scene = g1_scene(&sim, &mut cache, &mesh_root_refs, &floor);
+        let scene = g1_scene(&sim, &mut cache, &mesh_root_refs, &floor, &industrial_prop);
         let capture = rig.sample(
             g1_head_camera_transform(&sim),
             Some(&mut backend),
@@ -225,6 +231,8 @@ fn main() {
 }
 
 fn run_smoke() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    validate_bundled_environment(&repo_root);
     let first = smoke_digest();
     let second = smoke_digest();
     assert_eq!(first, second, "RGB-D sensor replay must be deterministic");
@@ -237,11 +245,26 @@ fn run_smoke() {
 }
 
 fn smoke_digest() -> Vec<(u64, u64, u64, u64)> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut sim = load_and_settle_g1();
     let mut cache = MeshRenderCache::new();
     let mesh_roots: Vec<PathBuf> = sim.mesh_package_roots().to_vec();
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
-    let floor = load_floor_textures(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    let floor = load_floor_textures(&repo_root);
+    let industrial_prop = load_industrial_prop(&repo_root);
+    if !env_flag("RNE_DISABLE_INDUSTRIAL_ASSETS") {
+        assert!(
+            !industrial_prop.items.is_empty(),
+            "industrial hand-truck asset must be available in the repository"
+        );
+        assert!(
+            industrial_prop.items.iter().any(|item| {
+                item.material.normal_texture.is_some()
+                    && item.material.metallic_roughness_texture.is_some()
+            }),
+            "industrial hand-truck PBR maps must be imported"
+        );
+    }
     let mut rig = CameraRig::new(camera_spec());
     let mut digest = Vec::with_capacity(FRAME_COUNT);
 
@@ -250,7 +273,7 @@ fn smoke_digest() -> Vec<(u64, u64, u64, u64)> {
             let step = frame_index as u64 * STEPS_PER_FRAME + substep;
             sim.step_joint_position_targets(&unitree_g1_gait_targets(step, WALK_COMMAND));
         }
-        let scene = g1_scene(&sim, &mut cache, &mesh_root_refs, &floor);
+        let scene = g1_scene(&sim, &mut cache, &mesh_root_refs, &floor, &industrial_prop);
         let mesh_count = scene
             .items
             .iter()
@@ -347,6 +370,7 @@ fn g1_scene(
     cache: &mut MeshRenderCache,
     mesh_roots: &[&Path],
     floor: &FloorTextures,
+    industrial_prop: &IndustrialProp,
 ) -> RenderScene {
     let mut scene = build_visual_render_scene(sim.world());
     scene.items.retain(|item| {
@@ -361,6 +385,7 @@ fn g1_scene(
         }
     }
     append_calibration_room(&mut scene, Vec3::new(0.0, 0.0, 0.0), floor);
+    append_industrial_prop(&mut scene, Vec3::ZERO, industrial_prop);
     scene
 }
 
@@ -382,6 +407,69 @@ fn load_texture(path: &Path) -> Arc<ImageFrame> {
         rgba.height(),
         rgba.into_raw(),
     ))
+}
+
+fn load_industrial_prop(repo_root: &Path) -> IndustrialProp {
+    if env_flag("RNE_DISABLE_INDUSTRIAL_ASSETS") {
+        return IndustrialProp::default();
+    }
+    let asset_root = repo_root.join("assets/environments/polyhaven_machine_shop_01");
+    let gltf_path = asset_root.join("hand_truck.gltf");
+    if !gltf_path.is_file() {
+        eprintln!(
+            "industrial asset {} is missing; using the procedural calibration room only",
+            gltf_path.display()
+        );
+        return IndustrialProp::default();
+    }
+
+    let mut prop_scene = RenderScene::new();
+    prop_scene.items.push(RenderSceneItem {
+        transform: Transform3::IDENTITY,
+        shape: VisualShape::Mesh {
+            path: "package://hand_truck/hand_truck.gltf".to_owned(),
+            scale: Vec3::ONE,
+        },
+        color_rgba: [1.0; 4],
+        mesh: None,
+        base_color_texture: None,
+        material: PbrMaterial::default(),
+    });
+    prop_scene
+        .resolve_mesh_assets(asset_root.as_path())
+        .unwrap_or_else(|error| panic!("resolve Poly Haven hand truck: {error}"));
+    IndustrialProp {
+        items: prop_scene.items,
+    }
+}
+
+fn append_industrial_prop(scene: &mut RenderScene, center: Vec3, prop: &IndustrialProp) {
+    let placement = center + Vec3::new(0.95, 0.005, -0.55);
+    for base_item in &prop.items {
+        let mut item = base_item.clone();
+        item.transform.translation += placement;
+        scene.items.push(item);
+    }
+}
+
+fn validate_bundled_environment(repo_root: &Path) {
+    if env_flag("RNE_DISABLE_BUNDLED_INDUSTRIAL_ENVIRONMENT") {
+        return;
+    }
+    let path =
+        repo_root.join("assets/environments/polyhaven_machine_shop_01/machine_shop_01_1k.hdr");
+    let map = EnvironmentMap::load(&path)
+        .unwrap_or_else(|error| panic!("load bundled industrial HDRI {}: {error}", path.display()));
+    assert!(
+        map.width > 1 && map.height > 1,
+        "bundled HDRI must contain an image"
+    );
+    assert!(
+        map.rgba32f
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0),
+        "bundled HDRI contains invalid linear pixels"
+    );
 }
 
 fn append_calibration_room(scene: &mut RenderScene, center: Vec3, floor: &FloorTextures) {
@@ -474,11 +562,28 @@ fn push_box(scene: &mut RenderScene, translation: Vec3, size: Vec3, color_rgba: 
     });
 }
 
-fn configure_environment(backend: &mut WgpuRenderBackend) {
-    let Some(path) = std::env::var_os("RNE_HDRI_PATH") else {
+fn configure_environment(backend: &mut WgpuRenderBackend, repo_root: &Path) {
+    let path = std::env::var_os("RNE_HDRI_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if env_flag("RNE_DISABLE_BUNDLED_INDUSTRIAL_ENVIRONMENT") {
+                return None;
+            }
+            Some(
+                repo_root
+                    .join("assets/environments/polyhaven_machine_shop_01/machine_shop_01_1k.hdr"),
+            )
+        });
+    let Some(path) = path else {
         return;
     };
-    let path = PathBuf::from(path);
+    if !path.is_file() {
+        eprintln!(
+            "HDRI environment {} is missing; using the procedural lighting fallback",
+            path.display()
+        );
+        return;
+    }
     let map = EnvironmentMap::load(&path)
         .unwrap_or_else(|error| panic!("load HDRI environment {}: {error}", path.display()));
     let mut lighting = EnvironmentLighting::from_map(Arc::new(map));
@@ -494,6 +599,17 @@ fn configure_environment(backend: &mut WgpuRenderBackend) {
     }
     backend.set_environment(lighting);
     println!("using HDRI environment {}", path.display());
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn configure_taa(backend: &mut WgpuRenderBackend) {
