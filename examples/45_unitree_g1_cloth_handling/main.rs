@@ -327,6 +327,7 @@ fn append_cloth(scene: &mut RenderScene, sim: &UrdfSceneSim, attached: bool) {
             normals: surface.normals,
             texcoords: vec![[0.0, 0.0]; surface.indices.len()],
             indices: surface.indices,
+            skinning: None,
         },
         if attached {
             [0.10, 0.72, 1.0, 1.0]

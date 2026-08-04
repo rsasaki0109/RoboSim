@@ -83,6 +83,7 @@ fn render(world: &World, cloth_entity: rne_ecs::Entity) {
             normals: surface.normals,
             texcoords: vec![[0.0, 0.0]; surface.indices.len()],
             indices: surface.indices,
+            skinning: None,
         },
         color,
     ));

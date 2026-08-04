@@ -26,6 +26,11 @@ All notable changes to Robot Native Engine are documented in this file.
   produces deterministic bind-pose-safe CPU-deformed meshes for the existing
   dynamic-mesh render path; cubic-spline animation and morph targets remain
   explicit unsupported cases.
+- **Photoreal GPU skinning (v0.3-F)**: `GltfAnimationPlayer` and
+  `GltfSceneAsset::sample_part_for_gpu` provide simulation-driven bind-pose
+  meshes with joint matrices and weights. `rne_render_wgpu` uploads those
+  payloads through storage buffers and applies them in both the color and
+  shadow passes.
 - **PLATEAU city-drive visual realism**: Example 46 now generates a licensed
   90-meter, ten-building PLATEAU-style showcase and renders varied facades,
   sidewalks, curbs, lane markings, a crossing, trees, and streetlights. The

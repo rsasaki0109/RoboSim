@@ -191,6 +191,7 @@ mod tests {
             normals: vec![[0.0, 0.0, 1.0]; 3],
             texcoords: vec![[0.0, 0.0]; 3],
             indices: vec![0, 1, 2],
+            skinning: None,
         };
         let item = RenderScene::item_from_dynamic_mesh(mesh.clone(), [0.2, 0.4, 0.8, 1.0]);
 

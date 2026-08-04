@@ -92,10 +92,15 @@ The v0.3-A material mapping follows the glTF metallic-roughness convention:
 callers. Applications that need humanoid motion can use `load_gltf_scene` to
 preserve the node hierarchy, inverse-bind matrices, `JOINTS_0`/`WEIGHTS_0`,
 and linear or step TRS animation clips. `GltfSceneAsset::sample_part` applies
-the selected clip and returns a fresh deformed `TriangleMesh`, which can be
-submitted through the existing dynamic-mesh path without accumulating vertex
-deformation. Cubic-spline animation, morph targets, and non-triangle primitive
-modes remain explicit unsupported cases.
+the selected clip and returns a fresh CPU-deformed `TriangleMesh`, while
+`sample_part_for_gpu` keeps bind-pose vertices and returns immutable joint
+matrices and weights for the WGPU backend. `GltfAnimationPlayer` advances from
+simulation deltas and exposes the same GPU sampling path; dynamic mesh items
+therefore update their storage-buffer pose without accumulating vertex
+deformation. The WGPU main and shadow passes consume the same `JOINTS_0` /
+`WEIGHTS_0` vertex attributes, so animated silhouettes and shadows stay aligned.
+Cubic-spline animation, morph targets, and non-triangle primitive modes remain
+explicit unsupported cases.
 
 This change adds no third-party scene or texture asset to the repository. The
 loader preserves source pixel data but does not replace an imported asset's
@@ -112,6 +117,6 @@ directory. The maps are sampled with repeat addressing and are not part of the
 physics scene. Normal/roughness maps and glTF PBR maps are now part of the
 material path. HDR environment lighting, prefiltered image-based lighting, and
 temporal anti-aliasing are available through the opt-in WGPU path. The
-backend-neutral glTF path now also supports deterministic CPU skinning and TRS
-animation sampling; a GPU skinning player and morph targets remain future
-increments.
+backend-neutral glTF path supports deterministic CPU skinning, GPU skinning
+payload sampling, and a simulation-driven TRS animation player. Morph targets
+remain a future increment.
