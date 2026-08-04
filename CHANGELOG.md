@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Photoreal Unitree G1 capture (v0.3-H)**: example 70 now resolves the
+  official Unitree G1 URDF/STL visual hierarchy through the existing physics
+  world and `MeshRenderCache`, adds a PBR calibration room with floor normal/
+  roughness maps, supports optional HDRI/TAA, writes PNG/GIF captures, and
+  runs a headless mesh-resolution smoke in CI.
 - **Photoreal humanoid asset integration (v0.3-G)**: the pinned and attributed
   Khronos Rigged Figure GLB now drives example 69 through the glTF scene loader,
   deterministic animation player, material/texture propagation, and WGPU color
