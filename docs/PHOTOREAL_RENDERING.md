@@ -116,6 +116,31 @@ license or attribution requirements; applications should keep the glTF asset's
 provenance beside their package and verify redistribution terms before shipping
 it. The generated unit-test images are synthetic fixtures.
 
+## Unitree G1 photoreal capture
+
+Example 70 connects the official Unitree G1 URDF/STL visual hierarchy to the
+photoreal path without moving robot-specific types into the renderer. It loads
+the vendored BSD-3-Clause model recorded in
+`assets/robots/g1_description/UPSTREAM.md`, settles the same dynamic scene used
+by the headless G1 gait examples, resolves all 29 visual mesh parts through
+`MeshRenderCache`, and adds a render-only calibration room. The room reuses the
+mapped concrete floor from example 63, so base color, tangent-space normal, and
+linear roughness maps are exercised together with the G1 materials.
+
+Run the deterministic GPU-free check with:
+
+```text
+cargo run -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke
+```
+
+The default invocation writes twelve PNG frames and an animated GIF below
+`target/rne-g1-photoreal/`. `RNE_HDRI_PATH` enables an external Radiance HDR
+environment, while `RNE_TAA=1` enables deterministic temporal accumulation;
+the optional `RNE_HDRI_INTENSITY`, `RNE_HDRI_ROTATION_RAD`,
+`RNE_TAA_FEEDBACK`, and `RNE_TAA_JITTER_PX` variables tune those paths. HDRI
+files remain external so their licensing and attribution stay with the
+application that supplies them.
+
 The G1 stride hero uses a render-only UV mesh for the test-bay floor and the
 tileable base-color asset at
 `examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_basecolor.png`.

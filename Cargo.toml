@@ -89,6 +89,7 @@ members = [
   "examples/67_g1_commanded_locomotion",
   "examples/68_g1_heading_turn",
   "examples/69_gltf_humanoid_gpu",
+  "examples/70_g1_photoreal_capture",
   "tests/determinism",
   "tests/dynamics",
   "tools/rne_asset_cli",
