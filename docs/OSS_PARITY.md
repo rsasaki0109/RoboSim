@@ -24,7 +24,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, and ROS 2 point-cloud/scan output | One scene manifest must be able to schedule and export every sensor type consistently |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports | OpenSCENARIO and external traffic-simulator adapters are future work |
-| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, and versioned `.rne-replay` artifacts | Browser interval playback and richer contact/failure annotations are future work |
+| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, versioned `.rne-replay` artifacts, and browser interval inspection | Richer contact/failure annotations and generic action streams are future work |
 | Extension model | Backend-neutral traits and plugin manifests/interfaces | Runtime discovery/loading and a stable plugin ABI are future work |
 
 ## Delivered first slice
@@ -66,10 +66,14 @@ the physics hash after each step, and the final report. Replay comparison uses
 exact step/time/hash checks and a documented `1e-12` relative-scale tolerance
 for floating-point observations.
 
+The [web viewer](../web/rne_web_viewer/README.md) can inspect the same artifact
+without rerunning the recorded policy or physics. Select the file in its Replay
+inspector to scrub or play the interval and inspect the selected observation and
+exact 64-bit physics hash.
+
 ## Next parity order
 
-1. Make the browser viewer inspect a recorded interval without rerunning policy
-   code, then add generic joint/effort action records.
+1. Add generic joint/effort action records.
 2. Expose joint/effort commands and sensor streams through the same runner
    boundary; keep ROS 2 as an adapter rather than moving ROS types into core.
 3. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay

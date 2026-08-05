@@ -6,6 +6,8 @@ The browser viewer lives in `web/rne_web_viewer/` and is **not** part of the cor
 - spawns ECS entities through `rne_assets` in-memory parsers
 - drives a kinematic joint sweep from a frame counter (visual only)
 - presents frames via `rne_render_wgpu` on a canvas (WebGPU / WebGL2)
+- reads uploaded versioned `.rne-replay` JSON in a browser-only inspector; the
+  inspector never invokes policy code or a physics backend
 
 ## Allowed dependencies
 
@@ -16,6 +18,10 @@ The web crate may depend on core crates (`rne_math`, `rne_ecs`, `rne_world`, `rn
 - No core crate may depend on `web/*`.
 - No ROS2 / adapter code in the viewer.
 - No wall-clock time inside simulation-oriented logic (the viewer uses frame-count animation only).
+
+Replay playback is presentation-only: `replay.js` validates and displays the
+recorded action, selected observation, timestamp, and physics hash. Its
+`requestAnimationFrame` loop advances a UI cursor and is not simulation time.
 
 ## Core touch points
 
