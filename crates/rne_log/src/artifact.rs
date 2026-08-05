@@ -1,6 +1,6 @@
 //! Versioned, inspectable replay artifacts for fixed-step simulation runs.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -57,42 +57,203 @@ pub enum ReplayControllerKind {
     None,
     /// Differential-drive wheel commands were recorded.
     DifferentialDrive,
+    /// Named joint velocity commands were recorded.
+    JointVelocity,
+    /// Named joint effort commands were recorded.
+    JointEffort,
 }
 
 /// One action sample recorded for a replay step.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReplayAction {
-    /// Wheel velocity command in radians per second.
-    pub wheel_velocity_rad_s: f64,
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReplayAction {
+    /// Differential-drive wheel velocity command in radians per second.
+    DifferentialDrive {
+        /// Wheel velocity command in radians per second.
+        wheel_velocity_rad_s: f64,
+    },
+    /// Named joint velocity command.
+    JointVelocity {
+        /// URDF / ECS joint name.
+        joint: String,
+        /// Target velocity in radians per second.
+        velocity_rad_s: f64,
+    },
+    /// Named joint effort command.
+    JointEffort {
+        /// URDF / ECS joint name.
+        joint: String,
+        /// Target effort in newton-meters.
+        effort_nm: f64,
+    },
+}
+
+impl<'de> Deserialize<'de> for ReplayAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum TaggedAction {
+            DifferentialDrive { wheel_velocity_rad_s: f64 },
+            JointVelocity { joint: String, velocity_rad_s: f64 },
+            JointEffort { joint: String, effort_nm: f64 },
+        }
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct LegacyAction {
+            wheel_velocity_rad_s: f64,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum WireAction {
+            Tagged(TaggedAction),
+            Legacy(LegacyAction),
+        }
+
+        match WireAction::deserialize(deserializer)? {
+            WireAction::Tagged(action) => Ok(match action {
+                TaggedAction::DifferentialDrive {
+                    wheel_velocity_rad_s,
+                } => Self::DifferentialDrive {
+                    wheel_velocity_rad_s,
+                },
+                TaggedAction::JointVelocity {
+                    joint,
+                    velocity_rad_s,
+                } => Self::JointVelocity {
+                    joint,
+                    velocity_rad_s,
+                },
+                TaggedAction::JointEffort { joint, effort_nm } => {
+                    Self::JointEffort { joint, effort_nm }
+                }
+            }),
+            WireAction::Legacy(action) => Ok(Self::DifferentialDrive {
+                wheel_velocity_rad_s: action.wheel_velocity_rad_s,
+            }),
+        }
+    }
 }
 
 impl ReplayAction {
     /// Creates a differential-drive wheel action.
     pub const fn differential_drive(wheel_velocity_rad_s: f64) -> Self {
-        Self {
+        Self::DifferentialDrive {
             wheel_velocity_rad_s,
+        }
+    }
+
+    /// Creates a named joint velocity action.
+    pub fn joint_velocity(joint: impl Into<String>, velocity_rad_s: f64) -> Self {
+        Self::JointVelocity {
+            joint: joint.into(),
+            velocity_rad_s,
+        }
+    }
+
+    /// Creates a named joint effort action.
+    pub fn joint_effort(joint: impl Into<String>, effort_nm: f64) -> Self {
+        Self::JointEffort {
+            joint: joint.into(),
+            effort_nm,
+        }
+    }
+
+    /// Returns the controller boundary represented by this action.
+    pub const fn controller_kind(&self) -> ReplayControllerKind {
+        match self {
+            Self::DifferentialDrive { .. } => ReplayControllerKind::DifferentialDrive,
+            Self::JointVelocity { .. } => ReplayControllerKind::JointVelocity,
+            Self::JointEffort { .. } => ReplayControllerKind::JointEffort,
+        }
+    }
+
+    /// Returns whether this action carries no actuator input.
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Self::DifferentialDrive {
+                wheel_velocity_rad_s,
+            } => *wheel_velocity_rad_s == 0.0,
+            Self::JointVelocity {
+                joint,
+                velocity_rad_s,
+            } => joint.trim().is_empty() || *velocity_rad_s == 0.0,
+            Self::JointEffort { joint, effort_nm } => joint.trim().is_empty() || *effort_nm == 0.0,
         }
     }
 }
 
+/// Named joint state captured in a replay observation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayJointState {
+    /// Joint names matching the position and velocity arrays.
+    pub names: Vec<String>,
+    /// Joint positions in radians, in name order.
+    pub positions_rad: Vec<f64>,
+    /// Joint velocities in radians per second, in name order.
+    pub velocities_rad_s: Vec<f64>,
+}
+
+/// Summary of one typed sensor stream captured in a replay observation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaySensorStream {
+    /// DataBus stream identifier.
+    pub stream_id: u64,
+    /// Stable sensor kind label.
+    pub kind: String,
+    /// Number of samples emitted by this sensor so far.
+    pub frame_count: u64,
+    /// Last emitted sequence number, or zero when no sample exists.
+    pub last_sequence: u64,
+    /// Stable digest of the latest typed payload, or zero when no sample exists.
+    pub payload_hash: u64,
+}
+
 /// Selected state observation recorded after one replay step.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayObservation {
     /// First differential-drive base translation in metres, when present.
     pub base_translation_m: Option<[f64; 3]>,
+    /// Named joint state when the scene contains articulated joints.
+    #[serde(default)]
+    pub joint_state: Option<ReplayJointState>,
+    /// Per-sensor DataBus stream summaries captured after this step.
+    #[serde(default)]
+    pub sensor_streams: Vec<ReplaySensorStream>,
 }
 
 impl ReplayObservation {
     /// Creates a selected observation for a replay frame.
     pub const fn new(base_translation_m: Option<[f64; 3]>) -> Self {
-        Self { base_translation_m }
+        Self {
+            base_translation_m,
+            joint_state: None,
+            sensor_streams: Vec::new(),
+        }
+    }
+
+    /// Adds the named joint state captured for this observation.
+    pub fn with_joint_state(mut self, joint_state: Option<ReplayJointState>) -> Self {
+        self.joint_state = joint_state;
+        self
+    }
+
+    /// Adds typed sensor stream summaries captured for this observation.
+    pub fn with_sensor_streams(mut self, sensor_streams: Vec<ReplaySensorStream>) -> Self {
+        self.sensor_streams = sensor_streams;
+        self
     }
 }
 
 /// One fixed-step action, observation, and deterministic state digest.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayFrame {
     /// Zero-based fixed-step index.
@@ -262,17 +423,6 @@ impl ReplayArtifact {
             self.final_report.first_base_translation_m,
             "final_report.first_base_translation_m",
         )?;
-        if matches!(self.controller, ReplayControllerKind::None)
-            && self
-                .frames
-                .iter()
-                .any(|frame| frame.action.wheel_velocity_rad_s != 0.0)
-        {
-            return Err(ReplayArtifactError::Invalid(
-                "controller=none requires zero wheel actions".to_string(),
-            ));
-        }
-
         let mut previous_sim_ticks = None;
         for (expected_step, frame) in self.frames.iter().enumerate() {
             let expected_step = expected_step as u64;
@@ -291,16 +441,13 @@ impl ReplayArtifact {
                 }
             }
             previous_sim_ticks = Some(frame.sim_ticks);
-            if !frame.action.wheel_velocity_rad_s.is_finite() {
-                return Err(ReplayArtifactError::Invalid(format!(
-                    "frame {} wheel_velocity_rad_s must be finite",
-                    frame.step
-                )));
-            }
+            validate_action(&frame.action, self.controller, frame.step)?;
+            validate_joint_state(frame.observation.joint_state.as_ref(), frame.step)?;
             validate_translation(
                 frame.observation.base_translation_m,
                 &format!("frame {} observation.base_translation_m", frame.step),
             )?;
+            validate_sensor_streams(&frame.observation.sensor_streams, frame.step)?;
         }
         Ok(())
     }
@@ -348,6 +495,126 @@ fn validate_translation(
                 "{field} must contain only finite values"
             )));
         }
+    }
+    Ok(())
+}
+
+fn validate_action(
+    action: &ReplayAction,
+    controller: ReplayControllerKind,
+    step: u64,
+) -> Result<(), ReplayArtifactError> {
+    let action_kind = action.controller_kind();
+    let valid_for_controller = match controller {
+        ReplayControllerKind::None => action.is_zero(),
+        expected => action_kind == expected,
+    };
+    if !valid_for_controller {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} action kind {:?} does not match controller {:?}",
+            action_kind, controller
+        )));
+    }
+
+    match action {
+        ReplayAction::DifferentialDrive {
+            wheel_velocity_rad_s,
+        } => {
+            if !wheel_velocity_rad_s.is_finite() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} wheel_velocity_rad_s must be finite"
+                )));
+            }
+        }
+        ReplayAction::JointVelocity {
+            joint,
+            velocity_rad_s,
+        } => {
+            if joint.trim().is_empty() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint action name must not be empty"
+                )));
+            }
+            if !velocity_rad_s.is_finite() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} velocity_rad_s must be finite"
+                )));
+            }
+        }
+        ReplayAction::JointEffort { joint, effort_nm } => {
+            if joint.trim().is_empty() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint action name must not be empty"
+                )));
+            }
+            if !effort_nm.is_finite() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} effort_nm must be finite"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_joint_state(
+    joint_state: Option<&ReplayJointState>,
+    step: u64,
+) -> Result<(), ReplayArtifactError> {
+    let Some(joint_state) = joint_state else {
+        return Ok(());
+    };
+    if joint_state.names.len() != joint_state.positions_rad.len()
+        || joint_state.names.len() != joint_state.velocities_rad_s.len()
+    {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} joint state arrays must have equal lengths"
+        )));
+    }
+    let mut names = joint_state
+        .names
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    if names.windows(2).any(|window| window[0] == window[1]) {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} joint state names must be unique"
+        )));
+    }
+    if joint_state.names.iter().any(|name| name.trim().is_empty()) {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} joint state names must not be empty"
+        )));
+    }
+    if joint_state
+        .positions_rad
+        .iter()
+        .chain(joint_state.velocities_rad_s.iter())
+        .any(|value| !value.is_finite())
+    {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} joint state values must be finite"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sensor_streams(
+    streams: &[ReplaySensorStream],
+    step: u64,
+) -> Result<(), ReplayArtifactError> {
+    for window in streams.windows(2) {
+        if window[0].stream_id >= window[1].stream_id {
+            return Err(ReplayArtifactError::Invalid(format!(
+                "frame {step} sensor streams must be sorted by unique stream_id"
+            )));
+        }
+    }
+    if streams.iter().any(|stream| stream.kind.trim().is_empty()) {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} sensor stream kind must not be empty"
+        )));
     }
     Ok(())
 }
@@ -429,8 +696,20 @@ mod tests {
 
         let error = artifact.validate().unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("controller=none requires zero wheel actions"));
+        assert!(error.to_string().contains("does not match controller"));
+    }
+
+    #[test]
+    fn joint_action_uses_tagged_json_and_legacy_wheel_json_is_readable() {
+        let action = ReplayAction::joint_velocity("left_hip_pitch_joint", 0.25);
+        let tagged = serde_json::to_string(&action).unwrap();
+        assert!(tagged.contains(r#""kind":"joint_velocity""#));
+        assert_eq!(
+            serde_json::from_str::<ReplayAction>(&tagged).unwrap(),
+            action
+        );
+
+        let legacy: ReplayAction = serde_json::from_str(r#"{"wheel_velocity_rad_s":6.0}"#).unwrap();
+        assert_eq!(legacy, ReplayAction::differential_drive(6.0));
     }
 }

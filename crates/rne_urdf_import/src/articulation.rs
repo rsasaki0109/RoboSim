@@ -3,12 +3,13 @@
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfJointType, UrdfRobot};
 use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
-use rne_ecs::{Entity, World};
+use rne_ecs::{Entity, Name, World};
 use rne_math::Vec3;
 use rne_physics::{
     FixedJointDesc, JointMotor, MultibodyLink, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
     RigidBodyType,
 };
+use rne_robot::{Actuator, ActuatorLimits, ActuatorTarget, ControlMode, Joint};
 use std::collections::HashSet;
 
 /// Configuration for [`attach_urdf_articulation`].
@@ -110,6 +111,7 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
+                attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
                 revolute_joints += 1;
             }
             UrdfJointType::Prismatic => {
@@ -123,6 +125,7 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
+                attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
                 prismatic_joints += 1;
             }
         }
@@ -133,6 +136,38 @@ pub fn attach_urdf_articulation(
         prismatic_joints,
         fixed_joints,
     })
+}
+
+fn attach_joint_actuator(world: &mut World, robot: Entity, joint_entity: Entity) {
+    let Some(joint) = world.get::<Joint>(joint_entity).cloned() else {
+        return;
+    };
+    let actuator_name = world
+        .get::<Name>(joint_entity)
+        .map(|name| format!("{}_actuator", name.0))
+        .unwrap_or_else(|| format!("{}_actuator", joint_entity.index()));
+    let limits = ActuatorLimits {
+        min_velocity_rad_s: finite_or_default(-joint.limits.max_velocity, -20.0),
+        max_velocity_rad_s: finite_or_default(joint.limits.max_velocity, 20.0),
+        max_effort_nm: finite_or_default(joint.limits.max_effort, 100.0),
+        ..ActuatorLimits::default()
+    };
+    world.entity_mut(joint_entity).insert(Actuator {
+        robot,
+        joint: Some(joint_entity),
+        name: actuator_name,
+        mode: ControlMode::Velocity,
+        target: ActuatorTarget::default(),
+        limits,
+    });
+}
+
+fn finite_or_default(value: f64, default: f64) -> f64 {
+    if value.is_finite() && value.abs() > f64::EPSILON {
+        value
+    } else {
+        default
+    }
 }
 
 fn multibody_link_names(urdf: &UrdfRobot, spawned: &SpawnedUrdfRobot) -> HashSet<String> {
@@ -348,6 +383,11 @@ mod tests {
                 .kind,
             JointKind::Revolute
         );
+        let actuator = world
+            .get::<rne_robot::Actuator>(spawned.joints["shoulder_joint"])
+            .expect("named URDF joint actuator");
+        assert_eq!(actuator.name, "shoulder_joint_actuator");
+        assert_eq!(actuator.joint, Some(spawned.joints["shoulder_joint"]));
         let _ = urdf;
     }
 

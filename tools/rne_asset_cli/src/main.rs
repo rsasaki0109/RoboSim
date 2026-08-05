@@ -7,19 +7,24 @@ use rne_assets::{
     validate_asset, AssetHotReloader, RunControllerKind, SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
-use rne_ecs::World;
+use rne_data::{
+    DataBus, ImageDepth, ImageRgb8, ImuSample, InMemoryDataBus, PointCloud, WheelEncoderSample,
+};
+use rne_ecs::{Name, World};
 use rne_log::{
     ReplayAction, ReplayArtifact, ReplayClock, ReplayControllerKind as ArtifactControllerKind,
-    ReplayFinalReport, ReplayFrame, ReplayObservation,
+    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorStream,
 };
 use rne_math::Hertz;
 use rne_physics::{hash_physics_state, PhysicsBackend, PhysicsWorldDesc};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
-    apply_actuator_commands, differential_drive_kinematics, ActuatorCommand, ActuatorCommandBuffer,
-    DiffDriveComponent,
+    apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
+    Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, Joint, JointKind,
 };
+use rne_sensor::{sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState};
 use rne_world::{Transform3, WorldEntity};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -64,6 +69,15 @@ enum Commands {
         /// Wheel velocity applied to every differential-drive robot.
         #[arg(long, default_value_t = 0.0)]
         wheel_velocity_rad_s: f64,
+        /// Named URDF / ECS joint to command.
+        #[arg(long)]
+        joint: Option<String>,
+        /// Velocity command for `--joint`, in radians per second.
+        #[arg(long)]
+        joint_velocity_rad_s: Option<f64>,
+        /// Effort command for `--joint`, in newton-meters.
+        #[arg(long)]
+        joint_effort_nm: Option<f64>,
         /// Run the same scene and inputs twice and compare the final report.
         #[arg(long)]
         determinism_check: bool,
@@ -100,13 +114,21 @@ fn main() -> Result<()> {
             steps,
             hz,
             wheel_velocity_rad_s,
+            joint,
+            joint_velocity_rad_s,
+            joint_effort_nm,
             determinism_check,
             replay_out,
         } => simulate_command(
             &path,
             steps,
             hz,
-            wheel_velocity_rad_s,
+            DirectActionOptions {
+                wheel_velocity_rad_s,
+                joint: joint.as_deref(),
+                joint_velocity_rad_s,
+                joint_effort_nm,
+            },
             determinism_check,
             replay_out.as_deref(),
         ),
@@ -158,35 +180,49 @@ struct SimulationReport {
     first_base_translation_m: Option<[f64; 3]>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SimulationOptions<'a> {
     steps: u64,
     hz: f64,
-    wheel_velocity_rad_s: f64,
+    action: ReplayAction,
     seed_override: Option<u64>,
     determinism_check: bool,
     replay_out: Option<&'a Path>,
     replay_controller: ArtifactControllerKind,
 }
 
+struct DirectActionOptions<'a> {
+    wheel_velocity_rad_s: f64,
+    joint: Option<&'a str>,
+    joint_velocity_rad_s: Option<f64>,
+    joint_effort_nm: Option<f64>,
+}
+
 fn simulate_command(
     path: &Path,
     steps: u64,
     hz: f64,
-    wheel_velocity_rad_s: f64,
+    direct_options: DirectActionOptions<'_>,
     determinism_check: bool,
     replay_out: Option<&Path>,
 ) -> Result<()> {
+    let action = direct_action(
+        direct_options.wheel_velocity_rad_s,
+        direct_options.joint,
+        direct_options.joint_velocity_rad_s,
+        direct_options.joint_effort_nm,
+    )?;
+    let replay_controller = action.controller_kind();
     run_simulation(
         path,
         SimulationOptions {
             steps,
             hz,
-            wheel_velocity_rad_s,
+            action,
             seed_override: None,
             determinism_check,
             replay_out,
-            replay_controller: ArtifactControllerKind::DifferentialDrive,
+            replay_controller,
         },
     )
 }
@@ -195,13 +231,29 @@ fn run_manifest_command(path: &Path) -> Result<()> {
     let manifest =
         load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
     let scene_path = manifest.resolve_scene_path(path);
-    let wheel_velocity_rad_s = match manifest.controller.kind {
-        RunControllerKind::None => 0.0,
-        RunControllerKind::DifferentialDrive => manifest.controller.wheel_velocity_rad_s,
-    };
-    let replay_controller = match manifest.controller.kind {
-        RunControllerKind::None => ArtifactControllerKind::None,
-        RunControllerKind::DifferentialDrive => ArtifactControllerKind::DifferentialDrive,
+    let (action, replay_controller) = match manifest.controller.kind {
+        RunControllerKind::None => (
+            ReplayAction::differential_drive(0.0),
+            ArtifactControllerKind::None,
+        ),
+        RunControllerKind::DifferentialDrive => (
+            ReplayAction::differential_drive(manifest.controller.wheel_velocity_rad_s),
+            ArtifactControllerKind::DifferentialDrive,
+        ),
+        RunControllerKind::JointVelocity => (
+            ReplayAction::joint_velocity(
+                manifest.controller.joint.clone(),
+                manifest.controller.velocity_rad_s,
+            ),
+            ArtifactControllerKind::JointVelocity,
+        ),
+        RunControllerKind::JointEffort => (
+            ReplayAction::joint_effort(
+                manifest.controller.joint.clone(),
+                manifest.controller.effort_nm,
+            ),
+            ArtifactControllerKind::JointEffort,
+        ),
     };
     let replay_out = manifest
         .output
@@ -219,7 +271,7 @@ fn run_manifest_command(path: &Path) -> Result<()> {
         SimulationOptions {
             steps: manifest.clock.steps,
             hz: manifest.clock.hz,
-            wheel_velocity_rad_s,
+            action,
             seed_override: manifest.seed,
             determinism_check: manifest.output.determinism_check,
             replay_out: replay_out.as_deref(),
@@ -232,7 +284,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
     let SimulationOptions {
         steps,
         hz,
-        wheel_velocity_rad_s,
+        action,
         seed_override,
         determinism_check,
         replay_out,
@@ -242,16 +294,14 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         hz.is_finite() && hz > 0.0,
         "--hz must be finite and positive"
     );
-    anyhow::ensure!(
-        wheel_velocity_rad_s.is_finite(),
-        "--wheel-velocity-rad-s must be finite"
-    );
+    ensure_action_is_finite(&action)?;
 
-    let run = simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, seed_override)?;
+    let run =
+        simulate_scene_with_action_schedule(path, steps, hz, action.clone(), seed_override, None)?;
     print_simulation_report(path, &run.report, determinism_check);
     if determinism_check {
         let replay =
-            simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, seed_override)?;
+            simulate_scene_with_action_schedule(path, steps, hz, action, seed_override, None)?;
         anyhow::ensure!(
             run.report == replay.report,
             "determinism check failed: first={:?} replay={:?}",
@@ -299,6 +349,7 @@ struct SimulationRun {
     frames: Vec<ReplayFrame>,
 }
 
+#[cfg(test)]
 fn simulate_scene_with_seed(
     path: &Path,
     steps: u64,
@@ -306,14 +357,21 @@ fn simulate_scene_with_seed(
     wheel_velocity_rad_s: f64,
     seed_override: Option<u64>,
 ) -> Result<SimulationRun> {
-    simulate_scene_with_action_schedule(path, steps, hz, wheel_velocity_rad_s, seed_override, None)
+    simulate_scene_with_action_schedule(
+        path,
+        steps,
+        hz,
+        ReplayAction::differential_drive(wheel_velocity_rad_s),
+        seed_override,
+        None,
+    )
 }
 
 fn simulate_scene_with_action_schedule(
     path: &Path,
     steps: u64,
     hz: f64,
-    wheel_velocity_rad_s: f64,
+    action: ReplayAction,
     seed_override: Option<u64>,
     replay_frames: Option<&[ReplayFrame]>,
 ) -> Result<SimulationRun> {
@@ -359,36 +417,40 @@ fn simulate_scene_with_action_schedule(
     let dt = SimDuration::from_hertz(Hertz::new(hz));
     let mut sim_time = SimTime::ZERO;
     let mut command_buffer = ActuatorCommandBuffer::new();
+    let mut data_bus = InMemoryDataBus::new();
     let mut frames = Vec::new();
     for step in 0..steps {
-        let wheel_velocity_rad_s = if let Some(replay_frames) = replay_frames {
+        let frame_action = if let Some(replay_frames) = replay_frames {
             let step_index = usize::try_from(step)
                 .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
-            replay_frames[step_index].action.wheel_velocity_rad_s
+            replay_frames[step_index].action.clone()
         } else {
-            wheel_velocity_rad_s
+            action.clone()
         };
-        for drive in &drives {
-            command_buffer.push(
-                ActuatorCommand::WheelVelocity {
-                    wheel: drive.left_actuator,
-                    velocity_rad_s: wheel_velocity_rad_s,
-                },
-                sim_time,
-            );
-            command_buffer.push(
-                ActuatorCommand::WheelVelocity {
-                    wheel: drive.right_actuator,
-                    velocity_rad_s: wheel_velocity_rad_s,
-                },
-                sim_time,
-            );
-        }
+        apply_replay_action(
+            &world,
+            &mut command_buffer,
+            &drives,
+            &frame_action,
+            sim_time,
+        )?;
         apply_actuator_commands(&mut world, &mut command_buffer);
+        sync_all_joint_motors_from_actuators(&mut world);
         differential_drive_kinematics(&mut world, &drives, dt);
         step_physics(&mut backend, &mut world, physics_world, dt)
             .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
         sim_time = sim_time + dt;
+        {
+            let mut sensor_context = SensorSampleContext {
+                world: &mut world,
+                sim_time,
+                physics: &backend,
+                physics_world,
+                render: None,
+                scene: None,
+            };
+            sample_sensors(&mut sensor_context, &mut data_bus);
+        }
 
         let base_translation_m = drives.first().and_then(|drive| {
             world.get::<Transform3>(drive.base_link).map(|transform| {
@@ -399,11 +461,14 @@ fn simulate_scene_with_action_schedule(
                 ]
             })
         });
+        let observation = ReplayObservation::new(base_translation_m)
+            .with_joint_state(capture_joint_state(&world))
+            .with_sensor_streams(capture_sensor_streams(&world, &data_bus));
         frames.push(ReplayFrame::new(
             step,
             sim_time.ticks(),
-            ReplayAction::differential_drive(wheel_velocity_rad_s),
-            ReplayObservation::new(base_translation_m),
+            frame_action,
+            observation,
             hash_physics_state(&world),
         ));
     }
@@ -431,6 +496,260 @@ fn simulate_scene_with_action_schedule(
     })
 }
 
+fn direct_action(
+    wheel_velocity_rad_s: f64,
+    joint: Option<&str>,
+    joint_velocity_rad_s: Option<f64>,
+    joint_effort_nm: Option<f64>,
+) -> Result<ReplayAction> {
+    anyhow::ensure!(
+        !(joint_velocity_rad_s.is_some() && joint_effort_nm.is_some()),
+        "choose only one of --joint-velocity-rad-s and --joint-effort-nm"
+    );
+    if let Some(joint) = joint {
+        anyhow::ensure!(
+            wheel_velocity_rad_s == 0.0,
+            "--wheel-velocity-rad-s cannot be combined with --joint"
+        );
+        anyhow::ensure!(!joint.trim().is_empty(), "--joint must not be empty");
+        if let Some(velocity_rad_s) = joint_velocity_rad_s {
+            return Ok(ReplayAction::joint_velocity(joint, velocity_rad_s));
+        }
+        if let Some(effort_nm) = joint_effort_nm {
+            return Ok(ReplayAction::joint_effort(joint, effort_nm));
+        }
+        anyhow::bail!("--joint requires --joint-velocity-rad-s or --joint-effort-nm");
+    }
+    anyhow::ensure!(
+        joint_velocity_rad_s.is_none() && joint_effort_nm.is_none(),
+        "--joint is required for a named joint command"
+    );
+    Ok(ReplayAction::differential_drive(wheel_velocity_rad_s))
+}
+
+fn ensure_action_is_finite(action: &ReplayAction) -> Result<()> {
+    match action {
+        ReplayAction::DifferentialDrive {
+            wheel_velocity_rad_s,
+        } => anyhow::ensure!(
+            wheel_velocity_rad_s.is_finite(),
+            "wheel velocity command must be finite"
+        ),
+        ReplayAction::JointVelocity {
+            joint,
+            velocity_rad_s,
+        } => {
+            anyhow::ensure!(
+                !joint.trim().is_empty(),
+                "joint command name must not be empty"
+            );
+            anyhow::ensure!(
+                velocity_rad_s.is_finite(),
+                "joint velocity command must be finite"
+            );
+        }
+        ReplayAction::JointEffort { joint, effort_nm } => {
+            anyhow::ensure!(
+                !joint.trim().is_empty(),
+                "joint command name must not be empty"
+            );
+            anyhow::ensure!(effort_nm.is_finite(), "joint effort command must be finite");
+        }
+    }
+    Ok(())
+}
+
+fn apply_replay_action(
+    world: &World,
+    command_buffer: &mut ActuatorCommandBuffer,
+    drives: &[rne_robot::DifferentialDrive],
+    action: &ReplayAction,
+    sim_time: SimTime,
+) -> Result<()> {
+    match action {
+        ReplayAction::DifferentialDrive {
+            wheel_velocity_rad_s,
+        } => {
+            for drive in drives {
+                command_buffer.push(
+                    ActuatorCommand::WheelVelocity {
+                        wheel: drive.left_actuator,
+                        velocity_rad_s: *wheel_velocity_rad_s,
+                    },
+                    sim_time,
+                );
+                command_buffer.push(
+                    ActuatorCommand::WheelVelocity {
+                        wheel: drive.right_actuator,
+                        velocity_rad_s: *wheel_velocity_rad_s,
+                    },
+                    sim_time,
+                );
+            }
+        }
+        ReplayAction::JointVelocity {
+            joint,
+            velocity_rad_s,
+        } => {
+            let joints = named_joint_entities(world, joint)?;
+            for joint in joints {
+                command_buffer.push(
+                    ActuatorCommand::JointVelocity {
+                        joint,
+                        velocity_rad_s: *velocity_rad_s,
+                    },
+                    sim_time,
+                );
+            }
+        }
+        ReplayAction::JointEffort { joint, effort_nm } => {
+            let joints = named_joint_entities(world, joint)?;
+            for joint in joints {
+                command_buffer.push(
+                    ActuatorCommand::JointEffort {
+                        joint,
+                        effort_nm: *effort_nm,
+                    },
+                    sim_time,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn named_joint_entities(world: &World, name: &str) -> Result<Vec<rne_ecs::Entity>> {
+    let mut joints = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let entity_name = world.get::<Name>(entity)?;
+            if entity_name.0 != name || world.get::<Joint>(entity).is_none() {
+                return None;
+            }
+            Some(entity)
+        })
+        .collect::<Vec<_>>();
+    joints.sort_unstable();
+    anyhow::ensure!(
+        !joints.is_empty(),
+        "no ECS joint named `{name}` exists in the scene"
+    );
+    for joint in &joints {
+        anyhow::ensure!(
+            world.get::<Actuator>(*joint).is_some(),
+            "joint `{name}` has no actuator; enable URDF articulation for this scene"
+        );
+    }
+    Ok(joints)
+}
+
+fn capture_joint_state(world: &World) -> Option<ReplayJointState> {
+    let mut joints = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let name = world.get::<Name>(entity)?;
+            let joint = world.get::<Joint>(entity)?;
+            if joint.kind == JointKind::Fixed {
+                return None;
+            }
+            Some((name.0.clone(), joint.position, joint.velocity, entity))
+        })
+        .collect::<Vec<_>>();
+    joints.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.3.cmp(&right.3)));
+    if joints.is_empty() {
+        return None;
+    }
+    Some(ReplayJointState {
+        names: joints.iter().map(|joint| joint.0.clone()).collect(),
+        positions_rad: joints.iter().map(|joint| joint.1).collect(),
+        velocities_rad_s: joints.iter().map(|joint| joint.2).collect(),
+    })
+}
+
+fn capture_sensor_streams(world: &World, bus: &InMemoryDataBus) -> Vec<ReplaySensorStream> {
+    let mut sensors = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            world.get::<Sensor>(entity).map(|_| entity)
+        })
+        .collect::<Vec<_>>();
+    sensors.sort_unstable_by_key(|entity| {
+        world
+            .get::<Sensor>(*entity)
+            .map(|sensor| (sensor.stream_id.0, *entity))
+    });
+
+    sensors
+        .into_iter()
+        .filter_map(|entity| {
+            let sensor = world.get::<Sensor>(entity)?;
+            let state = world
+                .get::<SensorState>(entity)
+                .cloned()
+                .unwrap_or_default();
+            let (kind, payload_hash) = match &sensor.kind {
+                SensorKind::Imu(_) => (
+                    "imu",
+                    latest_payload_hash::<ImuSample>(bus, sensor.stream_id),
+                ),
+                SensorKind::Lidar(_) => (
+                    "lidar",
+                    latest_payload_hash::<PointCloud>(bus, sensor.stream_id),
+                ),
+                SensorKind::Camera(_) => (
+                    "camera",
+                    combine_hashes(
+                        latest_payload_hash::<ImageRgb8>(bus, sensor.stream_id),
+                        latest_payload_hash::<ImageDepth>(
+                            bus,
+                            rne_data::StreamId::new(
+                                sensor.stream_id.0 + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET,
+                            ),
+                        ),
+                    ),
+                ),
+                SensorKind::WheelEncoder(_) => (
+                    "wheel_encoder",
+                    latest_payload_hash::<WheelEncoderSample>(bus, sensor.stream_id),
+                ),
+            };
+            Some(ReplaySensorStream {
+                stream_id: sensor.stream_id.0,
+                kind: kind.to_string(),
+                frame_count: state.frame_count,
+                last_sequence: state.last_sequence,
+                payload_hash,
+            })
+        })
+        .collect()
+}
+
+fn latest_payload_hash<T>(bus: &InMemoryDataBus, stream: rne_data::StreamId) -> u64
+where
+    T: rne_data::FramePayload + Serialize,
+{
+    bus.latest::<T>(stream)
+        .map(|frame| stable_payload_hash(&frame.payload))
+        .unwrap_or(0)
+}
+
+fn stable_payload_hash<T: Serialize>(payload: &T) -> u64 {
+    let bytes = serde_json::to_vec(payload).unwrap_or_default();
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn combine_hashes(first: u64, second: u64) -> u64 {
+    first.wrapping_mul(0x9e3779b185ebca87).rotate_left(17) ^ second
+}
+
 fn replay_command(path: &Path) -> Result<()> {
     let artifact = ReplayArtifact::read_json(path)
         .with_context(|| format!("load replay artifact {}", path.display()))?;
@@ -439,7 +758,7 @@ fn replay_command(path: &Path) -> Result<()> {
         &scene_path,
         artifact.clock.steps,
         artifact.clock.hz,
-        0.0,
+        ReplayAction::differential_drive(0.0),
         Some(artifact.seed),
         Some(&artifact.frames),
     )
@@ -480,14 +799,11 @@ fn ensure_replay_frames(expected: &[ReplayFrame], actual: &[ReplayFrame]) -> Res
             actual_frame.sim_ticks
         );
         anyhow::ensure!(
-            replay_float_matches(
-                expected_frame.action.wheel_velocity_rad_s,
-                actual_frame.action.wheel_velocity_rad_s
-            ),
-            "replay action mismatch at step {}: expected={} actual={}",
+            replay_action_matches(&expected_frame.action, &actual_frame.action),
+            "replay action mismatch at step {}: expected={:?} actual={:?}",
             expected_frame.step,
-            expected_frame.action.wheel_velocity_rad_s,
-            actual_frame.action.wheel_velocity_rad_s
+            expected_frame.action,
+            actual_frame.action
         );
         anyhow::ensure!(
             replay_translation_matches(
@@ -500,12 +816,93 @@ fn ensure_replay_frames(expected: &[ReplayFrame], actual: &[ReplayFrame]) -> Res
             actual_frame.observation.base_translation_m
         );
         anyhow::ensure!(
+            replay_joint_state_matches(
+                expected_frame.observation.joint_state.as_ref(),
+                actual_frame.observation.joint_state.as_ref()
+            ),
+            "replay joint state mismatch at step {}: expected={:?} actual={:?}",
+            expected_frame.step,
+            expected_frame.observation.joint_state,
+            actual_frame.observation.joint_state
+        );
+        anyhow::ensure!(
+            expected_frame.observation.sensor_streams == actual_frame.observation.sensor_streams,
+            "replay sensor stream mismatch at step {}: expected={:?} actual={:?}",
+            expected_frame.step,
+            expected_frame.observation.sensor_streams,
+            actual_frame.observation.sensor_streams
+        );
+        anyhow::ensure!(
             expected_frame.physics_hash == actual_frame.physics_hash,
             "replay frame mismatch at step {}: expected={expected_frame:?} actual={actual_frame:?}",
             expected_frame.step
         );
     }
     Ok(())
+}
+
+fn replay_action_matches(expected: &ReplayAction, actual: &ReplayAction) -> bool {
+    match (expected, actual) {
+        (
+            ReplayAction::DifferentialDrive {
+                wheel_velocity_rad_s: expected,
+            },
+            ReplayAction::DifferentialDrive {
+                wheel_velocity_rad_s: actual,
+            },
+        ) => replay_float_matches(*expected, *actual),
+        (
+            ReplayAction::JointVelocity {
+                joint: expected_joint,
+                velocity_rad_s: expected_velocity,
+            },
+            ReplayAction::JointVelocity {
+                joint: actual_joint,
+                velocity_rad_s: actual_velocity,
+            },
+        ) => {
+            expected_joint == actual_joint
+                && replay_float_matches(*expected_velocity, *actual_velocity)
+        }
+        (
+            ReplayAction::JointEffort {
+                joint: expected_joint,
+                effort_nm: expected_effort,
+            },
+            ReplayAction::JointEffort {
+                joint: actual_joint,
+                effort_nm: actual_effort,
+            },
+        ) => {
+            expected_joint == actual_joint && replay_float_matches(*expected_effort, *actual_effort)
+        }
+        _ => false,
+    }
+}
+
+fn replay_joint_state_matches(
+    expected: Option<&ReplayJointState>,
+    actual: Option<&ReplayJointState>,
+) -> bool {
+    match (expected, actual) {
+        (None, None) => true,
+        (Some(expected), Some(actual)) => {
+            expected.names == actual.names
+                && expected.positions_rad.len() == actual.positions_rad.len()
+                && expected.velocities_rad_s.len() == actual.velocities_rad_s.len()
+                && expected
+                    .positions_rad
+                    .iter()
+                    .zip(&actual.positions_rad)
+                    .all(|(expected, actual)| replay_float_matches(*expected, *actual))
+                && expected
+                    .velocities_rad_s
+                    .iter()
+                    .zip(&actual.velocities_rad_s)
+                    .all(|(expected, actual)| replay_float_matches(*expected, *actual))
+        }
+        _ => false,
+    }
 }
 
 fn ensure_replay_reports(expected: &ReplayFinalReport, actual: &ReplayFinalReport) -> Result<()> {
@@ -614,7 +1011,10 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{replay_command, run_manifest_command, simulate_scene};
+    use super::{
+        replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
+    };
+    use rne_log::ReplayAction;
     use std::path::PathBuf;
 
     #[test]
@@ -639,5 +1039,43 @@ mod tests {
             .expect("manifest parent")
             .join("../../target/runs/mesh_diff_drive.rne-replay");
         replay_command(&replay).expect("replay manifest output");
+    }
+
+    #[test]
+    fn named_joint_velocity_records_sensor_streams_and_replays() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let action = ReplayAction::joint_velocity("shoulder_joint", 0.5);
+        let first = simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None)
+            .expect("joint simulation");
+
+        let first_frame = first.frames.first().expect("first frame");
+        assert_eq!(
+            first_frame.action,
+            ReplayAction::joint_velocity("shoulder_joint", 0.5)
+        );
+        let joint_state = first_frame
+            .observation
+            .joint_state
+            .as_ref()
+            .expect("joint state");
+        assert!(joint_state
+            .names
+            .iter()
+            .any(|name| name == "shoulder_joint"));
+        assert_eq!(first_frame.observation.sensor_streams.len(), 1);
+        assert_eq!(first_frame.observation.sensor_streams[0].kind, "camera");
+        assert_eq!(first_frame.observation.sensor_streams[0].frame_count, 1);
+
+        let replay = simulate_scene_with_action_schedule(
+            &scene,
+            6,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            Some(&first.frames),
+        )
+        .expect("joint replay");
+        assert_eq!(first, replay);
     }
 }

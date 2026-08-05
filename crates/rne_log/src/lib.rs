@@ -8,7 +8,8 @@ pub mod replay;
 
 pub use artifact::{
     ReplayAction, ReplayArtifact, ReplayArtifactError, ReplayClock, ReplayControllerKind,
-    ReplayFinalReport, ReplayFrame, ReplayObservation, REPLAY_ARTIFACT_VERSION,
+    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorStream,
+    REPLAY_ARTIFACT_VERSION,
 };
 
 pub use record::{

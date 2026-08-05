@@ -67,12 +67,8 @@
       if (!Number.isInteger(frame.sim_ticks) || frame.sim_ticks < 0) {
         throw new Error(`frame ${index} has invalid sim_ticks`);
       }
-      if (
-        !frame.action ||
-        !Number.isFinite(frame.action.wheel_velocity_rad_s)
-      ) {
-        throw new Error(`frame ${index} has an invalid wheel action`);
-      }
+      validateAction(frame.action, index);
+      validateObservation(frame.observation, index);
       if (
         typeof frame.physics_hash !== "string" &&
         !Number.isInteger(frame.physics_hash)
@@ -84,12 +80,70 @@
     return artifact;
   }
 
+  function validateAction(action, index) {
+    if (!action || typeof action !== "object") {
+      throw new Error(`frame ${index} has an invalid action`);
+    }
+    const kind = action.kind || "differential_drive";
+    if (kind === "differential_drive") {
+      if (!Number.isFinite(action.wheel_velocity_rad_s)) {
+        throw new Error(`frame ${index} has an invalid wheel action`);
+      }
+      return;
+    }
+    if (kind === "joint_velocity") {
+      if (
+        typeof action.joint !== "string" ||
+        action.joint.trim() === "" ||
+        !Number.isFinite(action.velocity_rad_s)
+      ) {
+        throw new Error(`frame ${index} has an invalid joint velocity action`);
+      }
+      return;
+    }
+    if (kind === "joint_effort") {
+      if (
+        typeof action.joint !== "string" ||
+        action.joint.trim() === "" ||
+        !Number.isFinite(action.effort_nm)
+      ) {
+        throw new Error(`frame ${index} has an invalid joint effort action`);
+      }
+      return;
+    }
+    throw new Error(`frame ${index} has an unknown action kind`);
+  }
+
+  function validateObservation(observation, index) {
+    if (!observation || typeof observation !== "object") {
+      throw new Error(`frame ${index} has an invalid observation`);
+    }
+    if (observation.joint_state) {
+      const state = observation.joint_state;
+      if (
+        !Array.isArray(state.names) ||
+        !Array.isArray(state.positions_rad) ||
+        !Array.isArray(state.velocities_rad_s) ||
+        state.names.length !== state.positions_rad.length ||
+        state.names.length !== state.velocities_rad_s.length
+      ) {
+        throw new Error(`frame ${index} has an invalid joint state`);
+      }
+    }
+    if (
+      observation.sensor_streams !== undefined &&
+      !Array.isArray(observation.sensor_streams)
+    ) {
+      throw new Error(`frame ${index} has invalid sensor streams`);
+    }
+  }
+
   function parseArtifactText(text) {
     // JSON.parse rounds u64 physics hashes when they are left as numbers.
     // Quote those fields before parsing so the inspector can display the
     // exact hash emitted by the Rust artifact writer.
     const losslessText = text.replace(
-      /("physics_hash"\s*:\s*)(\d+)/g,
+      /("(?:physics_hash|payload_hash)"\s*:\s*)(\d+)/g,
       '$1"$2"',
     );
     return validateArtifact(JSON.parse(losslessText));
@@ -112,6 +166,39 @@
     return `[${translation.map((value) => Number(value).toFixed(4)).join(", ")}] m`;
   }
 
+  function formatAction(action) {
+    const kind = action.kind || "differential_drive";
+    if (kind === "differential_drive") {
+      return `${Number(action.wheel_velocity_rad_s).toFixed(4)} rad/s`;
+    }
+    if (kind === "joint_velocity") {
+      return `${action.joint}: ${Number(action.velocity_rad_s).toFixed(4)} rad/s`;
+    }
+    if (kind === "joint_effort") {
+      return `${action.joint}: ${Number(action.effort_nm).toFixed(4)} N·m`;
+    }
+    return kind;
+  }
+
+  function formatObservation(observation) {
+    const parts = [formatBaseTranslation(observation)];
+    const jointState = observation && observation.joint_state;
+    if (jointState) {
+      parts.push(`joints=${jointState.names.length}`);
+    }
+    const sensors = observation && observation.sensor_streams;
+    if (Array.isArray(sensors)) {
+      const sensorSummary = sensors
+        .map(
+          (sensor) =>
+            `${sensor.kind}#${sensor.stream_id}=${formatHash(sensor.payload_hash)}`,
+        )
+        .join(", ");
+      parts.push(`sensors=${sensors.length}${sensorSummary ? ` (${sensorSummary})` : ""}`);
+    }
+    return parts.join("; ");
+  }
+
   function renderFrame() {
     const artifact = state.artifact;
     if (!artifact || artifact.frames.length === 0) {
@@ -128,10 +215,8 @@
     frameOutput.textContent = `${frame.step} / ${artifact.clock.steps - 1} (${(
       frame.sim_ticks / 1_000_000_000
     ).toFixed(6)} s)`;
-    actionOutput.textContent = `${Number(
-      frame.action.wheel_velocity_rad_s,
-    ).toFixed(4)} rad/s`;
-    observationOutput.textContent = formatBaseTranslation(frame.observation);
+    actionOutput.textContent = formatAction(frame.action);
+    observationOutput.textContent = formatObservation(frame.observation);
     hashOutput.textContent = formatHash(frame.physics_hash);
     progress.style.width = `${
       artifact.frames.length <= 1

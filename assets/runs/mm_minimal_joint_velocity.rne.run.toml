@@ -1,0 +1,16 @@
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+seed = 44
+
+[clock]
+steps = 120
+hz = 60.0
+
+[controller]
+kind = "joint_velocity"
+joint = "shoulder_joint"
+velocity_rad_s = 0.5
+
+[output]
+determinism_check = true
+replay_path = "../../target/runs/mm_minimal_joint_velocity.rne-replay"

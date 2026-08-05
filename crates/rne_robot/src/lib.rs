@@ -21,6 +21,6 @@ pub use diff_drive::{
 pub use joint::validate_joint_limits;
 pub use systems::{
     ackermann_kinematics, apply_actuator_commands, command_ackermann_drive,
-    differential_drive_kinematics, pure_pursuit_steering, sync_joint_motors_from_actuators,
-    vehicle_dynamics, AckermannCommandResult, CommandApplyResult,
+    differential_drive_kinematics, pure_pursuit_steering, sync_all_joint_motors_from_actuators,
+    sync_joint_motors_from_actuators, vehicle_dynamics, AckermannCommandResult, CommandApplyResult,
 };

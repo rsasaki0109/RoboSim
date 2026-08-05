@@ -86,6 +86,10 @@ pub enum RunControllerKind {
     None,
     /// Apply one wheel velocity to every differential-drive robot.
     DifferentialDrive,
+    /// Apply one named joint velocity to every matching joint.
+    JointVelocity,
+    /// Apply one named joint effort to every matching joint.
+    JointEffort,
 }
 
 /// Controller settings in a [`RunManifest`].
@@ -98,6 +102,15 @@ pub struct RunController {
     /// Wheel velocity command used by [`RunControllerKind::DifferentialDrive`].
     #[serde(default)]
     pub wheel_velocity_rad_s: f64,
+    /// URDF / ECS joint name used by the named joint controller kinds.
+    #[serde(default)]
+    pub joint: String,
+    /// Joint velocity command in radians per second.
+    #[serde(default)]
+    pub velocity_rad_s: f64,
+    /// Joint effort command in newton-meters.
+    #[serde(default)]
+    pub effort_nm: f64,
 }
 
 impl Default for RunController {
@@ -105,6 +118,9 @@ impl Default for RunController {
         Self {
             kind: RunControllerKind::None,
             wheel_velocity_rad_s: 0.0,
+            joint: String::new(),
+            velocity_rad_s: 0.0,
+            effort_nm: 0.0,
         }
     }
 }
@@ -164,6 +180,28 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
         return Err(AssetError::invalid(
             path.display().to_string(),
             "controller.wheel_velocity_rad_s must be finite",
+        ));
+    }
+    if !manifest.controller.velocity_rad_s.is_finite() {
+        return Err(AssetError::invalid(
+            path.display().to_string(),
+            "controller.velocity_rad_s must be finite",
+        ));
+    }
+    if !manifest.controller.effort_nm.is_finite() {
+        return Err(AssetError::invalid(
+            path.display().to_string(),
+            "controller.effort_nm must be finite",
+        ));
+    }
+    if matches!(
+        manifest.controller.kind,
+        RunControllerKind::JointVelocity | RunControllerKind::JointEffort
+    ) && manifest.controller.joint.trim().is_empty()
+    {
+        return Err(AssetError::invalid(
+            path.display().to_string(),
+            "controller.joint must not be empty for a named joint controller",
         ));
     }
     Ok(manifest)
@@ -246,5 +284,26 @@ replay_path = "../../target/example.rne-replay"
         )
         .expect_err("clock must be rejected");
         assert!(clock_error.to_string().contains("clock.hz"));
+    }
+
+    #[test]
+    fn parses_named_joint_velocity_controller() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/joint.rne.run.toml"),
+            r#"
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+
+[controller]
+kind = "joint_velocity"
+joint = "shoulder_joint"
+velocity_rad_s = 0.4
+"#,
+        )
+        .expect("joint manifest");
+
+        assert_eq!(manifest.controller.kind, RunControllerKind::JointVelocity);
+        assert_eq!(manifest.controller.joint, "shoulder_joint");
+        assert_eq!(manifest.controller.velocity_rad_s, 0.4);
     }
 }

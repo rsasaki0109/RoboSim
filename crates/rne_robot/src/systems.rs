@@ -545,22 +545,48 @@ fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Tr
     }
 }
 
-/// Copies actuator velocity targets into [`JointMotor`] components for physics stepping.
-pub fn sync_joint_motors_from_actuators(world: &mut World, drives: &[DifferentialDrive]) {
-    for drive in drives {
-        for actuator_entity in [drive.left_actuator, drive.right_actuator] {
-            let Some(actuator) = world.get::<Actuator>(actuator_entity) else {
-                continue;
-            };
-            let Some(joint_entity) = actuator.joint else {
-                continue;
-            };
-            let velocity = actuator.target.velocity_rad_s;
-            if let Some(mut motor) = world.get_mut::<JointMotor>(joint_entity) {
-                motor.velocity_rad_s = velocity;
-            }
-        }
+/// Copies every actuator's backend-neutral target into its linked [`JointMotor`].
+///
+/// The optional `drives` argument on [`sync_joint_motors_from_actuators`] is kept
+/// for source compatibility with older diff-drive callers. Named URDF actuators
+/// use this function directly and are resolved through their [`Joint`] child link.
+pub fn sync_all_joint_motors_from_actuators(world: &mut World) {
+    let mut actuator_entities: Vec<_> = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .filter(|entity| world.get::<Actuator>(*entity).is_some())
+        .collect();
+    actuator_entities.sort_unstable();
+
+    for actuator_entity in actuator_entities {
+        let Some((joint_entity, mode, target)) = world
+            .get::<Actuator>(actuator_entity)
+            .map(|actuator| (actuator.joint, actuator.mode, actuator.target))
+        else {
+            continue;
+        };
+        let Some(joint_entity) = joint_entity else {
+            continue;
+        };
+        let Some(child_link) = world
+            .get::<Joint>(joint_entity)
+            .map(|joint| joint.child_link)
+        else {
+            continue;
+        };
+        let Some(mut motor) = world.get_mut::<JointMotor>(child_link) else {
+            continue;
+        };
+        motor.velocity_rad_s = match mode {
+            ControlMode::Velocity => target.velocity_rad_s,
+            ControlMode::Position | ControlMode::Effort => 0.0,
+        };
     }
+}
+
+/// Copies actuator velocity targets into [`JointMotor`] components for physics stepping.
+pub fn sync_joint_motors_from_actuators(world: &mut World, _drives: &[DifferentialDrive]) {
+    sync_all_joint_motors_from_actuators(world);
 }
 
 #[cfg(test)]

@@ -49,10 +49,10 @@ cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.
 trunk serve
 ```
 
-The panel validates schema version, frame count, sequential timestamps, and
-finite wheel actions before enabling the timeline. It displays the exact
-64-bit physics hash as hexadecimal; the browser does not execute the recorded
-actions or invoke a simulator.
+The panel validates schema version, frame count, sequential timestamps, tagged
+wheel/joint actions, and the selected joint/sensor observation metadata before
+enabling the timeline. It displays exact 64-bit physics and sensor payload
+hashes without rerunning the recorded actions or invoking a simulator.
 
 ## Workspace checks
 
