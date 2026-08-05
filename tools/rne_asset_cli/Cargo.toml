@@ -1,6 +1,6 @@
 [package]
 name = "rne_asset_cli"
-description = "CLI for validating and hot-reloading RNE asset files"
+description = "CLI for validating, running, and hot-reloading RNE asset files"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

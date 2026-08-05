@@ -3,7 +3,8 @@
 use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
-    inspect_asset, smoke_spawn_scene, validate_asset, AssetHotReloader, ValidatedAsset,
+    inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
+    validate_asset, AssetHotReloader, RunControllerKind, SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::World;
@@ -61,6 +62,11 @@ enum Commands {
         #[arg(long)]
         determinism_check: bool,
     },
+    /// Execute a versioned `.rne.run.toml` manifest headlessly.
+    Run {
+        /// Run manifest path.
+        path: PathBuf,
+    },
     /// Poll a scene asset graph and reload when dependencies change.
     Watch {
         /// Scene asset path.
@@ -82,6 +88,7 @@ fn main() -> Result<()> {
             wheel_velocity_rad_s,
             determinism_check,
         } => simulate_command(&path, steps, hz, wheel_velocity_rad_s, determinism_check),
+        Commands::Run { path } => run_manifest_command(&path),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
 }
@@ -135,6 +142,48 @@ fn simulate_command(
     wheel_velocity_rad_s: f64,
     determinism_check: bool,
 ) -> Result<()> {
+    run_simulation(
+        path,
+        steps,
+        hz,
+        wheel_velocity_rad_s,
+        None,
+        determinism_check,
+    )
+}
+
+fn run_manifest_command(path: &Path) -> Result<()> {
+    let manifest =
+        load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
+    let scene_path = manifest.resolve_scene_path(path);
+    let wheel_velocity_rad_s = match manifest.controller.kind {
+        RunControllerKind::None => 0.0,
+        RunControllerKind::DifferentialDrive => manifest.controller.wheel_velocity_rad_s,
+    };
+    println!(
+        "run manifest={} scene={} controller={:?}",
+        path.display(),
+        scene_path.display(),
+        manifest.controller.kind
+    );
+    run_simulation(
+        &scene_path,
+        manifest.clock.steps,
+        manifest.clock.hz,
+        wheel_velocity_rad_s,
+        manifest.seed,
+        manifest.output.determinism_check,
+    )
+}
+
+fn run_simulation(
+    path: &Path,
+    steps: u64,
+    hz: f64,
+    wheel_velocity_rad_s: f64,
+    seed_override: Option<u64>,
+    determinism_check: bool,
+) -> Result<()> {
     anyhow::ensure!(
         hz.is_finite() && hz > 0.0,
         "--hz must be finite and positive"
@@ -144,10 +193,18 @@ fn simulate_command(
         "--wheel-velocity-rad-s must be finite"
     );
 
-    let report = simulate_scene(path, steps, hz, wheel_velocity_rad_s)?;
+    let report = match seed_override {
+        Some(seed) => simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, Some(seed))?,
+        None => simulate_scene(path, steps, hz, wheel_velocity_rad_s)?,
+    };
     print_simulation_report(path, &report, determinism_check);
     if determinism_check {
-        let replay = simulate_scene(path, steps, hz, wheel_velocity_rad_s)?;
+        let replay = match seed_override {
+            Some(seed) => {
+                simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, Some(seed))?
+            }
+            None => simulate_scene(path, steps, hz, wheel_velocity_rad_s)?,
+        };
         anyhow::ensure!(
             report == replay,
             "determinism check failed: first={report:?} replay={replay:?}"
@@ -163,9 +220,24 @@ fn simulate_scene(
     hz: f64,
     wheel_velocity_rad_s: f64,
 ) -> Result<SimulationReport> {
+    simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, None)
+}
+
+fn simulate_scene_with_seed(
+    path: &Path,
+    steps: u64,
+    hz: f64,
+    wheel_velocity_rad_s: f64,
+    seed_override: Option<u64>,
+) -> Result<SimulationReport> {
     let mut world = World::new();
-    let spawned = rne_assets::load_and_spawn_scene(&mut world, path)
+    let mut bundle = load_scene_bundle(path)
         .map_err(|error| anyhow::anyhow!("load scene {}: {error}", path.display()))?;
+    if let Some(seed) = seed_override {
+        bundle.scene.world.seed = seed;
+    }
+    let spawned = spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())
+        .map_err(|error| anyhow::anyhow!("spawn scene {}: {error}", path.display()))?;
     let drives: Vec<_> = spawned
         .robots
         .iter()
@@ -287,7 +359,7 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 
 #[cfg(test)]
 mod tests {
-    use super::simulate_scene;
+    use super::{run_manifest_command, simulate_scene};
     use std::path::PathBuf;
 
     #[test]
@@ -300,5 +372,12 @@ mod tests {
         assert_eq!(first.steps, 30);
         assert_eq!(first.differential_drive_count, 1);
         assert!(first.first_base_translation_m.expect("base pose")[0] > 0.0);
+    }
+
+    #[test]
+    fn example_run_manifest_executes() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
+        run_manifest_command(&manifest).expect("run manifest");
     }
 }
