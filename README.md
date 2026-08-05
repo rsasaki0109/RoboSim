@@ -67,7 +67,8 @@ cargo run -p falling_cube --example 01_falling_cube
 cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
 
 # Run an asset scene headlessly with a fixed-step physics replay
-cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check
+cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay
+cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay
 
 # Run the same experiment from a versioned manifest
 cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml

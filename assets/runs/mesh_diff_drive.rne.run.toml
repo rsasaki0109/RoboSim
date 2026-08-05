@@ -12,3 +12,4 @@ wheel_velocity_rad_s = 6.0
 
 [output]
 determinism_check = true
+replay_path = "../../target/runs/mesh_diff_drive.rne-replay"

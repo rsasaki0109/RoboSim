@@ -42,6 +42,18 @@ impl RunManifest {
                 .join(&self.scene)
         }
     }
+
+    /// Resolves a relative output path against the manifest's parent directory.
+    pub fn resolve_output_path(&self, manifest_path: &Path, output_path: &Path) -> PathBuf {
+        if output_path.is_absolute() {
+            output_path.to_path_buf()
+        } else {
+            manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(output_path)
+        }
+    }
 }
 
 /// Fixed-step clock settings in a [`RunManifest`].
@@ -104,6 +116,9 @@ pub struct RunOutput {
     /// Repeat the run and require the final report to match exactly.
     #[serde(default)]
     pub determinism_check: bool,
+    /// Optional `.rne-replay` output path, relative to the manifest.
+    #[serde(default)]
+    pub replay_path: Option<PathBuf>,
 }
 
 /// Loads and validates a `.rne.run.toml` manifest from disk.
@@ -165,7 +180,7 @@ fn default_run_hz() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{parse_run_manifest, RunControllerKind, RUN_MANIFEST_VERSION};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn parses_and_resolves_v1_manifest() {
@@ -186,6 +201,7 @@ wheel_velocity_rad_s = 4.0
 
 [output]
 determinism_check = true
+replay_path = "../../target/example.rne-replay"
 "#,
         )
         .expect("manifest");
@@ -196,6 +212,17 @@ determinism_check = true
             RunControllerKind::DifferentialDrive
         );
         assert_eq!(manifest.clock.steps, 120);
+        assert_eq!(
+            manifest.output.replay_path,
+            Some(PathBuf::from("../../target/example.rne-replay"))
+        );
+        assert_eq!(
+            manifest.resolve_output_path(
+                Path::new("assets/runs/example.rne.run.toml"),
+                Path::new("../../target/example.rne-replay")
+            ),
+            Path::new("assets/runs/../../target/example.rne-replay")
+        );
         assert_eq!(
             manifest.resolve_scene_path(Path::new("assets/runs/example.rne.run.toml")),
             Path::new("assets/runs/../scenes/mesh_diff_drive.rne.scene.toml")

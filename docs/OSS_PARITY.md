@@ -24,7 +24,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, and ROS 2 point-cloud/scan output | One scene manifest must be able to schedule and export every sensor type consistently |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports | OpenSCENARIO and external traffic-simulator adapters are future work |
-| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports | A generic versioned `.rne-replay` artifact and viewer playback are future work |
+| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, and versioned `.rne-replay` artifacts | Browser interval playback and richer contact/failure annotations are future work |
 | Extension model | Backend-neutral traits and plugin manifests/interfaces | Runtime discovery/loading and a stable plugin ABI are future work |
 
 ## Delivered first slice
@@ -38,12 +38,13 @@ cargo run --release -p rne_asset_cli -- run \
 ```
 
 The manifest pins the scene reference, optional seed, fixed clock, controller,
-and determinism check. The runner loads the same scene asset used by the
-existing examples, spawns its physics world, applies the typed wheel command
-through the actuator buffer, advances Rapier at a fixed simulation rate, and
-prints the final physics hash. `determinism_check = true` repeats the complete
-run and requires the final report to match exactly. The command is headless; no
-GPU or ROS 2 installation is needed.
+determinism check, and optional replay output path. The runner loads the same
+scene asset used by the existing examples, spawns its physics world, applies
+the typed wheel command through the actuator buffer, advances Rapier at a fixed
+simulation rate, and prints the final physics hash. `determinism_check = true`
+repeats the complete run and requires the final report and per-step physics
+hashes to match. The command is headless; no GPU or ROS 2 installation is
+needed.
 
 The direct form remains useful for one-off overrides:
 
@@ -51,13 +52,24 @@ The direct form remains useful for one-off overrides:
 cargo run --release -p rne_asset_cli -- simulate \
   assets/scenes/mesh_diff_drive.rne.scene.toml \
   --steps 600 --hz 60 --wheel-velocity-rad-s 6 \
-  --determinism-check
+  --determinism-check \
+  --replay-out target/runs/mesh_diff_drive.rne-replay
+
+# Re-run the recorded action schedule and verify every frame hash/observation
+cargo run --release -p rne_asset_cli -- replay \
+  target/runs/mesh_diff_drive.rne-replay
 ```
+
+The `.rne-replay` file is versioned JSON. Version 1 records the scene and seed,
+fixed clock, controller kind, every wheel action, the selected base translation,
+the physics hash after each step, and the final report. Replay comparison uses
+exact step/time/hash checks and a documented `1e-12` relative-scale tolerance
+for floating-point observations.
 
 ## Next parity order
 
-1. Add generic action recording and a versioned `.rne-replay` bundle, then make
-   the browser viewer inspect a recorded interval without rerunning policy code.
+1. Make the browser viewer inspect a recorded interval without rerunning policy
+   code, then add generic joint/effort action records.
 2. Expose joint/effort commands and sensor streams through the same runner
    boundary; keep ROS 2 as an adapter rather than moving ROS types into core.
 3. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay

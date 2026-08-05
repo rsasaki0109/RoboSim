@@ -8,6 +8,10 @@ use rne_assets::{
 };
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::World;
+use rne_log::{
+    ReplayAction, ReplayArtifact, ReplayClock, ReplayControllerKind as ArtifactControllerKind,
+    ReplayFinalReport, ReplayFrame, ReplayObservation,
+};
 use rne_math::Hertz;
 use rne_physics::{hash_physics_state, PhysicsBackend, PhysicsWorldDesc};
 use rne_physics_rapier::{step_physics, RapierBackend};
@@ -19,6 +23,8 @@ use rne_world::{Transform3, WorldEntity};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
+
+const REPLAY_FLOAT_EPSILON: f64 = 1.0e-12;
 
 #[derive(Parser)]
 #[command(
@@ -61,10 +67,18 @@ enum Commands {
         /// Run the same scene and inputs twice and compare the final report.
         #[arg(long)]
         determinism_check: bool,
+        /// Write a versioned `.rne-replay` artifact to this path.
+        #[arg(long, value_name = "PATH")]
+        replay_out: Option<PathBuf>,
     },
     /// Execute a versioned `.rne.run.toml` manifest headlessly.
     Run {
         /// Run manifest path.
+        path: PathBuf,
+    },
+    /// Replay a recorded `.rne-replay` artifact and verify every frame.
+    Replay {
+        /// Replay artifact path.
         path: PathBuf,
     },
     /// Poll a scene asset graph and reload when dependencies change.
@@ -87,8 +101,17 @@ fn main() -> Result<()> {
             hz,
             wheel_velocity_rad_s,
             determinism_check,
-        } => simulate_command(&path, steps, hz, wheel_velocity_rad_s, determinism_check),
+            replay_out,
+        } => simulate_command(
+            &path,
+            steps,
+            hz,
+            wheel_velocity_rad_s,
+            determinism_check,
+            replay_out.as_deref(),
+        ),
         Commands::Run { path } => run_manifest_command(&path),
+        Commands::Replay { path } => replay_command(&path),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
 }
@@ -135,20 +158,36 @@ struct SimulationReport {
     first_base_translation_m: Option<[f64; 3]>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SimulationOptions<'a> {
+    steps: u64,
+    hz: f64,
+    wheel_velocity_rad_s: f64,
+    seed_override: Option<u64>,
+    determinism_check: bool,
+    replay_out: Option<&'a Path>,
+    replay_controller: ArtifactControllerKind,
+}
+
 fn simulate_command(
     path: &Path,
     steps: u64,
     hz: f64,
     wheel_velocity_rad_s: f64,
     determinism_check: bool,
+    replay_out: Option<&Path>,
 ) -> Result<()> {
     run_simulation(
         path,
-        steps,
-        hz,
-        wheel_velocity_rad_s,
-        None,
-        determinism_check,
+        SimulationOptions {
+            steps,
+            hz,
+            wheel_velocity_rad_s,
+            seed_override: None,
+            determinism_check,
+            replay_out,
+            replay_controller: ArtifactControllerKind::DifferentialDrive,
+        },
     )
 }
 
@@ -160,6 +199,15 @@ fn run_manifest_command(path: &Path) -> Result<()> {
         RunControllerKind::None => 0.0,
         RunControllerKind::DifferentialDrive => manifest.controller.wheel_velocity_rad_s,
     };
+    let replay_controller = match manifest.controller.kind {
+        RunControllerKind::None => ArtifactControllerKind::None,
+        RunControllerKind::DifferentialDrive => ArtifactControllerKind::DifferentialDrive,
+    };
+    let replay_out = manifest
+        .output
+        .replay_path
+        .as_deref()
+        .map(|output_path| manifest.resolve_output_path(path, output_path));
     println!(
         "run manifest={} scene={} controller={:?}",
         path.display(),
@@ -168,22 +216,28 @@ fn run_manifest_command(path: &Path) -> Result<()> {
     );
     run_simulation(
         &scene_path,
-        manifest.clock.steps,
-        manifest.clock.hz,
-        wheel_velocity_rad_s,
-        manifest.seed,
-        manifest.output.determinism_check,
+        SimulationOptions {
+            steps: manifest.clock.steps,
+            hz: manifest.clock.hz,
+            wheel_velocity_rad_s,
+            seed_override: manifest.seed,
+            determinism_check: manifest.output.determinism_check,
+            replay_out: replay_out.as_deref(),
+            replay_controller,
+        },
     )
 }
 
-fn run_simulation(
-    path: &Path,
-    steps: u64,
-    hz: f64,
-    wheel_velocity_rad_s: f64,
-    seed_override: Option<u64>,
-    determinism_check: bool,
-) -> Result<()> {
+fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
+    let SimulationOptions {
+        steps,
+        hz,
+        wheel_velocity_rad_s,
+        seed_override,
+        determinism_check,
+        replay_out,
+        replay_controller,
+    } = options;
     anyhow::ensure!(
         hz.is_finite() && hz > 0.0,
         "--hz must be finite and positive"
@@ -193,34 +247,56 @@ fn run_simulation(
         "--wheel-velocity-rad-s must be finite"
     );
 
-    let report = match seed_override {
-        Some(seed) => simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, Some(seed))?,
-        None => simulate_scene(path, steps, hz, wheel_velocity_rad_s)?,
-    };
-    print_simulation_report(path, &report, determinism_check);
+    let run = simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, seed_override)?;
+    print_simulation_report(path, &run.report, determinism_check);
     if determinism_check {
-        let replay = match seed_override {
-            Some(seed) => {
-                simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, Some(seed))?
-            }
-            None => simulate_scene(path, steps, hz, wheel_velocity_rad_s)?,
-        };
+        let replay =
+            simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, seed_override)?;
         anyhow::ensure!(
-            report == replay,
-            "determinism check failed: first={report:?} replay={replay:?}"
+            run.report == replay.report,
+            "determinism check failed: first={:?} replay={:?}",
+            run.report,
+            replay.report
         );
+        ensure_replay_frames(&run.frames, &replay.frames)?;
         println!("determinism: identical final report");
+    }
+    if let Some(replay_out) = replay_out {
+        let artifact = ReplayArtifact::new(
+            path.display().to_string(),
+            run.report.seed,
+            ReplayClock::new(steps, hz),
+            replay_controller,
+            run.frames.clone(),
+            replay_final_report(&run.report),
+        );
+        artifact
+            .write_json(replay_out)
+            .with_context(|| format!("write replay artifact {}", replay_out.display()))?;
+        println!(
+            "replay: wrote {} (version={} frames={})",
+            replay_out.display(),
+            artifact.version,
+            artifact.frames.len()
+        );
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn simulate_scene(
     path: &Path,
     steps: u64,
     hz: f64,
     wheel_velocity_rad_s: f64,
 ) -> Result<SimulationReport> {
-    simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, None)
+    Ok(simulate_scene_with_seed(path, steps, hz, wheel_velocity_rad_s, None)?.report)
+}
+
+#[derive(Debug, PartialEq)]
+struct SimulationRun {
+    report: SimulationReport,
+    frames: Vec<ReplayFrame>,
 }
 
 fn simulate_scene_with_seed(
@@ -229,7 +305,27 @@ fn simulate_scene_with_seed(
     hz: f64,
     wheel_velocity_rad_s: f64,
     seed_override: Option<u64>,
-) -> Result<SimulationReport> {
+) -> Result<SimulationRun> {
+    simulate_scene_with_action_schedule(path, steps, hz, wheel_velocity_rad_s, seed_override, None)
+}
+
+fn simulate_scene_with_action_schedule(
+    path: &Path,
+    steps: u64,
+    hz: f64,
+    wheel_velocity_rad_s: f64,
+    seed_override: Option<u64>,
+    replay_frames: Option<&[ReplayFrame]>,
+) -> Result<SimulationRun> {
+    if let Some(replay_frames) = replay_frames {
+        anyhow::ensure!(
+            replay_frames.len() as u64 == steps,
+            "replay contains {} frames but {} steps were requested",
+            replay_frames.len(),
+            steps
+        );
+    }
+
     let mut world = World::new();
     let mut bundle = load_scene_bundle(path)
         .map_err(|error| anyhow::anyhow!("load scene {}: {error}", path.display()))?;
@@ -263,7 +359,15 @@ fn simulate_scene_with_seed(
     let dt = SimDuration::from_hertz(Hertz::new(hz));
     let mut sim_time = SimTime::ZERO;
     let mut command_buffer = ActuatorCommandBuffer::new();
-    for _ in 0..steps {
+    let mut frames = Vec::new();
+    for step in 0..steps {
+        let wheel_velocity_rad_s = if let Some(replay_frames) = replay_frames {
+            let step_index = usize::try_from(step)
+                .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
+            replay_frames[step_index].action.wheel_velocity_rad_s
+        } else {
+            wheel_velocity_rad_s
+        };
         for drive in &drives {
             command_buffer.push(
                 ActuatorCommand::WheelVelocity {
@@ -285,6 +389,23 @@ fn simulate_scene_with_seed(
         step_physics(&mut backend, &mut world, physics_world, dt)
             .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
         sim_time = sim_time + dt;
+
+        let base_translation_m = drives.first().and_then(|drive| {
+            world.get::<Transform3>(drive.base_link).map(|transform| {
+                [
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                ]
+            })
+        });
+        frames.push(ReplayFrame::new(
+            step,
+            sim_time.ticks(),
+            ReplayAction::differential_drive(wheel_velocity_rad_s),
+            ReplayObservation::new(base_translation_m),
+            hash_physics_state(&world),
+        ));
     }
 
     let first_base_translation_m = drives.first().and_then(|drive| {
@@ -296,15 +417,149 @@ fn simulate_scene_with_seed(
             ]
         })
     });
-    Ok(SimulationReport {
-        steps,
-        sim_time_s: sim_time.as_seconds().value(),
-        seed,
-        robot_count: spawned.robots.len(),
-        differential_drive_count: drives.len(),
-        physics_hash: hash_physics_state(&world),
-        first_base_translation_m,
+    Ok(SimulationRun {
+        report: SimulationReport {
+            steps,
+            sim_time_s: sim_time.as_seconds().value(),
+            seed,
+            robot_count: spawned.robots.len(),
+            differential_drive_count: drives.len(),
+            physics_hash: hash_physics_state(&world),
+            first_base_translation_m,
+        },
+        frames,
     })
+}
+
+fn replay_command(path: &Path) -> Result<()> {
+    let artifact = ReplayArtifact::read_json(path)
+        .with_context(|| format!("load replay artifact {}", path.display()))?;
+    let scene_path = PathBuf::from(&artifact.scene);
+    let run = simulate_scene_with_action_schedule(
+        &scene_path,
+        artifact.clock.steps,
+        artifact.clock.hz,
+        0.0,
+        Some(artifact.seed),
+        Some(&artifact.frames),
+    )
+    .with_context(|| format!("replay scene {}", scene_path.display()))?;
+
+    ensure_replay_frames(&artifact.frames, &run.frames)?;
+    let actual_report = replay_final_report(&run.report);
+    ensure_replay_reports(&artifact.final_report, &actual_report)?;
+    println!(
+        "replay verified artifact={} scene={} steps={} physics_hash={:#018x}",
+        path.display(),
+        scene_path.display(),
+        artifact.clock.steps,
+        actual_report.physics_hash
+    );
+    Ok(())
+}
+
+fn ensure_replay_frames(expected: &[ReplayFrame], actual: &[ReplayFrame]) -> Result<()> {
+    anyhow::ensure!(
+        expected.len() == actual.len(),
+        "replay frame count mismatch: expected={} actual={}",
+        expected.len(),
+        actual.len()
+    );
+    for (expected_frame, actual_frame) in expected.iter().zip(actual) {
+        anyhow::ensure!(
+            expected_frame.step == actual_frame.step,
+            "replay frame index mismatch: expected={} actual={}",
+            expected_frame.step,
+            actual_frame.step
+        );
+        anyhow::ensure!(
+            expected_frame.sim_ticks == actual_frame.sim_ticks,
+            "replay sim_ticks mismatch at step {}: expected={} actual={}",
+            expected_frame.step,
+            expected_frame.sim_ticks,
+            actual_frame.sim_ticks
+        );
+        anyhow::ensure!(
+            replay_float_matches(
+                expected_frame.action.wheel_velocity_rad_s,
+                actual_frame.action.wheel_velocity_rad_s
+            ),
+            "replay action mismatch at step {}: expected={} actual={}",
+            expected_frame.step,
+            expected_frame.action.wheel_velocity_rad_s,
+            actual_frame.action.wheel_velocity_rad_s
+        );
+        anyhow::ensure!(
+            replay_translation_matches(
+                expected_frame.observation.base_translation_m,
+                actual_frame.observation.base_translation_m
+            ),
+            "replay observation mismatch at step {}: expected={:?} actual={:?}",
+            expected_frame.step,
+            expected_frame.observation.base_translation_m,
+            actual_frame.observation.base_translation_m
+        );
+        anyhow::ensure!(
+            expected_frame.physics_hash == actual_frame.physics_hash,
+            "replay frame mismatch at step {}: expected={expected_frame:?} actual={actual_frame:?}",
+            expected_frame.step
+        );
+    }
+    Ok(())
+}
+
+fn ensure_replay_reports(expected: &ReplayFinalReport, actual: &ReplayFinalReport) -> Result<()> {
+    anyhow::ensure!(
+        expected.steps == actual.steps
+            && expected.seed == actual.seed
+            && expected.robot_count == actual.robot_count
+            && expected.differential_drive_count == actual.differential_drive_count
+            && expected.physics_hash == actual.physics_hash,
+        "replay final report mismatch: expected={expected:?} actual={actual:?}"
+    );
+    anyhow::ensure!(
+        replay_float_matches(expected.sim_time_s, actual.sim_time_s),
+        "replay final sim_time_s mismatch: expected={} actual={}",
+        expected.sim_time_s,
+        actual.sim_time_s
+    );
+    anyhow::ensure!(
+        replay_translation_matches(
+            expected.first_base_translation_m,
+            actual.first_base_translation_m
+        ),
+        "replay final base translation mismatch: expected={:?} actual={:?}",
+        expected.first_base_translation_m,
+        actual.first_base_translation_m
+    );
+    Ok(())
+}
+
+fn replay_translation_matches(expected: Option<[f64; 3]>, actual: Option<[f64; 3]>) -> bool {
+    match (expected, actual) {
+        (None, None) => true,
+        (Some(expected), Some(actual)) => expected
+            .into_iter()
+            .zip(actual)
+            .all(|(expected, actual)| replay_float_matches(expected, actual)),
+        _ => false,
+    }
+}
+
+fn replay_float_matches(expected: f64, actual: f64) -> bool {
+    (expected - actual).abs() <= REPLAY_FLOAT_EPSILON * expected.abs().max(actual.abs()).max(1.0)
+}
+
+fn replay_final_report(report: &SimulationReport) -> ReplayFinalReport {
+    ReplayFinalReport::new(
+        report.steps,
+        report.sim_time_s,
+        report.seed,
+        report.robot_count,
+        report.differential_drive_count,
+        report.physics_hash,
+        report.first_base_translation_m,
+    )
 }
 
 fn print_simulation_report(path: &Path, report: &SimulationReport, determinism_check: bool) {
@@ -359,7 +614,7 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_manifest_command, simulate_scene};
+    use super::{replay_command, run_manifest_command, simulate_scene};
     use std::path::PathBuf;
 
     #[test]
@@ -379,5 +634,10 @@ mod tests {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
         run_manifest_command(&manifest).expect("run manifest");
+        let replay = manifest
+            .parent()
+            .expect("manifest parent")
+            .join("../../target/runs/mesh_diff_drive.rne-replay");
+        replay_command(&replay).expect("replay manifest output");
     }
 }
