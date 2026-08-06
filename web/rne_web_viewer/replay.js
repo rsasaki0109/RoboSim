@@ -12,6 +12,7 @@
   const actionOutput = document.getElementById("replay-action");
   const observationOutput = document.getElementById("replay-observation");
   const hashOutput = document.getElementById("replay-hash");
+  const reportOutput = document.getElementById("replay-report");
   const progress = document.getElementById("replay-progress");
 
   const state = {
@@ -77,7 +78,40 @@
       }
       previousTicks = frame.sim_ticks;
     });
+    validateFinalReport(artifact.final_report);
     return artifact;
+  }
+
+  function validateFinalReport(report) {
+    if (!report || typeof report !== "object") {
+      throw new Error("final report is missing");
+    }
+    if (
+      report.contact_pairs_max !== undefined &&
+      !Number.isInteger(report.contact_pairs_max)
+    ) {
+      throw new Error("final report has invalid contact_pairs_max");
+    }
+    if (
+      report.contact_impulse_max_ns !== undefined &&
+      !Number.isFinite(report.contact_impulse_max_ns)
+    ) {
+      throw new Error("final report has invalid contact_impulse_max_ns");
+    }
+    if (
+      report.min_base_height_m !== undefined &&
+      report.min_base_height_m !== null &&
+      !Number.isFinite(report.min_base_height_m)
+    ) {
+      throw new Error("final report has invalid min_base_height_m");
+    }
+    if (
+      report.failure !== undefined &&
+      report.failure !== null &&
+      typeof report.failure !== "string"
+    ) {
+      throw new Error("final report has invalid failure kind");
+    }
   }
 
   function validateAction(action, index) {
@@ -157,6 +191,16 @@
         }
       });
     }
+    if (observation.contact !== undefined && observation.contact !== null) {
+      const contact = observation.contact;
+      if (
+        !Number.isInteger(contact.pair_count) ||
+        !Number.isFinite(contact.total_impulse_ns) ||
+        !Number.isFinite(contact.max_impulse_ns)
+      ) {
+        throw new Error(`frame ${index} has invalid contact annotations`);
+      }
+    }
   }
 
   function parseArtifactText(text) {
@@ -224,6 +268,10 @@
         .join(", ");
       parts.push(`payloads=${payloads.length} (${payloadSummary})`);
     }
+    const contact = observation && observation.contact;
+    if (contact) {
+      parts.push(`contact: ${formatContact(contact)}`);
+    }
     return parts.join("; ");
   }
 
@@ -250,6 +298,39 @@
     return `${kind}#${payload.stream_id} ${sequence}`;
   }
 
+  function formatContact(contact) {
+    if (!contact) {
+      return "none";
+    }
+    return `${contact.pair_count} pairs, total ${Number(
+      contact.total_impulse_ns,
+    ).toFixed(4)} N·s, max ${Number(contact.max_impulse_ns).toFixed(4)} N·s`;
+  }
+
+  function formatReport(report) {
+    const parts = [];
+    if (report.contact_pairs_max !== undefined) {
+      parts.push(`contacts_pairs_max=${report.contact_pairs_max}`);
+    }
+    if (
+      report.contact_impulse_max_ns !== undefined &&
+      report.contact_impulse_max_ns !== null
+    ) {
+      parts.push(
+        `contact_impulse_max=${Number(report.contact_impulse_max_ns).toFixed(4)} N·s`,
+      );
+    }
+    if (report.min_base_height_m !== undefined && report.min_base_height_m !== null) {
+      parts.push(`min_height=${Number(report.min_base_height_m).toFixed(3)} m`);
+    }
+    if (report.failure) {
+      parts.push(`FAILED: ${report.failure}`);
+    } else {
+      parts.push("failure=ok");
+    }
+    return parts.join(", ");
+  }
+
   function renderFrame() {
     const artifact = state.artifact;
     if (!artifact || artifact.frames.length === 0) {
@@ -257,6 +338,7 @@
       actionOutput.textContent = "—";
       observationOutput.textContent = "—";
       hashOutput.textContent = "—";
+      reportOutput.textContent = "—";
       progress.style.width = "0%";
       return;
     }
@@ -325,6 +407,7 @@
     rangeInput.max = String(Math.max(0, artifact.frames.length - 1));
     sceneOutput.textContent = artifact.scene;
     clockOutput.textContent = `${artifact.clock.steps} steps @ ${artifact.clock.hz} Hz`;
+    reportOutput.textContent = formatReport(artifact.final_report);
     setStatus(`${fileName}: loaded ${artifact.frames.length} frames`);
     updateControls();
     renderFrame();

@@ -24,7 +24,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports | OpenSCENARIO and external traffic-simulator adapters are future work |
-| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, and browser interval inspection | Richer contact/failure annotations and full sensor payload streams are future work |
+| Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits and plugin manifests/interfaces | Runtime discovery/loading and a stable plugin ABI are future work |
 
 ## Delivered first slice
@@ -104,10 +104,15 @@ cargo run --release -p rne_asset_cli -- replay \
 The typed payloads are JSON-encoded in the artifact, so the browser inspector and
 other tools can read them without rerunning the sensor models.
 
+Every frame also records contact statistics (active pair count and summed/max
+normal impulse per step) and the final report annotates the run outcome: the
+maximum concurrent contact pairs, the largest per-step contact impulse, the
+minimum base height of the first differential-drive robot, and a `fell` failure
+when that height drops below half of its initial value.
+
 ## Next parity order
 
-1. Add richer contact/failure annotations to the replay report.
-2. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay
+1. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay
    contract is stable.
 
 This order closes the common simulator workflow first. Photoreal rendering,
