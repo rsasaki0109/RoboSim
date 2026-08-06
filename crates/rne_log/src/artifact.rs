@@ -215,6 +215,43 @@ pub struct ReplaySensorStream {
     pub payload_hash: u64,
 }
 
+/// Full typed payload captured for a subscribed sensor stream.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReplaySensorPayloadData {
+    /// Inertial measurement unit sample.
+    Imu(rne_data::ImuSample),
+    /// LiDAR point cloud.
+    Lidar(rne_data::PointCloud),
+    /// RGB camera frame with its paired depth image.
+    Camera {
+        /// RGB frame payload.
+        rgb: rne_data::ImageRgb8,
+        /// Depth frame payload from the paired depth stream.
+        depth: rne_data::ImageDepth,
+    },
+    /// Wheel encoder sample.
+    WheelEncoder(rne_data::WheelEncoderSample),
+}
+
+/// One full sensor payload recorded in a replay observation.
+///
+/// Payloads are only recorded for streams selected by the producing run's
+/// sensor subscriptions, so the artifact stays compact unless payload capture
+/// is requested.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaySensorPayload {
+    /// DataBus stream identifier.
+    pub stream_id: u64,
+    /// Stable sensor kind label.
+    pub kind: String,
+    /// Sequence number of the captured sample, or zero when none exists.
+    pub sequence: u64,
+    /// Typed payload data.
+    pub data: ReplaySensorPayloadData,
+}
+
 /// Selected state observation recorded after one replay step.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -227,6 +264,9 @@ pub struct ReplayObservation {
     /// Per-sensor DataBus stream summaries captured after this step.
     #[serde(default)]
     pub sensor_streams: Vec<ReplaySensorStream>,
+    /// Full typed payloads for manifest-subscribed sensor streams.
+    #[serde(default)]
+    pub sensor_payloads: Vec<ReplaySensorPayload>,
 }
 
 impl ReplayObservation {
@@ -236,6 +276,7 @@ impl ReplayObservation {
             base_translation_m,
             joint_state: None,
             sensor_streams: Vec::new(),
+            sensor_payloads: Vec::new(),
         }
     }
 
@@ -248,6 +289,12 @@ impl ReplayObservation {
     /// Adds typed sensor stream summaries captured for this observation.
     pub fn with_sensor_streams(mut self, sensor_streams: Vec<ReplaySensorStream>) -> Self {
         self.sensor_streams = sensor_streams;
+        self
+    }
+
+    /// Adds full typed sensor payloads captured for this observation.
+    pub fn with_sensor_payloads(mut self, sensor_payloads: Vec<ReplaySensorPayload>) -> Self {
+        self.sensor_payloads = sensor_payloads;
         self
     }
 }
@@ -350,6 +397,9 @@ pub struct ReplayArtifact {
     pub clock: ReplayClock,
     /// Controller boundary used by the run.
     pub controller: ReplayControllerKind,
+    /// Streams whose full typed payloads were captured, sorted and unique.
+    #[serde(default)]
+    pub sensor_payload_streams: Vec<u64>,
     /// Per-step actions, observations, and state hashes.
     pub frames: Vec<ReplayFrame>,
     /// Final report captured after the last frame.
@@ -358,11 +408,13 @@ pub struct ReplayArtifact {
 
 impl ReplayArtifact {
     /// Creates a replay artifact from one completed fixed-step run.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scene: impl Into<String>,
         seed: u64,
         clock: ReplayClock,
         controller: ReplayControllerKind,
+        sensor_payload_streams: Vec<u64>,
         frames: Vec<ReplayFrame>,
         final_report: ReplayFinalReport,
     ) -> Self {
@@ -372,6 +424,7 @@ impl ReplayArtifact {
             seed,
             clock,
             controller,
+            sensor_payload_streams,
             frames,
             final_report,
         }
@@ -423,6 +476,7 @@ impl ReplayArtifact {
             self.final_report.first_base_translation_m,
             "final_report.first_base_translation_m",
         )?;
+        validate_sensor_payload_streams(&self.sensor_payload_streams)?;
         let mut previous_sim_ticks = None;
         for (expected_step, frame) in self.frames.iter().enumerate() {
             let expected_step = expected_step as u64;
@@ -448,6 +502,12 @@ impl ReplayArtifact {
                 &format!("frame {} observation.base_translation_m", frame.step),
             )?;
             validate_sensor_streams(&frame.observation.sensor_streams, frame.step)?;
+            validate_sensor_payloads(
+                &frame.observation.sensor_payloads,
+                &frame.observation.sensor_streams,
+                &self.sensor_payload_streams,
+                frame.step,
+            )?;
         }
         Ok(())
     }
@@ -619,6 +679,125 @@ fn validate_sensor_streams(
     Ok(())
 }
 
+fn validate_sensor_payload_streams(streams: &[u64]) -> Result<(), ReplayArtifactError> {
+    for window in streams.windows(2) {
+        if window[0] >= window[1] {
+            return Err(ReplayArtifactError::Invalid(
+                "sensor_payload_streams must be sorted by unique stream_id".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sensor_payloads(
+    payloads: &[ReplaySensorPayload],
+    streams: &[ReplaySensorStream],
+    payload_streams: &[u64],
+    step: u64,
+) -> Result<(), ReplayArtifactError> {
+    for window in payloads.windows(2) {
+        if window[0].stream_id >= window[1].stream_id {
+            return Err(ReplayArtifactError::Invalid(format!(
+                "frame {step} sensor payloads must be sorted by unique stream_id"
+            )));
+        }
+    }
+    for payload in payloads {
+        if !payload_streams.binary_search(&payload.stream_id).is_ok() {
+            return Err(ReplayArtifactError::Invalid(format!(
+                "frame {step} sensor payload stream {} is not listed in sensor_payload_streams",
+                payload.stream_id
+            )));
+        }
+        if payload.kind.trim().is_empty() {
+            return Err(ReplayArtifactError::Invalid(format!(
+                "frame {step} sensor payload kind must not be empty"
+            )));
+        }
+        let summary = streams
+            .iter()
+            .find(|stream| stream.stream_id == payload.stream_id)
+            .ok_or_else(|| {
+                ReplayArtifactError::Invalid(format!(
+                    "frame {step} sensor payload stream {} has no matching stream summary",
+                    payload.stream_id
+                ))
+            })?;
+        if summary.kind != payload.kind {
+            return Err(ReplayArtifactError::Invalid(format!(
+                "frame {step} sensor payload kind {} does not match stream summary kind {}",
+                payload.kind, summary.kind
+            )));
+        }
+        match &payload.data {
+            ReplaySensorPayloadData::Imu(sample) => {
+                validate_vec3(
+                    sample.angular_velocity_rad_s,
+                    "angular_velocity_rad_s",
+                    step,
+                )?;
+                validate_vec3(
+                    sample.linear_acceleration_m_s2,
+                    "linear_acceleration_m_s2",
+                    step,
+                )?;
+            }
+            ReplaySensorPayloadData::Lidar(cloud) => {
+                if !cloud.attributes_are_aligned() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} lidar payload attributes must be aligned"
+                    )));
+                }
+                if cloud.points_m.iter().any(|point| !point.is_finite()) {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} lidar payload points must be finite"
+                    )));
+                }
+            }
+            ReplaySensorPayloadData::Camera { rgb, depth } => {
+                if rgb.width == 0 || rgb.height == 0 {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} camera rgb dimensions must be non-zero"
+                    )));
+                }
+                if rgb.rgba8.len() != (rgb.width as usize) * (rgb.height as usize) * 4 {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} camera rgb buffer length does not match dimensions"
+                    )));
+                }
+                if depth.width != rgb.width || depth.height != rgb.height {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} camera depth dimensions do not match rgb dimensions"
+                    )));
+                }
+                if depth.depth_m.len() != (depth.width as usize) * (depth.height as usize) {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} camera depth buffer length does not match dimensions"
+                    )));
+                }
+            }
+            ReplaySensorPayloadData::WheelEncoder(sample) => {
+                if !sample.position_rad.is_finite() || !sample.velocity_rad_s.is_finite() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} wheel encoder sample must be finite"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_vec3(value: rne_math::Vec3, field: &str, step: u64) -> Result<(), ReplayArtifactError> {
+    if !value.is_finite() {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} imu {field} must be finite"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -646,6 +825,7 @@ mod tests {
             42,
             ReplayClock::new(2, 60.0),
             ReplayControllerKind::DifferentialDrive,
+            Vec::new(),
             frames,
             ReplayFinalReport::new(2, 1.0 / 30.0, 42, 1, 1, 0x22, Some([0.2, 0.0, 0.0])),
         )
@@ -711,5 +891,124 @@ mod tests {
 
         let legacy: ReplayAction = serde_json::from_str(r#"{"wheel_velocity_rad_s":6.0}"#).unwrap();
         assert_eq!(legacy, ReplayAction::differential_drive(6.0));
+    }
+
+    #[test]
+    fn sensor_payloads_roundtrip_and_validate() {
+        let mut artifact = sample_artifact();
+        artifact.sensor_payload_streams = vec![7];
+        artifact.frames[0].observation.sensor_streams = vec![ReplaySensorStream {
+            stream_id: 7,
+            kind: "imu".to_string(),
+            frame_count: 1,
+            last_sequence: 1,
+            payload_hash: 0xabc,
+        }];
+        artifact.frames[0].observation.sensor_payloads = vec![ReplaySensorPayload {
+            stream_id: 7,
+            kind: "imu".to_string(),
+            sequence: 1,
+            data: ReplaySensorPayloadData::Imu(rne_data::ImuSample::default()),
+        }];
+
+        artifact.validate().expect("payloads are valid");
+        let json = artifact.to_json().unwrap();
+        let loaded = ReplayArtifact::from_json(&json).unwrap();
+        assert_eq!(loaded, artifact);
+        assert!(json.contains(r#""kind": "imu""#));
+    }
+
+    #[test]
+    fn legacy_artifact_without_payloads_still_parses() {
+        let legacy = r#"{
+            "version": 1,
+            "scene": "assets/scenes/example.rne.scene.toml",
+            "seed": 42,
+            "clock": {"steps": 1, "hz": 60.0},
+            "controller": "differential_drive",
+            "frames": [{
+                "step": 0,
+                "sim_ticks": 16666666,
+                "action": {"wheel_velocity_rad_s": 6.0},
+                "observation": {"base_translation_m": [0.1, 0.0, 0.0]},
+                "physics_hash": 17
+            }],
+            "final_report": {
+                "steps": 1,
+                "sim_time_s": 0.016666666,
+                "seed": 42,
+                "robot_count": 1,
+                "differential_drive_count": 1,
+                "physics_hash": 17,
+                "first_base_translation_m": [0.1, 0.0, 0.0]
+            }
+        }"#;
+        let artifact = ReplayArtifact::from_json(legacy).expect("legacy artifact parses");
+        assert!(artifact.sensor_payload_streams.is_empty());
+        assert!(artifact.frames[0].observation.sensor_payloads.is_empty());
+    }
+
+    #[test]
+    fn sensor_payload_must_match_a_stream_summary() {
+        let mut artifact = sample_artifact();
+        artifact.sensor_payload_streams = vec![9];
+        artifact.frames[0].observation.sensor_payloads = vec![ReplaySensorPayload {
+            stream_id: 9,
+            kind: "imu".to_string(),
+            sequence: 1,
+            data: ReplaySensorPayloadData::Imu(rne_data::ImuSample::default()),
+        }];
+
+        let error = artifact.validate().unwrap_err();
+        assert!(error.to_string().contains("no matching stream summary"));
+    }
+
+    #[test]
+    fn sensor_payload_must_be_listed_in_payload_streams() {
+        let mut artifact = sample_artifact();
+        artifact.sensor_payload_streams = Vec::new();
+        artifact.frames[0].observation.sensor_streams = vec![ReplaySensorStream {
+            stream_id: 9,
+            kind: "imu".to_string(),
+            frame_count: 1,
+            last_sequence: 1,
+            payload_hash: 0,
+        }];
+        artifact.frames[0].observation.sensor_payloads = vec![ReplaySensorPayload {
+            stream_id: 9,
+            kind: "imu".to_string(),
+            sequence: 1,
+            data: ReplaySensorPayloadData::Imu(rne_data::ImuSample::default()),
+        }];
+
+        let error = artifact.validate().unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("not listed in sensor_payload_streams"));
+    }
+
+    #[test]
+    fn camera_payload_dimensions_must_match() {
+        let mut artifact = sample_artifact();
+        artifact.sensor_payload_streams = vec![7];
+        artifact.frames[0].observation.sensor_streams = vec![ReplaySensorStream {
+            stream_id: 7,
+            kind: "camera".to_string(),
+            frame_count: 1,
+            last_sequence: 1,
+            payload_hash: 0,
+        }];
+        artifact.frames[0].observation.sensor_payloads = vec![ReplaySensorPayload {
+            stream_id: 7,
+            kind: "camera".to_string(),
+            sequence: 1,
+            data: ReplaySensorPayloadData::Camera {
+                rgb: rne_data::ImageRgb8::from_rgba8(2, 2, vec![0; 16]),
+                depth: rne_data::ImageDepth::new(3, 2, vec![0.0; 6]),
+            },
+        }];
+
+        let error = artifact.validate().unwrap_err();
+        assert!(error.to_string().contains("depth dimensions do not match"));
     }
 }

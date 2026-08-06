@@ -52,7 +52,10 @@ trunk serve
 The panel validates schema version, frame count, sequential timestamps, tagged
 wheel/joint actions, and the selected joint/sensor observation metadata before
 enabling the timeline. It displays exact 64-bit physics and sensor payload
-hashes without rerunning the recorded actions or invoking a simulator.
+hashes without rerunning the recorded actions or invoking a simulator. When the
+artifact carries full typed sensor payloads (produced by a run manifest with
+`[[sensors]]` subscriptions), the frame line summarizes each payload — LiDAR
+point count, camera RGB/D dimensions, or IMU / wheel-encoder sequence numbers.
 
 ## Workspace checks
 

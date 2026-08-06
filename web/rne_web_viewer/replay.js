@@ -136,6 +136,27 @@
     ) {
       throw new Error(`frame ${index} has invalid sensor streams`);
     }
+    if (
+      observation.sensor_payloads !== undefined &&
+      !Array.isArray(observation.sensor_payloads)
+    ) {
+      throw new Error(`frame ${index} has invalid sensor payloads`);
+    }
+    if (Array.isArray(observation.sensor_payloads)) {
+      observation.sensor_payloads.forEach((payload, payloadIndex) => {
+        if (
+          !payload ||
+          !Number.isInteger(payload.stream_id) ||
+          typeof payload.kind !== "string" ||
+          payload.kind.trim() === "" ||
+          !Number.isInteger(payload.sequence)
+        ) {
+          throw new Error(
+            `frame ${index} has invalid sensor payload ${payloadIndex}`,
+          );
+        }
+      });
+    }
   }
 
   function parseArtifactText(text) {
@@ -196,7 +217,37 @@
         .join(", ");
       parts.push(`sensors=${sensors.length}${sensorSummary ? ` (${sensorSummary})` : ""}`);
     }
+    const payloads = observation && observation.sensor_payloads;
+    if (Array.isArray(payloads) && payloads.length > 0) {
+      const payloadSummary = payloads
+        .map((payload) => formatPayload(payload))
+        .join(", ");
+      parts.push(`payloads=${payloads.length} (${payloadSummary})`);
+    }
     return parts.join("; ");
+  }
+
+  function formatPayload(payload) {
+    const kind = payload.kind;
+    const sequence = `seq=${payload.sequence}`;
+    const data = payload.data || {};
+    if (kind === "lidar") {
+      const points = data.points_m ? data.points_m.length : "?";
+      return `${kind} ${sequence} pts=${points}`;
+    }
+    if (kind === "camera") {
+      const rgb = data.rgb || {};
+      const depth = data.depth || {};
+      const rgbDims =
+        rgb.width && rgb.height ? `${rgb.width}x${rgb.height}` : "?";
+      const depthDims =
+        depth.width && depth.height ? `${depth.width}x${depth.height}` : "?";
+      return `${kind} ${sequence} rgb=${rgbDims} depth=${depthDims}`;
+    }
+    if (kind === "imu" || kind === "wheel_encoder") {
+      return `${kind} ${sequence}`;
+    }
+    return `${kind}#${payload.stream_id} ${sequence}`;
   }
 
   function renderFrame() {

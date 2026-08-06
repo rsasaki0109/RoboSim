@@ -75,6 +75,10 @@ cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_velocit
 
 # Run the same experiment from a versioned manifest
 cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml
+
+# Record full typed sensor payloads through a manifest [[sensors]] subscription
+cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml
+cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive_lidar_payload.rne-replay
 ```
 
 For a complete local validation:
