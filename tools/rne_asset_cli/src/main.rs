@@ -13,12 +13,13 @@ use rne_data::{
 };
 use rne_ecs::{Name, World};
 use rne_log::{
-    ReplayAction, ReplayArtifact, ReplayClock, ReplayControllerKind as ArtifactControllerKind,
-    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorPayload,
-    ReplaySensorPayloadData, ReplaySensorStream,
+    ReplayAction, ReplayArtifact, ReplayClock, ReplayContact,
+    ReplayControllerKind as ArtifactControllerKind, ReplayFailureKind, ReplayFinalReport,
+    ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorPayload, ReplaySensorPayloadData,
+    ReplaySensorStream,
 };
 use rne_math::Hertz;
-use rne_physics::{hash_physics_state, PhysicsBackend, PhysicsWorldDesc};
+use rne_physics::{hash_physics_state, ContactEvent, PhysicsBackend, PhysicsWorldDesc};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
@@ -219,6 +220,10 @@ struct SimulationReport {
     differential_drive_count: usize,
     physics_hash: u64,
     first_base_translation_m: Option<[f64; 3]>,
+    contact_pairs_max: u64,
+    contact_impulse_max_ns: f32,
+    min_base_height_m: Option<f64>,
+    failure: Option<rne_log::ReplayFailureKind>,
 }
 
 #[derive(Clone, Debug)]
@@ -486,6 +491,9 @@ fn simulate_scene_with_action_schedule(
     let mut data_bus = InMemoryDataBus::new();
     let sensor_payload_streams = resolve_sensor_subscriptions(&world, sensor_subscriptions)?;
     let mut frames = Vec::new();
+    let mut contact_pairs_max = 0_u64;
+    let mut contact_impulse_max_ns = 0.0_f32;
+    let mut min_base_height_m: Option<f64> = None;
     for step in 0..steps {
         let frame_action = if let Some(replay_frames) = replay_frames {
             let step_index = usize::try_from(step)
@@ -528,6 +536,17 @@ fn simulate_scene_with_action_schedule(
                 ]
             })
         });
+        let contact = backend
+            .contacts(physics_world)
+            .map_err(|error| anyhow::anyhow!("query contacts: {error}"))?;
+        let contact = summarize_contacts(contact);
+        contact_pairs_max = contact_pairs_max.max(contact.pair_count);
+        contact_impulse_max_ns = contact_impulse_max_ns.max(contact.total_impulse_ns);
+        if let Some(base_translation_m) = base_translation_m {
+            let height_m = base_translation_m[1];
+            min_base_height_m =
+                Some(min_base_height_m.map_or(height_m, |minimum: f64| minimum.min(height_m)));
+        }
         let observation = ReplayObservation::new(base_translation_m)
             .with_joint_state(capture_joint_state(&world))
             .with_sensor_streams(capture_sensor_streams(&world, &data_bus))
@@ -535,7 +554,8 @@ fn simulate_scene_with_action_schedule(
                 &world,
                 &data_bus,
                 &sensor_payload_streams,
-            ));
+            ))
+            .with_contact(Some(contact));
         frames.push(ReplayFrame::new(
             step,
             sim_time.ticks(),
@@ -554,6 +574,11 @@ fn simulate_scene_with_action_schedule(
             ]
         })
     });
+    let initial_base_height_m = frames
+        .first()
+        .and_then(|frame| frame.observation.base_translation_m)
+        .map(|translation| translation[1]);
+    let failure = classify_failure(initial_base_height_m, min_base_height_m);
     Ok(SimulationRun {
         report: SimulationReport {
             steps,
@@ -563,6 +588,10 @@ fn simulate_scene_with_action_schedule(
             differential_drive_count: drives.len(),
             physics_hash: hash_physics_state(&world),
             first_base_translation_m,
+            contact_pairs_max,
+            contact_impulse_max_ns,
+            min_base_height_m,
+            failure,
         },
         frames,
         sensor_payload_streams,
@@ -881,6 +910,48 @@ fn run_sensor_kind_matches(kind: &SensorKind, wanted: RunSensorKind) -> bool {
     )
 }
 
+/// Collapses the physics backend's per-step contact events into a replay summary.
+fn summarize_contacts(contacts: &[ContactEvent]) -> ReplayContact {
+    let pair_count = contacts.len() as u64;
+    let mut total_impulse_ns = 0.0_f32;
+    let mut max_impulse_ns = 0.0_f32;
+    for contact in contacts {
+        let impulse = contact.impulse.max(0.0);
+        total_impulse_ns += impulse;
+        max_impulse_ns = max_impulse_ns.max(impulse);
+    }
+    ReplayContact {
+        pair_count,
+        total_impulse_ns,
+        max_impulse_ns,
+    }
+}
+
+/// Classifies a run failure from the settle-height threshold.
+///
+/// A robot "fell" when its base height dropped below half of its initial base
+/// height. The threshold is deliberately qualitative: the runner does not know
+/// each robot's intended working height, so it flags any drop that cannot be a
+/// normal standing pose. Runs without a tracked differential-drive base never
+/// fail this check.
+fn classify_failure(
+    initial_base_height_m: Option<f64>,
+    min_base_height_m: Option<f64>,
+) -> Option<ReplayFailureKind> {
+    let (initial_height_m, min_height_m) = match (initial_base_height_m, min_base_height_m) {
+        (Some(initial), Some(minimum)) => (initial, minimum),
+        _ => return None,
+    };
+    if !initial_height_m.is_finite() || initial_height_m <= 0.0 {
+        return None;
+    }
+    if min_height_m < 0.5 * initial_height_m {
+        Some(ReplayFailureKind::Fell)
+    } else {
+        None
+    }
+}
+
 fn capture_sensor_payloads(
     world: &World,
     bus: &InMemoryDataBus,
@@ -1040,6 +1111,16 @@ fn ensure_replay_frames(expected: &[ReplayFrame], actual: &[ReplayFrame]) -> Res
             actual_frame.observation.sensor_streams
         );
         anyhow::ensure!(
+            replay_contact_matches(
+                expected_frame.observation.contact,
+                actual_frame.observation.contact
+            ),
+            "replay contact mismatch at step {}: expected={:?} actual={:?}",
+            expected_frame.step,
+            expected_frame.observation.contact,
+            actual_frame.observation.contact
+        );
+        anyhow::ensure!(
             expected_frame.physics_hash == actual_frame.physics_hash,
             "replay frame mismatch at step {}: expected={expected_frame:?} actual={actual_frame:?}",
             expected_frame.step
@@ -1118,7 +1199,14 @@ fn ensure_replay_reports(expected: &ReplayFinalReport, actual: &ReplayFinalRepor
             && expected.seed == actual.seed
             && expected.robot_count == actual.robot_count
             && expected.differential_drive_count == actual.differential_drive_count
-            && expected.physics_hash == actual.physics_hash,
+            && expected.physics_hash == actual.physics_hash
+            && expected.contact_pairs_max == actual.contact_pairs_max
+            && replay_float_matches(
+                f64::from(expected.contact_impulse_max_ns),
+                f64::from(actual.contact_impulse_max_ns)
+            )
+            && replay_optional_float_matches(expected.min_base_height_m, actual.min_base_height_m)
+            && expected.failure == actual.failure,
         "replay final report mismatch: expected={expected:?} actual={actual:?}"
     );
     anyhow::ensure!(
@@ -1150,6 +1238,32 @@ fn replay_translation_matches(expected: Option<[f64; 3]>, actual: Option<[f64; 3
     }
 }
 
+fn replay_optional_float_matches(expected: Option<f64>, actual: Option<f64>) -> bool {
+    match (expected, actual) {
+        (None, None) => true,
+        (Some(expected), Some(actual)) => replay_float_matches(expected, actual),
+        _ => false,
+    }
+}
+
+fn replay_contact_matches(expected: Option<ReplayContact>, actual: Option<ReplayContact>) -> bool {
+    match (expected, actual) {
+        (None, None) => true,
+        (Some(expected), Some(actual)) => {
+            expected.pair_count == actual.pair_count
+                && replay_float_matches(
+                    f64::from(expected.total_impulse_ns),
+                    f64::from(actual.total_impulse_ns),
+                )
+                && replay_float_matches(
+                    f64::from(expected.max_impulse_ns),
+                    f64::from(actual.max_impulse_ns),
+                )
+        }
+        _ => false,
+    }
+}
+
 fn replay_float_matches(expected: f64, actual: f64) -> bool {
     (expected - actual).abs() <= REPLAY_FLOAT_EPSILON * expected.abs().max(actual.abs()).max(1.0)
 }
@@ -1163,6 +1277,10 @@ fn replay_final_report(report: &SimulationReport) -> ReplayFinalReport {
         report.differential_drive_count,
         report.physics_hash,
         report.first_base_translation_m,
+        report.contact_pairs_max,
+        report.contact_impulse_max_ns,
+        report.min_base_height_m,
+        report.failure,
     )
 }
 
@@ -1176,8 +1294,15 @@ fn print_simulation_report(path: &Path, report: &SimulationReport, determinism_c
             )
         },
     );
+    let min_height = report
+        .min_base_height_m
+        .map_or_else(|| "none".to_string(), |height| format!("{height:.3} m"));
+    let failure = report.failure.map_or_else(
+        || "ok".to_string(),
+        |failure| format!("FAILED: {failure:?}"),
+    );
     println!(
-        "simulate scene={} steps={} time={:.6} s seed={} robots={} diff_drive={} base={} physics_hash={:#018x}{}",
+        "simulate scene={} steps={} time={:.6} s seed={} robots={} diff_drive={} base={} physics_hash={:#018x} contacts_pairs_max={} contact_impulse_max={:.4} Ns min_height={} failure={}{}",
         path.display(),
         report.steps,
         report.sim_time_s,
@@ -1186,6 +1311,10 @@ fn print_simulation_report(path: &Path, report: &SimulationReport, determinism_c
         report.differential_drive_count,
         base,
         report.physics_hash,
+        report.contact_pairs_max,
+        report.contact_impulse_max_ns,
+        min_height,
+        failure,
         if determinism_check { " (checking replay)" } else { "" },
     );
 }
@@ -1219,8 +1348,8 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_replay_frames, replay_command, run_manifest_command, simulate_scene,
-        simulate_scene_with_action_schedule,
+        classify_failure, ensure_replay_frames, replay_command, run_manifest_command,
+        simulate_scene, simulate_scene_with_action_schedule,
     };
     use rne_assets::{RunSensorKind, RunSensorSubscription};
     use rne_log::ReplayAction;
@@ -1236,6 +1365,8 @@ mod tests {
         assert_eq!(first.steps, 30);
         assert_eq!(first.differential_drive_count, 1);
         assert!(first.first_base_translation_m.expect("base pose")[0] > 0.0);
+        assert!(first.min_base_height_m.is_some());
+        assert_eq!(first.failure, None);
     }
 
     #[test]
@@ -1383,5 +1514,65 @@ mod tests {
         )
         .expect_err("unknown sensor must be rejected");
         assert!(error.to_string().contains("matched no sensor"));
+    }
+
+    #[test]
+    fn contact_annotations_are_captured_and_replay() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/cart_minimal.rne.scene.toml");
+        let run = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+        )
+        .expect("contact simulation");
+
+        let settled_frame = run
+            .frames
+            .last()
+            .expect("last frame")
+            .observation
+            .contact
+            .expect("contact summary");
+        assert!(
+            settled_frame.pair_count >= 1,
+            "settled cart wheels must rest on the ground"
+        );
+        assert!(settled_frame.total_impulse_ns > 0.0);
+        assert!(settled_frame.max_impulse_ns > 0.0);
+        assert!(run.report.contact_pairs_max >= 1);
+        assert!(run.report.contact_impulse_max_ns > 0.0);
+        assert!(run.report.min_base_height_m.is_none());
+        assert_eq!(run.report.failure, None);
+
+        let replay = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            Some(&run.frames),
+            &[],
+        )
+        .expect("contact replay");
+        assert_eq!(replay.report, run.report);
+        ensure_replay_frames(&run.frames, &replay.frames).expect("contact frames match");
+    }
+
+    #[test]
+    fn failure_classification_flags_a_fall() {
+        use rne_log::ReplayFailureKind;
+        assert_eq!(classify_failure(Some(0.25), Some(0.24)), None);
+        assert_eq!(
+            classify_failure(Some(0.25), Some(0.12)),
+            Some(ReplayFailureKind::Fell)
+        );
+        assert_eq!(classify_failure(Some(0.25), None), None);
+        assert_eq!(classify_failure(None, Some(0.1)), None);
+        assert_eq!(classify_failure(Some(0.0), Some(0.0)), None);
     }
 }

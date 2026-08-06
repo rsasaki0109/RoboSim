@@ -252,6 +252,18 @@ pub struct ReplaySensorPayload {
     pub data: ReplaySensorPayloadData,
 }
 
+/// Contact pair statistics captured after one replay step.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayContact {
+    /// Number of active contact pairs this step.
+    pub pair_count: u64,
+    /// Sum of normal-impulse magnitudes across all pairs this step, in N·s.
+    pub total_impulse_ns: f32,
+    /// Largest single-pair normal-impulse magnitude this step, in N·s.
+    pub max_impulse_ns: f32,
+}
+
 /// Selected state observation recorded after one replay step.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -267,6 +279,9 @@ pub struct ReplayObservation {
     /// Full typed payloads for manifest-subscribed sensor streams.
     #[serde(default)]
     pub sensor_payloads: Vec<ReplaySensorPayload>,
+    /// Contact pair statistics captured after this step.
+    #[serde(default)]
+    pub contact: Option<ReplayContact>,
 }
 
 impl ReplayObservation {
@@ -277,6 +292,7 @@ impl ReplayObservation {
             joint_state: None,
             sensor_streams: Vec::new(),
             sensor_payloads: Vec::new(),
+            contact: None,
         }
     }
 
@@ -295,6 +311,12 @@ impl ReplayObservation {
     /// Adds full typed sensor payloads captured for this observation.
     pub fn with_sensor_payloads(mut self, sensor_payloads: Vec<ReplaySensorPayload>) -> Self {
         self.sensor_payloads = sensor_payloads;
+        self
+    }
+
+    /// Adds contact pair statistics captured for this observation.
+    pub fn with_contact(mut self, contact: Option<ReplayContact>) -> Self {
+        self.contact = contact;
         self
     }
 }
@@ -334,6 +356,14 @@ impl ReplayFrame {
     }
 }
 
+/// Classification of a run that did not complete cleanly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayFailureKind {
+    /// The first robot base dropped below its settle-height threshold.
+    Fell,
+}
+
 /// Final report captured alongside a replay artifact.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -352,6 +382,18 @@ pub struct ReplayFinalReport {
     pub physics_hash: u64,
     /// First differential-drive base translation in metres, when present.
     pub first_base_translation_m: Option<[f64; 3]>,
+    /// Largest number of concurrent contact pairs across the run.
+    #[serde(default)]
+    pub contact_pairs_max: u64,
+    /// Largest per-step contact impulse across the run, in N·s.
+    #[serde(default)]
+    pub contact_impulse_max_ns: f32,
+    /// Minimum base height of the first differential-drive robot, in metres.
+    #[serde(default)]
+    pub min_base_height_m: Option<f64>,
+    /// Failure classification, when the run did not complete cleanly.
+    #[serde(default)]
+    pub failure: Option<ReplayFailureKind>,
 }
 
 impl ReplayFinalReport {
@@ -365,6 +407,10 @@ impl ReplayFinalReport {
         differential_drive_count: usize,
         physics_hash: u64,
         first_base_translation_m: Option<[f64; 3]>,
+        contact_pairs_max: u64,
+        contact_impulse_max_ns: f32,
+        min_base_height_m: Option<f64>,
+        failure: Option<ReplayFailureKind>,
     ) -> Self {
         Self {
             steps,
@@ -374,6 +420,10 @@ impl ReplayFinalReport {
             differential_drive_count,
             physics_hash,
             first_base_translation_m,
+            contact_pairs_max,
+            contact_impulse_max_ns,
+            min_base_height_m,
+            failure,
         }
     }
 }
@@ -472,6 +522,18 @@ impl ReplayArtifact {
                 "final_report.sim_time_s must be finite and non-negative".to_string(),
             ));
         }
+        if !self.final_report.contact_impulse_max_ns.is_finite() {
+            return Err(ReplayArtifactError::Invalid(
+                "final_report.contact_impulse_max_ns must be finite".to_string(),
+            ));
+        }
+        if let Some(min_base_height_m) = self.final_report.min_base_height_m {
+            if !min_base_height_m.is_finite() {
+                return Err(ReplayArtifactError::Invalid(
+                    "final_report.min_base_height_m must be finite".to_string(),
+                ));
+            }
+        }
         validate_translation(
             self.final_report.first_base_translation_m,
             "final_report.first_base_translation_m",
@@ -508,6 +570,7 @@ impl ReplayArtifact {
                 &self.sensor_payload_streams,
                 frame.step,
             )?;
+            validate_contact(frame.observation.contact, frame.step)?;
         }
         Ok(())
     }
@@ -798,6 +861,23 @@ fn validate_vec3(value: rne_math::Vec3, field: &str, step: u64) -> Result<(), Re
     Ok(())
 }
 
+fn validate_contact(contact: Option<ReplayContact>, step: u64) -> Result<(), ReplayArtifactError> {
+    let Some(contact) = contact else {
+        return Ok(());
+    };
+    if !contact.total_impulse_ns.is_finite() || !contact.max_impulse_ns.is_finite() {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} contact impulses must be finite"
+        )));
+    }
+    if contact.max_impulse_ns < 0.0 || contact.total_impulse_ns < 0.0 {
+        return Err(ReplayArtifactError::Invalid(format!(
+            "frame {step} contact impulses must be non-negative"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,7 +907,19 @@ mod tests {
             ReplayControllerKind::DifferentialDrive,
             Vec::new(),
             frames,
-            ReplayFinalReport::new(2, 1.0 / 30.0, 42, 1, 1, 0x22, Some([0.2, 0.0, 0.0])),
+            ReplayFinalReport::new(
+                2,
+                1.0 / 30.0,
+                42,
+                1,
+                1,
+                0x22,
+                Some([0.2, 0.0, 0.0]),
+                1,
+                9.81 / 60.0,
+                Some(0.2),
+                None,
+            ),
         )
     }
 
@@ -985,6 +1077,39 @@ mod tests {
         assert!(error
             .to_string()
             .contains("not listed in sensor_payload_streams"));
+    }
+
+    #[test]
+    fn contact_annotations_roundtrip_and_validate() {
+        let mut artifact = sample_artifact();
+        artifact.frames[0].observation.contact = Some(ReplayContact {
+            pair_count: 2,
+            total_impulse_ns: 0.4,
+            max_impulse_ns: 0.3,
+        });
+        artifact.final_report.contact_pairs_max = 2;
+        artifact.final_report.contact_impulse_max_ns = 0.3;
+        artifact.final_report.min_base_height_m = Some(0.05);
+        artifact.final_report.failure = Some(ReplayFailureKind::Fell);
+
+        artifact.validate().expect("annotations are valid");
+        let json = artifact.to_json().unwrap();
+        let loaded = ReplayArtifact::from_json(&json).unwrap();
+        assert_eq!(loaded, artifact);
+        assert!(json.contains(r#""failure": "fell""#));
+    }
+
+    #[test]
+    fn contact_impulse_must_be_non_negative() {
+        let mut artifact = sample_artifact();
+        artifact.frames[0].observation.contact = Some(ReplayContact {
+            pair_count: 1,
+            total_impulse_ns: -0.1,
+            max_impulse_ns: 0.1,
+        });
+
+        let error = artifact.validate().unwrap_err();
+        assert!(error.to_string().contains("non-negative"));
     }
 
     #[test]

@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Contact and failure annotations**: the replay artifact now records per-step
+  contact statistics (active pair count, summed and max normal impulse) and the
+  final report annotates the run outcome with the maximum concurrent contact
+  pairs, the largest per-step contact impulse, the minimum base height, and a
+  `fell` failure when the first robot base drops below half its initial height.
+  `rne-asset simulate`/`run` print the annotations and the browser replay
+  inspector shows them per frame and in the report.
 - **Full typed sensor payload export**: run manifests can request full IMU,
   LiDAR, camera (RGB+D), or wheel-encoder payload capture with `[[sensors]]`
   subscriptions (by entity name or kind). The `.rne-replay` artifact stores the
