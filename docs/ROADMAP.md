@@ -13,7 +13,8 @@ inspectable without a commercial engine. The baseline and scope are tracked in
 | A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |
 | B | Run manifest | Versioned `.rne.run.toml` for scene, clock, seed, controller, and determinism output | Done |
 | C | Replay artifact | Versioned `.rne-replay` recording tagged wheel/joint actions, joint state, sensor stream summaries, physics hashes, final report, CLI verification, and browser interval inspection | Done |
-| D | Standard adapters | Full sensor payload export and OpenSCENARIO/traffic adapter | In progress |
+| D | Standard adapters | Full typed sensor payload export and manifest-level sensor subscriptions | Done |
+| E | Standard adapters | OpenSCENARIO/traffic adapter | In progress |
 
 ## v0.16 goal: PLATEAU urban autonomy
 

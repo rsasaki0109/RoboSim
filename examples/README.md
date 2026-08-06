@@ -65,6 +65,7 @@
 | Headless scene runner | `cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay` | Fixed-step scene execution, typed wheel command, per-step physics hashes, and `.rne-replay` output |
 | Replay artifact | `cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay` | Re-runs the recorded action schedule and verifies every frame |
 | Run manifest | `cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml` | Versioned scene, seed, clock, controller, determinism, and replay-output configuration |
+| Sensor payload export | `cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml` | Full typed LiDAR payload capture through a manifest `[[sensors]]` subscription |
 | PLATEAU import CLI | `cargo run -p rne_plateau_import -- path/to/tile.gml --output target/plateau/tile --tile-name tile` | Convert bounded PLATEAU CityGML building and road LOD1 to OBJ, RNE scene, and stable lane metadata |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |

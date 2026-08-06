@@ -25,6 +25,9 @@ pub struct RunManifest {
     /// Controller configuration for the first runner boundary.
     #[serde(default)]
     pub controller: RunController,
+    /// Sensor subscriptions requesting full typed payload capture.
+    #[serde(default)]
+    pub sensors: Vec<RunSensorSubscription>,
     /// Output and replay checks for this run.
     #[serde(default)]
     pub output: RunOutput,
@@ -125,6 +128,36 @@ impl Default for RunController {
     }
 }
 
+/// Sensor kinds that a [`RunSensorSubscription`] can select.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunSensorKind {
+    /// Inertial measurement unit.
+    #[default]
+    Imu,
+    /// Scanning LiDAR.
+    Lidar,
+    /// RGB(-D) camera.
+    Camera,
+    /// Wheel encoder.
+    WheelEncoder,
+}
+
+/// Selects one or more sensors for full typed payload capture.
+///
+/// A subscription matches every sensor whose entity name equals [`Self::name`]
+/// or whose kind equals [`Self::kind`]. At least one selector is required.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSensorSubscription {
+    /// Sensor entity name, for example `lidar` or `wrist_camera`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Sensor kind selector.
+    #[serde(default)]
+    pub kind: Option<RunSensorKind>,
+}
+
 /// Output settings in a [`RunManifest`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +237,22 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             "controller.joint must not be empty for a named joint controller",
         ));
     }
+    for (index, subscription) in manifest.sensors.iter().enumerate() {
+        if subscription.name.is_none() && subscription.kind.is_none() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                format!("sensors[{index}] must select a sensor by name or kind"),
+            ));
+        }
+        if let Some(name) = subscription.name.as_deref() {
+            if name.trim().is_empty() {
+                return Err(AssetError::invalid(
+                    path.display().to_string(),
+                    format!("sensors[{index}].name must not be empty"),
+                ));
+            }
+        }
+    }
     Ok(manifest)
 }
 
@@ -217,7 +266,7 @@ fn default_run_hz() -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_run_manifest, RunControllerKind, RUN_MANIFEST_VERSION};
+    use super::{parse_run_manifest, RunControllerKind, RunSensorKind, RUN_MANIFEST_VERSION};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -305,5 +354,41 @@ velocity_rad_s = 0.4
         assert_eq!(manifest.controller.kind, RunControllerKind::JointVelocity);
         assert_eq!(manifest.controller.joint, "shoulder_joint");
         assert_eq!(manifest.controller.velocity_rad_s, 0.4);
+    }
+
+    #[test]
+    fn parses_sensor_subscriptions_by_name_and_kind() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/sensors.rne.run.toml"),
+            r#"
+version = 1
+scene = "../scenes/mesh_diff_drive.rne.scene.toml"
+
+[[sensors]]
+name = "wrist_camera"
+
+[[sensors]]
+kind = "lidar"
+"#,
+        )
+        .expect("sensor manifest");
+
+        assert_eq!(manifest.sensors.len(), 2);
+        assert_eq!(manifest.sensors[0].name.as_deref(), Some("wrist_camera"));
+        assert_eq!(manifest.sensors[0].kind, None);
+        assert_eq!(manifest.sensors[1].name, None);
+        assert_eq!(manifest.sensors[1].kind, Some(RunSensorKind::Lidar));
+    }
+
+    #[test]
+    fn rejects_sensor_subscription_without_selector() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            "version = 1\nscene = \"scene.rne.scene.toml\"\n\n[[sensors]]\n",
+        )
+        .expect_err("selector must be required");
+        assert!(error
+            .to_string()
+            .contains("select a sensor by name or kind"));
     }
 }

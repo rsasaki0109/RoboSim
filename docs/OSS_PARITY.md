@@ -21,7 +21,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count | Interactive pause/reset controls are still needed |
 | Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort and wheel paths, episode APIs, and an isolated ROS 2 adapter | Multi-joint trajectories and policy callbacks are still application-level APIs |
 | Physics | Backend-neutral traits with Rapier rigid bodies, joints, articulation, contacts, and deterministic hashes | A second open backend and a public capability negotiation workflow are future work |
-| Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, and per-step replay stream summaries | Full typed payload export and a manifest-level sensor subscription list are future work |
+| Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports | OpenSCENARIO and external traffic-simulator adapters are future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, and browser interval inspection | Richer contact/failure annotations and full sensor payload streams are future work |
@@ -79,11 +79,35 @@ without rerunning the recorded policy or physics. Select the file in its Replay
 inspector to scrub or play the interval and inspect the selected observation and
 exact 64-bit physics and sensor payload hashes.
 
+Run manifests can also request full typed sensor payload capture. A
+`[[sensors]]` subscription selects sensors by entity name or kind, and the
+recording then stores the complete IMU, LiDAR, camera (RGB+D), or wheel-encoder
+payload for each frame in addition to the stream summaries:
+
+```toml
+[[sensors]]
+kind = "lidar"
+
+[[sensors]]
+name = "wrist_camera"
+```
+
+```bash
+cargo run --release -p rne_asset_cli -- run \
+  assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml
+
+# Re-run and verify the recorded actions, observations, and every frame hash
+cargo run --release -p rne_asset_cli -- replay \
+  target/runs/mesh_diff_drive_lidar_payload.rne-replay
+```
+
+The typed payloads are JSON-encoded in the artifact, so the browser inspector and
+other tools can read them without rerunning the sensor models.
+
 ## Next parity order
 
-1. Add full typed sensor payload export and manifest-level sensor subscriptions.
-2. Add richer contact/failure annotations to the replay report.
-3. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay
+1. Add richer contact/failure annotations to the replay report.
+2. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay
    contract is stable.
 
 This order closes the common simulator workflow first. Photoreal rendering,

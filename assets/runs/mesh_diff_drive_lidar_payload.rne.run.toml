@@ -1,0 +1,18 @@
+version = 1
+scene = "../scenes/mesh_diff_drive.rne.scene.toml"
+seed = 42
+
+[clock]
+steps = 120
+hz = 60.0
+
+[controller]
+kind = "differential_drive"
+wheel_velocity_rad_s = 6.0
+
+[[sensors]]
+kind = "lidar"
+
+[output]
+determinism_check = true
+replay_path = "../../target/runs/mesh_diff_drive_lidar_payload.rne-replay"

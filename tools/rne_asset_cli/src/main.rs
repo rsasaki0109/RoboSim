@@ -4,7 +4,8 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
     inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
-    validate_asset, AssetHotReloader, RunControllerKind, SpawnSceneOptions, ValidatedAsset,
+    validate_asset, AssetHotReloader, RunControllerKind, RunSensorKind, RunSensorSubscription,
+    SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
@@ -13,7 +14,8 @@ use rne_data::{
 use rne_ecs::{Name, World};
 use rne_log::{
     ReplayAction, ReplayArtifact, ReplayClock, ReplayControllerKind as ArtifactControllerKind,
-    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorStream,
+    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorPayload,
+    ReplaySensorPayloadData, ReplaySensorStream,
 };
 use rne_math::Hertz;
 use rne_physics::{hash_physics_state, PhysicsBackend, PhysicsWorldDesc};
@@ -22,7 +24,10 @@ use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
     Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, Joint, JointKind,
 };
-use rne_sensor::{sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState};
+use rne_sensor::{
+    sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState,
+    CAMERA_DEPTH_STREAM_OFFSET,
+};
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -30,6 +35,18 @@ use std::thread;
 use std::time::Duration;
 
 const REPLAY_FLOAT_EPSILON: f64 = 1.0e-12;
+
+fn parse_run_sensor_kind(text: &str) -> Result<RunSensorKind, String> {
+    match text {
+        "imu" => Ok(RunSensorKind::Imu),
+        "lidar" => Ok(RunSensorKind::Lidar),
+        "camera" => Ok(RunSensorKind::Camera),
+        "wheel_encoder" => Ok(RunSensorKind::WheelEncoder),
+        other => Err(format!(
+            "unknown sensor kind `{other}` (expected imu, lidar, camera, or wheel_encoder)"
+        )),
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -81,6 +98,12 @@ enum Commands {
         /// Run the same scene and inputs twice and compare the final report.
         #[arg(long)]
         determinism_check: bool,
+        /// Record full payloads for sensors with this entity name (repeatable).
+        #[arg(long)]
+        sensor_name: Vec<String>,
+        /// Record full payloads for sensors of this kind (repeatable).
+        #[arg(long, value_parser = parse_run_sensor_kind)]
+        sensor_kind: Vec<RunSensorKind>,
         /// Write a versioned `.rne-replay` artifact to this path.
         #[arg(long, value_name = "PATH")]
         replay_out: Option<PathBuf>,
@@ -118,20 +141,38 @@ fn main() -> Result<()> {
             joint_velocity_rad_s,
             joint_effort_nm,
             determinism_check,
+            sensor_name,
+            sensor_kind,
             replay_out,
-        } => simulate_command(
-            &path,
-            steps,
-            hz,
-            DirectActionOptions {
-                wheel_velocity_rad_s,
-                joint: joint.as_deref(),
-                joint_velocity_rad_s,
-                joint_effort_nm,
-            },
-            determinism_check,
-            replay_out.as_deref(),
-        ),
+        } => {
+            let mut sensor_subscriptions = sensor_name
+                .into_iter()
+                .map(|name| RunSensorSubscription {
+                    name: Some(name),
+                    kind: None,
+                })
+                .collect::<Vec<_>>();
+            sensor_subscriptions.extend(sensor_kind.into_iter().map(|kind| {
+                RunSensorSubscription {
+                    name: None,
+                    kind: Some(kind),
+                }
+            }));
+            simulate_command(
+                &path,
+                steps,
+                hz,
+                DirectActionOptions {
+                    wheel_velocity_rad_s,
+                    joint: joint.as_deref(),
+                    joint_velocity_rad_s,
+                    joint_effort_nm,
+                },
+                determinism_check,
+                sensor_subscriptions,
+                replay_out.as_deref(),
+            )
+        }
         Commands::Run { path } => run_manifest_command(&path),
         Commands::Replay { path } => replay_command(&path),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
@@ -189,6 +230,7 @@ struct SimulationOptions<'a> {
     determinism_check: bool,
     replay_out: Option<&'a Path>,
     replay_controller: ArtifactControllerKind,
+    sensor_subscriptions: Vec<RunSensorSubscription>,
 }
 
 struct DirectActionOptions<'a> {
@@ -204,6 +246,7 @@ fn simulate_command(
     hz: f64,
     direct_options: DirectActionOptions<'_>,
     determinism_check: bool,
+    sensor_subscriptions: Vec<RunSensorSubscription>,
     replay_out: Option<&Path>,
 ) -> Result<()> {
     let action = direct_action(
@@ -223,6 +266,7 @@ fn simulate_command(
             determinism_check,
             replay_out,
             replay_controller,
+            sensor_subscriptions,
         },
     )
 }
@@ -276,6 +320,7 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             determinism_check: manifest.output.determinism_check,
             replay_out: replay_out.as_deref(),
             replay_controller,
+            sensor_subscriptions: manifest.sensors.clone(),
         },
     )
 }
@@ -289,6 +334,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         determinism_check,
         replay_out,
         replay_controller,
+        sensor_subscriptions,
     } = options;
     anyhow::ensure!(
         hz.is_finite() && hz > 0.0,
@@ -296,12 +342,26 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
     );
     ensure_action_is_finite(&action)?;
 
-    let run =
-        simulate_scene_with_action_schedule(path, steps, hz, action.clone(), seed_override, None)?;
+    let run = simulate_scene_with_action_schedule(
+        path,
+        steps,
+        hz,
+        action.clone(),
+        seed_override,
+        None,
+        &sensor_subscriptions,
+    )?;
     print_simulation_report(path, &run.report, determinism_check);
     if determinism_check {
-        let replay =
-            simulate_scene_with_action_schedule(path, steps, hz, action, seed_override, None)?;
+        let replay = simulate_scene_with_action_schedule(
+            path,
+            steps,
+            hz,
+            action,
+            seed_override,
+            None,
+            &sensor_subscriptions,
+        )?;
         anyhow::ensure!(
             run.report == replay.report,
             "determinism check failed: first={:?} replay={:?}",
@@ -317,6 +377,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             run.report.seed,
             ReplayClock::new(steps, hz),
             replay_controller,
+            run.sensor_payload_streams.clone(),
             run.frames.clone(),
             replay_final_report(&run.report),
         );
@@ -324,10 +385,11 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             .write_json(replay_out)
             .with_context(|| format!("write replay artifact {}", replay_out.display()))?;
         println!(
-            "replay: wrote {} (version={} frames={})",
+            "replay: wrote {} (version={} frames={} payload_streams={})",
             replay_out.display(),
             artifact.version,
-            artifact.frames.len()
+            artifact.frames.len(),
+            artifact.sensor_payload_streams.len()
         );
     }
     Ok(())
@@ -347,6 +409,8 @@ fn simulate_scene(
 struct SimulationRun {
     report: SimulationReport,
     frames: Vec<ReplayFrame>,
+    /// Streams whose full payloads were captured, sorted and unique.
+    sensor_payload_streams: Vec<u64>,
 }
 
 #[cfg(test)]
@@ -364,6 +428,7 @@ fn simulate_scene_with_seed(
         ReplayAction::differential_drive(wheel_velocity_rad_s),
         seed_override,
         None,
+        &[],
     )
 }
 
@@ -374,6 +439,7 @@ fn simulate_scene_with_action_schedule(
     action: ReplayAction,
     seed_override: Option<u64>,
     replay_frames: Option<&[ReplayFrame]>,
+    sensor_subscriptions: &[RunSensorSubscription],
 ) -> Result<SimulationRun> {
     if let Some(replay_frames) = replay_frames {
         anyhow::ensure!(
@@ -418,6 +484,7 @@ fn simulate_scene_with_action_schedule(
     let mut sim_time = SimTime::ZERO;
     let mut command_buffer = ActuatorCommandBuffer::new();
     let mut data_bus = InMemoryDataBus::new();
+    let sensor_payload_streams = resolve_sensor_subscriptions(&world, sensor_subscriptions)?;
     let mut frames = Vec::new();
     for step in 0..steps {
         let frame_action = if let Some(replay_frames) = replay_frames {
@@ -463,7 +530,12 @@ fn simulate_scene_with_action_schedule(
         });
         let observation = ReplayObservation::new(base_translation_m)
             .with_joint_state(capture_joint_state(&world))
-            .with_sensor_streams(capture_sensor_streams(&world, &data_bus));
+            .with_sensor_streams(capture_sensor_streams(&world, &data_bus))
+            .with_sensor_payloads(capture_sensor_payloads(
+                &world,
+                &data_bus,
+                &sensor_payload_streams,
+            ));
         frames.push(ReplayFrame::new(
             step,
             sim_time.ticks(),
@@ -493,6 +565,7 @@ fn simulate_scene_with_action_schedule(
             first_base_translation_m,
         },
         frames,
+        sensor_payload_streams,
     })
 }
 
@@ -750,6 +823,139 @@ fn combine_hashes(first: u64, second: u64) -> u64 {
     first.wrapping_mul(0x9e3779b185ebca87).rotate_left(17) ^ second
 }
 
+fn resolve_sensor_subscriptions(
+    world: &World,
+    subscriptions: &[RunSensorSubscription],
+) -> Result<Vec<u64>> {
+    if subscriptions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut sensors = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let sensor = world.get::<Sensor>(entity)?;
+            let name = world.get::<Name>(entity).map(|name| name.0.clone());
+            Some((sensor.stream_id.0, name, sensor.kind.clone()))
+        })
+        .collect::<Vec<_>>();
+    sensors.sort_unstable_by_key(|(stream_id, _, _)| *stream_id);
+
+    let mut matched = Vec::new();
+    for subscription in subscriptions {
+        let matched_before = matched.len();
+        for (stream_id, name, kind) in &sensors {
+            let matches_name = subscription
+                .name
+                .as_deref()
+                .map(|wanted| name.as_deref() == Some(wanted))
+                .unwrap_or(false);
+            let matches_kind = subscription
+                .kind
+                .map(|wanted| run_sensor_kind_matches(kind, wanted))
+                .unwrap_or(false);
+            if (matches_name || matches_kind) && !matched.contains(stream_id) {
+                matched.push(*stream_id);
+            }
+        }
+        if matched.len() == matched_before {
+            let selector = match (&subscription.name, &subscription.kind) {
+                (Some(name), _) => format!("name `{name}`"),
+                (_, Some(kind)) => format!("kind `{kind:?}`"),
+                (None, None) => "without a selector".to_string(),
+            };
+            anyhow::bail!("sensor subscription by {selector} matched no sensor in the scene");
+        }
+    }
+    matched.sort_unstable();
+    Ok(matched)
+}
+
+fn run_sensor_kind_matches(kind: &SensorKind, wanted: RunSensorKind) -> bool {
+    matches!(
+        (kind, wanted),
+        (SensorKind::Imu(_), RunSensorKind::Imu)
+            | (SensorKind::Lidar(_), RunSensorKind::Lidar)
+            | (SensorKind::Camera(_), RunSensorKind::Camera)
+            | (SensorKind::WheelEncoder(_), RunSensorKind::WheelEncoder)
+    )
+}
+
+fn capture_sensor_payloads(
+    world: &World,
+    bus: &InMemoryDataBus,
+    sensor_payload_streams: &[u64],
+) -> Vec<ReplaySensorPayload> {
+    if sensor_payload_streams.is_empty() {
+        return Vec::new();
+    }
+    let mut sensors = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let sensor = world.get::<Sensor>(entity)?;
+            if !sensor_payload_streams.contains(&sensor.stream_id.0) {
+                return None;
+            }
+            Some(sensor.clone())
+        })
+        .collect::<Vec<_>>();
+    sensors.sort_unstable_by_key(|sensor| sensor.stream_id.0);
+    sensors
+        .into_iter()
+        .filter_map(|sensor| {
+            let (kind, sequence, data) = match &sensor.kind {
+                SensorKind::Imu(_) => bus.latest::<ImuSample>(sensor.stream_id).map(|frame| {
+                    (
+                        "imu",
+                        frame.sequence,
+                        ReplaySensorPayloadData::Imu(frame.payload),
+                    )
+                })?,
+                SensorKind::Lidar(_) => {
+                    bus.latest::<PointCloud>(sensor.stream_id).map(|frame| {
+                        (
+                            "lidar",
+                            frame.sequence,
+                            ReplaySensorPayloadData::Lidar(frame.payload),
+                        )
+                    })?
+                }
+                SensorKind::Camera(_) => {
+                    let rgb = bus.latest::<ImageRgb8>(sensor.stream_id);
+                    let depth = bus.latest::<ImageDepth>(rne_data::StreamId::new(
+                        sensor.stream_id.0 + CAMERA_DEPTH_STREAM_OFFSET,
+                    ));
+                    let (rgb, depth) = (rgb?, depth?);
+                    (
+                        "camera",
+                        rgb.sequence,
+                        ReplaySensorPayloadData::Camera {
+                            rgb: rgb.payload,
+                            depth: depth.payload,
+                        },
+                    )
+                }
+                SensorKind::WheelEncoder(_) => bus
+                    .latest::<WheelEncoderSample>(sensor.stream_id)
+                    .map(|frame| {
+                    (
+                        "wheel_encoder",
+                        frame.sequence,
+                        ReplaySensorPayloadData::WheelEncoder(frame.payload),
+                    )
+                })?,
+            };
+            Some(ReplaySensorPayload {
+                stream_id: sensor.stream_id.0,
+                kind: kind.to_string(),
+                sequence,
+                data,
+            })
+        })
+        .collect()
+}
+
 fn replay_command(path: &Path) -> Result<()> {
     let artifact = ReplayArtifact::read_json(path)
         .with_context(|| format!("load replay artifact {}", path.display()))?;
@@ -761,6 +967,7 @@ fn replay_command(path: &Path) -> Result<()> {
         ReplayAction::differential_drive(0.0),
         Some(artifact.seed),
         Some(&artifact.frames),
+        &[],
     )
     .with_context(|| format!("replay scene {}", scene_path.display()))?;
 
@@ -1012,8 +1219,10 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
+        ensure_replay_frames, replay_command, run_manifest_command, simulate_scene,
+        simulate_scene_with_action_schedule,
     };
+    use rne_assets::{RunSensorKind, RunSensorSubscription};
     use rne_log::ReplayAction;
     use std::path::PathBuf;
 
@@ -1042,11 +1251,32 @@ mod tests {
     }
 
     #[test]
+    fn lidar_payload_run_manifest_records_and_replays() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
+        run_manifest_command(&manifest).expect("run lidar payload manifest");
+        let replay_path = manifest
+            .parent()
+            .expect("manifest parent")
+            .join("../../target/runs/mesh_diff_drive_lidar_payload.rne-replay");
+        let artifact = rne_log::ReplayArtifact::read_json(&replay_path).expect("read artifact");
+        assert!(!artifact.sensor_payload_streams.is_empty());
+        let last_frame = artifact.frames.last().expect("last frame");
+        let payloads = &last_frame.observation.sensor_payloads;
+        assert!(
+            !payloads.is_empty(),
+            "subscribed lidar payloads must be recorded"
+        );
+        assert_eq!(payloads[0].kind, "lidar");
+        replay_command(&replay_path).expect("replay lidar payload artifact");
+    }
+
+    #[test]
     fn named_joint_velocity_records_sensor_streams_and_replays() {
         let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_minimal.rne.scene.toml");
         let action = ReplayAction::joint_velocity("shoulder_joint", 0.5);
-        let first = simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None)
+        let first = simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None, &[])
             .expect("joint simulation");
 
         let first_frame = first.frames.first().expect("first frame");
@@ -1074,8 +1304,84 @@ mod tests {
             ReplayAction::differential_drive(0.0),
             None,
             Some(&first.frames),
+            &[],
         )
         .expect("joint replay");
         assert_eq!(first, replay);
+    }
+
+    #[test]
+    fn camera_payload_subscription_records_full_payloads() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let subscription = RunSensorSubscription {
+            name: None,
+            kind: Some(RunSensorKind::Camera),
+        };
+        let run = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[subscription],
+        )
+        .expect("camera payload simulation");
+
+        assert_eq!(run.sensor_payload_streams.len(), 1);
+        let last_frame = run.frames.last().expect("last frame");
+        let stream_summary = last_frame
+            .observation
+            .sensor_streams
+            .first()
+            .expect("stream summary");
+        assert_eq!(stream_summary.kind, "camera");
+        let payloads = &last_frame.observation.sensor_payloads;
+        assert_eq!(payloads.len(), 1, "camera payloads must be captured");
+        assert_eq!(payloads[0].stream_id, run.sensor_payload_streams[0]);
+        assert_eq!(payloads[0].kind, "camera");
+        assert!(payloads[0].sequence >= 1);
+        let camera_data = match &payloads[0].data {
+            rne_log::ReplaySensorPayloadData::Camera { rgb, depth } => (rgb, depth),
+            other => panic!("expected camera payload, got {other:?}"),
+        };
+        assert!(camera_data.0.width > 0 && camera_data.0.height > 0);
+        assert_eq!(camera_data.0.width, camera_data.1.width);
+        assert_eq!(camera_data.0.height, camera_data.1.height);
+
+        let replay = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            Some(&run.frames),
+            &[],
+        )
+        .expect("camera replay");
+        assert_eq!(replay.report, run.report);
+        ensure_replay_frames(&run.frames, &replay.frames).expect("camera replay frames match");
+    }
+
+    #[test]
+    fn sensor_subscription_without_match_is_rejected() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let subscription = RunSensorSubscription {
+            name: Some("nonexistent_sensor".to_string()),
+            kind: None,
+        };
+        let error = simulate_scene_with_action_schedule(
+            &scene,
+            6,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[subscription],
+        )
+        .expect_err("unknown sensor must be rejected");
+        assert!(error.to_string().contains("matched no sensor"));
     }
 }

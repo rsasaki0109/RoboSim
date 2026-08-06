@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Full typed sensor payload export**: run manifests can request full IMU,
+  LiDAR, camera (RGB+D), or wheel-encoder payload capture with `[[sensors]]`
+  subscriptions (by entity name or kind). The `.rne-replay` artifact stores the
+  complete typed payload per frame next to the existing stream summaries, and
+  `rne-asset simulate`/`run` accept `--sensor-name` / `--sensor-kind`. Replay
+  verification continues to check the exact payload hashes; the browser replay
+  inspector summarizes captured payloads. See `docs/OSS_PARITY.md`.
 - **Photoreal industrial environment package (v0.3-J)**: examples 70 and 71
   now default to a provenance-pinned CC0 Poly Haven Machine Shop HDRI and
   Hand Truck glTF prop, exercise the existing PBR/glTF material path, and keep
