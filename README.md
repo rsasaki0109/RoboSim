@@ -65,6 +65,16 @@ cd RoboSim
 cargo run -p hello_world --example 00_hello_world
 cargo run -p falling_cube --example 01_falling_cube
 cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
+
+# Run an asset scene headlessly with a fixed-step physics replay
+cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay
+cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay
+
+# Run a named URDF joint and record joint/sensor observations
+cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_velocity.rne.run.toml
+
+# Run the same experiment from a versioned manifest
+cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml
 ```
 
 For a complete local validation:
@@ -179,6 +189,8 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 
 - [Architecture overview](docs/architecture/000_overview.md)
 - [Roadmap](docs/ROADMAP.md)
+- [OSS parity baseline](docs/OSS_PARITY.md)
+- [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

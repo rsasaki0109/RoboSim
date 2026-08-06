@@ -14,19 +14,15 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.08, 0.12, 1.0];
 /// GPU initialization completion event for wasm async startup.
 struct ViewerInitEvent(Result<InteractiveViewer, ViewerError>);
 
+#[derive(Default)]
 enum InitState {
+    #[default]
     Pending,
     Ready {
-        viewer: InteractiveViewer,
-        scene: WebScene,
+        viewer: Box<InteractiveViewer>,
+        scene: Box<WebScene>,
     },
     Failed(String),
-}
-
-impl Default for InitState {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 /// Runs the viewer event loop until the page is closed.
@@ -119,7 +115,10 @@ impl ApplicationHandler<ViewerInitEvent> for App {
 
         match event.0 {
             Ok(viewer) => {
-                self.init = InitState::Ready { viewer, scene };
+                self.init = InitState::Ready {
+                    viewer: Box::new(viewer),
+                    scene: Box::new(scene),
+                };
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -194,6 +193,9 @@ impl ApplicationHandler<ViewerInitEvent> for App {
 impl App {
     fn draw_frame(&mut self) -> Result<(), String> {
         let InitState::Ready { viewer, scene } = &mut self.init else {
+            if let InitState::Failed(error) = &self.init {
+                return Err(error.clone());
+            }
             return Ok(());
         };
 

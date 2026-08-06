@@ -2,8 +2,15 @@
 
 #![deny(missing_docs)]
 
+pub mod artifact;
 pub mod record;
 pub mod replay;
+
+pub use artifact::{
+    ReplayAction, ReplayArtifact, ReplayArtifactError, ReplayClock, ReplayControllerKind,
+    ReplayFinalReport, ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorStream,
+    REPLAY_ARTIFACT_VERSION,
+};
 
 pub use record::{
     frame_header, LogRecord, ReplayCompatibility, ReplayCompatibilityError, ReplayHeader,

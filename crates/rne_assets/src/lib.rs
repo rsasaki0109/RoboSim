@@ -5,6 +5,7 @@
 pub mod error;
 pub mod pipeline;
 pub mod robot;
+pub mod run;
 pub mod scene;
 pub mod spawn;
 
@@ -18,6 +19,10 @@ pub use pipeline::{
 pub use robot::{
     load_robot_asset, parse_robot_asset, LidarRobotAsset, RobotAsset, RobotKind, UrdfRobotAsset,
     VisualsRobotAsset, WristCameraRobotAsset,
+};
+pub use run::{
+    load_run_manifest, parse_run_manifest, RunClock, RunController, RunControllerKind, RunManifest,
+    RunOutput, RUN_MANIFEST_VERSION,
 };
 pub use scene::{
     load_scene_asset, parse_scene_asset, parse_scene_robots, SceneAsset, SceneCollisionAsset,

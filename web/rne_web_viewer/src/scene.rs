@@ -14,8 +14,11 @@ use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 use std::path::PathBuf;
 
 const SCENE_VIRTUAL_PATH: &str = "assets/scenes/mm_minimal.rne.scene.toml";
-const ROBOT_VIRTUAL_PATH: &str = "assets/robots/mm_minimal.rne.robot.toml";
-const URDF_VIRTUAL_PATH: &str = "assets/robots/mm_minimal/mm_minimal.urdf";
+// Keep the embedded keys in the same lexical form produced by resolving the
+// scene's `../robots` reference. This matters on Windows, where PathBuf does
+// not collapse `scenes/../robots` before using it as a HashMap key.
+const ROBOT_VIRTUAL_PATH: &str = "assets/scenes/../robots/mm_minimal.rne.robot.toml";
+const URDF_VIRTUAL_PATH: &str = "assets/scenes/../robots/mm_minimal/mm_minimal.urdf";
 
 const SCENE_TOML: &str = include_str!("../../../assets/scenes/mm_minimal.rne.scene.toml");
 const ROBOT_TOML: &str = include_str!("../../../assets/robots/mm_minimal.rne.robot.toml");
@@ -99,8 +102,8 @@ impl WebScene {
 
     fn apply_joint_animation(&mut self, frame_index: u64) {
         const PERIOD_FRAMES: u64 = 480;
-        let phase = (frame_index % PERIOD_FRAMES) as f64 / PERIOD_FRAMES as f64
-            * std::f64::consts::TAU;
+        let phase =
+            (frame_index % PERIOD_FRAMES) as f64 / PERIOD_FRAMES as f64 * std::f64::consts::TAU;
 
         for drive in &self.joint_drives {
             let angle = drive.amplitude_rad * (phase + drive.phase_rad).sin();
@@ -192,7 +195,11 @@ fn scene_focus(world: &World, spawned: &SpawnedScene) -> Vec3 {
         .first()
         .expect("spawned robot present after load");
     let base = world_transform_of(world, robot.base_link);
-    Vec3::new(base.translation.x, base.translation.y + 0.35, base.translation.z)
+    Vec3::new(
+        base.translation.x,
+        base.translation.y + 0.35,
+        base.translation.z,
+    )
 }
 
 /// Builds a render scene from all entities that carry visuals or colliders.

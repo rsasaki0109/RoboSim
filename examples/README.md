@@ -62,6 +62,9 @@
 | Unitree G1 RGB-D sensor capture | `cargo run -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke` | Mounts a renderer-independent RGB-D camera on `head_link`, renders the bundled CC0 industrial environment, and validates DataBus latency, asset presence, and deterministic hashes headlessly before writing GPU RGB/depth captures |
 | Mobile manipulator report GIF | `cargo run -p xtask -- house-gif-demo` | Dependency-free 2D report-artifact smoke; use `python examples/27_mobile_manipulator_rl/house_gif_demo.py --out-dir house_mobile_manipulator_demo` to keep CSV, GIF, metadata JSON, and HTML preview |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
+| Headless scene runner | `cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay` | Fixed-step scene execution, typed wheel command, per-step physics hashes, and `.rne-replay` output |
+| Replay artifact | `cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay` | Re-runs the recorded action schedule and verifies every frame |
+| Run manifest | `cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml` | Versioned scene, seed, clock, controller, determinism, and replay-output configuration |
 | PLATEAU import CLI | `cargo run -p rne_plateau_import -- path/to/tile.gml --output target/plateau/tile --tile-name tile` | Convert bounded PLATEAU CityGML building and road LOD1 to OBJ, RNE scene, and stable lane metadata |
 | Python episode | `.venv/bin/python examples/05_episode_diff_drive/run.py` | Episode API from Python |
 | ROS 2 bridge | `adapters/ros2/rne_ros2_bridge/smoke_test.sh` | Publishes `/clock`, `/points`, `/tf` (Python) |

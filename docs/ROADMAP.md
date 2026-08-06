@@ -1,5 +1,20 @@
 # Roadmap
 
+## OSS-compatible simulation workflow
+
+The next product arc closes the common workflow gap with open simulators such
+as Choreonoid, Gazebo Sim, and AWSIM: one asset description should be runnable
+headlessly, controllable through typed I/O, recordable, replayable, and
+inspectable without a commercial engine. The baseline and scope are tracked in
+[OSS_PARITY.md](OSS_PARITY.md).
+
+| Phase | Area | Deliverable | Status |
+|---|---|---|---|
+| A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |
+| B | Run manifest | Versioned `.rne.run.toml` for scene, clock, seed, controller, and determinism output | Done |
+| C | Replay artifact | Versioned `.rne-replay` recording tagged wheel/joint actions, joint state, sensor stream summaries, physics hashes, final report, CLI verification, and browser interval inspection | Done |
+| D | Standard adapters | Full sensor payload export and OpenSCENARIO/traffic adapter | In progress |
+
 ## v0.16 goal: PLATEAU urban autonomy
 
 Build a deterministic, renderer-independent urban traffic domain, then import

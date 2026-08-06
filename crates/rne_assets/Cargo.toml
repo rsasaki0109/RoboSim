@@ -1,6 +1,6 @@
 [package]
 name = "rne_assets"
-description = "RNE scene and robot asset formats (.rne.scene.toml / .rne.robot.toml)"
+description = "RNE scene, robot, and run manifest asset formats"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

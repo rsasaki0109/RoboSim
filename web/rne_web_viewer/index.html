@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RNE Web Viewer — mm_minimal</title>
+    <title>RNE Web Viewer — replay inspector</title>
     <style>
       html,
       body {
@@ -40,6 +40,106 @@
         pointer-events: none;
         user-select: none;
       }
+
+      #replay-panel {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        width: min(390px, calc(100vw - 48px));
+        padding: 12px;
+        border: 1px solid rgba(170, 205, 235, 0.25);
+        border-radius: 8px;
+        background: rgba(8, 12, 18, 0.86);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      #replay-panel h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+
+      #replay-panel label,
+      #replay-panel button,
+      #replay-panel input {
+        font: inherit;
+      }
+
+      #replay-file {
+        display: block;
+        width: 100%;
+        margin: 4px 0 8px;
+      }
+
+      #replay-range {
+        width: 100%;
+        margin: 8px 0 2px;
+      }
+
+      #replay-panel button {
+        padding: 3px 10px;
+        border: 1px solid rgba(170, 205, 235, 0.35);
+        border-radius: 4px;
+        background: #1b2a3a;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      #replay-panel button:disabled,
+      #replay-panel input:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      #replay-status {
+        min-height: 1.4em;
+        color: #8fd3a8;
+      }
+
+      #replay-status[data-error="true"] {
+        color: #ff9e9e;
+      }
+
+      #replay-progress-track {
+        height: 4px;
+        margin: 2px 0 8px;
+        overflow: hidden;
+        border-radius: 3px;
+        background: #1d2a36;
+      }
+
+      #replay-progress {
+        width: 0;
+        height: 100%;
+        background: #72b7ff;
+        transition: width 60ms linear;
+      }
+
+      #replay-details {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 2px 8px;
+        margin: 8px 0 0;
+      }
+
+      #replay-details dt {
+        color: #91a7bb;
+      }
+
+      #replay-details dd {
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #replay-note {
+        display: block;
+        margin-top: 8px;
+        color: #91a7bb;
+        font-size: 11px;
+      }
     </style>
   </head>
   <body>
@@ -48,5 +148,34 @@
       RNE Web Viewer — drag to orbit, scroll to zoom<br />
       Arm animation uses a deterministic frame counter (not wall-clock sim time).
     </div>
+    <section id="replay-panel" aria-label="Replay inspector">
+      <h2>Replay inspector</h2>
+      <label for="replay-file">Open a .rne-replay file</label>
+      <input id="replay-file" type="file" accept=".rne-replay,.json" />
+      <div id="replay-status">No replay loaded</div>
+      <input id="replay-range" type="range" min="0" max="0" value="0" disabled />
+      <div id="replay-progress-track" aria-hidden="true">
+        <div id="replay-progress"></div>
+      </div>
+      <button id="replay-play" type="button" disabled>Play</button>
+      <dl id="replay-details">
+        <dt>Scene</dt>
+        <dd id="replay-scene">—</dd>
+        <dt>Clock</dt>
+        <dd id="replay-clock">—</dd>
+        <dt>Frame</dt>
+        <dd id="replay-frame">no frame</dd>
+        <dt>Action</dt>
+        <dd id="replay-action">—</dd>
+        <dt>Observation</dt>
+        <dd id="replay-observation">—</dd>
+        <dt>Physics hash</dt>
+        <dd id="replay-hash">—</dd>
+      </dl>
+      <small id="replay-note">
+        Inspection only: recorded frames are read in the browser; policy and physics are not rerun.
+      </small>
+    </section>
+    <script src="replay.js"></script>
   </body>
 </html>
