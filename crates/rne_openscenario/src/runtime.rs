@@ -11,8 +11,9 @@ use rne_core::{SimDuration, SimTime};
 use rne_ecs::{EntityUuid, Name, World};
 use rne_math::Hertz;
 use rne_traffic::{
-    shortest_lane_route, TrafficActor, TrafficActorKind, TrafficId, TrafficNetwork, TrafficPose,
-    TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime, TrafficSignalControls,
+    shortest_lane_route, SignalAspect, SignalProgram, TrafficActor, TrafficActorKind, TrafficId,
+    TrafficNetwork, TrafficPose, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower,
+    TrafficRuntime, TrafficSignalControl, TrafficSignalControls,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -132,10 +133,10 @@ pub fn execute_scenario(
             .insert(parallel_route.clone())
             .map_err(|error| ScenarioError::Invalid(format!("insert parallel route: {error}")))?;
     }
-    let controls = TrafficSignalControls::default();
     let mut runtime = TrafficRuntime::default();
     let delta = SimDuration::from_hertz(Hertz::new(options.hz));
     let schedules = build_action_schedules(document);
+    let (mut controls, signal_schedule) = build_signal_schedule(network, &route)?;
 
     let mut violations = 0;
     let mut collisions = 0;
@@ -144,6 +145,7 @@ pub fn execute_scenario(
     for step in 1..=options.steps {
         let sim_time = SimTime::from_ticks(step * delta.ticks());
         apply_due_actions(&mut world, &schedules, sim_time, parallel_route.as_ref());
+        apply_signal_cycle(&mut controls, &signal_schedule, sim_time);
         let report = rne_traffic::advance_controlled_kinematic_traffic(
             &mut world,
             &routes,
@@ -327,6 +329,114 @@ fn parallel_route_for(
     TrafficRoute::new(route_id, offset_path, primary.is_closed())
         .map(Some)
         .map_err(|error| ScenarioError::Invalid(format!("parallel route: {error}")))
+}
+
+/// One network signal's fixed-time program tied to a route stop-line control.
+struct SignalSchedule {
+    /// Control id in the [`TrafficSignalControls`].
+    control_id: TrafficId,
+    /// Signal-group id whose aspect the control follows.
+    group_id: TrafficId,
+    /// Deterministic fixed-time program advanced by the run clock.
+    program: SignalProgram,
+}
+
+/// Derives stop-line controls and cyclic aspects from the network's signals.
+///
+/// Only signals whose groups control a connection on the derived route are
+/// wired, using the group's nearest route connection as its stop distance.
+/// Signals without a fixed-time program are skipped.
+fn build_signal_schedule(
+    network: &TrafficNetwork,
+    route: &TrafficRoute,
+) -> Result<(TrafficSignalControls, Vec<SignalSchedule>), ScenarioError> {
+    let mut controls = TrafficSignalControls::default();
+    let mut schedule = Vec::new();
+    for signal in &network.signals {
+        let Some(program) = &signal.program else {
+            continue;
+        };
+        for group in &signal.groups {
+            let stop_distance_m = group
+                .connection_ids
+                .iter()
+                .filter_map(|connection_id| {
+                    route
+                        .movements()
+                        .iter()
+                        .find(|movement| &movement.connection_id == connection_id)
+                })
+                .map(|movement| movement.entry_distance_m)
+                .min_by(f64::total_cmp);
+            let Some(stop_distance_m) = stop_distance_m else {
+                continue;
+            };
+            let control_id =
+                TrafficId::new(format!("{}:{}", signal.id.as_str(), group.id.as_str()))
+                    .expect("stable signal control ID");
+            let initial_aspect = program
+                .phases
+                .first()
+                .and_then(|phase| {
+                    phase
+                        .group_aspects
+                        .iter()
+                        .find(|aspect| aspect.group_id == group.id)
+                        .map(|aspect| aspect.aspect)
+                })
+                .unwrap_or(SignalAspect::Red);
+            controls
+                .insert(TrafficSignalControl {
+                    id: control_id.clone(),
+                    route_id: route.id().clone(),
+                    stop_distance_m,
+                    aspect: initial_aspect,
+                })
+                .map_err(|error| {
+                    ScenarioError::Invalid(format!("insert signal control: {error}"))
+                })?;
+            schedule.push(SignalSchedule {
+                control_id,
+                group_id: group.id.clone(),
+                program: program.clone(),
+            });
+        }
+    }
+    Ok((controls, schedule))
+}
+
+/// Advances each signal's aspect to its active program phase at `sim_time`.
+fn apply_signal_cycle(
+    controls: &mut TrafficSignalControls,
+    schedule: &[SignalSchedule],
+    sim_time: SimTime,
+) {
+    let time_s = sim_time.as_seconds().value();
+    for entry in schedule {
+        let cycle_s = entry
+            .program
+            .phases
+            .iter()
+            .map(|phase| phase.duration_s)
+            .sum::<f64>();
+        if !cycle_s.is_finite() || cycle_s <= 0.0 {
+            continue;
+        }
+        let mut remaining_s = (time_s - entry.program.offset_s).rem_euclid(cycle_s);
+        for phase in &entry.program.phases {
+            if remaining_s < phase.duration_s {
+                if let Some(aspect) = phase
+                    .group_aspects
+                    .iter()
+                    .find(|aspect| aspect.group_id == entry.group_id)
+                {
+                    let _ = controls.set_aspect(&entry.control_id, aspect.aspect);
+                }
+                break;
+            }
+            remaining_s -= phase.duration_s;
+        }
+    }
 }
 
 fn build_action_schedules(document: &ScenarioDocument) -> ActionSchedule {

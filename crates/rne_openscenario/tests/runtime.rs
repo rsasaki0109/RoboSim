@@ -6,8 +6,9 @@ use rne_openscenario::{
 };
 use rne_traffic::{
     Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame, Junction,
-    JunctionKind, Lane, LaneKind, MovementKind, Provenance, TrafficActorKind, TrafficConnection,
-    TrafficId, TrafficNetwork, TrafficSignal,
+    JunctionKind, Lane, LaneKind, MovementKind, Provenance, SignalAspect, SignalGroup,
+    SignalGroupAspect, SignalPhase, SignalProgram, TrafficActorKind, TrafficConnection, TrafficId,
+    TrafficNetwork, TrafficSignal,
 };
 use std::fs;
 use std::path::Path;
@@ -168,4 +169,83 @@ fn lane_change_switches_the_actor_to_the_parallel_route() {
     let replay =
         execute_scenario(&document, &corridor_network(), &options).expect("rerun lane-change");
     assert_eq!(result, replay, "lane change must be deterministic");
+}
+
+/// Corridor network with a fixed-time signal on the through movement.
+///
+/// The program holds Red for 4 s then Green for 1 s, cyclically, so an actor
+/// arriving before t = 4 s is held at the stop line.
+fn signaled_corridor_network() -> TrafficNetwork {
+    let mut network = corridor_network();
+    let group_id = id("runtime:signal/group-through");
+    for connection in &mut network.connections {
+        connection.signal_group_id = Some(group_id.clone());
+    }
+    network.signals = vec![TrafficSignal {
+        id: id("runtime:signal-main"),
+        provenance: synthetic("runtime-signal"),
+        junction_id: Some(id("corridor:junction")),
+        position_m: Some([0.0, 0.0, 1.75]),
+        facing_yaw_rad: Some(0.0),
+        groups: vec![SignalGroup {
+            id: group_id.clone(),
+            connection_ids: vec![id("corridor:connect-west-east")],
+        }],
+        program: Some(SignalProgram {
+            provenance: synthetic("runtime-signal-program"),
+            offset_s: 0.0,
+            phases: vec![
+                SignalPhase {
+                    id: id("runtime:signal/phase-red"),
+                    duration_s: 4.0,
+                    group_aspects: vec![SignalGroupAspect {
+                        group_id: group_id.clone(),
+                        aspect: SignalAspect::Red,
+                    }],
+                },
+                SignalPhase {
+                    id: id("runtime:signal/phase-green"),
+                    duration_s: 1.0,
+                    group_aspects: vec![SignalGroupAspect {
+                        group_id,
+                        aspect: SignalAspect::Green,
+                    }],
+                },
+            ],
+        }),
+    }];
+    network
+}
+
+#[test]
+fn network_signal_stops_then_releases_the_actor() {
+    let text = fs::read_to_string(Path::new(FIXTURE_DIR).join("signaled_speed.xosc"))
+        .expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("signaled_speed.xosc", &text).expect("parse scenario");
+    let options = ScenarioRunOptions {
+        steps: 300,
+        hz: 60.0,
+    };
+
+    let free =
+        execute_scenario(&document, &corridor_network(), &options).expect("run without signal");
+    let signaled = execute_scenario(&document, &signaled_corridor_network(), &options)
+        .expect("run with signal");
+
+    assert_eq!(
+        signaled.signal_violations, 0,
+        "the actor must respect the red"
+    );
+    assert_eq!(signaled.collisions, 0);
+    let free_x = free.final_positions_m[0][0];
+    let signaled_x = signaled.final_positions_m[0][0];
+    assert!(
+        signaled_x < free_x,
+        "a red phase should delay the actor (free_x={free_x}, signaled_x={signaled_x})"
+    );
+
+    let replay = execute_scenario(&document, &signaled_corridor_network(), &options)
+        .expect("rerun with signal");
+    assert_eq!(signaled, replay, "signal timing must be deterministic");
 }
