@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Minimal MuJoCo MJCF model importer** (`rne_mjcf`): converts a strict MJCF
+  subset (one root body tree, `hinge`/`slide` joints with `axis`/`range` under
+  the `compiler` degree or radian convention, and `box`/`sphere`/`cylinder`
+  geoms with `pos`/`rgba`) into a URDF document the existing `rne_urdf_import`
+  pipeline consumes. Body/geom rotations, free/ball/universal joints, meshes,
+  and capsules are rejected with a clear error. Golden and round-trip tests pin
+  the emitted URDF.
 - **Minimal SDF model importer** (`rne_sdf`): converts a strict Gazebo SDF
   subset (a single `<model>` of links with inertial/visual/collision geometry
   and revolute/continuous/prismatic/fixed joints) into a URDF document that the
