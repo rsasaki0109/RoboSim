@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="two_link_arm">
+    <link name="base_link">
+      <inertial>
+        <mass value="2.0"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+      </inertial>
+      <visual name="base_visual">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.4 0.2 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <diffuse>0.8 0.2 0.1 1</diffuse>
+        </material>
+      </visual>
+      <collision name="base_collision">
+        <geometry>
+          <box>
+            <size>0.4 0.2 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+    <link name="upper_link">
+      <inertial>
+        <mass value="1.0"/>
+        <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/>
+      </inertial>
+      <visual name="upper_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.5</length>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+    <link name="tip_link">
+      <inertial>
+        <mass value="0.5"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+      </inertial>
+      <visual name="tip_visual">
+        <geometry>
+          <sphere>
+            <radius>0.03</radius>
+          </sphere>
+        </geometry>
+      </visual>
+    </link>
+    <joint name="shoulder_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="upper_link"/>
+      <pose>0 0 0.05 0 0 0</pose>
+      <axis xyz="0 0 1"/>
+      <limit lower="-3.14" upper="3.14" effort="10" velocity="2"/>
+    </joint>
+    <joint name="elbow_joint" type="revolute">
+      <parent link="upper_link"/>
+      <child link="tip_link"/>
+      <pose>0 0.25 0 0 0 0</pose>
+      <axis xyz="0 0 1"/>
+      <limit lower="-1.57" upper="1.57" effort="5" velocity="1"/>
+    </joint>
+  </model>
+</sdf>

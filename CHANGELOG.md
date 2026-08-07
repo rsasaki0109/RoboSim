@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Minimal SDF model importer** (`rne_sdf`): converts a strict Gazebo SDF
+  subset (a single `<model>` of links with inertial/visual/collision geometry
+  and revolute/continuous/prismatic/fixed joints) into a URDF document that the
+  existing `rne_urdf_import` pipeline consumes. Worlds, multiple models,
+  link/model `<pose>`, and unsupported geometry are rejected with a clear error.
+  Golden and round-trip tests pin the emitted URDF.
 - **Multi-joint position trajectories**: run manifests can use a
   `joint_trajectory` controller that interpolates time-indexed position
   waypoints per named joint; the runner records the interpolated targets as the
