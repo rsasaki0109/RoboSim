@@ -11,6 +11,8 @@
 //!
 //! - `FileHeader` with `revMajor`/`revMinor` exactly `1.0`
 //! - `ParameterDeclarations` with `${name}` reference substitution
+//! - `CatalogLocations` `VehicleCatalog` directories with `CatalogReference`
+//!   entity lookup
 //! - `RoadNetwork/LogicFile@filepath` recorded as the road-network reference
 //! - `Entities/ScenarioObject` declaring `Vehicle`, `Bicycle`, or `Pedestrian`
 //! - `Storyboard/Init` `TeleportAction` `WorldPosition` spawn poses
@@ -20,7 +22,7 @@
 //! - the road network's fixed-time `TrafficSignal` programs drive stop lines
 //!   during scenario execution
 //!
-//! Catalogs and controller bindings are not yet supported.
+//! Controller bindings are not yet supported.
 //!
 //! [ASAM OpenSCENARIO 1.0]: https://www.asam.net/standards/detail/openscenario/
 
@@ -32,6 +34,7 @@ pub mod scenario;
 
 pub use parser::{
     parse_openscenario_xml, parse_openscenario_xml_file, parse_openscenario_xml_with_source,
+    parse_openscenario_xml_with_source_at,
 };
 pub use runtime::{actor_length_m, execute_scenario, ScenarioRunOptions, ScenarioRunResult};
 pub use scenario::{

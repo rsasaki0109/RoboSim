@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VehicleCatalog>
+  <Vehicle name="sedan">
+    <Performance maxSpeed="30" maxAcceleration="5" maxDeceleration="9"/>
+    <BoundingBoxes/>
+    <Axles/>
+  </Vehicle>
+</VehicleCatalog>
