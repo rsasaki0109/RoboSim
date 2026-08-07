@@ -95,6 +95,7 @@ pub fn execute_scenario(
         .next()
         .ok_or_else(|| ScenarioError::Invalid("scenario has no entities".to_string()))?;
     let route = derive_route(network, primary_kind)?;
+    let parallel_route = parallel_route_for(&route, document)?;
 
     let mut world = World::new();
     let mut spawn_order = document.entities.clone();
@@ -126,10 +127,15 @@ pub fn execute_scenario(
     routes
         .insert(route.clone())
         .map_err(|error| ScenarioError::Invalid(format!("insert route: {error}")))?;
+    if let Some(parallel_route) = &parallel_route {
+        routes
+            .insert(parallel_route.clone())
+            .map_err(|error| ScenarioError::Invalid(format!("insert parallel route: {error}")))?;
+    }
     let controls = TrafficSignalControls::default();
     let mut runtime = TrafficRuntime::default();
     let delta = SimDuration::from_hertz(Hertz::new(options.hz));
-    let schedules = build_speed_schedules(document);
+    let schedules = build_action_schedules(document);
 
     let mut violations = 0;
     let mut collisions = 0;
@@ -137,7 +143,7 @@ pub fn execute_scenario(
     let mut average_speed_m_s = 0.0;
     for step in 1..=options.steps {
         let sim_time = SimTime::from_ticks(step * delta.ticks());
-        apply_due_speed_actions(&mut world, &schedules, sim_time);
+        apply_due_actions(&mut world, &schedules, sim_time, parallel_route.as_ref());
         let report = rne_traffic::advance_controlled_kinematic_traffic(
             &mut world,
             &routes,
@@ -276,16 +282,60 @@ fn uuid_for_entity(index: usize) -> u128 {
     0x0001_0000_0000_0000_0000_0000_0000_0000 | (index as u128)
 }
 
-type SpeedSchedule = BTreeMap<String, Vec<(f64, f64)>>;
+type ActionSchedule = BTreeMap<String, Vec<(f64, ScenarioAction)>>;
 
-fn build_speed_schedules(document: &ScenarioDocument) -> SpeedSchedule {
-    let mut schedules: SpeedSchedule = BTreeMap::new();
+/// Builds the parallel route used for lane changes, when any exist.
+fn parallel_route_for(
+    primary: &TrafficRoute,
+    document: &ScenarioDocument,
+) -> Result<Option<TrafficRoute>, ScenarioError> {
+    let offset = document
+        .actions
+        .iter()
+        .filter_map(|action| match action.action {
+            ScenarioAction::LaneChange { target_lane_offset } => Some(target_lane_offset),
+            _ => None,
+        })
+        .next();
+    let Some(offset) = offset else {
+        return Ok(None);
+    };
+    let path = primary.path_m();
+    let mut offset_path = path.to_vec();
+    const LANE_WIDTH_M: f64 = 3.5;
+    for index in 0..path.len() {
+        let (prev, next) = if path.len() == 1 {
+            (path[0], path[0])
+        } else if index == 0 {
+            (path[0], path[1])
+        } else if index + 1 == path.len() {
+            (path[index - 1], path[index])
+        } else {
+            (path[index - 1], path[index + 1])
+        };
+        let dx = next[0] - prev[0];
+        let dz = next[2] - prev[2];
+        let length = (dx * dx + dz * dz).sqrt();
+        if length <= 1e-9 {
+            continue;
+        }
+        let sign = if offset > 0 { 1.0 } else { -1.0 };
+        offset_path[index][0] += -dz / length * LANE_WIDTH_M * sign;
+        offset_path[index][2] += dx / length * LANE_WIDTH_M * sign;
+    }
+    let route_id = TrafficId::new("route:scenario:parallel").expect("stable route ID");
+    TrafficRoute::new(route_id, offset_path, primary.is_closed())
+        .map(Some)
+        .map_err(|error| ScenarioError::Invalid(format!("parallel route: {error}")))
+}
+
+fn build_action_schedules(document: &ScenarioDocument) -> ActionSchedule {
+    let mut schedules: ActionSchedule = BTreeMap::new();
     for action in &document.actions {
-        let ScenarioAction::AbsoluteSpeed { target_m_s } = action.action;
         schedules
             .entry(action.entity.clone())
             .or_default()
-            .push((action.start_time_s, target_m_s));
+            .push((action.start_time_s, action.action));
     }
     for entry in schedules.values_mut() {
         entry.sort_by(|left, right| left.0.total_cmp(&right.0));
@@ -293,20 +343,14 @@ fn build_speed_schedules(document: &ScenarioDocument) -> SpeedSchedule {
     schedules
 }
 
-fn apply_due_speed_actions(world: &mut World, schedules: &SpeedSchedule, sim_time: SimTime) {
+fn apply_due_actions(
+    world: &mut World,
+    schedules: &ActionSchedule,
+    sim_time: SimTime,
+    parallel_route: Option<&TrafficRoute>,
+) {
     let now_s = sim_time.as_seconds().value();
     for (entity_name, steps) in schedules {
-        let mut due_target_m_s = None;
-        for (start_time_s, target_m_s) in steps {
-            if *start_time_s <= now_s {
-                due_target_m_s = Some(*target_m_s);
-            } else {
-                break;
-            }
-        }
-        let Some(target_m_s) = due_target_m_s else {
-            continue;
-        };
         let Some(entity) = world.iter_entities().find_map(|entity_ref| {
             let entity = entity_ref.id();
             let name = world.get::<Name>(entity)?;
@@ -318,8 +362,23 @@ fn apply_due_speed_actions(world: &mut World, schedules: &SpeedSchedule, sim_tim
         }) else {
             continue;
         };
-        if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
-            follower.desired_speed_m_s = target_m_s;
+        for (start_time_s, action) in steps {
+            if *start_time_s > now_s {
+                break;
+            }
+            let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) else {
+                continue;
+            };
+            match action {
+                ScenarioAction::AbsoluteSpeed { target_m_s } => {
+                    follower.desired_speed_m_s = *target_m_s;
+                }
+                ScenarioAction::LaneChange { .. } => {
+                    if let Some(parallel_route) = parallel_route {
+                        follower.route_id = parallel_route.id().clone();
+                    }
+                }
+            }
         }
     }
 }

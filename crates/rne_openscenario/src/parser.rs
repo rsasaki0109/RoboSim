@@ -175,20 +175,28 @@ fn parse_storyboard_actions<'a, 'input>(
                         "`SimulationTimeCondition@value` must not be empty".to_string(),
                     )
                 })?;
-            let speed_action =
-                descendant_element(event, "AbsoluteTargetSpeed").ok_or_else(|| {
-                    ScenarioError::UnsupportedElement {
-                        element: "Event".to_string(),
-                        reason: format!(
-                            "event for entity `{entity}` requires an `AbsoluteTargetSpeed` action"
-                        ),
-                    }
-                })?;
-            let target_m_s = parse_f64_attribute(&speed_action, "value", "AbsoluteTargetSpeed")?;
+            let action = if let Some(speed_action) =
+                descendant_element(event, "AbsoluteTargetSpeed")
+            {
+                let target_m_s =
+                    parse_f64_attribute(&speed_action, "value", "AbsoluteTargetSpeed")?;
+                ScenarioAction::AbsoluteSpeed { target_m_s }
+            } else if let Some(lane_change) = descendant_element(event, "RelativeTargetLane") {
+                let target_lane_offset =
+                    parse_i64_attribute(&lane_change, "value", "RelativeTargetLane")?;
+                ScenarioAction::LaneChange { target_lane_offset }
+            } else {
+                return Err(ScenarioError::UnsupportedElement {
+                    element: "Event".to_string(),
+                    reason: format!(
+                        "event for entity `{entity}` requires an `AbsoluteTargetSpeed` or `RelativeTargetLane` action"
+                    ),
+                });
+            };
             actions.push(ScenarioTimedAction {
                 entity: entity.clone(),
                 start_time_s,
-                action: ScenarioAction::AbsoluteSpeed { target_m_s },
+                action,
             });
         }
     }
@@ -236,6 +244,19 @@ fn parse_u32_attribute<'a, 'input>(
             "`{element}@{attribute}` must be an unsigned integer"
         ))
     })
+}
+
+fn parse_i64_attribute<'a, 'input>(
+    node: &Node<'a, 'input>,
+    attribute: &str,
+    element: &str,
+) -> Result<i64, ScenarioError> {
+    let value = node
+        .attribute(attribute)
+        .ok_or_else(|| ScenarioError::Invalid(format!("missing `{element}@{attribute}`")))?;
+    value
+        .parse::<i64>()
+        .map_err(|_| ScenarioError::Invalid(format!("`{element}@{attribute}` must be an integer")))
 }
 
 fn parse_f64_attribute<'a, 'input>(

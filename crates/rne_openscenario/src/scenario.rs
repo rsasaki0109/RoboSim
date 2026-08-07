@@ -87,6 +87,15 @@ pub enum ScenarioAction {
         /// Target speed in metres per second.
         target_m_s: f64,
     },
+    /// Lateral lane change to a relative lane offset.
+    ///
+    /// The executor switches the actor to a synthetic parallel route offset
+    /// one lane width to the right (+1) or left (-1); the manoeuvre is a snap,
+    /// not a continuous lateral animation.
+    LaneChange {
+        /// Relative target lane offset, `+1` or `-1`.
+        target_lane_offset: i64,
+    },
 }
 
 /// A storyboard action scheduled at a simulation time.
@@ -213,6 +222,14 @@ impl ScenarioDocument {
                     if !target_m_s.is_finite() || *target_m_s < 0.0 {
                         return Err(ScenarioError::Invalid(format!(
                             "action for entity `{}` must have a finite non-negative speed target",
+                            action.entity
+                        )));
+                    }
+                }
+                ScenarioAction::LaneChange { target_lane_offset } => {
+                    if *target_lane_offset != 1 && *target_lane_offset != -1 {
+                        return Err(ScenarioError::Invalid(format!(
+                            "action for entity `{}` lane change offset must be +1 or -1",
                             action.entity
                         )));
                     }

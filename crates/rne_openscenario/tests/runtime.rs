@@ -141,3 +141,31 @@ fn empty_scenario_is_rejected() {
     .expect_err("empty scenario");
     assert!(error.to_string().contains("no entities"));
 }
+
+#[test]
+fn lane_change_switches_the_actor_to_the_parallel_route() {
+    let text =
+        fs::read_to_string(Path::new(FIXTURE_DIR).join("lane_change.xosc")).expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("lane_change.xosc", &text).expect("parse scenario");
+    assert_eq!(document.actions.len(), 2);
+
+    let options = ScenarioRunOptions {
+        steps: 300,
+        hz: 60.0,
+    };
+    let result = execute_scenario(&document, &corridor_network(), &options)
+        .expect("run lane-change scenario");
+
+    let final_z = result.final_positions_m[0][2];
+    // The corridor sits at z = 1.75; a +1 lane change offsets it one lane width
+    // (3.5 m) laterally.
+    assert!(
+        (final_z - 5.25).abs() < 1.0,
+        "lane change should move the ego laterally (got z={final_z})"
+    );
+
+    let replay =
+        execute_scenario(&document, &corridor_network(), &options).expect("rerun lane-change");
+    assert_eq!(result, replay, "lane change must be deterministic");
+}
