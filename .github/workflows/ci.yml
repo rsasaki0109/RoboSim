@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual run from the Actions UI; useful when PR push events are dropped.
+  workflow_dispatch:
 
 # The former single `workspace` job ran every stage in sequence with no caching and
 # took 26-34 minutes cold. The stages are independent, so they run as parallel jobs
