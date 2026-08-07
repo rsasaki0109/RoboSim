@@ -1,0 +1,18 @@
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+seed = 44
+
+[clock]
+steps = 120
+hz = 60.0
+
+[controller]
+kind = "plugin"
+plugin = "velocity_servo"
+joint = "shoulder_joint"
+target_rad = 1.0
+gain = 2.0
+max_velocity_rad_s = 2.0
+
+[output]
+determinism_check = true

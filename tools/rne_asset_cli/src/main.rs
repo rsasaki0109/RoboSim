@@ -16,8 +16,8 @@ use rne_ecs::{Name, World};
 use rne_log::{
     ReplayAction, ReplayArtifact, ReplayClock, ReplayContact,
     ReplayControllerKind as ArtifactControllerKind, ReplayFailureKind, ReplayFinalReport,
-    ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayObservation, ReplaySensorPayload,
-    ReplaySensorPayloadData, ReplaySensorStream,
+    ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayJointVelocity, ReplayObservation,
+    ReplaySensorPayload, ReplaySensorPayloadData, ReplaySensorStream,
 };
 use rne_math::Hertz;
 use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
@@ -27,6 +27,7 @@ use rne_physics::{
 };
 use rne_physics_analytic::AnalyticBackend;
 use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_plugin::{ControllerPlugin, VelocityServoController};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
     Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, Joint, JointKind,
@@ -239,12 +240,38 @@ struct SimulationOptions<'a> {
     hz: f64,
     action: ReplayAction,
     trajectories: Vec<RunJointTrajectory>,
+    plugin: Option<PluginControllerConfig>,
     seed_override: Option<u64>,
     determinism_check: bool,
     replay_out: Option<&'a Path>,
     replay_controller: ArtifactControllerKind,
     sensor_subscriptions: Vec<RunSensorSubscription>,
     physics_backend: RunPhysicsBackend,
+}
+
+/// Parameters for a [`VelocityServoController`] selected by a run manifest.
+#[derive(Clone, Debug, PartialEq)]
+struct PluginControllerConfig {
+    joint: String,
+    target_rad: f64,
+    gain: f64,
+    max_velocity_rad_s: f64,
+}
+
+impl PluginControllerConfig {
+    /// Builds the concrete controller plugin (the policy callback boundary).
+    fn build(&self) -> Result<Box<dyn ControllerPlugin>> {
+        Ok(Box::new(
+            VelocityServoController::new(
+                "velocity_servo",
+                &self.joint,
+                self.target_rad,
+                self.gain,
+                self.max_velocity_rad_s,
+            )
+            .map_err(|error| anyhow::anyhow!("{error}"))?,
+        ))
+    }
 }
 
 struct DirectActionOptions<'a> {
@@ -282,6 +309,7 @@ fn simulate_command(
             replay_controller,
             sensor_subscriptions,
             trajectories: Vec::new(),
+            plugin: None,
             physics_backend: RunPhysicsBackend::Rapier,
         },
     )
@@ -321,11 +349,25 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             ReplayAction::differential_drive(0.0),
             ArtifactControllerKind::JointTrajectory,
         ),
+        RunControllerKind::Plugin => (
+            ReplayAction::differential_drive(0.0),
+            ArtifactControllerKind::Plugin,
+        ),
     };
     let trajectories = if manifest.controller.kind == RunControllerKind::JointTrajectory {
         manifest.controller.joint_trajectories.clone()
     } else {
         Vec::new()
+    };
+    let plugin = if manifest.controller.kind == RunControllerKind::Plugin {
+        Some(PluginControllerConfig {
+            joint: manifest.controller.joint.clone(),
+            target_rad: manifest.controller.target_rad,
+            gain: manifest.controller.gain,
+            max_velocity_rad_s: manifest.controller.max_velocity_rad_s,
+        })
+    } else {
+        None
     };
     let replay_out = manifest
         .output
@@ -363,6 +405,7 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             hz: manifest.clock.hz,
             action,
             trajectories,
+            plugin,
             seed_override: manifest.seed,
             determinism_check: manifest.output.determinism_check,
             replay_out: replay_out.as_deref(),
@@ -562,6 +605,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         hz,
         action,
         trajectories,
+        plugin,
         seed_override,
         determinism_check,
         replay_out,
@@ -583,6 +627,10 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         seed_override,
         None,
         &trajectories,
+        plugin
+            .as_ref()
+            .map(PluginControllerConfig::build)
+            .transpose()?,
         &sensor_subscriptions,
         physics_backend,
     )?;
@@ -596,6 +644,10 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             seed_override,
             None,
             &trajectories,
+            plugin
+                .as_ref()
+                .map(PluginControllerConfig::build)
+                .transpose()?,
             &sensor_subscriptions,
             physics_backend,
         )?;
@@ -666,6 +718,7 @@ fn simulate_scene_with_seed(
         seed_override,
         None,
         &[],
+        None,
         &[],
         RunPhysicsBackend::Rapier,
     )
@@ -680,6 +733,7 @@ fn simulate_scene_with_action_schedule(
     seed_override: Option<u64>,
     replay_frames: Option<&[ReplayFrame]>,
     trajectories: &[RunJointTrajectory],
+    plugin: Option<Box<dyn ControllerPlugin>>,
     sensor_subscriptions: &[RunSensorSubscription],
     physics_backend: RunPhysicsBackend,
 ) -> Result<SimulationRun> {
@@ -738,6 +792,8 @@ fn simulate_scene_with_action_schedule(
             replay_frames[step_index].action.clone()
         } else if !trajectories.is_empty() {
             interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
+        } else if let Some(plugin) = &plugin {
+            plugin_joint_action(plugin.as_ref(), &world)?
         } else {
             action.clone()
         };
@@ -899,6 +955,18 @@ fn ensure_action_is_finite(action: &ReplayAction) -> Result<()> {
                 );
             }
         }
+        ReplayAction::JointVelocities { samples } => {
+            for sample in samples {
+                anyhow::ensure!(
+                    !sample.joint.trim().is_empty(),
+                    "joint velocities command name must not be empty"
+                );
+                anyhow::ensure!(
+                    sample.velocity_rad_s.is_finite(),
+                    "joint velocities command must be finite"
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -931,6 +999,27 @@ fn sample_trajectory(waypoints: &[RunTrajectoryWaypoint], t_s: f64) -> f64 {
         }
     }
     unreachable!("t_s is clamped between the first and last waypoints")
+}
+
+/// Invokes the controller plugin on the current joint state (policy callback).
+fn plugin_joint_action(plugin: &dyn ControllerPlugin, world: &World) -> Result<ReplayAction> {
+    let joint_state = capture_joint_state(world).ok_or_else(|| {
+        anyhow::anyhow!("plugin controller requires articulated joints in the scene")
+    })?;
+    let names = joint_state
+        .names
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let commands = plugin.joint_velocity_commands(&names, &joint_state.positions_rad);
+    let samples = commands
+        .into_iter()
+        .map(|(joint, velocity_rad_s)| ReplayJointVelocity {
+            joint,
+            velocity_rad_s,
+        })
+        .collect();
+    Ok(ReplayAction::JointVelocities { samples })
 }
 
 fn apply_replay_action(
@@ -996,6 +1085,20 @@ fn apply_replay_action(
                         ActuatorCommand::JointPosition {
                             joint,
                             position_rad: sample.position_rad,
+                        },
+                        sim_time,
+                    );
+                }
+            }
+        }
+        ReplayAction::JointVelocities { samples } => {
+            for sample in samples {
+                let joints = named_joint_entities(world, &sample.joint)?;
+                for joint in joints {
+                    command_buffer.push(
+                        ActuatorCommand::JointVelocity {
+                            joint,
+                            velocity_rad_s: sample.velocity_rad_s,
                         },
                         sim_time,
                     );
@@ -1325,6 +1428,7 @@ fn replay_command(path: &Path) -> Result<()> {
         Some(artifact.seed),
         Some(&artifact.frames),
         &[],
+        None,
         &[],
         RunPhysicsBackend::Rapier,
     )
@@ -1467,6 +1571,23 @@ fn replay_action_matches(expected: &ReplayAction, actual: &ReplayAction) -> bool
                     .all(|(expected, actual)| {
                         expected.joint == actual.joint
                             && replay_float_matches(expected.position_rad, actual.position_rad)
+                    })
+        }
+        (
+            ReplayAction::JointVelocities {
+                samples: expected_samples,
+            },
+            ReplayAction::JointVelocities {
+                samples: actual_samples,
+            },
+        ) => {
+            expected_samples.len() == actual_samples.len()
+                && expected_samples
+                    .iter()
+                    .zip(actual_samples)
+                    .all(|(expected, actual)| {
+                        expected.joint == actual.joint
+                            && replay_float_matches(expected.velocity_rad_s, actual.velocity_rad_s)
                     })
         }
         _ => false,
@@ -1737,6 +1858,13 @@ mod tests {
     }
 
     #[test]
+    fn plugin_controller_run_manifest_executes_deterministically() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/mm_minimal_velocity_servo.rne.run.toml");
+        run_manifest_command(&manifest).expect("run plugin controller manifest");
+    }
+
+    #[test]
     fn missing_physics_capability_is_rejected() {
         let error = verify_physics_requirements(
             RunPhysicsBackend::Rapier,
@@ -1764,6 +1892,7 @@ mod tests {
             None,
             None,
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1795,6 +1924,7 @@ mod tests {
             None,
             Some(&first.frames),
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1818,6 +1948,7 @@ mod tests {
             None,
             None,
             &[],
+            None,
             &[subscription],
             RunPhysicsBackend::Rapier,
         )
@@ -1852,6 +1983,7 @@ mod tests {
             None,
             Some(&run.frames),
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1876,6 +2008,7 @@ mod tests {
             None,
             None,
             &[],
+            None,
             &[subscription],
             RunPhysicsBackend::Rapier,
         )
@@ -1895,6 +2028,7 @@ mod tests {
             None,
             None,
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1926,6 +2060,7 @@ mod tests {
             None,
             Some(&run.frames),
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1965,6 +2100,7 @@ mod tests {
             None,
             None,
             &trajectories,
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )
@@ -1994,6 +2130,7 @@ mod tests {
             None,
             Some(&run.frames),
             &[],
+            None,
             &[],
             RunPhysicsBackend::Rapier,
         )

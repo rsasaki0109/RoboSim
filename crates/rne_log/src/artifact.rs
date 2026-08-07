@@ -63,6 +63,18 @@ pub enum ReplayControllerKind {
     JointEffort,
     /// Interpolated multi-joint position trajectories were recorded.
     JointTrajectory,
+    /// Controller-plugin velocity commands were recorded.
+    Plugin,
+}
+
+/// One joint velocity sample in a [`ReplayAction::JointVelocities`] action.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayJointVelocity {
+    /// URDF / ECS joint name.
+    pub joint: String,
+    /// Target velocity in radians per second.
+    pub velocity_rad_s: f64,
 }
 
 /// One joint position sample in a [`ReplayAction::JointPositions`] action.
@@ -103,6 +115,11 @@ pub enum ReplayAction {
         /// One position sample per commanded joint.
         samples: Vec<ReplayJointPosition>,
     },
+    /// Controller-plugin multi-joint velocity commands.
+    JointVelocities {
+        /// One velocity sample per commanded joint.
+        samples: Vec<ReplayJointVelocity>,
+    },
 }
 
 impl<'de> Deserialize<'de> for ReplayAction {
@@ -117,6 +134,7 @@ impl<'de> Deserialize<'de> for ReplayAction {
             JointVelocity { joint: String, velocity_rad_s: f64 },
             JointEffort { joint: String, effort_nm: f64 },
             JointPositions { samples: Vec<ReplayJointPosition> },
+            JointVelocities { samples: Vec<ReplayJointVelocity> },
         }
 
         #[derive(Deserialize)]
@@ -150,6 +168,7 @@ impl<'de> Deserialize<'de> for ReplayAction {
                     Self::JointEffort { joint, effort_nm }
                 }
                 TaggedAction::JointPositions { samples } => Self::JointPositions { samples },
+                TaggedAction::JointVelocities { samples } => Self::JointVelocities { samples },
             }),
             WireAction::Legacy(action) => Ok(Self::DifferentialDrive {
                 wheel_velocity_rad_s: action.wheel_velocity_rad_s,
@@ -189,6 +208,7 @@ impl ReplayAction {
             Self::JointVelocity { .. } => ReplayControllerKind::JointVelocity,
             Self::JointEffort { .. } => ReplayControllerKind::JointEffort,
             Self::JointPositions { .. } => ReplayControllerKind::JointTrajectory,
+            Self::JointVelocities { .. } => ReplayControllerKind::Plugin,
         }
     }
 
@@ -204,6 +224,7 @@ impl ReplayAction {
             } => joint.trim().is_empty() || *velocity_rad_s == 0.0,
             Self::JointEffort { joint, effort_nm } => joint.trim().is_empty() || *effort_nm == 0.0,
             Self::JointPositions { samples } => samples.is_empty(),
+            Self::JointVelocities { samples } => samples.is_empty(),
         }
     }
 }
@@ -726,6 +747,35 @@ fn validate_action(
                 }
             }
         }
+        ReplayAction::JointVelocities { samples } => {
+            if samples.is_empty() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint velocities action must not be empty"
+                )));
+            }
+            let mut names = samples
+                .iter()
+                .map(|sample| sample.joint.as_str())
+                .collect::<Vec<_>>();
+            names.sort_unstable();
+            if names.windows(2).any(|window| window[0] == window[1]) {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint velocities names must be unique"
+                )));
+            }
+            for sample in samples {
+                if sample.joint.trim().is_empty() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} joint velocities name must not be empty"
+                    )));
+                }
+                if !sample.velocity_rad_s.is_finite() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} joint velocities velocity_rad_s must be finite"
+                    )));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1057,6 +1107,20 @@ mod tests {
             ReplayControllerKind::JointTrajectory
         );
         assert!(!action.is_zero());
+    }
+
+    #[test]
+    fn joint_velocities_action_roundtrips_json() {
+        let action = ReplayAction::JointVelocities {
+            samples: vec![ReplayJointVelocity {
+                joint: "shoulder_joint".to_string(),
+                velocity_rad_s: 0.75,
+            }],
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains(r#""kind":"joint_velocities""#));
+        assert_eq!(serde_json::from_str::<ReplayAction>(&json).unwrap(), action);
+        assert_eq!(action.controller_kind(), ReplayControllerKind::Plugin);
     }
 
     #[test]

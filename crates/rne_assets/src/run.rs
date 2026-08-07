@@ -104,6 +104,8 @@ pub enum RunControllerKind {
     JointEffort,
     /// Interpolate per-joint position trajectories over simulation time.
     JointTrajectory,
+    /// Invoke a controller plugin (policy callback) each step.
+    Plugin,
 }
 
 /// Controller settings in a [`RunManifest`].
@@ -128,6 +130,18 @@ pub struct RunController {
     /// Per-joint position waypoints used by [`RunControllerKind::JointTrajectory`].
     #[serde(default)]
     pub joint_trajectories: Vec<RunJointTrajectory>,
+    /// Plugin name used by [`RunControllerKind::Plugin`].
+    #[serde(default)]
+    pub plugin: String,
+    /// Target joint angle for the velocity-servo plugin, in radians.
+    #[serde(default)]
+    pub target_rad: f64,
+    /// Proportional gain for the velocity-servo plugin.
+    #[serde(default)]
+    pub gain: f64,
+    /// Maximum commanded velocity for the velocity-servo plugin, in rad/s.
+    #[serde(default)]
+    pub max_velocity_rad_s: f64,
 }
 
 impl Default for RunController {
@@ -139,6 +153,10 @@ impl Default for RunController {
             velocity_rad_s: 0.0,
             effort_nm: 0.0,
             joint_trajectories: Vec::new(),
+            plugin: String::new(),
+            target_rad: 0.0,
+            gain: 0.0,
+            max_velocity_rad_s: 0.0,
         }
     }
 }
@@ -439,6 +457,32 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             path.display().to_string(),
             "physics.required_capabilities must be unique".to_string(),
         ));
+    }
+    if manifest.controller.kind == RunControllerKind::Plugin {
+        if manifest.controller.plugin.trim().is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.plugin must not be empty for a plugin controller",
+            ));
+        }
+        if manifest.controller.joint.trim().is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.joint must not be empty for the velocity-servo plugin",
+            ));
+        }
+        for (field, value) in [
+            ("target_rad", manifest.controller.target_rad),
+            ("gain", manifest.controller.gain),
+            ("max_velocity_rad_s", manifest.controller.max_velocity_rad_s),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(AssetError::invalid(
+                    path.display().to_string(),
+                    format!("controller.{field} must be finite and non-negative"),
+                ));
+            }
+        }
     }
     Ok(manifest)
 }
