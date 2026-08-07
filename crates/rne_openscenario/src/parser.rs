@@ -22,7 +22,9 @@ pub fn parse_openscenario_xml_with_source(
     source: &str,
     text: &str,
 ) -> Result<ScenarioDocument, ScenarioError> {
-    let document = Document::parse(text)
+    let parameters = extract_parameters(text)?;
+    let text = substitute_parameters(text, &parameters)?;
+    let document = Document::parse(&text)
         .map_err(|error| ScenarioError::Invalid(format!("XML syntax: {error}")))?;
     let root = document.root_element();
     if root.tag_name().name() != "OpenSCENARIO" {
@@ -278,4 +280,46 @@ fn parse_f64(value: &str, field: &str) -> Result<f64, ScenarioError> {
         return Err(ScenarioError::Invalid(format!("`{field}` must be finite")));
     }
     Ok(parsed)
+}
+
+/// Reads `ParameterDeclarations` into a name → value map.
+///
+/// Parameter values are substituted into `${name}` references before the
+/// document is parsed, so declared values must be plain XML attribute tokens
+/// (numbers for the numeric subset this importer accepts).
+fn extract_parameters(
+    text: &str,
+) -> Result<std::collections::HashMap<String, String>, ScenarioError> {
+    let document = Document::parse(text)
+        .map_err(|error| ScenarioError::Invalid(format!("XML syntax: {error}")))?;
+    let mut parameters = std::collections::HashMap::new();
+    for declaration in descendant_elements(document.root_element(), "ParameterDeclaration") {
+        let name = declaration.attribute("name").ok_or_else(|| {
+            ScenarioError::Invalid("`ParameterDeclaration` requires `@name`".to_string())
+        })?;
+        let value = declaration.attribute("value").ok_or_else(|| {
+            ScenarioError::Invalid("`ParameterDeclaration` requires `@value`".to_string())
+        })?;
+        if parameters
+            .insert(name.to_string(), value.to_string())
+            .is_some()
+        {
+            return Err(ScenarioError::Invalid(format!(
+                "duplicate parameter declaration `{name}`"
+            )));
+        }
+    }
+    Ok(parameters)
+}
+
+/// Replaces every `$ {name}` reference with its declared value.
+fn substitute_parameters(
+    text: &str,
+    parameters: &std::collections::HashMap<String, String>,
+) -> Result<String, ScenarioError> {
+    let mut out = text.to_string();
+    for (name, value) in parameters {
+        out = out.replace(&format!("${{{name}}}"), value);
+    }
+    Ok(out)
 }

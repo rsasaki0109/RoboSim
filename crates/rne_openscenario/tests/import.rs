@@ -113,6 +113,23 @@ fn imports_lane_change_scenario() {
 }
 
 #[test]
+fn substitutes_parameter_declarations() {
+    use rne_openscenario::ScenarioAction;
+
+    let text =
+        fs::read_to_string(Path::new(FIXTURE_DIR).join("parameters.xosc")).expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("parameters.xosc", &text).expect("parse scenario");
+
+    assert_eq!(document.actions.len(), 1);
+    assert!(matches!(
+        document.actions[0].action,
+        ScenarioAction::AbsoluteSpeed { target_m_s: 10.0 }
+    ));
+    assert_eq!(document.actions[0].start_time_s, 2.0);
+}
+
+#[test]
 fn rejects_missing_road_network() {
     let text = fixture("minimal_speed.xosc").replace(
         "<LogicFile filepath=\"assets/traffic/sanjo.rne.traffic.json\"/>",
