@@ -4,8 +4,8 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
     inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
-    validate_asset, AssetHotReloader, RunControllerKind, RunScenario, RunSensorKind,
-    RunSensorSubscription, SpawnSceneOptions, ValidatedAsset,
+    validate_asset, AssetHotReloader, RunControllerKind, RunJointTrajectory, RunScenario,
+    RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint, SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
@@ -15,8 +15,8 @@ use rne_ecs::{Name, World};
 use rne_log::{
     ReplayAction, ReplayArtifact, ReplayClock, ReplayContact,
     ReplayControllerKind as ArtifactControllerKind, ReplayFailureKind, ReplayFinalReport,
-    ReplayFrame, ReplayJointState, ReplayObservation, ReplaySensorPayload, ReplaySensorPayloadData,
-    ReplaySensorStream,
+    ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayObservation, ReplaySensorPayload,
+    ReplaySensorPayloadData, ReplaySensorStream,
 };
 use rne_math::Hertz;
 use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
@@ -233,6 +233,7 @@ struct SimulationOptions<'a> {
     steps: u64,
     hz: f64,
     action: ReplayAction,
+    trajectories: Vec<RunJointTrajectory>,
     seed_override: Option<u64>,
     determinism_check: bool,
     replay_out: Option<&'a Path>,
@@ -274,6 +275,7 @@ fn simulate_command(
             replay_out,
             replay_controller,
             sensor_subscriptions,
+            trajectories: Vec::new(),
         },
     )
 }
@@ -308,6 +310,15 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             ),
             ArtifactControllerKind::JointEffort,
         ),
+        RunControllerKind::JointTrajectory => (
+            ReplayAction::differential_drive(0.0),
+            ArtifactControllerKind::JointTrajectory,
+        ),
+    };
+    let trajectories = if manifest.controller.kind == RunControllerKind::JointTrajectory {
+        manifest.controller.joint_trajectories.clone()
+    } else {
+        Vec::new()
     };
     let replay_out = manifest
         .output
@@ -326,6 +337,7 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             steps: manifest.clock.steps,
             hz: manifest.clock.hz,
             action,
+            trajectories,
             seed_override: manifest.seed,
             determinism_check: manifest.output.determinism_check,
             replay_out: replay_out.as_deref(),
@@ -401,6 +413,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         steps,
         hz,
         action,
+        trajectories,
         seed_override,
         determinism_check,
         replay_out,
@@ -420,6 +433,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         action.clone(),
         seed_override,
         None,
+        &trajectories,
         &sensor_subscriptions,
     )?;
     print_simulation_report(path, &run.report, determinism_check);
@@ -431,6 +445,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             action,
             seed_override,
             None,
+            &trajectories,
             &sensor_subscriptions,
         )?;
         anyhow::ensure!(
@@ -500,9 +515,11 @@ fn simulate_scene_with_seed(
         seed_override,
         None,
         &[],
+        &[],
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn simulate_scene_with_action_schedule(
     path: &Path,
     steps: u64,
@@ -510,6 +527,7 @@ fn simulate_scene_with_action_schedule(
     action: ReplayAction,
     seed_override: Option<u64>,
     replay_frames: Option<&[ReplayFrame]>,
+    trajectories: &[RunJointTrajectory],
     sensor_subscriptions: &[RunSensorSubscription],
 ) -> Result<SimulationRun> {
     if let Some(replay_frames) = replay_frames {
@@ -565,6 +583,8 @@ fn simulate_scene_with_action_schedule(
             let step_index = usize::try_from(step)
                 .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
             replay_frames[step_index].action.clone()
+        } else if !trajectories.is_empty() {
+            interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
         } else {
             action.clone()
         };
@@ -723,8 +743,50 @@ fn ensure_action_is_finite(action: &ReplayAction) -> Result<()> {
             );
             anyhow::ensure!(effort_nm.is_finite(), "joint effort command must be finite");
         }
+        ReplayAction::JointPositions { samples } => {
+            for sample in samples {
+                anyhow::ensure!(
+                    !sample.joint.trim().is_empty(),
+                    "joint positions command name must not be empty"
+                );
+                anyhow::ensure!(
+                    sample.position_rad.is_finite(),
+                    "joint positions command must be finite"
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn interpolate_joint_positions(trajectories: &[RunJointTrajectory], t_s: f64) -> ReplayAction {
+    let samples = trajectories
+        .iter()
+        .map(|trajectory| ReplayJointPosition {
+            joint: trajectory.joint.clone(),
+            position_rad: sample_trajectory(&trajectory.waypoints, t_s),
+        })
+        .collect();
+    ReplayAction::JointPositions { samples }
+}
+
+fn sample_trajectory(waypoints: &[RunTrajectoryWaypoint], t_s: f64) -> f64 {
+    if t_s <= waypoints[0].t_s {
+        return waypoints[0].position_rad;
+    }
+    let last = waypoints.last().expect("validated waypoints");
+    if t_s >= last.t_s {
+        return last.position_rad;
+    }
+    for window in waypoints.windows(2) {
+        if t_s >= window[0].t_s && t_s <= window[1].t_s {
+            let span_s = window[1].t_s - window[0].t_s;
+            let fraction = (t_s - window[0].t_s) / span_s;
+            return window[0].position_rad
+                + fraction * (window[1].position_rad - window[0].position_rad);
+        }
+    }
+    unreachable!("t_s is clamped between the first and last waypoints")
 }
 
 fn apply_replay_action(
@@ -780,6 +842,20 @@ fn apply_replay_action(
                     },
                     sim_time,
                 );
+            }
+        }
+        ReplayAction::JointPositions { samples } => {
+            for sample in samples {
+                let joints = named_joint_entities(world, &sample.joint)?;
+                for joint in joints {
+                    command_buffer.push(
+                        ActuatorCommand::JointPosition {
+                            joint,
+                            position_rad: sample.position_rad,
+                        },
+                        sim_time,
+                    );
+                }
             }
         }
     }
@@ -1105,6 +1181,7 @@ fn replay_command(path: &Path) -> Result<()> {
         Some(artifact.seed),
         Some(&artifact.frames),
         &[],
+        &[],
     )
     .with_context(|| format!("replay scene {}", scene_path.display()))?;
 
@@ -1229,6 +1306,23 @@ fn replay_action_matches(expected: &ReplayAction, actual: &ReplayAction) -> bool
             },
         ) => {
             expected_joint == actual_joint && replay_float_matches(*expected_effort, *actual_effort)
+        }
+        (
+            ReplayAction::JointPositions {
+                samples: expected_samples,
+            },
+            ReplayAction::JointPositions {
+                samples: actual_samples,
+            },
+        ) => {
+            expected_samples.len() == actual_samples.len()
+                && expected_samples
+                    .iter()
+                    .zip(actual_samples)
+                    .all(|(expected, actual)| {
+                        expected.joint == actual.joint
+                            && replay_float_matches(expected.position_rad, actual.position_rad)
+                    })
         }
         _ => false,
     }
@@ -1414,8 +1508,8 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_failure, ensure_replay_frames, replay_command, run_manifest_command,
-        simulate_scene, simulate_scene_with_action_schedule,
+        classify_failure, ensure_replay_frames, interpolate_joint_positions, replay_command,
+        run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
     };
     use rne_assets::{RunSensorKind, RunSensorSubscription};
     use rne_log::ReplayAction;
@@ -1480,8 +1574,9 @@ mod tests {
         let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_minimal.rne.scene.toml");
         let action = ReplayAction::joint_velocity("shoulder_joint", 0.5);
-        let first = simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None, &[])
-            .expect("joint simulation");
+        let first =
+            simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None, &[], &[])
+                .expect("joint simulation");
 
         let first_frame = first.frames.first().expect("first frame");
         assert_eq!(
@@ -1509,6 +1604,7 @@ mod tests {
             None,
             Some(&first.frames),
             &[],
+            &[],
         )
         .expect("joint replay");
         assert_eq!(first, replay);
@@ -1529,6 +1625,7 @@ mod tests {
             ReplayAction::differential_drive(0.0),
             None,
             None,
+            &[],
             &[subscription],
         )
         .expect("camera payload simulation");
@@ -1562,6 +1659,7 @@ mod tests {
             None,
             Some(&run.frames),
             &[],
+            &[],
         )
         .expect("camera replay");
         assert_eq!(replay.report, run.report);
@@ -1583,6 +1681,7 @@ mod tests {
             ReplayAction::differential_drive(0.0),
             None,
             None,
+            &[],
             &[subscription],
         )
         .expect_err("unknown sensor must be rejected");
@@ -1600,6 +1699,7 @@ mod tests {
             ReplayAction::differential_drive(0.0),
             None,
             None,
+            &[],
             &[],
         )
         .expect("contact simulation");
@@ -1630,10 +1730,77 @@ mod tests {
             None,
             Some(&run.frames),
             &[],
+            &[],
         )
         .expect("contact replay");
         assert_eq!(replay.report, run.report);
         ensure_replay_frames(&run.frames, &replay.frames).expect("contact frames match");
+    }
+
+    #[test]
+    fn joint_trajectory_interpolates_and_replays() {
+        use rne_assets::{RunJointTrajectory, RunTrajectoryWaypoint};
+
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let trajectories = vec![RunJointTrajectory {
+            joint: "shoulder_joint".to_string(),
+            waypoints: vec![
+                RunTrajectoryWaypoint {
+                    t_s: 0.0,
+                    position_rad: 0.0,
+                },
+                RunTrajectoryWaypoint {
+                    t_s: 0.5,
+                    position_rad: 1.0,
+                },
+                RunTrajectoryWaypoint {
+                    t_s: 1.0,
+                    position_rad: 0.0,
+                },
+            ],
+        }];
+        let run = simulate_scene_with_action_schedule(
+            &scene,
+            60,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &trajectories,
+            &[],
+        )
+        .expect("trajectory simulation");
+
+        assert_eq!(
+            run.frames[0].action,
+            interpolate_joint_positions(&trajectories, 0.0)
+        );
+        let mid = &run.frames[30].action;
+        let ReplayAction::JointPositions { samples } = mid else {
+            panic!("expected joint positions action, got {mid:?}");
+        };
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].joint, "shoulder_joint");
+        assert!(
+            (samples[0].position_rad - 1.0).abs() < 1e-6,
+            "mid trajectory should approach the peak (got {})",
+            samples[0].position_rad
+        );
+
+        let replay = simulate_scene_with_action_schedule(
+            &scene,
+            60,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            Some(&run.frames),
+            &[],
+            &[],
+        )
+        .expect("trajectory replay");
+        assert_eq!(replay.report, run.report);
+        ensure_replay_frames(&run.frames, &replay.frames).expect("trajectory frames match");
     }
 
     #[test]

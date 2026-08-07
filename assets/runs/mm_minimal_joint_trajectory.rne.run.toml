@@ -1,0 +1,22 @@
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+seed = 44
+
+[clock]
+steps = 120
+hz = 60.0
+
+[controller]
+kind = "joint_trajectory"
+
+[[controller.joint_trajectories]]
+joint = "shoulder_joint"
+waypoints = [
+    { t_s = 0.0, position_rad = 0.0 },
+    { t_s = 0.5, position_rad = 1.0 },
+    { t_s = 1.0, position_rad = 0.0 },
+]
+
+[output]
+determinism_check = true
+replay_path = "../../target/runs/mm_minimal_joint_trajectory.rne-replay"

@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Multi-joint position trajectories**: run manifests can use a
+  `joint_trajectory` controller that interpolates time-indexed position
+  waypoints per named joint; the runner records the interpolated targets as the
+  frame action and they replay deterministically. Example:
+  `assets/runs/mm_minimal_joint_trajectory.rne.run.toml`.
 - **OpenSCENARIO run manifests**: run manifests can reference a scenario with
   `[scenario] xosc = "..."` (the manifest `scene` then becomes optional), and
   `rne-asset run` parses the OpenSCENARIO file, loads the road network from its

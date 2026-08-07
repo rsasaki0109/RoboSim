@@ -61,6 +61,18 @@ pub enum ReplayControllerKind {
     JointVelocity,
     /// Named joint effort commands were recorded.
     JointEffort,
+    /// Interpolated multi-joint position trajectories were recorded.
+    JointTrajectory,
+}
+
+/// One joint position sample in a [`ReplayAction::JointPositions`] action.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayJointPosition {
+    /// URDF / ECS joint name.
+    pub joint: String,
+    /// Target position in radians.
+    pub position_rad: f64,
 }
 
 /// One action sample recorded for a replay step.
@@ -86,6 +98,11 @@ pub enum ReplayAction {
         /// Target effort in newton-meters.
         effort_nm: f64,
     },
+    /// Interpolated multi-joint position targets.
+    JointPositions {
+        /// One position sample per commanded joint.
+        samples: Vec<ReplayJointPosition>,
+    },
 }
 
 impl<'de> Deserialize<'de> for ReplayAction {
@@ -99,6 +116,7 @@ impl<'de> Deserialize<'de> for ReplayAction {
             DifferentialDrive { wheel_velocity_rad_s: f64 },
             JointVelocity { joint: String, velocity_rad_s: f64 },
             JointEffort { joint: String, effort_nm: f64 },
+            JointPositions { samples: Vec<ReplayJointPosition> },
         }
 
         #[derive(Deserialize)]
@@ -131,6 +149,7 @@ impl<'de> Deserialize<'de> for ReplayAction {
                 TaggedAction::JointEffort { joint, effort_nm } => {
                     Self::JointEffort { joint, effort_nm }
                 }
+                TaggedAction::JointPositions { samples } => Self::JointPositions { samples },
             }),
             WireAction::Legacy(action) => Ok(Self::DifferentialDrive {
                 wheel_velocity_rad_s: action.wheel_velocity_rad_s,
@@ -169,6 +188,7 @@ impl ReplayAction {
             Self::DifferentialDrive { .. } => ReplayControllerKind::DifferentialDrive,
             Self::JointVelocity { .. } => ReplayControllerKind::JointVelocity,
             Self::JointEffort { .. } => ReplayControllerKind::JointEffort,
+            Self::JointPositions { .. } => ReplayControllerKind::JointTrajectory,
         }
     }
 
@@ -183,6 +203,7 @@ impl ReplayAction {
                 velocity_rad_s,
             } => joint.trim().is_empty() || *velocity_rad_s == 0.0,
             Self::JointEffort { joint, effort_nm } => joint.trim().is_empty() || *effort_nm == 0.0,
+            Self::JointPositions { samples } => samples.is_empty(),
         }
     }
 }
@@ -676,6 +697,35 @@ fn validate_action(
                 )));
             }
         }
+        ReplayAction::JointPositions { samples } => {
+            if samples.is_empty() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint positions action must not be empty"
+                )));
+            }
+            let mut names = samples
+                .iter()
+                .map(|sample| sample.joint.as_str())
+                .collect::<Vec<_>>();
+            names.sort_unstable();
+            if names.windows(2).any(|window| window[0] == window[1]) {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} joint positions names must be unique"
+                )));
+            }
+            for sample in samples {
+                if sample.joint.trim().is_empty() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} joint positions name must not be empty"
+                    )));
+                }
+                if !sample.position_rad.is_finite() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} joint positions position_rad must be finite"
+                    )));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -983,6 +1033,30 @@ mod tests {
 
         let legacy: ReplayAction = serde_json::from_str(r#"{"wheel_velocity_rad_s":6.0}"#).unwrap();
         assert_eq!(legacy, ReplayAction::differential_drive(6.0));
+    }
+
+    #[test]
+    fn joint_positions_action_roundtrips_json() {
+        let action = ReplayAction::JointPositions {
+            samples: vec![
+                ReplayJointPosition {
+                    joint: "shoulder_joint".to_string(),
+                    position_rad: 0.25,
+                },
+                ReplayJointPosition {
+                    joint: "elbow_joint".to_string(),
+                    position_rad: -0.5,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains(r#""kind":"joint_positions""#));
+        assert_eq!(serde_json::from_str::<ReplayAction>(&json).unwrap(), action);
+        assert_eq!(
+            action.controller_kind(),
+            ReplayControllerKind::JointTrajectory
+        );
+        assert!(!action.is_zero());
     }
 
     #[test]
