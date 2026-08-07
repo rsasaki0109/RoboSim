@@ -10,13 +10,15 @@
 //! rejects everything else with a clear error instead of silently dropping it:
 //!
 //! - `FileHeader` with `revMajor`/`revMinor` exactly `1.0`
+//! - `ParameterDeclarations` with `${name}` reference substitution
 //! - `RoadNetwork/LogicFile@filepath` recorded as the road-network reference
 //! - `Entities/ScenarioObject` declaring `Vehicle`, `Bicycle`, or `Pedestrian`
 //! - `Storyboard/Init` `TeleportAction` `WorldPosition` spawn poses
 //! - storyboard `SpeedAction` events with an `AbsoluteTargetSpeed` and a
-//!   `SimulationTimeCondition` start time
+//!   `SimulationTimeCondition` start time, and `LaneChangeAction` events with a
+//!   `RelativeTargetLane` offset
 //!
-//! Parameters, catalogs, controller bindings, routes, and non-speed actions
+//! Catalogs, controller bindings, routes, and non-speed/lane-change actions
 //! are not yet supported.
 //!
 //! [ASAM OpenSCENARIO 1.0]: https://www.asam.net/standards/detail/openscenario/

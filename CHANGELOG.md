@@ -6,6 +6,9 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO parameter substitution**: `ParameterDeclarations` values are
+  substituted into `${name}` references before parsing, so action targets can
+  be parameterized. Duplicate declarations are rejected.
 - **OpenSCENARIO lane-change actions**: the importer parses `LateralAction`
   `LaneChangeAction` `RelativeTargetLane` events and the executor switches the
   actor to a synthetic parallel route (one lane width lateral, snapped) at the
