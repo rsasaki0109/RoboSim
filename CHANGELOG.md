@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Minimal OpenSCENARIO 1.0 importer** (`rne_openscenario`): parses a strict
+  OpenSCENARIO 1.0 subset — `FileHeader` 1.0, `RoadNetwork/LogicFile` road
+  reference, `Entities` vehicles/bicycles/pedestrians, `Init` teleport spawn
+  poses, and storyboard `SpeedAction` events with `AbsoluteTargetSpeed` and a
+  `SimulationTimeCondition` — into a versioned `.rne.scenario.json` document.
+  Unsupported elements are rejected with a clear error; golden and round-trip
+  tests pin the canonical JSON.
 - **Contact and failure annotations**: the replay artifact now records per-step
   contact statistics (active pair count, summed and max normal impulse) and the
   final report annotates the run outcome with the maximum concurrent contact

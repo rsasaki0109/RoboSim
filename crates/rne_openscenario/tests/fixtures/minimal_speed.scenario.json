@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "source": "minimal_speed.xosc",
+  "road_network_logic_file": "assets/traffic/sanjo.rne.traffic.json",
+  "entities": [
+    {
+      "name": "ego",
+      "kind": "motor_vehicle",
+      "initial_world_position_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_heading_rad": 1.5707963267948966
+    },
+    {
+      "name": "cyclist",
+      "kind": "bicycle",
+      "initial_world_position_m": null,
+      "initial_heading_rad": null
+    },
+    {
+      "name": "walker",
+      "kind": "pedestrian",
+      "initial_world_position_m": null,
+      "initial_heading_rad": null
+    }
+  ],
+  "actions": [
+    {
+      "entity": "ego",
+      "start_time_s": 2.0,
+      "action": {
+        "kind": "absolute_speed",
+        "target_m_s": 10.0
+      }
+    }
+  ]
+}

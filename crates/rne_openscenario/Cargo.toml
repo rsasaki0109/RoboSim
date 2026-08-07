@@ -1,0 +1,13 @@
+[package]
+name = "rne_openscenario"
+description = "Minimal OpenSCENARIO 1.0 scenario import for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+roxmltree = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

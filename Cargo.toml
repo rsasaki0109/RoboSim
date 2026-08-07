@@ -18,6 +18,7 @@ members = [
   "crates/rne_py",
   "crates/rne_plateau",
   "crates/rne_traffic",
+  "crates/rne_openscenario",
   "crates/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
   "examples/00_hello_world",
