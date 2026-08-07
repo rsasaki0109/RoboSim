@@ -15,12 +15,12 @@
 //! - `Entities/ScenarioObject` declaring `Vehicle`, `Bicycle`, or `Pedestrian`
 //! - `Storyboard/Init` `TeleportAction` `WorldPosition` spawn poses
 //! - storyboard `SpeedAction` events with an `AbsoluteTargetSpeed` and a
-//!   `SimulationTimeCondition` start time, and `LaneChangeAction` events with a
-//!   `RelativeTargetLane` offset
+//!   `SimulationTimeCondition` start time, `LaneChangeAction` events with a
+//!   `RelativeTargetLane` offset, and `AssignRouteAction` waypoint routes
 //! - the road network's fixed-time `TrafficSignal` programs drive stop lines
 //!   during scenario execution
 //!
-//! Catalogs, controller bindings, and routes are not yet supported.
+//! Catalogs and controller bindings are not yet supported.
 //!
 //! [ASAM OpenSCENARIO 1.0]: https://www.asam.net/standards/detail/openscenario/
 

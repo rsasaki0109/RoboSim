@@ -249,3 +249,33 @@ fn network_signal_stops_then_releases_the_actor() {
         .expect("rerun with signal");
     assert_eq!(signaled, replay, "signal timing must be deterministic");
 }
+
+#[test]
+fn assigned_route_follows_scripted_waypoints() {
+    let text = fs::read_to_string(Path::new(FIXTURE_DIR).join("assigned_route.xosc"))
+        .expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("assigned_route.xosc", &text).expect("parse scenario");
+    let options = ScenarioRunOptions {
+        steps: 300,
+        hz: 60.0,
+    };
+
+    let result = execute_scenario(&document, &corridor_network(), &options)
+        .expect("run assigned-route scenario");
+
+    let final_x = result.final_positions_m[0][0];
+    let final_z = result.final_positions_m[0][2];
+    assert!(
+        final_x.abs() < 0.5,
+        "assigned route keeps the actor near x=0 (got x={final_x})"
+    );
+    assert!(
+        final_z > 5.0,
+        "the actor should travel along the assigned +z route (got z={final_z})"
+    );
+
+    let replay = execute_scenario(&document, &corridor_network(), &options)
+        .expect("rerun assigned-route scenario");
+    assert_eq!(result, replay, "assigned route must be deterministic");
+}
