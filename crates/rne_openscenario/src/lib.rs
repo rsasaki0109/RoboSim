@@ -1,0 +1,35 @@
+//! OpenSCENARIO 1.0 scenario import for Robot Native Engine.
+//!
+//! RNE's scenario workflow takes a fixed-step run (see `rne_asset_cli`) and,
+//! when needed, a traffic network (see `rne_traffic`). This crate bridges the
+//! industry-standard [ASAM OpenSCENARIO 1.0] storyboard into a versioned RNE
+//! scenario document so a scenario file can drive the same deterministic
+//! runtime as native manifests.
+//!
+//! The importer intentionally supports a strict subset of OpenSCENARIO 1.0 and
+//! rejects everything else with a clear error instead of silently dropping it:
+//!
+//! - `FileHeader` with `revMajor`/`revMinor` exactly `1.0`
+//! - `RoadNetwork/LogicFile@filepath` recorded as the road-network reference
+//! - `Entities/ScenarioObject` declaring `Vehicle`, `Bicycle`, or `Pedestrian`
+//! - `Storyboard/Init` `TeleportAction` `WorldPosition` spawn poses
+//! - storyboard `SpeedAction` events with an `AbsoluteTargetSpeed` and a
+//!   `SimulationTimeCondition` start time
+//!
+//! Parameters, catalogs, controller bindings, routes, and non-speed actions
+//! are not yet supported.
+//!
+//! [ASAM OpenSCENARIO 1.0]: https://www.asam.net/standards/detail/openscenario/
+
+#![deny(missing_docs)]
+
+pub mod parser;
+pub mod scenario;
+
+pub use parser::{
+    parse_openscenario_xml, parse_openscenario_xml_file, parse_openscenario_xml_with_source,
+};
+pub use scenario::{
+    ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,
+    ScenarioTimedAction, SCENARIO_DOCUMENT_VERSION,
+};
