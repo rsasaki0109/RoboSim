@@ -8,7 +8,8 @@ pub mod events;
 pub mod hash;
 
 pub use backend::{
-    PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
+    require_capabilities, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
+    PhysicsWorldId,
 };
 pub use components::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,

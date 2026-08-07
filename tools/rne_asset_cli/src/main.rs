@@ -4,8 +4,9 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
     inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
-    validate_asset, AssetHotReloader, RunControllerKind, RunJointTrajectory, RunScenario,
-    RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint, SpawnSceneOptions, ValidatedAsset,
+    validate_asset, AssetHotReloader, RunControllerKind, RunJointTrajectory, RunPhysicsCapability,
+    RunScenario, RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint, SpawnSceneOptions,
+    ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
@@ -20,7 +21,10 @@ use rne_log::{
 };
 use rne_math::Hertz;
 use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
-use rne_physics::{hash_physics_state, ContactEvent, PhysicsBackend, PhysicsWorldDesc};
+use rne_physics::{
+    hash_physics_state, require_capabilities, ContactEvent, PhysicsBackend, PhysicsCapability,
+    PhysicsWorldDesc,
+};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
@@ -325,6 +329,18 @@ fn run_manifest_command(path: &Path) -> Result<()> {
         .replay_path
         .as_deref()
         .map(|output_path| manifest.resolve_output_path(path, output_path));
+    if !manifest.physics.required_capabilities.is_empty() {
+        verify_physics_requirements(&manifest.physics.required_capabilities)
+            .with_context(|| format!("verify physics requirements for {}", path.display()))?;
+        let names = manifest
+            .physics
+            .required_capabilities
+            .iter()
+            .map(|capability| format!("{capability:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("physics: required capabilities [{}]", names);
+    }
     println!(
         "run manifest={} scene={} controller={:?}",
         path.display(),
@@ -345,6 +361,27 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             sensor_subscriptions: manifest.sensors.clone(),
         },
     )
+}
+
+fn verify_physics_requirements(required: &[RunPhysicsCapability]) -> Result<()> {
+    if required.is_empty() {
+        return Ok(());
+    }
+    let backend = RapierBackend::new();
+    let required_capabilities = required
+        .iter()
+        .map(|capability| match capability {
+            RunPhysicsCapability::RigidBody => PhysicsCapability::RigidBody,
+            RunPhysicsCapability::Articulation => PhysicsCapability::Articulation,
+            RunPhysicsCapability::GpuRigidBody => PhysicsCapability::GpuRigidBody,
+            RunPhysicsCapability::DeterministicStep => PhysicsCapability::DeterministicStep,
+            RunPhysicsCapability::SoftBody => PhysicsCapability::SoftBody,
+            RunPhysicsCapability::ContactForce => PhysicsCapability::ContactForce,
+            RunPhysicsCapability::RaycastBatch => PhysicsCapability::RaycastBatch,
+        })
+        .collect::<Vec<_>>();
+    require_capabilities(backend.capabilities(), &required_capabilities)
+        .map_err(|error| anyhow::anyhow!("{error}"))
 }
 
 fn run_scenario_manifest(
@@ -1510,8 +1547,9 @@ mod tests {
     use super::{
         classify_failure, ensure_replay_frames, interpolate_joint_positions, replay_command,
         run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
+        verify_physics_requirements,
     };
-    use rne_assets::{RunSensorKind, RunSensorSubscription};
+    use rne_assets::{RunPhysicsCapability, RunSensorKind, RunSensorSubscription};
     use rne_log::ReplayAction;
     use std::path::PathBuf;
 
@@ -1567,6 +1605,27 @@ mod tests {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/scenario_speed.rne.run.toml");
         run_manifest_command(&manifest).expect("run scenario manifest");
+    }
+
+    #[test]
+    fn trajectory_run_manifest_negotiates_physics_and_replays() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/mm_minimal_joint_trajectory.rne.run.toml");
+        run_manifest_command(&manifest).expect("run trajectory manifest with physics checks");
+        let replay = manifest
+            .parent()
+            .expect("manifest parent")
+            .join("../../target/runs/mm_minimal_joint_trajectory.rne-replay");
+        replay_command(&replay).expect("replay trajectory artifact");
+    }
+
+    #[test]
+    fn missing_physics_capability_is_rejected() {
+        let error = verify_physics_requirements(&[RunPhysicsCapability::GpuRigidBody])
+            .expect_err("gpu_rigid_body must be rejected");
+        assert!(error.to_string().contains("lacks required capabilities"));
+        verify_physics_requirements(&[RunPhysicsCapability::Articulation])
+            .expect("articulation is supported");
     }
 
     #[test]

@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Physics capability negotiation**: `rne_physics::require_capabilities`
+  verifies a backend's declared capabilities against a required set and reports
+  the missing ones; run manifests can declare `[physics]
+  required_capabilities = [...]` and `rne-asset run` fails with a clear error
+  before executing if the backend cannot satisfy them. Rapier now also declares
+  `deterministic_step` and `contact_force`.
 - **Minimal MuJoCo MJCF model importer** (`rne_mjcf`): converts a strict MJCF
   subset (one root body tree, `hinge`/`slide` joints with `axis`/`range` under
   the `compiler` degree or radian convention, and `box`/`sphere`/`cylinder`

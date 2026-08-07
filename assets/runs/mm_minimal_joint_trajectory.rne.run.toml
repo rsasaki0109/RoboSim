@@ -6,6 +6,9 @@ seed = 44
 steps = 120
 hz = 60.0
 
+[physics]
+required_capabilities = ["articulation", "contact_force", "deterministic_step", "rigid_body", "raycast_batch"]
+
 [controller]
 kind = "joint_trajectory"
 
