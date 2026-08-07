@@ -15,6 +15,9 @@ pub struct RunManifest {
     /// Schema version, currently [`RUN_MANIFEST_VERSION`].
     pub version: u32,
     /// Scene asset path, relative to this manifest unless absolute.
+    ///
+    /// Required unless a [`RunScenario`] is configured.
+    #[serde(default)]
     pub scene: PathBuf,
     /// Optional replacement for the scene's world seed.
     #[serde(default)]
@@ -28,6 +31,9 @@ pub struct RunManifest {
     /// Sensor subscriptions requesting full typed payload capture.
     #[serde(default)]
     pub sensors: Vec<RunSensorSubscription>,
+    /// Optional OpenSCENARIO scenario that replaces the fixed-step physics run.
+    #[serde(default)]
+    pub scenario: Option<RunScenario>,
     /// Output and replay checks for this run.
     #[serde(default)]
     pub output: RunOutput,
@@ -170,6 +176,32 @@ pub struct RunOutput {
     pub replay_path: Option<PathBuf>,
 }
 
+/// OpenSCENARIO scenario settings in a [`RunManifest`].
+///
+/// When present, the runner executes the scenario over the traffic runtime
+/// instead of the fixed-step physics simulation. The manifest `scene` is then
+/// optional; the road network comes from the scenario's `LogicFile`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunScenario {
+    /// OpenSCENARIO `.xosc` path, relative to this manifest unless absolute.
+    pub xosc: PathBuf,
+}
+
+impl RunScenario {
+    /// Resolves [`Self::xosc`] against the manifest's parent directory.
+    pub fn resolve_xosc_path(&self, manifest_path: &Path) -> PathBuf {
+        if self.xosc.is_absolute() {
+            self.xosc.clone()
+        } else {
+            manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(&self.xosc)
+        }
+    }
+}
+
 /// Loads and validates a `.rne.run.toml` manifest from disk.
 pub fn load_run_manifest(path: &Path) -> Result<RunManifest, AssetError> {
     let text = fs::read_to_string(path).map_err(|error| AssetError::Io {
@@ -197,11 +229,19 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             ),
         ));
     }
-    if manifest.scene.as_os_str().is_empty() {
+    if manifest.scenario.is_none() && manifest.scene.as_os_str().is_empty() {
         return Err(AssetError::invalid(
             path.display().to_string(),
-            "scene path must not be empty",
+            "scene path must not be empty unless a scenario is configured",
         ));
+    }
+    if let Some(scenario) = &manifest.scenario {
+        if scenario.xosc.as_os_str().is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "scenario.xosc must not be empty",
+            ));
+        }
     }
     if !manifest.clock.hz.is_finite() || manifest.clock.hz <= 0.0 {
         return Err(AssetError::invalid(
@@ -390,5 +430,40 @@ kind = "lidar"
         assert!(error
             .to_string()
             .contains("select a sensor by name or kind"));
+    }
+
+    #[test]
+    fn parses_scenario_run_without_scene() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/scenario.rne.run.toml"),
+            r#"
+version = 1
+
+[clock]
+steps = 300
+hz = 60.0
+
+[scenario]
+xosc = "../scenarios/speed.xosc"
+"#,
+        )
+        .expect("scenario manifest");
+
+        let scenario = manifest.scenario.expect("scenario configured");
+        assert_eq!(scenario.xosc, PathBuf::from("../scenarios/speed.xosc"));
+        assert_eq!(
+            scenario.resolve_xosc_path(Path::new("assets/runs/scenario.rne.run.toml")),
+            Path::new("assets/runs/../scenarios/speed.xosc")
+        );
+    }
+
+    #[test]
+    fn rejects_scenario_without_xosc() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            "version = 1\n\n[scenario]\nxosc = \"\"\n",
+        )
+        .expect_err("xosc must be required");
+        assert!(error.to_string().contains("scenario.xosc"));
     }
 }

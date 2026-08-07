@@ -79,6 +79,9 @@ cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.
 # Record full typed sensor payloads through a manifest [[sensors]] subscription
 cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml
 cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive_lidar_payload.rne-replay
+
+# Run an OpenSCENARIO speed scenario over the traffic runtime
+cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml
 ```
 
 For a complete local validation:

@@ -1,0 +1,11 @@
+version = 1
+
+[clock]
+steps = 300
+hz = 60.0
+
+[scenario]
+xosc = "../scenarios/speed.xosc"
+
+[output]
+determinism_check = true

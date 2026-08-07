@@ -18,8 +18,10 @@ rne_log = { path = "../../crates/rne_log" }
 rne_math = { path = "../../crates/rne_math" }
 rne_physics = { path = "../../crates/rne_physics" }
 rne_physics_rapier = { path = "../../crates/rne_physics_rapier" }
+rne_openscenario = { path = "../../crates/rne_openscenario" }
 rne_robot = { path = "../../crates/rne_robot" }
 rne_sensor = { path = "../../crates/rne_sensor" }
+rne_traffic = { path = "../../crates/rne_traffic" }
 serde = { workspace = true }
 serde_json = "1"
 rne_world = { path = "../../crates/rne_world" }

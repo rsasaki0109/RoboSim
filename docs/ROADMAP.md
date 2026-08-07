@@ -14,7 +14,7 @@ inspectable without a commercial engine. The baseline and scope are tracked in
 | B | Run manifest | Versioned `.rne.run.toml` for scene, clock, seed, controller, and determinism output | Done |
 | C | Replay artifact | Versioned `.rne-replay` recording tagged wheel/joint actions, joint state, sensor stream summaries, per-step contact statistics, fall/failure annotations, physics hashes, final report, CLI verification, and browser interval inspection | Done |
 | D | Standard adapters | Full typed sensor payload export and manifest-level sensor subscriptions | Done |
-| E | Standard adapters | OpenSCENARIO/traffic adapter | In progress (`rne_openscenario` importer ships a minimal OpenSCENARIO 1.0 subset → versioned scenario document, and its executor drives the document over the traffic runtime; run-manifest wiring is next) |
+| E | Standard adapters | OpenSCENARIO/traffic adapter | Done (`rne_openscenario` importer parses a minimal OpenSCENARIO 1.0 subset → versioned scenario document, its executor drives the document over the traffic runtime, and run manifests reference it via `[scenario]`) |
 
 ## v0.16 goal: PLATEAU urban autonomy
 
