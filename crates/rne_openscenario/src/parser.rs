@@ -187,11 +187,14 @@ fn parse_storyboard_actions<'a, 'input>(
                 let target_lane_offset =
                     parse_i64_attribute(&lane_change, "value", "RelativeTargetLane")?;
                 ScenarioAction::LaneChange { target_lane_offset }
+            } else if descendant_element(event, "AssignRouteAction").is_some() {
+                let waypoints = parse_assigned_route(event)?;
+                ScenarioAction::AssignRoute { waypoints }
             } else {
                 return Err(ScenarioError::UnsupportedElement {
                     element: "Event".to_string(),
                     reason: format!(
-                        "event for entity `{entity}` requires an `AbsoluteTargetSpeed` or `RelativeTargetLane` action"
+                        "event for entity `{entity}` requires an `AbsoluteTargetSpeed`, `RelativeTargetLane`, or `AssignRouteAction` action"
                     ),
                 });
             };
@@ -203,6 +206,31 @@ fn parse_storyboard_actions<'a, 'input>(
         }
     }
     Ok(actions)
+}
+
+fn parse_assigned_route(event: Node<'_, '_>) -> Result<Vec<[f64; 3]>, ScenarioError> {
+    let route = descendant_element(event, "Route").ok_or_else(|| {
+        ScenarioError::Invalid("`AssignRouteAction` requires a `<Route>`".to_string())
+    })?;
+    let mut waypoints = Vec::new();
+    for waypoint in descendant_elements(route, "Waypoint") {
+        let world_position = descendant_element(waypoint, "WorldPosition").ok_or_else(|| {
+            ScenarioError::Invalid(format!(
+                "`Waypoint` requires a `WorldPosition` (route has {} waypoints so far)",
+                waypoints.len()
+            ))
+        })?;
+        let x = parse_f64_attribute(&world_position, "x", "WorldPosition")?;
+        let y = parse_f64_attribute(&world_position, "y", "WorldPosition")?;
+        let z = parse_f64_attribute(&world_position, "z", "WorldPosition")?;
+        waypoints.push([x, y, z]);
+    }
+    if waypoints.len() < 2 {
+        return Err(ScenarioError::Invalid(
+            "`AssignRouteAction` route requires at least two waypoints".to_string(),
+        ));
+    }
+    Ok(waypoints)
 }
 
 fn child_elements<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = Node<'a, 'input>> {

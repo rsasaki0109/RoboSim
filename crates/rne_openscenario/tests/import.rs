@@ -113,6 +113,30 @@ fn imports_lane_change_scenario() {
 }
 
 #[test]
+fn imports_assigned_route_action() {
+    use rne_openscenario::ScenarioAction;
+
+    let text = fs::read_to_string(Path::new(FIXTURE_DIR).join("assigned_route.xosc"))
+        .expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("assigned_route.xosc", &text).expect("parse scenario");
+
+    let route_action = document
+        .actions
+        .iter()
+        .find(|action| matches!(action.action, ScenarioAction::AssignRoute { .. }))
+        .expect("assign route action");
+    match &route_action.action {
+        ScenarioAction::AssignRoute { waypoints } => {
+            assert_eq!(waypoints.len(), 2);
+            assert_eq!(waypoints[0], [0.0, 0.0, 0.0]);
+            assert_eq!(waypoints[1], [0.0, 0.0, 30.0]);
+        }
+        other => panic!("expected assign route action, got {other:?}"),
+    }
+}
+
+#[test]
 fn substitutes_parameter_declarations() {
     use rne_openscenario::ScenarioAction;
 

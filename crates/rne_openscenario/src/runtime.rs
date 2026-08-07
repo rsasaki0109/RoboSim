@@ -137,6 +137,7 @@ pub fn execute_scenario(
     let delta = SimDuration::from_hertz(Hertz::new(options.hz));
     let schedules = build_action_schedules(document);
     let (mut controls, signal_schedule) = build_signal_schedule(network, &route)?;
+    let mut applied = std::collections::HashMap::new();
 
     let mut violations = 0;
     let mut collisions = 0;
@@ -144,7 +145,14 @@ pub fn execute_scenario(
     let mut average_speed_m_s = 0.0;
     for step in 1..=options.steps {
         let sim_time = SimTime::from_ticks(step * delta.ticks());
-        apply_due_actions(&mut world, &schedules, sim_time, parallel_route.as_ref());
+        apply_due_actions(
+            &mut world,
+            &mut routes,
+            &schedules,
+            sim_time,
+            parallel_route.as_ref(),
+            &mut applied,
+        )?;
         apply_signal_cycle(&mut controls, &signal_schedule, sim_time);
         let report = rne_traffic::advance_controlled_kinematic_traffic(
             &mut world,
@@ -294,8 +302,8 @@ fn parallel_route_for(
     let offset = document
         .actions
         .iter()
-        .filter_map(|action| match action.action {
-            ScenarioAction::LaneChange { target_lane_offset } => Some(target_lane_offset),
+        .filter_map(|action| match &action.action {
+            ScenarioAction::LaneChange { target_lane_offset } => Some(*target_lane_offset),
             _ => None,
         })
         .next();
@@ -445,7 +453,7 @@ fn build_action_schedules(document: &ScenarioDocument) -> ActionSchedule {
         schedules
             .entry(action.entity.clone())
             .or_default()
-            .push((action.start_time_s, action.action));
+            .push((action.start_time_s, action.action.clone()));
     }
     for entry in schedules.values_mut() {
         entry.sort_by(|left, right| left.0.total_cmp(&right.0));
@@ -455,10 +463,12 @@ fn build_action_schedules(document: &ScenarioDocument) -> ActionSchedule {
 
 fn apply_due_actions(
     world: &mut World,
+    routes: &mut TrafficRouteCatalog,
     schedules: &ActionSchedule,
     sim_time: SimTime,
     parallel_route: Option<&TrafficRoute>,
-) {
+    applied: &mut std::collections::HashMap<String, usize>,
+) -> Result<(), ScenarioError> {
     let now_s = sim_time.as_seconds().value();
     for (entity_name, steps) in schedules {
         let Some(entity) = world.iter_entities().find_map(|entity_ref| {
@@ -472,23 +482,55 @@ fn apply_due_actions(
         }) else {
             continue;
         };
+        let applied_count = applied.entry(entity_name.clone()).or_insert(0);
+        let mut index = 0;
         for (start_time_s, action) in steps {
             if *start_time_s > now_s {
                 break;
             }
-            let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) else {
+            if index < *applied_count {
+                index += 1;
                 continue;
-            };
+            }
             match action {
                 ScenarioAction::AbsoluteSpeed { target_m_s } => {
-                    follower.desired_speed_m_s = *target_m_s;
+                    if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
+                        follower.desired_speed_m_s = *target_m_s;
+                    }
                 }
                 ScenarioAction::LaneChange { .. } => {
                     if let Some(parallel_route) = parallel_route {
-                        follower.route_id = parallel_route.id().clone();
+                        if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
+                            follower.route_id = parallel_route.id().clone();
+                        }
+                    }
+                }
+                ScenarioAction::AssignRoute { waypoints } => {
+                    let route_id = TrafficId::new("route:scenario:assigned")
+                        .expect("stable assigned route ID");
+                    if routes.get(&route_id).is_none() {
+                        let assigned_route =
+                            TrafficRoute::new(route_id.clone(), waypoints.clone(), false).map_err(
+                                |error| ScenarioError::Invalid(format!("assigned route: {error}")),
+                            )?;
+                        routes.insert(assigned_route).map_err(|error| {
+                            ScenarioError::Invalid(format!("insert assigned route: {error}"))
+                        })?;
+                    }
+                    let position = world.get::<TrafficPose>(entity).map(|pose| pose.position_m);
+                    let distance_m = spawn_distance_m(
+                        routes.get(&route_id).expect("inserted assigned route"),
+                        position,
+                    );
+                    if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
+                        follower.route_id = route_id;
+                        follower.distance_m = distance_m;
                     }
                 }
             }
+            index += 1;
+            *applied_count += 1;
         }
     }
+    Ok(())
 }

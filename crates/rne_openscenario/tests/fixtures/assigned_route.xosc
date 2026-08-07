@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="0" date="2026-08-07T00:00:00" description="assigned route" author="rne"/>
+  <RoadNetwork>
+    <LogicFile filepath="assets/traffic/runtime.rne.traffic.json"/>
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="ego">
+      <Vehicle>
+        <Performance maxSpeed="20" maxAcceleration="5" maxDeceleration="9"/>
+        <BoundingBoxes/>
+        <Axles/>
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private>
+          <EntityRef entityRef="ego"/>
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="0" y="0" z="0" h="0"/>
+              </Position>
+            </TeleportAction>
+          </PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="main">
+      <Act name="drive">
+        <ManeuverGroup name="mg_ego" maximumExecutionCount="1">
+          <Actors>
+            <EntityRef entityRef="ego"/>
+          </Actors>
+          <Maneuver name="follow_route">
+            <Event name="assign_route" priority="overwrite" maximumExecutionCount="1">
+              <Action name="follow">
+                <PrivateAction>
+                  <RoutingAction>
+                    <AssignRouteAction>
+                      <Route>
+                        <Waypoint>
+                          <Position>
+                            <WorldPosition x="0" y="0" z="0" h="0"/>
+                          </Position>
+                        </Waypoint>
+                        <Waypoint>
+                          <Position>
+                            <WorldPosition x="0" y="0" z="30" h="0"/>
+                          </Position>
+                        </Waypoint>
+                      </Route>
+                    </AssignRouteAction>
+                  </RoutingAction>
+                </PrivateAction>
+              </Action>
+              <StartConditions>
+                <ConditionGroup>
+                  <Condition name="start" delay="0">
+                    <ByValueCondition>
+                      <SimulationTimeCondition value="0" rule="greaterThan"/>
+                    </ByValueCondition>
+                  </Condition>
+                </ConditionGroup>
+              </StartConditions>
+            </Event>
+            <Event name="speed_up" priority="overwrite" maximumExecutionCount="1">
+              <Action name="set_5">
+                <PrivateAction>
+                  <LongitudinalAction>
+                    <SpeedAction>
+                      <SpeedActionDynamics dynamicsDimension="time" value="0" dynamicsShape="step"/>
+                      <SpeedActionTarget>
+                        <AbsoluteTargetSpeed value="5"/>
+                      </SpeedActionTarget>
+                    </SpeedAction>
+                  </LongitudinalAction>
+                </PrivateAction>
+              </Action>
+              <StartConditions>
+                <ConditionGroup>
+                  <Condition name="go" delay="0">
+                    <ByValueCondition>
+                      <SimulationTimeCondition value="0" rule="greaterThan"/>
+                    </ByValueCondition>
+                  </Condition>
+                </ConditionGroup>
+              </StartConditions>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+      </Act>
+    </Story>
+  </Storyboard>
+</OpenSCENARIO>

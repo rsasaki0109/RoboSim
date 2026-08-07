@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO assigned-route actions**: the importer parses
+  `AssignRouteAction` waypoints and the executor builds a polyline route from
+  them, snapping the actor onto it at the scheduled time (each action applies
+  once). Parser and deterministic execution tests pin the behavior.
 - **Network signal timing in scenario runs**: the OpenSCENARIO executor derives
   stop-line controls from the road network's `TrafficSignal` fixed-time
   programs and advances their aspects each step, so actors stop at red and

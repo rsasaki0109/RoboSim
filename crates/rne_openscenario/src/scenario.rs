@@ -79,7 +79,7 @@ pub struct ScenarioEntity {
 }
 
 /// One supported storyboard action.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ScenarioAction {
     /// Absolute longitudinal speed target.
@@ -95,6 +95,14 @@ pub enum ScenarioAction {
     LaneChange {
         /// Relative target lane offset, `+1` or `-1`.
         target_lane_offset: i64,
+    },
+    /// Assign a scripted route of world waypoints.
+    ///
+    /// The executor builds a polyline route through the waypoints and switches
+    /// the actor's route follower onto it (snapping to the nearest point).
+    AssignRoute {
+        /// Ordered world waypoints in metres.
+        waypoints: Vec<[f64; 3]>,
     },
 }
 
@@ -230,6 +238,23 @@ impl ScenarioDocument {
                     if *target_lane_offset != 1 && *target_lane_offset != -1 {
                         return Err(ScenarioError::Invalid(format!(
                             "action for entity `{}` lane change offset must be +1 or -1",
+                            action.entity
+                        )));
+                    }
+                }
+                ScenarioAction::AssignRoute { waypoints } => {
+                    if waypoints.len() < 2 {
+                        return Err(ScenarioError::Invalid(format!(
+                            "action for entity `{}` assigned route requires at least two waypoints",
+                            action.entity
+                        )));
+                    }
+                    if waypoints
+                        .iter()
+                        .any(|waypoint| waypoint.iter().any(|value| !value.is_finite()))
+                    {
+                        return Err(ScenarioError::Invalid(format!(
+                            "action for entity `{}` assigned route waypoints must be finite",
                             action.entity
                         )));
                     }
