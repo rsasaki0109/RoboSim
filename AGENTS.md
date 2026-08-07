@@ -33,6 +33,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_plugin`: plugin manifest and loading interfaces
 - `crates/rne_traffic`: backend-neutral traffic semantics, topology, signals, and routing
 - `crates/rne_openscenario`: minimal OpenSCENARIO 1.0 scenario import (offline importer)
+- `crates/rne_sdf`: minimal SDF model import (SDF → URDF, offline importer)
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests
