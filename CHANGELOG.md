@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO scenario executor**: `rne_openscenario` now executes a
+  scenario document over the traffic runtime — it derives an actor-compatible
+  route from the road network, spawns the scenario entities as traffic actors,
+  and applies each timed `AbsoluteSpeed` action while stepping the deterministic
+  kinematic traffic systems. Deterministic replay tests pin the outcome.
 - **Minimal OpenSCENARIO 1.0 importer** (`rne_openscenario`): parses a strict
   OpenSCENARIO 1.0 subset — `FileHeader` 1.0, `RoadNetwork/LogicFile` road
   reference, `Entities` vehicles/bicycles/pedestrians, `Init` teleport spawn

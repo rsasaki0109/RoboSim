@@ -113,11 +113,12 @@ when that height drops below half of its initial value.
 ## Next parity order
 
 1. Add a minimal OpenSCENARIO/traffic adapter after the native run/replay
-   contract is stable. The importer (`rne_openscenario`) now parses a strict
-   OpenSCENARIO 1.0 subset into a versioned `.rne.scenario.json` document
-   (entities, spawn poses, and timed speed actions). Executing that scenario
-   over the traffic runtime and referencing it from a run manifest are the
-   remaining adapter steps.
+   contract is stable. The importer (`rne_openscenario`) parses a strict
+   OpenSCENARIO 1.0 subset into a versioned `.rne.scenario.json` document and
+   its executor drives the document over the traffic runtime (route
+   derivation, actor spawning, timed speed actions, deterministic kinematic
+   stepping). Referencing a scenario from a run manifest is the remaining
+   adapter step.
 
 This order closes the common simulator workflow first. Photoreal rendering,
 large asset libraries, and GPU-scale parallelism remain separate capabilities,
