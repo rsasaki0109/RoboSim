@@ -17,7 +17,7 @@ The comparison baseline is deliberately workflow-oriented:
 
 | Capability | RNE today | Remaining parity gap |
 |---|---|---|
-| World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF model import (`rne_sdf` → URDF) | MJCF import is not yet available |
+| World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
 | Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count | Interactive pause/reset controls are still needed |
 | Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, episode APIs, and an isolated ROS 2 adapter | Policy callbacks and application-level controllers still live in the code, not a plugin boundary |
 | Physics | Backend-neutral traits with Rapier rigid bodies, joints, articulation, contacts, and deterministic hashes | A second open backend and a public capability negotiation workflow are future work |
