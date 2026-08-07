@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO run manifests**: run manifests can reference a scenario with
+  `[scenario] xosc = "..."` (the manifest `scene` then becomes optional), and
+  `rne-asset run` parses the OpenSCENARIO file, loads the road network from its
+  `LogicFile`, executes the scenario over the traffic runtime, and verifies
+  determinism when configured. Example: `assets/runs/scenario_speed.rne.run.toml`.
 - **OpenSCENARIO scenario executor**: `rne_openscenario` now executes a
   scenario document over the traffic runtime — it derives an actor-compatible
   route from the road network, spawns the scenario entities as traffic actors,

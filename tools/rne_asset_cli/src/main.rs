@@ -4,8 +4,8 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
     inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
-    validate_asset, AssetHotReloader, RunControllerKind, RunSensorKind, RunSensorSubscription,
-    SpawnSceneOptions, ValidatedAsset,
+    validate_asset, AssetHotReloader, RunControllerKind, RunScenario, RunSensorKind,
+    RunSensorSubscription, SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
@@ -19,6 +19,7 @@ use rne_log::{
     ReplaySensorStream,
 };
 use rne_math::Hertz;
+use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
 use rne_physics::{hash_physics_state, ContactEvent, PhysicsBackend, PhysicsWorldDesc};
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
@@ -29,6 +30,7 @@ use rne_sensor::{
     sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState,
     CAMERA_DEPTH_STREAM_OFFSET,
 };
+use rne_traffic::load_traffic_asset;
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -279,6 +281,9 @@ fn simulate_command(
 fn run_manifest_command(path: &Path) -> Result<()> {
     let manifest =
         load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
+    if let Some(scenario) = &manifest.scenario {
+        return run_scenario_manifest(path, &manifest, scenario);
+    }
     let scene_path = manifest.resolve_scene_path(path);
     let (action, replay_controller) = match manifest.controller.kind {
         RunControllerKind::None => (
@@ -328,6 +333,67 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             sensor_subscriptions: manifest.sensors.clone(),
         },
     )
+}
+
+fn run_scenario_manifest(
+    manifest_path: &Path,
+    manifest: &rne_assets::RunManifest,
+    scenario: &RunScenario,
+) -> Result<()> {
+    let xosc_path = scenario.resolve_xosc_path(manifest_path);
+    println!(
+        "scenario manifest={} xosc={} steps={} hz={}",
+        manifest_path.display(),
+        xosc_path.display(),
+        manifest.clock.steps,
+        manifest.clock.hz
+    );
+    let document = parse_openscenario_xml_file(&xosc_path)
+        .with_context(|| format!("parse OpenSCENARIO {}", xosc_path.display()))?;
+    let network_path = {
+        let logic_file = Path::new(&document.road_network_logic_file);
+        if logic_file.is_absolute() {
+            logic_file.to_path_buf()
+        } else {
+            xosc_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(logic_file)
+        }
+    };
+    let asset = load_traffic_asset(&network_path).map_err(|error| {
+        anyhow::anyhow!("load traffic network {}: {error}", network_path.display())
+    })?;
+    let options = ScenarioRunOptions {
+        steps: manifest.clock.steps,
+        hz: manifest.clock.hz,
+    };
+    let first = execute_scenario(&document, &asset.network, &options)
+        .with_context(|| format!("execute scenario {}", xosc_path.display()))?;
+    print_scenario_report(&xosc_path, &first);
+    if manifest.output.determinism_check {
+        let replay = execute_scenario(&document, &asset.network, &options)
+            .with_context(|| format!("re-execute scenario {}", xosc_path.display()))?;
+        anyhow::ensure!(
+            first == replay,
+            "scenario determinism check failed: first={first:?} replay={replay:?}"
+        );
+        println!("determinism: identical scenario outcome");
+    }
+    Ok(())
+}
+
+fn print_scenario_report(path: &Path, result: &rne_openscenario::ScenarioRunResult) {
+    println!(
+        "scenario {} route_length={:.3} m final_positions={} collisions={} signal_violations={} average_speed={:.3} m/s stable_hash={:#018x}",
+        path.display(),
+        result.route_length_m,
+        result.final_positions_m.len(),
+        result.collisions,
+        result.signal_violations,
+        result.average_speed_m_s,
+        result.stable_hash
+    );
 }
 
 fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
@@ -1400,6 +1466,13 @@ mod tests {
         );
         assert_eq!(payloads[0].kind, "lidar");
         replay_command(&replay_path).expect("replay lidar payload artifact");
+    }
+
+    #[test]
+    fn scenario_run_manifest_executes_deterministically() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/scenario_speed.rne.run.toml");
+        run_manifest_command(&manifest).expect("run scenario manifest");
     }
 
     #[test]
