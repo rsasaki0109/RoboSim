@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO vehicle catalogs**: `CatalogLocations` `VehicleCatalog`
+  directories are resolved relative to the scenario file, and
+  `ScenarioObject` `CatalogReference` entries are looked up in the catalog
+  files (scanned deterministically). Catalog references without a base
+  directory are rejected. Parser tests pin the resolution.
 - **OpenSCENARIO assigned-route actions**: the importer parses
   `AssignRouteAction` waypoints and the executor builds a polyline route from
   them, snapping the actor onto it at the scheduled time (each action applies

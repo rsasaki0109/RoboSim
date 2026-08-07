@@ -18,9 +18,31 @@ pub fn parse_openscenario_xml(text: &str) -> Result<ScenarioDocument, ScenarioEr
 }
 
 /// Parses a minimal OpenSCENARIO 1.0 XML file with an explicit source path.
+///
+/// Vehicle `CatalogReference` entities are only resolvable when a base
+/// directory is provided (see [`parse_openscenario_xml_file`]); without one, a
+/// catalog reference is rejected.
 pub fn parse_openscenario_xml_with_source(
     source: &str,
     text: &str,
+) -> Result<ScenarioDocument, ScenarioError> {
+    parse_inner(source, text, None)
+}
+
+/// Parses a minimal OpenSCENARIO 1.0 XML file with an explicit source path and
+/// base directory used to resolve `CatalogLocations`.
+pub fn parse_openscenario_xml_with_source_at(
+    source: &str,
+    text: &str,
+    base_dir: &Path,
+) -> Result<ScenarioDocument, ScenarioError> {
+    parse_inner(source, text, Some(base_dir))
+}
+
+fn parse_inner(
+    source: &str,
+    text: &str,
+    base_dir: Option<&Path>,
 ) -> Result<ScenarioDocument, ScenarioError> {
     let parameters = extract_parameters(text)?;
     let text = substitute_parameters(text, &parameters)?;
@@ -46,7 +68,7 @@ pub fn parse_openscenario_xml_with_source(
             ScenarioError::Invalid("missing `RoadNetwork/LogicFile@filepath`".to_string())
         })?;
 
-    let mut entities = parse_entities(root)?;
+    let mut entities = parse_entities(root, base_dir)?;
     let initial_poses = parse_init_poses(root)?;
     for entity in &mut entities {
         if let Some((position, heading)) = initial_poses.get(&entity.name) {
@@ -63,14 +85,23 @@ pub fn parse_openscenario_xml_with_source(
 }
 
 /// Reads an OpenSCENARIO file from disk and parses it with its path recorded.
+///
+/// Vehicle catalog directories in `CatalogLocations` are resolved relative to
+/// the file's directory.
 pub fn parse_openscenario_xml_file(path: &Path) -> Result<ScenarioDocument, ScenarioError> {
     let text = std::fs::read_to_string(path)?;
-    parse_openscenario_xml_with_source(&path.display().to_string(), &text)
+    parse_openscenario_xml_with_source_at(
+        &path.display().to_string(),
+        &text,
+        path.parent().unwrap_or_else(|| Path::new(".")),
+    )
 }
 
 fn parse_entities<'a, 'input>(
     root: Node<'a, 'input>,
+    base_dir: Option<&Path>,
 ) -> Result<Vec<ScenarioEntity>, ScenarioError> {
+    let catalog_dirs = catalog_directories(root);
     let mut entities = Vec::new();
     for scenario_object in descendant_elements(root, "ScenarioObject") {
         let name = parse_string_attribute(&scenario_object, "name", "ScenarioObject")?;
@@ -80,11 +111,21 @@ fn parse_entities<'a, 'input>(
             ScenarioEntityKind::Bicycle
         } else if first_child_element(scenario_object, "Pedestrian").is_some() {
             ScenarioEntityKind::Pedestrian
+        } else if let Some(catalog_reference) =
+            first_child_element(scenario_object, "CatalogReference")
+        {
+            let catalog_name = catalog_reference.attribute("catalogName").ok_or_else(|| {
+                ScenarioError::Invalid("`CatalogReference` requires `@catalogName`".to_string())
+            })?;
+            let entry_name = catalog_reference.attribute("entryName").ok_or_else(|| {
+                ScenarioError::Invalid("`CatalogReference` requires `@entryName`".to_string())
+            })?;
+            resolve_catalog_entity(catalog_name, entry_name, &catalog_dirs, base_dir)?
         } else {
             return Err(ScenarioError::UnsupportedElement {
                 element: "ScenarioObject".to_string(),
                 reason: format!(
-                    "entity `{name}` must declare a Vehicle, Bicycle, or Pedestrian child"
+                    "entity `{name}` must declare a Vehicle, Bicycle, or Pedestrian child or a CatalogReference"
                 ),
             });
         };
@@ -96,6 +137,71 @@ fn parse_entities<'a, 'input>(
         });
     }
     Ok(entities)
+}
+
+/// Collects the `CatalogLocations` directory paths in document order.
+fn catalog_directories(root: Node<'_, '_>) -> Vec<std::path::PathBuf> {
+    descendant_elements(root, "Directory")
+        .into_iter()
+        .filter_map(|directory| directory.attribute("path"))
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// Resolves a `CatalogReference` entity kind by scanning the catalog files.
+fn resolve_catalog_entity(
+    catalog_name: &str,
+    entry_name: &str,
+    catalog_dirs: &[std::path::PathBuf],
+    base_dir: Option<&Path>,
+) -> Result<ScenarioEntityKind, ScenarioError> {
+    if catalog_name != "VehicleCatalog" {
+        return Err(ScenarioError::UnsupportedElement {
+            element: "CatalogReference".to_string(),
+            reason: format!("catalog `{catalog_name}` is not supported (only VehicleCatalog)"),
+        });
+    }
+    let Some(base_dir) = base_dir else {
+        return Err(ScenarioError::Invalid(
+            "catalog resolution requires a base directory".to_string(),
+        ));
+    };
+    for directory in catalog_dirs {
+        let directory_path = if directory.is_absolute() {
+            directory.clone()
+        } else {
+            base_dir.join(directory)
+        };
+        let mut files = std::fs::read_dir(&directory_path)
+            .map_err(|error| {
+                ScenarioError::Invalid(format!(
+                    "read catalog directory {}: {error}",
+                    directory_path.display()
+                ))
+            })?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "xosc" || extension == "xml")
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        for file in files {
+            let text = std::fs::read_to_string(&file)?;
+            let document = Document::parse(&text)
+                .map_err(|error| ScenarioError::Invalid(format!("XML syntax: {error}")))?;
+            let found = descendant_elements(document.root_element(), "Vehicle")
+                .into_iter()
+                .any(|vehicle| vehicle.attribute("name") == Some(entry_name));
+            if found {
+                return Ok(ScenarioEntityKind::MotorVehicle);
+            }
+        }
+    }
+    Err(ScenarioError::Invalid(format!(
+        "catalog entry `{entry_name}` not found in VehicleCatalog"
+    )))
 }
 
 /// Initial world pose decoded from a `TeleportAction` `WorldPosition`.

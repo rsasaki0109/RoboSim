@@ -23,7 +23,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
-| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, and minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, plus network signal timing, wired into run manifests) | External traffic-simulator adapters (e.g., SUMO) and OpenSCENARIO catalogs are future work |
+| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, and minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests) | External traffic-simulator adapters (e.g., SUMO) are future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits and plugin manifests/interfaces | Runtime discovery/loading and a stable plugin ABI are future work |
 
@@ -137,9 +137,9 @@ when that height drops below half of its initial value.
    `rne-asset run` executes it headlessly. Lane changes are supported as a
    `RelativeTargetLane` action that switches the actor to a synthetic parallel
    route, `AssignRouteAction` follows scripted waypoints, `${parameter}`
-   references resolve from `ParameterDeclarations`, and the network's fixed-time
-   signal programs drive stop lines during the run. Catalogs remain future
-   work.
+   references resolve from `ParameterDeclarations`, `CatalogReference` entities
+   resolve from `VehicleCatalog` directories, and the network's fixed-time
+   signal programs drive stop lines during the run.
 
 This order closes the common simulator workflow first. Photoreal rendering,
 large asset libraries, and GPU-scale parallelism remain separate capabilities,

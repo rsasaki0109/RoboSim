@@ -113,6 +113,26 @@ fn imports_lane_change_scenario() {
 }
 
 #[test]
+fn resolves_vehicle_catalog_reference() {
+    use rne_openscenario::{parse_openscenario_xml_file, ScenarioEntityKind};
+
+    let scenario = Path::new(FIXTURE_DIR).join("catalog_scenario.xosc");
+    let document = parse_openscenario_xml_file(&scenario).expect("parse catalog scenario");
+    assert_eq!(document.entities[0].name, "ego");
+    assert_eq!(document.entities[0].kind, ScenarioEntityKind::MotorVehicle);
+    assert!(matches!(
+        document.actions[0].action,
+        rne_openscenario::ScenarioAction::AbsoluteSpeed { target_m_s: 5.0 }
+    ));
+
+    // Without a base directory the reference cannot be resolved.
+    let text = fs::read_to_string(&scenario).expect("read fixture");
+    let error = parse_openscenario_xml_with_source("catalog_scenario.xosc", &text)
+        .expect_err("catalog reference without a base directory must be rejected");
+    assert!(error.to_string().contains("base directory"));
+}
+
+#[test]
 fn imports_assigned_route_action() {
     use rne_openscenario::ScenarioAction;
 
