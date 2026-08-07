@@ -90,6 +90,29 @@ fn rejects_action_for_unknown_entity() {
 }
 
 #[test]
+fn imports_lane_change_scenario() {
+    use rne_openscenario::ScenarioAction;
+
+    let text =
+        fs::read_to_string(Path::new(FIXTURE_DIR).join("lane_change.xosc")).expect("read fixture");
+    let document =
+        parse_openscenario_xml_with_source("lane_change.xosc", &text).expect("parse scenario");
+
+    assert_eq!(document.actions.len(), 2);
+    assert!(matches!(
+        document.actions[0].action,
+        ScenarioAction::AbsoluteSpeed { target_m_s: 5.0 }
+    ));
+    assert!(matches!(
+        document.actions[1].action,
+        ScenarioAction::LaneChange {
+            target_lane_offset: 1
+        }
+    ));
+    assert_eq!(document.actions[1].start_time_s, 1.0);
+}
+
+#[test]
 fn rejects_missing_road_network() {
     let text = fixture("minimal_speed.xosc").replace(
         "<LogicFile filepath=\"assets/traffic/sanjo.rne.traffic.json\"/>",

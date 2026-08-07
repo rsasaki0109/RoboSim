@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **OpenSCENARIO lane-change actions**: the importer parses `LateralAction`
+  `LaneChangeAction` `RelativeTargetLane` events and the executor switches the
+  actor to a synthetic parallel route (one lane width lateral, snapped) at the
+  scheduled time. Deterministic lane-change and parser tests pin the behavior.
 - **Second physics backend** (`rne_physics_analytic`): a deterministic,
   collision-free analytic backend (semi-implicit Euler gravity integration for
   dynamic rigid bodies) that implements the backend-neutral `PhysicsBackend`
