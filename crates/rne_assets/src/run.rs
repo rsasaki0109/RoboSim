@@ -99,6 +99,8 @@ pub enum RunControllerKind {
     JointVelocity,
     /// Apply one named joint effort to every matching joint.
     JointEffort,
+    /// Interpolate per-joint position trajectories over simulation time.
+    JointTrajectory,
 }
 
 /// Controller settings in a [`RunManifest`].
@@ -120,6 +122,9 @@ pub struct RunController {
     /// Joint effort command in newton-meters.
     #[serde(default)]
     pub effort_nm: f64,
+    /// Per-joint position waypoints used by [`RunControllerKind::JointTrajectory`].
+    #[serde(default)]
+    pub joint_trajectories: Vec<RunJointTrajectory>,
 }
 
 impl Default for RunController {
@@ -130,8 +135,29 @@ impl Default for RunController {
             joint: String::new(),
             velocity_rad_s: 0.0,
             effort_nm: 0.0,
+            joint_trajectories: Vec::new(),
         }
     }
+}
+
+/// One time-indexed position waypoint in a [`RunJointTrajectory`].
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunTrajectoryWaypoint {
+    /// Simulation time since the run start, in seconds.
+    pub t_s: f64,
+    /// Joint position target in radians.
+    pub position_rad: f64,
+}
+
+/// Position waypoints for one named joint over simulation time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunJointTrajectory {
+    /// URDF / ECS joint name.
+    pub joint: String,
+    /// Sorted time-indexed position waypoints.
+    pub waypoints: Vec<RunTrajectoryWaypoint>,
 }
 
 /// Sensor kinds that a [`RunSensorSubscription`] can select.
@@ -276,6 +302,73 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             path.display().to_string(),
             "controller.joint must not be empty for a named joint controller",
         ));
+    }
+    if manifest.controller.kind == RunControllerKind::JointTrajectory {
+        if manifest.controller.joint_trajectories.is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.joint_trajectories must not be empty for a joint trajectory controller",
+            ));
+        }
+        let mut joint_names = manifest
+            .controller
+            .joint_trajectories
+            .iter()
+            .map(|trajectory| trajectory.joint.clone())
+            .collect::<Vec<_>>();
+        joint_names.sort_unstable();
+        if joint_names.windows(2).any(|window| window[0] == window[1]) {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.joint_trajectories joint names must be unique",
+            ));
+        }
+        for (index, trajectory) in manifest.controller.joint_trajectories.iter().enumerate() {
+            if trajectory.joint.trim().is_empty() {
+                return Err(AssetError::invalid(
+                    path.display().to_string(),
+                    format!("controller.joint_trajectories[{index}].joint must not be empty"),
+                ));
+            }
+            if trajectory.waypoints.len() < 2 {
+                return Err(AssetError::invalid(
+                    path.display().to_string(),
+                    format!(
+                        "controller.joint_trajectories[{index}] requires at least two waypoints"
+                    ),
+                ));
+            }
+            for (waypoint_index, waypoint) in trajectory.waypoints.iter().enumerate() {
+                if !waypoint.t_s.is_finite() || waypoint.t_s < 0.0 {
+                    return Err(AssetError::invalid(
+                        path.display().to_string(),
+                        format!(
+                            "controller.joint_trajectories[{index}].waypoints[{waypoint_index}].t_s must be finite and non-negative"
+                        ),
+                    ));
+                }
+                if !waypoint.position_rad.is_finite() {
+                    return Err(AssetError::invalid(
+                        path.display().to_string(),
+                        format!(
+                            "controller.joint_trajectories[{index}].waypoints[{waypoint_index}].position_rad must be finite"
+                        ),
+                    ));
+                }
+            }
+            if trajectory
+                .waypoints
+                .windows(2)
+                .any(|window| window[0].t_s >= window[1].t_s)
+            {
+                return Err(AssetError::invalid(
+                    path.display().to_string(),
+                    format!(
+                        "controller.joint_trajectories[{index}] waypoints must be sorted by increasing t_s"
+                    ),
+                ));
+            }
+        }
     }
     for (index, subscription) in manifest.sensors.iter().enumerate() {
         if subscription.name.is_none() && subscription.kind.is_none() {
@@ -465,5 +558,58 @@ xosc = "../scenarios/speed.xosc"
         )
         .expect_err("xosc must be required");
         assert!(error.to_string().contains("scenario.xosc"));
+    }
+
+    #[test]
+    fn parses_joint_trajectory_controller() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/trajectory.rne.run.toml"),
+            r#"
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+
+[controller]
+kind = "joint_trajectory"
+
+[[controller.joint_trajectories]]
+joint = "shoulder_joint"
+waypoints = [
+    { t_s = 0.0, position_rad = 0.0 },
+    { t_s = 1.0, position_rad = 0.5 },
+    { t_s = 2.0, position_rad = 0.0 },
+]
+"#,
+        )
+        .expect("trajectory manifest");
+
+        assert_eq!(manifest.controller.kind, RunControllerKind::JointTrajectory);
+        let trajectory = &manifest.controller.joint_trajectories[0];
+        assert_eq!(trajectory.joint, "shoulder_joint");
+        assert_eq!(trajectory.waypoints.len(), 3);
+        assert_eq!(trajectory.waypoints[1].t_s, 1.0);
+        assert_eq!(trajectory.waypoints[1].position_rad, 0.5);
+    }
+
+    #[test]
+    fn rejects_unsorted_trajectory_waypoints() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            r#"
+version = 1
+scene = "scene.rne.scene.toml"
+
+[controller]
+kind = "joint_trajectory"
+
+[[controller.joint_trajectories]]
+joint = "shoulder_joint"
+waypoints = [
+    { t_s = 1.0, position_rad = 0.0 },
+    { t_s = 0.0, position_rad = 0.5 },
+]
+"#,
+        )
+        .expect_err("waypoints must be sorted");
+        assert!(error.to_string().contains("sorted by increasing t_s"));
     }
 }

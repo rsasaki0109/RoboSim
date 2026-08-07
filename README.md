@@ -82,6 +82,9 @@ cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive_lidar
 
 # Run an OpenSCENARIO speed scenario over the traffic runtime
 cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml
+
+# Drive a named joint through a multi-joint position trajectory
+cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_trajectory.rne.run.toml
 ```
 
 For a complete local validation:

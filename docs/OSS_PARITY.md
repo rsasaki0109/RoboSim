@@ -19,7 +19,7 @@ The comparison baseline is deliberately workflow-oriented:
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import | SDF/MJCF import is not yet available |
 | Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count | Interactive pause/reset controls are still needed |
-| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort and wheel paths, episode APIs, and an isolated ROS 2 adapter | Multi-joint trajectories and policy callbacks are still application-level APIs |
+| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, episode APIs, and an isolated ROS 2 adapter | Policy callbacks and application-level controllers still live in the code, not a plugin boundary |
 | Physics | Backend-neutral traits with Rapier rigid bodies, joints, articulation, contacts, and deterministic hashes | A second open backend and a public capability negotiation workflow are future work |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
@@ -90,6 +90,23 @@ kind = "lidar"
 
 [[sensors]]
 name = "wrist_camera"
+```
+
+A `joint_trajectory` controller drives named joints through time-indexed
+position waypoints; the runner interpolates them per fixed step and records the
+interpolated targets as the frame action:
+
+```toml
+[controller]
+kind = "joint_trajectory"
+
+[[controller.joint_trajectories]]
+joint = "shoulder_joint"
+waypoints = [
+    { t_s = 0.0, position_rad = 0.0 },
+    { t_s = 0.5, position_rad = 1.0 },
+    { t_s = 1.0, position_rad = 0.0 },
+]
 ```
 
 ```bash
