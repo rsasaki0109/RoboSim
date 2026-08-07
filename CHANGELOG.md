@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Second physics backend** (`rne_physics_analytic`): a deterministic,
+  collision-free analytic backend (semi-implicit Euler gravity integration for
+  dynamic rigid bodies) that implements the backend-neutral `PhysicsBackend`
+  trait. Run manifests select the backend with `[physics] backend =
+  "rapier" | "analytic"` and negotiate `required_capabilities` against it.
+  Free-fall, determinism, fixed-body, capability, and empty-contact tests pin
+  the behavior. Example: `assets/runs/cart_analytic.rne.run.toml`.
 - **Physics capability negotiation**: `rne_physics::require_capabilities`
   verifies a backend's declared capabilities against a required set and reports
   the missing ones; run manifests can declare `[physics]

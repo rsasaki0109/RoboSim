@@ -4,9 +4,9 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
     inspect_asset, load_run_manifest, load_scene_bundle, smoke_spawn_scene, spawn_scene_bundle,
-    validate_asset, AssetHotReloader, RunControllerKind, RunJointTrajectory, RunPhysicsCapability,
-    RunScenario, RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint, SpawnSceneOptions,
-    ValidatedAsset,
+    validate_asset, AssetHotReloader, RunControllerKind, RunJointTrajectory, RunPhysicsBackend,
+    RunPhysicsCapability, RunScenario, RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint,
+    SpawnSceneOptions, ValidatedAsset,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
@@ -23,8 +23,9 @@ use rne_math::Hertz;
 use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
 use rne_physics::{
     hash_physics_state, require_capabilities, ContactEvent, PhysicsBackend, PhysicsCapability,
-    PhysicsWorldDesc,
+    PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
 };
+use rne_physics_analytic::AnalyticBackend;
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
@@ -243,6 +244,7 @@ struct SimulationOptions<'a> {
     replay_out: Option<&'a Path>,
     replay_controller: ArtifactControllerKind,
     sensor_subscriptions: Vec<RunSensorSubscription>,
+    physics_backend: RunPhysicsBackend,
 }
 
 struct DirectActionOptions<'a> {
@@ -280,6 +282,7 @@ fn simulate_command(
             replay_controller,
             sensor_subscriptions,
             trajectories: Vec::new(),
+            physics_backend: RunPhysicsBackend::Rapier,
         },
     )
 }
@@ -330,8 +333,11 @@ fn run_manifest_command(path: &Path) -> Result<()> {
         .as_deref()
         .map(|output_path| manifest.resolve_output_path(path, output_path));
     if !manifest.physics.required_capabilities.is_empty() {
-        verify_physics_requirements(&manifest.physics.required_capabilities)
-            .with_context(|| format!("verify physics requirements for {}", path.display()))?;
+        verify_physics_requirements(
+            manifest.physics.backend,
+            &manifest.physics.required_capabilities,
+        )
+        .with_context(|| format!("verify physics requirements for {}", path.display()))?;
         let names = manifest
             .physics
             .required_capabilities
@@ -339,7 +345,10 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             .map(|capability| format!("{capability:?}"))
             .collect::<Vec<_>>()
             .join(", ");
-        println!("physics: required capabilities [{}]", names);
+        println!(
+            "physics: backend={:?} required capabilities [{}]",
+            manifest.physics.backend, names
+        );
     }
     println!(
         "run manifest={} scene={} controller={:?}",
@@ -359,15 +368,19 @@ fn run_manifest_command(path: &Path) -> Result<()> {
             replay_out: replay_out.as_deref(),
             replay_controller,
             sensor_subscriptions: manifest.sensors.clone(),
+            physics_backend: manifest.physics.backend,
         },
     )
 }
 
-fn verify_physics_requirements(required: &[RunPhysicsCapability]) -> Result<()> {
+fn verify_physics_requirements(
+    backend_kind: RunPhysicsBackend,
+    required: &[RunPhysicsCapability],
+) -> Result<()> {
     if required.is_empty() {
         return Ok(());
     }
-    let backend = RapierBackend::new();
+    let backend = RunnerBackend::new(backend_kind);
     let required_capabilities = required
         .iter()
         .map(|capability| match capability {
@@ -382,6 +395,104 @@ fn verify_physics_requirements(required: &[RunPhysicsCapability]) -> Result<()> 
         .collect::<Vec<_>>();
     require_capabilities(backend.capabilities(), &required_capabilities)
         .map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+/// Physics backend selected by a run manifest, dispatching the trait surface.
+enum RunnerBackend {
+    /// Rapier: full contacts, articulation, and contact force.
+    Rapier(RapierBackend),
+    /// Deterministic collision-free analytic dynamics.
+    Analytic(AnalyticBackend),
+}
+
+impl RunnerBackend {
+    /// Creates the backend selected by a manifest.
+    fn new(kind: RunPhysicsBackend) -> Self {
+        match kind {
+            RunPhysicsBackend::Rapier => Self::Rapier(RapierBackend::new()),
+            RunPhysicsBackend::Analytic => Self::Analytic(AnalyticBackend::new()),
+        }
+    }
+
+    fn create_world(&mut self, desc: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
+        match self {
+            Self::Rapier(backend) => backend.create_world(desc),
+            Self::Analytic(backend) => backend.create_world(desc),
+        }
+    }
+
+    fn sync_from_ecs(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+    ) -> Result<(), PhysicsError> {
+        match self {
+            Self::Rapier(backend) => backend.sync_from_ecs(world, physics_world),
+            Self::Analytic(backend) => backend.sync_from_ecs(world, physics_world),
+        }
+    }
+
+    fn step(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+        dt: SimDuration,
+    ) -> Result<(), PhysicsError> {
+        match self {
+            Self::Rapier(backend) => step_physics(backend, world, physics_world, dt),
+            Self::Analytic(backend) => {
+                rne_physics_analytic::step_physics(backend, world, physics_world, dt)
+            }
+        }
+    }
+
+    fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
+        match self {
+            Self::Rapier(backend) => backend.contacts(physics_world),
+            Self::Analytic(backend) => backend.contacts(physics_world),
+        }
+    }
+
+    fn capabilities(&self) -> &[PhysicsCapability] {
+        match self {
+            Self::Rapier(backend) => backend.capabilities(),
+            Self::Analytic(backend) => backend.capabilities(),
+        }
+    }
+}
+
+/// Samples sensors with the concrete backend behind a [`RunnerBackend`].
+fn sample_sensors_for(
+    backend: &RunnerBackend,
+    world: &mut World,
+    sim_time: SimTime,
+    physics_world: PhysicsWorldId,
+    bus: &mut InMemoryDataBus,
+) {
+    match backend {
+        RunnerBackend::Rapier(physics) => {
+            let mut context = SensorSampleContext {
+                world,
+                sim_time,
+                physics,
+                physics_world,
+                render: None,
+                scene: None,
+            };
+            sample_sensors(&mut context, bus);
+        }
+        RunnerBackend::Analytic(physics) => {
+            let mut context = SensorSampleContext {
+                world,
+                sim_time,
+                physics,
+                physics_world,
+                render: None,
+                scene: None,
+            };
+            sample_sensors(&mut context, bus);
+        }
+    }
 }
 
 fn run_scenario_manifest(
@@ -456,6 +567,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         replay_out,
         replay_controller,
         sensor_subscriptions,
+        physics_backend,
     } = options;
     anyhow::ensure!(
         hz.is_finite() && hz > 0.0,
@@ -472,6 +584,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         None,
         &trajectories,
         &sensor_subscriptions,
+        physics_backend,
     )?;
     print_simulation_report(path, &run.report, determinism_check);
     if determinism_check {
@@ -484,6 +597,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             None,
             &trajectories,
             &sensor_subscriptions,
+            physics_backend,
         )?;
         anyhow::ensure!(
             run.report == replay.report,
@@ -553,6 +667,7 @@ fn simulate_scene_with_seed(
         None,
         &[],
         &[],
+        RunPhysicsBackend::Rapier,
     )
 }
 
@@ -566,6 +681,7 @@ fn simulate_scene_with_action_schedule(
     replay_frames: Option<&[ReplayFrame]>,
     trajectories: &[RunJointTrajectory],
     sensor_subscriptions: &[RunSensorSubscription],
+    physics_backend: RunPhysicsBackend,
 ) -> Result<SimulationRun> {
     if let Some(replay_frames) = replay_frames {
         anyhow::ensure!(
@@ -598,7 +714,7 @@ fn simulate_scene_with_action_schedule(
         .get::<WorldEntity>(spawned.world)
         .map(|entity| entity.seed)
         .unwrap_or_default();
-    let mut backend = RapierBackend::new();
+    let mut backend = RunnerBackend::new(physics_backend);
     let physics_world = backend
         .create_world(PhysicsWorldDesc::default())
         .map_err(|error| anyhow::anyhow!("create physics world: {error}"))?;
@@ -635,20 +751,11 @@ fn simulate_scene_with_action_schedule(
         apply_actuator_commands(&mut world, &mut command_buffer);
         sync_all_joint_motors_from_actuators(&mut world);
         differential_drive_kinematics(&mut world, &drives, dt);
-        step_physics(&mut backend, &mut world, physics_world, dt)
+        backend
+            .step(&mut world, physics_world, dt)
             .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
         sim_time = sim_time + dt;
-        {
-            let mut sensor_context = SensorSampleContext {
-                world: &mut world,
-                sim_time,
-                physics: &backend,
-                physics_world,
-                render: None,
-                scene: None,
-            };
-            sample_sensors(&mut sensor_context, &mut data_bus);
-        }
+        sample_sensors_for(&backend, &mut world, sim_time, physics_world, &mut data_bus);
 
         let base_translation_m = drives.first().and_then(|drive| {
             world.get::<Transform3>(drive.base_link).map(|transform| {
@@ -1219,6 +1326,7 @@ fn replay_command(path: &Path) -> Result<()> {
         Some(&artifact.frames),
         &[],
         &[],
+        RunPhysicsBackend::Rapier,
     )
     .with_context(|| format!("replay scene {}", scene_path.display()))?;
 
@@ -1549,7 +1657,9 @@ mod tests {
         run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
         verify_physics_requirements,
     };
-    use rne_assets::{RunPhysicsCapability, RunSensorKind, RunSensorSubscription};
+    use rne_assets::{
+        RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
+    };
     use rne_log::ReplayAction;
     use std::path::PathBuf;
 
@@ -1620,12 +1730,25 @@ mod tests {
     }
 
     #[test]
+    fn analytic_backend_run_manifest_executes() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/cart_analytic.rne.run.toml");
+        run_manifest_command(&manifest).expect("run analytic backend manifest");
+    }
+
+    #[test]
     fn missing_physics_capability_is_rejected() {
-        let error = verify_physics_requirements(&[RunPhysicsCapability::GpuRigidBody])
-            .expect_err("gpu_rigid_body must be rejected");
+        let error = verify_physics_requirements(
+            RunPhysicsBackend::Rapier,
+            &[RunPhysicsCapability::GpuRigidBody],
+        )
+        .expect_err("gpu_rigid_body must be rejected");
         assert!(error.to_string().contains("lacks required capabilities"));
-        verify_physics_requirements(&[RunPhysicsCapability::Articulation])
-            .expect("articulation is supported");
+        verify_physics_requirements(
+            RunPhysicsBackend::Rapier,
+            &[RunPhysicsCapability::Articulation],
+        )
+        .expect("articulation is supported");
     }
 
     #[test]
@@ -1633,9 +1756,18 @@ mod tests {
         let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/scenes/mm_minimal.rne.scene.toml");
         let action = ReplayAction::joint_velocity("shoulder_joint", 0.5);
-        let first =
-            simulate_scene_with_action_schedule(&scene, 6, 60.0, action, None, None, &[], &[])
-                .expect("joint simulation");
+        let first = simulate_scene_with_action_schedule(
+            &scene,
+            6,
+            60.0,
+            action,
+            None,
+            None,
+            &[],
+            &[],
+            RunPhysicsBackend::Rapier,
+        )
+        .expect("joint simulation");
 
         let first_frame = first.frames.first().expect("first frame");
         assert_eq!(
@@ -1664,6 +1796,7 @@ mod tests {
             Some(&first.frames),
             &[],
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("joint replay");
         assert_eq!(first, replay);
@@ -1686,6 +1819,7 @@ mod tests {
             None,
             &[],
             &[subscription],
+            RunPhysicsBackend::Rapier,
         )
         .expect("camera payload simulation");
 
@@ -1719,6 +1853,7 @@ mod tests {
             Some(&run.frames),
             &[],
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("camera replay");
         assert_eq!(replay.report, run.report);
@@ -1742,6 +1877,7 @@ mod tests {
             None,
             &[],
             &[subscription],
+            RunPhysicsBackend::Rapier,
         )
         .expect_err("unknown sensor must be rejected");
         assert!(error.to_string().contains("matched no sensor"));
@@ -1760,6 +1896,7 @@ mod tests {
             None,
             &[],
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("contact simulation");
 
@@ -1790,6 +1927,7 @@ mod tests {
             Some(&run.frames),
             &[],
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("contact replay");
         assert_eq!(replay.report, run.report);
@@ -1828,6 +1966,7 @@ mod tests {
             None,
             &trajectories,
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("trajectory simulation");
 
@@ -1856,6 +1995,7 @@ mod tests {
             Some(&run.frames),
             &[],
             &[],
+            RunPhysicsBackend::Rapier,
         )
         .expect("trajectory replay");
         assert_eq!(replay.report, run.report);

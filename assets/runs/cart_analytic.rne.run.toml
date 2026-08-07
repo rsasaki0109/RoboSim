@@ -1,0 +1,14 @@
+version = 1
+scene = "../scenes/cart_minimal.rne.scene.toml"
+seed = 77
+
+[clock]
+steps = 60
+hz = 60.0
+
+[physics]
+backend = "analytic"
+required_capabilities = ["rigid_body", "deterministic_step"]
+
+[output]
+determinism_check = true

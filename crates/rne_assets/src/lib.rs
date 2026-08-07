@@ -22,8 +22,9 @@ pub use robot::{
 };
 pub use run::{
     load_run_manifest, parse_run_manifest, RunClock, RunController, RunControllerKind,
-    RunJointTrajectory, RunManifest, RunOutput, RunPhysics, RunPhysicsCapability, RunScenario,
-    RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint, RUN_MANIFEST_VERSION,
+    RunJointTrajectory, RunManifest, RunOutput, RunPhysics, RunPhysicsBackend,
+    RunPhysicsCapability, RunScenario, RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint,
+    RUN_MANIFEST_VERSION,
 };
 pub use scene::{
     load_scene_asset, parse_scene_asset, parse_scene_robots, SceneAsset, SceneCollisionAsset,
