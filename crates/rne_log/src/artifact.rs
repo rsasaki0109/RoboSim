@@ -817,7 +817,7 @@ fn validate_sensor_payloads(
         }
     }
     for payload in payloads {
-        if !payload_streams.binary_search(&payload.stream_id).is_ok() {
+        if payload_streams.binary_search(&payload.stream_id).is_err() {
             return Err(ReplayArtifactError::Invalid(format!(
                 "frame {step} sensor payload stream {} is not listed in sensor_payload_streams",
                 payload.stream_id
