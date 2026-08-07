@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Network signal timing in scenario runs**: the OpenSCENARIO executor derives
+  stop-line controls from the road network's `TrafficSignal` fixed-time
+  programs and advances their aspects each step, so actors stop at red and
+  proceed on green. A signaled-corridor test pins the delay, zero red-line
+  violations, and determinism.
 - **OpenSCENARIO parameter substitution**: `ParameterDeclarations` values are
   substituted into `${name}` references before parsing, so action targets can
   be parameterized. Duplicate declarations are rejected.

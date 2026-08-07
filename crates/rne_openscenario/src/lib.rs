@@ -17,9 +17,10 @@
 //! - storyboard `SpeedAction` events with an `AbsoluteTargetSpeed` and a
 //!   `SimulationTimeCondition` start time, and `LaneChangeAction` events with a
 //!   `RelativeTargetLane` offset
+//! - the road network's fixed-time `TrafficSignal` programs drive stop lines
+//!   during scenario execution
 //!
-//! Catalogs, controller bindings, routes, and non-speed/lane-change actions
-//! are not yet supported.
+//! Catalogs, controller bindings, and routes are not yet supported.
 //!
 //! [ASAM OpenSCENARIO 1.0]: https://www.asam.net/standards/detail/openscenario/
 
