@@ -24,11 +24,13 @@
 #![deny(missing_docs)]
 
 pub mod parser;
+pub mod runtime;
 pub mod scenario;
 
 pub use parser::{
     parse_openscenario_xml, parse_openscenario_xml_file, parse_openscenario_xml_with_source,
 };
+pub use runtime::{actor_length_m, execute_scenario, ScenarioRunOptions, ScenarioRunResult};
 pub use scenario::{
     ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,
     ScenarioTimedAction, SCENARIO_DOCUMENT_VERSION,
