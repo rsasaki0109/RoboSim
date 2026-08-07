@@ -35,7 +35,7 @@ impl Default for PhysicsWorldDesc {
 }
 
 /// Optional physics backend capabilities.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PhysicsCapability {
     /// Supports rigid body simulation.
     RigidBody,
@@ -62,6 +62,35 @@ pub enum PhysicsError {
     /// Backend failed to initialize.
     #[error("physics backend initialization failed")]
     InitializationFailed,
+    /// The backend does not satisfy every required capability.
+    #[error("physics backend lacks required capabilities: {missing:?}")]
+    MissingCapabilities {
+        /// Capabilities the backend does not provide.
+        missing: Vec<PhysicsCapability>,
+    },
+}
+
+/// Verifies a backend's declared capabilities satisfy every required one.
+///
+/// Returns [`PhysicsError::MissingCapabilities`] listing the capabilities the
+/// backend does not provide. Order-insensitive: required capabilities are
+/// deduplicated and compared as a set.
+pub fn require_capabilities(
+    available: &[PhysicsCapability],
+    required: &[PhysicsCapability],
+) -> Result<(), PhysicsError> {
+    let mut missing = Vec::new();
+    for capability in required {
+        if !available.contains(capability) && !missing.contains(capability) {
+            missing.push(*capability);
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        missing.sort_unstable();
+        Err(PhysicsError::MissingCapabilities { missing })
+    }
 }
 
 /// Backend-agnostic physics simulation interface.
@@ -184,6 +213,31 @@ mod tests {
         fn capabilities(&self) -> &[PhysicsCapability] {
             &[PhysicsCapability::RigidBody]
         }
+    }
+
+    #[test]
+    fn require_capabilities_lists_missing_features() {
+        let available = [
+            PhysicsCapability::RigidBody,
+            PhysicsCapability::Articulation,
+        ];
+        require_capabilities(&available, &[PhysicsCapability::Articulation])
+            .expect("present capability is accepted");
+
+        let error = require_capabilities(
+            &available,
+            &[
+                PhysicsCapability::SoftBody,
+                PhysicsCapability::Articulation,
+                PhysicsCapability::GpuRigidBody,
+            ],
+        )
+        .expect_err("missing capabilities are rejected");
+        assert!(matches!(
+            error,
+            PhysicsError::MissingCapabilities { missing }
+                if missing == vec![PhysicsCapability::GpuRigidBody, PhysicsCapability::SoftBody]
+        ));
     }
 
     #[test]

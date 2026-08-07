@@ -34,6 +34,9 @@ pub struct RunManifest {
     /// Optional OpenSCENARIO scenario that replaces the fixed-step physics run.
     #[serde(default)]
     pub scenario: Option<RunScenario>,
+    /// Physics backend requirements verified before the run starts.
+    #[serde(default)]
+    pub physics: RunPhysics,
     /// Output and replay checks for this run.
     #[serde(default)]
     pub output: RunOutput,
@@ -228,6 +231,35 @@ impl RunScenario {
     }
 }
 
+/// Physics capability names a run manifest can require.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPhysicsCapability {
+    /// Rigid body simulation.
+    RigidBody,
+    /// Articulated (multibody) bodies.
+    Articulation,
+    /// GPU rigid body simulation.
+    GpuRigidBody,
+    /// Deterministic stepping.
+    DeterministicStep,
+    /// Soft bodies.
+    SoftBody,
+    /// Contact force reporting.
+    ContactForce,
+    /// Batched raycasts.
+    RaycastBatch,
+}
+
+/// Physics backend requirements verified before a run starts.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunPhysics {
+    /// Capabilities the physics backend must provide, deduplicated on parse.
+    #[serde(default)]
+    pub required_capabilities: Vec<RunPhysicsCapability>,
+}
+
 /// Loads and validates a `.rne.run.toml` manifest from disk.
 pub fn load_run_manifest(path: &Path) -> Result<RunManifest, AssetError> {
     let text = fs::read_to_string(path).map_err(|error| AssetError::Io {
@@ -386,6 +418,14 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             }
         }
     }
+    let mut required = manifest.physics.required_capabilities.clone();
+    required.sort_unstable();
+    if required.windows(2).any(|window| window[0] == window[1]) {
+        return Err(AssetError::invalid(
+            path.display().to_string(),
+            "physics.required_capabilities must be unique".to_string(),
+        ));
+    }
     Ok(manifest)
 }
 
@@ -399,7 +439,10 @@ fn default_run_hz() -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_run_manifest, RunControllerKind, RunSensorKind, RUN_MANIFEST_VERSION};
+    use super::{
+        parse_run_manifest, RunControllerKind, RunPhysicsCapability, RunSensorKind,
+        RUN_MANIFEST_VERSION,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -611,5 +654,44 @@ waypoints = [
         )
         .expect_err("waypoints must be sorted");
         assert!(error.to_string().contains("sorted by increasing t_s"));
+    }
+
+    #[test]
+    fn parses_physics_requirements() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/physics.rne.run.toml"),
+            r#"
+version = 1
+scene = "../scenes/mesh_diff_drive.rne.scene.toml"
+
+[physics]
+required_capabilities = ["articulation", "contact_force"]
+"#,
+        )
+        .expect("physics manifest");
+
+        assert_eq!(
+            manifest.physics.required_capabilities,
+            vec![
+                RunPhysicsCapability::Articulation,
+                RunPhysicsCapability::ContactForce,
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_physics_requirements() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            r#"
+version = 1
+scene = "scene.rne.scene.toml"
+
+[physics]
+required_capabilities = ["rigid_body", "rigid_body"]
+"#,
+        )
+        .expect_err("duplicates must be rejected");
+        assert!(error.to_string().contains("must be unique"));
     }
 }

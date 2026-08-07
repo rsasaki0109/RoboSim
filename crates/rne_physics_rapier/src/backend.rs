@@ -60,6 +60,8 @@ impl RapierBackend {
             capabilities: vec![
                 PhysicsCapability::RigidBody,
                 PhysicsCapability::Articulation,
+                PhysicsCapability::DeterministicStep,
+                PhysicsCapability::ContactForce,
                 PhysicsCapability::RaycastBatch,
             ],
         }
