@@ -251,10 +251,24 @@ pub enum RunPhysicsCapability {
     RaycastBatch,
 }
 
+/// Physics backend choices a run manifest can select.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPhysicsBackend {
+    /// Rapier (default): full contacts, articulation, and contact force.
+    #[default]
+    Rapier,
+    /// Deterministic collision-free analytic dynamics.
+    Analytic,
+}
+
 /// Physics backend requirements verified before a run starts.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunPhysics {
+    /// Physics backend selected for the run.
+    #[serde(default)]
+    pub backend: RunPhysicsBackend,
     /// Capabilities the physics backend must provide, deduplicated on parse.
     #[serde(default)]
     pub required_capabilities: Vec<RunPhysicsCapability>,
@@ -440,8 +454,8 @@ fn default_run_hz() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_run_manifest, RunControllerKind, RunPhysicsCapability, RunSensorKind,
-        RUN_MANIFEST_VERSION,
+        parse_run_manifest, RunControllerKind, RunPhysicsBackend, RunPhysicsCapability,
+        RunSensorKind, RUN_MANIFEST_VERSION,
     };
     use std::path::{Path, PathBuf};
 
@@ -665,11 +679,13 @@ version = 1
 scene = "../scenes/mesh_diff_drive.rne.scene.toml"
 
 [physics]
+backend = "analytic"
 required_capabilities = ["articulation", "contact_force"]
 "#,
         )
         .expect("physics manifest");
 
+        assert_eq!(manifest.physics.backend, RunPhysicsBackend::Analytic);
         assert_eq!(
             manifest.physics.required_capabilities,
             vec![

@@ -85,6 +85,9 @@ cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.t
 
 # Drive a named joint through a multi-joint position trajectory
 cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_trajectory.rne.run.toml
+
+# Run on the deterministic analytic physics backend
+cargo run --release -p rne_asset_cli -- run assets/runs/cart_analytic.rne.run.toml
 ```
 
 For a complete local validation:

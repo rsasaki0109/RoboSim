@@ -24,6 +24,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_robot`: robot/link/joint/actuator components and systems
 - `crates/rne_physics`: physics backend traits only
 - `crates/rne_physics_rapier`: Rapier implementation
+- `crates/rne_physics_analytic`: deterministic collision-free analytic backend
 - `crates/rne_sensor`: sensor traits, specs, outputs, noise models
 - `crates/rne_render`: render traits only
 - `crates/rne_render_wgpu`: wgpu renderer
