@@ -87,3 +87,20 @@ fn control_stdin_reset_restarts_the_episode() {
     );
     assert_eq!(artifact.clock.steps, 4);
 }
+
+/// The runner starts paused awaiting the first command, so a script without a
+/// leading `pause` advances exactly the requested steps regardless of timing.
+#[test]
+fn control_stdin_starts_paused_and_advances_only_on_command() {
+    let replay = manifest_dir().join("../../target/runs/control_start_paused.rne-replay");
+    run_control_script(b"step 2\nquit\n", &replay);
+
+    let artifact =
+        rne_log::ReplayArtifact::read_json(&replay).expect("read control replay artifact");
+    assert_eq!(
+        artifact.frames.len(),
+        2,
+        "the runner must not advance before the first command"
+    );
+    assert_eq!(artifact.clock.steps, 2);
+}

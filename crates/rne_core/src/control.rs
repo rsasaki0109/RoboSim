@@ -83,6 +83,17 @@ impl<'a> RunControl<'a> {
         }
     }
 
+    /// Wraps a control transport, initially paused until the first command
+    /// arrives. Interactive transports use this so the runner never advances
+    /// before the client is connected.
+    pub fn paused(transport: &'a mut dyn RunnerControl) -> Self {
+        Self {
+            transport,
+            state: RunnerControlState::Paused,
+            step_remaining: 0,
+        }
+    }
+
     /// The current paused or advancing state.
     pub fn state(&self) -> RunnerControlState {
         self.state
@@ -188,6 +199,33 @@ mod tests {
         }
         assert_eq!(control.state(), RunnerControlState::Running);
         assert_eq!(waits.get(), 0, "free-running must not block");
+    }
+
+    #[test]
+    fn paused_start_waits_for_the_first_command() {
+        let waits = Rc::new(Cell::new(0));
+        let mut scripted = ScriptedControl::new(vec![], waits.clone());
+        let mut control = RunControl::paused(&mut scripted);
+        assert_eq!(control.state(), RunnerControlState::Paused);
+        assert_eq!(
+            control.checkpoint(),
+            EpisodeOutcome::Quit,
+            "paused start with no commands must block, not advance"
+        );
+        assert_eq!(waits.get(), 1, "paused start must block before any step");
+    }
+
+    #[test]
+    fn paused_start_consumes_a_queued_step_without_extra_wait() {
+        let waits = Rc::new(Cell::new(0));
+        let mut scripted = ScriptedControl::new(
+            vec![ControlCommand::Step { frames: 2 }, ControlCommand::Resume],
+            waits.clone(),
+        );
+        let mut control = RunControl::paused(&mut scripted);
+        assert_eq!(control.checkpoint(), EpisodeOutcome::Advance);
+        assert_eq!(waits.get(), 0, "a queued command is consumed by poll");
+        assert_eq!(control.state(), RunnerControlState::Paused);
     }
 
     #[test]

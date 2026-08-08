@@ -441,8 +441,8 @@ fn run_manifest_command(
     };
     if control_stdin {
         let mut transport = StdinRunnerControl::start()?;
-        let mut control = RunControl::new(&mut transport);
-        println!("control: runner commands on stdin: pause, resume, step N, reset, quit");
+        let mut control = RunControl::paused(&mut transport);
+        println!("control: runner paused; commands on stdin: pause, resume, step N, reset, quit");
         run_simulation(&scene_path, options, Some(&mut control))
     } else {
         run_simulation(&scene_path, options, None)

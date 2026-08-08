@@ -170,5 +170,8 @@ printf 'pause\nstep 5\nreset\nstep 3\nquit\n' | \
 - stdin EOF while paused is treated as `quit`, so piped scripts terminate
   deterministically.
 
+The runner starts paused and waits for the first command, so a piped script
+like `step N\nquit` advances exactly `N` frames regardless of timing.
+
 `--replay-out PATH` overrides the manifest's replay path, and determinism
 re-checks are skipped in interactive mode.

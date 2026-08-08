@@ -10,9 +10,10 @@ All notable changes to Robot Native Engine are documented in this file.
   transport-neutral control state machine in `rne_core::control` drives the
   fixed-step loop with `pause`, `resume`, `step N`, `reset`, and `quit`
   commands on stdin. `reset` rebuilds the world from the episode's initial
-  conditions; `step N` advances exactly N frames then pauses. stdin EOF while
-  paused quits the run, determinism re-checks are skipped in interactive mode,
-  and `--replay-out PATH` overrides the manifest's replay path.
+  conditions; `step N` advances exactly N frames then pauses. The runner starts
+  paused awaiting the first command, so piped scripts are timing-independent.
+  stdin EOF while paused quits the run, determinism re-checks are skipped in
+  interactive mode, and `--replay-out PATH` overrides the manifest's replay path.
 - **Controller-plugin boundary** (`rne_plugin`): plugin manifests and a
   `ControllerPlugin` trait separate policy implementations from the runner.
   Run manifests select a plugin with `[controller] kind = "plugin"`; the
