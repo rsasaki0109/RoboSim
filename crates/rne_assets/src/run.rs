@@ -133,6 +133,12 @@ pub struct RunController {
     /// Plugin name used by [`RunControllerKind::Plugin`].
     #[serde(default)]
     pub plugin: String,
+    /// Optional shared-library path for a dynamically loaded plugin, relative
+    /// to this manifest unless absolute. When set, the runner loads the plugin
+    /// through the versioned controller-plugin C ABI instead of using the
+    /// built-in `VelocityServoController`.
+    #[serde(default)]
+    pub library: Option<PathBuf>,
     /// Target joint angle for the velocity-servo plugin, in radians.
     #[serde(default)]
     pub target_rad: f64,
@@ -154,6 +160,7 @@ impl Default for RunController {
             effort_nm: 0.0,
             joint_trajectories: Vec::new(),
             plugin: String::new(),
+            library: None,
             target_rad: 0.0,
             gain: 0.0,
             max_velocity_rad_s: 0.0,
@@ -484,6 +491,20 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             }
         }
     }
+    if let Some(library) = &manifest.controller.library {
+        if library.as_os_str().is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.library must not be empty",
+            ));
+        }
+        if manifest.controller.kind != RunControllerKind::Plugin {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.library requires kind = \"plugin\"",
+            ));
+        }
+    }
     Ok(manifest)
 }
 
@@ -712,6 +733,55 @@ waypoints = [
         )
         .expect_err("waypoints must be sorted");
         assert!(error.to_string().contains("sorted by increasing t_s"));
+    }
+
+    #[test]
+    fn parses_library_plugin_controller() {
+        let manifest = parse_run_manifest(
+            Path::new("assets/runs/plugin_library.rne.run.toml"),
+            r#"
+version = 1
+scene = "../scenes/mm_minimal.rne.scene.toml"
+
+[controller]
+kind = "plugin"
+plugin = "velocity_servo"
+library = "../../target/debug/librne_plugin_example_velocity_servo.so"
+joint = "shoulder_joint"
+target_rad = 1.0
+gain = 2.0
+max_velocity_rad_s = 5.0
+"#,
+        )
+        .expect("library plugin manifest");
+
+        assert_eq!(manifest.controller.kind, RunControllerKind::Plugin);
+        assert_eq!(manifest.controller.plugin, "velocity_servo");
+        let library = manifest.controller.library.as_deref().expect("library");
+        assert_eq!(
+            library,
+            Path::new("../../target/debug/librne_plugin_example_velocity_servo.so")
+        );
+        assert_eq!(manifest.controller.joint, "shoulder_joint");
+        assert_eq!(manifest.controller.target_rad, 1.0);
+    }
+
+    #[test]
+    fn library_plugin_requires_plugin_kind() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            r#"
+version = 1
+scene = "scene.rne.scene.toml"
+
+[controller]
+kind = "joint_velocity"
+joint = "shoulder_joint"
+library = "plugin.so"
+"#,
+        )
+        .expect_err("library must require plugin kind");
+        assert!(error.to_string().contains("requires kind = \"plugin\""));
     }
 
     #[test]

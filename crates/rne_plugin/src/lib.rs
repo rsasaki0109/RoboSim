@@ -4,15 +4,20 @@
 //! implementations: a [`ControllerPlugin`] maps an observed joint state to
 //! velocity commands, and the runner invokes it through the trait rather than
 //! inlining the policy. A [`PluginManifest`] names and classifies a plugin for
-//! discovery, and [`VelocityServoController`] is a built-in reference
-//! implementation.
-//!
-//! Runtime discovery/loading of dynamic libraries is not yet supported; plugins
-//! are selected by name from compiled-in implementations.
+//! discovery, [`VelocityServoController`] is a built-in reference
+//! implementation, and [`cabi::load_controller_library`] loads controller
+//! plugins from shared libraries through a versioned C ABI.
 
 #![deny(missing_docs)]
 
 use serde::{Deserialize, Serialize};
+
+pub mod cabi;
+
+pub use cabi::{
+    load_controller_library, LoadedControllerPlugin, PluginLoadError, RneJointPosition,
+    RneJointVelocity, RNE_PLUGIN_ABI_VERSION,
+};
 
 /// Plugin kind used for discovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

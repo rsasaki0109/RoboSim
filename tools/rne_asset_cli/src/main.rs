@@ -265,28 +265,45 @@ struct SimulationOptions<'a> {
     physics_backend: RunPhysicsBackend,
 }
 
-/// Parameters for a [`VelocityServoController`] selected by a run manifest.
+/// Parameters for a [`VelocityServoController`] or a dynamically loaded
+/// controller plugin selected by a run manifest.
 #[derive(Clone, Debug, PartialEq)]
 struct PluginControllerConfig {
     joint: String,
     target_rad: f64,
     gain: f64,
     max_velocity_rad_s: f64,
+    /// Shared-library path to load through the controller-plugin C ABI.
+    library: Option<PathBuf>,
 }
 
 impl PluginControllerConfig {
     /// Builds the concrete controller plugin (the policy callback boundary).
+    ///
+    /// With [`Self::library`] set, the plugin is loaded from the shared
+    /// library; otherwise the built-in [`VelocityServoController`] is used.
     fn build(&self) -> Result<Box<dyn ControllerPlugin>> {
-        Ok(Box::new(
-            VelocityServoController::new(
-                "velocity_servo",
+        if let Some(library) = &self.library {
+            rne_plugin::load_controller_library(
+                library,
                 &self.joint,
                 self.target_rad,
                 self.gain,
                 self.max_velocity_rad_s,
             )
-            .map_err(|error| anyhow::anyhow!("{error}"))?,
-        ))
+            .map_err(|error| anyhow::anyhow!("{error}"))
+        } else {
+            Ok(Box::new(
+                VelocityServoController::new(
+                    "velocity_servo",
+                    &self.joint,
+                    self.target_rad,
+                    self.gain,
+                    self.max_velocity_rad_s,
+                )
+                .map_err(|error| anyhow::anyhow!("{error}"))?,
+            ))
+        }
     }
 }
 
@@ -390,6 +407,11 @@ fn run_manifest_command(
             target_rad: manifest.controller.target_rad,
             gain: manifest.controller.gain,
             max_velocity_rad_s: manifest.controller.max_velocity_rad_s,
+            library: manifest
+                .controller
+                .library
+                .as_deref()
+                .map(|library| manifest.resolve_output_path(path, library)),
         })
     } else {
         None
@@ -1935,7 +1957,7 @@ mod tests {
     use super::{
         classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
         replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
-        verify_physics_requirements,
+        verify_physics_requirements, PluginControllerConfig,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
@@ -2360,6 +2382,103 @@ mod tests {
             RunPhysicsBackend::Rapier,
             Some(&mut control),
         )
+    }
+
+    /// Locates the example controller-plugin shared library built by the
+    /// workspace (directly under `target/debug/` or hashed under `deps/`).
+    fn find_example_plugin_library() -> PathBuf {
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+        let debug = target.join("debug");
+        let file_name = if cfg!(target_os = "windows") {
+            "rne_plugin_example_velocity_servo.dll"
+        } else if cfg!(target_os = "macos") {
+            "librne_plugin_example_velocity_servo.dylib"
+        } else {
+            "librne_plugin_example_velocity_servo.so"
+        };
+        let direct = debug.join(file_name);
+        if direct.exists() {
+            return direct;
+        }
+        let deps = debug.join("deps");
+        let prefix = if cfg!(target_os = "windows") {
+            "rne_plugin_example_velocity_servo-"
+        } else {
+            "librne_plugin_example_velocity_servo-"
+        };
+        let extension = Path::new(file_name)
+            .extension()
+            .map(|extension| format!(".{}", extension.to_string_lossy()))
+            .expect("library extension");
+        if let Ok(entries) = std::fs::read_dir(&deps) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with(prefix) && name.ends_with(extension.as_str()) {
+                    return entry.path();
+                }
+            }
+        }
+        panic!(
+            "example plugin library not found under {}; run `cargo build --workspace` first",
+            debug.display()
+        );
+    }
+
+    #[test]
+    fn loaded_plugin_library_drives_the_same_policy_as_the_built_in() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let params = PluginControllerConfig {
+            joint: "shoulder_joint".to_string(),
+            target_rad: 1.0,
+            gain: 2.0,
+            max_velocity_rad_s: 5.0,
+            library: Some(find_example_plugin_library()),
+        };
+        let loaded = params.build().expect("load example plugin");
+        let built_in = PluginControllerConfig {
+            library: None,
+            ..params
+        }
+        .build()
+        .expect("build-in plugin");
+
+        let run_loaded = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            Some(loaded),
+            &[],
+            RunPhysicsBackend::Rapier,
+            None,
+        )
+        .expect("loaded plugin run");
+        let run_built_in = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            Some(built_in),
+            &[],
+            RunPhysicsBackend::Rapier,
+            None,
+        )
+        .expect("built-in run");
+        assert_eq!(
+            run_loaded.report, run_built_in.report,
+            "loaded and built-in plugins must drive identical runs"
+        );
+        ensure_replay_frames(&run_built_in.frames, &run_loaded.frames)
+            .expect("loaded and built-in frames match");
     }
 
     #[test]

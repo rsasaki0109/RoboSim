@@ -1,0 +1,11 @@
+[package]
+name = "rne_plugin_example_velocity_servo"
+description = "Example controller plugin compiled to a loadable shared library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
