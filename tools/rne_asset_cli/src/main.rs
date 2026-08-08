@@ -265,8 +265,8 @@ struct SimulationOptions<'a> {
     physics_backend: RunPhysicsBackend,
 }
 
-/// Parameters for a [`VelocityServoController`] or a dynamically loaded
-/// controller plugin selected by a run manifest.
+/// Parameters for a [`VelocityServoController`], a dynamically loaded, or a
+/// discovered controller plugin selected by a run manifest.
 #[derive(Clone, Debug, PartialEq)]
 struct PluginControllerConfig {
     joint: String,
@@ -275,17 +275,32 @@ struct PluginControllerConfig {
     max_velocity_rad_s: f64,
     /// Shared-library path to load through the controller-plugin C ABI.
     library: Option<PathBuf>,
+    /// Directories searched for a library whose plugin name matches.
+    plugin_paths: Vec<PathBuf>,
 }
 
 impl PluginControllerConfig {
     /// Builds the concrete controller plugin (the policy callback boundary).
     ///
-    /// With [`Self::library`] set, the plugin is loaded from the shared
-    /// library; otherwise the built-in [`VelocityServoController`] is used.
+    /// With [`Self::library`] set, the plugin is loaded directly from the
+    /// shared library. Otherwise, if [`Self::plugin_paths`] is non-empty the
+    /// plugin is discovered by name in those directories. Otherwise the
+    /// built-in [`VelocityServoController`] is used.
     fn build(&self) -> Result<Box<dyn ControllerPlugin>> {
         if let Some(library) = &self.library {
             rne_plugin::load_controller_library(
                 library,
+                &self.joint,
+                self.target_rad,
+                self.gain,
+                self.max_velocity_rad_s,
+            )
+            .map_err(|error| anyhow::anyhow!("{error}"))
+        } else if !self.plugin_paths.is_empty() {
+            let paths: Vec<&Path> = self.plugin_paths.iter().map(PathBuf::as_path).collect();
+            rne_plugin::discover_controller_plugin(
+                "velocity_servo",
+                &paths,
                 &self.joint,
                 self.target_rad,
                 self.gain,
@@ -412,6 +427,12 @@ fn run_manifest_command(
                 .library
                 .as_deref()
                 .map(|library| manifest.resolve_output_path(path, library)),
+            plugin_paths: manifest
+                .controller
+                .plugin_paths
+                .iter()
+                .map(|search_path| manifest.resolve_output_path(path, search_path))
+                .collect(),
         })
     } else {
         None
@@ -1964,6 +1985,7 @@ mod tests {
     };
     use rne_core::control::{ControlCommand, RunControl, RunnerControl};
     use rne_log::ReplayAction;
+    use rne_plugin::VelocityServoController;
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
 
@@ -2459,6 +2481,7 @@ mod tests {
             gain: 2.0,
             max_velocity_rad_s: 5.0,
             library: Some(find_example_plugin_library()),
+            plugin_paths: Vec::new(),
         };
         let loaded = params.build().expect("load example plugin");
         let built_in = PluginControllerConfig {
@@ -2502,6 +2525,64 @@ mod tests {
         );
         ensure_replay_frames(&run_built_in.frames, &run_loaded.frames)
             .expect("loaded and built-in frames match");
+    }
+
+    #[test]
+    fn discovered_plugin_drives_the_same_policy_as_the_built_in() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let search_path = find_example_plugin_library()
+            .parent()
+            .expect("library parent directory")
+            .to_path_buf();
+        let discovered = PluginControllerConfig {
+            joint: "shoulder_joint".to_string(),
+            target_rad: 1.0,
+            gain: 2.0,
+            max_velocity_rad_s: 5.0,
+            library: None,
+            plugin_paths: vec![search_path],
+        }
+        .build()
+        .expect("discover velocity_servo");
+        let built_in =
+            VelocityServoController::new("velocity_servo", "shoulder_joint", 1.0, 2.0, 5.0)
+                .expect("built-in controller");
+
+        let run_discovered = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            Some(discovered),
+            &[],
+            RunPhysicsBackend::Rapier,
+            None,
+        )
+        .expect("discovered plugin run");
+        let run_built_in = simulate_scene_with_action_schedule(
+            &scene,
+            30,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            Some(Box::new(built_in)),
+            &[],
+            RunPhysicsBackend::Rapier,
+            None,
+        )
+        .expect("built-in run");
+        assert_eq!(
+            run_discovered.report, run_built_in.report,
+            "discovered and built-in plugins must drive identical runs"
+        );
+        ensure_replay_frames(&run_built_in.frames, &run_discovered.frames)
+            .expect("discovered and built-in frames match");
     }
 
     #[test]

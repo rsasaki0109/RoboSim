@@ -85,27 +85,120 @@ fn load() -> Box<dyn ControllerPlugin> {
         .expect("load example plugin")
 }
 
+/// Expected `(joint names, positions, velocity commands)` for the policy tests.
+type ExpectedCommands = Vec<(&'static [&'static str], &'static [f64], Vec<(String, f64)>)>;
+
+fn expected_commands() -> ExpectedCommands {
+    vec![
+        (
+            &["shoulder_joint"],
+            &[0.25],
+            vec![("shoulder_joint".into(), 1.5)],
+        ),
+        (
+            &["shoulder_joint"],
+            &[-10.0],
+            vec![("shoulder_joint".into(), 5.0)],
+        ),
+        (
+            &["shoulder_joint"],
+            &[1.0],
+            vec![("shoulder_joint".into(), 0.0)],
+        ),
+        (&["other_joint"], &[0.5], vec![]),
+        (
+            &["other_joint", "shoulder_joint"],
+            &[0.5, 0.5],
+            vec![("shoulder_joint".into(), 1.0)],
+        ),
+    ]
+}
+
 #[test]
 fn loads_the_example_plugin_and_matches_the_built_in_policy() {
     let loaded = load();
-    assert_eq!(loaded.name(), "rne_plugin_example_velocity_servo");
+    assert_eq!(loaded.name(), "velocity_servo");
 
     let built_in = VelocityServoController::new("velocity_servo", "shoulder_joint", 1.0, 2.0, 5.0)
         .expect("built-in controller");
 
-    for (names, positions) in [
-        (vec!["shoulder_joint"], vec![0.25]),
-        (vec!["shoulder_joint"], vec![-10.0]),
-        (vec!["shoulder_joint"], vec![1.0]),
-        (vec!["other_joint"], vec![0.5]),
-        (vec!["other_joint", "shoulder_joint"], vec![0.5, 0.5]),
-    ] {
+    for (names, positions, expected) in expected_commands() {
         assert_eq!(
-            loaded.joint_velocity_commands(&names, &positions),
-            built_in.joint_velocity_commands(&names, &positions),
+            loaded.joint_velocity_commands(names, positions),
+            expected,
             "loaded plugin must match the built-in velocity-servo policy"
         );
+        assert_eq!(built_in.joint_velocity_commands(names, positions), expected);
     }
+}
+
+#[test]
+fn discovers_the_plugin_by_name_in_a_search_directory() {
+    let library = find_example_library();
+    let search_path = library
+        .parent()
+        .expect("library parent directory")
+        .to_path_buf();
+    let discovered = rne_plugin::discover_controller_plugin(
+        "velocity_servo",
+        &[search_path.as_path()],
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect("discover velocity_servo");
+
+    assert_eq!(discovered.name(), "velocity_servo");
+    for (names, positions, expected) in expected_commands() {
+        assert_eq!(
+            discovered.joint_velocity_commands(names, positions),
+            expected,
+            "discovered plugin must match the velocity-servo policy"
+        );
+    }
+}
+
+#[test]
+fn discovery_falls_back_to_the_built_in_without_search_paths() {
+    let discovered = rne_plugin::discover_controller_plugin(
+        "velocity_servo",
+        &[],
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect("built-in fallback");
+    assert_eq!(discovered.name(), "velocity_servo");
+    for (names, positions, expected) in expected_commands() {
+        assert_eq!(
+            discovered.joint_velocity_commands(names, positions),
+            expected,
+            "built-in fallback must match the velocity-servo policy"
+        );
+    }
+}
+
+#[test]
+fn discovery_rejects_an_unknown_plugin_name() {
+    let search_path = find_example_library()
+        .parent()
+        .expect("library parent directory")
+        .to_path_buf();
+    let error = rne_plugin::discover_controller_plugin(
+        "nonexistent_controller",
+        &[search_path.as_path()],
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect_err("unknown plugin must be rejected");
+    assert!(
+        matches!(error, PluginLoadError::NotFound { .. }),
+        "expected a not-found error, got {error}"
+    );
 }
 
 #[test]

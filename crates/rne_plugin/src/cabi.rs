@@ -19,7 +19,7 @@ use std::path::Path;
 ///
 /// Bump this whenever a symbol signature or a `#[repr(C)]` struct layout in
 /// this module changes. Plugins reporting a different version are rejected.
-pub const RNE_PLUGIN_ABI_VERSION: u32 = 1;
+pub const RNE_PLUGIN_ABI_VERSION: u32 = 2;
 
 /// A joint position observation passed from the host to a plugin.
 ///
@@ -49,6 +49,12 @@ pub struct RneJointVelocity {
 
 /// Reports the [`RNE_PLUGIN_ABI_VERSION`] the plugin was built against.
 pub type RnePluginAbiVersionFn = unsafe extern "C" fn() -> u32;
+
+/// Reports the plugin's logical name as a static NUL-terminated UTF-8 string.
+///
+/// The returned pointer must stay valid for the lifetime of the loaded
+/// library. The host copies it immediately.
+pub type RnePluginNameFn = unsafe extern "C" fn() -> *const c_char;
 
 /// Creates a controller instance.
 ///
@@ -163,10 +169,25 @@ impl LoadedControllerPlugin {
             symbol: "rne_controller_step",
             message: error.to_string(),
         })?;
+        let name_symbol: libloading::Symbol<'_, RnePluginNameFn> = unsafe {
+            library.get(b"rne_plugin_name")
+        }
+        .map_err(|error| PluginLoadError::Symbol {
+            path: library_path.display().to_string(),
+            symbol: "rne_plugin_name",
+            message: error.to_string(),
+        })?;
 
         let create: RneControllerCreateFn = *create_symbol;
         let destroy: RneControllerDestroyFn = *destroy_symbol;
         let step: RneControllerStepFn = *step_symbol;
+        let name_fn: RnePluginNameFn = *name_symbol;
+
+        // SAFETY: the ABI requires the returned name pointer to be a static
+        // NUL-terminated UTF-8 string valid for the lifetime of the library.
+        let name = unsafe { CStr::from_ptr(name_fn()) }
+            .to_string_lossy()
+            .into_owned();
 
         let joint_c = CString::new(joint).map_err(|error| PluginLoadError::Create {
             message: format!("joint is not NUL-free UTF-8: {error}"),
@@ -193,14 +214,6 @@ impl LoadedControllerPlugin {
             };
             return Err(PluginLoadError::Create { message });
         }
-
-        let name = library_path
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            // Strip the `lib` prefix Unix shared libraries carry so the plugin
-            // name is identical across platforms.
-            .map(|stem| stem.strip_prefix("lib").map(str::to_string).unwrap_or(stem))
-            .unwrap_or_else(|| "loaded_plugin".to_string());
 
         Ok(Self {
             library,
@@ -296,7 +309,87 @@ pub fn load_controller_library(
     )?))
 }
 
-/// A failure while opening, resolving, or invoking a plugin library.
+/// Shared-library file extensions for the current platform.
+fn shared_library_extensions() -> &'static [&'static str] {
+    if cfg!(target_os = "windows") {
+        &["dll"]
+    } else if cfg!(target_os = "macos") {
+        &["dylib"]
+    } else {
+        &["so"]
+    }
+}
+
+/// Whether a file name looks like a loadable shared library.
+fn is_shared_library(file_name: &str) -> bool {
+    shared_library_extensions()
+        .iter()
+        .any(|extension| file_name.ends_with(&format!(".{extension}")))
+}
+
+/// Discovers a controller plugin by logical name.
+///
+/// Searches each directory in `search_paths` in order for shared libraries
+/// whose file name contains `name` (case-insensitive), loading the first whose
+/// `rne_plugin_name` matches. If no library matches, the built-in registry is
+/// consulted (currently `velocity_servo`). Directory entries are scanned in
+/// sorted order so discovery is deterministic.
+pub fn discover_controller_plugin(
+    name: &str,
+    search_paths: &[&Path],
+    joint: &str,
+    target_rad: f64,
+    gain: f64,
+    max_velocity_rad_s: f64,
+) -> Result<Box<dyn crate::ControllerPlugin>, PluginLoadError> {
+    let name_lower = name.to_ascii_lowercase();
+    for path in search_paths {
+        let entries = std::fs::read_dir(path).map_err(|error| PluginLoadError::Search {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        let mut candidates = Vec::new();
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if is_shared_library(&file_name) && file_name.contains(&name_lower) {
+                candidates.push(entry.path());
+            }
+        }
+        candidates.sort_unstable();
+        for candidate in candidates {
+            let Ok(plugin) = crate::load_controller_library(
+                &candidate,
+                joint,
+                target_rad,
+                gain,
+                max_velocity_rad_s,
+            ) else {
+                continue;
+            };
+            if plugin.name().eq_ignore_ascii_case(name) {
+                return Ok(plugin);
+            }
+        }
+    }
+    if name == "velocity_servo" {
+        return Ok(Box::new(
+            crate::VelocityServoController::new(name, joint, target_rad, gain, max_velocity_rad_s)
+                .map_err(|error| PluginLoadError::Create {
+                    message: error.to_string(),
+                })?,
+        ));
+    }
+    Err(PluginLoadError::NotFound {
+        name: name.to_string(),
+        search_paths: search_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    })
+}
+
+/// A failure while opening, resolving, discovering, or invoking a plugin.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginLoadError {
     /// The shared library could not be opened.
@@ -330,5 +423,21 @@ pub enum PluginLoadError {
     Create {
         /// Error message reported by the plugin.
         message: String,
+    },
+    /// A plugin search directory could not be read.
+    #[error("read plugin search directory {path}: {message}")]
+    Search {
+        /// Directory path.
+        path: String,
+        /// Underlying filesystem error.
+        message: String,
+    },
+    /// No plugin with the requested name was found.
+    #[error("no controller plugin named `{name}` found in [{search_paths}] or built-in")]
+    NotFound {
+        /// Requested plugin name.
+        name: String,
+        /// Search directories that were consulted.
+        search_paths: String,
     },
 }

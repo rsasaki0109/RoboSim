@@ -139,6 +139,11 @@ pub struct RunController {
     /// built-in `VelocityServoController`.
     #[serde(default)]
     pub library: Option<PathBuf>,
+    /// Optional directories (relative to this manifest unless absolute) the
+    /// runner searches for a shared library whose `rne_plugin_name` matches
+    /// [`Self::plugin`], preferred over the built-in implementation.
+    #[serde(default)]
+    pub plugin_paths: Vec<PathBuf>,
     /// Target joint angle for the velocity-servo plugin, in radians.
     #[serde(default)]
     pub target_rad: f64,
@@ -161,6 +166,7 @@ impl Default for RunController {
             joint_trajectories: Vec::new(),
             plugin: String::new(),
             library: None,
+            plugin_paths: Vec::new(),
             target_rad: 0.0,
             gain: 0.0,
             max_velocity_rad_s: 0.0,
@@ -505,6 +511,20 @@ fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManife
             ));
         }
     }
+    for (index, search_path) in manifest.controller.plugin_paths.iter().enumerate() {
+        if search_path.as_os_str().is_empty() {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                format!("controller.plugin_paths[{index}] must not be empty"),
+            ));
+        }
+        if manifest.controller.kind != RunControllerKind::Plugin {
+            return Err(AssetError::invalid(
+                path.display().to_string(),
+                "controller.plugin_paths requires kind = \"plugin\"",
+            ));
+        }
+    }
     Ok(manifest)
 }
 
@@ -747,6 +767,7 @@ scene = "../scenes/mm_minimal.rne.scene.toml"
 kind = "plugin"
 plugin = "velocity_servo"
 library = "../../target/debug/librne_plugin_example_velocity_servo.so"
+plugin_paths = ["../../target/debug", "../../plugins"]
 joint = "shoulder_joint"
 target_rad = 1.0
 gain = 2.0
@@ -761,6 +782,13 @@ max_velocity_rad_s = 5.0
         assert_eq!(
             library,
             Path::new("../../target/debug/librne_plugin_example_velocity_servo.so")
+        );
+        assert_eq!(
+            manifest.controller.plugin_paths,
+            vec![
+                PathBuf::from("../../target/debug"),
+                PathBuf::from("../../plugins"),
+            ]
         );
         assert_eq!(manifest.controller.joint, "shoulder_joint");
         assert_eq!(manifest.controller.target_rad, 1.0);
@@ -781,6 +809,23 @@ library = "plugin.so"
 "#,
         )
         .expect_err("library must require plugin kind");
+        assert!(error.to_string().contains("requires kind = \"plugin\""));
+    }
+
+    #[test]
+    fn plugin_paths_requires_plugin_kind() {
+        let error = parse_run_manifest(
+            Path::new("bad.rne.run.toml"),
+            r#"
+version = 1
+scene = "scene.rne.scene.toml"
+
+[controller]
+kind = "differential_drive"
+plugin_paths = ["plugins"]
+"#,
+        )
+        .expect_err("plugin_paths must require plugin kind");
         assert!(error.to_string().contains("requires kind = \"plugin\""));
     }
 

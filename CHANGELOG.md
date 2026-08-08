@@ -6,6 +6,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Controller-plugin discovery by name**: the controller-plugin C ABI is now
+  version 2 and requires the plugin to export `rne_plugin_name` (a static
+  NUL-terminated name), which the host uses as the loaded plugin's name.
+  `rne_plugin::discover_controller_plugin` searches directories for a shared
+  library whose file name contains the requested name and whose
+  `rne_plugin_name` matches, deterministically, falling back to the built-in
+  `velocity_servo` registry. Run manifests select it with
+  `[controller] plugin_paths = [...]`. Discovery, not-found, and
+  discovered-vs-built-in replay-identical tests pin the behavior.
 - **Dynamically loaded controller plugins**: `rne_plugin::load_controller_library`
   opens a controller plugin from a shared library through a versioned C ABI
   (`rne_plugin_abi_version`, `rne_controller_create`, `rne_controller_destroy`,

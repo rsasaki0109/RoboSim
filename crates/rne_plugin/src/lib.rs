@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 pub mod cabi;
 
 pub use cabi::{
-    load_controller_library, LoadedControllerPlugin, PluginLoadError, RneJointPosition,
-    RneJointVelocity, RNE_PLUGIN_ABI_VERSION,
+    discover_controller_plugin, load_controller_library, LoadedControllerPlugin, PluginLoadError,
+    RneJointPosition, RneJointVelocity, RNE_PLUGIN_ABI_VERSION,
 };
 
 /// Plugin kind used for discovery.

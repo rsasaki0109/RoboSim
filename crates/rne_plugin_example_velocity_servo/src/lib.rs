@@ -16,7 +16,10 @@ use std::ffi::{c_char, c_void, CStr, CString};
 
 /// ABI version this plugin implements. Keep in sync with
 /// `rne_plugin::RNE_PLUGIN_ABI_VERSION`; the loader rejects mismatches.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
+
+/// Logical plugin name reported through [`rne_plugin_name`].
+pub const PLUGIN_NAME: &str = "velocity_servo";
 
 /// Joint position observation, mirroring `rne_plugin::cabi::RneJointPosition`.
 #[repr(C)]
@@ -60,6 +63,14 @@ pub fn velocity_command(
 #[no_mangle]
 pub extern "C" fn rne_plugin_abi_version() -> u32 {
     ABI_VERSION
+}
+
+static PLUGIN_NAME_C: &[u8] = b"velocity_servo\0";
+
+/// Reports the plugin's logical name as a static NUL-terminated UTF-8 string.
+#[no_mangle]
+pub extern "C" fn rne_plugin_name() -> *const c_char {
+    PLUGIN_NAME_C.as_ptr().cast()
 }
 
 /// Creates a velocity-servo controller instance.
