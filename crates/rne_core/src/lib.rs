@@ -3,11 +3,13 @@
 #![deny(missing_docs)]
 
 pub mod app;
+pub mod control;
 pub mod rng;
 pub mod schedule;
 pub mod time;
 
 pub use app::{AppBuilder, Plugin, RneApp};
+pub use control::{ControlCommand, EpisodeOutcome, RunControl, RunnerControl, RunnerControlState};
 pub use rng::{
     mix64, DeterministicRng, KeyedRandom, DETERMINISTIC_RNG_VERSION, KEYED_RANDOM_VERSION,
 };

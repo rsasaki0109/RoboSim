@@ -28,6 +28,9 @@ serde = { workspace = true }
 serde_json = "1"
 rne_world = { path = "../../crates/rne_world" }
 
+[dev-dependencies]
+rne_log = { path = "../../crates/rne_log" }
+
 [[bin]]
 name = "rne-asset"
 path = "src/main.rs"
