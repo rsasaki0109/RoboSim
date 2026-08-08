@@ -197,6 +197,9 @@ impl LoadedControllerPlugin {
         let name = library_path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
+            // Strip the `lib` prefix Unix shared libraries carry so the plugin
+            // name is identical across platforms.
+            .map(|stem| stem.strip_prefix("lib").map(str::to_string).unwrap_or(stem))
             .unwrap_or_else(|| "loaded_plugin".to_string());
 
         Ok(Self {
