@@ -2384,8 +2384,10 @@ mod tests {
         )
     }
 
-    /// Locates the example controller-plugin shared library built by the
-    /// workspace (directly under `target/debug/` or hashed under `deps/`).
+    /// Locates the example controller-plugin shared library, building it on
+    /// demand. A plain workspace build places it under `target/debug/`; cargo
+    /// nextest does not emit cdylib artifacts for workspace members, so the
+    /// helper falls back to building the crate itself.
     fn find_example_plugin_library() -> PathBuf {
         let target = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
@@ -2398,11 +2400,6 @@ mod tests {
         } else {
             "librne_plugin_example_velocity_servo.so"
         };
-        let direct = debug.join(file_name);
-        if direct.exists() {
-            return direct;
-        }
-        let deps = debug.join("deps");
         let prefix = if cfg!(target_os = "windows") {
             "rne_plugin_example_velocity_servo-"
         } else {
@@ -2412,16 +2409,42 @@ mod tests {
             .extension()
             .map(|extension| format!(".{}", extension.to_string_lossy()))
             .expect("library extension");
-        if let Ok(entries) = std::fs::read_dir(&deps) {
+        let find_in_deps = || -> Option<PathBuf> {
+            let entries = std::fs::read_dir(debug.join("deps")).ok()?;
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.starts_with(prefix) && name.ends_with(extension.as_str()) {
-                    return entry.path();
+                    return Some(entry.path());
                 }
             }
+            None
+        };
+        let direct = debug.join(file_name);
+        if direct.exists() {
+            return direct;
+        }
+        if let Some(found) = find_in_deps() {
+            return found;
+        }
+        let status = std::process::Command::new("cargo")
+            .arg("build")
+            .arg("-p")
+            .arg("rne_plugin_example_velocity_servo")
+            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .status()
+            .expect("run cargo to build the example plugin");
+        assert!(
+            status.success(),
+            "cargo build -p rne_plugin_example_velocity_servo failed"
+        );
+        if direct.exists() {
+            return direct;
+        }
+        if let Some(found) = find_in_deps() {
+            return found;
         }
         panic!(
-            "example plugin library not found under {}; run `cargo build --workspace` first",
+            "example plugin library still missing after a build; target dir: {}",
             debug.display()
         );
     }

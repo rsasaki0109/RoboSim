@@ -11,6 +11,3 @@ libloading = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
 thiserror = { workspace = true }
-
-[dev-dependencies]
-rne_plugin_example_velocity_servo = { path = "../rne_plugin_example_velocity_servo" }

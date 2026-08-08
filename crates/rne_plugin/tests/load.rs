@@ -22,37 +22,60 @@ fn library_file_name() -> String {
     }
 }
 
-/// Locates the example plugin shared library, built by the workspace.
+/// Locates the example plugin shared library, building it on demand.
 ///
-/// Under `cargo test --workspace` the artifact sits in `target/debug/`; under
-/// `cargo test -p rne_plugin` (which dev-depends on the example crate) it is
-/// hashed inside `target/debug/deps/`.
+/// The artifact is produced by `cargo build` on the example crate. A plain
+/// workspace build places it under `target/debug/`; `cargo nextest run` does
+/// not emit `cdylib` artifacts for workspace members, so the helper falls back
+/// to building the crate itself (which also populates `target/debug/`).
 fn find_example_library() -> PathBuf {
     let debug = target_dir().join("debug");
     let direct = debug.join(library_file_name());
-    if direct.exists() {
-        return direct;
-    }
-    let deps = debug.join("deps");
-    let prefix = if cfg!(target_os = "windows") {
-        "rne_plugin_example_velocity_servo-"
-    } else {
-        "librne_plugin_example_velocity_servo-"
-    };
-    let extension = library_file_name()
-        .rsplit_once('.')
-        .map(|(_, extension)| format!(".{extension}"))
-        .expect("library extension");
-    if let Ok(entries) = std::fs::read_dir(&deps) {
+    let find_in_deps = || -> Option<PathBuf> {
+        let deps = debug.join("deps");
+        let prefix = if cfg!(target_os = "windows") {
+            "rne_plugin_example_velocity_servo-"
+        } else {
+            "librne_plugin_example_velocity_servo-"
+        };
+        let extension = library_file_name()
+            .rsplit_once('.')
+            .map(|(_, extension)| format!(".{extension}"))
+            .expect("library extension");
+        let entries = std::fs::read_dir(&deps).ok()?;
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with(prefix) && name.ends_with(extension.as_str()) {
-                return entry.path();
+                return Some(entry.path());
             }
         }
+        None
+    };
+    if direct.exists() {
+        return direct;
+    }
+    if let Some(found) = find_in_deps() {
+        return found;
+    }
+    let status = std::process::Command::new("cargo")
+        .arg("build")
+        .arg("-p")
+        .arg("rne_plugin_example_velocity_servo")
+        .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .status()
+        .expect("run cargo to build the example plugin");
+    assert!(
+        status.success(),
+        "cargo build -p rne_plugin_example_velocity_servo failed"
+    );
+    if direct.exists() {
+        return direct;
+    }
+    if let Some(found) = find_in_deps() {
+        return found;
     }
     panic!(
-        "example plugin library not found under {}; run `cargo build --workspace` first",
+        "example plugin library still missing after a build; target dir: {}",
         debug.display()
     );
 }

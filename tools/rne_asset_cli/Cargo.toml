@@ -30,7 +30,6 @@ rne_world = { path = "../../crates/rne_world" }
 
 [dev-dependencies]
 rne_log = { path = "../../crates/rne_log" }
-rne_plugin_example_velocity_servo = { path = "../../crates/rne_plugin_example_velocity_servo" }
 
 [[bin]]
 name = "rne-asset"
