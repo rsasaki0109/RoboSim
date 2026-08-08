@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Plugin authoring tooling**: `rne_plugin::scaffold_controller_plugin` generates
+  a complete, compilable controller-plugin crate (a `cdylib` implementing the
+  controller-plugin C ABI, initially a velocity-servo policy) plus a versioned
+  `rne-plugin.json` manifest. `rne-asset plugin new <name> --dir <parent>`
+  scaffolds it; `rne-asset plugin list --path <dir>` enumerates built-in and
+  discoverable plugin libraries (`rne_plugin::discover_plugin_names`). An
+  end-to-end test scaffolds, builds, and loads a plugin from the generated
+  source, verifying the name, ABI version, and velocity-servo commands.
 - **SUMO `.net.xml` road-network import** (`rne_sumo`): an offline importer that
   converts SUMO `edge`/`lane` geometry and `allow`/`disallow` road-user classes
   into the RNE Y-up frame (`[x, z, -y]`), skipping internal/connector edges, and

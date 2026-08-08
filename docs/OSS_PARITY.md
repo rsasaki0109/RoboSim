@@ -25,7 +25,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), and offline SUMO `.net.xml` road-network import (`rne_sumo` converts SUMO lanes into the RNE Y-up frame and derives junctions/connections deterministically) | Live SUMO co-simulation (TraCI) and signal-program import are future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
-| Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), and name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback | Plugin authoring tooling beyond the example crate is future work |
+| Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
 
 ## Delivered first slice
 
@@ -238,3 +238,20 @@ target_rad = 1.0
 gain = 2.0
 max_velocity_rad_s = 5.0
 ```
+
+## Plugin authoring
+
+`rne-asset plugin new` scaffolds a complete, compilable controller-plugin crate
+implementing the C ABI, with a versioned `rne-plugin.json` manifest:
+
+```bash
+cargo run --release -p rne_asset_cli -- plugin new my_controller --dir plugins
+cd plugins/my_controller && cargo build
+```
+
+The scaffolded crate starts as a velocity-servo policy (so it compiles and
+loads immediately); replace `rne_controller_step` with your controller.
+`rne-asset plugin list --path <dir>` enumerates the built-in `velocity_servo`
+and any discoverable plugin libraries in the given directories. An
+end-to-end test scaffolds, builds, and loads a plugin from the generated
+source.
