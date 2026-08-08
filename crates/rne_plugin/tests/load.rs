@@ -202,6 +202,26 @@ fn discovery_rejects_an_unknown_plugin_name() {
 }
 
 #[test]
+fn enumerates_available_plugin_names() {
+    let search_path = find_example_library()
+        .parent()
+        .expect("library parent directory")
+        .to_path_buf();
+    let found =
+        rne_plugin::discover_plugin_names(&[search_path.as_path()]).expect("discover names");
+    assert!(
+        found.iter().any(|(name, _)| name == "velocity_servo"),
+        "the example plugin must be discovered by name, got {found:?}"
+    );
+    let mut names = found
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    assert!(names.windows(2).all(|pair| pair[0] <= pair[1]));
+}
+
+#[test]
 fn invalid_create_parameters_are_rejected() {
     let error = load_controller_library(&find_example_library(), "shoulder_joint", 1.0, -1.0, 5.0)
         .expect_err("negative gain must be rejected");

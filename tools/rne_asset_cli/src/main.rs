@@ -151,6 +151,11 @@ enum Commands {
         #[arg(long, default_value = "sumo")]
         network_id: String,
     },
+    /// Author and inspect controller plugins.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
     /// Poll a scene asset graph and reload when dependencies change.
     Watch {
         /// Scene asset path.
@@ -158,6 +163,24 @@ enum Commands {
         /// Poll interval in milliseconds.
         #[arg(long, default_value_t = 500)]
         interval_ms: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginCommand {
+    /// Scaffold a new controller-plugin crate implementing the C ABI.
+    New {
+        /// Plugin and crate name (ASCII letters, digits, and underscores).
+        name: String,
+        /// Parent directory receiving the plugin crate.
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        dir: PathBuf,
+    },
+    /// List built-in and discoverable controller plugins.
+    List {
+        /// Directories searched for plugin shared libraries (repeatable).
+        #[arg(long, value_name = "DIR")]
+        path: Vec<PathBuf>,
     },
 }
 
@@ -217,6 +240,7 @@ fn main() -> Result<()> {
             out,
             network_id,
         } => sumo_net_command(&path, &out, &network_id),
+        Commands::Plugin { command } => plugin_command(command),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
 }
@@ -1589,6 +1613,33 @@ fn sumo_net_command(path: &Path, out: &Path, network_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Dispatches the `plugin` subcommands.
+fn plugin_command(command: PluginCommand) -> Result<()> {
+    match command {
+        PluginCommand::New { name, dir } => {
+            let crate_dir = rne_plugin::scaffold_controller_plugin(&name, &dir)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            println!("plugin: scaffolded `{name}` at {}", crate_dir.display());
+            println!(
+                "  cargo build --manifest-path {}/Cargo.toml",
+                crate_dir.display()
+            );
+            println!("  plugin name `{name}`, controller ABI version 2");
+            Ok(())
+        }
+        PluginCommand::List { path } => {
+            let paths: Vec<&Path> = path.iter().map(PathBuf::as_path).collect();
+            println!("built-in: velocity_servo");
+            let discovered = rne_plugin::discover_plugin_names(&paths)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            for (name, library_path) in discovered {
+                println!("discovered: {name} ({})", library_path.display());
+            }
+            Ok(())
+        }
+    }
+}
+
 fn capture_sensor_payloads(
     world: &World,
     bus: &InMemoryDataBus,
@@ -2024,8 +2075,9 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 mod tests {
     use super::{
         classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
-        replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
-        sumo_net_command, verify_physics_requirements, PluginControllerConfig,
+        plugin_command, replay_command, run_manifest_command, simulate_scene,
+        simulate_scene_with_action_schedule, sumo_net_command, verify_physics_requirements,
+        PluginCommand, PluginControllerConfig,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
@@ -2432,6 +2484,27 @@ mod tests {
             asset.network.connections.len() >= 4,
             "approaches must connect through the junction"
         );
+    }
+
+    #[test]
+    fn plugin_new_scaffolds_a_plugin_crate() {
+        let parent =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runs/plugin-new-cli-test");
+        let _ = std::fs::remove_dir_all(&parent);
+        plugin_command(PluginCommand::New {
+            name: "cli_plugin".to_string(),
+            dir: parent.clone(),
+        })
+        .expect("scaffold plugin");
+
+        let crate_dir = parent.join("cli_plugin");
+        assert!(crate_dir.join("Cargo.toml").exists());
+        assert!(crate_dir.join("src/lib.rs").exists());
+        assert!(crate_dir.join("rne-plugin.json").exists());
+        let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).expect("read lib.rs");
+        assert!(lib.contains("rne_plugin_abi_version"));
+        assert!(lib.contains("rne_plugin_name"));
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     /// A queue-driven transport for deterministic runner-control tests.

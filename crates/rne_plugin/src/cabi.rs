@@ -13,7 +13,7 @@
 //! control returns to it.
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// ABI version negotiated at load time.
 ///
@@ -387,6 +387,67 @@ pub fn discover_controller_plugin(
             .collect::<Vec<_>>()
             .join(", "),
     })
+}
+
+/// Reads a plugin library's logical name without creating a controller.
+///
+/// Returns `None` when the library is not a compatible plugin (missing
+/// symbols, ABI-version mismatch, or a null name).
+pub fn peek_plugin_name(library_path: &Path) -> Option<String> {
+    let library = unsafe { libloading::Library::new(library_path) }.ok()?;
+    let abi_version: libloading::Symbol<'_, RnePluginAbiVersionFn> =
+        unsafe { library.get(b"rne_plugin_abi_version") }.ok()?;
+    if unsafe { abi_version() } != RNE_PLUGIN_ABI_VERSION {
+        return None;
+    }
+    let name: libloading::Symbol<'_, RnePluginNameFn> =
+        unsafe { library.get(b"rne_plugin_name") }.ok()?;
+    let pointer = unsafe { name() };
+    if pointer.is_null() {
+        return None;
+    }
+    // SAFETY: the ABI requires the returned name pointer to be a static
+    // NUL-terminated UTF-8 string valid for the lifetime of the library.
+    let name = unsafe { CStr::from_ptr(pointer) }
+        .to_string_lossy()
+        .into_owned();
+    if name.trim().is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Enumerates the controller plugins available in `search_paths`.
+///
+/// Scans each directory deterministically for shared libraries whose
+/// `rne_plugin_name` matches the ABI contract, returning `(name, path)` pairs
+/// sorted by name. When several libraries report the same name, the first in
+/// sorted path order wins.
+pub fn discover_plugin_names(
+    search_paths: &[&Path],
+) -> Result<Vec<(String, PathBuf)>, PluginLoadError> {
+    let mut found = std::collections::BTreeMap::new();
+    for path in search_paths {
+        let entries = std::fs::read_dir(path).map_err(|error| PluginLoadError::Search {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        let mut candidates = Vec::new();
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if is_shared_library(&file_name) {
+                candidates.push(entry.path());
+            }
+        }
+        candidates.sort_unstable();
+        for candidate in candidates {
+            if let Some(name) = peek_plugin_name(&candidate) {
+                found.entry(name).or_insert(candidate);
+            }
+        }
+    }
+    Ok(found.into_iter().collect())
 }
 
 /// A failure while opening, resolving, discovering, or invoking a plugin.
