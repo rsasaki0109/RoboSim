@@ -38,6 +38,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_openscenario`: minimal OpenSCENARIO 1.0 scenario import (offline importer)
 - `crates/rne_sdf`: minimal SDF model import (SDF → URDF, offline importer)
 - `crates/rne_mjcf`: minimal MuJoCo MJCF model import (MJCF → URDF, offline importer)
+- `crates/rne_sumo`: minimal SUMO `.net.xml` road-network import (offline importer → `.rne.traffic.json`)
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests

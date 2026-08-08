@@ -23,7 +23,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
-| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, and minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests) | External traffic-simulator adapters (e.g., SUMO) are future work |
+| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), and offline SUMO `.net.xml` road-network import (`rne_sumo` converts SUMO lanes into the RNE Y-up frame and derives junctions/connections deterministically) | Live SUMO co-simulation (TraCI) and signal-program import are future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), and name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback | Plugin authoring tooling beyond the example crate is future work |
 
@@ -144,6 +144,26 @@ when that height drops below half of its initial value.
 This order closes the common simulator workflow first. Photoreal rendering,
 large asset libraries, and GPU-scale parallelism remain separate capabilities,
 not prerequisites for headless behavior testing.
+
+## SUMO road-network import
+
+`rne-sumo`-powered `rne-asset sumo-net` converts a SUMO `.net.xml` road network
+into a `.rne.traffic.json` traffic asset. The importer maps `edge`/`lane`
+geometry (2D `x,y` SUMO coordinates) into the RNE Y-up frame
+(`[x, z, -y]`), converts `allow`/`disallow` road-user classes, and then lets
+`rne_traffic::build_traffic_topology` deterministically derive junctions and
+lane connections from the lane endpoints:
+
+```bash
+cargo run --release -p rne_asset_cli -- sumo-net \
+  assets/networks/minimal_cross.net.xml \
+  --out target/runs/minimal_cross.rne.traffic.json
+```
+
+Internal/connector edges are skipped, malformed input is rejected, and the
+fixture network derives a four-way junction with seven movements. Live SUMO
+co-simulation (TraCI) and SUMO `tlLogic` signal-program import remain future
+work.
 
 ## Runner control
 

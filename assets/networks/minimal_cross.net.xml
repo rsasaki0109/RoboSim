@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal SUMO road network fixture: a four-way at-grade intersection with
+     motor, bicycle, and pedestrian approaches. Lane ids and geometry follow
+     the SUMO .net.xml lane model (2D x,east / y,north coordinates). -->
+<net version="1.16" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="0.00,0.00" convBoundary="0.00,0.00,400.00,400.00" projParameter="+proj=utm +zone=50 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"/>
+    <edge id="northbound" from="north" to="center">
+        <lane id="northbound_0" index="0" speed="13.89" length="100.00" shape="200.00,300.00 200.00,200.00" width="3.50" allow="private passenger"/>
+        <lane id="northbound_1" index="1" speed="13.89" length="100.00" shape="203.50,300.00 203.50,200.00" width="3.50" allow="private passenger"/>
+    </edge>
+    <edge id="southbound" from="center" to="south">
+        <lane id="southbound_0" index="0" speed="13.89" length="100.00" shape="196.50,200.00 196.50,100.00" width="3.50" allow="private passenger"/>
+    </edge>
+    <edge id="eastbound" from="east" to="center">
+        <lane id="eastbound_0" index="0" speed="13.89" length="100.00" shape="300.00,196.50 200.00,196.50" width="3.50" allow="private passenger"/>
+    </edge>
+    <edge id="westbound" from="center" to="west">
+        <lane id="westbound_0" index="0" speed="13.89" length="100.00" shape="200.00,203.50 100.00,203.50" width="3.50" allow="private passenger"/>
+    </edge>
+    <edge id="pedestrian_path" from="northwest" to="center">
+        <lane id="pedestrian_path_0" index="0" speed="1.39" length="150.00" shape="150.00,350.00 200.00,200.00" width="2.00" allow="pedestrian"/>
+    </edge>
+    <edge id="bike_path" from="bikenorth" to="center">
+        <lane id="bike_path_0" index="0" speed="5.56" length="90.00" shape="207.00,290.00 203.50,200.00" width="1.50" allow="bicycle"/>
+    </edge>
+    <edge id="side_street" from="west" to="center">
+        <lane id="side_street_0" index="0" speed="8.33" length="60.00" shape="100.00,200.00 200.00,200.00" width="3.00" allow="private passenger"/>
+    </edge>
+    <junction id="center" type="traffic_light" x="200.00" y="200.00" incLanes="northbound_0 northbound_1 southbound_0 eastbound_0 westbound_0 pedestrian_path_0 bike_path_0 side_street_0" intLanes="" shape="196.50,196.50 203.50,196.50 203.50,203.50 196.50,203.50"/>
+    <junction id="north" type="dead_end" x="200.00" y="300.00" incLanes="northbound_0 northbound_1" intLanes="" shape="200.00,300.00 203.50,300.00 200.00,300.00 203.50,300.00"/>
+    <junction id="south" type="dead_end" x="196.50" y="100.00" incLanes="southbound_0" intLanes="" shape="196.50,100.00 196.50,100.00"/>
+    <junction id="east" type="dead_end" x="300.00" y="196.50" incLanes="eastbound_0" intLanes="" shape="300.00,196.50 300.00,196.50"/>
+    <junction id="west" type="dead_end" x="100.00" y="203.50" incLanes="westbound_0 side_street_0" intLanes="" shape="100.00,203.50 100.00,200.00"/>
+    <junction id="northwest" type="dead_end" x="150.00" y="350.00" incLanes="pedestrian_path_0" intLanes="" shape="150.00,350.00 150.00,350.00"/>
+    <junction id="bikenorth" type="dead_end" x="207.00" y="290.00" incLanes="bike_path_0" intLanes="" shape="207.00,290.00 207.00,290.00"/>
+</net>
