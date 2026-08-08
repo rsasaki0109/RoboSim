@@ -6,6 +6,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Dynamically loaded controller plugins**: `rne_plugin::load_controller_library`
+  opens a controller plugin from a shared library through a versioned C ABI
+  (`rne_plugin_abi_version`, `rne_controller_create`, `rne_controller_destroy`,
+  `rne_controller_step`; `#[repr(C)]` observations/commands, NUL-terminated
+  UTF-8 strings). ABI-version mismatches and missing symbols are rejected at
+  load time. `rne_plugin_example_velocity_servo` is a minimal `cdylib` reference
+  implementation that drives the same policy as the built-in
+  `VelocityServoController`; a run manifest selects it with
+  `[controller] kind = "plugin"` plus `library = "..."`. Loading, create-error,
+  and determinism (loaded vs built-in replay-identical) tests pin the behavior.
 - **Interactive runner control** (`rne-asset run --control-stdin`): a
   transport-neutral control state machine in `rne_core::control` drives the
   fixed-step loop with `pause`, `resume`, `step N`, `reset`, and `quit`
