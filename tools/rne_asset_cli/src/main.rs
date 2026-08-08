@@ -38,7 +38,8 @@ use rne_sensor::{
     sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState,
     CAMERA_DEPTH_STREAM_OFFSET,
 };
-use rne_traffic::load_traffic_asset;
+use rne_sumo::import_sumo_net_file;
+use rne_traffic::{load_traffic_asset, save_traffic_asset, TrafficId};
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
 use std::io::BufRead;
@@ -139,6 +140,17 @@ enum Commands {
         /// Replay artifact path.
         path: PathBuf,
     },
+    /// Convert a SUMO `.net.xml` road network into a `.rne.traffic.json` asset.
+    SumoNet {
+        /// SUMO `.net.xml` path.
+        path: PathBuf,
+        /// Output `.rne.traffic.json` path.
+        #[arg(short, long)]
+        out: PathBuf,
+        /// Stable network id for the derived asset.
+        #[arg(long, default_value = "sumo")]
+        network_id: String,
+    },
     /// Poll a scene asset graph and reload when dependencies change.
     Watch {
         /// Scene asset path.
@@ -200,6 +212,11 @@ fn main() -> Result<()> {
             replay_out,
         } => run_manifest_command(&path, control_stdin, replay_out.as_deref()),
         Commands::Replay { path } => replay_command(&path),
+        Commands::SumoNet {
+            path,
+            out,
+            network_id,
+        } => sumo_net_command(&path, &out, &network_id),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
 }
@@ -1542,6 +1559,36 @@ fn classify_failure(
     }
 }
 
+/// Converts a SUMO `.net.xml` road network into a `.rne.traffic.json` asset.
+fn sumo_net_command(path: &Path, out: &Path, network_id: &str) -> Result<()> {
+    let network_id = TrafficId::new(network_id)
+        .map_err(|error| anyhow::anyhow!("invalid network id `{network_id}`: {error}"))?;
+    let asset = import_sumo_net_file(&network_id, path)
+        .with_context(|| format!("import SUMO network {}", path.display()))?;
+    println!(
+        "sumo: imported {} lanes={} junctions={} connections={}",
+        path.display(),
+        asset.network.lanes.len(),
+        asset.network.junctions.len(),
+        asset.network.connections.len()
+    );
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create output directory {}", parent.display()))?;
+        }
+    }
+    save_traffic_asset(out, &asset)
+        .with_context(|| format!("write traffic asset {}", out.display()))?;
+    println!(
+        "traffic: wrote {} (network={} schema_version={})",
+        out.display(),
+        asset.network.id,
+        asset.schema_version
+    );
+    Ok(())
+}
+
 fn capture_sensor_payloads(
     world: &World,
     bus: &InMemoryDataBus,
@@ -1978,7 +2025,7 @@ mod tests {
     use super::{
         classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
         replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
-        verify_physics_requirements, PluginControllerConfig,
+        sumo_net_command, verify_physics_requirements, PluginControllerConfig,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
@@ -2365,6 +2412,26 @@ mod tests {
         assert_eq!(classify_failure(Some(0.25), None), None);
         assert_eq!(classify_failure(None, Some(0.1)), None);
         assert_eq!(classify_failure(Some(0.0), Some(0.0)), None);
+    }
+
+    #[test]
+    fn sumo_net_command_imports_a_cross_intersection() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/networks/minimal_cross.net.xml");
+        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/runs/sumo_minimal_cross.rne.traffic.json");
+        sumo_net_command(&fixture, &out, "sumo:minimal_cross").expect("import SUMO network");
+
+        let asset = rne_traffic::load_traffic_asset(&out).expect("load imported asset");
+        assert_eq!(asset.network.lanes.len(), 8);
+        assert!(
+            !asset.network.junctions.is_empty(),
+            "lane endpoints must cluster into junctions"
+        );
+        assert!(
+            asset.network.connections.len() >= 4,
+            "approaches must connect through the junction"
+        );
     }
 
     /// A queue-driven transport for deterministic runner-control tests.

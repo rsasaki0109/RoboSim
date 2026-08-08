@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **SUMO `.net.xml` road-network import** (`rne_sumo`): an offline importer that
+  converts SUMO `edge`/`lane` geometry and `allow`/`disallow` road-user classes
+  into the RNE Y-up frame (`[x, z, -y]`), skipping internal/connector edges, and
+  derives junctions and lane connections deterministically through
+  `rne_traffic::build_traffic_topology`. `rne-asset sumo-net` writes the
+  resulting `.rne.traffic.json`. Fixture: `assets/networks/minimal_cross.net.xml`
+  (four-way junction, seven movements). Malformed XML and shapes are rejected
+  with clear errors.
 - **Controller-plugin discovery by name**: the controller-plugin C ABI is now
   version 2 and requires the plugin to export `rne_plugin_name` (a static
   NUL-terminated name), which the host uses as the loaded plugin's name.

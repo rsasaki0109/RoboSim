@@ -1,0 +1,12 @@
+[package]
+name = "rne_sumo"
+description = "Minimal SUMO .net.xml road-network import for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+roxmltree = { workspace = true }
+rne_traffic = { path = "../rne_traffic" }
+thiserror = { workspace = true }
