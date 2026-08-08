@@ -7,6 +7,7 @@ members = [
   "crates/rne_physics",
   "crates/rne_physics_rapier",
   "crates/rne_physics_analytic",
+  "crates/rne_plugin",
   "crates/rne_deformable",
   "crates/rne_robot",
   "crates/rne_data",

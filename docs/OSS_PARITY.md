@@ -19,13 +19,13 @@ The comparison baseline is deliberately workflow-oriented:
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
 | Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count | Interactive pause/reset controls are still needed |
-| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, episode APIs, and an isolated ROS 2 adapter | Policy callbacks and application-level controllers still live in the code, not a plugin boundary |
+| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), episode APIs, and an isolated ROS 2 adapter | Application-level controllers still live in the code, not a loadable ABI |
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, and minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests) | External traffic-simulator adapters (e.g., SUMO) are future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
-| Extension model | Backend-neutral traits and plugin manifests/interfaces | Runtime discovery/loading and a stable plugin ABI are future work |
+| Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), and a controller-plugin boundary invoked by the runner | Runtime discovery/loading and a stable plugin ABI are future work |
 
 ## Delivered first slice
 

@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Controller-plugin boundary** (`rne_plugin`): plugin manifests and a
+  `ControllerPlugin` trait separate policy implementations from the runner.
+  Run manifests select a plugin with `[controller] kind = "plugin"`; the
+  built-in `VelocityServoController` maps observed joint positions to velocity
+  commands each step. Deterministic replay records the plugin actions.
+  Example: `assets/runs/mm_minimal_velocity_servo.rne.run.toml`.
 - **OpenSCENARIO vehicle catalogs**: `CatalogLocations` `VehicleCatalog`
   directories are resolved relative to the scenario file, and
   `ScenarioObject` `CatalogReference` entries are looked up in the catalog
