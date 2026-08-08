@@ -1572,6 +1572,12 @@ fn sumo_net_command(path: &Path, out: &Path, network_id: &str) -> Result<()> {
         asset.network.junctions.len(),
         asset.network.connections.len()
     );
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create output directory {}", parent.display()))?;
+        }
+    }
     save_traffic_asset(out, &asset)
         .with_context(|| format!("write traffic asset {}", out.display()))?;
     println!(
