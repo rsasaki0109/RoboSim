@@ -18,7 +18,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Capability | RNE today | Remaining parity gap |
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
-| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count | Interactive pause/reset controls are still needed |
+| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | No windowed GUI transport yet; the control protocol is line-based on stdin |
 | Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), episode APIs, and an isolated ROS 2 adapter | Application-level controllers still live in the code, not a loadable ABI |
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
@@ -144,3 +144,34 @@ when that height drops below half of its initial value.
 This order closes the common simulator workflow first. Photoreal rendering,
 large asset libraries, and GPU-scale parallelism remain separate capabilities,
 not prerequisites for headless behavior testing.
+
+## Runner control
+
+`rne-asset run --control-stdin` drives a manifest interactively (or from a
+script) without a GUI. The runner consults a transport-neutral control state
+machine (`rne_core::control`) at every fixed-step boundary:
+
+```bash
+printf 'pause\nstep 5\nreset\nstep 3\nquit\n' | \
+  cargo run --release -p rne_asset_cli -- run \
+    assets/runs/mesh_diff_drive.rne.run.toml --control-stdin
+```
+
+- `pause` suspends the loop at the next step boundary; the runner blocks until
+  the next command.
+- `resume` continues advancing freely.
+- `step N` advances exactly `N` frames, then pauses again. A step budget is
+  never interrupted by queued commands, so scripts stay ordered.
+- `reset` rebuilds the world from the episode's initial conditions (same seed)
+  and restarts from step 0. The final report and replay artifact describe the
+  current episode.
+- `quit` ends the run gracefully; the current episode is still reported and
+  written to the replay artifact.
+- stdin EOF while paused is treated as `quit`, so piped scripts terminate
+  deterministically.
+
+The runner starts paused and waits for the first command, so a piped script
+like `step N\nquit` advances exactly `N` frames regardless of timing.
+
+`--replay-out PATH` overrides the manifest's replay path, and determinism
+re-checks are skipped in interactive mode.

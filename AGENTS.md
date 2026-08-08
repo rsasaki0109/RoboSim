@@ -17,7 +17,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 
 ## Repository Layout
 
-- `crates/rne_core`: app, schedule, time, events, diagnostics
+- `crates/rne_core`: app, schedule, time, runner control, events, diagnostics
 - `crates/rne_math`: vectors, transforms, units, spatial math
 - `crates/rne_ecs`: ECS wrapper and shared entity conventions
 - `crates/rne_world`: world entity, scene index, frame graph

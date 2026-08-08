@@ -8,6 +8,7 @@ use rne_assets::{
     RunPhysicsCapability, RunScenario, RunSensorKind, RunSensorSubscription, RunTrajectoryWaypoint,
     SpawnSceneOptions, ValidatedAsset,
 };
+use rne_core::control::{ControlCommand, EpisodeOutcome, RunControl, RunnerControl};
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
     DataBus, ImageDepth, ImageRgb8, ImuSample, InMemoryDataBus, PointCloud, WheelEncoderSample,
@@ -30,7 +31,8 @@ use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_plugin::{ControllerPlugin, VelocityServoController};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
-    Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, Joint, JointKind,
+    Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, DifferentialDrive, Joint,
+    JointKind,
 };
 use rne_sensor::{
     sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState,
@@ -39,7 +41,9 @@ use rne_sensor::{
 use rne_traffic::load_traffic_asset;
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -121,6 +125,14 @@ enum Commands {
     Run {
         /// Run manifest path.
         path: PathBuf,
+        /// Accept runner control commands on stdin: `pause`, `resume`,
+        /// `step N`, `reset`, and `quit`. Determinism re-checks are skipped in
+        /// interactive mode.
+        #[arg(long)]
+        control_stdin: bool,
+        /// Override the manifest's replay output path.
+        #[arg(long, value_name = "PATH")]
+        replay_out: Option<PathBuf>,
     },
     /// Replay a recorded `.rne-replay` artifact and verify every frame.
     Replay {
@@ -182,7 +194,11 @@ fn main() -> Result<()> {
                 replay_out.as_deref(),
             )
         }
-        Commands::Run { path } => run_manifest_command(&path),
+        Commands::Run {
+            path,
+            control_stdin,
+            replay_out,
+        } => run_manifest_command(&path, control_stdin, replay_out.as_deref()),
         Commands::Replay { path } => replay_command(&path),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
@@ -312,13 +328,22 @@ fn simulate_command(
             plugin: None,
             physics_backend: RunPhysicsBackend::Rapier,
         },
+        None,
     )
 }
 
-fn run_manifest_command(path: &Path) -> Result<()> {
+fn run_manifest_command(
+    path: &Path,
+    control_stdin: bool,
+    replay_out_override: Option<&Path>,
+) -> Result<()> {
     let manifest =
         load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
     if let Some(scenario) = &manifest.scenario {
+        anyhow::ensure!(
+            !control_stdin,
+            "--control-stdin is not supported for scenario manifests"
+        );
         return run_scenario_manifest(path, &manifest, scenario);
     }
     let scene_path = manifest.resolve_scene_path(path);
@@ -369,11 +394,14 @@ fn run_manifest_command(path: &Path) -> Result<()> {
     } else {
         None
     };
-    let replay_out = manifest
-        .output
-        .replay_path
-        .as_deref()
-        .map(|output_path| manifest.resolve_output_path(path, output_path));
+    let replay_out = match replay_out_override {
+        Some(override_path) => Some(override_path.to_path_buf()),
+        None => manifest
+            .output
+            .replay_path
+            .as_deref()
+            .map(|output_path| manifest.resolve_output_path(path, output_path)),
+    };
     if !manifest.physics.required_capabilities.is_empty() {
         verify_physics_requirements(
             manifest.physics.backend,
@@ -398,22 +426,27 @@ fn run_manifest_command(path: &Path) -> Result<()> {
         scene_path.display(),
         manifest.controller.kind
     );
-    run_simulation(
-        &scene_path,
-        SimulationOptions {
-            steps: manifest.clock.steps,
-            hz: manifest.clock.hz,
-            action,
-            trajectories,
-            plugin,
-            seed_override: manifest.seed,
-            determinism_check: manifest.output.determinism_check,
-            replay_out: replay_out.as_deref(),
-            replay_controller,
-            sensor_subscriptions: manifest.sensors.clone(),
-            physics_backend: manifest.physics.backend,
-        },
-    )
+    let options = SimulationOptions {
+        steps: manifest.clock.steps,
+        hz: manifest.clock.hz,
+        action,
+        trajectories,
+        plugin,
+        seed_override: manifest.seed,
+        determinism_check: manifest.output.determinism_check,
+        replay_out: replay_out.as_deref(),
+        replay_controller,
+        sensor_subscriptions: manifest.sensors.clone(),
+        physics_backend: manifest.physics.backend,
+    };
+    if control_stdin {
+        let mut transport = StdinRunnerControl::start()?;
+        let mut control = RunControl::paused(&mut transport);
+        println!("control: runner paused; commands on stdin: pause, resume, step N, reset, quit");
+        run_simulation(&scene_path, options, Some(&mut control))
+    } else {
+        run_simulation(&scene_path, options, None)
+    }
 }
 
 fn verify_physics_requirements(
@@ -599,7 +632,11 @@ fn print_scenario_report(path: &Path, result: &rne_openscenario::ScenarioRunResu
     );
 }
 
-fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
+fn run_simulation(
+    path: &Path,
+    options: SimulationOptions<'_>,
+    mut control: Option<&mut RunControl<'_>>,
+) -> Result<()> {
     let SimulationOptions {
         steps,
         hz,
@@ -633,9 +670,10 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
             .transpose()?,
         &sensor_subscriptions,
         physics_backend,
+        control.as_deref_mut(),
     )?;
     print_simulation_report(path, &run.report, determinism_check);
-    if determinism_check {
+    if control.is_none() && determinism_check {
         let replay = simulate_scene_with_action_schedule(
             path,
             steps,
@@ -650,6 +688,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
                 .transpose()?,
             &sensor_subscriptions,
             physics_backend,
+            None,
         )?;
         anyhow::ensure!(
             run.report == replay.report,
@@ -664,7 +703,7 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         let artifact = ReplayArtifact::new(
             path.display().to_string(),
             run.report.seed,
-            ReplayClock::new(steps, hz),
+            ReplayClock::new(run.report.steps, hz),
             replay_controller,
             run.sensor_payload_streams.clone(),
             run.frames.clone(),
@@ -682,6 +721,68 @@ fn run_simulation(path: &Path, options: SimulationOptions<'_>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// A [`RunnerControl`] transport backed by stdin lines.
+///
+/// A reader thread turns each stdin line into a control command. When stdin
+/// closes the transport reports [`ControlCommand::Quit`], so a piped script
+/// ends the run after its last line.
+struct StdinRunnerControl {
+    receiver: mpsc::Receiver<ControlCommand>,
+}
+
+impl StdinRunnerControl {
+    /// Spawns the stdin reader thread and returns its transport.
+    fn start() -> Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("rne-control-stdin".into())
+            .spawn(move || {
+                for line in std::io::stdin().lock().lines() {
+                    match line {
+                        Ok(line) => {
+                            if let Some(command) = parse_control_line(&line) {
+                                println!("[control] {command:?}");
+                                if sender.send(command).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        Err(_) => return,
+                    }
+                }
+                let _ = sender.send(ControlCommand::Quit);
+            })
+            .map_err(|error| anyhow::anyhow!("spawn stdin control reader: {error}"))?;
+        Ok(Self { receiver })
+    }
+}
+
+impl RunnerControl for StdinRunnerControl {
+    fn try_poll(&mut self) -> Option<ControlCommand> {
+        self.receiver.try_recv().ok()
+    }
+
+    fn wait_command(&mut self) -> ControlCommand {
+        self.receiver.recv().unwrap_or(ControlCommand::Quit)
+    }
+}
+
+/// Parses one line of runner control input into a command.
+fn parse_control_line(line: &str) -> Option<ControlCommand> {
+    let mut parts = line.split_whitespace();
+    match parts.next()? {
+        "pause" => Some(ControlCommand::Pause),
+        "resume" => Some(ControlCommand::Resume),
+        "step" => {
+            let frames = parts.next()?.parse::<u64>().ok()?;
+            Some(ControlCommand::Step { frames })
+        }
+        "reset" => Some(ControlCommand::Reset),
+        "quit" | "exit" => Some(ControlCommand::Quit),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -721,31 +822,26 @@ fn simulate_scene_with_seed(
         None,
         &[],
         RunPhysicsBackend::Rapier,
+        None,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn simulate_scene_with_action_schedule(
-    path: &Path,
-    steps: u64,
-    hz: f64,
-    action: ReplayAction,
-    seed_override: Option<u64>,
-    replay_frames: Option<&[ReplayFrame]>,
-    trajectories: &[RunJointTrajectory],
-    plugin: Option<Box<dyn ControllerPlugin>>,
-    sensor_subscriptions: &[RunSensorSubscription],
-    physics_backend: RunPhysicsBackend,
-) -> Result<SimulationRun> {
-    if let Some(replay_frames) = replay_frames {
-        anyhow::ensure!(
-            replay_frames.len() as u64 == steps,
-            "replay contains {} frames but {} steps were requested",
-            replay_frames.len(),
-            steps
-        );
-    }
+/// The per-episode world state the runner rebuilds on `reset`.
+struct EpisodeSetup {
+    world: World,
+    backend: RunnerBackend,
+    physics_world: PhysicsWorldId,
+    drives: Vec<DifferentialDrive>,
+    seed: u64,
+    robot_count: usize,
+}
 
+/// Loads, spawns, and synchronizes the episode's initial world state.
+fn build_episode_setup(
+    path: &Path,
+    seed_override: Option<u64>,
+    physics_backend: RunPhysicsBackend,
+) -> Result<EpisodeSetup> {
     let mut world = World::new();
     let mut bundle = load_scene_bundle(path)
         .map_err(|error| anyhow::anyhow!("load scene {}: {error}", path.display()))?;
@@ -763,7 +859,6 @@ fn simulate_scene_with_action_schedule(
                 .map(|drive| drive.0)
         })
         .collect();
-
     let seed = world
         .get::<WorldEntity>(spawned.world)
         .map(|entity| entity.seed)
@@ -775,113 +870,176 @@ fn simulate_scene_with_action_schedule(
     backend
         .sync_from_ecs(&mut world, physics_world)
         .map_err(|error| anyhow::anyhow!("sync scene into physics: {error}"))?;
+    Ok(EpisodeSetup {
+        world,
+        backend,
+        physics_world,
+        drives,
+        seed,
+        robot_count: spawned.robots.len(),
+    })
+}
 
-    let dt = SimDuration::from_hertz(Hertz::new(hz));
-    let mut sim_time = SimTime::ZERO;
-    let mut command_buffer = ActuatorCommandBuffer::new();
-    let mut data_bus = InMemoryDataBus::new();
-    let sensor_payload_streams = resolve_sensor_subscriptions(&world, sensor_subscriptions)?;
-    let mut frames = Vec::new();
-    let mut contact_pairs_max = 0_u64;
-    let mut contact_impulse_max_ns = 0.0_f32;
-    let mut min_base_height_m: Option<f64> = None;
-    for step in 0..steps {
-        let frame_action = if let Some(replay_frames) = replay_frames {
-            let step_index = usize::try_from(step)
-                .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
-            replay_frames[step_index].action.clone()
-        } else if !trajectories.is_empty() {
-            interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
-        } else if let Some(plugin) = &plugin {
-            plugin_joint_action(plugin.as_ref(), &world)?
-        } else {
-            action.clone()
-        };
-        apply_replay_action(
-            &world,
-            &mut command_buffer,
-            &drives,
-            &frame_action,
-            sim_time,
-        )?;
-        apply_actuator_commands(&mut world, &mut command_buffer);
-        sync_all_joint_motors_from_actuators(&mut world);
-        differential_drive_kinematics(&mut world, &drives, dt);
-        backend
-            .step(&mut world, physics_world, dt)
-            .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
-        sim_time = sim_time + dt;
-        sample_sensors_for(&backend, &mut world, sim_time, physics_world, &mut data_bus);
-
-        let base_translation_m = drives.first().and_then(|drive| {
-            world.get::<Transform3>(drive.base_link).map(|transform| {
-                [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z,
-                ]
-            })
-        });
-        let contact = backend
-            .contacts(physics_world)
-            .map_err(|error| anyhow::anyhow!("query contacts: {error}"))?;
-        let contact = summarize_contacts(contact);
-        contact_pairs_max = contact_pairs_max.max(contact.pair_count);
-        contact_impulse_max_ns = contact_impulse_max_ns.max(contact.total_impulse_ns);
-        if let Some(base_translation_m) = base_translation_m {
-            let height_m = base_translation_m[1];
-            min_base_height_m =
-                Some(min_base_height_m.map_or(height_m, |minimum: f64| minimum.min(height_m)));
-        }
-        let observation = ReplayObservation::new(base_translation_m)
-            .with_joint_state(capture_joint_state(&world))
-            .with_sensor_streams(capture_sensor_streams(&world, &data_bus))
-            .with_sensor_payloads(capture_sensor_payloads(
-                &world,
-                &data_bus,
-                &sensor_payload_streams,
-            ))
-            .with_contact(Some(contact));
-        frames.push(ReplayFrame::new(
-            step,
-            sim_time.ticks(),
-            frame_action,
-            observation,
-            hash_physics_state(&world),
-        ));
+#[allow(clippy::too_many_arguments)]
+fn simulate_scene_with_action_schedule(
+    path: &Path,
+    steps: u64,
+    hz: f64,
+    action: ReplayAction,
+    seed_override: Option<u64>,
+    replay_frames: Option<&[ReplayFrame]>,
+    trajectories: &[RunJointTrajectory],
+    plugin: Option<Box<dyn ControllerPlugin>>,
+    sensor_subscriptions: &[RunSensorSubscription],
+    physics_backend: RunPhysicsBackend,
+    mut control: Option<&mut RunControl<'_>>,
+) -> Result<SimulationRun> {
+    if let Some(replay_frames) = replay_frames {
+        anyhow::ensure!(
+            replay_frames.len() as u64 == steps,
+            "replay contains {} frames but {} steps were requested",
+            replay_frames.len(),
+            steps
+        );
     }
 
-    let first_base_translation_m = drives.first().and_then(|drive| {
-        world.get::<Transform3>(drive.base_link).map(|transform| {
-            [
-                transform.translation.x,
-                transform.translation.y,
-                transform.translation.z,
-            ]
-        })
-    });
-    let initial_base_height_m = frames
-        .first()
-        .and_then(|frame| frame.observation.base_translation_m)
-        .map(|translation| translation[1]);
-    let failure = classify_failure(initial_base_height_m, min_base_height_m);
-    Ok(SimulationRun {
-        report: SimulationReport {
-            steps,
-            sim_time_s: sim_time.as_seconds().value(),
-            seed,
-            robot_count: spawned.robots.len(),
-            differential_drive_count: drives.len(),
-            physics_hash: hash_physics_state(&world),
-            first_base_translation_m,
-            contact_pairs_max,
-            contact_impulse_max_ns,
-            min_base_height_m,
-            failure,
-        },
-        frames,
-        sensor_payload_streams,
-    })
+    let mut setup = build_episode_setup(path, seed_override, physics_backend)?;
+    'episode: loop {
+        let dt = SimDuration::from_hertz(Hertz::new(hz));
+        let mut sim_time = SimTime::ZERO;
+        let mut command_buffer = ActuatorCommandBuffer::new();
+        let mut data_bus = InMemoryDataBus::new();
+        let sensor_payload_streams =
+            resolve_sensor_subscriptions(&setup.world, sensor_subscriptions)?;
+        let mut frames = Vec::new();
+        let mut contact_pairs_max = 0_u64;
+        let mut contact_impulse_max_ns = 0.0_f32;
+        let mut min_base_height_m: Option<f64> = None;
+        let mut step = 0_u64;
+        while step < steps {
+            if let Some(control) = control.as_deref_mut() {
+                match control.checkpoint() {
+                    EpisodeOutcome::Advance => {}
+                    EpisodeOutcome::Reset => {
+                        setup = build_episode_setup(path, seed_override, physics_backend)?;
+                        continue 'episode;
+                    }
+                    EpisodeOutcome::Quit => break,
+                }
+            }
+            let frame_action = if let Some(replay_frames) = replay_frames {
+                let step_index = usize::try_from(step)
+                    .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
+                replay_frames[step_index].action.clone()
+            } else if !trajectories.is_empty() {
+                interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
+            } else if let Some(plugin) = &plugin {
+                plugin_joint_action(plugin.as_ref(), &setup.world)?
+            } else {
+                action.clone()
+            };
+            apply_replay_action(
+                &setup.world,
+                &mut command_buffer,
+                &setup.drives,
+                &frame_action,
+                sim_time,
+            )?;
+            apply_actuator_commands(&mut setup.world, &mut command_buffer);
+            sync_all_joint_motors_from_actuators(&mut setup.world);
+            differential_drive_kinematics(&mut setup.world, &setup.drives, dt);
+            setup
+                .backend
+                .step(&mut setup.world, setup.physics_world, dt)
+                .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
+            sim_time = sim_time + dt;
+            sample_sensors_for(
+                &setup.backend,
+                &mut setup.world,
+                sim_time,
+                setup.physics_world,
+                &mut data_bus,
+            );
+
+            let base_translation_m = setup.drives.first().and_then(|drive| {
+                setup
+                    .world
+                    .get::<Transform3>(drive.base_link)
+                    .map(|transform| {
+                        [
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ]
+                    })
+            });
+            let contact = setup
+                .backend
+                .contacts(setup.physics_world)
+                .map_err(|error| anyhow::anyhow!("query contacts: {error}"))?;
+            let contact = summarize_contacts(contact);
+            contact_pairs_max = contact_pairs_max.max(contact.pair_count);
+            contact_impulse_max_ns = contact_impulse_max_ns.max(contact.total_impulse_ns);
+            if let Some(base_translation_m) = base_translation_m {
+                let height_m = base_translation_m[1];
+                min_base_height_m =
+                    Some(min_base_height_m.map_or(height_m, |minimum: f64| minimum.min(height_m)));
+            }
+            let observation = ReplayObservation::new(base_translation_m)
+                .with_joint_state(capture_joint_state(&setup.world))
+                .with_sensor_streams(capture_sensor_streams(&setup.world, &data_bus))
+                .with_sensor_payloads(capture_sensor_payloads(
+                    &setup.world,
+                    &data_bus,
+                    &sensor_payload_streams,
+                ))
+                .with_contact(Some(contact));
+            frames.push(ReplayFrame::new(
+                step,
+                sim_time.ticks(),
+                frame_action,
+                observation,
+                hash_physics_state(&setup.world),
+            ));
+            step += 1;
+        }
+
+        let first_base_translation_m = setup.drives.first().and_then(|drive| {
+            setup
+                .world
+                .get::<Transform3>(drive.base_link)
+                .map(|transform| {
+                    [
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ]
+                })
+        });
+        let initial_base_height_m = frames
+            .first()
+            .and_then(|frame| frame.observation.base_translation_m)
+            .map(|translation| translation[1]);
+        let failure = classify_failure(initial_base_height_m, min_base_height_m);
+        let steps_run = frames.len() as u64;
+        return Ok(SimulationRun {
+            report: SimulationReport {
+                steps: steps_run,
+                sim_time_s: sim_time.as_seconds().value(),
+                seed: setup.seed,
+                robot_count: setup.robot_count,
+                differential_drive_count: setup.drives.len(),
+                physics_hash: hash_physics_state(&setup.world),
+                first_base_translation_m,
+                contact_pairs_max,
+                contact_impulse_max_ns,
+                min_base_height_m,
+                failure,
+            },
+            frames,
+            sensor_payload_streams,
+        });
+    }
 }
 
 fn direct_action(
@@ -1431,6 +1589,7 @@ fn replay_command(path: &Path) -> Result<()> {
         None,
         &[],
         RunPhysicsBackend::Rapier,
+        None,
     )
     .with_context(|| format!("replay scene {}", scene_path.display()))?;
 
@@ -1774,15 +1933,17 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_failure, ensure_replay_frames, interpolate_joint_positions, replay_command,
-        run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
+        classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
+        replay_command, run_manifest_command, simulate_scene, simulate_scene_with_action_schedule,
         verify_physics_requirements,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
     };
+    use rne_core::control::{ControlCommand, RunControl, RunnerControl};
     use rne_log::ReplayAction;
-    use std::path::PathBuf;
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn mesh_diff_drive_simulation_replays_identically() {
@@ -1802,7 +1963,7 @@ mod tests {
     fn example_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
-        run_manifest_command(&manifest).expect("run manifest");
+        run_manifest_command(&manifest, false, None).expect("run manifest");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -1814,7 +1975,7 @@ mod tests {
     fn lidar_payload_run_manifest_records_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
-        run_manifest_command(&manifest).expect("run lidar payload manifest");
+        run_manifest_command(&manifest, false, None).expect("run lidar payload manifest");
         let replay_path = manifest
             .parent()
             .expect("manifest parent")
@@ -1835,14 +1996,15 @@ mod tests {
     fn scenario_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/scenario_speed.rne.run.toml");
-        run_manifest_command(&manifest).expect("run scenario manifest");
+        run_manifest_command(&manifest, false, None).expect("run scenario manifest");
     }
 
     #[test]
     fn trajectory_run_manifest_negotiates_physics_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_joint_trajectory.rne.run.toml");
-        run_manifest_command(&manifest).expect("run trajectory manifest with physics checks");
+        run_manifest_command(&manifest, false, None)
+            .expect("run trajectory manifest with physics checks");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -1854,14 +2016,14 @@ mod tests {
     fn analytic_backend_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/cart_analytic.rne.run.toml");
-        run_manifest_command(&manifest).expect("run analytic backend manifest");
+        run_manifest_command(&manifest, false, None).expect("run analytic backend manifest");
     }
 
     #[test]
     fn plugin_controller_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_velocity_servo.rne.run.toml");
-        run_manifest_command(&manifest).expect("run plugin controller manifest");
+        run_manifest_command(&manifest, false, None).expect("run plugin controller manifest");
     }
 
     #[test]
@@ -1895,6 +2057,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("joint simulation");
 
@@ -1927,6 +2090,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("joint replay");
         assert_eq!(first, replay);
@@ -1951,6 +2115,7 @@ mod tests {
             None,
             &[subscription],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("camera payload simulation");
 
@@ -1986,6 +2151,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("camera replay");
         assert_eq!(replay.report, run.report);
@@ -2011,6 +2177,7 @@ mod tests {
             None,
             &[subscription],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect_err("unknown sensor must be rejected");
         assert!(error.to_string().contains("matched no sensor"));
@@ -2031,6 +2198,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("contact simulation");
 
@@ -2063,6 +2231,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("contact replay");
         assert_eq!(replay.report, run.report);
@@ -2103,6 +2272,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("trajectory simulation");
 
@@ -2133,6 +2303,7 @@ mod tests {
             None,
             &[],
             RunPhysicsBackend::Rapier,
+            None,
         )
         .expect("trajectory replay");
         assert_eq!(replay.report, run.report);
@@ -2150,5 +2321,155 @@ mod tests {
         assert_eq!(classify_failure(Some(0.25), None), None);
         assert_eq!(classify_failure(None, Some(0.1)), None);
         assert_eq!(classify_failure(Some(0.0), Some(0.0)), None);
+    }
+
+    /// A queue-driven transport for deterministic runner-control tests.
+    struct ScriptedControl {
+        commands: VecDeque<ControlCommand>,
+    }
+
+    impl RunnerControl for ScriptedControl {
+        fn try_poll(&mut self) -> Option<ControlCommand> {
+            self.commands.pop_front()
+        }
+
+        fn wait_command(&mut self) -> ControlCommand {
+            self.commands.pop_front().unwrap_or(ControlCommand::Quit)
+        }
+    }
+
+    fn scripted(
+        commands: Vec<ControlCommand>,
+        scene: &Path,
+        steps: u64,
+    ) -> super::Result<super::SimulationRun> {
+        let mut transport = ScriptedControl {
+            commands: commands.into(),
+        };
+        let mut control = RunControl::new(&mut transport);
+        simulate_scene_with_action_schedule(
+            scene,
+            steps,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            RunPhysicsBackend::Rapier,
+            Some(&mut control),
+        )
+    }
+
+    #[test]
+    fn parse_control_line_accepts_the_documented_vocabulary() {
+        use rne_core::control::ControlCommand;
+        assert_eq!(parse_control_line("pause"), Some(ControlCommand::Pause));
+        assert_eq!(parse_control_line("resume"), Some(ControlCommand::Resume));
+        assert_eq!(
+            parse_control_line("step 5"),
+            Some(ControlCommand::Step { frames: 5 })
+        );
+        assert_eq!(
+            parse_control_line("step 5 # comment"),
+            Some(ControlCommand::Step { frames: 5 })
+        );
+        assert_eq!(parse_control_line("reset"), Some(ControlCommand::Reset));
+        assert_eq!(parse_control_line("quit"), Some(ControlCommand::Quit));
+        assert_eq!(parse_control_line("exit"), Some(ControlCommand::Quit));
+        assert_eq!(parse_control_line(""), None);
+        assert_eq!(parse_control_line("  \t\n"), None);
+        assert_eq!(parse_control_line("step"), None);
+        assert_eq!(parse_control_line("step x"), None);
+        assert_eq!(parse_control_line("unknown"), None);
+    }
+
+    #[test]
+    fn step_command_pauses_after_the_requested_frames() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let run = scripted(
+            vec![ControlCommand::Step { frames: 2 }, ControlCommand::Quit],
+            &scene,
+            200,
+        )
+        .expect("scripted step run");
+        assert_eq!(run.report.steps, 2, "exactly the stepped frames are run");
+        assert_eq!(run.frames.len(), 2);
+    }
+
+    #[test]
+    fn quit_ends_the_episode_early() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let run = scripted(
+            vec![
+                ControlCommand::Step { frames: 3 },
+                ControlCommand::Reset,
+                ControlCommand::Step { frames: 1 },
+                ControlCommand::Quit,
+            ],
+            &scene,
+            200,
+        )
+        .expect("scripted reset run");
+        assert_eq!(run.report.steps, 1, "the final episode runs one frame");
+        assert_eq!(run.frames.len(), 1);
+    }
+
+    #[test]
+    fn reset_restarts_the_episode_from_initial_conditions() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml");
+        let mut transport = ScriptedControl {
+            commands: vec![
+                ControlCommand::Step { frames: 10 },
+                ControlCommand::Reset,
+                ControlCommand::Step { frames: 10 },
+                ControlCommand::Quit,
+            ]
+            .into(),
+        };
+        let mut control = RunControl::new(&mut transport);
+        let run = simulate_scene_with_action_schedule(
+            &scene,
+            200,
+            60.0,
+            ReplayAction::differential_drive(6.0),
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            RunPhysicsBackend::Rapier,
+            Some(&mut control),
+        )
+        .expect("scripted reset run");
+        assert_eq!(
+            run.frames.len(),
+            10,
+            "only the post-reset episode is reported"
+        );
+
+        let full = simulate_scene_with_action_schedule(
+            &scene,
+            10,
+            60.0,
+            ReplayAction::differential_drive(6.0),
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            RunPhysicsBackend::Rapier,
+            None,
+        )
+        .expect("baseline 10-step run");
+        assert_eq!(
+            run.report, full.report,
+            "reset reproduces the initial episode"
+        );
+        ensure_replay_frames(&full.frames, &run.frames).expect("reset frames match the baseline");
     }
 }
