@@ -159,8 +159,10 @@ impl TraciClient {
     }
 
     fn send_command(&mut self, command_id: u8, payload: &[u8]) -> Result<(), TraciError> {
-        let mut command = Vec::with_capacity(6 + payload.len());
-        let command_length = 1 + payload.len();
+        let mut command = Vec::with_capacity(7 + payload.len());
+        // The command length counts the length byte itself, the command id,
+        // and the payload (SUMO's reference `traci` uses `payload + 2`).
+        let command_length = 2 + payload.len();
         if command_length <= 0xff {
             command.push(command_length as u8);
             command.push(command_id);

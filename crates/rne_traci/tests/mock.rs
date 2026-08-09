@@ -6,8 +6,9 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 fn command_bytes(command_id: u8, payload: &[u8]) -> Vec<u8> {
-    let mut command = Vec::with_capacity(1 + 1 + payload.len());
-    command.push((1 + payload.len()) as u8);
+    // Command length counts the length byte, the command id, and the payload.
+    let mut command = Vec::with_capacity(2 + payload.len());
+    command.push((2 + payload.len()) as u8);
     command.push(command_id);
     command.extend_from_slice(payload);
     command
@@ -34,8 +35,8 @@ fn status_bytes(command_id: u8, result: u8, description: &str) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(result);
     payload.extend_from_slice(&string_bytes(description));
-    let mut command = Vec::with_capacity(1 + 1 + payload.len());
-    command.push((1 + payload.len()) as u8);
+    let mut command = Vec::with_capacity(2 + payload.len());
+    command.push((2 + payload.len()) as u8);
     command.push(command_id);
     command.extend_from_slice(&payload);
     command

@@ -51,6 +51,14 @@ fn connects_and_co_simulates_with_a_real_sumo_when_available() {
         .spawn()
         .expect("spawn sumo");
 
+    let sumo_log = || std::fs::read_to_string(&stderr_log).unwrap_or_default();
+    let mut fail = |context: &str, error: String| -> ! {
+        let _ = child.kill();
+        let _ = child.wait();
+        let log = sumo_log();
+        panic!("{context}: {error}\nsumo stderr:\n{log}");
+    };
+
     let mut client = None;
     for _ in 0..100 {
         match TraciClient::connect("127.0.0.1", port) {
@@ -61,26 +69,34 @@ fn connects_and_co_simulates_with_a_real_sumo_when_available() {
             Err(_) => std::thread::sleep(Duration::from_millis(100)),
         }
     }
-    let mut client = match client {
-        Some(client) => client,
-        None => {
-            let log = std::fs::read_to_string(&stderr_log).unwrap_or_default();
-            let _ = child.kill();
-            panic!("could not connect to SUMO on port {port}; stderr:\n{log}");
-        }
-    };
+    let mut client = client.unwrap_or_else(|| {
+        fail(
+            "could not connect to SUMO",
+            "connection never established".to_string(),
+        )
+    });
 
-    let (api, _name) = client.get_version().expect("get version from SUMO");
+    let (api, _name) = match client.get_version() {
+        Ok(version) => version,
+        Err(error) => fail("get version from SUMO", error.to_string()),
+    };
     assert!(api > 0, "TraCI API version must be positive, got {api}");
 
-    client.simulation_step().expect("simulation step");
-    let ids = client.vehicle_ids().expect("vehicle id list");
+    if let Err(error) = client.simulation_step() {
+        fail("simulation step", error.to_string());
+    }
+    let ids = match client.vehicle_ids() {
+        Ok(ids) => ids,
+        Err(error) => fail("vehicle id list", error.to_string()),
+    };
     assert!(
         ids.is_empty(),
         "the fixture net has no routes, so no vehicles exist"
     );
 
-    client.close().expect("close SUMO connection");
+    if let Err(error) = client.close() {
+        fail("close SUMO connection", error.to_string());
+    }
     let status = child.wait().expect("wait for sumo");
     assert!(status.success(), "sumo should exit cleanly after close");
     let _ = std::fs::remove_file(&stderr_log);
