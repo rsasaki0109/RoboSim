@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Live SUMO co-simulation bridge** (`rne_traci::CoSimulation`): mirrors every
+  vehicle of a running SUMO process into the RNE ECS as a `TrafficActor` with a
+  `TrafficPose` in the RNE Y-up frame, spawning, updating, and despawning
+  actors as SUMO vehicles appear, move, and depart. A stateful-mock test pins
+  create/update/remove, and CI's real-SUMO test verifies the bridge tracks the
+  moving fixture vehicle. Advancing the mirrored actors through the RNE traffic
+  runtime remains future work.
 - **Live SUMO vehicle mapping**: `rne_traci::vehicle_position_rne` reads a
   SUMO vehicle's position in the RNE Y-up frame (`[x, 0, -y]`), matching the
   `rne_sumo` import frame so co-simulated vehicles land on the imported

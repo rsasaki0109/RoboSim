@@ -21,6 +21,10 @@
 
 #![deny(missing_docs)]
 
+pub mod co_simulation;
+
+pub use co_simulation::CoSimulation;
+
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 

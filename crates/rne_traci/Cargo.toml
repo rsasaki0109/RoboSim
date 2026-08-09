@@ -7,4 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rne_ecs = { path = "../rne_ecs" }
+rne_traffic = { path = "../rne_traffic" }
 thiserror = { workspace = true }
+uuid = { workspace = true }
