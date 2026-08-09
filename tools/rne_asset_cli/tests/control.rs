@@ -108,6 +108,12 @@ fn control_tcp_step_and_quit_produce_the_requested_frames() {
             status.starts_with(&format!("status step={expected_step} ")),
             "got unexpected status line: {status}"
         );
+        assert!(
+            status.contains("\"base\"")
+                && status.contains("\"joints\"")
+                && status.contains("\"sensors\""),
+            "status must stream a live observation snapshot, got: {status}"
+        );
     }
 
     stream.write_all(b"quit\n").expect("write quit");

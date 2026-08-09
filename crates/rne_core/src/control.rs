@@ -58,17 +58,15 @@ pub trait RunnerControl {
     /// Blocking: waits until the next command is available.
     fn wait_command(&mut self) -> ControlCommand;
 
-    /// Reports the runner's progress after each completed step.
+    /// Reports the runner's progress and per-step observation after each
+    /// completed step.
     ///
-    /// The default implementation does nothing; transports that expose live
-    /// state (for example a TCP frontend) override this to stream it.
-    fn report_status(
-        &mut self,
-        _step: u64,
-        _sim_time_s: f64,
-        _base_translation_m: Option<[f64; 3]>,
-    ) {
-    }
+    /// `snapshot` is an opaque, transport-specific payload (for example a
+    /// compact JSON observation) that a live frontend can render without
+    /// re-running physics. The default implementation does nothing; transports
+    /// that expose live state (for example a TCP frontend) override this to
+    /// stream it.
+    fn report_status(&mut self, _step: u64, _sim_time_s: f64, _snapshot: &[u8]) {}
 }
 
 /// Drives the fixed-step loop from a control transport.
@@ -112,14 +110,8 @@ impl<'a> RunControl<'a> {
     }
 
     /// Forwards a completed-step status report to the transport.
-    pub fn report_status(
-        &mut self,
-        step: u64,
-        sim_time_s: f64,
-        base_translation_m: Option<[f64; 3]>,
-    ) {
-        self.transport
-            .report_status(step, sim_time_s, base_translation_m);
+    pub fn report_status(&mut self, step: u64, sim_time_s: f64, snapshot: &[u8]) {
+        self.transport.report_status(step, sim_time_s, snapshot);
     }
 
     /// Applies one command, returning a terminal outcome when the run should

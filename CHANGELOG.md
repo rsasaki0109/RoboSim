@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Live observation streaming over the TCP control endpoint**: each completed
+  step now streams a compact single-line JSON observation
+  (`base`, `joints`, `sensors`) through `rne_core::RunnerControl::report_status`,
+  so a renderer/frontend can render the live state without re-running physics.
+  The TCP status line becomes
+  `status step=<n> t=<t> state=<state> snapshot=<json>`; the process-level test
+  verifies the snapshot payload alongside the control protocol.
 - **SUMO `tlLogic` fixed-time signal-program import**: `rne_sumo` now parses
   `connection` and `tlLogic` elements and overlays them onto the derived
   topology by matching each `linkIndex` to the derived connection with the same
