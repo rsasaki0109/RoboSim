@@ -171,13 +171,8 @@ fn co_simulation_bridge_mirrors_a_real_sumo_vehicle() {
     }
     let (net, routes) = fixture_paths();
     let mut fixture = SumoFixture::spawn(&net, Some(&routes));
-    let mut co_sim = match CoSimulation::connect("127.0.0.1", fixture.port) {
-        Ok(co_sim) => co_sim,
-        Err(_) => fixture.fail(
-            "could not connect to SUMO",
-            "connection never established".to_string(),
-        ),
-    };
+    let client = fixture.connect();
+    let mut co_sim = CoSimulation::from_client(client);
     let mut world = World::new();
     for _ in 0..5 {
         if let Err(error) = co_sim.step(&mut world) {

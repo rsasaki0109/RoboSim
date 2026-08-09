@@ -28,10 +28,18 @@ pub struct CoSimulation {
 impl CoSimulation {
     /// Connects to a running SUMO process.
     pub fn connect(host: &str, port: u16) -> Result<Self, TraciError> {
-        Ok(Self {
-            client: TraciClient::connect(host, port)?,
+        Ok(Self::from_client(TraciClient::connect(host, port)?))
+    }
+
+    /// Wraps an already-connected TraCI client.
+    ///
+    /// Useful when the caller performs connection retries or needs the raw
+    /// client first.
+    pub fn from_client(client: TraciClient) -> Self {
+        Self {
+            client,
             actors: BTreeMap::new(),
-        })
+        }
     }
 
     /// Advances SUMO by one step and synchronizes the mirror actors.
