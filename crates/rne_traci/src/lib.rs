@@ -31,7 +31,7 @@ const CMD_GET_VEHICLE_VARIABLE: u8 = 0xa4;
 const RESPONSE_GET_VEHICLE_VARIABLE: u8 = 0xb4;
 
 const VAR_ID_LIST: u8 = 0x00;
-const VAR_POSITION: u8 = 0x40;
+const VAR_POSITION: u8 = 0x42;
 
 const TYPE_STRING_LIST: u8 = 0x0e;
 const TYPE_POSITION_2D: u8 = 0x01;
