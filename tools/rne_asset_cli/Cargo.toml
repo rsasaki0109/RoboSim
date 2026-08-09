@@ -24,6 +24,7 @@ rne_plugin = { path = "../../crates/rne_plugin" }
 rne_robot = { path = "../../crates/rne_robot" }
 rne_sensor = { path = "../../crates/rne_sensor" }
 rne_sumo = { path = "../../crates/rne_sumo" }
+rne_traci = { path = "../../crates/rne_traci" }
 rne_traffic = { path = "../../crates/rne_traffic" }
 serde = { workspace = true }
 serde_json = "1"

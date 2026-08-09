@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Headless SUMO co-simulation run** (`rne-asset co-sim <net.xml> --routes
+  <rou.xml> --steps N`): spawns SUMO, connects over TraCI, mirrors vehicles
+  through `rne_traci::CoSimulation`, and reports a deterministic stable hash
+  over every step's sorted vehicle states. `--determinism-check` runs it twice
+  and requires identical outcomes. A process-level test verifies the mirrored
+  vehicle and determinism against a real SUMO process (CI installs
+  `eclipse-sumo`).
 - **Live SUMO co-simulation bridge** (`rne_traci::CoSimulation`): mirrors every
   vehicle of a running SUMO process into the RNE ECS as a `TrafficActor` with a
   `TrafficPose` in the RNE Y-up frame, spawning, updating, and despawning

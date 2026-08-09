@@ -23,7 +23,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
-| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), offline SUMO `.net.xml` road-network import (`rne_sumo`), scenario runs that reference a `.net.xml` directly, and live SUMO co-simulation (`rne_traci` connects to a running SUMO, maps vehicles into the RNE Y-up frame, and mirrors them as `TrafficActor` entities in the RNE ECS) | Driving the mirrored SUMO vehicles through the RNE traffic runtime is future work |
+| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), offline SUMO `.net.xml` road-network import (`rne_sumo`), scenario runs that reference a `.net.xml` directly, and live SUMO co-simulation (`rne_traci` connects to a running SUMO, maps vehicles into the RNE Y-up frame, mirrors them as `TrafficActor` entities, and `rne-asset co-sim` runs a deterministic headless co-simulation) | Driving the mirrored SUMO vehicles through the RNE traffic runtime is future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
 
@@ -185,11 +185,13 @@ big-endian TCP framing. Positions map into the RNE Y-up frame (`[x, 0, -y]`),
 matching `rne_sumo`'s import frame, so SUMO vehicles land on the same network
 geometry RNE imports. `rne_traci::CoSimulation` mirrors every live SUMO
 vehicle into the RNE ECS as a `TrafficActor` with a `TrafficPose`, so RNE
-sensors, logging, and rendering can observe live SUMO traffic. The client and
-bridge are validated against an in-process mock TraCI server, and CI installs
-`eclipse-sumo` so co-simulation tests run a real SUMO process with a moving
-vehicle (`sumo_cross_flow.rou.xml`) and verify the mirrored RNE poses advance
-down the imported approach. Advancing the mirrored actors through the RNE
+sensors, logging, and rendering can observe live SUMO traffic.
+`rne-asset co-sim <net.xml> --routes <rou.xml> --steps N` runs a headless SUMO
+co-simulation (spawning SUMO, connecting over TraCI, stepping, and mirroring
+vehicles) and reports a deterministic stable hash; `--determinism-check` runs
+it twice and requires identical outcomes. CI installs `eclipse-sumo` so these
+co-simulation tests run against a real SUMO process with a moving vehicle
+(`sumo_cross_flow.rou.xml`). Driving the mirrored actors through the RNE
 traffic runtime (rather than only mirroring them) remains future work.
 
 ## Runner control
