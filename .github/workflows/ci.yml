@@ -43,6 +43,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
+      - name: Install SUMO for the TraCI co-simulation test
+        run: pip install --quiet eclipse-sumo
       - name: Workspace tests (shard ${{ matrix.partition }}/3) and asset validation
         run: cargo run -p xtask -- ci-test ${{ matrix.partition }}/3
 

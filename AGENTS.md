@@ -39,6 +39,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_sdf`: minimal SDF model import (SDF → URDF, offline importer)
 - `crates/rne_mjcf`: minimal MuJoCo MJCF model import (MJCF → URDF, offline importer)
 - `crates/rne_sumo`: minimal SUMO `.net.xml` road-network import (offline importer → `.rne.traffic.json`)
+- `crates/rne_traci`: minimal TraCI client for live SUMO co-simulation
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests

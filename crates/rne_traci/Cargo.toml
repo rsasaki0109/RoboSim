@@ -1,0 +1,10 @@
+[package]
+name = "rne_traci"
+description = "Minimal TraCI client for live SUMO co-simulation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
