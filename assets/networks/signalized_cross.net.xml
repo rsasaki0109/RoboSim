@@ -5,7 +5,7 @@
      movements (green first), 4-5 the eastbound movements (red first), and 6
      the side-street straight. -->
 <net version="1.16" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
-    <location netOffset="0.00,0.00" convBoundary="0.00,0.00,400.00,400.00" projParameter="+proj=utm +zone=50 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"/>
+    <location netOffset="0.00,0.00" origBoundary="0.00,0.00,400.00,400.00" convBoundary="0.00,0.00,400.00,400.00" origProj="+proj=utm +zone=50 +ellps=WGS84 +datum=WGS84 +units=m +no_defs" projParameter="+proj=utm +zone=50 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"/>
     <edge id="northbound" from="north" to="center">
         <lane id="northbound_0" index="0" speed="13.89" length="100.00" shape="200.00,300.00 200.00,200.00" width="3.50" allow="private passenger"/>
         <lane id="northbound_1" index="1" speed="13.89" length="100.00" shape="203.50,300.00 203.50,200.00" width="3.50" allow="private passenger"/>

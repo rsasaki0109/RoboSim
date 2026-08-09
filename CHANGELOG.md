@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Minimal TraCI client** (`rne_traci`): a TCP client for live SUMO
+  co-simulation implementing SUMO's big-endian TraCI framing
+  (`get_version`, `simulation_step`, `close`, `vehicle_ids`,
+  `vehicle_position`). The crate tests validate the wire protocol against an
+  in-process mock TraCI server, and CI installs `eclipse-sumo` so a
+  co-simulation test runs against a real SUMO process.
 - **Live observation streaming over the TCP control endpoint**: each completed
   step now streams a compact single-line JSON observation
   (`base`, `joints`, `sensors`) through `rne_core::RunnerControl::report_status`,
