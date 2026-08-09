@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **SUMO networks drive scenario runs**: a run manifest's OpenSCENARIO
+  `LogicFile` may reference a SUMO `.net.xml` directly; `rne-asset run` imports
+  it through `rne_sumo` (deriving topology) instead of loading a
+  `.rne.traffic.json`. `assets/runs/sumo_cross.rne.run.toml` spawns a vehicle
+  on the imported `minimal_cross.net.xml` fixture and drives it toward the
+  intersection (206 m route at 10 m/s, no collisions); tests pin the route
+  derivation, the run, and determinism.
 - **TCP runner control endpoint** (`rne-asset run --control-port PORT`): the
   interactive control channel (`pause`, `resume`, `step N`, `reset`, `quit`)
   is also served over a local TCP connection for a GUI/frontend. On connect

@@ -1,0 +1,11 @@
+version = 1
+
+[clock]
+steps = 600
+hz = 60.0
+
+[scenario]
+xosc = "../scenarios/sumo_cross.xosc"
+
+[output]
+determinism_check = true

@@ -695,9 +695,21 @@ fn run_scenario_manifest(
                 .join(logic_file)
         }
     };
-    let asset = load_traffic_asset(&network_path).map_err(|error| {
-        anyhow::anyhow!("load traffic network {}: {error}", network_path.display())
-    })?;
+    let is_sumo_net = network_path
+        .file_name()
+        .map(|name| name.to_string_lossy().ends_with(".net.xml"))
+        .unwrap_or(false);
+    let asset = if is_sumo_net {
+        let network_id =
+            TrafficId::new("sumo:scenario-network").map_err(|error| anyhow::anyhow!("{error}"))?;
+        import_sumo_net_file(&network_id, &network_path).map_err(|error| {
+            anyhow::anyhow!("import SUMO network {}: {error}", network_path.display())
+        })?
+    } else {
+        load_traffic_asset(&network_path).map_err(|error| {
+            anyhow::anyhow!("load traffic network {}: {error}", network_path.display())
+        })?
+    };
     let options = ScenarioRunOptions {
         steps: manifest.clock.steps,
         hz: manifest.clock.hz,
@@ -2666,6 +2678,41 @@ mod tests {
         assert!(lib.contains("rne_plugin_abi_version"));
         assert!(lib.contains("rne_plugin_name"));
         let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn sumo_cross_scenario_drives_through_the_imported_network() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let xosc = root.join("assets/scenarios/sumo_cross.xosc");
+        let document = rne_openscenario::parse_openscenario_xml_file(&xosc)
+            .expect("parse SUMO cross scenario");
+        let network_path = root.join("assets/networks/minimal_cross.net.xml");
+        let network_id = rne_traffic::TrafficId::new("sumo:test").expect("network id");
+        let asset = rne_sumo::import_sumo_net_file(&network_id, &network_path)
+            .expect("import SUMO cross network");
+        let result = rne_openscenario::execute_scenario(
+            &document,
+            &asset.network,
+            &rne_openscenario::ScenarioRunOptions {
+                steps: 600,
+                hz: 60.0,
+            },
+        )
+        .expect("execute SUMO cross scenario");
+        assert!(
+            result.route_length_m > 100.0,
+            "the route must span the eastbound approach and beyond, got {}",
+            result.route_length_m
+        );
+        assert_eq!(result.final_positions_m.len(), 1);
+        assert_eq!(result.collisions, 0);
+    }
+
+    #[test]
+    fn sumo_cross_run_manifest_executes_deterministically() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/runs/sumo_cross.rne.run.toml");
+        run_manifest_command(&manifest, false, None, None).expect("run SUMO cross manifest");
     }
 
     /// A queue-driven transport for deterministic runner-control tests.
