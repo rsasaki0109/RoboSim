@@ -993,21 +993,12 @@ impl RunnerControl for TcpRunnerControl {
         command
     }
 
-    fn report_status(&mut self, step: u64, sim_time_s: f64, base_translation_m: Option<[f64; 3]>) {
-        let base = base_translation_m
-            .map(|position| {
-                format!(
-                    "{},{},{}",
-                    format_f64_status(position[0]),
-                    format_f64_status(position[1]),
-                    format_f64_status(position[2])
-                )
-            })
-            .unwrap_or_else(|| "none".to_string());
+    fn report_status(&mut self, step: u64, sim_time_s: f64, snapshot: &[u8]) {
         let state = if self.paused { "paused" } else { "running" };
         let line = format!(
-            "status step={step} t={} base={base} state={state}\n",
-            format_f64_status(sim_time_s)
+            "status step={step} t={} state={state} snapshot={}\n",
+            format_f64_status(sim_time_s),
+            String::from_utf8_lossy(snapshot)
         );
         if let Ok(mut slot) = self.writer.lock() {
             if let Some(writer) = slot.as_mut() {
@@ -1016,6 +1007,63 @@ impl RunnerControl for TcpRunnerControl {
             }
         }
     }
+}
+
+/// Compact per-step observation streamed to a live frontend.
+///
+/// Deliberately excludes full sensor payloads so status lines stay small.
+#[derive(serde::Serialize)]
+struct LiveSnapshot<'a> {
+    /// First differential-drive base translation, when present.
+    base: Option<[f64; 3]>,
+    /// Named joint positions, when the scene has articulated joints.
+    joints: Option<LiveJointState<'a>>,
+    /// Per-sensor stream summaries.
+    sensors: Vec<LiveSensorStream<'a>>,
+}
+
+/// Named joint positions in a [`LiveSnapshot`].
+#[derive(serde::Serialize)]
+struct LiveJointState<'a> {
+    /// Joint names matching the position array.
+    names: &'a [String],
+    /// Joint positions in radians, in name order.
+    positions_rad: &'a [f64],
+}
+
+/// Sensor stream summary in a [`LiveSnapshot`].
+#[derive(serde::Serialize)]
+struct LiveSensorStream<'a> {
+    /// DataBus stream identifier.
+    stream_id: u64,
+    /// Stable sensor kind label.
+    kind: &'a str,
+    /// Last emitted sequence number.
+    sequence: u64,
+}
+
+/// Serializes a [`ReplayObservation`] into a compact single-line JSON snapshot.
+fn build_live_snapshot(observation: &ReplayObservation) -> String {
+    let snapshot = LiveSnapshot {
+        base: observation.base_translation_m,
+        joints: observation
+            .joint_state
+            .as_ref()
+            .map(|state| LiveJointState {
+                names: &state.names,
+                positions_rad: &state.positions_rad,
+            }),
+        sensors: observation
+            .sensor_streams
+            .iter()
+            .map(|stream| LiveSensorStream {
+                stream_id: stream.stream_id,
+                kind: &stream.kind,
+                sequence: stream.last_sequence,
+            })
+            .collect(),
+    };
+    serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Formats a status f64 compactly for the control wire protocol.
@@ -1248,6 +1296,7 @@ fn simulate_scene_with_action_schedule(
                     &sensor_payload_streams,
                 ))
                 .with_contact(Some(contact));
+            let snapshot = build_live_snapshot(&observation);
             frames.push(ReplayFrame::new(
                 step,
                 sim_time.ticks(),
@@ -1257,7 +1306,7 @@ fn simulate_scene_with_action_schedule(
             ));
             step += 1;
             if let Some(control) = control.as_deref_mut() {
-                control.report_status(step, sim_time.as_seconds().value(), base_translation_m);
+                control.report_status(step, sim_time.as_seconds().value(), snapshot.as_bytes());
             }
         }
 

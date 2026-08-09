@@ -18,7 +18,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Capability | RNE today | Remaining parity gap |
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
-| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `--control-port PORT` serves the same commands over a local TCP connection with live per-step status replies for a GUI/frontend. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | No windowed renderer/GUI transport yet; the control protocol is line-based over stdin or TCP |
+| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `--control-port PORT` serves the same commands over a local TCP connection with live per-step observation snapshots for a GUI/frontend. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | No windowed renderer/GUI transport yet; the control protocol is line-based over stdin or TCP |
 | Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), episode APIs, and an isolated ROS 2 adapter | Application-level controllers still live in the code, not a loadable ABI |
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
@@ -208,10 +208,11 @@ like `step N\nquit` advances exactly `N` frames regardless of timing.
 For a GUI or renderer frontend, `--control-port PORT` serves the same commands
 over a local TCP connection (port 0 picks an ephemeral port). On connect the
 runner sends `ready paused`, acknowledges each command with `ok <state>`, and
-streams `status step=<n> t=<t> base=<x,y,z> state=<state>` after every
-completed step, so a frontend can both drive and observe the run. The test
-suite drives the binary over TCP and verifies the reply protocol and the
-resulting replay.
+streams `status step=<n> t=<t> state=<state> snapshot=<json>` after every
+completed step. The snapshot is a compact single-line JSON observation
+(`base`, `joints`, `sensors`), so a frontend can render the live state without
+re-running physics. The test suite drives the binary over TCP and verifies the
+reply protocol, the snapshot, and the resulting replay.
 
 `--replay-out PATH` overrides the manifest's replay path, and determinism
 re-checks are skipped in interactive mode.
