@@ -2715,6 +2715,46 @@ mod tests {
         run_manifest_command(&manifest, false, None, None).expect("run SUMO cross manifest");
     }
 
+    #[test]
+    fn signalized_sumo_network_holds_the_actor_at_red() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let xosc = root.join("assets/scenarios/sumo_cross.xosc");
+        let document = rne_openscenario::parse_openscenario_xml_file(&xosc)
+            .expect("parse SUMO cross scenario");
+        let network_path = root.join("assets/networks/signalized_cross.net.xml");
+        let network_id = rne_traffic::TrafficId::new("sumo:signalized").expect("network id");
+        let asset = rne_sumo::import_sumo_net_file(&network_id, &network_path)
+            .expect("import signalized SUMO network");
+        assert_eq!(asset.network.signals.len(), 1);
+
+        let result = rne_openscenario::execute_scenario(
+            &document,
+            &asset.network,
+            &rne_openscenario::ScenarioRunOptions {
+                steps: 900,
+                hz: 60.0,
+            },
+        )
+        .expect("execute signalized SUMO scenario");
+        assert!(result.route_length_m > 100.0);
+        assert_eq!(result.final_positions_m.len(), 1);
+        assert_eq!(result.collisions, 0);
+        assert_eq!(result.signal_violations, 0);
+        assert!(
+            result.average_speed_m_s < 0.5,
+            "the eastbound movement is red for 20 s, so the actor must be held at the stop line"
+        );
+        let final_position = result.final_positions_m[0];
+        assert!(
+            final_position[0] < 260.0,
+            "the actor must have driven down the eastbound approach before stopping, got {final_position:?}"
+        );
+        assert!(
+            final_position[0] > 190.0,
+            "the actor must not cross the red stop line, got {final_position:?}"
+        );
+    }
+
     /// A queue-driven transport for deterministic runner-control tests.
     struct ScriptedControl {
         commands: VecDeque<ControlCommand>,

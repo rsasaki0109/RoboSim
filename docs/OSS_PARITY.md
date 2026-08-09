@@ -23,7 +23,7 @@ The comparison baseline is deliberately workflow-oriented:
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA | The renderer is not yet a first-class frontend of the headless runner |
-| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), offline SUMO `.net.xml` road-network import (`rne_sumo` converts SUMO lanes into the RNE Y-up frame and derives junctions/connections deterministically), and scenario runs that reference a `.net.xml` road network directly (`rne-asset run` imports and routes on the fly; the `sumo_cross` fixture drives a vehicle through the imported intersection) | Live SUMO co-simulation (TraCI) and SUMO `tlLogic` signal-program import are future work |
+| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), offline SUMO `.net.xml` road-network import (`rne_sumo` converts SUMO lanes into the RNE Y-up frame, derives junctions/connections deterministically, and imports `connection` + `tlLogic` fixed-time signal programs matched to the derived connections), and scenario runs that reference a `.net.xml` road network directly (`rne-asset run` imports and routes on the fly; the `sumo_cross` fixture drives a vehicle through the imported intersection and the `signalized_cross` fixture holds it at a red stop line) | Live SUMO co-simulation (TraCI) is future work |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
 
@@ -166,8 +166,16 @@ manifest can reference the `.net.xml` directly as its OpenSCENARIO `LogicFile`:
 `rne-asset run` imports the network (deriving topology) and routes the scenario
 actors on it. `assets/runs/sumo_cross.rne.run.toml` spawns a vehicle on the
 eastbound approach and drives it toward the intersection (206 m route, 10 m/s,
-no collisions, deterministic). Live SUMO co-simulation (TraCI) and SUMO
-`tlLogic` signal-program import remain future work.
+no collisions, deterministic).
+
+`connection` and `tlLogic` elements are imported too: the `signalized_cross`
+fixture assigns a fixed-time program (20 s green northbound, then 15 s green
+eastbound), and the importer matches each `linkIndex` to the derived
+connection with the same `(incoming, outgoing)` lane pair, building one RNE
+`TrafficSignal` group per link and one phase per parsed phase. The signal
+drives RNE stop-line control: a scenario actor on the eastbound approach is
+held at the red stop line without violating the signal. Live SUMO
+co-simulation (TraCI) remains future work.
 
 ## Runner control
 
