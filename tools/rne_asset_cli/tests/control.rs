@@ -1,8 +1,9 @@
 //! Process-level runner-control tests for the `rne-asset` binary.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_rne-asset");
 
@@ -37,6 +38,94 @@ fn run_control_script(script: &[u8], replay: &std::path::Path) -> std::process::
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+/// Spawns the runner with a TCP control endpoint and returns the child, its
+/// stdout reader, and the bound control port.
+fn spawn_tcp_control(
+    replay: &std::path::Path,
+) -> (Child, BufReader<std::process::ChildStdout>, u16) {
+    let _ = std::fs::remove_file(replay);
+    let mut child = Command::new(BIN)
+        .arg("run")
+        .arg(manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml"))
+        .arg("--control-port")
+        .arg("0")
+        .arg("--replay-out")
+        .arg(replay)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn rne-asset");
+
+    let stdout = child.stdout.take().expect("child stdout");
+    let mut stdout = BufReader::new(stdout);
+    let mut port = None;
+    let mut line = String::new();
+    while port.is_none() {
+        line.clear();
+        if stdout.read_line(&mut line).expect("read child stdout") == 0 {
+            break;
+        }
+        if let Some(rest) = line.split_once("127.0.0.1:").map(|(_, rest)| rest) {
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            port = digits.parse::<u16>().ok();
+        }
+    }
+    (
+        child,
+        stdout,
+        port.expect("control port from runner stdout"),
+    )
+}
+
+/// `--control-port` serves pause/step/quit over TCP with live status replies and
+/// drives exactly the requested frames.
+#[test]
+fn control_tcp_step_and_quit_produce_the_requested_frames() {
+    let replay = manifest_dir().join("../../target/runs/control_tcp_step_3.rne-replay");
+    let (mut child, _stdout, port) = spawn_tcp_control(&replay);
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect control");
+    let mut reader = BufReader::new(stream.try_clone().expect("clone control stream"));
+
+    let mut ready = String::new();
+    reader.read_line(&mut ready).expect("read ready");
+    assert_eq!(ready.trim(), "ready paused");
+
+    stream.write_all(b"step 3\n").expect("write step");
+    let mut ack = String::new();
+    reader.read_line(&mut ack).expect("read ack");
+    assert_eq!(ack.trim(), "ok paused");
+
+    for expected_step in 1..=3 {
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("read status");
+        assert!(
+            status.starts_with(&format!("status step={expected_step} ")),
+            "got unexpected status line: {status}"
+        );
+    }
+
+    stream.write_all(b"quit\n").expect("write quit");
+    let mut ack = String::new();
+    reader.read_line(&mut ack).expect("read quit ack");
+    assert_eq!(ack.trim(), "ok paused");
+
+    let status = child.wait().expect("wait for rne-asset");
+    assert!(status.success(), "rne-asset must exit successfully");
+
+    let artifact =
+        rne_log::ReplayArtifact::read_json(&replay).expect("read control replay artifact");
+    assert_eq!(
+        artifact.frames.len(),
+        3,
+        "TCP step 3 + quit must produce exactly 3 frames"
+    );
+    assert_eq!(artifact.clock.steps, 3);
 }
 
 /// `pause`, `step 3`, `quit` piped on stdin must drive exactly three frames and

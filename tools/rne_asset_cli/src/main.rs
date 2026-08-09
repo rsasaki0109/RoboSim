@@ -42,9 +42,9 @@ use rne_sumo::import_sumo_net_file;
 use rne_traffic::{load_traffic_asset, save_traffic_asset, TrafficId};
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
-use std::io::BufRead;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -129,8 +129,13 @@ enum Commands {
         /// Accept runner control commands on stdin: `pause`, `resume`,
         /// `step N`, `reset`, and `quit`. Determinism re-checks are skipped in
         /// interactive mode.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "control_port")]
         control_stdin: bool,
+        /// Serve runner control commands over a local TCP port for a frontend:
+        /// `pause`, `resume`, `step N`, `reset`, and `quit`, with live per-step
+        /// status replies. Determinism re-checks are skipped in interactive mode.
+        #[arg(long, value_name = "PORT", conflicts_with = "control_stdin")]
+        control_port: Option<u16>,
         /// Override the manifest's replay output path.
         #[arg(long, value_name = "PATH")]
         replay_out: Option<PathBuf>,
@@ -232,8 +237,9 @@ fn main() -> Result<()> {
         Commands::Run {
             path,
             control_stdin,
+            control_port,
             replay_out,
-        } => run_manifest_command(&path, control_stdin, replay_out.as_deref()),
+        } => run_manifest_command(&path, control_stdin, control_port, replay_out.as_deref()),
         Commands::Replay { path } => replay_command(&path),
         Commands::SumoNet {
             path,
@@ -408,14 +414,15 @@ fn simulate_command(
 fn run_manifest_command(
     path: &Path,
     control_stdin: bool,
+    control_port: Option<u16>,
     replay_out_override: Option<&Path>,
 ) -> Result<()> {
     let manifest =
         load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
     if let Some(scenario) = &manifest.scenario {
         anyhow::ensure!(
-            !control_stdin,
-            "--control-stdin is not supported for scenario manifests"
+            !control_stdin && control_port.is_none(),
+            "runner control is not supported for scenario manifests"
         );
         return run_scenario_manifest(path, &manifest, scenario);
     }
@@ -527,6 +534,13 @@ fn run_manifest_command(
         let mut transport = StdinRunnerControl::start()?;
         let mut control = RunControl::paused(&mut transport);
         println!("control: runner paused; commands on stdin: pause, resume, step N, reset, quit");
+        run_simulation(&scene_path, options, Some(&mut control))
+    } else if let Some(port) = control_port {
+        let (mut transport, bound_port) = TcpRunnerControl::start(port)?;
+        println!(
+            "control: listening on 127.0.0.1:{bound_port}; commands: pause, resume, step N, reset, quit"
+        );
+        let mut control = RunControl::paused(&mut transport);
         run_simulation(&scene_path, options, Some(&mut control))
     } else {
         run_simulation(&scene_path, options, None)
@@ -853,6 +867,150 @@ impl RunnerControl for StdinRunnerControl {
     }
 }
 
+/// A [`RunnerControl`] transport served over a local TCP connection.
+///
+/// A reader thread accepts one client, sends `ready paused`, then turns each
+/// line into a control command (acknowledging `ok <state>`). The main thread
+/// streams a `status step=<n> t=<t> base=<x,y,z> state=<state>` line after
+/// every completed step, so a GUI or renderer frontend can both drive and
+/// observe the run.
+struct TcpRunnerControl {
+    receiver: mpsc::Receiver<ControlCommand>,
+    writer: Arc<Mutex<Option<std::io::BufWriter<std::net::TcpStream>>>>,
+    paused: bool,
+}
+
+impl TcpRunnerControl {
+    /// Binds the control listener on `127.0.0.1:port` (port 0 picks an
+    /// ephemeral port) and spawns the client reader thread. Returns the
+    /// transport and the bound port.
+    fn start(port: u16) -> Result<(Self, u16)> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port))
+            .map_err(|error| anyhow::anyhow!("bind control listener on port {port}: {error}"))?;
+        let bound_port = listener
+            .local_addr()
+            .map_err(|error| anyhow::anyhow!("query control listener address: {error}"))?
+            .port();
+        let writer = Arc::new(Mutex::new(None::<std::io::BufWriter<std::net::TcpStream>>));
+        let thread_writer = writer.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("rne-control-tcp".into())
+            .spawn(move || {
+                let Ok((stream, _peer)) = listener.accept() else {
+                    let _ = sender.send(ControlCommand::Quit);
+                    return;
+                };
+                let read_stream = stream.try_clone().ok();
+                if let Ok(mut slot) = thread_writer.lock() {
+                    *slot = Some(std::io::BufWriter::new(stream));
+                }
+                let write = |line: &str| {
+                    if let Ok(mut slot) = thread_writer.lock() {
+                        if let Some(writer) = slot.as_mut() {
+                            let _ = writer.write_all(line.as_bytes());
+                            let _ = writer.flush();
+                        }
+                    }
+                };
+                write("ready paused\n");
+                let Some(read_stream) = read_stream else {
+                    let _ = sender.send(ControlCommand::Quit);
+                    return;
+                };
+                let mut paused = true;
+                let reader = std::io::BufReader::new(read_stream);
+                for line in reader.lines() {
+                    let Ok(line) = line else { break };
+                    let Some(command) = parse_control_line(&line) else {
+                        continue;
+                    };
+                    let quit = matches!(command, ControlCommand::Quit);
+                    paused = match command {
+                        ControlCommand::Pause
+                        | ControlCommand::Step { .. }
+                        | ControlCommand::Reset => true,
+                        ControlCommand::Resume => false,
+                        ControlCommand::Quit => paused,
+                    };
+                    if sender.send(command).is_err() {
+                        break;
+                    }
+                    write(&format!(
+                        "ok {}\n",
+                        if paused { "paused" } else { "running" }
+                    ));
+                    if quit {
+                        break;
+                    }
+                }
+                let _ = sender.send(ControlCommand::Quit);
+            })
+            .map_err(|error| anyhow::anyhow!("spawn tcp control reader: {error}"))?;
+        Ok((
+            Self {
+                receiver,
+                writer,
+                paused: true,
+            },
+            bound_port,
+        ))
+    }
+
+    fn update_state(&mut self, command: ControlCommand) {
+        self.paused = match command {
+            ControlCommand::Pause | ControlCommand::Step { .. } | ControlCommand::Reset => true,
+            ControlCommand::Resume => false,
+            ControlCommand::Quit => self.paused,
+        };
+    }
+}
+
+impl RunnerControl for TcpRunnerControl {
+    fn try_poll(&mut self) -> Option<ControlCommand> {
+        let command = self.receiver.try_recv().ok();
+        if let Some(command) = command {
+            self.update_state(command);
+        }
+        command
+    }
+
+    fn wait_command(&mut self) -> ControlCommand {
+        let command = self.receiver.recv().unwrap_or(ControlCommand::Quit);
+        self.update_state(command);
+        command
+    }
+
+    fn report_status(&mut self, step: u64, sim_time_s: f64, base_translation_m: Option<[f64; 3]>) {
+        let base = base_translation_m
+            .map(|position| {
+                format!(
+                    "{},{},{}",
+                    format_f64_status(position[0]),
+                    format_f64_status(position[1]),
+                    format_f64_status(position[2])
+                )
+            })
+            .unwrap_or_else(|| "none".to_string());
+        let state = if self.paused { "paused" } else { "running" };
+        let line = format!(
+            "status step={step} t={} base={base} state={state}\n",
+            format_f64_status(sim_time_s)
+        );
+        if let Ok(mut slot) = self.writer.lock() {
+            if let Some(writer) = slot.as_mut() {
+                let _ = writer.write_all(line.as_bytes());
+                let _ = writer.flush();
+            }
+        }
+    }
+}
+
+/// Formats a status f64 compactly for the control wire protocol.
+fn format_f64_status(value: f64) -> String {
+    format!("{value:.6}")
+}
+
 /// Parses one line of runner control input into a command.
 fn parse_control_line(line: &str) -> Option<ControlCommand> {
     let mut parts = line.split_whitespace();
@@ -1086,6 +1244,9 @@ fn simulate_scene_with_action_schedule(
                 hash_physics_state(&setup.world),
             ));
             step += 1;
+            if let Some(control) = control.as_deref_mut() {
+                control.report_status(step, sim_time.as_seconds().value(), base_translation_m);
+            }
         }
 
         let first_base_translation_m = setup.drives.first().and_then(|drive| {
@@ -2106,7 +2267,7 @@ mod tests {
     fn example_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
-        run_manifest_command(&manifest, false, None).expect("run manifest");
+        run_manifest_command(&manifest, false, None, None).expect("run manifest");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -2118,7 +2279,7 @@ mod tests {
     fn lidar_payload_run_manifest_records_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
-        run_manifest_command(&manifest, false, None).expect("run lidar payload manifest");
+        run_manifest_command(&manifest, false, None, None).expect("run lidar payload manifest");
         let replay_path = manifest
             .parent()
             .expect("manifest parent")
@@ -2139,14 +2300,14 @@ mod tests {
     fn scenario_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/scenario_speed.rne.run.toml");
-        run_manifest_command(&manifest, false, None).expect("run scenario manifest");
+        run_manifest_command(&manifest, false, None, None).expect("run scenario manifest");
     }
 
     #[test]
     fn trajectory_run_manifest_negotiates_physics_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_joint_trajectory.rne.run.toml");
-        run_manifest_command(&manifest, false, None)
+        run_manifest_command(&manifest, false, None, None)
             .expect("run trajectory manifest with physics checks");
         let replay = manifest
             .parent()
@@ -2159,14 +2320,14 @@ mod tests {
     fn analytic_backend_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/cart_analytic.rne.run.toml");
-        run_manifest_command(&manifest, false, None).expect("run analytic backend manifest");
+        run_manifest_command(&manifest, false, None, None).expect("run analytic backend manifest");
     }
 
     #[test]
     fn plugin_controller_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_velocity_servo.rne.run.toml");
-        run_manifest_command(&manifest, false, None).expect("run plugin controller manifest");
+        run_manifest_command(&manifest, false, None, None).expect("run plugin controller manifest");
     }
 
     #[test]

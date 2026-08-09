@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **TCP runner control endpoint** (`rne-asset run --control-port PORT`): the
+  interactive control channel (`pause`, `resume`, `step N`, `reset`, `quit`)
+  is also served over a local TCP connection for a GUI/frontend. On connect
+  the runner sends `ready paused`, acknowledges each command with `ok <state>`,
+  and streams `status step=<n> t=<t> base=<x,y,z> state=<state>` after every
+  step through the new `rne_core::RunnerControl::report_status` hook. A
+  process-level test drives the binary over TCP and verifies the protocol and
+  the resulting replay.
 - **Plugin authoring tooling**: `rne_plugin::scaffold_controller_plugin` generates
   a complete, compilable controller-plugin crate (a `cdylib` implementing the
   controller-plugin C ABI, initially a velocity-servo policy) plus a versioned
