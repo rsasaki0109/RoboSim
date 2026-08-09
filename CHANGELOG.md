@@ -6,6 +6,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **SUMO `tlLogic` fixed-time signal-program import**: `rne_sumo` now parses
+  `connection` and `tlLogic` elements and overlays them onto the derived
+  topology by matching each `linkIndex` to the derived connection with the same
+  `(incoming, outgoing)` lane pair, building one RNE `TrafficSignal` group per
+  link and one phase per parsed phase (the phase-state character at a link
+  index becomes the group's aspect). The `signalized_cross` fixture (20 s
+  green northbound, then 15 s green eastbound) drives RNE stop-line control: a
+  scenario actor on the eastbound approach is held at the red stop line with
+  zero violations. Unsignalized networks still import without signals.
 - **SUMO networks drive scenario runs**: a run manifest's OpenSCENARIO
   `LogicFile` may reference a SUMO `.net.xml` directly; `rne-asset run` imports
   it through `rne_sumo` (deriving topology) instead of loading a
