@@ -39,6 +39,7 @@ use rne_sensor::{
     CAMERA_DEPTH_STREAM_OFFSET,
 };
 use rne_sumo::import_sumo_net_file;
+use rne_traci::{CoSimulation, TraciClient};
 use rne_traffic::{load_traffic_asset, save_traffic_asset, TrafficId};
 use rne_world::{Transform3, WorldEntity};
 use serde::Serialize;
@@ -161,6 +162,20 @@ enum Commands {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Run a headless SUMO co-simulation and report the mirrored vehicles.
+    CoSim {
+        /// SUMO `.net.xml` path.
+        path: PathBuf,
+        /// SUMO `.rou.xml` route file.
+        #[arg(long)]
+        routes: PathBuf,
+        /// Number of co-simulation steps.
+        #[arg(long, default_value_t = 10)]
+        steps: u64,
+        /// Run the same co-simulation twice and compare the stable hash.
+        #[arg(long)]
+        determinism_check: bool,
+    },
     /// Poll a scene asset graph and reload when dependencies change.
     Watch {
         /// Scene asset path.
@@ -247,6 +262,12 @@ fn main() -> Result<()> {
             network_id,
         } => sumo_net_command(&path, &out, &network_id),
         Commands::Plugin { command } => plugin_command(command),
+        Commands::CoSim {
+            path,
+            routes,
+            steps,
+            determinism_check,
+        } => co_sim_command(&path, &routes, steps, determinism_check),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
 }
@@ -1835,6 +1856,152 @@ fn sumo_net_command(path: &Path, out: &Path, network_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Result of one headless SUMO co-simulation run.
+#[derive(Clone, Debug, PartialEq)]
+struct CoSimReport {
+    /// Number of co-simulation steps executed.
+    steps: u64,
+    /// Number of mirrored vehicles after the last step.
+    final_actor_count: usize,
+    /// Deterministic hash over every step's sorted vehicle states.
+    stable_hash: u64,
+}
+
+/// Folds per-step sorted `(vehicle id, RNE position)` states into a stable hash.
+fn stable_co_sim_hash(step_states: &[Vec<(String, [f64; 3])>]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for state in step_states {
+        for (id, position) in state {
+            for byte in id.as_bytes() {
+                hash = hash.wrapping_mul(PRIME).wrapping_add(u64::from(*byte));
+            }
+            for value in position {
+                for byte in value.to_le_bytes() {
+                    hash = hash.wrapping_mul(PRIME).wrapping_add(u64::from(byte));
+                }
+            }
+        }
+        hash = hash.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    }
+    hash
+}
+
+/// Spawns SUMO with a net and route file and connects a TraCI client.
+fn spawn_sumo_and_connect(net: &Path, routes: &Path) -> Result<(std::process::Child, TraciClient)> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| anyhow::anyhow!("bind co-sim port probe: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| anyhow::anyhow!("co-sim port probe: {error}"))?
+        .port();
+    drop(listener);
+    let stderr_log = std::env::temp_dir().join(format!("rne-co-sim-sumo-{port}.log"));
+    let stderr_file = std::fs::File::create(&stderr_log)
+        .map_err(|error| anyhow::anyhow!("create sumo stderr log: {error}"))?;
+    let mut child = std::process::Command::new("sumo")
+        .args([
+            "--net-file",
+            net.to_str().expect("net path"),
+            "--route-files",
+            routes.to_str().expect("route path"),
+            "--remote-port",
+            &port.to_string(),
+            "--start",
+            "--no-warnings",
+            "--no-step-log",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(stderr_file))
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("spawn sumo: {error}"))?;
+    let mut client = None;
+    for _ in 0..100 {
+        match TraciClient::connect("127.0.0.1", port) {
+            Ok(connected) => {
+                client = Some(connected);
+                break;
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    if let Some(client) = client {
+        Ok((child, client))
+    } else {
+        let _ = child.kill();
+        let _ = child.wait();
+        let log = std::fs::read_to_string(&stderr_log).unwrap_or_default();
+        anyhow::bail!("could not connect to SUMO on port {port}; stderr:\n{log}");
+    }
+}
+
+/// Runs one headless SUMO co-simulation and returns its report.
+fn run_co_simulation(net: &Path, routes: &Path, steps: u64) -> Result<CoSimReport> {
+    let (mut child, client) = spawn_sumo_and_connect(net, routes)?;
+    let mut co_sim = CoSimulation::from_client(client);
+    let mut world = rne_ecs::World::new();
+    let mut step_states: Vec<Vec<(String, [f64; 3])>> = Vec::new();
+    for _ in 0..steps {
+        co_sim
+            .step(&mut world)
+            .map_err(|error| anyhow::anyhow!("co-simulation step: {error}"))?;
+        let mut state = co_sim
+            .actors()
+            .iter()
+            .map(|(id, entity)| {
+                let position = world
+                    .get::<rne_traffic::TrafficPose>(*entity)
+                    .map(|pose| pose.position_m)
+                    .unwrap_or([f64::NAN; 3]);
+                (id.clone(), position)
+            })
+            .collect::<Vec<_>>();
+        state.sort_by(|left, right| left.0.cmp(&right.0));
+        step_states.push(state);
+    }
+    let final_actor_count = co_sim.actors().len();
+    let stable_hash = stable_co_sim_hash(&step_states);
+    let _ = co_sim.close();
+    let status = child
+        .wait()
+        .map_err(|error| anyhow::anyhow!("wait for sumo: {error}"))?;
+    if !status.success() {
+        anyhow::bail!("sumo exited with status {status}");
+    }
+    Ok(CoSimReport {
+        steps,
+        final_actor_count,
+        stable_hash,
+    })
+}
+
+/// Runs a headless SUMO co-simulation and prints the report.
+fn co_sim_command(path: &Path, routes: &Path, steps: u64, determinism_check: bool) -> Result<()> {
+    let report = run_co_simulation(path, routes, steps)
+        .with_context(|| format!("co-simulate SUMO network {}", path.display()))?;
+    println!(
+        "co-sim: net={} routes={} steps={} final_actors={} stable_hash={:#018x}",
+        path.display(),
+        routes.display(),
+        report.steps,
+        report.final_actor_count,
+        report.stable_hash
+    );
+    if determinism_check {
+        let replay = run_co_simulation(path, routes, steps)
+            .with_context(|| format!("re-run co-simulation for {}", path.display()))?;
+        anyhow::ensure!(
+            report.stable_hash == replay.stable_hash,
+            "co-simulation determinism check failed: first={:#x} replay={:#x}",
+            report.stable_hash,
+            replay.stable_hash
+        );
+        println!("determinism: identical co-simulation outcome");
+    }
+    Ok(())
+}
+
 /// Dispatches the `plugin` subcommands.
 fn plugin_command(command: PluginCommand) -> Result<()> {
     match command {
@@ -2298,8 +2465,8 @@ mod tests {
     use super::{
         classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
         plugin_command, replay_command, run_manifest_command, simulate_scene,
-        simulate_scene_with_action_schedule, sumo_net_command, verify_physics_requirements,
-        PluginCommand, PluginControllerConfig,
+        simulate_scene_with_action_schedule, stable_co_sim_hash, sumo_net_command,
+        verify_physics_requirements, PluginCommand, PluginControllerConfig,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
@@ -2686,6 +2853,24 @@ mod tests {
         assert_eq!(classify_failure(Some(0.25), None), None);
         assert_eq!(classify_failure(None, Some(0.1)), None);
         assert_eq!(classify_failure(Some(0.0), Some(0.0)), None);
+    }
+
+    #[test]
+    fn stable_co_sim_hash_is_deterministic_and_sensitive() {
+        let states = vec![
+            vec![("v0".to_string(), [10.0, 0.0, 20.0])],
+            vec![("v0".to_string(), [20.0, 0.0, 30.0])],
+        ];
+        assert_eq!(stable_co_sim_hash(&states), stable_co_sim_hash(&states));
+        let moved = vec![
+            vec![("v0".to_string(), [11.0, 0.0, 20.0])],
+            vec![("v0".to_string(), [20.0, 0.0, 30.0])],
+        ];
+        assert_ne!(
+            stable_co_sim_hash(&states),
+            stable_co_sim_hash(&moved),
+            "a different position must change the hash"
+        );
     }
 
     #[test]
