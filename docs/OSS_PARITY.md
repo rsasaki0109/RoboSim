@@ -181,9 +181,12 @@ held at the red stop line without violating the signal.
 `rne_traci` is a minimal TraCI (Traffic Control Interface) client for driving
 and observing a running SUMO process: it negotiates the API version, advances
 simulation steps, lists vehicles, and reads their positions using SUMO's
-big-endian TCP framing. The client is validated against an in-process mock
-TraCI server in the crate tests, and CI installs `eclipse-sumo` so an
-integration test co-simulates with a real SUMO process. Wiring live SUMO
+big-endian TCP framing. Positions map into the RNE Y-up frame (`[x, 0, -y]`),
+matching `rne_sumo`'s import frame, so SUMO vehicles land on the same network
+geometry RNE imports. The client is validated against an in-process mock TraCI
+server, and CI installs `eclipse-sumo` so a co-simulation test runs a real SUMO
+process with a moving vehicle (`sumo_cross_flow.rou.xml`) and verifies the
+vehicle's RNE position advances down the imported approach. Wiring live SUMO
 vehicles into the RNE traffic runtime remains future work.
 
 ## Runner control

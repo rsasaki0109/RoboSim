@@ -188,10 +188,18 @@ fn vehicle_id_list_round_trip() {
 
 #[test]
 fn vehicle_position_round_trip() {
-    let port = start_mock(|reply| reply.position_2d(0x40, "veh_0", 10.0, -20.0));
+    let port = start_mock(|reply| reply.position_2d(0x42, "veh_0", 10.0, -20.0));
     let mut client = connect(port);
     let position = client.vehicle_position("veh_0").expect("position");
     assert_eq!(position, [10.0, -20.0]);
+}
+
+#[test]
+fn vehicle_position_rne_maps_to_the_y_up_frame() {
+    let port = start_mock(|reply| reply.position_2d(0x42, "veh_0", 10.0, -20.0));
+    let mut client = connect(port);
+    let position = client.vehicle_position_rne("veh_0").expect("rne position");
+    assert_eq!(position, [10.0, 0.0, 20.0]);
 }
 
 #[test]

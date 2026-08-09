@@ -31,7 +31,7 @@ const CMD_GET_VEHICLE_VARIABLE: u8 = 0xa4;
 const RESPONSE_GET_VEHICLE_VARIABLE: u8 = 0xb4;
 
 const VAR_ID_LIST: u8 = 0x00;
-const VAR_POSITION: u8 = 0x40;
+const VAR_POSITION: u8 = 0x42;
 
 const TYPE_STRING_LIST: u8 = 0x0e;
 const TYPE_POSITION_2D: u8 = 0x01;
@@ -124,6 +124,16 @@ impl TraciClient {
         let x = message.read_f64()?;
         let y = message.read_f64()?;
         Ok([x, y])
+    }
+
+    /// Reads a vehicle's position in the RNE Y-up frame `[x, 0, -y]`.
+    ///
+    /// SUMO uses `x` = east and `y` = north, matching the coordinate frame
+    /// [`crate`] shares with `rne_sumo`: east maps to RNE X and north to
+    /// negative Z, with Y up.
+    pub fn vehicle_position_rne(&mut self, vehicle_id: &str) -> Result<[f64; 3], TraciError> {
+        let [x, y] = self.vehicle_position(vehicle_id)?;
+        Ok([x, 0.0, -y])
     }
 
     /// Tells SUMO to close the connection and shut down.
