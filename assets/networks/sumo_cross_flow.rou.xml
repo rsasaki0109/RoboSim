@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SUMO route fixture for live co-simulation: one vehicle drives the
+     northbound edge (north -> center) of minimal_cross.net.xml at up to
+     10 m/s. A single-edge route needs no junction connections. -->
+<routes>
+    <vType id="car" accel="2.0" decel="4.0" maxSpeed="10.0"/>
+    <route id="r0" edges="northbound"/>
+    <vehicle id="v0" type="car" depart="0" route="r0"/>
+</routes>

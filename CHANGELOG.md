@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Live SUMO vehicle mapping**: `rne_traci::vehicle_position_rne` reads a
+  SUMO vehicle's position in the RNE Y-up frame (`[x, 0, -y]`), matching the
+  `rne_sumo` import frame so co-simulated vehicles land on the imported
+  network geometry. CI's real-SUMO test now runs a moving vehicle
+  (`assets/networks/sumo_cross_flow.rou.xml`) on `minimal_cross.net.xml` and
+  verifies its RNE position advances down the approach across co-simulation
+  steps.
 - **Minimal TraCI client** (`rne_traci`): a TCP client for live SUMO
   co-simulation implementing SUMO's big-endian TraCI framing
   (`get_version`, `simulation_step`, `close`, `vehicle_ids`,

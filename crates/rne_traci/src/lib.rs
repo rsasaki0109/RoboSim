@@ -126,6 +126,16 @@ impl TraciClient {
         Ok([x, y])
     }
 
+    /// Reads a vehicle's position in the RNE Y-up frame `[x, 0, -y]`.
+    ///
+    /// SUMO uses `x` = east and `y` = north, matching the coordinate frame
+    /// [`crate`] shares with `rne_sumo`: east maps to RNE X and north to
+    /// negative Z, with Y up.
+    pub fn vehicle_position_rne(&mut self, vehicle_id: &str) -> Result<[f64; 3], TraciError> {
+        let [x, y] = self.vehicle_position(vehicle_id)?;
+        Ok([x, 0.0, -y])
+    }
+
     /// Tells SUMO to close the connection and shut down.
     pub fn close(&mut self) -> Result<(), TraciError> {
         self.send_command(CMD_CLOSE, &[])?;
