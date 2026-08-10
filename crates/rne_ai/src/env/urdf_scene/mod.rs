@@ -93,14 +93,14 @@ use rne_deformable::{
     DeformableSolverConfig, DeformableStepError,
 };
 use rne_ecs::{Entity, Name, Parent, World};
-use rne_math::{y_up_euler_rad, Hertz, Quat};
+use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,
     PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc,
     RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
-use rne_robot::Link;
+use rne_robot::{Joint, JointKind, Link};
 use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3, WorldEntity};
 use std::path::{Path, PathBuf};
 
@@ -203,6 +203,23 @@ pub struct UrdfSceneSim {
     sim_time: SimTime,
     dt: SimDuration,
     deformable_solver_config: DeformableSolverConfig,
+    render_joint_projections: Vec<RenderJointProjection>,
+}
+
+/// Authored link state used as the origin for render-only remote projection.
+///
+/// The physics backend is deliberately not touched by this state. Remote
+/// frontends can therefore display a runner's joint positions without stepping
+/// a second simulation or changing the local backend's ownership of dynamics.
+#[derive(Clone, Debug)]
+struct RenderJointProjection {
+    name: String,
+    child_link: Entity,
+    initial_transform: WorldTransform3,
+    kind: JointKind,
+    initial_position: f64,
+    axis: Vec3,
+    anchor_parent_m: Vec3,
 }
 
 impl UrdfSceneSim {
@@ -323,6 +340,7 @@ impl UrdfSceneSim {
 
         let bundle = load_scene_bundle(scene_path)?;
         let mesh_roots = mesh_package_roots(&bundle);
+        let render_joint_projections = render_joint_projections(&world);
 
         let mut backend = RapierBackend::new();
         let physics_world = backend
@@ -349,6 +367,7 @@ impl UrdfSceneSim {
             sim_time: SimTime::default(),
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             deformable_solver_config: DeformableSolverConfig::default(),
+            render_joint_projections,
         };
         sim.backend
             .sync_from_ecs(&mut sim.world, sim.physics_world)
@@ -626,6 +645,74 @@ impl UrdfSceneSim {
     pub fn named_transform(&self, name: &str) -> Option<rne_world::Transform3> {
         let entity = find_entity_by_name(&self.world, name)?;
         Some(world_transform_of(&self.world, entity))
+    }
+
+    /// Projects a remote runner snapshot into the local scene for rendering.
+    ///
+    /// This updates only ECS `Transform3` values used by the renderer; it does
+    /// not update Rapier state, motor targets, velocities, or simulation time.
+    /// A caller displaying a remote run must keep the local simulation paused,
+    /// as the interactive viewer does. Joint names are the URDF joint names,
+    /// while their values are radians for revolute joints and meters for
+    /// prismatic joints. The return value is the number of joint values
+    /// applied successfully.
+    pub fn apply_render_projection(
+        &mut self,
+        base_translation_m: Option<[f64; 3]>,
+        base_yaw_rad: Option<f64>,
+        joint_names: &[String],
+        joint_positions: &[f64],
+    ) -> usize {
+        if let Some(translation_m) = base_translation_m {
+            if translation_m.iter().all(|value| value.is_finite()) {
+                if let Some(mut transform) = self.world.get_mut::<WorldTransform3>(self.base_link) {
+                    transform.translation =
+                        Vec3::new(translation_m[0], translation_m[1], translation_m[2]);
+                }
+            }
+        }
+        if let Some(yaw_rad) = base_yaw_rad {
+            if yaw_rad.is_finite() {
+                if let Some(mut transform) = self.world.get_mut::<WorldTransform3>(self.base_link) {
+                    transform.rotation = Quat::from_rotation_y(yaw_rad);
+                }
+            }
+        }
+
+        let mut applied = 0;
+        for projection in &self.render_joint_projections {
+            let Some(index) = joint_names.iter().position(|name| name == &projection.name) else {
+                continue;
+            };
+            let Some(position) = joint_positions.get(index).copied() else {
+                continue;
+            };
+            if !position.is_finite() {
+                continue;
+            }
+            let delta = position - projection.initial_position;
+            let mut transform = projection.initial_transform;
+            let axis = projection.axis.normalize_or_zero();
+            match projection.kind {
+                JointKind::Revolute | JointKind::Continuous => {
+                    let rotation = Quat::from_axis_angle(axis, delta);
+                    transform.translation = projection.anchor_parent_m
+                        + rotation
+                            * (projection.initial_transform.translation
+                                - projection.anchor_parent_m);
+                    transform.rotation = rotation * projection.initial_transform.rotation;
+                }
+                JointKind::Prismatic => {
+                    transform.translation = projection.initial_transform.translation + axis * delta;
+                }
+                JointKind::Fixed => continue,
+            }
+            self.world
+                .entity_mut(projection.child_link)
+                .insert(transform);
+            applied += 1;
+        }
+        applied
     }
 
     /// Repositions an unparented named rigid body and clears its velocity.
@@ -1519,6 +1606,41 @@ fn find_link_by_name(world: &World, name: &str) -> Option<Entity> {
     None
 }
 
+fn render_joint_projections(world: &World) -> Vec<RenderJointProjection> {
+    let mut projections = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let joint_entity = entity_ref.id();
+            let joint = world.get::<Joint>(joint_entity)?;
+            let name = world.get::<Name>(joint_entity)?.0.clone();
+            let child_link = joint.child_link;
+            let initial_transform = world.get::<WorldTransform3>(child_link).copied()?;
+            let (axis, anchor_parent_m) = match joint.kind {
+                JointKind::Revolute | JointKind::Continuous => {
+                    let desc = world.get::<RevoluteJointDesc>(child_link)?;
+                    (desc.axis, desc.anchor_parent_m)
+                }
+                JointKind::Prismatic => {
+                    let desc = world.get::<PrismaticJointDesc>(child_link)?;
+                    (desc.axis, desc.anchor_parent_m)
+                }
+                JointKind::Fixed => return None,
+            };
+            Some(RenderJointProjection {
+                name,
+                child_link,
+                initial_transform,
+                kind: joint.kind,
+                initial_position: joint.position,
+                axis,
+                anchor_parent_m,
+            })
+        })
+        .collect::<Vec<_>>();
+    projections.sort_by(|left, right| left.name.cmp(&right.name));
+    projections
+}
+
 fn find_entity_by_name(world: &World, name: &str) -> Option<Entity> {
     world.iter_entities().find_map(|entity_ref| {
         world
@@ -1667,6 +1789,23 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.target_position, 0.35);
         assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn render_projection_applies_remote_joint_without_stepping_physics() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        let before = sim
+            .named_transform("shoulder_link")
+            .expect("shoulder link transform");
+        let names = vec!["shoulder_pan".to_string()];
+        let applied = sim.apply_render_projection(None, None, &names, &[0.35]);
+        assert_eq!(applied, 1);
+        let after = sim
+            .named_transform("shoulder_link")
+            .expect("projected shoulder link transform");
+        assert_ne!(after.rotation, before.rotation);
+        assert_eq!(sim.sim_time, SimTime::default());
     }
 
     #[test]
