@@ -52,6 +52,36 @@ pub enum ScenarioReplayArtifactError {
     Invalid(String),
 }
 
+/// Exact files used to execute and later verify a scenario replay.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScenarioReplayInputs {
+    /// OpenSCENARIO XML path used for the run.
+    pub scenario_path: String,
+    /// Stable digest of the OpenSCENARIO XML bytes used for the run.
+    pub scenario_digest: u64,
+    /// Traffic network path used for the run.
+    pub network_path: String,
+    /// Stable digest of the resolved traffic-network source bytes.
+    pub network_digest: u64,
+}
+
+impl ScenarioReplayInputs {
+    /// Creates replay-input metadata from resolved paths and byte digests.
+    pub fn new(
+        scenario_path: impl Into<String>,
+        scenario_digest: u64,
+        network_path: impl Into<String>,
+        network_digest: u64,
+    ) -> Self {
+        Self {
+            scenario_path: scenario_path.into(),
+            scenario_digest,
+            network_path: network_path.into(),
+            network_digest,
+        }
+    }
+}
+
 /// A deterministic scenario run record that can be verified by the CLI.
 ///
 /// Paths use the same working-directory-relative convention as the native
@@ -95,10 +125,7 @@ pub struct ScenarioReplayArtifact {
 impl ScenarioReplayArtifact {
     /// Creates a validated scenario replay artifact.
     pub fn new(
-        scenario_path: impl Into<String>,
-        scenario_digest: u64,
-        network_path: impl Into<String>,
-        network_digest: u64,
+        inputs: ScenarioReplayInputs,
         options: ScenarioRunOptions,
         executed_steps: u64,
         control_commands: Vec<ControlCommand>,
@@ -107,10 +134,10 @@ impl ScenarioReplayArtifact {
         Self {
             kind: SCENARIO_REPLAY_KIND.to_string(),
             schema_version: SCENARIO_REPLAY_SCHEMA_VERSION,
-            scenario_path: scenario_path.into(),
-            scenario_digest,
-            network_path: network_path.into(),
-            network_digest,
+            scenario_path: inputs.scenario_path,
+            scenario_digest: inputs.scenario_digest,
+            network_path: inputs.network_path,
+            network_digest: inputs.network_digest,
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             options,
             executed_steps,
@@ -267,13 +294,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn artifact_roundtrips_and_validates() {
-        let artifact = ScenarioReplayArtifact::new(
+    fn inputs() -> ScenarioReplayInputs {
+        ScenarioReplayInputs::new(
             "scenario.xosc",
             stable_replay_input_digest(b"scenario"),
             "network.rne.traffic.json",
             stable_replay_input_digest(b"network"),
+        )
+    }
+
+    #[test]
+    fn artifact_roundtrips_and_validates() {
+        let artifact = ScenarioReplayArtifact::new(
+            inputs(),
             ScenarioRunOptions { steps: 4, hz: 60.0 },
             4,
             vec![],
@@ -287,10 +320,7 @@ mod tests {
     #[test]
     fn control_transcript_roundtrips() {
         let artifact = ScenarioReplayArtifact::new(
-            "scenario.xosc",
-            stable_replay_input_digest(b"scenario"),
-            "network.rne.traffic.json",
-            stable_replay_input_digest(b"network"),
+            inputs(),
             ScenarioRunOptions {
                 steps: 10,
                 hz: 60.0,
@@ -317,10 +347,7 @@ mod tests {
     #[test]
     fn result_step_mismatch_is_rejected() {
         let artifact = ScenarioReplayArtifact::new(
-            "scenario.xosc",
-            stable_replay_input_digest(b"scenario"),
-            "network.rne.traffic.json",
-            stable_replay_input_digest(b"network"),
+            inputs(),
             ScenarioRunOptions { steps: 4, hz: 60.0 },
             3,
             vec![],

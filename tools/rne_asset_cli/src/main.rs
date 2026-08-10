@@ -23,8 +23,8 @@ use rne_log::{
 use rne_math::{yaw_rad, Hertz};
 use rne_openscenario::{
     execute_scenario, execute_scenario_with_control, parse_openscenario_xml_file,
-    stable_replay_input_digest, ScenarioDocument, ScenarioReplayArtifact, ScenarioRunOptions,
-    SCENARIO_REPLAY_KIND,
+    stable_replay_input_digest, ScenarioDocument, ScenarioReplayArtifact, ScenarioReplayInputs,
+    ScenarioRunOptions, SCENARIO_REPLAY_KIND,
 };
 use rne_physics::{
     hash_physics_state, require_capabilities, ContactEvent, PhysicsBackend, PhysicsCapability,
@@ -825,10 +825,12 @@ fn run_scenario_manifest(
         let scenario_digest = replay_input_digest(&xosc_path, "OpenSCENARIO")?;
         let network_digest = replay_input_digest(&network_path, "traffic network")?;
         let artifact = ScenarioReplayArtifact::new(
-            xosc_path.display().to_string(),
-            scenario_digest,
-            network_path.display().to_string(),
-            network_digest,
+            ScenarioReplayInputs::new(
+                xosc_path.display().to_string(),
+                scenario_digest,
+                network_path.display().to_string(),
+                network_digest,
+            ),
             options,
             first.steps,
             control_commands,
