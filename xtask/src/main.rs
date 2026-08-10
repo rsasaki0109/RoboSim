@@ -10,6 +10,7 @@ use std::{
 };
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
+const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
 
 fn main() -> ExitCode {
     match run() {
@@ -78,59 +79,59 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let checks = [
         (
             "robot_control_replay",
-            "cargo run -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive.rne-replay",
+            "cargo run --locked -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive.rne-replay",
         ),
         (
             "robot_replay_verify",
-            "cargo run -q -p rne_asset_cli -- replay target/runs/oss_parity_mesh_diff_drive.rne-replay",
+            "cargo run --locked -q -p rne_asset_cli -- replay target/runs/oss_parity_mesh_diff_drive.rne-replay",
         ),
         (
             "sensor_payload_replay",
-            "cargo run -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive_lidar_payload.rne-replay",
+            "cargo run --locked -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive_lidar_payload.rne-replay",
         ),
         (
             "scenario_traffic_run",
-            "cargo run -q -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml",
+            "cargo run --locked -q -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml",
         ),
         (
             "scenario_replay_verify",
-            "cargo run -q -p rne_asset_cli -- replay target/runs/scenario_speed.rne-replay",
+            "cargo run --locked -q -p rne_asset_cli -- replay target/runs/scenario_speed.rne-replay",
         ),
         (
             "traffic_external_pose_ownership",
-            "cargo test -q -p rne_traffic --test external_pose",
+            "cargo test --locked -q -p rne_traffic --test external_pose",
         ),
         (
             "traci_mirror_protocol",
-            "cargo test -q -p rne_traci --test co_simulation",
+            "cargo test --locked -q -p rne_traci --test co_simulation",
         ),
         (
             "runner_tcp_frontend_protocol",
-            "cargo test -q -p rne_asset_cli --test control",
+            "cargo test --locked -q -p rne_asset_cli --test control",
         ),
         (
             "runner_tcp_full_resolution_rgbd_e2e",
-            "cargo test -q -p rne_asset_cli --test control control_tcp_full_resolution_camera_and_depth_snapshot",
+            "cargo test --locked -q -p rne_asset_cli --test control control_tcp_full_resolution_camera_and_depth_snapshot",
         ),
         (
             "runner_remote_sensor_snapshot_contract",
-            "cargo test -q -p rne_asset_cli live_snapshot_contains_bounded_camera_preview",
+            "cargo test --locked -q -p rne_asset_cli live_snapshot_contains_bounded_camera_preview",
         ),
         (
             "native_frontend_compile_contract",
-            "cargo check -q -p interactive_viewer --example 14_interactive_viewer",
+            "cargo check --locked -q -p interactive_viewer --example 14_interactive_viewer",
         ),
         (
             "articulated_render_projection",
-            "cargo test -q -p rne_ai render_projection_applies_remote_joint_without_stepping_physics",
+            "cargo test --locked -q -p rne_ai render_projection_applies_remote_joint_without_stepping_physics",
         ),
         (
             "frontend_remote_snapshot_contract",
-            "cargo test -q -p interactive_viewer --example 14_interactive_viewer remote_status_parses_scenario_traffic_positions",
+            "cargo test --locked -q -p interactive_viewer --example 14_interactive_viewer remote_status_parses_scenario_traffic_positions",
         ),
         (
             "frontend_remote_sensor_projection_contract",
-            "cargo test -q -p interactive_viewer --example 14_interactive_viewer remote_status_decodes_camera_and_lidar_previews",
+            "cargo test --locked -q -p interactive_viewer --example 14_interactive_viewer remote_status_decodes_camera_and_lidar_previews",
         ),
     ];
 
@@ -175,7 +176,7 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut seeds = (0_u64..10).collect::<Vec<_>>();
+    let mut seeds = default_behavior_seeds();
     let mut json_path = root.join("artifacts/behavior-ci/report.json");
     let mut junit_path = root.join("artifacts/behavior-ci/junit.xml");
     while let Some(argument) = args.next() {
@@ -260,11 +261,16 @@ fn parse_seed_range(value: &str) -> anyhow::Result<Vec<u64>> {
     Ok((start..end).collect())
 }
 
+fn default_behavior_seeds() -> Vec<u64> {
+    parse_seed_range(DEFAULT_BEHAVIOR_SEED_RANGE).expect("default behavior seed range is valid")
+}
+
 /// The full local gate: every stage in sequence.
 ///
-/// CI runs lint, sharded tests, four smoke partitions, RL, and parity as parallel
-/// jobs, so wall-clock time there is the slowest stage instead of the sum. Keep
-/// stage contents in the stage functions so the local and CI gates cannot drift apart.
+/// CI runs lint, sharded tests, four smoke partitions, RL, headless, parity, and
+/// behavior CI as parallel jobs, so wall-clock time there is the slowest stage
+/// instead of the sum. Keep stage contents in the stage functions so the local
+/// and CI gates cannot drift apart.
 fn ci() -> anyhow::Result<()> {
     ci_lint()?;
     ci_test()?;
@@ -274,14 +280,16 @@ fn ci() -> anyhow::Result<()> {
     } else {
         ci_rl()?;
     }
-    Ok(())
+    ci_headless()?;
+    parity(&mut std::iter::empty::<String>())?;
+    behavior_ci(&mut std::iter::empty::<String>())
 }
 
 /// Formatting, dependency boundaries, and Clippy.
 fn ci_lint() -> anyhow::Result<()> {
     run_step("cargo fmt --all -- --check")?;
     lint_boundaries()?;
-    run_step("cargo clippy --workspace --all-targets -- -D warnings")
+    run_step("cargo clippy --locked --workspace --all-targets -- -D warnings")
 }
 
 /// Workspace tests, optional Pinocchio goldens, and asset validation.
@@ -299,7 +307,7 @@ fn ci_test() -> anyhow::Result<()> {
 /// the first partition to avoid duplicating them per shard.
 fn ci_test_partition(partition: Option<&str>) -> anyhow::Result<()> {
     match partition {
-        None => run_step("cargo test --workspace")?,
+        None => run_step("cargo test --locked --workspace")?,
         Some(spec) => {
             anyhow::ensure!(
                 spec.split('/').count() == 2
@@ -307,7 +315,7 @@ fn ci_test_partition(partition: Option<&str>) -> anyhow::Result<()> {
                 "partition must be PART/TOTAL, got {spec}"
             );
             run_step(&format!(
-                "cargo nextest run --workspace --partition hash:{spec}"
+                "cargo nextest run --locked --workspace --partition hash:{spec}"
             ))?;
         }
     }
@@ -360,8 +368,8 @@ fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartiti
 
 /// Runs the explicit CPU-only headless renderer and sensor test gates.
 fn ci_headless() -> anyhow::Result<()> {
-    run_step("cargo test -p rne_render --lib")?;
-    run_step("cargo test -p rne_sensor --lib")
+    run_step("cargo test --locked -p rne_render --lib")?;
+    run_step("cargo test --locked -p rne_sensor --lib")
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.
@@ -376,66 +384,76 @@ fn run_example_smokes() -> anyhow::Result<()> {
 }
 
 fn run_manipulator_smokes() -> anyhow::Result<()> {
-    run_step("cargo run -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke")?;
+    run_step("cargo run --locked -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke")?;
     run_step(
-        "cargo run -p mobile_manipulator_reach --example 21_mobile_manipulator_reach -- --smoke",
+        "cargo run --locked -p mobile_manipulator_reach --example 21_mobile_manipulator_reach -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_grasp --example 22_mobile_manipulator_grasp -- --smoke",
+        "cargo run --locked -p mobile_manipulator_grasp --example 22_mobile_manipulator_grasp -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_transport --example 23_mobile_manipulator_transport -- --smoke",
+        "cargo run --locked -p mobile_manipulator_transport --example 23_mobile_manipulator_transport -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_wrist_cam --example 24_mobile_manipulator_wrist_cam -- --smoke",
+        "cargo run --locked -p mobile_manipulator_wrist_cam --example 24_mobile_manipulator_wrist_cam -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_episode --example 25_mobile_manipulator_episode -- --smoke",
+        "cargo run --locked -p mobile_manipulator_episode --example 25_mobile_manipulator_episode -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_place --example 26_mobile_manipulator_place -- --smoke",
+        "cargo run --locked -p mobile_manipulator_place --example 26_mobile_manipulator_place -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_vectorized --example 28_mobile_manipulator_vectorized -- --smoke",
+        "cargo run --locked -p mobile_manipulator_vectorized --example 28_mobile_manipulator_vectorized -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_curriculum --example 29_mobile_manipulator_curriculum -- --smoke",
+        "cargo run --locked -p mobile_manipulator_curriculum --example 29_mobile_manipulator_curriculum -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_lift --example 30_mobile_manipulator_lift -- --smoke",
+        "cargo run --locked -p mobile_manipulator_lift --example 30_mobile_manipulator_lift -- --smoke",
     )?;
     run_step(
-        "cargo run -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place -- --smoke",
-    )?;
-    run_step("cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke")?;
-    run_step("cargo run -p clutter_pick_place_e2e --example 33_clutter_pick_place_e2e -- --smoke")?;
-    run_step(
-        "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
+        "cargo run --locked -p mobile_manipulator_lift_pick_place --example 31_mobile_manipulator_lift_pick_place -- --smoke",
     )?;
     run_step(
-        "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-mobile",
+        "cargo run --locked -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke",
+    )?;
+    run_step("cargo run --locked -p clutter_pick_place_e2e --example 33_clutter_pick_place_e2e -- --smoke")?;
+    run_step(
+        "cargo run --locked -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator",
     )?;
     run_step(
-        "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
+        "cargo run --locked -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-mobile",
+    )?;
+    run_step(
+        "cargo run --locked -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
     )
 }
 
 fn run_locomotion_smokes() -> anyhow::Result<()> {
-    run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
-    run_step("cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke")?;
-    run_step("cargo run -p locomotion_vectorized --example 66_locomotion_vectorized -- --smoke")?;
+    run_step("cargo run --locked -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
     run_step(
-        "cargo run -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --smoke",
+        "cargo run --locked -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke",
     )?;
-    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --smoke")?;
-    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke")
+    run_step(
+        "cargo run --locked -p locomotion_vectorized --example 66_locomotion_vectorized -- --smoke",
+    )?;
+    run_step(
+        "cargo run --locked -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --smoke",
+    )?;
+    run_step("cargo run --locked -p g1_heading_turn --example 68_g1_heading_turn -- --smoke")?;
+    run_step(
+        "cargo run --locked -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke",
+    )
 }
 
 fn run_asset_smokes() -> anyhow::Result<()> {
-    run_step("cargo run -p gltf_humanoid_gpu --example 69_gltf_humanoid_gpu -- --smoke")?;
-    run_step("cargo run -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke")?;
-    run_step("cargo run -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
-    run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")
+    run_step("cargo run --locked -p gltf_humanoid_gpu --example 69_gltf_humanoid_gpu -- --smoke")?;
+    run_step(
+        "cargo run --locked -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke",
+    )?;
+    run_step("cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
+    run_step("cargo run --locked -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")
 }
 
 fn house_gif_demo() -> anyhow::Result<()> {
@@ -834,7 +852,8 @@ fn hero_media_check() -> anyhow::Result<()> {
 }
 
 fn hero_simulation_smoke_digest() -> anyhow::Result<String> {
-    let command = "cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke";
+    let command =
+        "cargo run --locked -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke";
     let output = run_step_output(command)?;
     extract_hero_digest(&output)
         .ok_or_else(|| anyhow::anyhow!("hero smoke output did not include trajectory digest"))
@@ -1354,7 +1373,7 @@ fn run_program(program: &Path, args: &[&str]) -> anyhow::Result<()> {
 
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .args(["metadata", "--locked", "--format-version", "1", "--no-deps"])
         .output()?;
 
     if !output.status.success() {
@@ -1391,8 +1410,8 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range,
-        parse_smoke_partition, SmokePartition,
+        default_behavior_seeds, extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter,
+        parse_seed_range, parse_smoke_partition, SmokePartition,
     };
 
     #[test]
@@ -1400,6 +1419,11 @@ mod tests {
         assert_eq!(parse_seed_range("0..3").expect("range"), vec![0, 1, 2]);
         assert!(parse_seed_range("3..3").is_err());
         assert!(parse_seed_range("3...4").is_err());
+    }
+
+    #[test]
+    fn default_behavior_ci_covers_ten_seeds() {
+        assert_eq!(default_behavior_seeds(), (0_u64..10).collect::<Vec<_>>());
     }
 
     #[test]

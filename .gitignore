@@ -4,7 +4,9 @@
 __pycache__/
 **/*.pyc
 **/*.rs.bk
-Cargo.lock
+# The root workspace ships runnable tools/examples and pins its release graph.
+**/Cargo.lock
+!/Cargo.lock
 adapters/ros2/rne_ros2_node/.cargo/
 adapters/ros2/rne_ros2_node/target/
 
