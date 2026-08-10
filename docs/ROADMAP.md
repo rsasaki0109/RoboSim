@@ -171,7 +171,7 @@ standing settle instead of animating the former fixed-base showcase.
 | Perception | Wrist-camera grasp target estimation (visuomotor pick) — pairs naturally with Phase B |
 | CI | Behavior-contract failures emit a deterministic seed/replay bundle and one-command local reproduction (M1) |
 | Scene diversity | Domain randomization + curriculum over clutter layouts |
-| DevEx | Fix `xtask` `run_step` on Windows: `cmd /C` strips the leading quote of the venv python path, so the RL smoke stage's pip steps fail locally (Linux CI unaffected; reproduces on main) |
+| DevEx | ~~Fix quoted virtualenv commands on Windows~~ **Done**: venv pip, maturin, and smoke scripts execute through `run_program(Path, args)` without `cmd /C` reparsing |
 | CI | ~~ROS 2 jobs (`rne_ros2_node`, `rne_ros2_bridge`) are red on the runner: `simulation_interfaces` package missing~~ **Done**: both workflows now apt-install `ros-jazzy-simulation-interfaces` (Python msgs for the bridge, `share/*/rust` crate patched in by `generate_cargo_config.sh` for the node) |
 
 ### Known platform notes (carried forward)
