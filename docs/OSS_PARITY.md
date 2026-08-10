@@ -23,8 +23,8 @@ workflow is truly complete.
 | Capability | RNE today | Remaining parity gap |
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
-| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene or OpenSCENARIO manifest headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `--control-port PORT` serves the same commands over a local TCP connection with live per-step robot, traffic, and sensor snapshots. `--control-camera-full-resolution` is an opt-in source-resolution RGB-D stream for frontend E2E checks. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | None for the current fixed-step and runner-control slice |
-| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), episode APIs, and an isolated ROS 2 adapter | Application-level controllers still live in the code, not a loadable ABI |
+| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene or OpenSCENARIO manifest headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `--control-port PORT` serves the same commands over a local TCP connection with live per-step robot, traffic, and sensor snapshots. `--control-camera-full-resolution` is an opt-in source-resolution RGB-D stream, capped at 1920x1080 per payload, for frontend E2E checks. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | None for the current fixed-step and runner-control slice |
+| Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), dynamically loaded controller libraries through the versioned C ABI, episode APIs, and an isolated ROS 2 adapter | None for the current controller slice; sensor and agent plugin ABIs remain future scope |
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
 | Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA, and the `interactive_viewer --connect HOST:PORT` runner frontend | Remote diff-drive and scenario traffic positions project into the local viewer; bounded RGB camera previews drive PiP, LiDAR previews drive point overlays, IMU/wheel summaries are available in the status contract, and `--control-camera-full-resolution` enables RGB plus GPU depth PiP; binary video transport remains future work |
@@ -273,12 +273,19 @@ verified with the same `rne-asset replay` command.
 
 For a GUI or renderer frontend, `--control-port PORT` serves the same commands
 over a local TCP connection (port 0 picks an ephemeral port). On connect the
-runner sends `ready paused`, acknowledges each command with `ok <state>`, and
+runner sends `ready paused protocol=1`, acknowledges each accepted command with
+`ok <state>`, and
 streams `status step=<n> t=<t> state=<state> snapshot=<json>` after every
 completed step. The snapshot is a compact single-line JSON observation
 (`base`, `base_yaw_rad`, `joints`, `sensors`, or scenario `positions_m` and
 traffic metrics), so a frontend can render the live state without re-running
 physics. The native wgpu frontend connects with:
+
+Command acknowledgement is a queue-acceptance boundary; the following status
+line is the applied-state boundary. TCP writes use a finite timeout. RGB-D
+payloads are always bounded (1920x1080 per image even in opt-in source mode),
+and snapshots above 32 MiB are replaced with a compact
+`snapshot_limit_exceeded` status instead of an unbounded write.
 
 ```bash
 cargo run -p interactive_viewer --example 14_interactive_viewer -- \

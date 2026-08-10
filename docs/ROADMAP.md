@@ -8,6 +8,35 @@ headlessly, controllable through typed I/O, recordable, replayable, and
 inspectable without a commercial engine. The baseline and scope are tracked in
 [OSS_PARITY.md](OSS_PARITY.md).
 
+## 1.0 execution plan (August 2026 through July 2027)
+
+Roadmap version labels below describe feature tracks, not published crate
+versions. Several v0.15/v0.16-track capabilities landed before the v0.14
+release was cut. M0 consolidates that work into one auditable v0.14 release
+candidate; version numbering is rebased from the code actually shipped after
+that point.
+
+| Milestone | Target | Outcome | Exit gate |
+|---|---|---|---|
+| M0 | Aug 2026 | Parity consolidation and `v0.14.0-rc.1`: split reviewable history, replay-input integrity, transactional external-simulator mirroring, bounded/versioned runner transport, pinned reproducible CI, current docs and changelog | `fmt`, workspace Clippy, workspace tests, explicit headless tests, parity catalog, and 10-seed Behavior CI all pass from a locked dependency graph; release candidate is reproducible from a clean checkout |
+| M1 | Sep-Oct 2026 | Behavior CI failure replay: versioned behavior contracts, deterministic seed manifests, minimized failing-run artifacts, JSON/JUnit diagnostics, and local reproduction command | Every behavior failure reports contract, seed, first violating step, state digest, and replay artifact; a committed failure fixture fails then reproduces identically headlessly |
+| M2 | Nov-Dec 2026 | Stable robot-native control surface: versioned observation/action schemas, controller lifecycle and capability negotiation, multi-robot scheduling, and C-ABI compatibility suite | A controller built against the oldest supported ABI loads in the newest runtime; no adapter type leaks into core crates; multi-robot results are spawn-order independent |
+| M3 | Jan-Feb 2027 | Production sensor/frontend transport: framed binary protocol, explicit negotiation, bounded queues/backpressure, RGB-D/LiDAR payloads, and reconnect semantics | Slow/disconnected clients cannot stall simulation or grow memory without bound; protocol compatibility and headless sensor references pass on Windows and Linux |
+| M4 | Mar-Apr 2027 | Physics conformance: backend-neutral test vectors, units/tolerance registry, snapshots, contact/joint validation, and analytic-vs-Rapier reports | Every advertised backend capability has a conformance test; deterministic tests use stable hashes where valid and documented tolerances otherwise |
+| M5 | May-Jun 2027 | Scenario and traffic scale: multi-entity OpenSCENARIO execution, mixed native/external ownership metrics, recoverable TraCI sessions, and urban scale budgets | Reference scenario runs 100 actors at >=60 Hz headlessly on the CI benchmark class with deterministic externally visible ordering and zero unexplained violations |
+| M6 | Jul 2027 | 1.0 RC hardening: public API freeze, migration and compatibility policy, supply-chain/license audit, fuzzed import/protocol boundaries, release artifacts and examples | No P0/P1 defects, all public APIs documented, two clean release rehearsals pass the full matrix, and `v1.0.0-rc.1` installs and runs every flagship workflow |
+
+Cross-cutting rules for every milestone:
+
+- Core crates remain ROS2- and backend-type-free; adapters conform to RNE types.
+- Simulation decisions use `SimClock`, explicit units, seeded randomness, and
+  deterministic externally visible ordering.
+- Every feature has a headless test or runnable example plus a short docs
+  update; every failure must be locally reproducible from a recorded seed or
+  artifact.
+- Performance claims name the fixture, machine class, actor/sensor count, and
+  percentile; correctness gates are never waived to meet throughput targets.
+
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|
 | A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |
@@ -49,9 +78,9 @@ the weld *look* like a grasp, then replace it with physical friction-based grasp
 | A | Manipulation | Weld visual realism: two-finger contact gating (no single-finger graze capture), smooth weld-anchor retarget to a canonical in-gripper pose (centered between finger pads, folds in the 2 cm seat lift — no teleports), fingers pinch to the object surface | Done (PR #35, fixes #39/#40/#41; README hero rebuilt on real physics PR #42; mm_mobile uncommanded-arm hold damping PR #43) |
 | B | Physics | Friction-based grasp core: force-limited finger position motors + friction-cone holding, weld removed for graspable objects. **Risk**: reintroduces contact-history sensitivity — the v0.13 settle fixes (stable equilibria, kinematic base) are the prerequisite that makes this attemptable. Validate cross-platform from day one (temp linux workflow loop) | Core done (`feat/friction-grasp-core`): opt-in `GraspMode::Friction` on `MobileManipulatorSim` (weld stays the default, hero digest bit-for-bit unchanged), `ContactEvent::impulse` from Rapier's solver, per-obstacle `friction` in scene TOML, hold/release/low-friction-slip tests on `mm_minimal` |
 | C | Tasks | Migrate pick/place E2Es, policies, and RL benches to friction grasp; keep weld as a fallback mode for scripted regression tests | In progress: bounded continued-close pinch target complete; fixed-base example 33 and its policy E2E run in friction mode; Python RL clutter/place rollouts select friction after reset; mobile example 34 validates friction grasp acquisition while full mobile friction placement remains |
-| D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | Pending |
+| D | Release | CHANGELOG / ROADMAP / hero regen, ship v0.14.0 | In progress (M0 parity consolidation and RC hardening) |
 
-The remaining mobile friction-place gap is deferred to v0.15: `mm_mobile` has
+The remaining mobile friction-place gap is deferred to a post-v0.14 mobile-manipulation track: `mm_mobile` has
 no vertical lift, while its v0.13 policy drags a welded cube across the table.
 A physical-grasp replacement needs a lift-capable mobile manipulator or a task
 scene/trajectory designed to clear the tabletop without a rigid attachment.
@@ -140,7 +169,7 @@ standing settle instead of animating the former fixed-base showcase.
 | Area | Idea |
 |------|------|
 | Perception | Wrist-camera grasp target estimation (visuomotor pick) — pairs naturally with Phase B |
-| Physics | Wire URDF prismatic joints to Rapier (carried-over architecture gap) |
+| CI | Behavior-contract failures emit a deterministic seed/replay bundle and one-command local reproduction (M1) |
 | Scene diversity | Domain randomization + curriculum over clutter layouts |
 | DevEx | Fix `xtask` `run_step` on Windows: `cmd /C` strips the leading quote of the venv python path, so the RL smoke stage's pip steps fail locally (Linux CI unaffected; reproduces on main) |
 | CI | ~~ROS 2 jobs (`rne_ros2_node`, `rne_ros2_bridge`) are red on the runner: `simulation_interfaces` package missing~~ **Done**: both workflows now apt-install `ros-jazzy-simulation-interfaces` (Python msgs for the bridge, `share/*/rust` crate patched in by `generate_cargo_config.sh` for the node) |
@@ -484,13 +513,18 @@ The native node is built with `--manifest-path` and is not part of the core work
 
 ## Release checklist
 
-After merging release changes (replace `0.9.0` with the version you are shipping):
+After merging release changes, set `RNE_VERSION` to the exact version being
+shipped and run the clean release gate before creating generated release notes:
 
 ```bash
-cargo run -p xtask -- ci
-git tag -a v0.9.0 -m "Robot Native Engine v0.9.0"
-git push origin main --tags
-gh release create v0.9.0 --title "v0.9.0" --notes-file CHANGELOG.md
+RNE_VERSION=0.14.0-rc.1
+cargo run --locked -p xtask -- ci
+git diff --exit-code
+git tag -a "v${RNE_VERSION}" -m "Robot Native Engine v${RNE_VERSION}"
+git push origin "v${RNE_VERSION}"
+gh release create "v${RNE_VERSION}" --title "v${RNE_VERSION}" --generate-notes --verify-tag
 ```
 
-Adjust the `gh release create` notes to the `[0.9.0]` section only if you prefer a shorter GitHub release body.
+Create the tag only from the protected, green release commit. A release
+candidate does not advance to final until its clean-checkout rehearsal and
+published artifacts have both been verified.
