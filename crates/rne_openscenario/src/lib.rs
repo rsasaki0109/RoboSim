@@ -29,6 +29,7 @@
 #![deny(missing_docs)]
 
 pub mod parser;
+pub mod replay;
 pub mod runtime;
 pub mod scenario;
 
@@ -36,7 +37,14 @@ pub use parser::{
     parse_openscenario_xml, parse_openscenario_xml_file, parse_openscenario_xml_with_source,
     parse_openscenario_xml_with_source_at,
 };
-pub use runtime::{actor_length_m, execute_scenario, ScenarioRunOptions, ScenarioRunResult};
+pub use replay::{
+    ScenarioReplayArtifact, ScenarioReplayArtifactError, SCENARIO_REPLAY_KIND,
+    SCENARIO_REPLAY_SCHEMA_VERSION,
+};
+pub use runtime::{
+    actor_length_m, execute_scenario, execute_scenario_with_control, ScenarioRunOptions,
+    ScenarioRunResult,
+};
 pub use scenario::{
     ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,
     ScenarioTimedAction, SCENARIO_DOCUMENT_VERSION,

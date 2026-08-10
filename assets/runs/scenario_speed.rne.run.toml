@@ -9,3 +9,4 @@ xosc = "../scenarios/speed.xosc"
 
 [output]
 determinism_check = true
+replay_path = "../../target/runs/scenario_speed.rne-replay"
