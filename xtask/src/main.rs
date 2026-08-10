@@ -6,6 +6,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
@@ -31,10 +32,19 @@ fn run() -> anyhow::Result<()> {
             Some(partition) => ci_test_partition(Some(&partition)),
             None => ci_test(),
         },
-        "ci-smoke" => ci_smoke(),
+        "ci-smoke" => {
+            let partition = args.next();
+            anyhow::ensure!(
+                args.next().is_none(),
+                "ci-smoke accepts at most one partition: manipulator, locomotion, assets, or media"
+            );
+            ci_smoke(partition.as_deref())
+        }
+        "ci-headless" => ci_headless(),
         "ci-rl" => ci_rl(),
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
+        "parity" => parity(&mut args),
         "house-gif-demo" => house_gif_demo(),
         "hero-media-check" => hero_media_check(),
         "hero-contact-sheet" => hero_contact_sheet(),
@@ -43,6 +53,124 @@ fn run() -> anyhow::Result<()> {
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
+}
+
+/// Runs the committed OSS-parity flagship workflows and writes a machine-readable report.
+///
+/// This is intentionally a small catalog of representative gates rather than a
+/// second implementation of the workspace test suite. Each check invokes the
+/// same public command or integration test a contributor would use manually.
+fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let mut json_path = root.join("artifacts/oss-parity/report.json");
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--json" => {
+                json_path = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--json requires a path"))?,
+                );
+            }
+            other => anyhow::bail!("unknown parity argument: {other}"),
+        }
+    }
+
+    let checks = [
+        (
+            "robot_control_replay",
+            "cargo run -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive.rne-replay",
+        ),
+        (
+            "robot_replay_verify",
+            "cargo run -q -p rne_asset_cli -- replay target/runs/oss_parity_mesh_diff_drive.rne-replay",
+        ),
+        (
+            "sensor_payload_replay",
+            "cargo run -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive_lidar_payload.rne-replay",
+        ),
+        (
+            "scenario_traffic_run",
+            "cargo run -q -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml",
+        ),
+        (
+            "scenario_replay_verify",
+            "cargo run -q -p rne_asset_cli -- replay target/runs/scenario_speed.rne-replay",
+        ),
+        (
+            "traffic_external_pose_ownership",
+            "cargo test -q -p rne_traffic --test external_pose",
+        ),
+        (
+            "traci_mirror_protocol",
+            "cargo test -q -p rne_traci --test co_simulation",
+        ),
+        (
+            "runner_tcp_frontend_protocol",
+            "cargo test -q -p rne_asset_cli --test control",
+        ),
+        (
+            "runner_tcp_full_resolution_rgbd_e2e",
+            "cargo test -q -p rne_asset_cli --test control control_tcp_full_resolution_camera_and_depth_snapshot",
+        ),
+        (
+            "runner_remote_sensor_snapshot_contract",
+            "cargo test -q -p rne_asset_cli live_snapshot_contains_bounded_camera_preview",
+        ),
+        (
+            "native_frontend_compile_contract",
+            "cargo check -q -p interactive_viewer --example 14_interactive_viewer",
+        ),
+        (
+            "articulated_render_projection",
+            "cargo test -q -p rne_ai render_projection_applies_remote_joint_without_stepping_physics",
+        ),
+        (
+            "frontend_remote_snapshot_contract",
+            "cargo test -q -p interactive_viewer --example 14_interactive_viewer remote_status_parses_scenario_traffic_positions",
+        ),
+        (
+            "frontend_remote_sensor_projection_contract",
+            "cargo test -q -p interactive_viewer --example 14_interactive_viewer remote_status_decodes_camera_and_lidar_previews",
+        ),
+    ];
+
+    fs::create_dir_all(root.join("target/runs"))?;
+    let mut report_checks = Vec::with_capacity(checks.len());
+    let mut all_passed = true;
+    for (id, command) in checks {
+        let started = Instant::now();
+        let (passed, output) = run_step_capture(command)?;
+        all_passed &= passed;
+        let output_tail = output
+            .lines()
+            .rev()
+            .take(12)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        report_checks.push(serde_json::json!({
+            "id": id,
+            "command": command,
+            "status": if passed { "passed" } else { "failed" },
+            "duration_ms": started.elapsed().as_millis(),
+            "output_tail": output_tail,
+        }));
+    }
+
+    let report = serde_json::json!({
+        "schema_version": 1,
+        "status": if all_passed { "passed" } else { "failed" },
+        "checks": report_checks,
+    });
+    if let Some(parent) = json_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&json_path, serde_json::to_vec_pretty(&report)?)?;
+    println!("OSS parity report: {}", json_path.display());
+    anyhow::ensure!(all_passed, "one or more OSS parity checks failed");
+    Ok(())
 }
 
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
@@ -134,13 +262,13 @@ fn parse_seed_range(value: &str) -> anyhow::Result<Vec<u64>> {
 
 /// The full local gate: every stage in sequence.
 ///
-/// CI runs the same stages as four parallel jobs (`ci-lint`, `ci-test`, `ci-smoke`,
-/// `ci-rl`), so wall-clock time there is the slowest stage instead of the sum. Keep
+/// CI runs lint, sharded tests, four smoke partitions, RL, and parity as parallel
+/// jobs, so wall-clock time there is the slowest stage instead of the sum. Keep
 /// stage contents in the stage functions so the local and CI gates cannot drift apart.
 fn ci() -> anyhow::Result<()> {
     ci_lint()?;
     ci_test()?;
-    ci_smoke()?;
+    ci_smoke(None)?;
     if std::env::var("RNE_SKIP_RL_SMOKES").is_ok() {
         eprintln!("skipping mobile_manipulator_rl_smokes (RNE_SKIP_RL_SMOKES is set)");
     } else {
@@ -191,10 +319,49 @@ fn ci_test_partition(partition: Option<&str>) -> anyhow::Result<()> {
 }
 
 /// Example smokes and media checks.
-fn ci_smoke() -> anyhow::Result<()> {
-    run_example_smokes()?;
-    house_gif_demo()?;
-    hero_media_check()
+fn ci_smoke(partition: Option<&str>) -> anyhow::Result<()> {
+    match parse_smoke_partition(partition)? {
+        SmokePartition::All => {
+            run_example_smokes()?;
+            house_gif_demo()?;
+            hero_media_check()
+        }
+        SmokePartition::Manipulator => run_manipulator_smokes(),
+        SmokePartition::Locomotion => run_locomotion_smokes(),
+        SmokePartition::Assets => run_asset_smokes(),
+        SmokePartition::Media => {
+            house_gif_demo()?;
+            hero_media_check()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SmokePartition {
+    All,
+    Manipulator,
+    Locomotion,
+    Assets,
+    Media,
+}
+
+fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartition> {
+    match partition {
+        None => Ok(SmokePartition::All),
+        Some("manipulator") => Ok(SmokePartition::Manipulator),
+        Some("locomotion") => Ok(SmokePartition::Locomotion),
+        Some("assets") => Ok(SmokePartition::Assets),
+        Some("media") => Ok(SmokePartition::Media),
+        Some(other) => anyhow::bail!(
+            "unknown ci-smoke partition {other:?}; expected manipulator, locomotion, assets, or media"
+        ),
+    }
+}
+
+/// Runs the explicit CPU-only headless renderer and sensor test gates.
+fn ci_headless() -> anyhow::Result<()> {
+    run_step("cargo test -p rne_render --lib")?;
+    run_step("cargo test -p rne_sensor --lib")
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.
@@ -203,6 +370,12 @@ fn ci_rl() -> anyhow::Result<()> {
 }
 
 fn run_example_smokes() -> anyhow::Result<()> {
+    run_manipulator_smokes()?;
+    run_locomotion_smokes()?;
+    run_asset_smokes()
+}
+
+fn run_manipulator_smokes() -> anyhow::Result<()> {
     run_step("cargo run -p mobile_manipulator_arm --example 20_mobile_manipulator_arm -- --smoke")?;
     run_step(
         "cargo run -p mobile_manipulator_reach --example 21_mobile_manipulator_reach -- --smoke",
@@ -244,7 +417,10 @@ fn run_example_smokes() -> anyhow::Result<()> {
     )?;
     run_step(
         "cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke --manipulator-lift",
-    )?;
+    )
+}
+
+fn run_locomotion_smokes() -> anyhow::Result<()> {
     run_step("cargo run -p go2_pure_torque --example 64_go2_pure_torque -- --smoke")?;
     run_step("cargo run -p go2_velocity_terrain --example 65_go2_velocity_terrain -- --smoke")?;
     run_step("cargo run -p locomotion_vectorized --example 66_locomotion_vectorized -- --smoke")?;
@@ -252,12 +428,14 @@ fn run_example_smokes() -> anyhow::Result<()> {
         "cargo run -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --smoke",
     )?;
     run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --smoke")?;
-    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke")?;
+    run_step("cargo run -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke")
+}
+
+fn run_asset_smokes() -> anyhow::Result<()> {
     run_step("cargo run -p gltf_humanoid_gpu --example 69_gltf_humanoid_gpu -- --smoke")?;
     run_step("cargo run -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke")?;
     run_step("cargo run -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
-    run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
-    Ok(())
+    run_step("cargo run -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")
 }
 
 fn house_gif_demo() -> anyhow::Result<()> {
@@ -1149,6 +1327,21 @@ fn run_step_output(command: &str) -> anyhow::Result<String> {
     }
 }
 
+/// Runs a catalog command while retaining its output for a parity report.
+fn run_step_capture(command: &str) -> anyhow::Result<(bool, String)> {
+    println!("$ {command}");
+    let output = if cfg!(windows) {
+        Command::new("cmd").args(["/C", command]).output()?
+    } else {
+        Command::new("sh").arg("-c").arg(command).output()?
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    print!("{stdout}");
+    eprint!("{stderr}");
+    Ok((output.status.success(), format!("{stdout}\n{stderr}")))
+}
+
 fn run_program(program: &Path, args: &[&str]) -> anyhow::Result<()> {
     println!("$ {} {}", program.display(), args.join(" "));
     let status = Command::new(program).args(args).status()?;
@@ -1199,6 +1392,7 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 mod tests {
     use super::{
         extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range,
+        parse_smoke_partition, SmokePartition,
     };
 
     #[test]
@@ -1244,5 +1438,27 @@ mod tests {
     #[test]
     fn rejects_frame_delta_length_mismatch() {
         assert!(frame_delta_ratio(&[0, 0, 0, 255], &[0, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn parses_ci_smoke_partitions() {
+        assert_eq!(parse_smoke_partition(None).unwrap(), SmokePartition::All);
+        assert_eq!(
+            parse_smoke_partition(Some("manipulator")).unwrap(),
+            SmokePartition::Manipulator
+        );
+        assert_eq!(
+            parse_smoke_partition(Some("locomotion")).unwrap(),
+            SmokePartition::Locomotion
+        );
+        assert_eq!(
+            parse_smoke_partition(Some("assets")).unwrap(),
+            SmokePartition::Assets
+        );
+        assert_eq!(
+            parse_smoke_partition(Some("media")).unwrap(),
+            SmokePartition::Media
+        );
+        assert!(parse_smoke_partition(Some("unknown")).is_err());
     }
 }

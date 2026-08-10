@@ -150,8 +150,8 @@ standing settle instead of animating the former fixed-base showcase.
 - The README hero live trajectory digest is compared only on Windows (the generating
   platform): cross-platform contact dynamics are outcome-stable but not bit-identical.
   Outcome-level hero checks run everywhere.
-- `cargo test --workspace --features headless` is listed in AGENTS.md but no workspace
-  package defines a `headless` feature (pre-existing; also absent from `xtask ci`).
+- The explicit headless gate is `cargo run -p xtask -- ci-headless`; it runs the
+  renderer-independent `rne_render` and sensor test suites without a feature flag.
 
 ## v0.13 goal: mobile clutter place E2E
 
