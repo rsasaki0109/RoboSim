@@ -3391,13 +3391,13 @@ mod tests {
         );
     }
 
-    /// Writes a standalone `mm_minimal_transport`-equivalent scene (fixed-base
-    /// parallel gripper, tabletop cube) with the cube's collider friction
-    /// overridden, so friction-grasp tests can exercise both a normal-friction
-    /// hold and a low-friction slip from the same fixture. The robot reference
-    /// uses the built-in `mm_minimal` asset's absolute path so the temp file's
-    /// location doesn't matter.
-    fn mm_minimal_transport_scene_with_friction(friction: f32) -> PathBuf {
+    /// Writes a uniquely named, standalone `mm_minimal_transport`-equivalent
+    /// scene (fixed-base parallel gripper, tabletop cube) with the cube's collider
+    /// friction overridden, so parallel friction-grasp tests cannot race while
+    /// exercising both a normal-friction hold and a low-friction slip. The robot
+    /// reference uses the built-in `mm_minimal` asset's absolute path so the temp
+    /// file's location doesn't matter.
+    fn mm_minimal_transport_scene_with_friction(friction: f32) -> tempfile::NamedTempFile {
         let robot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/robots/mm_minimal.rne.robot.toml");
         let text = format!(
@@ -3433,15 +3433,13 @@ half_extents_m = [0.06, 0.02, 0.06]
 "#,
             robot_path = robot_path.display().to_string().replace('\\', "/"),
         );
-        let dir = std::env::temp_dir().join(format!(
-            "rne_ai_friction_grasp_{}_{}",
-            std::process::id(),
-            (friction * 1000.0) as i64
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp scene dir");
-        let scene_path = dir.join("mm_minimal_transport_friction.rne.scene.toml");
-        std::fs::write(&scene_path, text).expect("write temp scene");
-        scene_path
+        let scene = tempfile::Builder::new()
+            .prefix("rne_ai_friction_grasp_")
+            .suffix(".rne.scene.toml")
+            .tempfile()
+            .expect("create temp scene");
+        std::fs::write(scene.path(), text).expect("write temp scene");
+        scene
     }
 
     /// Runs the same approach/close/carry sequence as
@@ -3468,7 +3466,8 @@ half_extents_m = [0.06, 0.02, 0.06]
         continued_close: bool,
     ) -> (MobileManipulatorSim, f64, f64) {
         let scene = mm_minimal_transport_scene_with_friction(friction);
-        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load friction scene");
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(scene.path()).expect("load friction scene");
         sim.set_grasp_mode(grasp_mode);
         let resting_y = sim.named_translation_m("grasp_cube").expect("cube").1;
 
@@ -3642,7 +3641,8 @@ half_extents_m = [0.06, 0.02, 0.06]
         // confirm the gripper can re-catch the cube rather than being stuck
         // unable to advance the fingers any further.
         let scene = mm_minimal_transport_scene_with_friction(0.5);
-        let mut sim = MobileManipulatorSim::from_scene_path(&scene).expect("load friction scene");
+        let mut sim =
+            MobileManipulatorSim::from_scene_path(scene.path()).expect("load friction scene");
         sim.set_grasp_mode(GraspMode::Friction);
 
         let close = MobileManipulatorAction {

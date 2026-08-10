@@ -27,3 +27,4 @@ serde_json = "1"
 
 [dev-dependencies]
 approx = "0.5"
+tempfile = "3"
