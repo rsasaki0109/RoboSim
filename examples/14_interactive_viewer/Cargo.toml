@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+base64 = { workspace = true }
 rne_ai = { path = "../../crates/rne_ai" }
 rne_assets = { path = "../../crates/rne_assets" }
 rne_ecs = { path = "../../crates/rne_ecs" }
@@ -14,6 +15,8 @@ rne_render = { path = "../../crates/rne_render" }
 rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
 rne_robot = { path = "../../crates/rne_robot" }
 rne_world = { path = "../../crates/rne_world" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 winit = "0.30"
 
 [[example]]
