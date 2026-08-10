@@ -47,11 +47,25 @@ impl CoSimulation {
     /// Advances SUMO by one step and synchronizes the mirror actors.
     pub fn step(&mut self, world: &mut World) -> Result<(), TraciError> {
         self.client.simulation_step()?;
-        let ids = self.client.vehicle_ids()?;
-        let mut seen = BTreeSet::new();
-        for id in &ids {
-            let position = self.client.vehicle_position_rne(id)?;
-            match self.actors.get(id) {
+        let mut ids = self.client.vehicle_ids()?;
+        ids.sort();
+
+        // Keep the SUMO read phase separate from the ECS write phase. A
+        // position read can fail after earlier vehicles have already been
+        // read successfully; applying those earlier results would leave the
+        // ECS mirror and `actors` map representing different SUMO steps.
+        let positions = ids
+            .into_iter()
+            .map(|id| {
+                self.client
+                    .vehicle_position_rne(&id)
+                    .map(|position| (id, position))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let seen = positions.keys().cloned().collect::<BTreeSet<_>>();
+
+        for (id, position) in positions {
+            match self.actors.get(&id) {
                 Some(entity) => {
                     if let Some(mut pose) = world.get_mut::<TrafficPose>(*entity) {
                         pose.position_m = position;
@@ -60,20 +74,19 @@ impl CoSimulation {
                 None => {
                     let entity = world
                         .spawn((
-                            Name::new(id),
+                            Name::new(&id),
                             TrafficActor::motor_vehicle(),
                             TrafficPoseSource::External,
-                            EntityUuid(stable_uuid(id)),
+                            EntityUuid(stable_uuid(&id)),
                             TrafficPose {
                                 position_m: position,
                                 yaw_rad: 0.0,
                             },
                         ))
                         .id();
-                    self.actors.insert(id.clone(), entity);
+                    self.actors.insert(id, entity);
                 }
             }
-            seen.insert(id.clone());
         }
         let departed = self
             .actors
