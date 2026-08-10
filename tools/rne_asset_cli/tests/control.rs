@@ -5,6 +5,8 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
+use rne_core::control::ControlCommand;
+
 const BIN: &str = env!("CARGO_BIN_EXE_rne-asset");
 
 fn manifest_dir() -> PathBuf {
@@ -45,14 +47,37 @@ fn run_control_script(script: &[u8], replay: &std::path::Path) -> std::process::
 fn spawn_tcp_control(
     replay: &std::path::Path,
 ) -> (Child, BufReader<std::process::ChildStdout>, u16) {
+    spawn_tcp_control_for(
+        manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml"),
+        replay,
+    )
+}
+
+fn spawn_tcp_control_for(
+    manifest: PathBuf,
+    replay: &std::path::Path,
+) -> (Child, BufReader<std::process::ChildStdout>, u16) {
+    spawn_tcp_control_for_options(manifest, replay, false)
+}
+
+fn spawn_tcp_control_for_options(
+    manifest: PathBuf,
+    replay: &std::path::Path,
+    control_camera_full_resolution: bool,
+) -> (Child, BufReader<std::process::ChildStdout>, u16) {
     let _ = std::fs::remove_file(replay);
-    let mut child = Command::new(BIN)
+    let mut command = Command::new(BIN);
+    command
         .arg("run")
-        .arg(manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml"))
+        .arg(manifest)
         .arg("--control-port")
         .arg("0")
         .arg("--replay-out")
-        .arg(replay)
+        .arg(replay);
+    if control_camera_full_resolution {
+        command.arg("--control-camera-full-resolution");
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -80,6 +105,78 @@ fn spawn_tcp_control(
         stdout,
         port.expect("control port from runner stdout"),
     )
+}
+
+/// The opt-in full-resolution TCP path must carry the source RGB-D dimensions
+/// and exact little-endian payload lengths through a real runner process.
+#[test]
+fn control_tcp_full_resolution_camera_and_depth_snapshot() {
+    let manifest = manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml");
+    let replay = manifest_dir().join("../../target/runs/control_tcp_full_rgbd.rne-replay");
+    let (mut child, _stdout, port) = spawn_tcp_control_for_options(manifest, &replay, true);
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect RGB-D control");
+    let mut reader = BufReader::new(stream.try_clone().expect("clone RGB-D control stream"));
+    let mut ready = String::new();
+    reader.read_line(&mut ready).expect("read RGB-D ready");
+    assert_eq!(ready.trim(), "ready paused");
+
+    stream.write_all(b"step 1\n").expect("write RGB-D step");
+    let mut ack = String::new();
+    reader.read_line(&mut ack).expect("read RGB-D ack");
+    assert_eq!(ack.trim(), "ok paused");
+
+    let mut status = String::new();
+    reader.read_line(&mut status).expect("read RGB-D status");
+    assert!(
+        status.starts_with("status step=1 "),
+        "unexpected status: {status}"
+    );
+    let snapshot = status
+        .split_once(" snapshot=")
+        .map(|(_, snapshot)| snapshot.trim())
+        .expect("snapshot field");
+    let value: serde_json::Value = serde_json::from_str(snapshot).expect("snapshot JSON");
+    let camera = value["sensors"]
+        .as_array()
+        .expect("sensor array")
+        .iter()
+        .find(|stream| stream["kind"] == "camera")
+        .and_then(|stream| stream.get("camera"))
+        .expect("camera payload");
+    assert_eq!(camera["width"], serde_json::json!(64));
+    assert_eq!(camera["height"], serde_json::json!(48));
+    assert_eq!(
+        base64::decode(camera["rgba8_base64"].as_str().expect("RGB base64"))
+            .expect("decode RGB")
+            .len(),
+        64 * 48 * 4
+    );
+    assert_eq!(camera["depth_width"], serde_json::json!(64));
+    assert_eq!(camera["depth_height"], serde_json::json!(48));
+    assert_eq!(
+        base64::decode(
+            camera["depth_f32_le_base64"]
+                .as_str()
+                .expect("depth base64")
+        )
+        .expect("decode depth")
+        .len(),
+        64 * 48 * 4
+    );
+
+    stream.write_all(b"quit\n").expect("write RGB-D quit");
+    let mut quit_ack = String::new();
+    reader
+        .read_line(&mut quit_ack)
+        .expect("read RGB-D quit ack");
+    assert_eq!(quit_ack.trim(), "ok paused");
+    assert!(
+        child.wait().expect("wait for RGB-D runner").success(),
+        "RGB-D runner must exit successfully"
+    );
+    let artifact = rne_log::ReplayArtifact::read_json(&replay).expect("read RGB-D replay");
+    assert_eq!(artifact.frames.len(), 1);
 }
 
 /// `--control-port` serves pause/step/quit over TCP with live status replies and
@@ -110,6 +207,7 @@ fn control_tcp_step_and_quit_produce_the_requested_frames() {
         );
         assert!(
             status.contains("\"base\"")
+                && status.contains("\"base_yaw_rad\"")
                 && status.contains("\"joints\"")
                 && status.contains("\"sensors\""),
             "status must stream a live observation snapshot, got: {status}"
@@ -132,6 +230,66 @@ fn control_tcp_step_and_quit_produce_the_requested_frames() {
         "TCP step 3 + quit must produce exactly 3 frames"
     );
     assert_eq!(artifact.clock.steps, 3);
+}
+
+/// Scenario manifests use the same paused TCP runner contract and stream traffic snapshots.
+#[test]
+fn control_tcp_scenario_step_and_quit_streams_traffic_status() {
+    let manifest = manifest_dir().join("../../assets/runs/scenario_speed.rne.run.toml");
+    let replay = manifest_dir().join("../../target/runs/control_tcp_scenario.rne-replay");
+    let (mut child, _stdout, port) = spawn_tcp_control_for(manifest, &replay);
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect scenario control");
+    let mut reader = BufReader::new(stream.try_clone().expect("clone scenario control stream"));
+    let mut ready = String::new();
+    reader.read_line(&mut ready).expect("read scenario ready");
+    assert_eq!(ready.trim(), "ready paused");
+
+    stream.write_all(b"step 3\n").expect("write scenario step");
+    let mut ack = String::new();
+    reader.read_line(&mut ack).expect("read scenario ack");
+    assert_eq!(ack.trim(), "ok paused");
+    for expected_step in 1..=3 {
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("read scenario status");
+        assert!(
+            status.starts_with(&format!("status step={expected_step} ")),
+            "got unexpected scenario status line: {status}"
+        );
+        assert!(
+            status.contains("\"positions_m\"") && status.contains("\"stable_hash\""),
+            "scenario status must stream traffic state, got: {status}"
+        );
+    }
+
+    stream.write_all(b"quit\n").expect("write scenario quit");
+    let mut ack = String::new();
+    reader.read_line(&mut ack).expect("read scenario quit ack");
+    assert_eq!(ack.trim(), "ok paused");
+    assert!(
+        child.wait().expect("wait for scenario runner").success(),
+        "scenario runner must exit successfully"
+    );
+    let artifact = rne_openscenario::ScenarioReplayArtifact::read_json(&replay)
+        .expect("read scenario control artifact");
+    assert!(artifact.replayable);
+    assert_eq!(
+        artifact.control_commands,
+        vec![ControlCommand::Step { frames: 3 }, ControlCommand::Quit,]
+    );
+    assert_eq!(artifact.executed_steps, 3);
+
+    let replay_output = Command::new(BIN)
+        .arg("replay")
+        .arg(&replay)
+        .output()
+        .expect("replay scenario control artifact");
+    assert!(
+        replay_output.status.success(),
+        "scenario control replay failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&replay_output.stdout),
+        String::from_utf8_lossy(&replay_output.stderr)
+    );
 }
 
 /// `pause`, `step 3`, `quit` piped on stdin must drive exactly three frames and

@@ -20,8 +20,11 @@ use rne_log::{
     ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayJointVelocity, ReplayObservation,
     ReplaySensorPayload, ReplaySensorPayloadData, ReplaySensorStream,
 };
-use rne_math::Hertz;
-use rne_openscenario::{execute_scenario, parse_openscenario_xml_file, ScenarioRunOptions};
+use rne_math::{yaw_rad, Hertz};
+use rne_openscenario::{
+    execute_scenario, execute_scenario_with_control, parse_openscenario_xml_file, ScenarioDocument,
+    ScenarioReplayArtifact, ScenarioRunOptions, SCENARIO_REPLAY_KIND,
+};
 use rne_physics::{
     hash_physics_state, require_capabilities, ContactEvent, PhysicsBackend, PhysicsCapability,
     PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
@@ -41,8 +44,9 @@ use rne_sensor::{
 use rne_sumo::import_sumo_net_file;
 use rne_traci::{CoSimulation, TraciClient};
 use rne_traffic::{load_traffic_asset, save_traffic_asset, TrafficId};
-use rne_world::{Transform3, WorldEntity};
+use rne_world::{world_transform_of, Transform3, WorldEntity};
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
@@ -50,6 +54,36 @@ use std::thread;
 use std::time::Duration;
 
 const REPLAY_FLOAT_EPSILON: f64 = 1.0e-12;
+const LIVE_CAMERA_MAX_WIDTH: u32 = 160;
+const LIVE_CAMERA_MAX_HEIGHT: u32 = 120;
+const LIVE_LIDAR_MAX_POINTS: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LiveSnapshotOptions {
+    camera_max_width: Option<u32>,
+    camera_max_height: Option<u32>,
+    include_full_depth: bool,
+}
+
+impl Default for LiveSnapshotOptions {
+    fn default() -> Self {
+        Self {
+            camera_max_width: Some(LIVE_CAMERA_MAX_WIDTH),
+            camera_max_height: Some(LIVE_CAMERA_MAX_HEIGHT),
+            include_full_depth: false,
+        }
+    }
+}
+
+impl LiveSnapshotOptions {
+    fn full_resolution() -> Self {
+        Self {
+            camera_max_width: None,
+            camera_max_height: None,
+            include_full_depth: true,
+        }
+    }
+}
 
 fn parse_run_sensor_kind(text: &str) -> Result<RunSensorKind, String> {
     match text {
@@ -137,6 +171,10 @@ enum Commands {
         /// status replies. Determinism re-checks are skipped in interactive mode.
         #[arg(long, value_name = "PORT", conflicts_with = "control_stdin")]
         control_port: Option<u16>,
+        /// Stream camera and depth payloads at their source resolution over TCP.
+        /// This is opt-in because each status line can become substantially larger.
+        #[arg(long, requires = "control_port")]
+        control_camera_full_resolution: bool,
         /// Override the manifest's replay output path.
         #[arg(long, value_name = "PATH")]
         replay_out: Option<PathBuf>,
@@ -253,8 +291,15 @@ fn main() -> Result<()> {
             path,
             control_stdin,
             control_port,
+            control_camera_full_resolution,
             replay_out,
-        } => run_manifest_command(&path, control_stdin, control_port, replay_out.as_deref()),
+        } => run_manifest_command(
+            &path,
+            control_stdin,
+            control_port,
+            control_camera_full_resolution,
+            replay_out.as_deref(),
+        ),
         Commands::Replay { path } => replay_command(&path),
         Commands::SumoNet {
             path,
@@ -331,6 +376,7 @@ struct SimulationOptions<'a> {
     replay_controller: ArtifactControllerKind,
     sensor_subscriptions: Vec<RunSensorSubscription>,
     physics_backend: RunPhysicsBackend,
+    live_snapshot_options: LiveSnapshotOptions,
 }
 
 /// Parameters for a [`VelocityServoController`], a dynamically loaded, or a
@@ -427,6 +473,7 @@ fn simulate_command(
             trajectories: Vec::new(),
             plugin: None,
             physics_backend: RunPhysicsBackend::Rapier,
+            live_snapshot_options: LiveSnapshotOptions::default(),
         },
         None,
     )
@@ -436,16 +483,41 @@ fn run_manifest_command(
     path: &Path,
     control_stdin: bool,
     control_port: Option<u16>,
+    control_camera_full_resolution: bool,
     replay_out_override: Option<&Path>,
 ) -> Result<()> {
     let manifest =
         load_run_manifest(path).with_context(|| format!("load run manifest {}", path.display()))?;
     if let Some(scenario) = &manifest.scenario {
-        anyhow::ensure!(
-            !control_stdin && control_port.is_none(),
-            "runner control is not supported for scenario manifests"
-        );
-        return run_scenario_manifest(path, &manifest, scenario);
+        if control_stdin {
+            let mut transport = StdinRunnerControl::start()?;
+            let mut control = RunControl::paused(&mut transport);
+            println!(
+                "control: scenario runner paused; commands on stdin: pause, resume, step N, reset, quit"
+            );
+            return run_scenario_manifest(
+                path,
+                &manifest,
+                scenario,
+                Some(&mut control),
+                replay_out_override,
+            );
+        }
+        if let Some(port) = control_port {
+            let (mut transport, bound_port) = TcpRunnerControl::start(port)?;
+            println!(
+                "control: scenario runner listening on 127.0.0.1:{bound_port}; commands: pause, resume, step N, reset, quit"
+            );
+            let mut control = RunControl::paused(&mut transport);
+            return run_scenario_manifest(
+                path,
+                &manifest,
+                scenario,
+                Some(&mut control),
+                replay_out_override,
+            );
+        }
+        return run_scenario_manifest(path, &manifest, scenario, None, replay_out_override);
     }
     let scene_path = manifest.resolve_scene_path(path);
     let (action, replay_controller) = match manifest.controller.kind {
@@ -550,6 +622,11 @@ fn run_manifest_command(
         replay_controller,
         sensor_subscriptions: manifest.sensors.clone(),
         physics_backend: manifest.physics.backend,
+        live_snapshot_options: if control_camera_full_resolution {
+            LiveSnapshotOptions::full_resolution()
+        } else {
+            LiveSnapshotOptions::default()
+        },
     };
     if control_stdin {
         let mut transport = StdinRunnerControl::start()?;
@@ -694,6 +771,8 @@ fn run_scenario_manifest(
     manifest_path: &Path,
     manifest: &rne_assets::RunManifest,
     scenario: &RunScenario,
+    mut control: Option<&mut RunControl<'_>>,
+    replay_out_override: Option<&Path>,
 ) -> Result<()> {
     let xosc_path = scenario.resolve_xosc_path(manifest_path);
     println!(
@@ -703,9 +782,78 @@ fn run_scenario_manifest(
         manifest.clock.steps,
         manifest.clock.hz
     );
-    let document = parse_openscenario_xml_file(&xosc_path)
+    let (document, network, network_path) = load_scenario_inputs(&xosc_path, None)?;
+    let options = ScenarioRunOptions {
+        steps: manifest.clock.steps,
+        hz: manifest.clock.hz,
+    };
+    let controlled = control.is_some();
+    let first =
+        execute_scenario_with_control(&document, &network, &options, control.as_deref_mut())
+            .with_context(|| format!("execute scenario {}", xosc_path.display()))?;
+    let control_commands = control
+        .as_deref()
+        .map(|control| control.recorded_commands().to_vec())
+        .unwrap_or_default();
+    print_scenario_report(&xosc_path, &first);
+    if manifest.output.determinism_check && !controlled {
+        let replay = execute_scenario(&document, &network, &options)
+            .with_context(|| format!("re-execute scenario {}", xosc_path.display()))?;
+        anyhow::ensure!(
+            first == replay,
+            "scenario determinism check failed: first={first:?} replay={replay:?}"
+        );
+        println!("determinism: identical scenario outcome");
+    } else if controlled && manifest.output.determinism_check {
+        println!("determinism: skipped in interactive mode");
+    }
+    let replay_out = replay_out_override.map(PathBuf::from).or_else(|| {
+        manifest
+            .output
+            .replay_path
+            .as_deref()
+            .map(|path| manifest.resolve_output_path(manifest_path, path))
+    });
+    if let Some(replay_out) = replay_out {
+        let artifact = ScenarioReplayArtifact::new(
+            xosc_path.display().to_string(),
+            network_path.display().to_string(),
+            options,
+            first.steps,
+            control_commands,
+            first.clone(),
+        );
+        artifact
+            .write_json(&replay_out)
+            .with_context(|| format!("write scenario replay artifact {}", replay_out.display()))?;
+        println!(
+            "scenario replay: wrote {} (version={} steps={} replayable={})",
+            replay_out.display(),
+            artifact.schema_version,
+            artifact.executed_steps,
+            artifact.replayable
+        );
+        if controlled {
+            println!(
+                "scenario replay: recorded {} control commands",
+                artifact.control_commands.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Loads an OpenSCENARIO document and its referenced traffic network.
+///
+/// `network_override` is used by replay verification so the artifact records
+/// the exact network input rather than re-deriving it from a changed XOSC.
+fn load_scenario_inputs(
+    xosc_path: &Path,
+    network_override: Option<&Path>,
+) -> Result<(ScenarioDocument, rne_traffic::TrafficNetwork, PathBuf)> {
+    let document = parse_openscenario_xml_file(xosc_path)
         .with_context(|| format!("parse OpenSCENARIO {}", xosc_path.display()))?;
-    let network_path = {
+    let network_path = network_override.map(PathBuf::from).unwrap_or_else(|| {
         let logic_file = Path::new(&document.road_network_logic_file);
         if logic_file.is_absolute() {
             logic_file.to_path_buf()
@@ -715,39 +863,27 @@ fn run_scenario_manifest(
                 .unwrap_or_else(|| Path::new("."))
                 .join(logic_file)
         }
-    };
+    });
     let is_sumo_net = network_path
         .file_name()
         .map(|name| name.to_string_lossy().ends_with(".net.xml"))
         .unwrap_or(false);
-    let asset = if is_sumo_net {
+    let network = if is_sumo_net {
         let network_id =
             TrafficId::new("sumo:scenario-network").map_err(|error| anyhow::anyhow!("{error}"))?;
-        import_sumo_net_file(&network_id, &network_path).map_err(|error| {
-            anyhow::anyhow!("import SUMO network {}: {error}", network_path.display())
-        })?
+        import_sumo_net_file(&network_id, &network_path)
+            .map_err(|error| {
+                anyhow::anyhow!("import SUMO network {}: {error}", network_path.display())
+            })?
+            .network
     } else {
-        load_traffic_asset(&network_path).map_err(|error| {
-            anyhow::anyhow!("load traffic network {}: {error}", network_path.display())
-        })?
+        load_traffic_asset(&network_path)
+            .map_err(|error| {
+                anyhow::anyhow!("load traffic network {}: {error}", network_path.display())
+            })?
+            .network
     };
-    let options = ScenarioRunOptions {
-        steps: manifest.clock.steps,
-        hz: manifest.clock.hz,
-    };
-    let first = execute_scenario(&document, &asset.network, &options)
-        .with_context(|| format!("execute scenario {}", xosc_path.display()))?;
-    print_scenario_report(&xosc_path, &first);
-    if manifest.output.determinism_check {
-        let replay = execute_scenario(&document, &asset.network, &options)
-            .with_context(|| format!("re-execute scenario {}", xosc_path.display()))?;
-        anyhow::ensure!(
-            first == replay,
-            "scenario determinism check failed: first={first:?} replay={replay:?}"
-        );
-        println!("determinism: identical scenario outcome");
-    }
-    Ok(())
+    Ok((document, network, network_path))
 }
 
 fn print_scenario_report(path: &Path, result: &rne_openscenario::ScenarioRunResult) {
@@ -780,6 +916,7 @@ fn run_simulation(
         replay_controller,
         sensor_subscriptions,
         physics_backend,
+        live_snapshot_options,
     } = options;
     anyhow::ensure!(
         hz.is_finite() && hz > 0.0,
@@ -787,7 +924,7 @@ fn run_simulation(
     );
     ensure_action_is_finite(&action)?;
 
-    let run = simulate_scene_with_action_schedule(
+    let run = simulate_scene_with_snapshot_options(
         path,
         steps,
         hz,
@@ -802,10 +939,11 @@ fn run_simulation(
         &sensor_subscriptions,
         physics_backend,
         control.as_deref_mut(),
+        live_snapshot_options,
     )?;
     print_simulation_report(path, &run.report, determinism_check);
     if control.is_none() && determinism_check {
-        let replay = simulate_scene_with_action_schedule(
+        let replay = simulate_scene_with_snapshot_options(
             path,
             steps,
             hz,
@@ -820,6 +958,7 @@ fn run_simulation(
             &sensor_subscriptions,
             physics_backend,
             None,
+            live_snapshot_options,
         )?;
         anyhow::ensure!(
             run.report == replay.report,
@@ -904,13 +1043,39 @@ impl RunnerControl for StdinRunnerControl {
 ///
 /// A reader thread accepts one client, sends `ready paused`, then turns each
 /// line into a control command (acknowledging `ok <state>`). The main thread
-/// streams a `status step=<n> t=<t> base=<x,y,z> state=<state>` line after
+/// streams a `status step=<n> t=<t> state=<state> snapshot=<json>` line after
 /// every completed step, so a GUI or renderer frontend can both drive and
-/// observe the run.
+/// observe the run. The snapshot contains bounded RGB camera previews,
+/// deterministic LiDAR point samples, and latest IMU/wheel values when those
+/// typed sensor streams are present. The `run` command can opt into source-
+/// resolution RGB plus little-endian f32 depth payloads for TCP control.
 struct TcpRunnerControl {
     receiver: mpsc::Receiver<ControlCommand>,
     writer: Arc<Mutex<Option<std::io::BufWriter<std::net::TcpStream>>>>,
     paused: bool,
+}
+
+/// A deterministic in-memory runner-control transport used by scenario replay.
+struct ScriptedRunnerControl {
+    commands: VecDeque<ControlCommand>,
+}
+
+impl ScriptedRunnerControl {
+    fn new(commands: Vec<ControlCommand>) -> Self {
+        Self {
+            commands: commands.into(),
+        }
+    }
+}
+
+impl RunnerControl for ScriptedRunnerControl {
+    fn try_poll(&mut self) -> Option<ControlCommand> {
+        self.commands.pop_front()
+    }
+
+    fn wait_command(&mut self) -> ControlCommand {
+        self.commands.pop_front().unwrap_or(ControlCommand::Quit)
+    }
 }
 
 impl TcpRunnerControl {
@@ -1032,15 +1197,20 @@ impl RunnerControl for TcpRunnerControl {
 
 /// Compact per-step observation streamed to a live frontend.
 ///
-/// Deliberately excludes full sensor payloads so status lines stay small.
+/// Camera images are deterministic, nearest-neighbour previews capped by
+/// [`LIVE_CAMERA_MAX_WIDTH`] and [`LIVE_CAMERA_MAX_HEIGHT`]. LiDAR points are
+/// capped by [`LIVE_LIDAR_MAX_POINTS`]; replay artifacts remain the path for
+/// full sensor payloads.
 #[derive(serde::Serialize)]
 struct LiveSnapshot<'a> {
     /// First differential-drive base translation, when present.
     base: Option<[f64; 3]>,
+    /// First differential-drive base yaw, in radians, when present.
+    base_yaw_rad: Option<f64>,
     /// Named joint positions, when the scene has articulated joints.
     joints: Option<LiveJointState<'a>>,
     /// Per-sensor stream summaries.
-    sensors: Vec<LiveSensorStream<'a>>,
+    sensors: Vec<LiveSensorStream>,
 }
 
 /// Named joint positions in a [`LiveSnapshot`].
@@ -1054,19 +1224,93 @@ struct LiveJointState<'a> {
 
 /// Sensor stream summary in a [`LiveSnapshot`].
 #[derive(serde::Serialize)]
-struct LiveSensorStream<'a> {
+struct LiveSensorStream {
     /// DataBus stream identifier.
     stream_id: u64,
     /// Stable sensor kind label.
-    kind: &'a str,
+    kind: String,
     /// Last emitted sequence number.
     sequence: u64,
+    /// Stable digest of the latest typed payload.
+    payload_hash: u64,
+    /// Camera preview, when this is a camera stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    camera: Option<LiveCameraPreview>,
+    /// Bounded world-frame LiDAR preview, when this is a LiDAR stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lidar: Option<LiveLidarPreview>,
+    /// Latest IMU sample, when this is an IMU stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    imu: Option<LiveImuSample>,
+    /// Latest wheel encoder sample, when this is a wheel-encoder stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wheel_encoder: Option<LiveWheelEncoderSample>,
 }
 
-/// Serializes a [`ReplayObservation`] into a compact single-line JSON snapshot.
-fn build_live_snapshot(observation: &ReplayObservation) -> String {
+/// Bounded RGB-D camera preview in the runner status protocol.
+#[derive(serde::Serialize)]
+struct LiveCameraPreview {
+    /// Preview width in pixels.
+    width: u32,
+    /// Preview height in pixels.
+    height: u32,
+    /// Row-major RGBA8 bytes encoded as base64 to keep the line protocol safe.
+    rgba8_base64: String,
+    /// Center-pixel depth in metres, when a paired depth frame is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_center_m: Option<f32>,
+    /// Stable hash of the full paired depth frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_hash: Option<u64>,
+    /// Source depth width when full-resolution depth streaming is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_width: Option<u32>,
+    /// Source depth height when full-resolution depth streaming is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_height: Option<u32>,
+    /// Little-endian f32 depth metres encoded as base64 when enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_f32_le_base64: Option<String>,
+}
+
+/// Bounded world-frame LiDAR preview in the runner status protocol.
+#[derive(serde::Serialize)]
+struct LiveLidarPreview {
+    /// Number of points in the full latest cloud.
+    point_count: usize,
+    /// Deterministically sampled points in metres.
+    points_m: Vec<[f64; 3]>,
+}
+
+/// Latest IMU sample in a JSON-friendly fixed-size representation.
+#[derive(serde::Serialize)]
+struct LiveImuSample {
+    /// Angular velocity in radians per second.
+    angular_velocity_rad_s: [f64; 3],
+    /// Linear acceleration in metres per second squared.
+    linear_acceleration_m_s2: [f64; 3],
+}
+
+/// Latest wheel encoder sample in the runner status protocol.
+#[derive(serde::Serialize)]
+struct LiveWheelEncoderSample {
+    /// Wheel position in radians.
+    position_rad: f64,
+    /// Wheel velocity in radians per second.
+    velocity_rad_s: f64,
+}
+
+/// Serializes a [`ReplayObservation`] and base orientation into a compact
+/// single-line JSON snapshot.
+fn build_live_snapshot(
+    observation: &ReplayObservation,
+    base_yaw_rad: Option<f64>,
+    bus: &InMemoryDataBus,
+    options: LiveSnapshotOptions,
+) -> String {
     let snapshot = LiveSnapshot {
         base: observation.base_translation_m,
+        base_yaw_rad,
         joints: observation
             .joint_state
             .as_ref()
@@ -1077,14 +1321,178 @@ fn build_live_snapshot(observation: &ReplayObservation) -> String {
         sensors: observation
             .sensor_streams
             .iter()
-            .map(|stream| LiveSensorStream {
-                stream_id: stream.stream_id,
-                kind: &stream.kind,
-                sequence: stream.last_sequence,
-            })
+            .map(|stream| build_live_sensor_stream(stream, bus, options))
             .collect(),
     };
     serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn build_live_sensor_stream(
+    summary: &ReplaySensorStream,
+    bus: &InMemoryDataBus,
+    options: LiveSnapshotOptions,
+) -> LiveSensorStream {
+    let camera = if summary.kind == "camera" {
+        let rgb = bus.latest::<ImageRgb8>(rne_data::StreamId::new(summary.stream_id));
+        let depth = bus.latest::<ImageDepth>(rne_data::StreamId::new(
+            summary.stream_id + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET,
+        ));
+        rgb.as_ref().and_then(|rgb| {
+            build_live_camera_preview(
+                &rgb.payload,
+                depth.as_ref().map(|frame| &frame.payload),
+                options,
+            )
+        })
+    } else {
+        None
+    };
+    let lidar = if summary.kind == "lidar" {
+        bus.latest::<PointCloud>(rne_data::StreamId::new(summary.stream_id))
+            .map(|frame| LiveLidarPreview {
+                point_count: frame.payload.points_m.len(),
+                points_m: downsample_lidar_points(&frame.payload.points_m),
+            })
+    } else {
+        None
+    };
+    let imu = if summary.kind == "imu" {
+        bus.latest::<ImuSample>(rne_data::StreamId::new(summary.stream_id))
+            .map(|frame| LiveImuSample {
+                angular_velocity_rad_s: finite_vec3(frame.payload.angular_velocity_rad_s),
+                linear_acceleration_m_s2: finite_vec3(frame.payload.linear_acceleration_m_s2),
+            })
+    } else {
+        None
+    };
+    let wheel_encoder = if summary.kind == "wheel_encoder" {
+        bus.latest::<WheelEncoderSample>(rne_data::StreamId::new(summary.stream_id))
+            .map(|frame| LiveWheelEncoderSample {
+                position_rad: finite_f64(frame.payload.position_rad),
+                velocity_rad_s: finite_f64(frame.payload.velocity_rad_s),
+            })
+    } else {
+        None
+    };
+    LiveSensorStream {
+        stream_id: summary.stream_id,
+        kind: summary.kind.clone(),
+        sequence: summary.last_sequence,
+        payload_hash: summary.payload_hash,
+        camera,
+        lidar,
+        imu,
+        wheel_encoder,
+    }
+}
+
+fn build_live_camera_preview(
+    rgb: &ImageRgb8,
+    depth: Option<&ImageDepth>,
+    options: LiveSnapshotOptions,
+) -> Option<LiveCameraPreview> {
+    let (width, height, rgba8) = downsample_rgba8(rgb, options)?;
+    let (depth_width, depth_height, depth_f32_le_base64) = if options.include_full_depth {
+        depth
+            .and_then(encode_full_depth)
+            .map_or((None, None, None), |(width, height, depth)| {
+                (Some(width), Some(height), Some(depth))
+            })
+    } else {
+        (None, None, None)
+    };
+    Some(LiveCameraPreview {
+        width,
+        height,
+        rgba8_base64: base64::encode(rgba8),
+        depth_center_m: depth
+            .map(ImageDepth::center_depth_m)
+            .filter(|value| value.is_finite()),
+        depth_hash: depth.map(ImageDepth::hash_depth),
+        depth_width,
+        depth_height,
+        depth_f32_le_base64,
+    })
+}
+
+fn encode_full_depth(depth: &ImageDepth) -> Option<(u32, u32, String)> {
+    let expected_len = (depth.width as usize).checked_mul(depth.height as usize)?;
+    if depth.width == 0 || depth.height == 0 || depth.depth_m.len() < expected_len {
+        return None;
+    }
+    let byte_len = expected_len.checked_mul(std::mem::size_of::<f32>())?;
+    let mut bytes = Vec::with_capacity(byte_len);
+    for value in depth.depth_m.iter().take(expected_len) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    Some((depth.width, depth.height, base64::encode(bytes)))
+}
+
+fn downsample_rgba8(
+    image: &ImageRgb8,
+    options: LiveSnapshotOptions,
+) -> Option<(u32, u32, Vec<u8>)> {
+    let expected_len = (image.width as usize)
+        .checked_mul(image.height as usize)?
+        .checked_mul(4)?;
+    if image.width == 0 || image.height == 0 || image.rgba8.len() < expected_len {
+        return None;
+    }
+    let max_width = options.camera_max_width.unwrap_or(image.width);
+    let max_height = options.camera_max_height.unwrap_or(image.height);
+    let scale = (max_width as f64 / image.width as f64)
+        .min(max_height as f64 / image.height as f64)
+        .min(1.0);
+    let width = ((image.width as f64 * scale).round() as u32).max(1);
+    let height = ((image.height as f64 * scale).round() as u32).max(1);
+    let mut rgba8 = Vec::with_capacity((width as usize) * (height as usize) * 4);
+    for y in 0..height {
+        let source_y = ((u64::from(y) * u64::from(image.height)) / u64::from(height)) as usize;
+        for x in 0..width {
+            let source_x = ((u64::from(x) * u64::from(image.width)) / u64::from(width)) as usize;
+            let source = (source_y * image.width as usize + source_x) * 4;
+            rgba8.extend_from_slice(&image.rgba8[source..source + 4]);
+        }
+    }
+    Some((width, height, rgba8))
+}
+
+fn downsample_lidar_points(points: &[rne_math::Vec3]) -> Vec<[f64; 3]> {
+    let finite_points = points
+        .iter()
+        .filter(|point| point.x.is_finite() && point.y.is_finite() && point.z.is_finite())
+        .collect::<Vec<_>>();
+    let limit = finite_points.len().min(LIVE_LIDAR_MAX_POINTS);
+    if limit == 0 {
+        return Vec::new();
+    }
+    (0..limit)
+        .map(|index| {
+            let source_index = if limit == 1 {
+                0
+            } else {
+                index * (finite_points.len() - 1) / (limit - 1)
+            };
+            let point = finite_points[source_index];
+            [point.x, point.y, point.z]
+        })
+        .collect()
+}
+
+fn finite_vec3(value: rne_math::Vec3) -> [f64; 3] {
+    [
+        finite_f64(value.x),
+        finite_f64(value.y),
+        finite_f64(value.z),
+    ]
+}
+
+fn finite_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 /// Formats a status f64 compactly for the control wire protocol.
@@ -1215,7 +1623,38 @@ fn simulate_scene_with_action_schedule(
     plugin: Option<Box<dyn ControllerPlugin>>,
     sensor_subscriptions: &[RunSensorSubscription],
     physics_backend: RunPhysicsBackend,
+    control: Option<&mut RunControl<'_>>,
+) -> Result<SimulationRun> {
+    simulate_scene_with_snapshot_options(
+        path,
+        steps,
+        hz,
+        action,
+        seed_override,
+        replay_frames,
+        trajectories,
+        plugin,
+        sensor_subscriptions,
+        physics_backend,
+        control,
+        LiveSnapshotOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn simulate_scene_with_snapshot_options(
+    path: &Path,
+    steps: u64,
+    hz: f64,
+    action: ReplayAction,
+    seed_override: Option<u64>,
+    replay_frames: Option<&[ReplayFrame]>,
+    trajectories: &[RunJointTrajectory],
+    plugin: Option<Box<dyn ControllerPlugin>>,
+    sensor_subscriptions: &[RunSensorSubscription],
+    physics_backend: RunPhysicsBackend,
     mut control: Option<&mut RunControl<'_>>,
+    live_snapshot_options: LiveSnapshotOptions,
 ) -> Result<SimulationRun> {
     if let Some(replay_frames) = replay_frames {
         anyhow::ensure!(
@@ -1317,7 +1756,12 @@ fn simulate_scene_with_action_schedule(
                     &sensor_payload_streams,
                 ))
                 .with_contact(Some(contact));
-            let snapshot = build_live_snapshot(&observation);
+            let base_yaw_rad = setup
+                .drives
+                .first()
+                .map(|drive| yaw_rad(world_transform_of(&setup.world, drive.base_link).rotation));
+            let snapshot =
+                build_live_snapshot(&observation, base_yaw_rad, &data_bus, live_snapshot_options);
             frames.push(ReplayFrame::new(
                 step,
                 sim_time.ticks(),
@@ -2105,8 +2549,24 @@ fn capture_sensor_payloads(
 }
 
 fn replay_command(path: &Path) -> Result<()> {
-    let artifact = ReplayArtifact::read_json(path)
+    let text = std::fs::read_to_string(path)
         .with_context(|| format!("load replay artifact {}", path.display()))?;
+    let is_scenario_replay = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .map(|kind| kind == SCENARIO_REPLAY_KIND)
+        })
+        .unwrap_or(false);
+    if is_scenario_replay {
+        let artifact = ScenarioReplayArtifact::from_json(&text)
+            .with_context(|| format!("parse scenario replay artifact {}", path.display()))?;
+        return replay_scenario_command(path, &artifact);
+    }
+    let artifact = ReplayArtifact::from_json(&text)
+        .with_context(|| format!("parse replay artifact {}", path.display()))?;
     let scene_path = PathBuf::from(&artifact.scene);
     let run = simulate_scene_with_action_schedule(
         &scene_path,
@@ -2132,6 +2592,47 @@ fn replay_command(path: &Path) -> Result<()> {
         scene_path.display(),
         artifact.clock.steps,
         actual_report.physics_hash
+    );
+    Ok(())
+}
+
+/// Re-executes and verifies a deterministic OpenSCENARIO replay artifact.
+fn replay_scenario_command(path: &Path, artifact: &ScenarioReplayArtifact) -> Result<()> {
+    anyhow::ensure!(
+        artifact.replayable,
+        "scenario replay artifact {} is marked non-replayable",
+        path.display()
+    );
+    let xosc_path = PathBuf::from(&artifact.scenario_path);
+    let network_path = PathBuf::from(&artifact.network_path);
+    let (document, network, _) = load_scenario_inputs(&xosc_path, Some(&network_path))?;
+    let actual = if artifact.control_commands.is_empty() {
+        execute_scenario(&document, &network, &artifact.options)
+            .with_context(|| format!("replay scenario {}", xosc_path.display()))?
+    } else {
+        let mut transport = ScriptedRunnerControl::new(artifact.control_commands.clone());
+        let mut control = RunControl::paused(&mut transport);
+        execute_scenario_with_control(&document, &network, &artifact.options, Some(&mut control))
+            .with_context(|| format!("replay controlled scenario {}", xosc_path.display()))?
+    };
+    anyhow::ensure!(
+        actual.steps == artifact.executed_steps,
+        "scenario replay step count mismatch: expected={} actual={}",
+        artifact.executed_steps,
+        actual.steps
+    );
+    anyhow::ensure!(
+        actual == artifact.result,
+        "scenario replay result mismatch: expected={:?} actual={:?}",
+        artifact.result,
+        actual
+    );
+    println!(
+        "scenario replay verified artifact={} xosc={} steps={} stable_hash={:#018x}",
+        path.display(),
+        xosc_path.display(),
+        actual.steps,
+        actual.stable_hash
     );
     Ok(())
 }
@@ -2463,16 +2964,19 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_failure, ensure_replay_frames, interpolate_joint_positions, parse_control_line,
-        plugin_command, replay_command, run_manifest_command, simulate_scene,
+        build_live_snapshot, classify_failure, ensure_replay_frames, interpolate_joint_positions,
+        parse_control_line, plugin_command, replay_command, run_manifest_command, simulate_scene,
         simulate_scene_with_action_schedule, stable_co_sim_hash, sumo_net_command,
-        verify_physics_requirements, PluginCommand, PluginControllerConfig,
+        verify_physics_requirements, LiveSnapshotOptions, PluginCommand, PluginControllerConfig,
+        ScenarioReplayArtifact,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
     };
     use rne_core::control::{ControlCommand, RunControl, RunnerControl};
-    use rne_log::ReplayAction;
+    use rne_core::SimTime;
+    use rne_data::{DataBus, Frame, ImageDepth, ImageRgb8, InMemoryDataBus, StreamId};
+    use rne_log::{ReplayAction, ReplayObservation, ReplaySensorStream};
     use rne_plugin::VelocityServoController;
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
@@ -2495,7 +2999,7 @@ mod tests {
     fn example_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run manifest");
+        run_manifest_command(&manifest, false, None, false, None).expect("run manifest");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -2504,10 +3008,97 @@ mod tests {
     }
 
     #[test]
+    fn live_snapshot_contains_pose_orientation_and_streams() {
+        let observation = ReplayObservation::new(Some([1.0, 0.25, 2.0]));
+        let bus = InMemoryDataBus::new();
+        let json = build_live_snapshot(
+            &observation,
+            Some(0.5),
+            &bus,
+            LiveSnapshotOptions::default(),
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).expect("live snapshot JSON");
+        assert_eq!(value["base"], serde_json::json!([1.0, 0.25, 2.0]));
+        assert_eq!(value["base_yaw_rad"], serde_json::json!(0.5));
+        assert!(value["sensors"]
+            .as_array()
+            .expect("sensor array")
+            .is_empty());
+    }
+
+    #[test]
+    fn live_snapshot_contains_bounded_camera_preview() {
+        let stream_id = StreamId::new(5);
+        let mut bus = InMemoryDataBus::new();
+        let rgb = ImageRgb8::from_rgba8(2, 1, vec![1, 2, 3, 255, 5, 6, 7, 255]);
+        let depth = ImageDepth::new(2, 1, vec![1.0, 2.0]);
+        bus.publish(Frame::new(
+            stream_id,
+            rne_ecs::Entity::from_raw(1),
+            7,
+            SimTime::from_ticks(1),
+            rgb,
+        ));
+        bus.publish(Frame::new(
+            StreamId::new(5 + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET),
+            rne_ecs::Entity::from_raw(1),
+            7,
+            SimTime::from_ticks(1),
+            depth,
+        ));
+        let observation =
+            ReplayObservation::new(None).with_sensor_streams(vec![ReplaySensorStream {
+                stream_id: 5,
+                kind: "camera".to_string(),
+                frame_count: 1,
+                last_sequence: 7,
+                payload_hash: 99,
+            }]);
+
+        let json = build_live_snapshot(&observation, None, &bus, LiveSnapshotOptions::default());
+        let value: serde_json::Value = serde_json::from_str(&json).expect("snapshot JSON");
+        let camera = &value["sensors"][0]["camera"];
+        assert_eq!(camera["width"], serde_json::json!(2));
+        assert_eq!(camera["height"], serde_json::json!(1));
+        assert_eq!(camera["depth_center_m"], serde_json::json!(2.0));
+        assert_eq!(
+            camera["depth_hash"],
+            serde_json::json!(ImageDepth::new(2, 1, vec![1.0, 2.0]).hash_depth())
+        );
+        assert_eq!(
+            base64::decode(camera["rgba8_base64"].as_str().expect("base64"))
+                .expect("decode preview"),
+            vec![1, 2, 3, 255, 5, 6, 7, 255]
+        );
+
+        let full_json = build_live_snapshot(
+            &observation,
+            None,
+            &bus,
+            LiveSnapshotOptions::full_resolution(),
+        );
+        let full_value: serde_json::Value =
+            serde_json::from_str(&full_json).expect("full snapshot JSON");
+        let full_camera = &full_value["sensors"][0]["camera"];
+        assert_eq!(full_camera["depth_width"], serde_json::json!(2));
+        assert_eq!(full_camera["depth_height"], serde_json::json!(1));
+        assert_eq!(
+            base64::decode(
+                full_camera["depth_f32_le_base64"]
+                    .as_str()
+                    .expect("depth base64")
+            )
+            .expect("decode depth"),
+            vec![0, 0, 128, 63, 0, 0, 0, 64]
+        );
+    }
+
+    #[test]
     fn lidar_payload_run_manifest_records_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run lidar payload manifest");
+        run_manifest_command(&manifest, false, None, false, None)
+            .expect("run lidar payload manifest");
         let replay_path = manifest
             .parent()
             .expect("manifest parent")
@@ -2528,14 +3119,22 @@ mod tests {
     fn scenario_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/scenario_speed.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run scenario manifest");
+        run_manifest_command(&manifest, false, None, false, None).expect("run scenario manifest");
+        let replay = manifest
+            .parent()
+            .expect("manifest parent")
+            .join("../../target/runs/scenario_speed.rne-replay");
+        let artifact = ScenarioReplayArtifact::read_json(&replay).expect("read scenario artifact");
+        assert!(artifact.replayable);
+        assert_eq!(artifact.executed_steps, 300);
+        replay_command(&replay).expect("replay scenario artifact");
     }
 
     #[test]
     fn trajectory_run_manifest_negotiates_physics_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_joint_trajectory.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None)
+        run_manifest_command(&manifest, false, None, false, None)
             .expect("run trajectory manifest with physics checks");
         let replay = manifest
             .parent()
@@ -2548,14 +3147,16 @@ mod tests {
     fn analytic_backend_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/cart_analytic.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run analytic backend manifest");
+        run_manifest_command(&manifest, false, None, false, None)
+            .expect("run analytic backend manifest");
     }
 
     #[test]
     fn plugin_controller_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_velocity_servo.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run plugin controller manifest");
+        run_manifest_command(&manifest, false, None, false, None)
+            .expect("run plugin controller manifest");
     }
 
     #[test]
@@ -2946,7 +3547,7 @@ mod tests {
     fn sumo_cross_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/sumo_cross.rne.run.toml");
-        run_manifest_command(&manifest, false, None, None).expect("run SUMO cross manifest");
+        run_manifest_command(&manifest, false, None, false, None).expect("run SUMO cross manifest");
     }
 
     #[test]

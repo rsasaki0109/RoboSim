@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 rne_assets = { path = "../../crates/rne_assets" }
 rne_core = { path = "../../crates/rne_core" }
