@@ -21,6 +21,21 @@ Each managed entity has:
 stops at its final point; a closed route wraps across its final-to-first
 segment.
 
+Pose ownership is explicit when an external traffic adapter shares the world.
+Actors without `TrafficPoseSource`, or with `TrafficPoseSource::Runtime`, are
+advanced by `rne_traffic`. An adapter that supplies a pose every step attaches
+`TrafficPoseSource::External`; the runtime then excludes that actor from
+kinematic integration and flow metrics. This prevents a SUMO (or other
+external simulator) pose from being overwritten by a second integrator while
+allowing RNE-owned traffic actors to advance in the same world.
+
+The TraCI adapter keeps external control explicit as well. Calling
+`rne_traci::CoSimulation::set_vehicle_speed_m_s` sends one SUMO
+`vehicle.setSpeed` command; `CoSimulation::step` never derives commands from
+the mirrored `TrafficPose`. SUMO therefore remains the motion and route
+authority, while the backend-neutral traffic runtime remains responsible only
+for actors marked `TrafficPoseSource::Runtime`.
+
 `advance_kinematic_traffic` receives `SimTime` and `SimDuration` explicitly. It
 never reads wall-clock time. Before mutation it validates every actor, route
 reference, UUID, numeric value, and control parameter. Invalid input therefore

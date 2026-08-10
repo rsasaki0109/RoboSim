@@ -8,6 +8,7 @@
 //! - [`TraciClient::simulation_step`] (command `0x02`)
 //! - [`TraciClient::vehicle_ids`] and [`TraciClient::vehicle_position`]
 //!   (domain command `0xa4`)
+//! - [`TraciClient::set_vehicle_speed_m_s`] (vehicle state command `0xc4`)
 //! - [`TraciClient::close`] (command `0x7f`)
 //!
 //! The wire format follows SUMO's reference `traci` implementation: every TCP
@@ -32,13 +33,16 @@ const CMD_GET_VERSION: u8 = 0x00;
 const CMD_SIM_STEP: u8 = 0x02;
 const CMD_CLOSE: u8 = 0x7f;
 const CMD_GET_VEHICLE_VARIABLE: u8 = 0xa4;
+const CMD_SET_VEHICLE_VARIABLE: u8 = 0xc4;
 const RESPONSE_GET_VEHICLE_VARIABLE: u8 = 0xb4;
 
 const VAR_ID_LIST: u8 = 0x00;
 const VAR_POSITION: u8 = 0x42;
+const VAR_SPEED: u8 = 0x40;
 
 const TYPE_STRING_LIST: u8 = 0x0e;
 const TYPE_POSITION_2D: u8 = 0x01;
+const TYPE_DOUBLE: u8 = 0x0b;
 
 /// TraCI protocol or connection failure.
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +62,9 @@ pub enum TraciError {
     /// The server sent a value with an unexpected type.
     #[error("TraCI unexpected value type {0:#x} for {1}")]
     UnexpectedValue(u8, &'static str),
+    /// A caller supplied a value outside this adapter's supported range.
+    #[error("invalid TraCI argument: {0}")]
+    InvalidArgument(String),
 }
 
 /// A connected TraCI client bound to one SUMO process.
@@ -138,6 +145,34 @@ impl TraciClient {
     pub fn vehicle_position_rne(&mut self, vehicle_id: &str) -> Result<[f64; 3], TraciError> {
         let [x, y] = self.vehicle_position(vehicle_id)?;
         Ok([x, 0.0, -y])
+    }
+
+    /// Explicitly asks SUMO to set one vehicle's target speed in m/s.
+    ///
+    /// The command is sent only when this method is called. SUMO remains the
+    /// motion authority and applies its configured safety and speed-mode rules;
+    /// RNE's traffic runtime does not integrate the mirrored actor. Passing
+    /// `-1.0` restores SUMO's original vehicle-type speed behavior, as defined
+    /// by the TraCI vehicle state API.
+    pub fn set_vehicle_speed_m_s(
+        &mut self,
+        vehicle_id: &str,
+        speed_m_s: f64,
+    ) -> Result<(), TraciError> {
+        if !speed_m_s.is_finite() || speed_m_s < -1.0 {
+            return Err(TraciError::InvalidArgument(format!(
+                "vehicle speed must be finite and at least -1.0 m/s, got {speed_m_s}"
+            )));
+        }
+        let mut payload = Vec::with_capacity(1 + 4 + vehicle_id.len() + 1 + 8);
+        payload.push(VAR_SPEED);
+        payload.extend_from_slice(&(vehicle_id.len() as u32).to_be_bytes());
+        payload.extend_from_slice(vehicle_id.as_bytes());
+        payload.push(TYPE_DOUBLE);
+        payload.extend_from_slice(&speed_m_s.to_be_bytes());
+        self.send_command(CMD_SET_VEHICLE_VARIABLE, &payload)?;
+        let mut message = self.read_response()?;
+        self.read_status(&mut message, CMD_SET_VEHICLE_VARIABLE)
     }
 
     /// Tells SUMO to close the connection and shut down.

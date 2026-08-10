@@ -4,11 +4,13 @@
 //! and mirrors every SUMO vehicle into an RNE ECS [`World`] as a
 //! [`rne_traffic::TrafficActor`] with a [`rne_traffic::TrafficPose`] in the RNE
 //! Y-up frame. SUMO owns the motion and routing; RNE owns the mirror, so RNE
-//! sensors, logging, and rendering can observe live SUMO traffic.
+//! sensors, logging, and rendering can observe live SUMO traffic. Mirrored
+//! actors are tagged with [`rne_traffic::TrafficPoseSource::External`] so a
+//! concurrent RNE traffic runtime does not integrate the same pose twice.
 
 use crate::{TraciClient, TraciError};
 use rne_ecs::{Entity, EntityUuid, Name, World};
-use rne_traffic::{TrafficActor, TrafficPose};
+use rne_traffic::{TrafficActor, TrafficPose, TrafficPoseSource};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Stable namespace prefix so SUMO vehicle UUIDs never collide with random v4
@@ -60,6 +62,7 @@ impl CoSimulation {
                         .spawn((
                             Name::new(id),
                             TrafficActor::motor_vehicle(),
+                            TrafficPoseSource::External,
                             EntityUuid(stable_uuid(id)),
                             TrafficPose {
                                 position_m: position,
@@ -89,6 +92,20 @@ impl CoSimulation {
     /// The ECS entities mirroring the current SUMO vehicles, keyed by SUMO id.
     pub fn actors(&self) -> &BTreeMap<String, Entity> {
         &self.actors
+    }
+
+    /// Explicitly returns a vehicle speed command to SUMO.
+    ///
+    /// This is an opt-in control path: calling [`Self::step`] never derives or
+    /// sends commands from the mirrored RNE pose. SUMO still owns vehicle
+    /// integration and routing, while the RNE traffic runtime continues to
+    /// treat the mirrored actor as [`TrafficPoseSource::External`].
+    pub fn set_vehicle_speed_m_s(
+        &mut self,
+        vehicle_id: &str,
+        speed_m_s: f64,
+    ) -> Result<(), TraciError> {
+        self.client.set_vehicle_speed_m_s(vehicle_id, speed_m_s)
     }
 
     /// Tells SUMO to close the connection and shut down.

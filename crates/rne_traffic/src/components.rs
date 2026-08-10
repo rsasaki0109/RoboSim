@@ -21,7 +21,7 @@ pub enum TrafficActorKind {
     Pedestrian,
 }
 
-/// Marks an entity as a road user managed by traffic runtime systems.
+/// Marks an entity as a road user that participates in traffic integration.
 ///
 /// Externally visible iteration uses the entity's [`rne_ecs::EntityUuid`],
 /// never ECS insertion order.
@@ -38,6 +38,22 @@ impl TrafficActor {
             kind: TrafficActorKind::MotorVehicle,
         }
     }
+}
+
+/// Identifies the subsystem that owns an actor's [`TrafficPose`].
+///
+/// Actors without this component, or with [`TrafficPoseSource::Runtime`], are
+/// advanced by the deterministic traffic runtime. An external adapter can
+/// attach [`TrafficPoseSource::External`] when it supplies the pose each
+/// simulation step; traffic runtime systems then leave that actor untouched.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficPoseSource {
+    /// The RNE traffic runtime owns route progress and pose updates.
+    #[default]
+    Runtime,
+    /// An external simulator or adapter owns route progress and pose updates.
+    External,
 }
 
 /// Kinematic progress of one actor along a catalogued traffic route.

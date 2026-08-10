@@ -2,7 +2,7 @@
 
 use rne_ecs::World;
 use rne_traci::CoSimulation;
-use rne_traffic::{TrafficActor, TrafficPose};
+use rne_traffic::{TrafficActor, TrafficPose, TrafficPoseSource};
 use std::io::{BufReader, Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -116,10 +116,18 @@ fn mirrors_vehicle_create_update_and_remove() {
     let mut co_sim = CoSimulation::connect("127.0.0.1", port).expect("connect");
     assert!(co_sim.actors().is_empty());
 
+    co_sim
+        .set_vehicle_speed_m_s("v0", 4.0)
+        .expect("explicit SUMO speed command");
+
     co_sim.step(&mut world).expect("first step");
     assert_eq!(co_sim.actors().len(), 1, "the vehicle must be mirrored");
     let entity = co_sim.actors()["v0"];
     assert!(world.get::<TrafficActor>(entity).is_some());
+    assert_eq!(
+        world.get::<TrafficPoseSource>(entity),
+        Some(&TrafficPoseSource::External)
+    );
     let pose = world.get::<TrafficPose>(entity).expect("pose");
     assert_eq!(pose.position_m, [10.0, 0.0, 20.0]);
 

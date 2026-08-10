@@ -26,7 +26,7 @@ pub use asset::{
 };
 pub use components::{
     TrafficActor, TrafficActorKind, TrafficDeparture, TrafficNetworkRoot, TrafficPose,
-    TrafficRouteFollower,
+    TrafficPoseSource, TrafficRouteFollower,
 };
 pub use error::{TrafficAssetError, TrafficIdError};
 pub use events::TrafficStepCompleted;
