@@ -1,8 +1,9 @@
 //! Scenario execution over the traffic runtime integration tests.
 
+use rne_core::control::{ControlCommand, RunControl, RunnerControl};
 use rne_openscenario::{
-    execute_scenario, parse_openscenario_xml_with_source, ScenarioDocument, ScenarioEntityKind,
-    ScenarioRunOptions,
+    execute_scenario, execute_scenario_with_control, parse_openscenario_xml_with_source,
+    ScenarioDocument, ScenarioEntityKind, ScenarioRunOptions,
 };
 use rne_traffic::{
     Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame, Junction,
@@ -10,6 +11,7 @@ use rne_traffic::{
     SignalGroupAspect, SignalPhase, SignalProgram, TrafficActorKind, TrafficConnection, TrafficId,
     TrafficNetwork, TrafficSignal,
 };
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 
@@ -93,6 +95,25 @@ fn scenario() -> ScenarioDocument {
     parse_openscenario_xml_with_source("runtime_speed.xosc", &text).expect("parse scenario")
 }
 
+struct ScriptedControl {
+    commands: VecDeque<ControlCommand>,
+    status_steps: Vec<u64>,
+}
+
+impl RunnerControl for ScriptedControl {
+    fn try_poll(&mut self) -> Option<ControlCommand> {
+        self.commands.pop_front()
+    }
+
+    fn wait_command(&mut self) -> ControlCommand {
+        self.commands.pop_front().unwrap_or(ControlCommand::Quit)
+    }
+
+    fn report_status(&mut self, step: u64, _sim_time_s: f64, _snapshot: &[u8]) {
+        self.status_steps.push(step);
+    }
+}
+
 #[test]
 fn executes_speed_scenario_deterministically() {
     let document = scenario();
@@ -117,6 +138,62 @@ fn executes_speed_scenario_deterministically() {
     let final_x = first.final_positions_m[0][0];
     assert!(final_x > 0.0, "ego should travel east along the corridor");
     assert_ne!(first.stable_hash, 0);
+}
+
+#[test]
+fn controlled_scenario_supports_step_reset_and_quit() {
+    let document = scenario();
+    let network = corridor_network();
+    let options = ScenarioRunOptions {
+        steps: 30,
+        hz: 60.0,
+    };
+    let commands = vec![
+        ControlCommand::Step { frames: 5 },
+        ControlCommand::Reset,
+        ControlCommand::Step { frames: 3 },
+        ControlCommand::Quit,
+    ];
+    let mut transport = ScriptedControl {
+        commands: commands.clone().into(),
+        status_steps: Vec::new(),
+    };
+    let (controlled, recorded_commands) = {
+        let mut control = RunControl::paused(&mut transport);
+        let result =
+            execute_scenario_with_control(&document, &network, &options, Some(&mut control))
+                .expect("controlled scenario");
+        (result, control.recorded_commands().to_vec())
+    };
+    assert_eq!(recorded_commands, commands);
+
+    let mut replay_transport = ScriptedControl {
+        commands: recorded_commands.into(),
+        status_steps: Vec::new(),
+    };
+    let replayed = {
+        let mut control = RunControl::paused(&mut replay_transport);
+        execute_scenario_with_control(&document, &network, &options, Some(&mut control))
+            .expect("replay controlled scenario")
+    };
+
+    let baseline = execute_scenario(
+        &document,
+        &network,
+        &ScenarioRunOptions { steps: 3, hz: 60.0 },
+    )
+    .expect("baseline scenario");
+    assert_eq!(
+        controlled, baseline,
+        "reset must restart deterministic state"
+    );
+    assert_eq!(
+        controlled, replayed,
+        "the command transcript must replay exactly"
+    );
+    assert_eq!(transport.status_steps.len(), 8);
+    assert_eq!(&transport.status_steps[..5], &[1, 2, 3, 4, 5]);
+    assert_eq!(&transport.status_steps[5..], &[1, 2, 3]);
 }
 
 #[test]

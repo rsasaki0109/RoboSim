@@ -5,8 +5,10 @@
 //! commands into an [`EpisodeOutcome`], so the fixed-step loop can be driven
 //! interactively (or scripted) without coupling the loop to any transport.
 
+use serde::{Deserialize, Serialize};
+
 /// A command a client can send to a running experiment at a step boundary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlCommand {
     /// Suspend the fixed-step loop at the next step boundary.
     Pause,
@@ -81,6 +83,7 @@ pub struct RunControl<'a> {
     transport: &'a mut dyn RunnerControl,
     state: RunnerControlState,
     step_remaining: u64,
+    recorded_commands: Vec<ControlCommand>,
 }
 
 impl<'a> RunControl<'a> {
@@ -90,6 +93,7 @@ impl<'a> RunControl<'a> {
             transport,
             state: RunnerControlState::Running,
             step_remaining: 0,
+            recorded_commands: Vec::new(),
         }
     }
 
@@ -101,12 +105,23 @@ impl<'a> RunControl<'a> {
             transport,
             state: RunnerControlState::Paused,
             step_remaining: 0,
+            recorded_commands: Vec::new(),
         }
     }
 
     /// The current paused or advancing state.
     pub fn state(&self) -> RunnerControlState {
         self.state
+    }
+
+    /// Returns the commands consumed by this runner in transport order.
+    ///
+    /// Commands are recorded when [`Self::checkpoint`] consumes them, not
+    /// when a transport receives them. Consequently, commands still queued
+    /// after a run reaches its step limit are intentionally absent from the
+    /// transcript.
+    pub fn recorded_commands(&self) -> &[ControlCommand] {
+        &self.recorded_commands
     }
 
     /// Forwards a completed-step status report to the transport.
@@ -152,6 +167,7 @@ impl<'a> RunControl<'a> {
             if !consumed {
                 if let Some(command) = self.transport.try_poll() {
                     consumed = true;
+                    self.recorded_commands.push(command);
                     if let Some(outcome) = self.apply(command) {
                         return outcome;
                     }
@@ -160,6 +176,7 @@ impl<'a> RunControl<'a> {
             }
             if self.state == RunnerControlState::Paused && self.step_remaining == 0 {
                 let command = self.transport.wait_command();
+                self.recorded_commands.push(command);
                 if let Some(outcome) = self.apply(command) {
                     return outcome;
                 }
@@ -338,5 +355,22 @@ mod tests {
         assert_eq!(control.checkpoint(), EpisodeOutcome::Advance);
         assert_eq!(waits.get(), 1, "step 0 must block until resumed");
         assert_eq!(control.state(), RunnerControlState::Running);
+    }
+
+    #[test]
+    fn records_commands_in_the_order_they_are_consumed() {
+        let waits = Rc::new(Cell::new(0));
+        let mut scripted = ScriptedControl::new(
+            vec![ControlCommand::Step { frames: 2 }, ControlCommand::Quit],
+            waits,
+        );
+        let mut control = RunControl::paused(&mut scripted);
+        assert_eq!(control.checkpoint(), EpisodeOutcome::Advance);
+        assert_eq!(control.checkpoint(), EpisodeOutcome::Advance);
+        assert_eq!(control.checkpoint(), EpisodeOutcome::Quit);
+        assert_eq!(
+            control.recorded_commands(),
+            &[ControlCommand::Step { frames: 2 }, ControlCommand::Quit]
+        );
     }
 }

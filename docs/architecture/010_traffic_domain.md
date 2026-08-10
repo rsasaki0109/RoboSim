@@ -73,6 +73,9 @@ dependency graph.
 - A network root has `TrafficNetworkRoot`.
 - A road user has `TrafficActor` in addition to its Robot Entity components
   when it is a simulated vehicle.
+- `TrafficPoseSource::Runtime` (the default when absent) means RNE owns route
+  progress and pose updates. `TrafficPoseSource::External` means an adapter
+  supplies the pose and RNE must not integrate that actor a second time.
 - `TrafficRuntime` is per-world deterministic step state.
 - Traffic events carry simulation time and stable entity UUIDs.
 
@@ -83,12 +86,13 @@ coupling the ECS markers to a particular importer.
 ## Runtime order
 
 1. Apply signal phase and route decisions for the current `SimTime`.
-2. Compute actor commands in stable actor-ID order.
+2. Compute commands for RNE-owned actors in stable actor-ID order.
 3. Apply kinematic or backend-neutral robot commands.
-4. Advance physics when a scenario opts into it.
-5. Update lane-relative state and detect conflicts/violations.
-6. Record a stable world-state hash.
-7. Optionally extract render data.
+4. Synchronize externally owned poses from adapters.
+5. Advance physics when a scenario opts into it.
+6. Update lane-relative state and detect conflicts/violations.
+7. Record a stable world-state hash.
+8. Optionally extract render data.
 
 Headless execution uses the same steps and is the acceptance path.
 

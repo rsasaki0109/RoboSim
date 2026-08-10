@@ -7,7 +7,7 @@
 //! stepping the kinematic traffic systems.
 
 use crate::{ScenarioAction, ScenarioDocument, ScenarioEntityKind, ScenarioError};
-use rne_core::{SimDuration, SimTime};
+use rne_core::{EpisodeOutcome, RunControl, SimDuration, SimTime};
 use rne_ecs::{EntityUuid, Name, World};
 use rne_math::Hertz;
 use rne_traffic::{
@@ -15,11 +15,13 @@ use rne_traffic::{
     TrafficNetwork, TrafficPose, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower,
     TrafficRuntime, TrafficSignalControl, TrafficSignalControls,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 /// Fixed-step execution settings for a scenario.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioRunOptions {
     /// Number of fixed simulation steps.
     pub steps: u64,
@@ -37,7 +39,8 @@ impl Default for ScenarioRunOptions {
 }
 
 /// Deterministic outcome of one scenario execution.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioRunResult {
     /// Stable hash of the ordered actor state after the last step.
     pub stable_hash: u64,
@@ -51,6 +54,8 @@ pub struct ScenarioRunResult {
     pub route_length_m: f64,
     /// Average speed of departed, unfinished actors after the last step.
     pub average_speed_m_s: f64,
+    /// Number of steps completed in the final episode.
+    pub steps: u64,
 }
 
 /// Body length assumed per actor kind for traffic-following spacing.
@@ -70,6 +75,106 @@ fn actor_kind(kind: ScenarioEntityKind) -> TrafficActorKind {
     }
 }
 
+/// Mutable state for one deterministic scenario episode.
+struct ScenarioEpisode {
+    world: World,
+    route: TrafficRoute,
+    parallel_route: Option<TrafficRoute>,
+    routes: TrafficRouteCatalog,
+    runtime: TrafficRuntime,
+    schedules: ActionSchedule,
+    controls: TrafficSignalControls,
+    signal_schedule: Vec<SignalSchedule>,
+    applied: std::collections::HashMap<String, usize>,
+    signal_violations: usize,
+    collisions: usize,
+    stable_hash: u64,
+    average_speed_m_s: f64,
+}
+
+#[derive(Serialize)]
+struct ScenarioLiveSnapshot {
+    positions_m: Vec<[f64; 3]>,
+    signal_violations: usize,
+    collisions: usize,
+    stable_hash: u64,
+    average_speed_m_s: f64,
+}
+
+impl ScenarioEpisode {
+    fn build(
+        document: &ScenarioDocument,
+        network: &TrafficNetwork,
+        primary_kind: ScenarioEntityKind,
+    ) -> Result<Self, ScenarioError> {
+        let route = derive_route(network, primary_kind)?;
+        let parallel_route = parallel_route_for(&route, document)?;
+
+        let mut world = World::new();
+        let mut spawn_order = document.entities.clone();
+        spawn_order.sort_by(|left, right| left.name.cmp(&right.name));
+        for (index, entity) in spawn_order.iter().enumerate() {
+            let distance_m = spawn_distance_m(&route, entity.initial_world_position_m);
+            let pose = route.sample(distance_m);
+            world.spawn((
+                Name(entity.name.clone()),
+                TrafficActor {
+                    kind: actor_kind(entity.kind),
+                },
+                EntityUuid(Uuid::from_u128(uuid_for_entity(index))),
+                TrafficRouteFollower {
+                    route_id: route.id().clone(),
+                    distance_m,
+                    speed_m_s: 0.0,
+                    desired_speed_m_s: 0.0,
+                    length_m: actor_length_m(entity.kind),
+                },
+                TrafficPose {
+                    position_m: pose.position_m,
+                    yaw_rad: pose.yaw_rad,
+                },
+            ));
+        }
+
+        let mut routes = TrafficRouteCatalog::default();
+        routes
+            .insert(route.clone())
+            .map_err(|error| ScenarioError::Invalid(format!("insert route: {error}")))?;
+        if let Some(parallel_route) = &parallel_route {
+            routes.insert(parallel_route.clone()).map_err(|error| {
+                ScenarioError::Invalid(format!("insert parallel route: {error}"))
+            })?;
+        }
+        let (controls, signal_schedule) = build_signal_schedule(network, &route)?;
+        Ok(Self {
+            world,
+            route,
+            parallel_route,
+            routes,
+            runtime: TrafficRuntime::default(),
+            schedules: build_action_schedules(document),
+            controls,
+            signal_schedule,
+            applied: std::collections::HashMap::new(),
+            signal_violations: 0,
+            collisions: 0,
+            stable_hash: 0,
+            average_speed_m_s: 0.0,
+        })
+    }
+
+    fn live_snapshot(&self) -> String {
+        serde_json::to_string(&ScenarioLiveSnapshot {
+            positions_m: collect_positions(&self.world),
+            signal_violations: self.signal_violations,
+            collisions: self.collisions,
+            stable_hash: self.stable_hash,
+            average_speed_m_s: self.average_speed_m_s,
+        })
+        .unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
 /// Executes a scenario document over a traffic network.
 ///
 /// The runner derives a single route from the first and last network lanes that
@@ -81,6 +186,22 @@ pub fn execute_scenario(
     document: &ScenarioDocument,
     network: &TrafficNetwork,
     options: &ScenarioRunOptions,
+) -> Result<ScenarioRunResult, ScenarioError> {
+    execute_scenario_with_control(document, network, options, None)
+}
+
+/// Executes a scenario with optional pause, step, reset, quit, and live-status control.
+///
+/// When control is None, this has the same deterministic fixed-step behavior
+/// as execute_scenario. When present, the control state machine is consulted
+/// before every step. Reset rebuilds the episode from its initial conditions,
+/// quit returns the current partial episode, and completed steps report a
+/// compact JSON snapshot containing actor positions and traffic metrics.
+pub fn execute_scenario_with_control(
+    document: &ScenarioDocument,
+    network: &TrafficNetwork,
+    options: &ScenarioRunOptions,
+    mut control: Option<&mut RunControl<'_>>,
 ) -> Result<ScenarioRunResult, ScenarioError> {
     document.validate()?;
     if !options.hz.is_finite() || options.hz <= 0.0 {
@@ -95,81 +216,63 @@ pub fn execute_scenario(
         .map(|entity| entity.kind)
         .next()
         .ok_or_else(|| ScenarioError::Invalid("scenario has no entities".to_string()))?;
-    let route = derive_route(network, primary_kind)?;
-    let parallel_route = parallel_route_for(&route, document)?;
-
-    let mut world = World::new();
-    let mut spawn_order = document.entities.clone();
-    spawn_order.sort_by(|left, right| left.name.cmp(&right.name));
-    for (index, entity) in spawn_order.iter().enumerate() {
-        let distance_m = spawn_distance_m(&route, entity.initial_world_position_m);
-        let pose = route.sample(distance_m);
-        world.spawn((
-            Name(entity.name.clone()),
-            TrafficActor {
-                kind: actor_kind(entity.kind),
-            },
-            EntityUuid(Uuid::from_u128(uuid_for_entity(index))),
-            TrafficRouteFollower {
-                route_id: route.id().clone(),
-                distance_m,
-                speed_m_s: 0.0,
-                desired_speed_m_s: 0.0,
-                length_m: actor_length_m(entity.kind),
-            },
-            TrafficPose {
-                position_m: pose.position_m,
-                yaw_rad: pose.yaw_rad,
-            },
-        ));
-    }
-
-    let mut routes = TrafficRouteCatalog::default();
-    routes
-        .insert(route.clone())
-        .map_err(|error| ScenarioError::Invalid(format!("insert route: {error}")))?;
-    if let Some(parallel_route) = &parallel_route {
-        routes
-            .insert(parallel_route.clone())
-            .map_err(|error| ScenarioError::Invalid(format!("insert parallel route: {error}")))?;
-    }
-    let mut runtime = TrafficRuntime::default();
     let delta = SimDuration::from_hertz(Hertz::new(options.hz));
-    let schedules = build_action_schedules(document);
-    let (mut controls, signal_schedule) = build_signal_schedule(network, &route)?;
-    let mut applied = std::collections::HashMap::new();
+    'episode: loop {
+        let mut episode = ScenarioEpisode::build(document, network, primary_kind)?;
+        let mut completed_steps = 0;
+        for step in 1..=options.steps {
+            if let Some(control) = control.as_deref_mut() {
+                match control.checkpoint() {
+                    EpisodeOutcome::Advance => {}
+                    EpisodeOutcome::Reset => continue 'episode,
+                    EpisodeOutcome::Quit => break,
+                }
+            }
+            let sim_time = SimTime::from_ticks(step * delta.ticks());
+            apply_due_actions(
+                &mut episode.world,
+                &mut episode.routes,
+                &episode.schedules,
+                sim_time,
+                episode.parallel_route.as_ref(),
+                &mut episode.applied,
+            )?;
+            apply_signal_cycle(&mut episode.controls, &episode.signal_schedule, sim_time);
+            let report = rne_traffic::advance_controlled_kinematic_traffic(
+                &mut episode.world,
+                &episode.routes,
+                &episode.controls,
+                &mut episode.runtime,
+                sim_time,
+                delta,
+                rne_traffic::KinematicTrafficConfig::default(),
+            )
+            .map_err(|error| ScenarioError::Invalid(format!("traffic step: {error}")))?;
+            episode.signal_violations += report.signal_violation_count;
+            episode.collisions += report.collision_count;
+            episode.stable_hash = report.stable_state_hash;
+            episode.average_speed_m_s = report.flow.average_speed_m_s;
+            completed_steps = step;
+            if let Some(control) = control.as_deref_mut() {
+                let snapshot = episode.live_snapshot();
+                control.report_status(step, sim_time.as_seconds().value(), snapshot.as_bytes());
+            }
+        }
 
-    let mut violations = 0;
-    let mut collisions = 0;
-    let mut stable_hash = 0;
-    let mut average_speed_m_s = 0.0;
-    for step in 1..=options.steps {
-        let sim_time = SimTime::from_ticks(step * delta.ticks());
-        apply_due_actions(
-            &mut world,
-            &mut routes,
-            &schedules,
-            sim_time,
-            parallel_route.as_ref(),
-            &mut applied,
-        )?;
-        apply_signal_cycle(&mut controls, &signal_schedule, sim_time);
-        let report = rne_traffic::advance_controlled_kinematic_traffic(
-            &mut world,
-            &routes,
-            &controls,
-            &mut runtime,
-            sim_time,
-            delta,
-            rne_traffic::KinematicTrafficConfig::default(),
-        )
-        .map_err(|error| ScenarioError::Invalid(format!("traffic step: {error}")))?;
-        violations += report.signal_violation_count;
-        collisions += report.collision_count;
-        stable_hash = report.stable_state_hash;
-        average_speed_m_s = report.flow.average_speed_m_s;
+        let final_positions_m = collect_positions(&episode.world);
+        return Ok(ScenarioRunResult {
+            stable_hash: episode.stable_hash,
+            signal_violations: episode.signal_violations,
+            collisions: episode.collisions,
+            final_positions_m,
+            route_length_m: episode.route.total_length_m(),
+            average_speed_m_s: episode.average_speed_m_s,
+            steps: completed_steps,
+        });
     }
+}
 
+fn collect_positions(world: &World) -> Vec<[f64; 3]> {
     let mut positions = world
         .iter_entities()
         .filter_map(|entity_ref| {
@@ -180,19 +283,10 @@ pub fn execute_scenario(
         })
         .collect::<Vec<_>>();
     positions.sort_by(|left, right| left.0.cmp(&right.0));
-    let final_positions_m = positions
+    positions
         .into_iter()
         .map(|(_, position)| position)
-        .collect();
-
-    Ok(ScenarioRunResult {
-        stable_hash,
-        signal_violations: violations,
-        collisions,
-        final_positions_m,
-        route_length_m: route.total_length_m(),
-        average_speed_m_s,
-    })
+        .collect()
 }
 
 fn derive_route(

@@ -29,28 +29,28 @@ struct DrawUniform {
 @group(1) @binding(0) var<uniform> draw: DrawUniform;
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(2) @binding(1) var base_color_sampler: sampler;
+@group(2) @binding(2) var normal_texture: texture_2d<f32>;
+@group(2) @binding(3) var normal_sampler: sampler;
+@group(2) @binding(4) var roughness_texture: texture_2d<f32>;
+@group(2) @binding(5) var roughness_sampler: sampler;
+@group(2) @binding(6) var metallic_roughness_texture: texture_2d<f32>;
+@group(2) @binding(7) var metallic_roughness_sampler: sampler;
+@group(2) @binding(8) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(9) var emissive_sampler: sampler;
+@group(2) @binding(10) var occlusion_texture: texture_2d<f32>;
+@group(2) @binding(11) var occlusion_sampler: sampler;
 @group(3) @binding(0) var shadow_texture: texture_depth_2d;
 @group(3) @binding(1) var shadow_sampler: sampler_comparison;
-@group(4) @binding(0) var normal_texture: texture_2d<f32>;
-@group(4) @binding(1) var normal_sampler: sampler;
-@group(5) @binding(0) var roughness_texture: texture_2d<f32>;
-@group(5) @binding(1) var roughness_sampler: sampler;
-@group(6) @binding(0) var metallic_roughness_texture: texture_2d<f32>;
-@group(6) @binding(1) var metallic_roughness_sampler: sampler;
-@group(7) @binding(0) var emissive_texture: texture_2d<f32>;
-@group(7) @binding(1) var emissive_sampler: sampler;
-@group(8) @binding(0) var occlusion_texture: texture_2d<f32>;
-@group(8) @binding(1) var occlusion_sampler: sampler;
-@group(9) @binding(0) var environment_texture: texture_2d<f32>;
-@group(9) @binding(1) var prefiltered_environment_texture: texture_2d<f32>;
-@group(9) @binding(2) var diffuse_environment_texture: texture_2d<f32>;
+@group(3) @binding(2) var environment_texture: texture_2d<f32>;
+@group(3) @binding(3) var prefiltered_environment_texture: texture_2d<f32>;
+@group(3) @binding(4) var diffuse_environment_texture: texture_2d<f32>;
 
 struct SkinStorage {
     mesh_transform: mat4x4<f32>,
     joint_matrices: array<mat4x4<f32>>,
 }
 
-@group(10) @binding(0) var<storage, read> skin: SkinStorage;
+@group(3) @binding(5) var<storage, read> skin: SkinStorage;
 
 fn mat3_from_mat4(matrix: mat4x4<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(matrix[0].xyz, matrix[1].xyz, matrix[2].xyz);
@@ -662,7 +662,10 @@ pub struct PrimitiveRenderer {
     taa: TemporalAntiAliasing,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
-    shadow_bind_group: wgpu::BindGroup,
+    shadow_sampler: wgpu::Sampler,
+    _shadow_bind_group: wgpu::BindGroup,
+    material_layout: wgpu::BindGroupLayout,
+    scene_layout: wgpu::BindGroupLayout,
 }
 
 struct GpuMesh {
@@ -674,19 +677,24 @@ struct GpuMesh {
 }
 
 struct GpuSkin {
-    _buffer: wgpu::Buffer,
+    buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
 struct GpuTexture {
     _texture: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    _bind_group: wgpu::BindGroup,
 }
 
 struct GpuEnvironmentTexture {
     _texture: wgpu::Texture,
     _prefiltered_texture: wgpu::Texture,
     _diffuse_texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    prefiltered_view: wgpu::TextureView,
+    diffuse_view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
 }
 
@@ -779,7 +787,7 @@ impl PrimitiveRenderer {
             label: Some("rne_draw_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,
@@ -872,21 +880,87 @@ impl PrimitiveRenderer {
                     count: None,
                 }),
             });
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rne_material_texture_layout"),
+            entries: &[
+                (0, true),
+                (1, false),
+                (2, true),
+                (3, false),
+                (4, true),
+                (5, false),
+                (6, true),
+                (7, false),
+                (8, true),
+                (9, false),
+                (10, true),
+                (11, false),
+            ]
+            .map(|(binding, is_texture)| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: if is_texture {
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    }
+                } else {
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
+                },
+                count: None,
+            }),
+        });
+        let mut scene_entries = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                count: None,
+            },
+        ];
+        scene_entries.extend([2, 3, 4].map(|binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }));
+        scene_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 5,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        let scene_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rne_scene_bindings_layout"),
+            entries: &scene_entries,
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rne_primitive_pipeline_layout"),
             bind_group_layouts: &[
                 &camera_layout,
                 &draw_layout,
-                &texture_layout,
-                &shadow_texture_layout,
-                &texture_layout,
-                &texture_layout,
-                &texture_layout,
-                &texture_layout,
-                &texture_layout,
-                &environment_layout,
-                &skin_layout,
+                &material_layout,
+                &scene_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -989,7 +1063,13 @@ impl PrimitiveRenderer {
                 cull_mode: None,
                 ..Default::default()
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
             cache: None,
@@ -1230,7 +1310,10 @@ impl PrimitiveRenderer {
             taa: TemporalAntiAliasing::new(device, color_format),
             _shadow_texture: shadow_texture,
             shadow_view,
-            shadow_bind_group,
+            shadow_sampler,
+            _shadow_bind_group: shadow_bind_group,
+            material_layout,
+            scene_layout,
         }
     }
 
@@ -1461,10 +1544,17 @@ impl PrimitiveRenderer {
             }
         }
 
-        let environment_bind_group = self
-            .environment_texture(device, queue, environment)
-            .bind_group
-            .clone();
+        let (environment_bind_group, environment_views) = {
+            let environment_texture = self.environment_texture(device, queue, environment);
+            (
+                environment_texture.bind_group.clone(),
+                [
+                    environment_texture.view.clone(),
+                    environment_texture.prefiltered_view.clone(),
+                    environment_texture.diffuse_view.clone(),
+                ],
+            )
+        };
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rne_camera_bind_group"),
@@ -1590,8 +1680,6 @@ impl PrimitiveRenderer {
             }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &camera_bind_group, &[]);
-            pass.set_bind_group(3, &self.shadow_bind_group, &[]);
-            pass.set_bind_group(9, &environment_bind_group, &[]);
 
             for (index, item) in scene.items.iter().enumerate() {
                 pass.set_bind_group(
@@ -1649,20 +1737,43 @@ impl PrimitiveRenderer {
                             .get(&(Arc::as_ptr(texture) as usize))
                     })
                     .unwrap_or(&self.fallback_occlusion_texture);
-                pass.set_bind_group(2, &texture.bind_group, &[]);
-                pass.set_bind_group(4, &normal_texture.bind_group, &[]);
-                pass.set_bind_group(5, &roughness_texture.bind_group, &[]);
-                pass.set_bind_group(6, &metallic_roughness_texture.bind_group, &[]);
-                pass.set_bind_group(7, &emissive_texture.bind_group, &[]);
-                pass.set_bind_group(8, &occlusion_texture.bind_group, &[]);
 
-                if let Some(gpu_mesh) = &dynamic_meshes[index] {
-                    let skin_bind_group = gpu_mesh
+                let skin = if let Some(gpu_mesh) = &dynamic_meshes[index] {
+                    gpu_mesh.skin.as_ref().unwrap_or(&self.fallback_skin)
+                } else if let Some(mesh) = &item.mesh {
+                    self.mesh_cache
+                        .get(&(Arc::as_ptr(mesh) as usize))
+                        .expect("mesh uploaded before render pass")
                         .skin
                         .as_ref()
-                        .map(|skin| &skin.bind_group)
-                        .unwrap_or(&self.fallback_skin.bind_group);
-                    pass.set_bind_group(10, skin_bind_group, &[]);
+                        .unwrap_or(&self.fallback_skin)
+                } else {
+                    &self.fallback_skin
+                };
+                let material_bind_group = create_material_bind_group(
+                    device,
+                    &self.material_layout,
+                    [
+                        texture,
+                        normal_texture,
+                        roughness_texture,
+                        metallic_roughness_texture,
+                        emissive_texture,
+                        occlusion_texture,
+                    ],
+                );
+                let scene_bind_group = create_scene_bind_group(
+                    device,
+                    &self.scene_layout,
+                    &self.shadow_view,
+                    &self.shadow_sampler,
+                    &environment_views,
+                    skin,
+                );
+                pass.set_bind_group(2, &material_bind_group, &[]);
+                pass.set_bind_group(3, &scene_bind_group, &[]);
+
+                if let Some(gpu_mesh) = &dynamic_meshes[index] {
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
@@ -1671,18 +1782,11 @@ impl PrimitiveRenderer {
                         .mesh_cache
                         .get(&(Arc::as_ptr(mesh) as usize))
                         .expect("mesh uploaded before render pass");
-                    let skin_bind_group = gpu_mesh
-                        .skin
-                        .as_ref()
-                        .map(|skin| &skin.bind_group)
-                        .unwrap_or(&self.fallback_skin.bind_group);
-                    pass.set_bind_group(10, skin_bind_group, &[]);
                     pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), gpu_mesh.index_format);
                     pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 } else {
                     let primitive = self.primitive_mesh_for(&item.shape);
-                    pass.set_bind_group(10, &self.fallback_skin.bind_group, &[]);
                     pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         primitive.index_buffer.slice(..),
@@ -1992,10 +2096,84 @@ fn upload_skinning(
             resource: buffer.as_entire_binding(),
         }],
     });
-    GpuSkin {
-        _buffer: buffer,
-        bind_group,
+    GpuSkin { buffer, bind_group }
+}
+
+fn create_material_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    textures: [&GpuTexture; 6],
+) -> wgpu::BindGroup {
+    let [base_color_texture, normal_texture, roughness_texture, metallic_roughness_texture, emissive_texture, occlusion_texture] =
+        textures;
+    let entries = [
+        (0, &base_color_texture.view, &base_color_texture.sampler),
+        (2, &normal_texture.view, &normal_texture.sampler),
+        (4, &roughness_texture.view, &roughness_texture.sampler),
+        (
+            6,
+            &metallic_roughness_texture.view,
+            &metallic_roughness_texture.sampler,
+        ),
+        (8, &emissive_texture.view, &emissive_texture.sampler),
+        (10, &occlusion_texture.view, &occlusion_texture.sampler),
+    ];
+    let mut bind_group_entries = Vec::with_capacity(entries.len() * 2);
+    for (binding, view, sampler) in entries {
+        bind_group_entries.push(wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+        bind_group_entries.push(wgpu::BindGroupEntry {
+            binding: binding + 1,
+            resource: wgpu::BindingResource::Sampler(sampler),
+        });
     }
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rne_material_bind_group"),
+        layout,
+        entries: &bind_group_entries,
+    })
+}
+
+fn create_scene_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    shadow_view: &wgpu::TextureView,
+    shadow_sampler: &wgpu::Sampler,
+    environment_views: &[wgpu::TextureView; 3],
+    skin: &GpuSkin,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rne_scene_bind_group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(shadow_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&environment_views[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&environment_views[1]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&environment_views[2]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: skin.buffer.as_entire_binding(),
+            },
+        ],
+    })
 }
 
 fn upload_texture(
@@ -2064,7 +2242,9 @@ fn upload_texture(
     });
     GpuTexture {
         _texture: texture,
-        bind_group,
+        view,
+        sampler,
+        _bind_group: bind_group,
     }
 }
 
@@ -2206,6 +2386,9 @@ fn upload_environment_texture(
         _texture: texture,
         _prefiltered_texture: prefiltered_texture,
         _diffuse_texture: diffuse_texture,
+        view,
+        prefiltered_view,
+        diffuse_view,
         bind_group,
     }
 }

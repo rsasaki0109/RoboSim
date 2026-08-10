@@ -96,6 +96,10 @@ For a complete local validation:
 cargo run -p xtask -- ci
 ```
 
+The long example smoke gate is split for CI into `manipulator`, `locomotion`,
+`assets`, and `media` partitions; run one locally with, for example,
+`cargo run -p xtask -- ci-smoke media`.
+
 See [examples/README.md](examples/README.md) for the complete example index.
 
 ## Selected demos
@@ -181,6 +185,7 @@ Run the standard checks:
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo run -p xtask -- ci-headless
 cargo run -p xtask -- ci
 ```
 

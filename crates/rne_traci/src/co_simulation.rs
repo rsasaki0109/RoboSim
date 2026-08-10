@@ -4,11 +4,13 @@
 //! and mirrors every SUMO vehicle into an RNE ECS [`World`] as a
 //! [`rne_traffic::TrafficActor`] with a [`rne_traffic::TrafficPose`] in the RNE
 //! Y-up frame. SUMO owns the motion and routing; RNE owns the mirror, so RNE
-//! sensors, logging, and rendering can observe live SUMO traffic.
+//! sensors, logging, and rendering can observe live SUMO traffic. Mirrored
+//! actors are tagged with [`rne_traffic::TrafficPoseSource::External`] so a
+//! concurrent RNE traffic runtime does not integrate the same pose twice.
 
 use crate::{TraciClient, TraciError};
 use rne_ecs::{Entity, EntityUuid, Name, World};
-use rne_traffic::{TrafficActor, TrafficPose};
+use rne_traffic::{TrafficActor, TrafficPose, TrafficPoseSource};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Stable namespace prefix so SUMO vehicle UUIDs never collide with random v4
@@ -45,11 +47,25 @@ impl CoSimulation {
     /// Advances SUMO by one step and synchronizes the mirror actors.
     pub fn step(&mut self, world: &mut World) -> Result<(), TraciError> {
         self.client.simulation_step()?;
-        let ids = self.client.vehicle_ids()?;
-        let mut seen = BTreeSet::new();
-        for id in &ids {
-            let position = self.client.vehicle_position_rne(id)?;
-            match self.actors.get(id) {
+        let mut ids = self.client.vehicle_ids()?;
+        ids.sort();
+
+        // Keep the SUMO read phase separate from the ECS write phase. A
+        // position read can fail after earlier vehicles have already been
+        // read successfully; applying those earlier results would leave the
+        // ECS mirror and `actors` map representing different SUMO steps.
+        let positions = ids
+            .into_iter()
+            .map(|id| {
+                self.client
+                    .vehicle_position_rne(&id)
+                    .map(|position| (id, position))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let seen = positions.keys().cloned().collect::<BTreeSet<_>>();
+
+        for (id, position) in positions {
+            match self.actors.get(&id) {
                 Some(entity) => {
                     if let Some(mut pose) = world.get_mut::<TrafficPose>(*entity) {
                         pose.position_m = position;
@@ -58,19 +74,19 @@ impl CoSimulation {
                 None => {
                     let entity = world
                         .spawn((
-                            Name::new(id),
+                            Name::new(&id),
                             TrafficActor::motor_vehicle(),
-                            EntityUuid(stable_uuid(id)),
+                            TrafficPoseSource::External,
+                            EntityUuid(stable_uuid(&id)),
                             TrafficPose {
                                 position_m: position,
                                 yaw_rad: 0.0,
                             },
                         ))
                         .id();
-                    self.actors.insert(id.clone(), entity);
+                    self.actors.insert(id, entity);
                 }
             }
-            seen.insert(id.clone());
         }
         let departed = self
             .actors
@@ -89,6 +105,20 @@ impl CoSimulation {
     /// The ECS entities mirroring the current SUMO vehicles, keyed by SUMO id.
     pub fn actors(&self) -> &BTreeMap<String, Entity> {
         &self.actors
+    }
+
+    /// Explicitly returns a vehicle speed command to SUMO.
+    ///
+    /// This is an opt-in control path: calling [`Self::step`] never derives or
+    /// sends commands from the mirrored RNE pose. SUMO still owns vehicle
+    /// integration and routing, while the RNE traffic runtime continues to
+    /// treat the mirrored actor as [`TrafficPoseSource::External`].
+    pub fn set_vehicle_speed_m_s(
+        &mut self,
+        vehicle_id: &str,
+        speed_m_s: f64,
+    ) -> Result<(), TraciError> {
+        self.client.set_vehicle_speed_m_s(vehicle_id, speed_m_s)
     }
 
     /// Tells SUMO to close the connection and shut down.

@@ -9,3 +9,4 @@ xosc = "../scenarios/sumo_cross.xosc"
 
 [output]
 determinism_check = true
+replay_path = "../../target/runs/sumo_cross.rne-replay"

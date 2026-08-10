@@ -10,21 +10,21 @@ on:
 # The former single `workspace` job ran every stage in sequence with no caching and
 # took 26-34 minutes cold. The stages are independent, so they run as parallel jobs
 # and wall-clock time becomes the slowest stage. Each job restores the shared
-# Swatinem cargo cache; `cargo run -p xtask` itself is a cargo build, so even the
+# Swatinem cargo cache; `cargo run --locked -p xtask` itself is a cargo build, so even the
 # lint job benefits.
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
       - name: Format, boundaries, clippy
-        run: cargo run -p xtask -- ci-lint
+        run: cargo run --locked -p xtask -- ci-lint
 
   # The episode suites in rne_ai dominate pure test runtime, and caching cannot
   # shorten execution — so the tests themselves are sharded across parallel jobs
@@ -38,7 +38,7 @@ jobs:
         partition: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,24 +46,29 @@ jobs:
       - name: Install SUMO for the TraCI co-simulation test
         run: pip install --quiet eclipse-sumo
       - name: Workspace tests (shard ${{ matrix.partition }}/3) and asset validation
-        run: cargo run -p xtask -- ci-test ${{ matrix.partition }}/3
+        run: cargo run --locked -p xtask -- ci-test ${{ matrix.partition }}/3
 
   smoke:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [manipulator, locomotion, assets, media]
+    name: smoke (${{ matrix.partition }})
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
-      - name: Example smokes and media checks
-        run: cargo run -p xtask -- ci-smoke
+      - name: Example smokes and media checks (${{ matrix.partition }})
+        run: cargo run --locked -p xtask -- ci-smoke ${{ matrix.partition }}
 
   rl:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
@@ -73,13 +78,58 @@ jobs:
           cache: pip
           cache-dependency-path: examples/27_mobile_manipulator_rl/requirements-ci.txt
       - name: Python RL smokes
-        run: cargo run -p xtask -- ci-rl
+        run: cargo run --locked -p xtask -- ci-rl
+
+  headless:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+      - name: Explicit CPU-only headless gate
+        run: cargo run --locked -p xtask -- ci-headless
+
+  behavior_ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+      - name: Default 10-seed behavior CI
+        run: cargo run --locked -p xtask -- behavior-ci
+      - name: Upload behavior CI reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-ci-report
+          path: artifacts/behavior-ci/
+
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+      - name: Run OSS parity flagship catalog
+        run: cargo run --locked -p xtask -- parity
+      - name: Upload OSS parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-parity-report
+          path: artifacts/oss-parity/report.json
 
   # Aggregate gate so tooling that watched the old single job has one required
   # context to point at; it passes only when every stage passes.
   workspace:
     runs-on: ubuntu-latest
-    needs: [lint, test, smoke, rl]
+    needs: [lint, test, smoke, rl, headless, behavior_ci, parity]
     if: always()
     steps:
       - name: All stages green

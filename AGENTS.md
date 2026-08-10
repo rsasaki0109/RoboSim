@@ -53,7 +53,7 @@ Use these commands before submitting changes:
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo test --workspace --features headless
+cargo run -p xtask -- ci-headless
 cargo run -p xtask -- ci
 ```
 

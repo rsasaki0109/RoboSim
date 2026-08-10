@@ -2,8 +2,8 @@
 
 use crate::{
     SignalAspect, TrafficActor, TrafficConflictControls, TrafficDeparture, TrafficPose,
-    TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime, TrafficSignalControls,
-    TrafficStepCompleted,
+    TrafficPoseSource, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
+    TrafficSignalControls, TrafficStepCompleted,
 };
 use bevy_ecs::prelude::{Entity, With, World};
 use rne_core::{SimDuration, SimTime};
@@ -291,10 +291,14 @@ fn advance_traffic(
         Option<&TrafficRouteFollower>,
         Option<&TrafficPose>,
         Option<&TrafficDeparture>,
+        Option<&TrafficPoseSource>,
     ), With<TrafficActor>>();
     let mut missing_count = 0;
     let mut actors = Vec::new();
-    for (entity, uuid, follower, pose, departure) in query.iter(world) {
+    for (entity, uuid, follower, pose, departure, pose_source) in query.iter(world) {
+        if pose_source.is_some_and(|source| *source == TrafficPoseSource::External) {
+            continue;
+        }
         match (uuid, follower, pose) {
             (Some(uuid), Some(follower), Some(pose)) => actors.push(ActorSnapshot {
                 entity,

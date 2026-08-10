@@ -1,6 +1,6 @@
 //! Interactive winit window backed by wgpu.
 
-use crate::overlay::{ImageOverlay, ImageOverlayDraw};
+use crate::overlay::{DepthOverlay, DepthOverlayDraw, ImageOverlay, ImageOverlayDraw};
 use crate::primitive::{PrimitiveRenderViews, PrimitiveRenderer, PrimitiveSurfacePass};
 use crate::taa::TaaSettings;
 use rne_math::Transform3;
@@ -46,6 +46,7 @@ pub struct InteractiveViewer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     overlay: ImageOverlay,
+    depth_overlay: DepthOverlay,
 }
 
 impl InteractiveViewer {
@@ -113,6 +114,7 @@ impl InteractiveViewer {
         let primitive = PrimitiveRenderer::new(&device, &queue, format);
         let (depth_texture, depth_view) = create_depth_target(&device, width, height);
         let overlay = ImageOverlay::new(&device, format);
+        let depth_overlay = DepthOverlay::new(&device, format);
 
         Ok(Self {
             window,
@@ -126,6 +128,7 @@ impl InteractiveViewer {
             depth_texture,
             depth_view,
             overlay,
+            depth_overlay,
         })
     }
 
@@ -206,6 +209,18 @@ impl InteractiveViewer {
         clear_color: [f32; 4],
         pip: Option<(Vec<u8>, u32, u32)>,
     ) -> Result<(), ViewerError> {
+        self.render_with_pip_and_depth(view, scene, clear_color, pip, None)
+    }
+
+    /// Renders a scene with optional RGBA8 and GPU depth PiP overlays.
+    pub fn render_with_pip_and_depth(
+        &mut self,
+        view: &Transform3,
+        scene: &RenderScene,
+        clear_color: [f32; 4],
+        pip: Option<(Vec<u8>, u32, u32)>,
+        depth_pip: Option<(Vec<f32>, u32, u32)>,
+    ) -> Result<(), ViewerError> {
         let output = self
             .surface
             .get_current_texture()
@@ -258,6 +273,45 @@ impl InteractiveViewer {
                     rgba8: &rgba8,
                     width,
                     height,
+                    ndc_min: [x0, y0],
+                    ndc_max: [x1, y1],
+                },
+            );
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        if let Some((depth_f32, width, height)) = depth_pip {
+            let max_depth_m = depth_f32
+                .iter()
+                .copied()
+                .filter(|depth| depth.is_finite() && *depth > 0.0)
+                .fold(0.0_f32, f32::max)
+                .max(1.0);
+            let scale = 0.28_f32;
+            let aspect = height as f32 / width as f32;
+            let pip_w = scale;
+            let pip_h = scale * aspect * (self.config.width as f32 / self.config.height as f32);
+            let margin = 0.02;
+            let x0 = -1.0 + margin;
+            let y0 = -1.0 + margin;
+            let x1 = x0 + pip_w;
+            let y1 = y0 + pip_h * 2.0;
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rne_viewer_depth_pip_encoder"),
+                });
+            self.depth_overlay.draw(
+                &self.device,
+                &self.queue,
+                DepthOverlayDraw {
+                    encoder: &mut encoder,
+                    color_view: &color_view,
+                    depth_f32: &depth_f32,
+                    width,
+                    height,
+                    max_depth_m,
                     ndc_min: [x0, y0],
                     ndc_max: [x1, y1],
                 },

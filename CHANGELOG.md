@@ -4,8 +4,28 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0-rc.1] - 2026-08-10
+
 ### Added
 
+- **Scenario replay artifact v3**: controlled and fixed-step OpenSCENARIO runs
+  now record the producing RNE version plus stable digests of the exact XOSC
+  and resolved traffic-network bytes. `rne-asset replay` verifies compatibility
+  and both inputs before executing, rejects changed inputs with expected/actual
+  digests, and validates result counts and finite metrics.
+- **Native remote inspection loop**: the runner streams robot base, generic
+  joint, RGB-D, LiDAR, IMU, wheel, and scenario traffic state; the native wgpu
+  viewer projects remote articulated joints and traffic poses, renders RGB and
+  GPU-depth picture-in-picture overlays, and draws remote LiDAR points without
+  stepping a second physics world.
+- **Executable OSS parity catalog**: `cargo run -p xtask -- parity` runs the
+  flagship robot replay, scenario replay, sensor payload, traffic ownership,
+  TraCI, runner-control, RGB-D, and frontend contracts and writes a machine-
+  readable report. The catalog is an explicit CI gate.
+- **M0-to-1.0 execution plan**: the roadmap now defines dated M0-M6 outcomes
+  and objective exit gates for release consolidation, Behavior CI replay,
+  stable control schemas, production sensor transport, physics conformance,
+  scenario scale, and 1.0 RC hardening.
 - **Headless SUMO co-simulation run** (`rne-asset co-sim <net.xml> --routes
   <rou.xml> --steps N`): spawns SUMO, connects over TraCI, mirrors vehicles
   through `rne_traci::CoSimulation`, and reports a deterministic stable hash
@@ -59,11 +79,11 @@ All notable changes to Robot Native Engine are documented in this file.
 - **TCP runner control endpoint** (`rne-asset run --control-port PORT`): the
   interactive control channel (`pause`, `resume`, `step N`, `reset`, `quit`)
   is also served over a local TCP connection for a GUI/frontend. On connect
-  the runner sends `ready paused`, acknowledges each command with `ok <state>`,
-  and streams `status step=<n> t=<t> base=<x,y,z> state=<state>` after every
-  step through the new `rne_core::RunnerControl::report_status` hook. A
-  process-level test drives the binary over TCP and verifies the protocol and
-  the resulting replay.
+  the runner sends `ready paused protocol=1`, acknowledges each accepted
+  command with `ok <state>`, and streams
+  `status step=<n> t=<t> state=<state> snapshot=<json>` after every step
+  through `rne_core::RunnerControl::report_status`. A process-level test drives
+  the binary over TCP and verifies the protocol and resulting replay.
 - **Plugin authoring tooling**: `rne_plugin::scaffold_controller_plugin` generates
   a complete, compilable controller-plugin crate (a `cdylib` implementing the
   controller-plugin C ABI, initially a velocity-servo policy) plus a versioned
@@ -288,6 +308,20 @@ All notable changes to Robot Native Engine are documented in this file.
   remain in carry/place coordinates across the friction grasp's debounced drop
   semantics. Weld remains available for scripted regression trajectories.
 
+### Changed
+
+- **Reproducible release gates**: GitHub Actions and local `xtask ci` use the
+  repository's Rust 1.95 toolchain and locked dependency graph. Headless and
+  default 10-seed Behavior CI are independent required jobs; the full local
+  gate also includes headless, OSS parity, and Behavior CI stages.
+- **Bounded runner transport**: protocol-v1 TCP writes have a finite timeout,
+  opt-in source RGB-D is capped at 1920x1080 per image, source and transmitted
+  dimensions are explicit, and snapshots above 32 MiB become a compact limit
+  status instead of an unbounded socket write.
+- **Explicit external traffic ownership**: co-simulated actors carry
+  `TrafficPoseSource::External`, so native traffic systems do not advance poses
+  owned by SUMO while native actors retain deterministic kinematic ownership.
+
 ### Known limitations
 
 - **Mobile friction placement**: `mm_mobile` can acquire a physical friction
@@ -299,6 +333,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Transactional TraCI synchronization**: a co-simulation step now reads and
+  validates every sorted SUMO vehicle position before mutating ECS or the actor
+  index. A late position error therefore cannot partially update existing
+  actors or spawn only a prefix of the new vehicle set.
 - **`mm_mobile` arm servo sway**: base motion alone (a yaw turn, or a driving
   turn like the hero pick approach) back-drove the uncommanded shoulder/elbow
   position hold by up to ~0.30 rad — the base's yaw acceleration couples the

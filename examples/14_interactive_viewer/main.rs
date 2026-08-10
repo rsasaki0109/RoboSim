@@ -16,8 +16,19 @@
 //! - Up / Down: zoom camera
 //! - L: toggle LiDAR hit overlay (diff-drive scenes only)
 //! - M: toggle semantic task-marker rings
-//! - P: toggle wrist camera PiP (manipulator profiles only)
+//! - P: toggle camera PiP (remote camera or manipulator profiles)
+//! - D: toggle remote GPU depth PiP (`--control-camera-full-resolution`)
 //! - Escape: quit
+//!
+//! Remote runner frontend (diff-drive and URDF profiles):
+//! - Space: pause / resume
+//! - N: advance one fixed step
+//! - T: advance ten fixed steps
+//! - R: reset the remote episode
+//!
+//! Usage:
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- \
+//!     --connect 127.0.0.1:9000 assets/scenes/mesh_diff_drive.rne.scene.toml
 //!
 //! Usage:
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer
@@ -40,13 +51,19 @@ use rne_ai::{
     UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_assets::AssetHotReloader;
-use rne_math::Vec3;
+use rne_math::{Quat, Vec3};
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
 use rne_render_wgpu::{CameraOrbit, InteractiveViewer, WgpuRenderBackend};
+use rne_world::Transform3;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::env;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::time::Duration;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -59,6 +76,329 @@ const TURN_DELTA_RAD_S: f64 = 3.0;
 const ARM_SPEED_RAD_S: f64 = 2.5;
 const GRIPPER_SPEED_RAD_S: f64 = 2.0;
 const LIFT_SPEED_M_S: f64 = 0.3;
+const REMOTE_LIDAR_COLOR: [f32; 4] = [0.95, 0.80, 0.15, 0.9];
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteSnapshot {
+    #[serde(default)]
+    base: Option<[f64; 3]>,
+    #[serde(default)]
+    base_yaw_rad: Option<f64>,
+    #[serde(default)]
+    positions_m: Option<Vec<[f64; 3]>>,
+    #[serde(default)]
+    joints: Option<RemoteJointState>,
+    #[serde(default)]
+    sensors: Vec<RemoteSensorStream>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteJointState {
+    names: Vec<String>,
+    positions_rad: Vec<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteSensorStream {
+    #[allow(dead_code)]
+    stream_id: u64,
+    #[allow(dead_code)]
+    kind: String,
+    #[allow(dead_code)]
+    sequence: u64,
+    /// Stable digest of the latest typed payload.
+    #[allow(dead_code)]
+    #[serde(default)]
+    payload_hash: u64,
+    /// Bounded RGB-D camera preview.
+    #[serde(default)]
+    camera: Option<RemoteCameraPreview>,
+    /// Bounded world-frame LiDAR preview.
+    #[serde(default)]
+    lidar: Option<RemoteLidarPreview>,
+    /// Latest IMU sample, if present.
+    #[allow(dead_code)]
+    #[serde(default)]
+    imu: Option<RemoteImuSample>,
+    /// Latest wheel-encoder sample, if present.
+    #[allow(dead_code)]
+    #[serde(default)]
+    wheel_encoder: Option<RemoteWheelEncoderSample>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteCameraPreview {
+    width: u32,
+    height: u32,
+    rgba8_base64: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    depth_center_m: Option<f32>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    depth_hash: Option<u64>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    depth_width: Option<u32>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    depth_height: Option<u32>,
+    #[serde(default)]
+    depth_f32_le_base64: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteLidarPreview {
+    #[allow(dead_code)]
+    #[serde(default)]
+    point_count: usize,
+    points_m: Vec<[f64; 3]>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteImuSample {
+    #[allow(dead_code)]
+    angular_velocity_rad_s: [f64; 3],
+    #[allow(dead_code)]
+    linear_acceleration_m_s2: [f64; 3],
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RemoteWheelEncoderSample {
+    #[allow(dead_code)]
+    position_rad: f64,
+    #[allow(dead_code)]
+    velocity_rad_s: f64,
+}
+
+impl RemoteSnapshot {
+    fn camera_pip(&self) -> Option<(Vec<u8>, u32, u32)> {
+        self.sensors
+            .iter()
+            .filter_map(|stream| stream.camera.as_ref())
+            .find_map(|camera| {
+                let expected_len = (camera.width as usize)
+                    .checked_mul(camera.height as usize)?
+                    .checked_mul(4)?;
+                let rgba8 = base64::decode(&camera.rgba8_base64).ok()?;
+                if camera.width == 0 || camera.height == 0 || rgba8.len() != expected_len {
+                    return None;
+                }
+                Some((rgba8, camera.width, camera.height))
+            })
+    }
+
+    fn lidar_points(&self) -> Vec<Vec3> {
+        self.sensors
+            .iter()
+            .filter_map(|stream| stream.lidar.as_ref())
+            .flat_map(|lidar| lidar.points_m.iter().copied())
+            .filter(|point| point.iter().all(|value| value.is_finite()))
+            .map(|point| Vec3::new(point[0], point[1], point[2]))
+            .collect()
+    }
+
+    fn depth_pip(&self) -> Option<(Vec<f32>, u32, u32)> {
+        self.sensors
+            .iter()
+            .filter_map(|stream| stream.camera.as_ref())
+            .find_map(|camera| {
+                let width = camera.depth_width?;
+                let height = camera.depth_height?;
+                let expected_len = (width as usize).checked_mul(height as usize)?;
+                let bytes = base64::decode(camera.depth_f32_le_base64.as_ref()?).ok()?;
+                let expected_byte_len = expected_len.checked_mul(std::mem::size_of::<f32>())?;
+                if width == 0 || height == 0 || bytes.len() != expected_byte_len {
+                    return None;
+                }
+                let depth = bytes
+                    .chunks_exact(4)
+                    .map(|chunk| {
+                        let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        if value.is_finite() && value >= 0.0 {
+                            value
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                Some((depth, width, height))
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteRunnerState {
+    Paused,
+    Running,
+}
+
+impl RemoteRunnerState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Paused => "paused",
+            Self::Running => "running",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RemoteStatus {
+    step: u64,
+    sim_time_s: f64,
+    state: RemoteRunnerState,
+    snapshot: RemoteSnapshot,
+}
+
+enum RemoteEvent {
+    Status(RemoteStatus),
+    Disconnected,
+}
+
+/// Parses one `status ... snapshot=...` line from the runner control protocol.
+fn parse_remote_status(line: &str) -> Option<RemoteStatus> {
+    let line = line.strip_prefix("status ")?;
+    let (fields, snapshot_json) = line.split_once(" snapshot=")?;
+    let mut step = None;
+    let mut sim_time_s = None;
+    let mut state = None;
+    for field in fields.split_whitespace() {
+        let (key, value) = field.split_once('=')?;
+        match key {
+            "step" => step = value.parse::<u64>().ok(),
+            "t" => sim_time_s = value.parse::<f64>().ok(),
+            "state" => {
+                state = match value {
+                    "paused" => Some(RemoteRunnerState::Paused),
+                    "running" => Some(RemoteRunnerState::Running),
+                    _ => None,
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(RemoteStatus {
+        step: step?,
+        sim_time_s: sim_time_s?,
+        state: state?,
+        snapshot: serde_json::from_str(snapshot_json).ok()?,
+    })
+}
+
+/// Small native client for the line-oriented runner frontend protocol.
+struct RemoteControlClient {
+    writer: BufWriter<TcpStream>,
+    receiver: mpsc::Receiver<RemoteEvent>,
+    latest: Option<RemoteStatus>,
+    connected: bool,
+}
+
+impl RemoteControlClient {
+    fn connect(address: &str) -> Result<Self, String> {
+        let mut last_error = None;
+        let stream = address
+            .to_socket_addrs()
+            .map_err(|error| format!("resolve runner address {address}: {error}"))?
+            .find_map(|socket_address| {
+                match TcpStream::connect_timeout(&socket_address, Duration::from_secs(5)) {
+                    Ok(stream) => Some(stream),
+                    Err(error) => {
+                        last_error = Some(error.to_string());
+                        None
+                    }
+                }
+            })
+            .ok_or_else(|| {
+                format!(
+                    "connect runner at {address}: {}",
+                    last_error.unwrap_or_else(|| "no address resolved".to_string())
+                )
+            })?;
+        let read_stream = stream
+            .try_clone()
+            .map_err(|error| format!("clone runner stream: {error}"))?;
+        let mut reader = BufReader::new(read_stream);
+        let mut ready = String::new();
+        reader
+            .read_line(&mut ready)
+            .map_err(|error| format!("read runner handshake: {error}"))?;
+        if !ready.starts_with("ready ") {
+            return Err(format!("unexpected runner handshake: {}", ready.trim()));
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("rne-viewer-runner-reader".into())
+            .spawn(move || {
+                for line in reader.lines() {
+                    let Ok(line) = line else { break };
+                    if let Some(status) = parse_remote_status(&line) {
+                        if sender.send(RemoteEvent::Status(status)).is_err() {
+                            return;
+                        }
+                    }
+                }
+                let _ = sender.send(RemoteEvent::Disconnected);
+            })
+            .map_err(|error| format!("spawn runner reader: {error}"))?;
+
+        Ok(Self {
+            writer: BufWriter::new(stream),
+            receiver,
+            latest: None,
+            connected: true,
+        })
+    }
+
+    fn poll(&mut self) {
+        loop {
+            match self.receiver.try_recv() {
+                Ok(RemoteEvent::Status(status)) => self.latest = Some(status),
+                Ok(RemoteEvent::Disconnected) => {
+                    self.connected = false;
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.connected = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn latest(&self) -> Option<&RemoteStatus> {
+        self.latest.as_ref()
+    }
+
+    fn state(&self) -> RemoteRunnerState {
+        self.latest
+            .as_ref()
+            .map(|status| status.state)
+            .unwrap_or(RemoteRunnerState::Paused)
+    }
+
+    fn state_label(&self) -> &'static str {
+        if !self.connected {
+            "disconnected"
+        } else if self.latest.is_none() {
+            "waiting"
+        } else {
+            self.state().as_str()
+        }
+    }
+
+    fn send(&mut self, command: &str) -> Result<(), String> {
+        if !self.connected {
+            return Err("runner connection is closed".to_string());
+        }
+        if let Err(error) = writeln!(self.writer, "{command}").and_then(|_| self.writer.flush()) {
+            self.connected = false;
+            return Err(format!("send runner command `{command}`: {error}"));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 enum ViewerProfile {
@@ -99,6 +439,45 @@ impl ViewerSim {
                     sim.step_arm(teleop_urdf_arm(keys));
                 }
             }
+        }
+    }
+
+    fn apply_remote_snapshot(&mut self, snapshot: &RemoteSnapshot) -> Result<(), String> {
+        let base = snapshot.base.or_else(|| {
+            snapshot
+                .positions_m
+                .as_ref()
+                .and_then(|positions| positions.first().copied())
+        });
+        match self {
+            Self::DiffDrive(sim) => {
+                let Some(base) = base else {
+                    return Ok(());
+                };
+                let base_link = sim.robot().base_link;
+                let mut transform = sim
+                    .world_mut()
+                    .get_mut::<Transform3>(base_link)
+                    .ok_or_else(|| "remote viewer base link has no Transform3".to_string())?;
+                transform.translation = Vec3::new(base[0], base[1], base[2]);
+                if let Some(yaw_rad) = snapshot.base_yaw_rad {
+                    transform.rotation = Quat::from_rotation_y(yaw_rad);
+                }
+                Ok(())
+            }
+            Self::UrdfScene(sim) => {
+                let (names, positions) = snapshot
+                    .joints
+                    .as_ref()
+                    .map(|joints| (joints.names.as_slice(), joints.positions_rad.as_slice()))
+                    .unwrap_or((&[], &[]));
+                sim.apply_render_projection(base, snapshot.base_yaw_rad, names, positions);
+                Ok(())
+            }
+            Self::Manipulator(_) => Err(
+                "remote runner frontend supports diff-drive and generic URDF profiles; use --urdf for articulated snapshots"
+                    .into(),
+            ),
         }
     }
 
@@ -169,18 +548,24 @@ impl ViewerSim {
         matches!(self, Self::Manipulator(sim) if sim.wrist_camera_enabled())
     }
 
-    fn build_scene(&self, show_lidar: bool, show_task_markers: bool) -> rne_render::RenderScene {
+    fn build_scene(
+        &self,
+        show_lidar: bool,
+        show_task_markers: bool,
+        remote_lidar_points: Option<&[Vec3]>,
+    ) -> rne_render::RenderScene {
         let mut scene = match self {
-            Self::DiffDrive(sim) => {
-                let mut scene = build_diff_drive_render_scene(sim.world(), sim.robots());
-                if show_lidar {
-                    append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
-                }
-                scene
-            }
+            Self::DiffDrive(sim) => build_diff_drive_render_scene(sim.world(), sim.robots()),
             Self::Manipulator(sim) => build_visual_render_scene(sim.world()),
             Self::UrdfScene(sim) => build_visual_render_scene(sim.world()),
         };
+        if show_lidar {
+            if let Some(points) = remote_lidar_points {
+                scene.append_lidar_points(points, REMOTE_LIDAR_COLOR);
+            } else if let Self::DiffDrive(sim) = self {
+                append_lidar_overlay(&mut scene, sim.world(), sim.data_bus());
+            }
+        }
         if show_task_markers {
             match self {
                 Self::DiffDrive(sim) => {
@@ -261,13 +646,26 @@ fn main() {
     }
 
     let event_loop = EventLoop::new().expect("create event loop");
-    let mut app = App::new(profile);
+    let remote_addr = viewer_remote_addr_from_args();
+    let mut app = App::new(profile, remote_addr);
     event_loop.run_app(&mut app).expect("run viewer");
 }
 
 fn default_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
+}
+
+fn viewer_remote_addr_from_args() -> Option<String> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    args.windows(2)
+        .find(|pair| pair[0] == "--connect")
+        .map(|pair| pair[1].clone())
+        .or_else(|| {
+            args.iter()
+                .find_map(|arg| arg.strip_prefix("--connect=").map(str::to_string))
+        })
+        .or_else(|| env::var("RNE_VIEWER_CONNECT").ok())
 }
 
 fn viewer_profile_from_args() -> ViewerProfile {
@@ -381,7 +779,11 @@ fn run_smoke(explicit: bool, profile: &ViewerProfile) {
         }
     };
 
-    let mut scene = sim.build_scene(matches!(profile, ViewerProfile::DiffDriveScene(_)), true);
+    let mut scene = sim.build_scene(
+        matches!(profile, ViewerProfile::DiffDriveScene(_)),
+        true,
+        None,
+    );
     let mesh_items = count_mesh_items(&scene);
     let mut mesh_cache = MeshRenderCache::new();
     let mesh_roots = sim.mesh_roots();
@@ -602,9 +1004,11 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
 
 struct App {
     profile: ViewerProfile,
+    remote_addr: Option<String>,
     window: Option<Arc<Window>>,
     viewer: Option<InteractiveViewer>,
     sim: Option<ViewerSim>,
+    remote: Option<RemoteControlClient>,
     hot_reloader: Option<AssetHotReloader>,
     mesh_cache: MeshRenderCache,
     reload_count: u32,
@@ -615,16 +1019,19 @@ struct App {
     show_lidar: bool,
     show_task_markers: bool,
     show_wrist_camera: bool,
+    show_depth_pip: bool,
     last_hud: String,
 }
 
 impl App {
-    fn new(profile: ViewerProfile) -> Self {
+    fn new(profile: ViewerProfile, remote_addr: Option<String>) -> Self {
         Self {
             profile,
+            remote_addr,
             window: None,
             viewer: None,
             sim: None,
+            remote: None,
             hot_reloader: None,
             mesh_cache: MeshRenderCache::new(),
             reload_count: 0,
@@ -635,6 +1042,7 @@ impl App {
             show_lidar: true,
             show_task_markers: true,
             show_wrist_camera: true,
+            show_depth_pip: false,
             last_hud: String::new(),
         }
     }
@@ -675,6 +1083,32 @@ impl ApplicationHandler for App {
             }
         };
 
+        let remote = if let Some(address) = self.remote_addr.as_deref() {
+            if matches!(
+                &self.profile,
+                ViewerProfile::ManipulatorFixed(_)
+                    | ViewerProfile::ManipulatorMobile(_)
+                    | ViewerProfile::ManipulatorLift(_)
+            ) {
+                eprintln!("--connect requires a diff-drive or generic URDF scene profile");
+                event_loop.exit();
+                return;
+            }
+            match RemoteControlClient::connect(address) {
+                Ok(remote) => {
+                    println!("connected to runner frontend at {address}");
+                    Some(remote)
+                }
+                Err(error) => {
+                    eprintln!("runner frontend connection failed: {error}");
+                    event_loop.exit();
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         let hot_reloader = match AssetHotReloader::load(profile_scene_path(&self.profile)) {
             Ok(reloader) => Some(reloader),
             Err(error) => {
@@ -696,6 +1130,7 @@ impl ApplicationHandler for App {
         self.window = Some(window);
         self.viewer = Some(viewer);
         self.sim = Some(sim);
+        self.remote = remote;
         self.hot_reloader = hot_reloader;
     }
 
@@ -740,6 +1175,9 @@ impl App {
         match event.state {
             ElementState::Pressed => {
                 if physical == KeyCode::Escape {
+                    if let Some(remote) = self.remote.as_mut() {
+                        let _ = remote.send("quit");
+                    }
                     std::process::exit(0);
                 }
                 if physical == KeyCode::KeyL
@@ -756,17 +1194,29 @@ impl App {
                     );
                 }
                 if physical == KeyCode::KeyP
-                    && matches!(
-                        self.profile,
-                        ViewerProfile::ManipulatorFixed(_)
-                            | ViewerProfile::ManipulatorMobile(_)
-                            | ViewerProfile::ManipulatorLift(_)
-                    )
+                    && (self.remote.is_some()
+                        || matches!(
+                            self.profile,
+                            ViewerProfile::ManipulatorFixed(_)
+                                | ViewerProfile::ManipulatorMobile(_)
+                                | ViewerProfile::ManipulatorLift(_)
+                        ))
                 {
                     self.show_wrist_camera = !self.show_wrist_camera;
                     println!(
-                        "wrist camera pip {}",
+                        "camera pip {}",
                         if self.show_wrist_camera {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                if physical == KeyCode::KeyD && self.remote.is_some() {
+                    self.show_depth_pip = !self.show_depth_pip;
+                    println!(
+                        "depth pip {}",
+                        if self.show_depth_pip {
                             "enabled"
                         } else {
                             "disabled"
@@ -784,6 +1234,25 @@ impl App {
                         }
                     );
                 }
+                if let Some(remote) = self.remote.as_mut() {
+                    let command = match physical {
+                        KeyCode::Space => Some(if remote.state() == RemoteRunnerState::Paused {
+                            "resume"
+                        } else {
+                            "pause"
+                        }),
+                        KeyCode::KeyN => Some("step 1"),
+                        KeyCode::KeyT => Some("step 10"),
+                        KeyCode::KeyR => Some("reset"),
+                        _ => None,
+                    };
+                    if let Some(command) = command {
+                        if let Err(error) = remote.send(command) {
+                            eprintln!("{error}");
+                        }
+                        return;
+                    }
+                }
                 self.pressed.insert(physical);
             }
             ElementState::Released => {
@@ -796,11 +1265,44 @@ impl App {
         self.apply_camera_input();
         self.poll_hot_reload()?;
 
+        let remote_status = if let Some(remote) = self.remote.as_mut() {
+            remote.poll();
+            remote.latest().cloned()
+        } else {
+            None
+        };
+
         let sim = self.sim.as_mut().ok_or("simulation not ready")?;
-        sim.step(&self.pressed);
+        let remote_lidar_points = remote_status
+            .as_ref()
+            .map(|status| status.snapshot.lidar_points());
+        if let Some(status) = &remote_status {
+            sim.apply_remote_snapshot(&status.snapshot)?;
+        } else if self.remote.is_none() {
+            sim.step(&self.pressed);
+        }
         self.orbit.focus = sim.focus();
 
-        let hud = sim.hud_line();
+        let hud = if let Some(status) = &remote_status {
+            let joint_count = status
+                .snapshot
+                .joints
+                .as_ref()
+                .map_or(0, |joints| joints.positions_rad.len());
+            format!(
+                "remote step={} t={:.3} state={} joints={} sensors={} {}",
+                status.step,
+                status.sim_time_s,
+                status.state.as_str(),
+                joint_count,
+                status.snapshot.sensors.len(),
+                sim.hud_line()
+            )
+        } else if let Some(remote) = self.remote.as_ref() {
+            format!("remote {} {}", remote.state_label(), sim.hud_line())
+        } else {
+            sim.hud_line()
+        };
         if hud != self.last_hud {
             if let Some(window) = &self.window {
                 window.set_title(&format!(
@@ -812,7 +1314,11 @@ impl App {
             self.last_hud = hud;
         }
 
-        let mut scene = sim.build_scene(self.show_lidar, self.show_task_markers);
+        let mut scene = sim.build_scene(
+            self.show_lidar,
+            self.show_task_markers,
+            remote_lidar_points.as_deref(),
+        );
         let mesh_roots = sim.mesh_roots();
         let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
         self.mesh_cache
@@ -822,12 +1328,25 @@ impl App {
         let view = self.orbit.camera_transform();
         let viewer = self.viewer.as_mut().ok_or("viewer not ready")?;
         let pip = if self.show_wrist_camera {
-            sim.wrist_camera_pip()
+            if self.remote.is_some() {
+                remote_status
+                    .as_ref()
+                    .and_then(|status| status.snapshot.camera_pip())
+            } else {
+                sim.wrist_camera_pip()
+            }
+        } else {
+            None
+        };
+        let depth_pip = if self.show_depth_pip {
+            remote_status
+                .as_ref()
+                .and_then(|status| status.snapshot.depth_pip())
         } else {
             None
         };
         viewer
-            .render_with_pip(&view, &scene, CLEAR_COLOR, pip)
+            .render_with_pip_and_depth(&view, &scene, CLEAR_COLOR, pip, depth_pip)
             .map_err(|error| error.to_string())
     }
 
@@ -1027,6 +1546,49 @@ mod tests {
     #[test]
     fn default_scene_path_exists() {
         assert!(default_scene_path().is_file());
+    }
+
+    #[test]
+    fn remote_status_parses_pose_and_sensor_summary() {
+        let status = parse_remote_status(
+            r#"status step=7 t=0.116667 state=paused snapshot={"base":[1.0,0.25,2.0],"base_yaw_rad":0.5,"joints":null,"sensors":[{"stream_id":1,"kind":"imu","sequence":7}]}"#,
+        )
+        .expect("parse remote status");
+        assert_eq!(status.step, 7);
+        assert_eq!(status.state, RemoteRunnerState::Paused);
+        assert_eq!(status.snapshot.base, Some([1.0, 0.25, 2.0]));
+        assert_eq!(status.snapshot.base_yaw_rad, Some(0.5));
+        assert_eq!(status.snapshot.sensors.len(), 1);
+    }
+
+    #[test]
+    fn remote_status_decodes_camera_and_lidar_previews() {
+        let status = parse_remote_status(
+            r#"status step=8 t=0.133333 state=paused snapshot={"base":[1.0,0.25,2.0],"base_yaw_rad":0.5,"joints":null,"sensors":[{"stream_id":2,"kind":"camera","sequence":8,"payload_hash":11,"camera":{"width":1,"height":1,"rgba8_base64":"AQIDBA==","depth_center_m":1.5,"depth_hash":12,"depth_width":2,"depth_height":1,"depth_f32_le_base64":"AACAPwAAAEA="}},{"stream_id":3,"kind":"lidar","sequence":8,"payload_hash":13,"lidar":{"point_count":1,"points_m":[[2.0,0.3,1.0]]}}]}"#,
+        )
+        .expect("parse sensor previews");
+        assert_eq!(status.snapshot.camera_pip(), Some((vec![1, 2, 3, 4], 1, 1)));
+        assert_eq!(
+            status.snapshot.lidar_points(),
+            vec![Vec3::new(2.0, 0.3, 1.0)]
+        );
+        assert_eq!(status.snapshot.depth_pip(), Some((vec![1.0, 2.0], 2, 1)));
+    }
+
+    #[test]
+    fn remote_status_parses_scenario_traffic_positions() {
+        let status = parse_remote_status(
+            r#"status step=3 t=0.050000 state=paused snapshot={"positions_m":[[4.0,0.0,2.0]],"signal_violations":0,"collisions":0,"stable_hash":42,"average_speed_m_s":3.0}"#,
+        )
+        .expect("parse scenario status");
+        assert_eq!(status.snapshot.base, None);
+        assert_eq!(status.snapshot.positions_m, Some(vec![[4.0, 0.0, 2.0]]));
+    }
+
+    #[test]
+    fn remote_status_ignores_command_ack_lines() {
+        assert!(parse_remote_status("ok paused").is_none());
+        assert!(parse_remote_status("ready paused").is_none());
     }
 
     #[test]

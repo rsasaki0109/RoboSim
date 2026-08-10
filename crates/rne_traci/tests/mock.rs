@@ -53,6 +53,37 @@ fn start_mock(respond: impl Fn(&mut MockReply) + Send + 'static) -> u16 {
     port
 }
 
+/// Spawns a mock server that validates the TraCI vehicle speed command payload.
+fn start_speed_mock(expected_vehicle_id: &str, expected_speed_m_s: f64) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind speed mock listener");
+    let port = listener.local_addr().expect("local address").port();
+    let expected_vehicle_id = expected_vehicle_id.to_string();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept speed client");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone speed stream"));
+        let body = read_request(&mut reader).expect("read speed request");
+        let valid = body.get(1) == Some(&0xc4)
+            && body.get(2) == Some(&0x40)
+            && body.len() >= 3 + 4 + expected_vehicle_id.len() + 1 + 8
+            && u32::from_be_bytes(body[3..7].try_into().expect("vehicle id length"))
+                == expected_vehicle_id.len() as u32
+            && body.get(7..7 + expected_vehicle_id.len()) == Some(expected_vehicle_id.as_bytes())
+            && body.get(7 + expected_vehicle_id.len()) == Some(&0x0b)
+            && f64::from_be_bytes(
+                body[8 + expected_vehicle_id.len()..16 + expected_vehicle_id.len()]
+                    .try_into()
+                    .expect("speed bytes"),
+            ) == expected_speed_m_s;
+        let response = if valid {
+            status_bytes(0xc4, 0x00, "")
+        } else {
+            status_bytes(0xc4, 0xff, "invalid speed payload")
+        };
+        let _ = stream.write_all(&message(&[response]));
+    });
+    port
+}
+
 /// Builds mock TraCI response commands.
 struct MockReply {
     responses: Vec<Vec<u8>>,
@@ -207,6 +238,25 @@ fn close_round_trip() {
     let port = start_mock(|_| {});
     let mut client = connect(port);
     client.close().expect("close");
+}
+
+#[test]
+fn vehicle_speed_command_round_trip_uses_change_vehicle_state_payload() {
+    let port = start_speed_mock("veh_0", 3.5);
+    let mut client = connect(port);
+    client
+        .set_vehicle_speed_m_s("veh_0", 3.5)
+        .expect("set vehicle speed");
+}
+
+#[test]
+fn vehicle_speed_rejects_values_below_sumo_reset_sentinel() {
+    let port = start_mock(|_| {});
+    let mut client = connect(port);
+    let error = client
+        .set_vehicle_speed_m_s("veh_0", -2.0)
+        .expect_err("invalid speed must be rejected before sending");
+    assert!(matches!(error, TraciError::InvalidArgument(_)));
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use rne_ecs::World;
 use rne_traci::CoSimulation;
-use rne_traffic::{TrafficActor, TrafficPose};
+use rne_traffic::{TrafficActor, TrafficPose, TrafficPoseSource};
 use std::io::{BufReader, Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -18,6 +18,17 @@ fn status_bytes(command_id: u8) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(0x00);
     payload.extend_from_slice(&string_bytes(""));
+    let mut command = Vec::with_capacity(2 + payload.len());
+    command.push((2 + payload.len()) as u8);
+    command.push(command_id);
+    command.extend_from_slice(&payload);
+    command
+}
+
+fn error_status_bytes(command_id: u8, description: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.push(0xff);
+    payload.extend_from_slice(&string_bytes(description));
     let mut command = Vec::with_capacity(2 + payload.len());
     command.push((2 + payload.len()) as u8);
     command.push(command_id);
@@ -109,6 +120,87 @@ fn start_stateful_mock() -> u16 {
     port
 }
 
+/// Serves `v0` on the first step, then returns `v0` and `v1` while failing to
+/// provide `v1`'s position. The successful `v0` read must not be mirrored.
+fn start_transactional_failure_mock() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock listener");
+    let port = listener.local_addr().expect("local address").port();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept mock client");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut sim_step = 0_usize;
+        loop {
+            let mut length_bytes = [0_u8; 4];
+            if reader.read_exact(&mut length_bytes).is_err() {
+                return;
+            }
+            let length = u32::from_be_bytes(length_bytes) as usize;
+            let mut body = vec![0_u8; length.saturating_sub(4)];
+            if reader.read_exact(&mut body).is_err() {
+                return;
+            }
+            let mut responses = Vec::new();
+            match body[1] {
+                0x02 => {
+                    responses.push(status_bytes(0x02));
+                    responses.push(command_bytes(0x02, &0_u32.to_be_bytes()));
+                    sim_step += 1;
+                }
+                0xa4 => {
+                    let variable = body[2];
+                    if variable == 0x00 {
+                        responses.push(status_bytes(0xa4));
+                        let ids: &[&str] = if sim_step == 1 {
+                            &["v0"]
+                        } else {
+                            &["v0", "v1"]
+                        };
+                        let mut payload = Vec::new();
+                        payload.push(variable);
+                        payload.extend_from_slice(&string_bytes(""));
+                        payload.push(0x0e);
+                        payload.extend_from_slice(&(ids.len() as u32).to_be_bytes());
+                        for id in ids {
+                            payload.extend_from_slice(&string_bytes(id));
+                        }
+                        responses.push(command_bytes(0xb4, &payload));
+                    } else if variable == 0x42 {
+                        let id_length =
+                            u32::from_be_bytes(body[3..7].try_into().expect("vehicle id length"))
+                                as usize;
+                        let id =
+                            std::str::from_utf8(&body[7..7 + id_length]).expect("vehicle id utf-8");
+                        if sim_step >= 2 && id == "v1" {
+                            responses.push(error_status_bytes(0xa4, "position unavailable"));
+                        } else {
+                            responses.push(status_bytes(0xa4));
+                            let (x, y): (f64, f64) = if sim_step == 1 {
+                                (1.0, -2.0)
+                            } else {
+                                (9.0, -8.0)
+                            };
+                            let mut payload = Vec::new();
+                            payload.push(variable);
+                            payload.extend_from_slice(&string_bytes(id));
+                            payload.push(0x01);
+                            payload.extend_from_slice(&x.to_be_bytes());
+                            payload.extend_from_slice(&y.to_be_bytes());
+                            responses.push(command_bytes(0xb4, &payload));
+                        }
+                    }
+                }
+                other => responses.push(status_bytes(other)),
+            }
+            let bytes = message(&responses);
+            if stream.write_all(&bytes).is_err() {
+                return;
+            }
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
 #[test]
 fn mirrors_vehicle_create_update_and_remove() {
     let port = start_stateful_mock();
@@ -116,10 +208,18 @@ fn mirrors_vehicle_create_update_and_remove() {
     let mut co_sim = CoSimulation::connect("127.0.0.1", port).expect("connect");
     assert!(co_sim.actors().is_empty());
 
+    co_sim
+        .set_vehicle_speed_m_s("v0", 4.0)
+        .expect("explicit SUMO speed command");
+
     co_sim.step(&mut world).expect("first step");
     assert_eq!(co_sim.actors().len(), 1, "the vehicle must be mirrored");
     let entity = co_sim.actors()["v0"];
     assert!(world.get::<TrafficActor>(entity).is_some());
+    assert_eq!(
+        world.get::<TrafficPoseSource>(entity),
+        Some(&TrafficPoseSource::External)
+    );
     let pose = world.get::<TrafficPose>(entity).expect("pose");
     assert_eq!(pose.position_m, [10.0, 0.0, 20.0]);
 
@@ -135,5 +235,40 @@ fn mirrors_vehicle_create_update_and_remove() {
     assert!(
         co_sim.actors().is_empty(),
         "a departed SUMO vehicle must be despawned"
+    );
+}
+
+#[test]
+fn position_failure_does_not_partially_update_the_mirror() {
+    let port = start_transactional_failure_mock();
+    let mut world = World::new();
+    let mut co_sim = CoSimulation::connect("127.0.0.1", port).expect("connect");
+
+    co_sim.step(&mut world).expect("initial step");
+    let entity = co_sim.actors()["v0"];
+    let pose_before = *world.get::<TrafficPose>(entity).expect("initial pose");
+    let actors_before = co_sim.actors().clone();
+
+    let error = co_sim
+        .step(&mut world)
+        .expect_err("the second vehicle position must fail");
+    assert!(
+        error.to_string().contains("position unavailable"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(co_sim.actors(), &actors_before);
+    assert_eq!(
+        world.get::<TrafficPose>(entity),
+        Some(&pose_before),
+        "a successful earlier position read must not update ECS"
+    );
+    assert_eq!(
+        world.query::<&TrafficPose>().iter(&world).count(),
+        1,
+        "a new actor must not be spawned before every position read succeeds"
+    );
+    assert_eq!(
+        world.get::<TrafficPoseSource>(entity),
+        Some(&TrafficPoseSource::External)
     );
 }

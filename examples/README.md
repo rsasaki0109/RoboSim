@@ -17,7 +17,7 @@
 | Agent policy | `cargo run -p agent_policy --example 11_agent_policy` | Agent entity + attachable policy (episode-owned world) |
 | Shared-world agent | `cargo run -p shared_world_agent --example 12_shared_world_agent` | Agent entity in simulation ECS world |
 | Multi-robot agent | `cargo run -p multi_robot_agent --example 13_multi_robot_agent` | Two agents, two robots, one shared world |
-| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene/URDF/mesh live reload, URDF mesh visuals (`--urdf <scene>`), WASD teleop, orbit camera, LiDAR (`L`) and semantic TaskMarker (`M`) overlays; manipulator profiles add arm teleop |
+| Interactive viewer | `cargo run -p interactive_viewer --example 14_interactive_viewer` | Scene/URDF/mesh live reload, URDF mesh visuals (`--urdf <scene>`), WASD teleop, LiDAR (`L`) and semantic TaskMarker (`M`) overlays; `--connect` adds remote camera PiP, bounded LiDAR previews, and `D` depth PiP for `--control-camera-full-resolution`; manipulator profiles add arm teleop |
 | Asset hot reload | `cargo run -p asset_hot_reload --example 15_asset_hot_reload -- --smoke` | Validate scene deps and reload on file change |
 | Goal-conditioned agent | `cargo run -p goal_conditioned_agent --example 16_goal_conditioned_agent` | Goal-seeking policy, curriculum, shared-world goal agent |
 | Multi-robot collision | `cargo run -p multi_robot_collision --example 17_multi_robot_collision` | Head-on contact detection from scene asset and built-in scenario |
@@ -66,7 +66,7 @@
 | Replay artifact | `cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay` | Re-runs the recorded action schedule and verifies every frame |
 | Run manifest | `cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml` | Versioned scene, seed, clock, controller, determinism, and replay-output configuration |
 | Sensor payload export | `cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml` | Full typed LiDAR payload capture through a manifest `[[sensors]]` subscription |
-| OpenSCENARIO scenario | `cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml` | Executes a `.xosc` speed scenario over the traffic runtime |
+| OpenSCENARIO scenario | `cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml` | Executes a `.xosc` speed scenario over the traffic runtime and writes/verifies a deterministic scenario replay artifact |
 | Joint trajectory | `cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_trajectory.rne.run.toml` | Interpolates multi-joint position waypoints headlessly |
 | Analytic physics backend | `cargo run --release -p rne_asset_cli -- run assets/runs/cart_analytic.rne.run.toml` | Selects the deterministic collision-free analytic backend |
 | PLATEAU import CLI | `cargo run -p rne_plateau_import -- path/to/tile.gml --output target/plateau/tile --tile-name tile` | Convert bounded PLATEAU CityGML building and road LOD1 to OBJ, RNE scene, and stable lane metadata |
