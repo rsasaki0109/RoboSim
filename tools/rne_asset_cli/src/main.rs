@@ -22,8 +22,9 @@ use rne_log::{
 };
 use rne_math::{yaw_rad, Hertz};
 use rne_openscenario::{
-    execute_scenario, execute_scenario_with_control, parse_openscenario_xml_file, ScenarioDocument,
-    ScenarioReplayArtifact, ScenarioRunOptions, SCENARIO_REPLAY_KIND,
+    execute_scenario, execute_scenario_with_control, parse_openscenario_xml_file,
+    stable_replay_input_digest, ScenarioDocument, ScenarioReplayArtifact, ScenarioRunOptions,
+    SCENARIO_REPLAY_KIND,
 };
 use rne_physics::{
     hash_physics_state, require_capabilities, ContactEvent, PhysicsBackend, PhysicsCapability,
@@ -54,8 +55,13 @@ use std::thread;
 use std::time::Duration;
 
 const REPLAY_FLOAT_EPSILON: f64 = 1.0e-12;
+const RUNNER_CONTROL_PROTOCOL_VERSION: u32 = 1;
+const RUNNER_CONTROL_MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
+const RUNNER_CONTROL_WRITE_TIMEOUT_MS: u64 = 500;
 const LIVE_CAMERA_MAX_WIDTH: u32 = 160;
 const LIVE_CAMERA_MAX_HEIGHT: u32 = 120;
+const LIVE_CAMERA_TRANSPORT_MAX_WIDTH: u32 = 1920;
+const LIVE_CAMERA_TRANSPORT_MAX_HEIGHT: u32 = 1080;
 const LIVE_LIDAR_MAX_POINTS: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,7 +177,8 @@ enum Commands {
         /// status replies. Determinism re-checks are skipped in interactive mode.
         #[arg(long, value_name = "PORT", conflicts_with = "control_stdin")]
         control_port: Option<u16>,
-        /// Stream camera and depth payloads at their source resolution over TCP.
+        /// Stream camera and depth payloads at source resolution over TCP, up
+        /// to the transport safety cap of 1920x1080 pixels per payload.
         /// This is opt-in because each status line can become substantially larger.
         #[arg(long, requires = "control_port")]
         control_camera_full_resolution: bool,
@@ -815,9 +822,13 @@ fn run_scenario_manifest(
             .map(|path| manifest.resolve_output_path(manifest_path, path))
     });
     if let Some(replay_out) = replay_out {
+        let scenario_digest = replay_input_digest(&xosc_path, "OpenSCENARIO")?;
+        let network_digest = replay_input_digest(&network_path, "traffic network")?;
         let artifact = ScenarioReplayArtifact::new(
             xosc_path.display().to_string(),
+            scenario_digest,
             network_path.display().to_string(),
+            network_digest,
             options,
             first.steps,
             control_commands,
@@ -841,6 +852,12 @@ fn run_scenario_manifest(
         }
     }
     Ok(())
+}
+
+fn replay_input_digest(path: &Path, input_kind: &str) -> Result<u64> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("read {input_kind} replay input {}", path.display()))?;
+    Ok(stable_replay_input_digest(&bytes))
 }
 
 /// Loads an OpenSCENARIO document and its referenced traffic network.
@@ -1041,14 +1058,17 @@ impl RunnerControl for StdinRunnerControl {
 
 /// A [`RunnerControl`] transport served over a local TCP connection.
 ///
-/// A reader thread accepts one client, sends `ready paused`, then turns each
+/// A reader thread accepts one client, sends `ready paused protocol=1`, then turns each
 /// line into a control command (acknowledging `ok <state>`). The main thread
 /// streams a `status step=<n> t=<t> state=<state> snapshot=<json>` line after
 /// every completed step, so a GUI or renderer frontend can both drive and
-/// observe the run. The snapshot contains bounded RGB camera previews,
+/// observe the run. An acknowledgement means the command was accepted by the
+/// runner-control queue; the subsequent status is the applied-state boundary.
+/// The snapshot contains bounded RGB camera previews,
 /// deterministic LiDAR point samples, and latest IMU/wheel values when those
 /// typed sensor streams are present. The `run` command can opt into source-
-/// resolution RGB plus little-endian f32 depth payloads for TCP control.
+/// resolution RGB plus little-endian f32 depth payloads for TCP control, with
+/// absolute per-image and per-status safety limits.
 struct TcpRunnerControl {
     receiver: mpsc::Receiver<ControlCommand>,
     writer: Arc<Mutex<Option<std::io::BufWriter<std::net::TcpStream>>>>,
@@ -1099,19 +1119,29 @@ impl TcpRunnerControl {
                     let _ = sender.send(ControlCommand::Quit);
                     return;
                 };
+                let _ = stream.set_write_timeout(Some(Duration::from_millis(
+                    RUNNER_CONTROL_WRITE_TIMEOUT_MS,
+                )));
                 let read_stream = stream.try_clone().ok();
                 if let Ok(mut slot) = thread_writer.lock() {
                     *slot = Some(std::io::BufWriter::new(stream));
                 }
                 let write = |line: &str| {
                     if let Ok(mut slot) = thread_writer.lock() {
-                        if let Some(writer) = slot.as_mut() {
-                            let _ = writer.write_all(line.as_bytes());
-                            let _ = writer.flush();
+                        let failed = slot.as_mut().is_some_and(|writer| {
+                            writer
+                                .write_all(line.as_bytes())
+                                .and_then(|()| writer.flush())
+                                .is_err()
+                        });
+                        if failed {
+                            *slot = None;
                         }
                     }
                 };
-                write("ready paused\n");
+                write(&format!(
+                    "ready paused protocol={RUNNER_CONTROL_PROTOCOL_VERSION}\n"
+                ));
                 let Some(read_stream) = read_stream else {
                     let _ = sender.send(ControlCommand::Quit);
                     return;
@@ -1181,18 +1211,49 @@ impl RunnerControl for TcpRunnerControl {
 
     fn report_status(&mut self, step: u64, sim_time_s: f64, snapshot: &[u8]) {
         let state = if self.paused { "paused" } else { "running" };
-        let line = format!(
-            "status step={step} t={} state={state} snapshot={}\n",
-            format_f64_status(sim_time_s),
-            String::from_utf8_lossy(snapshot)
-        );
+        let line = runner_status_line(step, sim_time_s, state, snapshot);
         if let Ok(mut slot) = self.writer.lock() {
-            if let Some(writer) = slot.as_mut() {
-                let _ = writer.write_all(line.as_bytes());
-                let _ = writer.flush();
+            let failed = slot.as_mut().is_some_and(|writer| {
+                writer
+                    .write_all(line.as_bytes())
+                    .and_then(|()| writer.flush())
+                    .is_err()
+            });
+            if failed {
+                *slot = None;
             }
         }
     }
+}
+
+fn runner_status_line(step: u64, sim_time_s: f64, state: &str, snapshot: &[u8]) -> String {
+    runner_status_line_with_limit(
+        step,
+        sim_time_s,
+        state,
+        snapshot,
+        RUNNER_CONTROL_MAX_SNAPSHOT_BYTES,
+    )
+}
+
+fn runner_status_line_with_limit(
+    step: u64,
+    sim_time_s: f64,
+    state: &str,
+    snapshot: &[u8],
+    max_snapshot_bytes: usize,
+) -> String {
+    let sim_time = format_f64_status(sim_time_s);
+    if snapshot.len() <= max_snapshot_bytes {
+        return format!(
+            "status step={step} t={sim_time} state={state} snapshot={}\n",
+            String::from_utf8_lossy(snapshot)
+        );
+    }
+    format!(
+        "status step={step} t={sim_time} state={state} snapshot={{\"error\":\"snapshot_limit_exceeded\",\"snapshot_bytes\":{},\"limit_bytes\":{max_snapshot_bytes}}}\n",
+        snapshot.len(),
+    )
 }
 
 /// Compact per-step observation streamed to a live frontend.
@@ -1250,6 +1311,10 @@ struct LiveSensorStream {
 /// Bounded RGB-D camera preview in the runner status protocol.
 #[derive(serde::Serialize)]
 struct LiveCameraPreview {
+    /// Source RGB width before transport downsampling.
+    source_width: u32,
+    /// Source RGB height before transport downsampling.
+    source_height: u32,
     /// Preview width in pixels.
     width: u32,
     /// Preview height in pixels.
@@ -1262,10 +1327,16 @@ struct LiveCameraPreview {
     /// Stable hash of the full paired depth frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     depth_hash: Option<u64>,
-    /// Source depth width when full-resolution depth streaming is enabled.
+    /// Source depth width when depth streaming is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_source_width: Option<u32>,
+    /// Source depth height when depth streaming is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    depth_source_height: Option<u32>,
+    /// Transport depth width when full-resolution depth streaming is enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     depth_width: Option<u32>,
-    /// Source depth height when full-resolution depth streaming is enabled.
+    /// Transport depth height when full-resolution depth streaming is enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     depth_height: Option<u32>,
     /// Little-endian f32 depth metres encoded as base64 when enabled.
@@ -1392,16 +1463,28 @@ fn build_live_camera_preview(
     options: LiveSnapshotOptions,
 ) -> Option<LiveCameraPreview> {
     let (width, height, rgba8) = downsample_rgba8(rgb, options)?;
-    let (depth_width, depth_height, depth_f32_le_base64) = if options.include_full_depth {
-        depth
-            .and_then(encode_full_depth)
-            .map_or((None, None, None), |(width, height, depth)| {
-                (Some(width), Some(height), Some(depth))
-            })
-    } else {
-        (None, None, None)
-    };
+    let (depth_source_width, depth_source_height, depth_width, depth_height, depth_f32_le_base64) =
+        if options.include_full_depth {
+            depth
+                .and_then(|depth| encode_bounded_depth(depth, options))
+                .map_or(
+                    (None, None, None, None, None),
+                    |(width, height, payload)| {
+                        (
+                            depth.map(|value| value.width),
+                            depth.map(|value| value.height),
+                            Some(width),
+                            Some(height),
+                            Some(payload),
+                        )
+                    },
+                )
+        } else {
+            (None, None, None, None, None)
+        };
     Some(LiveCameraPreview {
+        source_width: rgb.width,
+        source_height: rgb.height,
         width,
         height,
         rgba8_base64: base64::encode(rgba8),
@@ -1409,23 +1492,35 @@ fn build_live_camera_preview(
             .map(ImageDepth::center_depth_m)
             .filter(|value| value.is_finite()),
         depth_hash: depth.map(ImageDepth::hash_depth),
+        depth_source_width,
+        depth_source_height,
         depth_width,
         depth_height,
         depth_f32_le_base64,
     })
 }
 
-fn encode_full_depth(depth: &ImageDepth) -> Option<(u32, u32, String)> {
+fn encode_bounded_depth(
+    depth: &ImageDepth,
+    options: LiveSnapshotOptions,
+) -> Option<(u32, u32, String)> {
     let expected_len = (depth.width as usize).checked_mul(depth.height as usize)?;
     if depth.width == 0 || depth.height == 0 || depth.depth_m.len() < expected_len {
         return None;
     }
-    let byte_len = expected_len.checked_mul(std::mem::size_of::<f32>())?;
+    let (width, height) = bounded_image_dimensions(depth.width, depth.height, options)?;
+    let output_len = (width as usize).checked_mul(height as usize)?;
+    let byte_len = output_len.checked_mul(std::mem::size_of::<f32>())?;
     let mut bytes = Vec::with_capacity(byte_len);
-    for value in depth.depth_m.iter().take(expected_len) {
-        bytes.extend_from_slice(&value.to_le_bytes());
+    for y in 0..height {
+        let source_y = ((u64::from(y) * u64::from(depth.height)) / u64::from(height)) as usize;
+        for x in 0..width {
+            let source_x = ((u64::from(x) * u64::from(depth.width)) / u64::from(width)) as usize;
+            let value = depth.depth_m[source_y * depth.width as usize + source_x];
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
     }
-    Some((depth.width, depth.height, base64::encode(bytes)))
+    Some((width, height, base64::encode(bytes)))
 }
 
 fn downsample_rgba8(
@@ -1438,14 +1533,11 @@ fn downsample_rgba8(
     if image.width == 0 || image.height == 0 || image.rgba8.len() < expected_len {
         return None;
     }
-    let max_width = options.camera_max_width.unwrap_or(image.width);
-    let max_height = options.camera_max_height.unwrap_or(image.height);
-    let scale = (max_width as f64 / image.width as f64)
-        .min(max_height as f64 / image.height as f64)
-        .min(1.0);
-    let width = ((image.width as f64 * scale).round() as u32).max(1);
-    let height = ((image.height as f64 * scale).round() as u32).max(1);
-    let mut rgba8 = Vec::with_capacity((width as usize) * (height as usize) * 4);
+    let (width, height) = bounded_image_dimensions(image.width, image.height, options)?;
+    let output_len = (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)?;
+    let mut rgba8 = Vec::with_capacity(output_len);
     for y in 0..height {
         let source_y = ((u64::from(y) * u64::from(image.height)) / u64::from(height)) as usize;
         for x in 0..width {
@@ -1455,6 +1547,31 @@ fn downsample_rgba8(
         }
     }
     Some((width, height, rgba8))
+}
+
+fn bounded_image_dimensions(
+    source_width: u32,
+    source_height: u32,
+    options: LiveSnapshotOptions,
+) -> Option<(u32, u32)> {
+    if source_width == 0 || source_height == 0 {
+        return None;
+    }
+    let max_width = options
+        .camera_max_width
+        .unwrap_or(LIVE_CAMERA_TRANSPORT_MAX_WIDTH)
+        .clamp(1, LIVE_CAMERA_TRANSPORT_MAX_WIDTH);
+    let max_height = options
+        .camera_max_height
+        .unwrap_or(LIVE_CAMERA_TRANSPORT_MAX_HEIGHT)
+        .clamp(1, LIVE_CAMERA_TRANSPORT_MAX_HEIGHT);
+    let scale = (max_width as f64 / source_width as f64)
+        .min(max_height as f64 / source_height as f64)
+        .min(1.0);
+    Some((
+        ((source_width as f64 * scale).round() as u32).max(1),
+        ((source_height as f64 * scale).round() as u32).max(1),
+    ))
 }
 
 fn downsample_lidar_points(points: &[rne_math::Vec3]) -> Vec<[f64; 3]> {
@@ -2603,8 +2720,30 @@ fn replay_scenario_command(path: &Path, artifact: &ScenarioReplayArtifact) -> Re
         "scenario replay artifact {} is marked non-replayable",
         path.display()
     );
+    anyhow::ensure!(
+        artifact.engine_version == env!("CARGO_PKG_VERSION"),
+        "scenario replay engine version mismatch: artifact={} runtime={}; replay with the producing RNE version",
+        artifact.engine_version,
+        env!("CARGO_PKG_VERSION")
+    );
     let xosc_path = PathBuf::from(&artifact.scenario_path);
     let network_path = PathBuf::from(&artifact.network_path);
+    let actual_scenario_digest = replay_input_digest(&xosc_path, "OpenSCENARIO")?;
+    anyhow::ensure!(
+        actual_scenario_digest == artifact.scenario_digest,
+        "scenario replay OpenSCENARIO input changed: expected={:#018x} actual={:#018x} path={}",
+        artifact.scenario_digest,
+        actual_scenario_digest,
+        xosc_path.display()
+    );
+    let actual_network_digest = replay_input_digest(&network_path, "traffic network")?;
+    anyhow::ensure!(
+        actual_network_digest == artifact.network_digest,
+        "scenario replay traffic-network input changed: expected={:#018x} actual={:#018x} path={}",
+        artifact.network_digest,
+        actual_network_digest,
+        network_path.display()
+    );
     let (document, network, _) = load_scenario_inputs(&xosc_path, Some(&network_path))?;
     let actual = if artifact.control_commands.is_empty() {
         execute_scenario(&document, &network, &artifact.options)
@@ -2964,11 +3103,12 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_live_snapshot, classify_failure, ensure_replay_frames, interpolate_joint_positions,
-        parse_control_line, plugin_command, replay_command, run_manifest_command, simulate_scene,
-        simulate_scene_with_action_schedule, stable_co_sim_hash, sumo_net_command,
-        verify_physics_requirements, LiveSnapshotOptions, PluginCommand, PluginControllerConfig,
-        ScenarioReplayArtifact,
+        bounded_image_dimensions, build_live_snapshot, classify_failure, encode_bounded_depth,
+        ensure_replay_frames, interpolate_joint_positions, parse_control_line, plugin_command,
+        replay_command, replay_input_digest, replay_scenario_command, run_manifest_command,
+        runner_status_line_with_limit, simulate_scene, simulate_scene_with_action_schedule,
+        stable_co_sim_hash, sumo_net_command, verify_physics_requirements, LiveSnapshotOptions,
+        PluginCommand, PluginControllerConfig, ScenarioReplayArtifact,
     };
     use rne_assets::{
         RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
@@ -3058,6 +3198,8 @@ mod tests {
         let json = build_live_snapshot(&observation, None, &bus, LiveSnapshotOptions::default());
         let value: serde_json::Value = serde_json::from_str(&json).expect("snapshot JSON");
         let camera = &value["sensors"][0]["camera"];
+        assert_eq!(camera["source_width"], serde_json::json!(2));
+        assert_eq!(camera["source_height"], serde_json::json!(1));
         assert_eq!(camera["width"], serde_json::json!(2));
         assert_eq!(camera["height"], serde_json::json!(1));
         assert_eq!(camera["depth_center_m"], serde_json::json!(2.0));
@@ -3080,6 +3222,8 @@ mod tests {
         let full_value: serde_json::Value =
             serde_json::from_str(&full_json).expect("full snapshot JSON");
         let full_camera = &full_value["sensors"][0]["camera"];
+        assert_eq!(full_camera["depth_source_width"], serde_json::json!(2));
+        assert_eq!(full_camera["depth_source_height"], serde_json::json!(1));
         assert_eq!(full_camera["depth_width"], serde_json::json!(2));
         assert_eq!(full_camera["depth_height"], serde_json::json!(1));
         assert_eq!(
@@ -3091,6 +3235,44 @@ mod tests {
             .expect("decode depth"),
             vec![0, 0, 128, 63, 0, 0, 0, 64]
         );
+    }
+
+    #[test]
+    fn full_resolution_camera_transport_has_absolute_rgbd_caps() {
+        let options = LiveSnapshotOptions::full_resolution();
+        assert_eq!(
+            bounded_image_dimensions(3840, 2160, options),
+            Some((1920, 1080))
+        );
+        assert_eq!(
+            bounded_image_dimensions(2160, 3840, options),
+            Some((608, 1080))
+        );
+
+        let depth = ImageDepth::new(4, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        let bounded_options = LiveSnapshotOptions {
+            camera_max_width: Some(2),
+            camera_max_height: Some(1),
+            include_full_depth: true,
+        };
+        let (width, height, encoded) =
+            encode_bounded_depth(&depth, bounded_options).expect("bounded depth payload");
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(
+            base64::decode(encoded).expect("decode bounded depth"),
+            vec![0, 0, 128, 63, 0, 0, 64, 64]
+        );
+    }
+
+    #[test]
+    fn runner_status_replaces_snapshots_above_the_transport_limit() {
+        let within_limit = runner_status_line_with_limit(7, 0.5, "paused", b"{}", 2);
+        assert!(within_limit.ends_with("snapshot={}\n"));
+
+        let over_limit = runner_status_line_with_limit(7, 0.5, "paused", b"{}", 1);
+        assert!(over_limit.contains("\"error\":\"snapshot_limit_exceeded\""));
+        assert!(over_limit.contains("\"snapshot_bytes\":2"));
+        assert!(over_limit.contains("\"limit_bytes\":1"));
     }
 
     #[test]
@@ -3127,7 +3309,24 @@ mod tests {
         let artifact = ScenarioReplayArtifact::read_json(&replay).expect("read scenario artifact");
         assert!(artifact.replayable);
         assert_eq!(artifact.executed_steps, 300);
+        assert_eq!(artifact.engine_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            artifact.scenario_digest,
+            replay_input_digest(Path::new(&artifact.scenario_path), "OpenSCENARIO")
+                .expect("digest scenario input")
+        );
+        assert_eq!(
+            artifact.network_digest,
+            replay_input_digest(Path::new(&artifact.network_path), "traffic network")
+                .expect("digest network input")
+        );
         replay_command(&replay).expect("replay scenario artifact");
+
+        let mut mismatched = artifact;
+        mismatched.scenario_digest ^= 1;
+        let error = replay_scenario_command(&replay, &mismatched)
+            .expect_err("changed scenario digest must be rejected");
+        assert!(error.to_string().contains("OpenSCENARIO input changed"));
     }
 
     #[test]

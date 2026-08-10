@@ -11,7 +11,24 @@ use thiserror::Error;
 pub const SCENARIO_REPLAY_KIND: &str = "rne-scenario-replay";
 
 /// Current scenario replay artifact schema version.
-pub const SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 2;
+pub const SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 3;
+
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+/// Computes a stable FNV-1a digest for a replay input file.
+///
+/// Scenario replay artifacts store this digest for both the OpenSCENARIO XML
+/// and resolved traffic-network source so replay fails clearly when either
+/// input changed after the artifact was recorded.
+pub fn stable_replay_input_digest(bytes: &[u8]) -> u64 {
+    let mut digest = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        digest ^= u64::from(*byte);
+        digest = digest.wrapping_mul(FNV_PRIME);
+    }
+    digest
+}
 
 /// Errors raised while reading or validating a scenario replay artifact.
 #[derive(Debug, Error)]
@@ -22,7 +39,7 @@ pub enum ScenarioReplayArtifactError {
     /// The artifact JSON was malformed.
     #[error("scenario replay artifact JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    /// The artifact schema is newer than this runtime supports.
+    /// The artifact schema differs from the version this runtime supports.
     #[error("unsupported scenario replay schema version: expected {expected}, got {actual}")]
     UnsupportedVersion {
         /// Schema version supported by this crate.
@@ -51,15 +68,21 @@ pub struct ScenarioReplayArtifact {
     pub schema_version: u32,
     /// OpenSCENARIO XML path used for the run.
     pub scenario_path: String,
+    /// Stable digest of the OpenSCENARIO XML bytes used for the run.
+    pub scenario_digest: u64,
     /// Traffic network path used for the run.
     pub network_path: String,
+    /// Stable digest of the resolved traffic-network source bytes.
+    pub network_digest: u64,
+    /// RNE crate version that produced this artifact.
+    pub engine_version: String,
     /// Fixed-step settings used for the run.
     pub options: ScenarioRunOptions,
     /// Number of steps completed in the final episode.
     pub executed_steps: u64,
     /// Whether `rne-asset replay` can reproduce this record automatically.
     ///
-    /// This is always `true` for schema version 2 artifacts. It remains an
+    /// This is always `true` for schema version 3 artifacts. It remains an
     /// explicit field so consumers can distinguish a verified artifact from
     /// an older or externally produced record.
     pub replayable: bool,
@@ -73,7 +96,9 @@ impl ScenarioReplayArtifact {
     /// Creates a validated scenario replay artifact.
     pub fn new(
         scenario_path: impl Into<String>,
+        scenario_digest: u64,
         network_path: impl Into<String>,
+        network_digest: u64,
         options: ScenarioRunOptions,
         executed_steps: u64,
         control_commands: Vec<ControlCommand>,
@@ -83,7 +108,10 @@ impl ScenarioReplayArtifact {
             kind: SCENARIO_REPLAY_KIND.to_string(),
             schema_version: SCENARIO_REPLAY_SCHEMA_VERSION,
             scenario_path: scenario_path.into(),
+            scenario_digest,
             network_path: network_path.into(),
+            network_digest,
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
             options,
             executed_steps,
             replayable: true,
@@ -116,9 +144,14 @@ impl ScenarioReplayArtifact {
                 "network_path must not be empty".to_string(),
             ));
         }
+        if self.engine_version.trim().is_empty() {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "engine_version must not be empty".to_string(),
+            ));
+        }
         if !self.replayable {
             return Err(ScenarioReplayArtifactError::Invalid(
-                "schema version 2 scenario replay artifacts must be replayable".to_string(),
+                "schema version 3 scenario replay artifacts must be replayable".to_string(),
             ));
         }
         if !self.options.hz.is_finite() || self.options.hz <= 0.0 {
@@ -132,6 +165,42 @@ impl ScenarioReplayArtifact {
                 self.executed_steps, self.options.steps
             )));
         }
+        if self.result.steps != self.executed_steps {
+            return Err(ScenarioReplayArtifactError::Invalid(format!(
+                "result.steps={} does not match executed_steps={}",
+                self.result.steps, self.executed_steps
+            )));
+        }
+        if !self.result.route_length_m.is_finite() || self.result.route_length_m < 0.0 {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.route_length_m must be finite and non-negative".to_string(),
+            ));
+        }
+        if !self.result.average_speed_m_s.is_finite() || self.result.average_speed_m_s < 0.0 {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.average_speed_m_s must be finite and non-negative".to_string(),
+            ));
+        }
+        if self
+            .result
+            .final_positions_m
+            .iter()
+            .flatten()
+            .any(|value| !value.is_finite())
+        {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.final_positions_m must contain only finite values".to_string(),
+            ));
+        }
+        if self
+            .control_commands
+            .iter()
+            .any(|command| matches!(command, ControlCommand::Step { frames: 0 }))
+        {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "control step commands must request at least one frame".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -143,7 +212,24 @@ impl ScenarioReplayArtifact {
 
     /// Parses and validates a scenario replay artifact from JSON.
     pub fn from_json(text: &str) -> Result<Self, ScenarioReplayArtifactError> {
-        let artifact: Self = serde_json::from_str(text)?;
+        let value: serde_json::Value = serde_json::from_str(text)?;
+        if let Some(actual) = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+        {
+            let actual = u32::try_from(actual).map_err(|_| {
+                ScenarioReplayArtifactError::Invalid(format!(
+                    "schema_version={actual} does not fit in u32"
+                ))
+            })?;
+            if actual != SCENARIO_REPLAY_SCHEMA_VERSION {
+                return Err(ScenarioReplayArtifactError::UnsupportedVersion {
+                    expected: SCENARIO_REPLAY_SCHEMA_VERSION,
+                    actual,
+                });
+            }
+        }
+        let artifact: Self = serde_json::from_value(value)?;
         artifact.validate()?;
         Ok(artifact)
     }
@@ -185,7 +271,9 @@ mod tests {
     fn artifact_roundtrips_and_validates() {
         let artifact = ScenarioReplayArtifact::new(
             "scenario.xosc",
+            stable_replay_input_digest(b"scenario"),
             "network.rne.traffic.json",
+            stable_replay_input_digest(b"network"),
             ScenarioRunOptions { steps: 4, hz: 60.0 },
             4,
             vec![],
@@ -200,7 +288,9 @@ mod tests {
     fn control_transcript_roundtrips() {
         let artifact = ScenarioReplayArtifact::new(
             "scenario.xosc",
+            stable_replay_input_digest(b"scenario"),
             "network.rne.traffic.json",
+            stable_replay_input_digest(b"network"),
             ScenarioRunOptions {
                 steps: 10,
                 hz: 60.0,
@@ -214,5 +304,43 @@ mod tests {
         let loaded = ScenarioReplayArtifact::from_json(&json).expect("parse control transcript");
         assert_eq!(loaded.control_commands, artifact.control_commands);
         assert!(loaded.replayable);
+    }
+
+    #[test]
+    fn input_digest_has_a_fixed_vector() {
+        assert_eq!(
+            stable_replay_input_digest(b"RNE scenario replay"),
+            0xf5c9_1bfc_e251_9ffd
+        );
+    }
+
+    #[test]
+    fn result_step_mismatch_is_rejected() {
+        let artifact = ScenarioReplayArtifact::new(
+            "scenario.xosc",
+            stable_replay_input_digest(b"scenario"),
+            "network.rne.traffic.json",
+            stable_replay_input_digest(b"network"),
+            ScenarioRunOptions { steps: 4, hz: 60.0 },
+            3,
+            vec![],
+            result(),
+        );
+        assert!(matches!(
+            artifact.validate(),
+            Err(ScenarioReplayArtifactError::Invalid(message))
+                if message.contains("result.steps")
+        ));
+    }
+
+    #[test]
+    fn older_schema_is_reported_before_new_required_fields() {
+        assert!(matches!(
+            ScenarioReplayArtifact::from_json(r#"{"schema_version":2}"#),
+            Err(ScenarioReplayArtifactError::UnsupportedVersion {
+                expected: SCENARIO_REPLAY_SCHEMA_VERSION,
+                actual: 2,
+            })
+        ));
     }
 }

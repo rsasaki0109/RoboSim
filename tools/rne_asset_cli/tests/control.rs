@@ -119,7 +119,7 @@ fn control_tcp_full_resolution_camera_and_depth_snapshot() {
     let mut reader = BufReader::new(stream.try_clone().expect("clone RGB-D control stream"));
     let mut ready = String::new();
     reader.read_line(&mut ready).expect("read RGB-D ready");
-    assert_eq!(ready.trim(), "ready paused");
+    assert_eq!(ready.trim(), "ready paused protocol=1");
 
     stream.write_all(b"step 1\n").expect("write RGB-D step");
     let mut ack = String::new();
@@ -191,7 +191,7 @@ fn control_tcp_step_and_quit_produce_the_requested_frames() {
 
     let mut ready = String::new();
     reader.read_line(&mut ready).expect("read ready");
-    assert_eq!(ready.trim(), "ready paused");
+    assert_eq!(ready.trim(), "ready paused protocol=1");
 
     stream.write_all(b"step 3\n").expect("write step");
     let mut ack = String::new();
@@ -243,7 +243,7 @@ fn control_tcp_scenario_step_and_quit_streams_traffic_status() {
     let mut reader = BufReader::new(stream.try_clone().expect("clone scenario control stream"));
     let mut ready = String::new();
     reader.read_line(&mut ready).expect("read scenario ready");
-    assert_eq!(ready.trim(), "ready paused");
+    assert_eq!(ready.trim(), "ready paused protocol=1");
 
     stream.write_all(b"step 3\n").expect("write scenario step");
     let mut ack = String::new();

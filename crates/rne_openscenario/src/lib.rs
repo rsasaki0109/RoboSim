@@ -38,8 +38,8 @@ pub use parser::{
     parse_openscenario_xml_with_source_at,
 };
 pub use replay::{
-    ScenarioReplayArtifact, ScenarioReplayArtifactError, SCENARIO_REPLAY_KIND,
-    SCENARIO_REPLAY_SCHEMA_VERSION,
+    stable_replay_input_digest, ScenarioReplayArtifact, ScenarioReplayArtifactError,
+    SCENARIO_REPLAY_KIND, SCENARIO_REPLAY_SCHEMA_VERSION,
 };
 pub use runtime::{
     actor_length_m, execute_scenario, execute_scenario_with_control, ScenarioRunOptions,
