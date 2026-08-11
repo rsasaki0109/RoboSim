@@ -6,6 +6,17 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Physics conformance (M4)**: analytic and Rapier execute one fixed-step
+  rigid-body vector, emit canonical versioned snapshots with frozen FNV-1a
+  hashes, and compare unlike solvers only through a named SI-unit tolerance
+  registry. Rapier articulation, resting-contact impulse, and repeated ordered
+  raycast vectors prove every advertised capability. `xtask
+  physics-conformance` and OSS parity write and validate the deterministic JSON
+  report, including the measured Rapier convention that configured body mass is
+  additional to default-density collider mass.
+- **Observable analytic velocity**: analytic synchronization exposes integrated
+  linear velocity through shared ECS state and canonical snapshots.
+
 - **Production sensor/frontend transport (M3)**: `rne_data::transport` defines a
   fixed-header little-endian framed protocol with explicit version/capability/
   limit negotiation, bounded rejection messages, stable session and sequence

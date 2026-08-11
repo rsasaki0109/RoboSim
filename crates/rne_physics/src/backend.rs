@@ -53,6 +53,32 @@ pub enum PhysicsCapability {
     RaycastBatch,
 }
 
+impl PhysicsCapability {
+    /// Every capability known by this engine version in stable wire/report order.
+    pub const ALL: [Self; 7] = [
+        Self::RigidBody,
+        Self::Articulation,
+        Self::GpuRigidBody,
+        Self::DeterministicStep,
+        Self::SoftBody,
+        Self::ContactForce,
+        Self::RaycastBatch,
+    ];
+
+    /// Returns the stable lowercase identifier used by conformance reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RigidBody => "rigid_body",
+            Self::Articulation => "articulation",
+            Self::GpuRigidBody => "gpu_rigid_body",
+            Self::DeterministicStep => "deterministic_step",
+            Self::SoftBody => "soft_body",
+            Self::ContactForce => "contact_force",
+            Self::RaycastBatch => "raycast_batch",
+        }
+    }
+}
+
 /// Physics backend error type.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum PhysicsError {
@@ -129,6 +155,24 @@ pub trait PhysicsBackend: Send + Sync + 'static {
         physics_world: PhysicsWorldId,
         query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError>;
+
+    /// Executes raycast queries in caller-provided order.
+    ///
+    /// The outer result preserves query order. Each inner hit list follows the
+    /// same distance/entity ordering contract as [`Self::raycast`]. Backends
+    /// advertising [`PhysicsCapability::RaycastBatch`] must pass the conformance
+    /// vector for this method.
+    fn raycast_batch(
+        &self,
+        physics_world: PhysicsWorldId,
+        queries: &[RaycastQuery],
+    ) -> Result<Vec<Vec<RaycastHit>>, PhysicsError> {
+        queries
+            .iter()
+            .copied()
+            .map(|query| self.raycast(physics_world, query))
+            .collect()
+    }
 
     /// Returns contact events from the last simulation step.
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError>;

@@ -11,6 +11,36 @@ cargo test -p rne_dynamics_tests
 cargo test -p rne_dynamics_tests report -- --nocapture   # measured error magnitudes
 ```
 
+## Backend conformance report
+
+M4 adds one executable contract shared by the deterministic analytic backend
+and Rapier:
+
+```bash
+cargo run -p xtask -- physics-conformance
+```
+
+The command writes `artifacts/physics-conformance/report.json`. The report has
+no wall-clock data or machine paths and records sorted advertised capabilities,
+case outcomes, unit-bearing measurements, named tolerance entries, and frozen
+canonical snapshot hashes. `xtask parity` executes the same runner in CI.
+
+The fixed-step free-fall vector checks observable pose and velocity with both
+backends. Exact repeatability compares the versioned canonical snapshot and its
+FNV-1a digest separately for each backend; analytic-vs-Rapier comparisons use
+registered SI-unit bounds instead of claiming cross-solver bit equality.
+Rapier-specific vectors cover revolute anchor/limit behavior, canonical resting
+contact impulse, and repeated ordered raycast batches. Coverage fails when an
+advertised capability has no passing evidence.
+
+The contact vector also records an important current backend convention:
+Rapier maps `RigidBody::mass_kg` to Rapier's additional body mass, while a
+non-sensor collider contributes its shape volume at Rapier's default unit
+density. The expected resting impulse therefore uses the effective sum of both
+masses. This is measured compatibility behavior, not a backend-neutral promise;
+callers that need exact total-mass semantics must account for collider density
+until that API is versioned explicitly.
+
 ## Scenarios and references
 
 | # | Scenario | Reference | Primary tolerance rationale |
