@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "scenario": "unitree_g1_dex3_invalid_tray",
+  "seed": 0,
+  "dimensions": [
+    {
+      "name": "part_offset_x_m",
+      "value": 0.004,
+      "baseline": 0.0
+    },
+    {
+      "name": "part_offset_y_m",
+      "value": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "name": "part_offset_z_m",
+      "value": -0.006,
+      "baseline": 0.0
+    },
+    {
+      "name": "tray_on_inactive_palm",
+      "value": true,
+      "baseline": false
+    }
+  ],
+  "expected_contract": "no_inactive_hand_contact"
+}

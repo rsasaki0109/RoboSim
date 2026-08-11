@@ -99,8 +99,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
+      - name: Test browser behavior replay inspector
+        run: node web/rne_web_viewer/replay.test.cjs
       - name: Default 10-seed behavior CI
         run: cargo run --locked -p xtask -- behavior-ci
+      - name: Reproduce and minimize committed behavior failure
+        run: >-
+          cargo run --locked -p xtask -- behavior-ci
+          --case crates/rne_ai/tests/fixtures/unitree_g1_dex3_invalid_tray.behavior-case.json
+          --json artifacts/behavior-ci/fixture-report.json
+          --junit artifacts/behavior-ci/fixture-junit.xml
+          --artifacts artifacts/behavior-ci/fixture-replays
+      - name: Replay committed behavior failure in a fresh process
+        run: >-
+          cargo run --locked -p xtask -- behavior-replay
+          artifacts/behavior-ci/fixture-replays/unitree_g1_dex3_invalid_tray-seed-0-minimized.rne-replay
       - name: Upload behavior CI reports
         if: always()
         uses: actions/upload-artifact@v4

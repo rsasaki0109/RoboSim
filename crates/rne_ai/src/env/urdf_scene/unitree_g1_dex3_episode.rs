@@ -5,6 +5,7 @@ use super::{
 use crate::{DeterministicRng, Episode, EpisodeStep};
 use rne_assets::{AssetError, SceneAsset};
 use rne_math::Vec3;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const SETTLE_STEPS: u64 = 4;
@@ -56,7 +57,8 @@ const WORKCELL_OBJECTS: [&str; 3] = [
 ];
 
 /// Script phase reported by [`UnitreeG1Dex3Episode`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UnitreeG1Dex3Phase {
     /// Move the open hand around the part.
     #[default]
@@ -104,6 +106,8 @@ pub struct UnitreeG1Dex3EpisodeConfig {
     pub max_grasp_contact_opposition: f64,
     /// Maximum absolute X/Y/Z reset offset sampled for the payload, in meters.
     pub part_position_jitter_m: [f64; 3],
+    /// Explicit payload reset offset used instead of random sampling, in meters.
+    pub part_position_override_m: Option<[f64; 3]>,
     /// Deterministic seed for payload-position sampling across resets.
     pub random_seed: u64,
     /// Maximum number of close attempts before the episode continues to failure.
@@ -133,6 +137,7 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             max_grasp_center_error_m: 0.030,
             max_grasp_contact_opposition: 0.50,
             part_position_jitter_m: [0.0; 3],
+            part_position_override_m: None,
             random_seed: 2042,
             max_grasp_attempts: 1,
             cartesian_tracking_gain: 0.0,
@@ -167,7 +172,8 @@ pub struct UnitreeG1Dex3Action {
 }
 
 /// Observation emitted by [`UnitreeG1Dex3Episode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitreeG1Dex3Observation {
     /// Current task phase.
     pub phase: UnitreeG1Dex3Phase,
@@ -686,6 +692,9 @@ fn sample_part_offset_m(
     config: &UnitreeG1Dex3EpisodeConfig,
     rng: &mut DeterministicRng,
 ) -> [f64; 3] {
+    if let Some(offset_m) = config.part_position_override_m {
+        return offset_m;
+    }
     config.part_position_jitter_m.map(|max_offset_m| {
         if max_offset_m == 0.0 {
             0.0
@@ -959,6 +968,15 @@ fn validate_scene_names(config: &UnitreeG1Dex3EpisodeConfig) -> Result<(), Asset
             "part_position_jitter_m values must be finite and non-negative",
         ));
     }
+    if config
+        .part_position_override_m
+        .is_some_and(|offset| offset.into_iter().any(|value| !value.is_finite()))
+    {
+        return Err(invalid(
+            config,
+            "part_position_override_m values must be finite",
+        ));
+    }
     if config.max_grasp_attempts == 0 {
         return Err(invalid(
             config,
@@ -1087,6 +1105,9 @@ mod tests {
         config.max_grasp_contact_opposition = 1.1;
         assert!(validate_scene_names(&config).is_err());
         config.max_grasp_contact_opposition = 0.5;
+        config.part_position_override_m = Some([f64::NAN, 0.0, 0.0]);
+        assert!(validate_scene_names(&config).is_err());
+        config.part_position_override_m = None;
         config.use_pose_follow_grasp = true;
         config.terminate_on_grasp = false;
         assert!(validate_scene_names(&config).is_err());
@@ -1113,6 +1134,16 @@ mod tests {
         let initial_offset = first.observation().part_position_offset_m;
         let reset_offset = first.reset().observation.part_position_offset_m;
         assert_ne!(initial_offset, reset_offset);
+    }
+
+    #[test]
+    fn explicit_part_offset_is_stable_across_reset() {
+        let expected = [0.004, 0.0, -0.006];
+        let mut config = UnitreeG1Dex3EpisodeConfig::randomized(17);
+        config.part_position_override_m = Some(expected);
+        let mut episode = UnitreeG1Dex3Episode::new(config).expect("overridden task");
+        assert_eq!(episode.observation().part_position_offset_m, expected);
+        assert_eq!(episode.reset().observation.part_position_offset_m, expected);
     }
 
     #[test]

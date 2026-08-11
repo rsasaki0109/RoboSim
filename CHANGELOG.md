@@ -4,6 +4,32 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Behavior CI failure replay and minimization**: typed contract/report schema
+  v2 now records a deterministic seed manifest and per-violation state digest.
+  Failed seeds emit versioned `.rne-replay` artifacts with scripted actions,
+  task observations, named randomization dimensions, compatibility metadata,
+  and the first violating contract. `xtask behavior-ci` deterministically
+  minimizes each failure, verifies the minimized replay, writes a standalone
+  `.behavior-case.json`, and includes all artifact paths in JSON and JUnit.
+- **Local Behavior replay diagnostics**: `cargo run -p xtask --
+  behavior-replay <artifact>` reconstructs the G1 scenario headlessly and
+  requires matching schema, seed, action sequence, first violation, and stable
+  world-state digests. Named JSON-field diffs distinguish semantic divergence
+  from an explicit `1e-12` tolerance for derived floating-point observations.
+- **Committed G1 failure fixture and browser inspection**: the invalid-tray
+  fixture detects inactive-hand contact at a stable step and digest, reproduces
+  across processes, and can be exercised with `behavior-ci --case`. The web
+  replay inspector accepts Behavior CI artifacts and displays their contract,
+  dimensions, observation interval, and exact 64-bit state hashes.
+
+### Fixed
+
+- **Stable Windows WGPU startup**: the default renderer now selects WGPU's
+  primary backends on Windows instead of loading legacy OpenGL drivers. Explicit
+  backend selection remains available through `WgpuRenderBackend::with_backends`.
+
 ## [0.14.0-rc.1] - 2026-08-10
 
 ### Added

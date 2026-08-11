@@ -2,6 +2,9 @@
   "use strict";
 
   const SUPPORTED_VERSION = 1;
+  const BEHAVIOR_REPLAY_KIND = "rne_behavior_replay";
+  const SUPPORTED_BEHAVIOR_VERSION = 1;
+  const SUPPORTED_BEHAVIOR_CONTRACT_VERSION = 2;
   const fileInput = document.getElementById("replay-file");
   const playButton = document.getElementById("replay-play");
   const rangeInput = document.getElementById("replay-range");
@@ -29,7 +32,127 @@
     statusOutput.dataset.error = isError ? "true" : "false";
   }
 
+  function normalizeArtifact(artifact) {
+    if (!artifact || artifact.kind !== BEHAVIOR_REPLAY_KIND) {
+      return artifact;
+    }
+    validateBehaviorArtifact(artifact);
+    const failure = artifact.failure;
+    return {
+      version: SUPPORTED_VERSION,
+      scene: artifact.scenario,
+      clock: {
+        steps: artifact.frames.length,
+        hz: 1_000_000_000 / artifact.fixed_delta_ticks,
+      },
+      frames: artifact.frames.map((frame) => ({
+        step: frame.step,
+        sim_ticks: frame.sim_time_ticks,
+        action: { kind: "behavior_step", behavior_action: frame.action },
+        observation: frame.observation,
+        physics_hash: frame.state_digest,
+      })),
+      final_report: {
+        failure: `${failure.contract.name}: ${failure.violation.message}`,
+        behavior_failure: {
+          seed: artifact.seed,
+          contract: failure.contract.name,
+          step: failure.violation.step,
+          state_digest: failure.violation.state_digest,
+          entities: failure.violation.entities,
+          dimensions: artifact.dimensions,
+          minimized: Boolean(artifact.minimization),
+        },
+      },
+    };
+  }
+
+  function validateBehaviorArtifact(artifact) {
+    if (artifact.schema_version !== SUPPORTED_BEHAVIOR_VERSION) {
+      throw new Error(
+        `unsupported behavior replay version (expected ${SUPPORTED_BEHAVIOR_VERSION})`,
+      );
+    }
+    if (
+      artifact.contract_schema_version !== SUPPORTED_BEHAVIOR_CONTRACT_VERSION
+    ) {
+      throw new Error(
+        `unsupported behavior contract version (expected ${SUPPORTED_BEHAVIOR_CONTRACT_VERSION})`,
+      );
+    }
+    if (
+      typeof artifact.engine_version !== "string" ||
+      artifact.engine_version.trim() === "" ||
+      !isDigest(artifact.contract_digest) ||
+      !isDigest(artifact.scenario_digest)
+    ) {
+      throw new Error("behavior compatibility metadata is invalid");
+    }
+    if (typeof artifact.scenario !== "string" || artifact.scenario.trim() === "") {
+      throw new Error("behavior scenario is empty");
+    }
+    if (
+      !Number.isInteger(artifact.fixed_delta_ticks) ||
+      artifact.fixed_delta_ticks <= 0
+    ) {
+      throw new Error("behavior fixed_delta_ticks is invalid");
+    }
+    if (
+      !Number.isFinite(artifact.observation_numeric_tolerance) ||
+      artifact.observation_numeric_tolerance < 0
+    ) {
+      throw new Error("behavior observation tolerance is invalid");
+    }
+    if (!Array.isArray(artifact.contracts) || artifact.contracts.length === 0) {
+      throw new Error("behavior contract manifest is empty");
+    }
+    if (!Array.isArray(artifact.dimensions)) {
+      throw new Error("behavior dimensions are invalid");
+    }
+    if (!Array.isArray(artifact.frames) || artifact.frames.length === 0) {
+      throw new Error("behavior replay has no frames");
+    }
+    artifact.frames.forEach((frame, index) => {
+      if (!frame || frame.step !== index) {
+        throw new Error(`behavior frame ${index} is not sequential`);
+      }
+      if (
+        frame.sim_time_ticks !== artifact.fixed_delta_ticks * index ||
+        !frame.observation ||
+        typeof frame.observation !== "object" ||
+        !isDigest(frame.state_digest)
+      ) {
+        throw new Error(`behavior frame ${index} is invalid`);
+      }
+      const expectedAction = index === 0 ? "initial_observation" : "advance";
+      if (frame.action !== expectedAction) {
+        throw new Error(`behavior frame ${index} has an invalid action`);
+      }
+    });
+    const failure = artifact.failure;
+    const finalFrame = artifact.frames[artifact.frames.length - 1];
+    if (
+      !failure ||
+      !failure.contract ||
+      typeof failure.contract.name !== "string" ||
+      !failure.violation ||
+      failure.violation.step !== finalFrame.step ||
+      failure.violation.sim_time_ticks !== finalFrame.sim_time_ticks ||
+      String(failure.violation.state_digest) !== String(finalFrame.state_digest)
+    ) {
+      throw new Error("behavior failure does not match the final frame");
+    }
+  }
+
+  function isDigest(value) {
+    return (
+      (Number.isInteger(value) && value >= 0) ||
+      (typeof value === "string" && /^\d+$/.test(value))
+    );
+  }
+
   function validateArtifact(artifact) {
+    artifact = normalizeArtifact(artifact);
     if (!artifact || artifact.version !== SUPPORTED_VERSION) {
       throw new Error(
         `unsupported replay version (expected ${SUPPORTED_VERSION})`,
@@ -145,6 +268,9 @@
       }
       return;
     }
+    if (kind === "behavior_step") {
+      return;
+    }
     throw new Error(`frame ${index} has an unknown action kind`);
   }
 
@@ -208,7 +334,7 @@
     // Quote those fields before parsing so the inspector can display the
     // exact hash emitted by the Rust artifact writer.
     const losslessText = text.replace(
-      /("(?:physics_hash|payload_hash)"\s*:\s*)(\d+)/g,
+      /("(?:physics_hash|payload_hash|state_digest|contract_digest|scenario_digest|source_state_digest|seed)"\s*:\s*)(\d+)/g,
       '$1"$2"',
     );
     return validateArtifact(JSON.parse(losslessText));
@@ -242,11 +368,36 @@
     if (kind === "joint_effort") {
       return `${action.joint}: ${Number(action.effort_nm).toFixed(4)} N·m`;
     }
+    if (kind === "behavior_step") {
+      return `${action.behavior_action}: evaluate behavior contracts`;
+    }
     return kind;
   }
 
   function formatObservation(observation) {
     const parts = [formatBaseTranslation(observation)];
+    if (typeof observation.phase === "string") {
+      parts[0] = `phase=${observation.phase}`;
+    }
+    if (
+      Array.isArray(observation.part_position_m) &&
+      observation.part_position_m.length === 3
+    ) {
+      parts.push(
+        `part=[${observation.part_position_m
+          .map((value) => Number(value).toFixed(4))
+          .join(", ")}] m`,
+      );
+    }
+    if (typeof observation.dual_contact === "boolean") {
+      parts.push(
+        `dual_contact=${observation.dual_contact}, grasped=${Boolean(
+          observation.grasped,
+        )}, inactive_contact=${Boolean(
+          observation.inactive_hand_workcell_contact,
+        )}`,
+      );
+    }
     const jointState = observation && observation.joint_state;
     if (jointState) {
       parts.push(`joints=${jointState.names.length}`);
@@ -309,6 +460,18 @@
 
   function formatReport(report) {
     const parts = [];
+    if (report.behavior_failure) {
+      const behavior = report.behavior_failure;
+      parts.push(
+        `seed=${behavior.seed}, contract=${behavior.contract}, step=${behavior.step}, state=${formatHash(
+          behavior.state_digest,
+        )}`,
+      );
+      parts.push(`dimensions=${behavior.dimensions.length}`);
+      if (behavior.minimized) {
+        parts.push("minimized=yes");
+      }
+    }
     if (report.contact_pairs_max !== undefined) {
       parts.push(`contacts_pairs_max=${report.contact_pairs_max}`);
     }
