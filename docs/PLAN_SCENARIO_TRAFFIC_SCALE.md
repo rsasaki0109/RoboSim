@@ -206,13 +206,17 @@ repetitions.
 
 Local Windows x86_64 release evidence on 2026-08-12 completed all 100 actors
 for 600 steps in every repetition. The slowest measured repetition sustained
-1,177.9 steps/s against the 60 steps/s bound; minimum gap was 15.6 m, runtime
+1,613.1 steps/s against the 60 steps/s bound; minimum gap was 15.6 m, runtime
 ownership was 100/100, actor/action result digest was
 `6732886903736628512`, and every violation-registry count was zero. The named
-GitHub-hosted runner remains the authoritative performance result.
+GitHub-hosted runner remains the authoritative performance result. The locked
+local exit matrix passed `cargo fmt --all`, workspace Clippy with warnings
+denied, workspace tests, `xtask ci-headless`, and the full `xtask ci`; its OSS
+parity report passed all 22 checks and its physics-conformance report passed all
+backend checks.
 
 - M5-A contract and canonical scenario evidence: complete.
 - M5-B mixed ownership: complete.
 - M5-C recoverable TraCI: complete.
-- M5-D reference/report: complete locally; CI evidence pending.
-- M5-E full workspace/CI matrix: in progress.
+- M5-D reference/report: complete locally; GitHub CI evidence pending.
+- M5-E full workspace/CI matrix: complete locally; GitHub CI evidence pending.
