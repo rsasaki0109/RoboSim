@@ -553,16 +553,18 @@ pub fn negotiate_transport(
     }
     if client.max_payload_bytes == 0
         || client.queue_frame_limit == 0
-        || client.queue_byte_limit < TRANSPORT_HEADER_BYTES as u32
+        || client.queue_byte_limit <= TRANSPORT_HEADER_BYTES as u32
         || policy.max_payload_bytes == 0
         || policy.queue_frame_limit == 0
-        || policy.queue_byte_limit < TRANSPORT_HEADER_BYTES as u32
+        || policy.queue_byte_limit <= TRANSPORT_HEADER_BYTES as u32
     {
         return Err(NegotiationReject::new(
             NegotiationRejectCode::InvalidLimits,
             "payload and queue limits must be non-zero",
         ));
     }
+    let queue_byte_limit = client.queue_byte_limit.min(policy.queue_byte_limit);
+    let queue_payload_limit = queue_byte_limit - TRANSPORT_HEADER_BYTES as u32;
     Ok(NegotiatedTransport {
         protocol_major: overlap_max,
         protocol_minor: if overlap_max == TRANSPORT_PROTOCOL_MAJOR {
@@ -571,9 +573,12 @@ pub fn negotiate_transport(
             0
         },
         capabilities,
-        max_payload_bytes: client.max_payload_bytes.min(policy.max_payload_bytes),
+        max_payload_bytes: client
+            .max_payload_bytes
+            .min(policy.max_payload_bytes)
+            .min(queue_payload_limit),
         queue_frame_limit: client.queue_frame_limit.min(policy.queue_frame_limit),
-        queue_byte_limit: client.queue_byte_limit.min(policy.queue_byte_limit),
+        queue_byte_limit,
         resume_after_sequence: client.resume_after_sequence,
     })
 }
@@ -1155,6 +1160,18 @@ pub enum LatestPushOutcome {
     Dropped,
 }
 
+/// Sequence range removed by the most recent latest-only queue push.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DroppedSequenceRange {
+    /// Smallest sequence removed by the push.
+    pub first_sequence: u64,
+    /// Largest sequence removed by the push.
+    pub last_sequence: u64,
+    /// Number of messages removed, which may exceed the numeric span when
+    /// transport sequences for reliable messages occur between drops.
+    pub count: u64,
+}
+
 /// Non-blocking frame+byte bounded egress queue.
 ///
 /// Reliable messages are never evicted. Latest-only messages replace older
@@ -1167,6 +1184,7 @@ pub struct BoundedEgressQueue {
     max_bytes: usize,
     queued_bytes: usize,
     dropped_messages: u64,
+    last_dropped_range: Option<DroppedSequenceRange>,
 }
 
 impl BoundedEgressQueue {
@@ -1181,6 +1199,7 @@ impl BoundedEgressQueue {
             max_bytes,
             queued_bytes: 0,
             dropped_messages: 0,
+            last_dropped_range: None,
         })
     }
 
@@ -1204,16 +1223,18 @@ impl BoundedEgressQueue {
 
     /// Pushes a latest-only message without blocking.
     pub fn push_latest(&mut self, key: EgressKey, frame: TransportFrame) -> LatestPushOutcome {
+        self.last_dropped_range = None;
         let frame_bytes = frame.encoded_len();
         if frame_bytes > self.max_bytes {
-            self.dropped_messages = self.dropped_messages.saturating_add(1);
+            self.record_drop(frame.sequence);
             return LatestPushOutcome::Dropped;
         }
         let mut dropped = 0_u64;
         if let Some(index) = self.frames.iter().position(
             |queued| matches!(queued.class, DeliveryClass::LatestOnly(existing) if existing == key),
         ) {
-            self.remove(index);
+            let sequence = self.remove(index).expect("matched queue index exists");
+            self.record_drop(sequence);
             dropped += 1;
         }
         while !self.can_fit(frame_bytes) {
@@ -1222,10 +1243,11 @@ impl BoundedEgressQueue {
                 .iter()
                 .position(|queued| matches!(queued.class, DeliveryClass::LatestOnly(_)))
             else {
-                self.dropped_messages = self.dropped_messages.saturating_add(dropped + 1);
+                self.record_drop(frame.sequence);
                 return LatestPushOutcome::Dropped;
             };
-            self.remove(index);
+            let sequence = self.remove(index).expect("matched queue index exists");
+            self.record_drop(sequence);
             dropped += 1;
         }
         self.queued_bytes += frame_bytes;
@@ -1233,7 +1255,6 @@ impl BoundedEgressQueue {
             frame,
             class: DeliveryClass::LatestOnly(key),
         });
-        self.dropped_messages = self.dropped_messages.saturating_add(dropped);
         if dropped == 0 {
             LatestPushOutcome::Enqueued
         } else {
@@ -1268,6 +1289,11 @@ impl BoundedEgressQueue {
         self.dropped_messages
     }
 
+    /// Returns and clears the sequence range dropped by the latest push.
+    pub fn take_last_dropped_range(&mut self) -> Option<DroppedSequenceRange> {
+        self.last_dropped_range.take()
+    }
+
     /// Configured maximum frame count.
     pub fn max_frames(&self) -> usize {
         self.max_frames
@@ -1286,9 +1312,30 @@ impl BoundedEgressQueue {
                 .is_some_and(|bytes| bytes <= self.max_bytes)
     }
 
-    fn remove(&mut self, index: usize) {
+    fn remove(&mut self, index: usize) -> Option<u64> {
         if let Some(queued) = self.frames.remove(index) {
             self.queued_bytes = self.queued_bytes.saturating_sub(queued.frame.encoded_len());
+            Some(queued.frame.sequence)
+        } else {
+            None
+        }
+    }
+
+    fn record_drop(&mut self, sequence: u64) {
+        self.dropped_messages = self.dropped_messages.saturating_add(1);
+        match &mut self.last_dropped_range {
+            Some(range) => {
+                range.first_sequence = range.first_sequence.min(sequence);
+                range.last_sequence = range.last_sequence.max(sequence);
+                range.count = range.count.saturating_add(1);
+            }
+            None => {
+                self.last_dropped_range = Some(DroppedSequenceRange {
+                    first_sequence: sequence,
+                    last_sequence: sequence,
+                    count: 1,
+                });
+            }
         }
     }
 }

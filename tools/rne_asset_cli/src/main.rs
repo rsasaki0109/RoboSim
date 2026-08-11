@@ -1,5 +1,7 @@
 //! Command-line tools for RNE scene and robot assets.
 
+mod frontend_transport;
+
 use anyhow::{Context as _, Result};
 use clap::{Parser, Subcommand};
 use rne_assets::{
@@ -58,6 +60,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use frontend_transport::{BinaryFrontendControl, BinaryFrontendPublisher};
+
 const REPLAY_FLOAT_EPSILON: f64 = 1.0e-12;
 const RUNNER_CONTROL_PROTOCOL_VERSION: u32 = 1;
 const RUNNER_CONTROL_MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
@@ -67,12 +71,14 @@ const LIVE_CAMERA_MAX_HEIGHT: u32 = 120;
 const LIVE_CAMERA_TRANSPORT_MAX_WIDTH: u32 = 1920;
 const LIVE_CAMERA_TRANSPORT_MAX_HEIGHT: u32 = 1080;
 const LIVE_LIDAR_MAX_POINTS: usize = 256;
+const RUNNER_DATA_BUS_RETAINED_FRAMES_PER_STREAM: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LiveSnapshotOptions {
     camera_max_width: Option<u32>,
     camera_max_height: Option<u32>,
     include_full_depth: bool,
+    include_bulk_previews: bool,
 }
 
 impl Default for LiveSnapshotOptions {
@@ -81,6 +87,7 @@ impl Default for LiveSnapshotOptions {
             camera_max_width: Some(LIVE_CAMERA_MAX_WIDTH),
             camera_max_height: Some(LIVE_CAMERA_MAX_HEIGHT),
             include_full_depth: false,
+            include_bulk_previews: true,
         }
     }
 }
@@ -91,6 +98,16 @@ impl LiveSnapshotOptions {
             camera_max_width: None,
             camera_max_height: None,
             include_full_depth: true,
+            include_bulk_previews: true,
+        }
+    }
+
+    fn metadata_only() -> Self {
+        Self {
+            camera_max_width: Some(LIVE_CAMERA_MAX_WIDTH),
+            camera_max_height: Some(LIVE_CAMERA_MAX_HEIGHT),
+            include_full_depth: false,
+            include_bulk_previews: false,
         }
     }
 }
@@ -174,13 +191,26 @@ enum Commands {
         /// Accept runner control commands on stdin: `pause`, `resume`,
         /// `step N`, `reset`, and `quit`. Determinism re-checks are skipped in
         /// interactive mode.
-        #[arg(long, conflicts_with = "control_port")]
+        #[arg(long, conflicts_with_all = ["control_port", "frontend_port"])]
         control_stdin: bool,
         /// Serve runner control commands over a local TCP port for a frontend:
         /// `pause`, `resume`, `step N`, `reset`, and `quit`, with live per-step
         /// status replies. Determinism re-checks are skipped in interactive mode.
-        #[arg(long, value_name = "PORT", conflicts_with = "control_stdin")]
+        #[arg(
+            long,
+            value_name = "PORT",
+            conflicts_with_all = ["control_stdin", "frontend_port"]
+        )]
         control_port: Option<u16>,
+        /// Serve the negotiated framed binary production protocol. Bulk RGB-D
+        /// and LiDAR payloads are typed binary frames; queues and socket writes
+        /// are bounded and disconnected clients may reconnect to the same run.
+        #[arg(
+            long,
+            value_name = "PORT",
+            conflicts_with_all = ["control_stdin", "control_port"]
+        )]
+        frontend_port: Option<u16>,
         /// Stream camera and depth payloads at source resolution over TCP, up
         /// to the transport safety cap of 1920x1080 pixels per payload.
         /// This is opt-in because each status line can become substantially larger.
@@ -302,12 +332,14 @@ fn main() -> Result<()> {
             path,
             control_stdin,
             control_port,
+            frontend_port,
             control_camera_full_resolution,
             replay_out,
         } => run_manifest_command(
             &path,
             control_stdin,
             control_port,
+            frontend_port,
             control_camera_full_resolution,
             replay_out.as_deref(),
         ),
@@ -487,6 +519,7 @@ fn simulate_command(
             live_snapshot_options: LiveSnapshotOptions::default(),
         },
         None,
+        None,
     )
 }
 
@@ -494,6 +527,7 @@ fn run_manifest_command(
     path: &Path,
     control_stdin: bool,
     control_port: Option<u16>,
+    frontend_port: Option<u16>,
     control_camera_full_resolution: bool,
     replay_out_override: Option<&Path>,
 ) -> Result<()> {
@@ -518,6 +552,21 @@ fn run_manifest_command(
             let (mut transport, bound_port) = TcpRunnerControl::start(port)?;
             println!(
                 "control: scenario runner listening on 127.0.0.1:{bound_port}; commands: pause, resume, step N, reset, quit"
+            );
+            let mut control = RunControl::paused(&mut transport);
+            return run_scenario_manifest(
+                path,
+                &manifest,
+                scenario,
+                Some(&mut control),
+                replay_out_override,
+            );
+        }
+        if let Some(port) = frontend_port {
+            let (mut transport, _publisher, bound_port) = BinaryFrontendControl::start(port)?;
+            println!(
+                "frontend: scenario runner listening on 127.0.0.1:{bound_port}; binary protocol={}",
+                rne_data::transport::TRANSPORT_PROTOCOL_MAJOR
             );
             let mut control = RunControl::paused(&mut transport);
             return run_scenario_manifest(
@@ -633,7 +682,9 @@ fn run_manifest_command(
         replay_controller,
         sensor_subscriptions: manifest.sensors.clone(),
         physics_backend: manifest.physics.backend,
-        live_snapshot_options: if control_camera_full_resolution {
+        live_snapshot_options: if frontend_port.is_some() {
+            LiveSnapshotOptions::metadata_only()
+        } else if control_camera_full_resolution {
             LiveSnapshotOptions::full_resolution()
         } else {
             LiveSnapshotOptions::default()
@@ -643,16 +694,24 @@ fn run_manifest_command(
         let mut transport = StdinRunnerControl::start()?;
         let mut control = RunControl::paused(&mut transport);
         println!("control: runner paused; commands on stdin: pause, resume, step N, reset, quit");
-        run_simulation(&scene_path, options, Some(&mut control))
+        run_simulation(&scene_path, options, Some(&mut control), None)
     } else if let Some(port) = control_port {
         let (mut transport, bound_port) = TcpRunnerControl::start(port)?;
         println!(
             "control: listening on 127.0.0.1:{bound_port}; commands: pause, resume, step N, reset, quit"
         );
         let mut control = RunControl::paused(&mut transport);
-        run_simulation(&scene_path, options, Some(&mut control))
+        run_simulation(&scene_path, options, Some(&mut control), None)
+    } else if let Some(port) = frontend_port {
+        let (mut transport, publisher, bound_port) = BinaryFrontendControl::start(port)?;
+        println!(
+            "frontend: listening on 127.0.0.1:{bound_port}; binary protocol={}",
+            rne_data::transport::TRANSPORT_PROTOCOL_MAJOR
+        );
+        let mut control = RunControl::paused(&mut transport);
+        run_simulation(&scene_path, options, Some(&mut control), Some(&publisher))
     } else {
-        run_simulation(&scene_path, options, None)
+        run_simulation(&scene_path, options, None, None)
     }
 }
 
@@ -926,6 +985,7 @@ fn run_simulation(
     path: &Path,
     options: SimulationOptions<'_>,
     mut control: Option<&mut RunControl<'_>>,
+    frontend_publisher: Option<&BinaryFrontendPublisher>,
 ) -> Result<()> {
     let SimulationOptions {
         steps,
@@ -963,6 +1023,7 @@ fn run_simulation(
         physics_backend,
         control.as_deref_mut(),
         live_snapshot_options,
+        frontend_publisher,
     )?;
     print_simulation_report(path, &run.report, determinism_check);
     if control.is_none() && determinism_check {
@@ -982,6 +1043,7 @@ fn run_simulation(
             physics_backend,
             None,
             live_snapshot_options,
+            None,
         )?;
         anyhow::ensure!(
             run.report == replay.report,
@@ -1409,7 +1471,7 @@ fn build_live_sensor_stream(
     bus: &InMemoryDataBus,
     options: LiveSnapshotOptions,
 ) -> LiveSensorStream {
-    let camera = if summary.kind == "camera" {
+    let camera = if options.include_bulk_previews && summary.kind == "camera" {
         let rgb = bus.latest::<ImageRgb8>(rne_data::StreamId::new(summary.stream_id));
         let depth = bus.latest::<ImageDepth>(rne_data::StreamId::new(
             summary.stream_id + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET,
@@ -1424,7 +1486,7 @@ fn build_live_sensor_stream(
     } else {
         None
     };
-    let lidar = if summary.kind == "lidar" {
+    let lidar = if options.include_bulk_previews && summary.kind == "lidar" {
         bus.latest::<PointCloud>(rne_data::StreamId::new(summary.stream_id))
             .map(|frame| LiveLidarPreview {
                 point_count: frame.payload.points_m.len(),
@@ -1793,6 +1855,7 @@ fn simulate_scene_with_action_schedule(
         physics_backend,
         control,
         LiveSnapshotOptions::default(),
+        None,
     )
 }
 
@@ -1810,6 +1873,7 @@ fn simulate_scene_with_snapshot_options(
     physics_backend: RunPhysicsBackend,
     mut control: Option<&mut RunControl<'_>>,
     live_snapshot_options: LiveSnapshotOptions,
+    frontend_publisher: Option<&BinaryFrontendPublisher>,
 ) -> Result<SimulationRun> {
     if let Some(replay_frames) = replay_frames {
         anyhow::ensure!(
@@ -1854,7 +1918,10 @@ fn simulate_scene_with_snapshot_options(
             let dt = SimDuration::from_hertz(Hertz::new(hz));
             let mut sim_time = SimTime::ZERO;
             let mut command_buffer = ActuatorCommandBuffer::new();
-            let mut data_bus = InMemoryDataBus::new();
+            let mut data_bus = InMemoryDataBus::with_capacity_per_stream(
+                RUNNER_DATA_BUS_RETAINED_FRAMES_PER_STREAM,
+            )
+            .context("configure bounded runner DataBus")?;
             let sensor_payload_streams =
                 resolve_sensor_subscriptions(&setup.world, sensor_subscriptions)?;
             let mut frames = Vec::new();
@@ -1975,6 +2042,17 @@ fn simulate_scene_with_snapshot_options(
                     &data_bus,
                     live_snapshot_options,
                 );
+                if let Some(publisher) = frontend_publisher {
+                    frontend_transport::publish_bulk_sensors(
+                        publisher,
+                        &data_bus,
+                        observation
+                            .sensor_streams
+                            .iter()
+                            .map(|stream| (stream.stream_id, stream.kind.as_str())),
+                        CAMERA_DEPTH_STREAM_OFFSET,
+                    );
+                }
                 frames.push(ReplayFrame::new(
                     step,
                     sim_time.ticks(),
@@ -3410,7 +3488,7 @@ mod tests {
     fn example_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None).expect("run manifest");
+        run_manifest_command(&manifest, false, None, None, false, None).expect("run manifest");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -3525,6 +3603,7 @@ mod tests {
             camera_max_width: Some(2),
             camera_max_height: Some(1),
             include_full_depth: true,
+            include_bulk_previews: true,
         };
         let (width, height, encoded) =
             encode_bounded_depth(&depth, bounded_options).expect("bounded depth payload");
@@ -3550,7 +3629,7 @@ mod tests {
     fn lidar_payload_run_manifest_records_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None)
+        run_manifest_command(&manifest, false, None, None, false, None)
             .expect("run lidar payload manifest");
         let replay_path = manifest
             .parent()
@@ -3572,7 +3651,8 @@ mod tests {
     fn scenario_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/scenario_speed.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None).expect("run scenario manifest");
+        run_manifest_command(&manifest, false, None, None, false, None)
+            .expect("run scenario manifest");
         let replay = manifest
             .parent()
             .expect("manifest parent")
@@ -3604,7 +3684,7 @@ mod tests {
     fn trajectory_run_manifest_negotiates_physics_and_replays() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_joint_trajectory.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None)
+        run_manifest_command(&manifest, false, None, None, false, None)
             .expect("run trajectory manifest with physics checks");
         let replay = manifest
             .parent()
@@ -3617,7 +3697,7 @@ mod tests {
     fn analytic_backend_run_manifest_executes() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/cart_analytic.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None)
+        run_manifest_command(&manifest, false, None, None, false, None)
             .expect("run analytic backend manifest");
     }
 
@@ -3625,7 +3705,7 @@ mod tests {
     fn plugin_controller_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/mm_minimal_velocity_servo.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None)
+        run_manifest_command(&manifest, false, None, None, false, None)
             .expect("run plugin controller manifest");
     }
 
@@ -4017,7 +4097,8 @@ mod tests {
     fn sumo_cross_run_manifest_executes_deterministically() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/runs/sumo_cross.rne.run.toml");
-        run_manifest_command(&manifest, false, None, false, None).expect("run SUMO cross manifest");
+        run_manifest_command(&manifest, false, None, None, false, None)
+            .expect("run SUMO cross manifest");
     }
 
     #[test]

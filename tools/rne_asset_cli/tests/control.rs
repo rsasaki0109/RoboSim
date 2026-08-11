@@ -6,8 +6,47 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 use rne_core::control::ControlCommand;
+use rne_data::transport::{
+    decode_image_depth, decode_image_rgb8, decode_lidar_point_cloud, encode_control_command,
+    ClientHello, ControlAck, ServerHello, StatusMessage, TransportCapabilities, TransportFrame,
+    TransportMessageKind, TRANSPORT_MAX_PAYLOAD_BYTES,
+};
 
 const BIN: &str = env!("CARGO_BIN_EXE_rne-asset");
+
+struct KillOnDropChild(Child);
+
+impl KillOnDropChild {
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait()
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.0.try_wait()
+    }
+
+    fn wait_bounded(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        for _ in 0..300 {
+            if let Some(status) = self.try_wait()? {
+                return Ok(status);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "runner did not exit within 15 seconds",
+        ))
+    }
+}
+
+impl Drop for KillOnDropChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -105,6 +144,243 @@ fn spawn_tcp_control_for_options(
         stdout,
         port.expect("control port from runner stdout"),
     )
+}
+
+fn spawn_binary_frontend_for(
+    manifest: PathBuf,
+    replay: &std::path::Path,
+) -> (KillOnDropChild, BufReader<std::process::ChildStdout>, u16) {
+    let _ = std::fs::remove_file(replay);
+    let mut child = Command::new(BIN)
+        .arg("run")
+        .arg(manifest)
+        .arg("--frontend-port")
+        .arg("0")
+        .arg("--replay-out")
+        .arg(replay)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn binary frontend runner");
+    let stdout = child.stdout.take().expect("binary frontend stdout");
+    let mut stdout = BufReader::new(stdout);
+    let mut port = None;
+    let mut line = String::new();
+    while port.is_none() {
+        line.clear();
+        if stdout.read_line(&mut line).expect("read frontend stdout") == 0 {
+            break;
+        }
+        if let Some(rest) = line.split_once("127.0.0.1:").map(|(_, rest)| rest) {
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            port = digits.parse::<u16>().ok();
+        }
+    }
+    (
+        KillOnDropChild(child),
+        stdout,
+        port.expect("binary frontend port from runner stdout"),
+    )
+}
+
+fn connect_binary_frontend(port: u16) -> (TcpStream, u64, ServerHello) {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect binary frontend");
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .expect("set binary frontend read timeout");
+    let hello = ClientHello {
+        min_protocol_major: 1,
+        max_protocol_major: 1,
+        capabilities: TransportCapabilities::ALL_V1,
+        required_capabilities: TransportCapabilities::CONTROL.union(TransportCapabilities::STATUS),
+        max_payload_bytes: TRANSPORT_MAX_PAYLOAD_BYTES as u32,
+        queue_frame_limit: 16,
+        queue_byte_limit: 64 * 1024 * 1024,
+        resume_after_sequence: None,
+    };
+    TransportFrame::new(
+        TransportMessageKind::ClientHello,
+        1,
+        0,
+        hello.encode_payload(),
+    )
+    .write_to(&mut stream)
+    .expect("write binary ClientHello");
+    let response = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
+        .expect("read binary ServerHello")
+        .expect("binary ServerHello frame");
+    assert_eq!(response.kind, TransportMessageKind::ServerHello);
+    let server = ServerHello::decode_payload(&response.payload).expect("decode ServerHello");
+    (stream, response.session_id, server)
+}
+
+fn write_binary_command(
+    stream: &mut TcpStream,
+    session_id: u64,
+    sequence: u64,
+    command: ControlCommand,
+) {
+    TransportFrame::new(
+        TransportMessageKind::ControlCommand,
+        sequence,
+        session_id,
+        encode_control_command(command),
+    )
+    .write_to(stream)
+    .expect("write binary control command");
+}
+
+#[test]
+fn binary_frontend_streams_lossless_rgbd_with_sim_timestamps() {
+    let manifest = manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml");
+    let replay = manifest_dir().join("../../target/runs/frontend_binary_rgbd.rne-replay");
+    let (mut child, _stdout, port) = spawn_binary_frontend_for(manifest, &replay);
+    let (mut stream, session_id, server) = connect_binary_frontend(port);
+    assert!(server
+        .negotiated
+        .capabilities
+        .contains(TransportCapabilities::IMAGE_RGB8));
+    assert!(server
+        .negotiated
+        .capabilities
+        .contains(TransportCapabilities::IMAGE_DEPTH_F32));
+    write_binary_command(
+        &mut stream,
+        session_id,
+        10,
+        ControlCommand::Step { frames: 1 },
+    );
+
+    let mut ack = false;
+    let mut status = false;
+    let mut rgb = false;
+    let mut depth = false;
+    for _ in 0..16 {
+        let frame = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
+            .expect("read RGB-D frontend frame")
+            .unwrap_or_else(|| {
+                panic!(
+                    "RGB-D frontend closed early: ack={ack} status={status} rgb={rgb} depth={depth} child={:?}",
+                    child.try_wait()
+                )
+            });
+        match frame.kind {
+            TransportMessageKind::ControlAck => {
+                let value = ControlAck::decode_payload(&frame.payload).expect("decode ack");
+                ack |= value.command_sequence == 10;
+            }
+            TransportMessageKind::Status => {
+                let value = StatusMessage::decode_payload(&frame.payload).expect("decode status");
+                assert_eq!(value.step, 1);
+                assert!(value.sim_time_ticks > 0);
+                let json = std::str::from_utf8(&value.snapshot_json).expect("status UTF-8");
+                assert!(json.contains("\"sensors\""));
+                assert!(!json.contains("rgba8_base64"));
+                assert!(!json.contains("depth_f32_le_base64"));
+                status = true;
+            }
+            TransportMessageKind::ImageRgb8 => {
+                let (metadata, image) = decode_image_rgb8(&frame.payload).expect("decode RGB8");
+                assert_eq!((image.width, image.height), (64, 48));
+                assert_eq!(image.rgba8.len(), 64 * 48 * 4);
+                assert!(metadata.available_ticks >= metadata.capture_ticks);
+                rgb = true;
+            }
+            TransportMessageKind::ImageDepthF32 => {
+                let (metadata, image) = decode_image_depth(&frame.payload).expect("decode depth");
+                assert_eq!((image.width, image.height), (64, 48));
+                assert_eq!(image.depth_m.len(), 64 * 48);
+                assert!(image.depth_m.iter().all(|value| value.is_finite()));
+                assert!(metadata.available_ticks >= metadata.capture_ticks);
+                depth = true;
+            }
+            TransportMessageKind::Gap => {}
+            other => panic!("unexpected RGB-D frontend frame: {other:?}"),
+        }
+        if ack && status && rgb && depth {
+            break;
+        }
+    }
+    assert!(
+        ack && status && rgb && depth,
+        "missing RGB-D frontend frames"
+    );
+
+    write_binary_command(&mut stream, session_id, 11, ControlCommand::Quit);
+    assert!(
+        child
+            .wait()
+            .expect("wait for RGB-D frontend runner")
+            .success(),
+        "RGB-D frontend runner must exit successfully"
+    );
+    let artifact = rne_log::ReplayArtifact::read_json(&replay).expect("read RGB-D replay");
+    assert_eq!(artifact.frames.len(), 1);
+}
+
+#[test]
+fn binary_frontend_streams_aligned_lidar_payload() {
+    let manifest =
+        manifest_dir().join("../../assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml");
+    let replay = manifest_dir().join("../../target/runs/frontend_binary_lidar.rne-replay");
+    let (mut child, _stdout, port) = spawn_binary_frontend_for(manifest, &replay);
+    let (mut stream, session_id, _server) = connect_binary_frontend(port);
+    write_binary_command(
+        &mut stream,
+        session_id,
+        20,
+        ControlCommand::Step { frames: 1 },
+    );
+
+    let mut lidar = None;
+    for _ in 0..16 {
+        let frame = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
+            .expect("read LiDAR frontend frame")
+            .expect("LiDAR frontend frame");
+        if frame.kind == TransportMessageKind::LidarPointCloud {
+            lidar = Some(decode_lidar_point_cloud(&frame.payload).expect("decode LiDAR"));
+            break;
+        }
+    }
+    let (metadata, cloud) = lidar.expect("binary LiDAR payload");
+    assert!(metadata.available_ticks >= metadata.capture_ticks);
+    assert!(!cloud.points_m.is_empty());
+    assert!(cloud.attributes_are_aligned());
+    assert!(cloud.points_m.iter().all(|point| point.is_finite()));
+
+    write_binary_command(&mut stream, session_id, 21, ControlCommand::Quit);
+    assert!(
+        child
+            .wait()
+            .expect("wait for LiDAR frontend runner")
+            .success(),
+        "LiDAR frontend runner must exit successfully"
+    );
+    let artifact = rne_log::ReplayArtifact::read_json(&replay).expect("read LiDAR replay");
+    assert_eq!(artifact.frames.len(), 1);
+}
+
+#[test]
+fn binary_frontend_unread_client_does_not_stall_simulation() {
+    let manifest = manifest_dir().join("../../assets/runs/mm_minimal_joint_velocity.rne.run.toml");
+    let replay = manifest_dir().join("../../target/runs/frontend_binary_slow_client.rne-replay");
+    let (mut child, _stdout, port) = spawn_binary_frontend_for(manifest, &replay);
+    let (mut stream, session_id, _server) = connect_binary_frontend(port);
+    write_binary_command(&mut stream, session_id, 30, ControlCommand::Resume);
+
+    // Deliberately retain the socket without reading the acknowledgement,
+    // status, RGB, or depth frames. Socket I/O occurs off the simulation
+    // thread, and both queue dimensions are bounded.
+    let status = child
+        .wait_bounded()
+        .expect("slow frontend must not stall runner");
+    assert!(status.success(), "runner must finish with unread frontend");
+    let artifact = rne_log::ReplayArtifact::read_json(&replay).expect("read slow-client replay");
+    assert_eq!(artifact.frames.len(), 120);
+    drop(stream);
 }
 
 /// The opt-in full-resolution TCP path must carry the source RGB-D dimensions
