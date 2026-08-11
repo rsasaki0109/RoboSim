@@ -1,6 +1,6 @@
 # Stable Controller Control Surface Plan
 
-Status: M2-A implemented; M2-B through M2-D planned
+Status: M2-A through M2-C implemented; M2-D planned
 
 ## Goal
 
@@ -30,7 +30,7 @@ independent of ECS entity IDs and input insertion order.
 
 ## M2-B: Lifecycle and capability negotiation
 
-Add a controller descriptor with a sorted capability set and a host-owned
+Implemented with a controller descriptor containing a sorted capability set and a host-owned
 `created -> configured -> active -> shutdown` lifecycle. Configuration must
 fail before stepping when a controller cannot consume every required
 observation or produce every required action. Reset remains a deterministic
@@ -38,7 +38,7 @@ simulation event and receives fixed-step metadata, never wall-clock time.
 
 ## M2-C: Multi-robot scheduling
 
-Add a scheduler that invokes controllers in stable controller/robot ID order,
+Implemented with a scheduler that invokes controllers in stable controller/robot ID order,
 validates every returned action against the paired observation, rejects
 conflicting commands, and emits one canonical action frame. A reversed-spawn
 fixture must produce byte-identical action frames and equivalent final named
