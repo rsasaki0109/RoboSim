@@ -116,4 +116,10 @@ LiDAR parallel-array alignment are validated before allocation or publication.
 - M3-B production RGB-D/LiDAR payloads: done locally.
 - M3-C bounded delivery and DataBus retention: done locally.
 - M3-D reconnecting runner and native frontend: done locally.
-- M3-E full workspace/CI matrix: in progress.
+- M3-E full workspace/CI matrix: done locally on 2026-08-11.
+
+The locked graph passes `cargo fmt --all`, workspace Clippy with
+`-D warnings`, `cargo test --workspace`, `xtask ci-headless`, and the complete
+`xtask ci` pipeline. The parity catalog contains 20 passing checks, including
+wire golden bytes, process-level RGB-D/LiDAR delivery, slow-client progress,
+same-session reconnect, and native-viewer sensor projection.
