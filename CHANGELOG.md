@@ -82,6 +82,9 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Ordered TCP runner-control replies**: command enqueue and acknowledgement
+  now share the status-writer lock, guaranteeing the documented acknowledgement
+  before the applied-state status even under Windows thread scheduling.
 - **Stable Windows WGPU startup**: the default renderer now selects WGPU's
   primary backends on Windows instead of loading legacy OpenGL drivers. Explicit
   backend selection remains available through `WgpuRenderBackend::with_backends`.

@@ -215,8 +215,13 @@ denied, workspace tests, `xtask ci-headless`, and the full `xtask ci`; its OSS
 parity report passed all 22 checks and its physics-conformance report passed all
 backend checks.
 
+GitHub-hosted `windows-latest` evidence on 2026-08-12 sustained a slowest
+repetition of 4,848.2 steps/s with the same 15.6 m minimum gap, stable digests,
+canonical ordering, ownership counts, and zero-violation result. The uploaded
+reports passed all 22 OSS parity checks and every physics-conformance check.
+
 - M5-A contract and canonical scenario evidence: complete.
 - M5-B mixed ownership: complete.
 - M5-C recoverable TraCI: complete.
-- M5-D reference/report: complete locally; GitHub CI evidence pending.
-- M5-E full workspace/CI matrix: complete locally; GitHub CI evidence pending.
+- M5-D reference/report: complete.
+- M5-E full workspace/CI matrix: complete.
