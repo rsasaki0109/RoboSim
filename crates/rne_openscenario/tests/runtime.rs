@@ -3,7 +3,8 @@
 use rne_core::control::{ControlCommand, RunControl, RunnerControl};
 use rne_openscenario::{
     execute_scenario, execute_scenario_with_control, parse_openscenario_xml_with_source,
-    ScenarioDocument, ScenarioEntityKind, ScenarioRunOptions,
+    ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioRunOptions,
+    ScenarioTimedAction,
 };
 use rne_traffic::{
     Accuracy, AccuracyClass, AuthorityClass, AxisConvention, CoordinateFrame, Junction,
@@ -95,6 +96,23 @@ fn scenario() -> ScenarioDocument {
     parse_openscenario_xml_with_source("runtime_speed.xosc", &text).expect("parse scenario")
 }
 
+fn entity(name: &str, kind: ScenarioEntityKind, position_m: [f64; 3]) -> ScenarioEntity {
+    ScenarioEntity {
+        name: name.to_string(),
+        kind,
+        initial_world_position_m: Some(position_m),
+        initial_heading_rad: Some(0.0),
+    }
+}
+
+fn action(entity: &str, action: ScenarioAction) -> ScenarioTimedAction {
+    ScenarioTimedAction {
+        entity: entity.to_string(),
+        start_time_s: 0.0,
+        action,
+    }
+}
+
 struct ScriptedControl {
     commands: VecDeque<ControlCommand>,
     status_steps: Vec<u64>,
@@ -138,6 +156,102 @@ fn executes_speed_scenario_deterministically() {
     let final_x = first.final_positions_m[0][0];
     assert!(final_x > 0.0, "ego should travel east along the corridor");
     assert_ne!(first.stable_hash, 0);
+}
+
+#[test]
+fn multi_kind_execution_is_entity_order_independent() {
+    let mut network = corridor_network();
+    network.lanes.push(Lane {
+        id: id("corridor:walk"),
+        provenance: synthetic("corridor-walk"),
+        kind: LaneKind::Sidewalk,
+        allowed_actors: vec![TrafficActorKind::Pedestrian],
+        centerline_m: vec![[-20.0, 0.0, 10.0], [20.0, 0.0, 10.0]],
+        width_m: 2.0,
+        speed_limit_m_s: Some(2.0),
+        road_class: None,
+        road_functions: Vec::new(),
+    });
+    let ego = entity("ego", ScenarioEntityKind::MotorVehicle, [-18.0, 0.0, 1.75]);
+    let walker = entity("walker", ScenarioEntityKind::Pedestrian, [-18.0, 0.0, 10.0]);
+    let ego_speed = action("ego", ScenarioAction::AbsoluteSpeed { target_m_s: 5.0 });
+    let walker_speed = action("walker", ScenarioAction::AbsoluteSpeed { target_m_s: 1.0 });
+    let forward = ScenarioDocument::new(
+        "multi_kind.xosc",
+        "network.rne.traffic.json",
+        vec![ego.clone(), walker.clone()],
+        vec![ego_speed.clone(), walker_speed.clone()],
+    );
+    let reverse = ScenarioDocument::new(
+        "multi_kind.xosc",
+        "network.rne.traffic.json",
+        vec![walker, ego],
+        vec![walker_speed, ego_speed],
+    );
+    let options = ScenarioRunOptions {
+        steps: 120,
+        hz: 60.0,
+    };
+
+    let forward = execute_scenario(&forward, &network, &options).expect("forward multi-kind run");
+    let reverse = execute_scenario(&reverse, &network, &options).expect("reverse multi-kind run");
+
+    assert_eq!(forward, reverse);
+    assert_eq!(forward.final_actors.len(), 2);
+    assert_eq!(forward.final_actors[0].name, "ego");
+    assert_eq!(
+        forward.final_actors[0].kind,
+        ScenarioEntityKind::MotorVehicle
+    );
+    assert_eq!(forward.final_actors[1].name, "walker");
+    assert_eq!(forward.final_actors[1].kind, ScenarioEntityKind::Pedestrian);
+    assert!(forward.final_actors[0].final_speed_m_s > 0.0);
+    assert!(forward.final_actors[1].final_speed_m_s > 0.0);
+}
+
+#[test]
+fn simultaneous_assigned_routes_remain_actor_specific() {
+    let entities = vec![
+        entity("north", ScenarioEntityKind::MotorVehicle, [0.0, 0.0, 0.0]),
+        entity("south", ScenarioEntityKind::MotorVehicle, [10.0, 0.0, 0.0]),
+    ];
+    let actions = vec![
+        action(
+            "north",
+            ScenarioAction::AssignRoute {
+                waypoints: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 30.0]],
+            },
+        ),
+        action("north", ScenarioAction::AbsoluteSpeed { target_m_s: 4.0 }),
+        action(
+            "south",
+            ScenarioAction::AssignRoute {
+                waypoints: vec![[10.0, 0.0, 0.0], [10.0, 0.0, -30.0]],
+            },
+        ),
+        action("south", ScenarioAction::AbsoluteSpeed { target_m_s: 4.0 }),
+    ];
+    let document = ScenarioDocument::new(
+        "independent_routes.xosc",
+        "network.rne.traffic.json",
+        entities,
+        actions,
+    );
+    let result = execute_scenario(
+        &document,
+        &corridor_network(),
+        &ScenarioRunOptions {
+            steps: 300,
+            hz: 60.0,
+        },
+    )
+    .expect("independent assigned routes");
+
+    assert_eq!(result.final_actors[0].name, "north");
+    assert!(result.final_actors[0].final_position_m[2] > 10.0);
+    assert_eq!(result.final_actors[1].name, "south");
+    assert!(result.final_actors[1].final_position_m[2] < -10.0);
+    assert_eq!(result.collisions, 0);
 }
 
 #[test]

@@ -6,6 +6,17 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
+  canonical multi-actor actions, heterogeneous actor kinds receive compatible
+  deterministic routes, assigned routes no longer alias, and replay schema v4
+  records UUID-ordered actor state plus ordered action evidence. Native traffic
+  reports mixed runtime/external ownership and a complete visible-state digest.
+  TraCI co-simulation now retains the last complete mirror across disconnects,
+  exposes lifecycle metrics, and performs bounded snapshot-only recovery
+  without re-sending an ambiguous simulation step. `xtask scenario-scale`
+  writes the classified 100-actor/600-step release benchmark report and gates
+  at least 60 headless steps/s on the named CI runner.
+
 - **Physics conformance (M4)**: analytic and Rapier execute one fixed-step
   rigid-body vector, emit canonical versioned snapshots with frozen FNV-1a
   hashes, and compare unlike solvers only through a named SI-unit tolerance
@@ -71,6 +82,9 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Ordered TCP runner-control replies**: command enqueue and acknowledgement
+  now share the status-writer lock, guaranteeing the documented acknowledgement
+  before the applied-state status even under Windows thread scheduling.
 - **Stable Windows WGPU startup**: the default renderer now selects WGPU's
   primary backends on Windows instead of loading legacy OpenGL drivers. Explicit
   backend selection remains available through `WgpuRenderBackend::with_backends`.

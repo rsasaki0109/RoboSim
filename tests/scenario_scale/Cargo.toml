@@ -1,0 +1,19 @@
+[package]
+name = "rne_scenario_scale"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "rne-scenario-scale"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+rne_openscenario = { path = "../../crates/rne_openscenario" }
+rne_traffic = { path = "../../crates/rne_traffic" }
+serde = { workspace = true }
+serde_json = { workspace = true }

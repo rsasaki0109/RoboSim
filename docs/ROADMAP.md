@@ -23,7 +23,7 @@ that point.
 | M2 | Nov-Dec 2026 | Stable robot-native control surface: versioned observation/action schemas, controller lifecycle and capability negotiation, multi-robot scheduling, and C-ABI compatibility suite ([plan](PLAN_CONTROLLER_CONTROL_SURFACE.md)) | A controller built against the oldest supported ABI loads in the newest runtime; no adapter type leaks into core crates; multi-robot results are spawn-order independent |
 | M3 | Jan-Feb 2027 | Production sensor/frontend transport: framed binary protocol, explicit negotiation, bounded queues/backpressure, RGB-D/LiDAR payloads, and reconnect semantics ([plan](PLAN_SENSOR_FRONTEND_TRANSPORT.md)) | Slow/disconnected clients cannot stall simulation or grow memory without bound; protocol compatibility and headless sensor references pass on Windows and Linux |
 | M4 | Mar-Apr 2027 | Physics conformance: backend-neutral test vectors, units/tolerance registry, snapshots, contact/joint validation, and analytic-vs-Rapier reports ([plan](PLAN_PHYSICS_CONFORMANCE.md)) | Every advertised backend capability has a conformance test; deterministic tests use stable hashes where valid and documented tolerances otherwise |
-| M5 | May-Jun 2027 | Scenario and traffic scale: multi-entity OpenSCENARIO execution, mixed native/external ownership metrics, recoverable TraCI sessions, and urban scale budgets | Reference scenario runs 100 actors at >=60 Hz headlessly on the CI benchmark class with deterministic externally visible ordering and zero unexplained violations |
+| M5 | May-Jun 2027 | Scenario and traffic scale: multi-entity OpenSCENARIO execution, mixed native/external ownership metrics, recoverable TraCI sessions, and urban scale budgets ([plan](PLAN_SCENARIO_TRAFFIC_SCALE.md)) | Reference scenario runs 100 actors at >=60 Hz headlessly on the CI benchmark class with deterministic externally visible ordering and zero unexplained violations |
 | M6 | Jul 2027 | 1.0 RC hardening: public API freeze, migration and compatibility policy, supply-chain/license audit, fuzzed import/protocol boundaries, release artifacts and examples | No P0/P1 defects, all public APIs documented, two clean release rehearsals pass the full matrix, and `v1.0.0-rc.1` installs and runs every flagship workflow |
 
 Cross-cutting rules for every milestone:
@@ -36,6 +36,13 @@ Cross-cutting rules for every milestone:
   artifact.
 - Performance claims name the fixture, machine class, actor/sensor count, and
   percentile; correctness gates are never waived to meet throughput targets.
+
+M5 evidence is produced by `cargo run -p xtask -- scenario-scale`. The
+committed OpenSCENARIO reference contains 100 actors and runs 600 fixed steps;
+its golden runtime hash is `7503294308621126381` and its canonical
+actor/action result digest is `6732886903736628512`. The report measures three
+release repetitions on the named runner class and fails below 60 headless
+steps/s or on any classified/unexplained violation.
 
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|

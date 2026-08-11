@@ -46,6 +46,7 @@ fn run() -> anyhow::Result<()> {
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
         "physics-conformance" => physics_conformance(&mut args),
+        "scenario-scale" => scenario_scale(&mut args),
         "parity" => parity(&mut args),
         "house-gif-demo" => house_gif_demo(),
         "hero-media-check" => hero_media_check(),
@@ -82,6 +83,10 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         (
             "physics_backend_conformance",
             "cargo run --locked -q -p rne_physics_conformance --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
+        ),
+        (
+            "scenario_traffic_scale",
+            "cargo run --locked --release -q -p rne_scenario_scale --bin rne-scenario-scale -- --output artifacts/scenario-scale/report.json",
         ),
         (
             "robot_control_replay",
@@ -230,6 +235,40 @@ fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Resul
             "rne_physics_conformance",
             "--bin",
             "rne-physics-conformance",
+            "--",
+            "--output",
+            &output,
+        ],
+    )
+}
+
+/// Runs the release-mode 100-actor scenario scale gate and writes its JSON report.
+fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let mut output = root.join("artifacts/scenario-scale/report.json");
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--json" => {
+                output = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--json requires a path"))?,
+                );
+            }
+            other => anyhow::bail!("unknown scenario-scale argument: {other}"),
+        }
+    }
+    let output = output.to_string_lossy().into_owned();
+    run_program(
+        Path::new("cargo"),
+        &[
+            "run",
+            "--locked",
+            "--release",
+            "-q",
+            "-p",
+            "rne_scenario_scale",
+            "--bin",
+            "rne-scenario-scale",
             "--",
             "--output",
             &output,

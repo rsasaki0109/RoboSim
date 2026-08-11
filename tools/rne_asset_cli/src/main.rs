@@ -1229,13 +1229,37 @@ impl TcpRunnerControl {
                         ControlCommand::Resume => false,
                         ControlCommand::Quit => paused,
                     };
-                    if sender.send(command).is_err() {
+                    // Keep the writer locked while enqueueing and acknowledging
+                    // the command. Once the receiver observes the command, the
+                    // simulation thread may immediately report a status; holding
+                    // this lock guarantees the documented ACK-before-status order.
+                    let queued = if let Ok(mut slot) = thread_writer.lock() {
+                        if sender.send(command).is_err() {
+                            false
+                        } else {
+                            let failed = slot.as_mut().is_some_and(|writer| {
+                                writer
+                                    .write_all(
+                                        format!(
+                                            "ok {}\n",
+                                            if paused { "paused" } else { "running" }
+                                        )
+                                        .as_bytes(),
+                                    )
+                                    .and_then(|()| writer.flush())
+                                    .is_err()
+                            });
+                            if failed {
+                                *slot = None;
+                            }
+                            true
+                        }
+                    } else {
+                        sender.send(command).is_ok()
+                    };
+                    if !queued {
                         break;
                     }
-                    write(&format!(
-                        "ok {}\n",
-                        if paused { "paused" } else { "running" }
-                    ));
                     if quit {
                         break;
                     }
@@ -3080,7 +3104,7 @@ fn replay_scenario_command(path: &Path, artifact: &ScenarioReplayArtifact) -> Re
         actual.steps
     );
     anyhow::ensure!(
-        actual == artifact.result,
+        actual.replay_matches(&artifact.result),
         "scenario replay result mismatch: expected={:?} actual={:?}",
         artifact.result,
         actual

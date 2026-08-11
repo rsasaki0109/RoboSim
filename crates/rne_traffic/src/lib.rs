@@ -46,7 +46,7 @@ pub use systems::{
     advance_controlled_kinematic_traffic, advance_kinematic_traffic,
     advance_reserved_kinematic_traffic, advance_traffic_step, traffic_actors_in_stable_order,
     KinematicTrafficConfig, KinematicTrafficControls, KinematicTrafficError, KinematicTrafficStep,
-    MissingTrafficActorStableId, TrafficFlowMetrics,
+    MissingTrafficActorStableId, TrafficFlowMetrics, TrafficOwnershipMetrics,
 };
 pub use topology::{
     build_traffic_topology, TopologyBuildConfig, TopologyBuildResult, TopologyBuildStats,

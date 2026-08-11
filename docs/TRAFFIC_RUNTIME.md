@@ -25,9 +25,13 @@ Pose ownership is explicit when an external traffic adapter shares the world.
 Actors without `TrafficPoseSource`, or with `TrafficPoseSource::Runtime`, are
 advanced by `rne_traffic`. An adapter that supplies a pose every step attaches
 `TrafficPoseSource::External`; the runtime then excludes that actor from
-kinematic integration and flow metrics. This prevents a SUMO (or other
-external simulator) pose from being overwritten by a second integrator while
-allowing RNE-owned traffic actors to advance in the same world.
+kinematic integration and native flow metrics. Every completed step still
+reports total, runtime-owned, external-owned, advanced, and observed actor
+counts. Its canonical externally-visible digest covers stable UUID, actor kind,
+pose owner, and pose for both ownership classes. This
+prevents a SUMO (or other external simulator) pose from being overwritten by a
+second integrator while allowing RNE-owned traffic actors to advance in the
+same world and keeping the complete mixed world observable.
 
 The TraCI adapter keeps external control explicit as well. Calling
 `rne_traci::CoSimulation::set_vehicle_speed_m_s` sends one SUMO
@@ -35,6 +39,14 @@ The TraCI adapter keeps external control explicit as well. Calling
 the mirrored `TrafficPose`. SUMO therefore remains the motion and route
 authority, while the backend-neutral traffic runtime remains responsible only
 for actors marked `TrafficPoseSource::Runtime`.
+
+`CoSimulation` also exposes `Connected`, `Disconnected`, and `Closed` session
+states with monotonic step/recovery metrics. An I/O or protocol disconnect
+retains the last complete ECS mirror. `recover` makes a bounded number of
+endpoint reconnect attempts and performs a complete snapshot-only resync
+before another `simulationStep`; unchanged SUMO IDs retain their RNE entities
+and stable UUIDs. `recover_from_client` provides the same transaction for
+caller-owned connection policy. A failed read never commits a partial mirror.
 
 `advance_kinematic_traffic` receives `SimTime` and `SimDuration` explicitly. It
 never reads wall-clock time. Before mutation it validates every actor, route
@@ -116,6 +128,20 @@ average speed, waiting time, queue length, and throughput. The generated
 `docs/media/plateau-car.gif` contains 144 real wgpu frames over 12 seconds.
 Optional batched debug layers show every lane, the chosen route, signal
 positions, generated connections, and conflict points.
+
+The M5 reference extends the same gate through the OpenSCENARIO executor. A
+committed 100-actor scenario runs 600 fixed steps at 60 Hz, records canonical
+actor/action evidence and mixed ownership metrics, repeats under reversed
+declaration order, and measures three release-mode repetitions. The slowest
+repetition must exceed 60 simulation steps per wall-clock second on the
+GitHub-hosted Windows parity runner:
+
+```bash
+cargo run -p xtask -- scenario-scale
+```
+
+The command writes `artifacts/scenario-scale/report.json`; timing is diagnostic
+and excluded from the stable actor/action digests.
 
 The follow-on `docs/media/plateau-lidar.gif` mounts a physics-aware 16-channel
 LiDAR on the tracked vehicle and raycasts against official building collision

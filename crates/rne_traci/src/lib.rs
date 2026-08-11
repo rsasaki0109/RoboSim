@@ -24,7 +24,10 @@
 
 pub mod co_simulation;
 
-pub use co_simulation::CoSimulation;
+pub use co_simulation::{
+    CoSimulation, CoSimulationRecovery, CoSimulationSessionMetrics, CoSimulationSessionState,
+    ReconnectPolicy, TraciEndpoint,
+};
 
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
@@ -65,6 +68,34 @@ pub enum TraciError {
     /// A caller supplied a value outside this adapter's supported range.
     #[error("invalid TraCI argument: {0}")]
     InvalidArgument(String),
+    /// An operation is not valid in the current co-simulation session state.
+    #[error("TraCI session operation `{operation}` is invalid while {state}")]
+    SessionState {
+        /// Attempted operation.
+        operation: &'static str,
+        /// Current session state.
+        state: &'static str,
+    },
+    /// The session was constructed without a reconnect endpoint.
+    #[error("TraCI session has no endpoint for automatic recovery")]
+    RecoveryUnavailable,
+    /// Every bounded reconnect attempt failed.
+    #[error("TraCI recovery failed after {attempts} attempt(s): {last_error}")]
+    RecoveryFailed {
+        /// Number of attempted replacement connections.
+        attempts: u32,
+        /// Last connection or snapshot error.
+        last_error: String,
+    },
+}
+
+impl TraciError {
+    pub(crate) fn disconnects_session(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_) | Self::Protocol(_) | Self::UnexpectedValue(_, _)
+        )
+    }
 }
 
 /// A connected TraCI client bound to one SUMO process.
