@@ -109,16 +109,22 @@ fn lib_source(name: &str) -> String {
         r#"//! RNE controller plugin `{name}`.
 //!
 //! This scaffold compiles to a shared library implementing the versioned
-//! controller-plugin C ABI (`rne_plugin::cabi`, ABI version 2). Replace the
-//! velocity-servo policy in `rne_controller_step` with your controller.
+//! controller-plugin C ABI (`rne_plugin::cabi`, ABI version 3). Replace the
+//! velocity-servo policy in `rne_controller_step_v3` with your controller.
 
 use std::ffi::{{c_char, c_void, CStr, CString}};
 
 /// ABI version implemented by this plugin.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// Logical plugin name reported through [`rne_plugin_name`].
 pub const PLUGIN_NAME: &str = "{name}";
+
+const CAP_JOINT_POSITION_OBSERVATION: u64 = 1 << 0;
+const CAP_JOINT_VELOCITY_COMMAND: u64 = 1 << 2;
+const CAP_MULTI_ROBOT: u64 = 1 << 3;
+const CAPABILITIES: u64 =
+    CAP_JOINT_POSITION_OBSERVATION | CAP_JOINT_VELOCITY_COMMAND | CAP_MULTI_ROBOT;
 
 /// Joint position observation.
 #[repr(C)]
@@ -140,12 +146,44 @@ pub struct RneJointVelocity {{
     pub velocity_rad_s: f64,
 }}
 
+/// Robot-scoped ABI-v3 joint observation.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct RneJointObservationV3 {{
+    pub robot_id: *const c_char,
+    pub name: *const c_char,
+    pub position_rad: f64,
+    pub velocity_rad_s: f64,
+    pub has_velocity: u8,
+    pub reserved: [u8; 7],
+}}
+
+/// Robot-scoped ABI-v3 joint velocity command.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct RneJointVelocityV3 {{
+    pub robot_id: *const c_char,
+    pub name: *const c_char,
+    pub velocity_rad_s: f64,
+}}
+
+/// ABI-v3 fixed-step result.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RneControllerStepResultV3 {{
+    pub status: i32,
+    pub output_count: usize,
+}}
+
 /// Controller state owned by the plugin.
 struct ControllerState {{
     name: CString,
     target_rad: f64,
     gain: f64,
     max_velocity_rad_s: f64,
+    configured: bool,
+    active: bool,
+    shutdown: bool,
 }}
 
 static PLUGIN_NAME_C: &[u8] = b"{name}\0";
@@ -160,6 +198,12 @@ pub extern "C" fn rne_plugin_abi_version() -> u32 {{
 #[no_mangle]
 pub extern "C" fn rne_plugin_name() -> *const c_char {{
     PLUGIN_NAME_C.as_ptr().cast()
+}}
+
+/// Reports the supported ABI-v3 capability mask.
+#[no_mangle]
+pub extern "C" fn rne_plugin_capabilities() -> u64 {{
+    CAPABILITIES
 }}
 
 /// Creates a controller instance.
@@ -185,6 +229,7 @@ pub unsafe extern "C" fn rne_controller_create(
         return std::ptr::null_mut();
     }}
     let Ok(joint) = (|| -> Result<String, ()> {{
+        // SAFETY: `joint` is a valid NUL-terminated string by contract.
         let joint = unsafe {{ CStr::from_ptr(joint) }}.to_str().map_err(|_| ())?;
         if joint.is_empty() {{
             return Err(());
@@ -212,6 +257,9 @@ pub unsafe extern "C" fn rne_controller_create(
         target_rad,
         gain,
         max_velocity_rad_s,
+        configured: false,
+        active: false,
+        shutdown: false,
     }});
     Box::into_raw(state).cast::<c_void>()
 }}
@@ -227,6 +275,7 @@ pub unsafe extern "C" fn rne_controller_destroy(handle: *mut c_void) {{
     if handle.is_null() {{
         return;
     }}
+    // SAFETY: `handle` is a unique live instance by contract.
     drop(unsafe {{ Box::from_raw(handle.cast::<ControllerState>()) }});
 }}
 
@@ -251,17 +300,21 @@ pub unsafe extern "C" fn rne_controller_step(
     if output_capacity == 0 {{
         return 0;
     }}
+    // SAFETY: the handle and input array satisfy the callback contract.
     let state = unsafe {{ &*handle.cast::<ControllerState>() }};
     let observations = unsafe {{ std::slice::from_raw_parts(observations, observation_count) }};
     for observation in observations {{
         if observation.name.is_null() {{
             continue;
         }}
+        // SAFETY: observation names are NUL-terminated by contract.
         if unsafe {{ CStr::from_ptr(observation.name) }}.to_bytes() != state.name.to_bytes() {{
             continue;
         }}
         let velocity = (state.gain * (state.target_rad - observation.position_rad))
             .clamp(-state.max_velocity_rad_s, state.max_velocity_rad_s);
+        // SAFETY: output capacity is non-zero and the state-owned name remains
+        // valid until instance destruction.
         unsafe {{
             *output = RneJointVelocity {{
                 name: state.name.as_ptr(),
@@ -270,6 +323,151 @@ pub unsafe extern "C" fn rne_controller_step(
         }};
         return 1;
     }}
+    0
+}}
+
+/// Accepts the host's negotiated ABI-v3 capability requirements.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_configure_v3(
+    handle: *mut c_void,
+    required_capabilities: u64,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {{
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe {{ &mut *handle.cast::<ControllerState>() }};
+    if state.shutdown {{
+        write_error(error, error_capacity, "controller is shut down");
+        return 1;
+    }}
+    if required_capabilities & !CAPABILITIES != 0 {{
+        write_error(error, error_capacity, "unsupported required capability");
+        return 1;
+    }}
+    state.configured = true;
+    0
+}}
+
+/// Activates or resets one deterministic ABI-v3 episode.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_reset_v3(
+    handle: *mut c_void,
+    _episode: u64,
+    _seed: u64,
+    _step: u64,
+    _sim_time_ticks: u64,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {{
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe {{ &mut *handle.cast::<ControllerState>() }};
+    if !state.configured || state.shutdown {{
+        write_error(
+            error,
+            error_capacity,
+            "controller must be configured and not shut down",
+        );
+        return 1;
+    }}
+    state.active = true;
+    0
+}}
+
+/// Computes robot-scoped velocity commands for one ABI-v3 fixed step.
+///
+/// # Safety
+///
+/// `handle` must be a live instance, `observations` and `output` must point to
+/// arrays of their declared lengths, identifiers must be NUL-terminated, and
+/// `error` must be null or point to `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_step_v3(
+    handle: *mut c_void,
+    _step: u64,
+    _sim_time_ticks: u64,
+    observations: *const RneJointObservationV3,
+    observation_count: usize,
+    output: *mut RneJointVelocityV3,
+    output_capacity: usize,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> RneControllerStepResultV3 {{
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe {{ &mut *handle.cast::<ControllerState>() }};
+    if !state.active || state.shutdown {{
+        write_error(error, error_capacity, "controller is not active");
+        return RneControllerStepResultV3 {{
+            status: 1,
+            output_count: 0,
+        }};
+    }}
+    // SAFETY: the host supplies an array with the declared length.
+    let observations = unsafe {{ std::slice::from_raw_parts(observations, observation_count) }};
+    let mut output_count = 0;
+    for observation in observations {{
+        if observation.robot_id.is_null() || observation.name.is_null() {{
+            continue;
+        }}
+        // SAFETY: observation names are NUL-terminated by contract.
+        if unsafe {{ CStr::from_ptr(observation.name) }}.to_bytes() != state.name.to_bytes() {{
+            continue;
+        }}
+        if output_count >= output_capacity {{
+            write_error(error, error_capacity, "output capacity is too small");
+            return RneControllerStepResultV3 {{
+                status: 1,
+                output_count: 0,
+            }};
+        }}
+        let velocity = (state.gain * (state.target_rad - observation.position_rad))
+            .clamp(-state.max_velocity_rad_s, state.max_velocity_rad_s);
+        // SAFETY: `output_count < output_capacity`; both pointers stay valid
+        // until the host copies the result immediately after this call.
+        unsafe {{
+            *output.add(output_count) = RneJointVelocityV3 {{
+                robot_id: observation.robot_id,
+                name: state.name.as_ptr(),
+                velocity_rad_s: velocity,
+            }}
+        }};
+        output_count += 1;
+    }}
+    RneControllerStepResultV3 {{
+        status: 0,
+        output_count,
+    }}
+}}
+
+/// Terminates the ABI-v3 lifecycle before instance destruction.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_shutdown_v3(
+    handle: *mut c_void,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {{
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe {{ &mut *handle.cast::<ControllerState>() }};
+    if state.shutdown {{
+        write_error(error, error_capacity, "controller is already shut down");
+        return 1;
+    }}
+    state.active = false;
+    state.shutdown = true;
     0
 }}
 
@@ -284,6 +482,7 @@ unsafe fn write_error(error: *mut c_char, error_capacity: usize, message: &str) 
     }}
     let bytes = message.as_bytes();
     let length = bytes.len().min(error_capacity - 1);
+    // SAFETY: `length + 1` fits the declared caller-owned buffer.
     unsafe {{
         std::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), error, length);
         *error.add(length) = 0;
@@ -299,7 +498,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn scaffolds_a_compilable_looking_crate() {
+    fn scaffolds_a_compilable_crate() {
         let parent = std::env::temp_dir().join("rne-scaffold-test");
         let _ = fs::remove_dir_all(&parent);
         let name = "my_controller";
@@ -318,14 +517,32 @@ mod tests {
         for symbol in [
             "rne_plugin_abi_version",
             "rne_plugin_name",
+            "rne_plugin_capabilities",
             "rne_controller_create",
             "rne_controller_destroy",
             "rne_controller_step",
+            "rne_controller_configure_v3",
+            "rne_controller_reset_v3",
+            "rne_controller_step_v3",
+            "rne_controller_shutdown_v3",
         ] {
             assert!(lib.contains(symbol), "lib.rs must export `{symbol}`");
         }
-        assert!(lib.contains("pub const ABI_VERSION: u32 = 2;"));
+        assert!(lib.contains("pub const ABI_VERSION: u32 = 3;"));
         assert!(lib.contains(&format!("pub const PLUGIN_NAME: &str = \"{name}\";")));
+
+        let output_dir = parent.join("rustc-output");
+        fs::create_dir_all(&output_dir).expect("create rustc output directory");
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let status = std::process::Command::new(rustc)
+            .arg("--edition=2021")
+            .arg("--crate-type=lib")
+            .arg("--out-dir")
+            .arg(&output_dir)
+            .arg(crate_dir.join("src/lib.rs"))
+            .status()
+            .expect("run rustc on generated plugin source");
+        assert!(status.success(), "generated plugin source must compile");
 
         let _ = fs::remove_dir_all(&parent);
     }

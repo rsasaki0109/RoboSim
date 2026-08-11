@@ -77,6 +77,18 @@ pub struct ReplayJointVelocity {
     pub velocity_rad_s: f64,
 }
 
+/// One robot-scoped joint velocity sample in a controller-plugin replay action.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayRobotJointVelocity {
+    /// Stable robot model identity, independent of ECS allocation.
+    pub robot_id: String,
+    /// URDF / ECS joint name within the robot.
+    pub joint: String,
+    /// Target velocity in radians per second.
+    pub velocity_rad_s: f64,
+}
+
 /// One joint position sample in a [`ReplayAction::JointPositions`] action.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -120,6 +132,11 @@ pub enum ReplayAction {
         /// One velocity sample per commanded joint.
         samples: Vec<ReplayJointVelocity>,
     },
+    /// Robot-scoped controller-plugin joint velocity commands.
+    RobotJointVelocities {
+        /// Samples sorted by stable robot ID and then joint name.
+        samples: Vec<ReplayRobotJointVelocity>,
+    },
 }
 
 impl<'de> Deserialize<'de> for ReplayAction {
@@ -130,11 +147,26 @@ impl<'de> Deserialize<'de> for ReplayAction {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case")]
         enum TaggedAction {
-            DifferentialDrive { wheel_velocity_rad_s: f64 },
-            JointVelocity { joint: String, velocity_rad_s: f64 },
-            JointEffort { joint: String, effort_nm: f64 },
-            JointPositions { samples: Vec<ReplayJointPosition> },
-            JointVelocities { samples: Vec<ReplayJointVelocity> },
+            DifferentialDrive {
+                wheel_velocity_rad_s: f64,
+            },
+            JointVelocity {
+                joint: String,
+                velocity_rad_s: f64,
+            },
+            JointEffort {
+                joint: String,
+                effort_nm: f64,
+            },
+            JointPositions {
+                samples: Vec<ReplayJointPosition>,
+            },
+            JointVelocities {
+                samples: Vec<ReplayJointVelocity>,
+            },
+            RobotJointVelocities {
+                samples: Vec<ReplayRobotJointVelocity>,
+            },
         }
 
         #[derive(Deserialize)]
@@ -169,6 +201,9 @@ impl<'de> Deserialize<'de> for ReplayAction {
                 }
                 TaggedAction::JointPositions { samples } => Self::JointPositions { samples },
                 TaggedAction::JointVelocities { samples } => Self::JointVelocities { samples },
+                TaggedAction::RobotJointVelocities { samples } => {
+                    Self::RobotJointVelocities { samples }
+                }
             }),
             WireAction::Legacy(action) => Ok(Self::DifferentialDrive {
                 wheel_velocity_rad_s: action.wheel_velocity_rad_s,
@@ -209,6 +244,7 @@ impl ReplayAction {
             Self::JointEffort { .. } => ReplayControllerKind::JointEffort,
             Self::JointPositions { .. } => ReplayControllerKind::JointTrajectory,
             Self::JointVelocities { .. } => ReplayControllerKind::Plugin,
+            Self::RobotJointVelocities { .. } => ReplayControllerKind::Plugin,
         }
     }
 
@@ -225,6 +261,7 @@ impl ReplayAction {
             Self::JointEffort { joint, effort_nm } => joint.trim().is_empty() || *effort_nm == 0.0,
             Self::JointPositions { samples } => samples.is_empty(),
             Self::JointVelocities { samples } => samples.is_empty(),
+            Self::RobotJointVelocities { samples } => samples.is_empty(),
         }
     }
 }
@@ -776,6 +813,38 @@ fn validate_action(
                 }
             }
         }
+        ReplayAction::RobotJointVelocities { samples } => {
+            if samples.is_empty() {
+                return Err(ReplayArtifactError::Invalid(format!(
+                    "frame {step} robot joint velocities action must not be empty"
+                )));
+            }
+            for window in samples.windows(2) {
+                let left = (&window[0].robot_id, &window[0].joint);
+                let right = (&window[1].robot_id, &window[1].joint);
+                if left >= right {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} robot joint velocities must be sorted by unique robot/joint"
+                    )));
+                }
+            }
+            for sample in samples {
+                if sample.robot_id.trim().is_empty()
+                    || sample.joint.trim().is_empty()
+                    || sample.robot_id.contains('\0')
+                    || sample.joint.contains('\0')
+                {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} robot and joint command names must be non-empty and NUL-free"
+                    )));
+                }
+                if !sample.velocity_rad_s.is_finite() {
+                    return Err(ReplayArtifactError::Invalid(format!(
+                        "frame {step} robot joint velocity must be finite"
+                    )));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1121,6 +1190,62 @@ mod tests {
         assert!(json.contains(r#""kind":"joint_velocities""#));
         assert_eq!(serde_json::from_str::<ReplayAction>(&json).unwrap(), action);
         assert_eq!(action.controller_kind(), ReplayControllerKind::Plugin);
+    }
+
+    #[test]
+    fn robot_joint_velocities_action_roundtrips_json() {
+        let action = ReplayAction::RobotJointVelocities {
+            samples: vec![
+                ReplayRobotJointVelocity {
+                    robot_id: "robot_a".to_string(),
+                    joint: "shoulder_joint".to_string(),
+                    velocity_rad_s: 0.75,
+                },
+                ReplayRobotJointVelocity {
+                    robot_id: "robot_b".to_string(),
+                    joint: "shoulder_joint".to_string(),
+                    velocity_rad_s: -0.25,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains(r#""kind":"robot_joint_velocities""#));
+        assert_eq!(serde_json::from_str::<ReplayAction>(&json).unwrap(), action);
+        assert_eq!(action.controller_kind(), ReplayControllerKind::Plugin);
+    }
+
+    #[test]
+    fn robot_joint_velocities_require_canonical_nul_free_ids() {
+        let unsorted = ReplayAction::RobotJointVelocities {
+            samples: vec![
+                ReplayRobotJointVelocity {
+                    robot_id: "robot_b".to_string(),
+                    joint: "shoulder_joint".to_string(),
+                    velocity_rad_s: 0.25,
+                },
+                ReplayRobotJointVelocity {
+                    robot_id: "robot_a".to_string(),
+                    joint: "shoulder_joint".to_string(),
+                    velocity_rad_s: 0.5,
+                },
+            ],
+        };
+        assert!(validate_action(&unsorted, ReplayControllerKind::Plugin, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("sorted by unique robot/joint"));
+
+        let nul = ReplayAction::RobotJointVelocities {
+            samples: vec![ReplayRobotJointVelocity {
+                robot_id: "robot\0a".to_string(),
+                joint: "shoulder_joint".to_string(),
+                velocity_rad_s: 0.25,
+            }],
+        };
+        assert!(validate_action(&nul, ReplayControllerKind::Plugin, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("NUL-free"));
     }
 
     #[test]

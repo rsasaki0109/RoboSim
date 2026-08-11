@@ -87,6 +87,14 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
             "cargo run --locked -q -p rne_asset_cli -- replay target/runs/oss_parity_mesh_diff_drive.rne-replay",
         ),
         (
+            "controller_oldest_abi_compatibility",
+            "cargo test --locked -q -p rne_plugin --test load frozen_abi_v2_plugin_loads_and_steps_in_the_current_runtime",
+        ),
+        (
+            "controller_multi_robot_spawn_order",
+            "cargo test --locked -q -p rne_asset_cli dual_robot_controller_is_independent_of_ecs_spawn_order",
+        ),
+        (
             "sensor_payload_replay",
             "cargo run --locked -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive_lidar_payload.rne-replay",
         ),

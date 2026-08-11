@@ -13,14 +13,30 @@
 use serde::{Deserialize, Serialize};
 
 pub mod cabi;
+pub mod control;
+pub mod lifecycle;
 pub mod scaffold;
+pub mod scheduler;
 
 pub use cabi::{
-    discover_controller_plugin, discover_plugin_names, load_controller_library, peek_plugin_name,
-    LoadedControllerPlugin, PluginLoadError, RneJointPosition, RneJointVelocity,
-    RNE_PLUGIN_ABI_VERSION,
+    controller_capability_bit, discover_controller_plugin, discover_plugin_names,
+    load_controller_library, peek_plugin_name, LoadedControllerPlugin, PluginLoadError,
+    RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
+    RneJointVelocityV3, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
+    RNE_PLUGIN_MIN_ABI_VERSION,
+};
+pub use control::{
+    ControllerActionFrame, ControllerJointObservation, ControllerJointVelocityCommand,
+    ControllerObservationFrame, ControllerRobotAction, ControllerRobotObservation,
+    ControllerSchemaError, CONTROLLER_SCHEMA_VERSION,
+};
+pub use lifecycle::{
+    ControllerCapability, ControllerConfiguration, ControllerDescriptor, ControllerHost,
+    ControllerLifecycleError, ControllerLifecycleState, ControllerNegotiation,
+    ControllerPluginError, ControllerResetContext,
 };
 pub use scaffold::{scaffold_controller_plugin, validate_plugin_name, ScaffoldError};
+pub use scheduler::{ControllerScheduleError, ControllerScheduler};
 
 /// Plugin kind used for discovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +102,72 @@ pub trait ControllerPlugin: Send + Sync + std::fmt::Debug {
     /// Plugin name reported to the runner.
     fn name(&self) -> &str;
 
+    /// Capabilities supported by this controller implementation.
+    ///
+    /// The default preserves the original controller-plugin contract: named
+    /// joint-position observations produce named joint-velocity commands.
+    fn capabilities(&self) -> Vec<ControllerCapability> {
+        vec![
+            ControllerCapability::JointPositionObservation,
+            ControllerCapability::JointVelocityCommand,
+        ]
+    }
+
+    /// Lifecycle hook invoked after capability negotiation succeeds.
+    fn on_configure(
+        &mut self,
+        _negotiation: &ControllerNegotiation,
+    ) -> Result<(), ControllerPluginError> {
+        Ok(())
+    }
+
+    /// Lifecycle hook invoked for deterministic episode activation and reset.
+    fn on_reset(&mut self, _context: ControllerResetContext) -> Result<(), ControllerPluginError> {
+        Ok(())
+    }
+
+    /// Computes a versioned action frame from one fixed-step observation.
+    ///
+    /// The default adapts the original per-joint callback once for each robot
+    /// in stable frame order. Stateful multi-robot controllers should override
+    /// this method and advertise [`ControllerCapability::MultiRobot`].
+    fn step_frame(
+        &mut self,
+        observation: &ControllerObservationFrame,
+    ) -> Result<ControllerActionFrame, ControllerPluginError> {
+        observation.validate()?;
+        let mut robot_actions = Vec::new();
+        for robot in &observation.robots {
+            let names = robot
+                .joints
+                .iter()
+                .map(|joint| joint.name.as_str())
+                .collect::<Vec<_>>();
+            let positions_rad = robot
+                .joints
+                .iter()
+                .map(|joint| joint.position_rad)
+                .collect::<Vec<_>>();
+            let commands = self
+                .joint_velocity_commands(&names, &positions_rad)
+                .into_iter()
+                .map(|(name, velocity_rad_s)| {
+                    ControllerJointVelocityCommand::new(name, velocity_rad_s)
+                })
+                .collect();
+            robot_actions.push(ControllerRobotAction::new(
+                robot.robot_id.clone(),
+                commands,
+            )?);
+        }
+        Ok(ControllerActionFrame::new(observation.step, robot_actions)?)
+    }
+
+    /// Terminal lifecycle hook invoked before the host releases the plugin.
+    fn on_shutdown(&mut self) -> Result<(), ControllerPluginError> {
+        Ok(())
+    }
+
     /// Computes joint velocity commands from the observed joint positions.
     ///
     /// `joint_names` and `positions_rad` are parallel arrays. Returned commands
@@ -150,6 +232,14 @@ impl VelocityServoController {
 impl ControllerPlugin for VelocityServoController {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn capabilities(&self) -> Vec<ControllerCapability> {
+        vec![
+            ControllerCapability::JointPositionObservation,
+            ControllerCapability::JointVelocityCommand,
+            ControllerCapability::MultiRobot,
+        ]
     }
 
     fn joint_velocity_commands(

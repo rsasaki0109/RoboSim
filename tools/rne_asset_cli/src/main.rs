@@ -17,8 +17,8 @@ use rne_ecs::{Name, World};
 use rne_log::{
     ReplayAction, ReplayArtifact, ReplayClock, ReplayContact,
     ReplayControllerKind as ArtifactControllerKind, ReplayFailureKind, ReplayFinalReport,
-    ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayJointVelocity, ReplayObservation,
-    ReplaySensorPayload, ReplaySensorPayloadData, ReplaySensorStream,
+    ReplayFrame, ReplayJointPosition, ReplayJointState, ReplayObservation,
+    ReplayRobotJointVelocity, ReplaySensorPayload, ReplaySensorPayloadData, ReplaySensorStream,
 };
 use rne_math::{yaw_rad, Hertz};
 use rne_openscenario::{
@@ -32,11 +32,15 @@ use rne_physics::{
 };
 use rne_physics_analytic::AnalyticBackend;
 use rne_physics_rapier::{step_physics, RapierBackend};
-use rne_plugin::{ControllerPlugin, VelocityServoController};
+use rne_plugin::{
+    ControllerActionFrame, ControllerJointObservation, ControllerObservationFrame,
+    ControllerPlugin, ControllerResetContext, ControllerRobotObservation, ControllerScheduler,
+    VelocityServoController, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_MIN_ABI_VERSION,
+};
 use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, sync_all_joint_motors_from_actuators,
     Actuator, ActuatorCommand, ActuatorCommandBuffer, DiffDriveComponent, DifferentialDrive, Joint,
-    JointKind,
+    JointKind, Robot,
 };
 use rne_sensor::{
     sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState,
@@ -1682,6 +1686,7 @@ struct EpisodeSetup {
     backend: RunnerBackend,
     physics_world: PhysicsWorldId,
     drives: Vec<DifferentialDrive>,
+    controller_robots: Vec<(String, rne_ecs::Entity)>,
     seed: u64,
     robot_count: usize,
 }
@@ -1709,6 +1714,12 @@ fn build_episode_setup(
                 .map(|drive| drive.0)
         })
         .collect();
+    let controller_robots = spawned
+        .robots
+        .iter()
+        .map(|(model_name, robot)| (model_name.clone(), robot.robot))
+        .collect::<Vec<_>>();
+    let controller_robots = canonicalize_controller_robots(&mut world, controller_robots)?;
     let seed = world
         .get::<WorldEntity>(spawned.world)
         .map(|entity| entity.seed)
@@ -1725,9 +1736,34 @@ fn build_episode_setup(
         backend,
         physics_world,
         drives,
+        controller_robots,
         seed,
         robot_count: spawned.robots.len(),
     })
+}
+
+fn canonicalize_controller_robots(
+    world: &mut World,
+    mut controller_robots: Vec<(String, rne_ecs::Entity)>,
+) -> Result<Vec<(String, rne_ecs::Entity)>> {
+    controller_robots.sort_by(|left, right| left.0.cmp(&right.0));
+    anyhow::ensure!(
+        controller_robots
+            .windows(2)
+            .all(|window| window[0].0 != window[1].0),
+        "scene robot model names must be unique for controller scheduling"
+    );
+    for (robot_id, entity) in &controller_robots {
+        anyhow::ensure!(
+            !robot_id.trim().is_empty() && !robot_id.contains('\0'),
+            "controller robot model names must be non-empty and NUL-free"
+        );
+        let mut robot = world.get_mut::<Robot>(*entity).ok_or_else(|| {
+            anyhow::anyhow!("controller robot `{robot_id}` has no Robot component")
+        })?;
+        robot.model_name.clone_from(robot_id);
+    }
+    Ok(controller_robots)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1785,64 +1821,174 @@ fn simulate_scene_with_snapshot_options(
     }
 
     let mut setup = build_episode_setup(path, seed_override, physics_backend)?;
-    'episode: loop {
-        let dt = SimDuration::from_hertz(Hertz::new(hz));
-        let mut sim_time = SimTime::ZERO;
-        let mut command_buffer = ActuatorCommandBuffer::new();
-        let mut data_bus = InMemoryDataBus::new();
-        let sensor_payload_streams =
-            resolve_sensor_subscriptions(&setup.world, sensor_subscriptions)?;
-        let mut frames = Vec::new();
-        let mut contact_pairs_max = 0_u64;
-        let mut contact_impulse_max_ns = 0.0_f32;
-        let mut min_base_height_m: Option<f64> = None;
-        let mut step = 0_u64;
-        while step < steps {
-            if let Some(control) = control.as_deref_mut() {
-                match control.checkpoint() {
-                    EpisodeOutcome::Advance => {}
-                    EpisodeOutcome::Reset => {
-                        setup = build_episode_setup(path, seed_override, physics_backend)?;
-                        continue 'episode;
+    let controller_robot_ids = setup
+        .controller_robots
+        .iter()
+        .map(|(robot_id, _)| robot_id.clone())
+        .collect::<Vec<_>>();
+    let mut scheduler = plugin
+        .map(|plugin| {
+            let mut scheduler = ControllerScheduler::new();
+            scheduler.register("manifest_controller", plugin, controller_robot_ids.clone())?;
+            Ok::<_, rne_plugin::ControllerScheduleError>(scheduler)
+        })
+        .transpose()
+        .context("register controller plugin")?;
+    if let Some(scheduler) = scheduler.as_mut() {
+        let initialize = scheduler.configure().and_then(|()| {
+            scheduler.activate(ControllerResetContext {
+                episode: 0,
+                seed: setup.seed,
+                step: 0,
+                sim_time_ticks: 0,
+            })
+        });
+        if let Err(error) = initialize {
+            let _ = scheduler.shutdown();
+            return Err(error).context("initialize controller plugin");
+        }
+    }
+    let mut episode = 0_u64;
+    let run_result = (|| -> Result<SimulationRun> {
+        'episode: loop {
+            let dt = SimDuration::from_hertz(Hertz::new(hz));
+            let mut sim_time = SimTime::ZERO;
+            let mut command_buffer = ActuatorCommandBuffer::new();
+            let mut data_bus = InMemoryDataBus::new();
+            let sensor_payload_streams =
+                resolve_sensor_subscriptions(&setup.world, sensor_subscriptions)?;
+            let mut frames = Vec::new();
+            let mut contact_pairs_max = 0_u64;
+            let mut contact_impulse_max_ns = 0.0_f32;
+            let mut min_base_height_m: Option<f64> = None;
+            let mut step = 0_u64;
+            while step < steps {
+                if let Some(control) = control.as_deref_mut() {
+                    match control.checkpoint() {
+                        EpisodeOutcome::Advance => {}
+                        EpisodeOutcome::Reset => {
+                            let replacement =
+                                build_episode_setup(path, seed_override, physics_backend)?;
+                            let replacement_robot_ids = replacement
+                                .controller_robots
+                                .iter()
+                                .map(|(robot_id, _)| robot_id.clone())
+                                .collect::<Vec<_>>();
+                            anyhow::ensure!(
+                                replacement_robot_ids == controller_robot_ids,
+                                "controller robot IDs changed while resetting the episode"
+                            );
+                            setup = replacement;
+                            episode = episode.checked_add(1).ok_or_else(|| {
+                                anyhow::anyhow!("controller episode index overflow")
+                            })?;
+                            if let Some(scheduler) = scheduler.as_mut() {
+                                scheduler
+                                    .reset(ControllerResetContext {
+                                        episode,
+                                        seed: setup.seed,
+                                        step: 0,
+                                        sim_time_ticks: 0,
+                                    })
+                                    .context("reset controller plugin")?;
+                            }
+                            continue 'episode;
+                        }
+                        EpisodeOutcome::Quit => break,
                     }
-                    EpisodeOutcome::Quit => break,
+                }
+                let frame_action = if let Some(replay_frames) = replay_frames {
+                    let step_index = usize::try_from(step).map_err(|_| {
+                        anyhow::anyhow!("replay step index {step} does not fit usize")
+                    })?;
+                    replay_frames[step_index].action.clone()
+                } else if !trajectories.is_empty() {
+                    interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
+                } else if let Some(scheduler) = scheduler.as_mut() {
+                    plugin_controller_action(scheduler, &setup, step, sim_time)?
+                } else {
+                    action.clone()
+                };
+                apply_replay_action(
+                    &setup.world,
+                    &mut command_buffer,
+                    &setup.drives,
+                    &frame_action,
+                    sim_time,
+                )?;
+                apply_actuator_commands(&mut setup.world, &mut command_buffer);
+                sync_all_joint_motors_from_actuators(&mut setup.world);
+                differential_drive_kinematics(&mut setup.world, &setup.drives, dt);
+                setup
+                    .backend
+                    .step(&mut setup.world, setup.physics_world, dt)
+                    .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
+                sim_time = sim_time + dt;
+                sample_sensors_for(
+                    &setup.backend,
+                    &mut setup.world,
+                    sim_time,
+                    setup.physics_world,
+                    &mut data_bus,
+                );
+
+                let base_translation_m = setup.drives.first().and_then(|drive| {
+                    setup
+                        .world
+                        .get::<Transform3>(drive.base_link)
+                        .map(|transform| {
+                            [
+                                transform.translation.x,
+                                transform.translation.y,
+                                transform.translation.z,
+                            ]
+                        })
+                });
+                let contact = setup
+                    .backend
+                    .contacts(setup.physics_world)
+                    .map_err(|error| anyhow::anyhow!("query contacts: {error}"))?;
+                let contact = summarize_contacts(contact);
+                contact_pairs_max = contact_pairs_max.max(contact.pair_count);
+                contact_impulse_max_ns = contact_impulse_max_ns.max(contact.total_impulse_ns);
+                if let Some(base_translation_m) = base_translation_m {
+                    let height_m = base_translation_m[1];
+                    min_base_height_m = Some(
+                        min_base_height_m.map_or(height_m, |minimum: f64| minimum.min(height_m)),
+                    );
+                }
+                let observation = ReplayObservation::new(base_translation_m)
+                    .with_joint_state(capture_joint_state(&setup.world))
+                    .with_sensor_streams(capture_sensor_streams(&setup.world, &data_bus))
+                    .with_sensor_payloads(capture_sensor_payloads(
+                        &setup.world,
+                        &data_bus,
+                        &sensor_payload_streams,
+                    ))
+                    .with_contact(Some(contact));
+                let base_yaw_rad = setup.drives.first().map(|drive| {
+                    yaw_rad(world_transform_of(&setup.world, drive.base_link).rotation)
+                });
+                let snapshot = build_live_snapshot(
+                    &observation,
+                    base_yaw_rad,
+                    &data_bus,
+                    live_snapshot_options,
+                );
+                frames.push(ReplayFrame::new(
+                    step,
+                    sim_time.ticks(),
+                    frame_action,
+                    observation,
+                    hash_physics_state(&setup.world),
+                ));
+                step += 1;
+                if let Some(control) = control.as_deref_mut() {
+                    control.report_status(step, sim_time.as_seconds().value(), snapshot.as_bytes());
                 }
             }
-            let frame_action = if let Some(replay_frames) = replay_frames {
-                let step_index = usize::try_from(step)
-                    .map_err(|_| anyhow::anyhow!("replay step index {step} does not fit usize"))?;
-                replay_frames[step_index].action.clone()
-            } else if !trajectories.is_empty() {
-                interpolate_joint_positions(trajectories, sim_time.as_seconds().value())
-            } else if let Some(plugin) = &plugin {
-                plugin_joint_action(plugin.as_ref(), &setup.world)?
-            } else {
-                action.clone()
-            };
-            apply_replay_action(
-                &setup.world,
-                &mut command_buffer,
-                &setup.drives,
-                &frame_action,
-                sim_time,
-            )?;
-            apply_actuator_commands(&mut setup.world, &mut command_buffer);
-            sync_all_joint_motors_from_actuators(&mut setup.world);
-            differential_drive_kinematics(&mut setup.world, &setup.drives, dt);
-            setup
-                .backend
-                .step(&mut setup.world, setup.physics_world, dt)
-                .map_err(|error| anyhow::anyhow!("physics step: {error}"))?;
-            sim_time = sim_time + dt;
-            sample_sensors_for(
-                &setup.backend,
-                &mut setup.world,
-                sim_time,
-                setup.physics_world,
-                &mut data_bus,
-            );
 
-            let base_translation_m = setup.drives.first().and_then(|drive| {
+            let first_base_translation_m = setup.drives.first().and_then(|drive| {
                 setup
                     .world
                     .get::<Transform3>(drive.base_link)
@@ -1854,81 +2000,39 @@ fn simulate_scene_with_snapshot_options(
                         ]
                     })
             });
-            let contact = setup
-                .backend
-                .contacts(setup.physics_world)
-                .map_err(|error| anyhow::anyhow!("query contacts: {error}"))?;
-            let contact = summarize_contacts(contact);
-            contact_pairs_max = contact_pairs_max.max(contact.pair_count);
-            contact_impulse_max_ns = contact_impulse_max_ns.max(contact.total_impulse_ns);
-            if let Some(base_translation_m) = base_translation_m {
-                let height_m = base_translation_m[1];
-                min_base_height_m =
-                    Some(min_base_height_m.map_or(height_m, |minimum: f64| minimum.min(height_m)));
-            }
-            let observation = ReplayObservation::new(base_translation_m)
-                .with_joint_state(capture_joint_state(&setup.world))
-                .with_sensor_streams(capture_sensor_streams(&setup.world, &data_bus))
-                .with_sensor_payloads(capture_sensor_payloads(
-                    &setup.world,
-                    &data_bus,
-                    &sensor_payload_streams,
-                ))
-                .with_contact(Some(contact));
-            let base_yaw_rad = setup
-                .drives
+            let initial_base_height_m = frames
                 .first()
-                .map(|drive| yaw_rad(world_transform_of(&setup.world, drive.base_link).rotation));
-            let snapshot =
-                build_live_snapshot(&observation, base_yaw_rad, &data_bus, live_snapshot_options);
-            frames.push(ReplayFrame::new(
-                step,
-                sim_time.ticks(),
-                frame_action,
-                observation,
-                hash_physics_state(&setup.world),
-            ));
-            step += 1;
-            if let Some(control) = control.as_deref_mut() {
-                control.report_status(step, sim_time.as_seconds().value(), snapshot.as_bytes());
-            }
+                .and_then(|frame| frame.observation.base_translation_m)
+                .map(|translation| translation[1]);
+            let failure = classify_failure(initial_base_height_m, min_base_height_m);
+            let steps_run = frames.len() as u64;
+            return Ok(SimulationRun {
+                report: SimulationReport {
+                    steps: steps_run,
+                    sim_time_s: sim_time.as_seconds().value(),
+                    seed: setup.seed,
+                    robot_count: setup.robot_count,
+                    differential_drive_count: setup.drives.len(),
+                    physics_hash: hash_physics_state(&setup.world),
+                    first_base_translation_m,
+                    contact_pairs_max,
+                    contact_impulse_max_ns,
+                    min_base_height_m,
+                    failure,
+                },
+                frames,
+                sensor_payload_streams,
+            });
         }
-
-        let first_base_translation_m = setup.drives.first().and_then(|drive| {
-            setup
-                .world
-                .get::<Transform3>(drive.base_link)
-                .map(|transform| {
-                    [
-                        transform.translation.x,
-                        transform.translation.y,
-                        transform.translation.z,
-                    ]
-                })
-        });
-        let initial_base_height_m = frames
-            .first()
-            .and_then(|frame| frame.observation.base_translation_m)
-            .map(|translation| translation[1]);
-        let failure = classify_failure(initial_base_height_m, min_base_height_m);
-        let steps_run = frames.len() as u64;
-        return Ok(SimulationRun {
-            report: SimulationReport {
-                steps: steps_run,
-                sim_time_s: sim_time.as_seconds().value(),
-                seed: setup.seed,
-                robot_count: setup.robot_count,
-                differential_drive_count: setup.drives.len(),
-                physics_hash: hash_physics_state(&setup.world),
-                first_base_translation_m,
-                contact_pairs_max,
-                contact_impulse_max_ns,
-                min_base_height_m,
-                failure,
-            },
-            frames,
-            sensor_payload_streams,
-        });
+    })();
+    let shutdown_result = scheduler
+        .as_mut()
+        .map(|scheduler| scheduler.shutdown().context("shutdown controller plugin"))
+        .transpose();
+    match (run_result, shutdown_result) {
+        (Ok(run), Ok(_)) => Ok(run),
+        (Err(run_error), _) => Err(run_error),
+        (Ok(_), Err(shutdown_error)) => Err(shutdown_error),
     }
 }
 
@@ -2015,6 +2119,22 @@ fn ensure_action_is_finite(action: &ReplayAction) -> Result<()> {
                 );
             }
         }
+        ReplayAction::RobotJointVelocities { samples } => {
+            for sample in samples {
+                anyhow::ensure!(
+                    !sample.robot_id.trim().is_empty() && !sample.robot_id.contains('\0'),
+                    "robot joint velocities robot ID must be non-empty and NUL-free"
+                );
+                anyhow::ensure!(
+                    !sample.joint.trim().is_empty() && !sample.joint.contains('\0'),
+                    "robot joint velocities command name must be non-empty and NUL-free"
+                );
+                anyhow::ensure!(
+                    sample.velocity_rad_s.is_finite(),
+                    "robot joint velocities command must be finite"
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -2049,25 +2169,88 @@ fn sample_trajectory(waypoints: &[RunTrajectoryWaypoint], t_s: f64) -> f64 {
     unreachable!("t_s is clamped between the first and last waypoints")
 }
 
-/// Invokes the controller plugin on the current joint state (policy callback).
-fn plugin_joint_action(plugin: &dyn ControllerPlugin, world: &World) -> Result<ReplayAction> {
-    let joint_state = capture_joint_state(world).ok_or_else(|| {
-        anyhow::anyhow!("plugin controller requires articulated joints in the scene")
-    })?;
-    let names = joint_state
-        .names
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let commands = plugin.joint_velocity_commands(&names, &joint_state.positions_rad);
-    let samples = commands
+/// Invokes the controller scheduler on a canonical robot-scoped observation.
+fn plugin_controller_action(
+    scheduler: &mut ControllerScheduler,
+    setup: &EpisodeSetup,
+    step: u64,
+    sim_time: SimTime,
+) -> Result<ReplayAction> {
+    let observation =
+        capture_controller_observation(&setup.world, &setup.controller_robots, step, sim_time)?;
+    let action = scheduler
+        .step(&observation)
+        .context("step controller plugin")?;
+    controller_replay_action(action)
+}
+
+fn controller_replay_action(action: ControllerActionFrame) -> Result<ReplayAction> {
+    let samples = action
+        .robots
         .into_iter()
-        .map(|(joint, velocity_rad_s)| ReplayJointVelocity {
-            joint,
-            velocity_rad_s,
+        .flat_map(|robot| {
+            robot
+                .joint_velocities
+                .into_iter()
+                .map(move |command| ReplayRobotJointVelocity {
+                    robot_id: robot.robot_id.clone(),
+                    joint: command.name,
+                    velocity_rad_s: command.velocity_rad_s,
+                })
         })
-        .collect();
-    Ok(ReplayAction::JointVelocities { samples })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !samples.is_empty(),
+        "controller plugin produced no joint velocity commands"
+    );
+    Ok(ReplayAction::RobotJointVelocities { samples })
+}
+
+fn capture_controller_observation(
+    world: &World,
+    controller_robots: &[(String, rne_ecs::Entity)],
+    step: u64,
+    sim_time: SimTime,
+) -> Result<ControllerObservationFrame> {
+    let mut robots = Vec::with_capacity(controller_robots.len());
+    let mut articulated_joint_count = 0_usize;
+    for (robot_id, robot_entity) in controller_robots {
+        let robot = world.get::<Robot>(*robot_entity).ok_or_else(|| {
+            anyhow::anyhow!("controller robot `{robot_id}` has no Robot component")
+        })?;
+        anyhow::ensure!(
+            robot.model_name == *robot_id,
+            "controller robot identity mismatch: expected `{robot_id}`, found `{}`",
+            robot.model_name
+        );
+        let joints = world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                let entity = entity_ref.id();
+                let joint = world.get::<Joint>(entity)?;
+                if joint.robot != *robot_entity || joint.kind == JointKind::Fixed {
+                    return None;
+                }
+                let name = world.get::<Name>(entity)?;
+                Some(ControllerJointObservation::position_velocity(
+                    name.0.clone(),
+                    joint.position,
+                    joint.velocity,
+                ))
+            })
+            .collect::<Vec<_>>();
+        articulated_joint_count += joints.len();
+        robots.push(ControllerRobotObservation::new(robot_id.clone(), joints)?);
+    }
+    anyhow::ensure!(
+        articulated_joint_count > 0,
+        "plugin controller requires articulated joints in the scene"
+    );
+    Ok(ControllerObservationFrame::new(
+        step,
+        sim_time.ticks(),
+        robots,
+    )?)
 }
 
 fn apply_replay_action(
@@ -2153,8 +2336,62 @@ fn apply_replay_action(
                 }
             }
         }
+        ReplayAction::RobotJointVelocities { samples } => {
+            for sample in samples {
+                let joint = robot_named_joint_entity(world, &sample.robot_id, &sample.joint)?;
+                command_buffer.push(
+                    ActuatorCommand::JointVelocity {
+                        joint,
+                        velocity_rad_s: sample.velocity_rad_s,
+                    },
+                    sim_time,
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn robot_named_joint_entity(
+    world: &World,
+    robot_id: &str,
+    joint_name: &str,
+) -> Result<rne_ecs::Entity> {
+    let mut robots = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let robot = world.get::<Robot>(entity)?;
+            (robot.model_name == robot_id).then_some(entity)
+        })
+        .collect::<Vec<_>>();
+    robots.sort_unstable();
+    anyhow::ensure!(
+        robots.len() == 1,
+        "expected one controller robot named `{robot_id}`, found {}",
+        robots.len()
+    );
+    let robot = robots[0];
+    let mut joints = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            let entity = entity_ref.id();
+            let name = world.get::<Name>(entity)?;
+            let joint = world.get::<Joint>(entity)?;
+            (joint.robot == robot && name.0 == joint_name).then_some(entity)
+        })
+        .collect::<Vec<_>>();
+    joints.sort_unstable();
+    anyhow::ensure!(
+        joints.len() == 1,
+        "expected one joint named `{joint_name}` on controller robot `{robot_id}`, found {}",
+        joints.len()
+    );
+    anyhow::ensure!(
+        world.get::<Actuator>(joints[0]).is_some(),
+        "joint `{joint_name}` on robot `{robot_id}` has no actuator; enable URDF articulation for this scene"
+    );
+    Ok(joints[0])
 }
 
 fn named_joint_entities(world: &World, name: &str) -> Result<Vec<rne_ecs::Entity>> {
@@ -2576,7 +2813,9 @@ fn plugin_command(command: PluginCommand) -> Result<()> {
                 "  cargo build --manifest-path {}/Cargo.toml",
                 crate_dir.display()
             );
-            println!("  plugin name `{name}`, controller ABI version 2");
+            println!(
+                "  plugin name `{name}`, controller ABI versions {RNE_PLUGIN_MIN_ABI_VERSION}..={RNE_PLUGIN_ABI_VERSION}"
+            );
             Ok(())
         }
         PluginCommand::List { path } => {
@@ -2921,6 +3160,24 @@ fn replay_action_matches(expected: &ReplayAction, actual: &ReplayAction) -> bool
                             && replay_float_matches(expected.velocity_rad_s, actual.velocity_rad_s)
                     })
         }
+        (
+            ReplayAction::RobotJointVelocities {
+                samples: expected_samples,
+            },
+            ReplayAction::RobotJointVelocities {
+                samples: actual_samples,
+            },
+        ) => {
+            expected_samples.len() == actual_samples.len()
+                && expected_samples
+                    .iter()
+                    .zip(actual_samples)
+                    .all(|(expected, actual)| {
+                        expected.robot_id == actual.robot_id
+                            && expected.joint == actual.joint
+                            && replay_float_matches(expected.velocity_rad_s, actual.velocity_rad_s)
+                    })
+        }
         _ => false,
     }
 }
@@ -3105,23 +3362,35 @@ fn print_reload_summary(bundle: &rne_assets::SceneAssetBundle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_image_dimensions, build_live_snapshot, classify_failure, encode_bounded_depth,
-        ensure_replay_frames, interpolate_joint_positions, parse_control_line, plugin_command,
-        replay_command, replay_input_digest, replay_scenario_command, run_manifest_command,
+        apply_replay_action, bounded_image_dimensions, build_live_snapshot,
+        canonicalize_controller_robots, capture_controller_observation, classify_failure,
+        controller_replay_action, encode_bounded_depth, ensure_replay_frames,
+        interpolate_joint_positions, parse_control_line, plugin_command, replay_command,
+        replay_input_digest, replay_scenario_command, run_manifest_command,
         runner_status_line_with_limit, simulate_scene, simulate_scene_with_action_schedule,
         stable_co_sim_hash, sumo_net_command, verify_physics_requirements, LiveSnapshotOptions,
         PluginCommand, PluginControllerConfig, ScenarioReplayArtifact,
     };
     use rne_assets::{
-        RunPhysicsBackend, RunPhysicsCapability, RunSensorKind, RunSensorSubscription,
+        load_scene_bundle, spawn_scene_bundle, RunPhysicsBackend, RunPhysicsCapability,
+        RunSensorKind, RunSensorSubscription, SpawnSceneOptions,
     };
     use rne_core::control::{ControlCommand, RunControl, RunnerControl};
     use rne_core::SimTime;
     use rne_data::{DataBus, Frame, ImageDepth, ImageRgb8, InMemoryDataBus, StreamId};
+    use rne_ecs::{Name, World};
     use rne_log::{ReplayAction, ReplayObservation, ReplaySensorStream};
-    use rne_plugin::VelocityServoController;
+    use rne_plugin::{
+        ControllerNegotiation, ControllerPlugin, ControllerPluginError, ControllerResetContext,
+        ControllerScheduler, VelocityServoController,
+    };
+    use rne_robot::{
+        apply_actuator_commands, Actuator, ActuatorCommandBuffer, Joint, JointKind, Robot,
+    };
+    use std::collections::BTreeMap;
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn mesh_diff_drive_simulation_replays_identically() {
@@ -4007,6 +4276,217 @@ mod tests {
         );
         ensure_replay_frames(&run_built_in.frames, &run_discovered.frames)
             .expect("discovered and built-in frames match");
+    }
+
+    #[derive(Debug)]
+    struct LifecycleRecordingController {
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl LifecycleRecordingController {
+        fn record(&self, event: impl Into<String>) {
+            self.events.lock().expect("event lock").push(event.into());
+        }
+    }
+
+    impl ControllerPlugin for LifecycleRecordingController {
+        fn name(&self) -> &str {
+            "lifecycle_recorder"
+        }
+
+        fn on_configure(
+            &mut self,
+            _negotiation: &ControllerNegotiation,
+        ) -> Result<(), ControllerPluginError> {
+            self.record("configure");
+            Ok(())
+        }
+
+        fn on_reset(
+            &mut self,
+            context: ControllerResetContext,
+        ) -> Result<(), ControllerPluginError> {
+            self.record(format!("reset:{}", context.episode));
+            Ok(())
+        }
+
+        fn on_shutdown(&mut self) -> Result<(), ControllerPluginError> {
+            self.record("shutdown");
+            Ok(())
+        }
+
+        fn joint_velocity_commands(
+            &self,
+            joint_names: &[&str],
+            _positions_rad: &[f64],
+        ) -> Vec<(String, f64)> {
+            self.record("step");
+            joint_names
+                .iter()
+                .find(|name| **name == "shoulder_joint")
+                .map(|name| vec![(name.to_string(), 0.25)])
+                .unwrap_or_default()
+        }
+    }
+
+    #[test]
+    fn runner_owns_controller_lifecycle_across_episode_reset() {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_minimal.rne.scene.toml");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let controller = LifecycleRecordingController {
+            events: Arc::clone(&events),
+        };
+        let mut transport = ScriptedControl {
+            commands: vec![
+                ControlCommand::Step { frames: 1 },
+                ControlCommand::Reset,
+                ControlCommand::Step { frames: 1 },
+                ControlCommand::Quit,
+            ]
+            .into(),
+        };
+        let mut control = RunControl::new(&mut transport);
+        let run = simulate_scene_with_action_schedule(
+            &scene,
+            20,
+            60.0,
+            ReplayAction::differential_drive(0.0),
+            None,
+            None,
+            &[],
+            Some(Box::new(controller)),
+            &[],
+            RunPhysicsBackend::Rapier,
+            Some(&mut control),
+        )
+        .expect("controller lifecycle run");
+
+        assert_eq!(run.frames.len(), 1, "only the final episode is reported");
+        assert_eq!(
+            *events.lock().expect("event lock"),
+            [
+                "configure",
+                "reset:0",
+                "step",
+                "reset:1",
+                "step",
+                "shutdown"
+            ]
+        );
+    }
+
+    fn dual_robot_controller_result(
+        reverse_spawn_order: bool,
+    ) -> (String, BTreeMap<(String, String), f64>) {
+        let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/scenes/mm_dual_controller.rne.scene.toml");
+        let mut bundle = load_scene_bundle(&scene).expect("load dual-robot scene");
+        if reverse_spawn_order {
+            bundle.scene.robots.reverse();
+            bundle.robots.reverse();
+        }
+        let mut world = World::new();
+        let spawned = spawn_scene_bundle(&mut world, &bundle, None, SpawnSceneOptions::default())
+            .expect("spawn dual-robot scene");
+        let controller_robots = spawned
+            .robots
+            .iter()
+            .map(|(robot_id, robot)| (robot_id.clone(), robot.robot))
+            .collect::<Vec<_>>();
+        let controller_robots = canonicalize_controller_robots(&mut world, controller_robots)
+            .expect("canonical controller robots");
+
+        let robot_b = controller_robots
+            .iter()
+            .find(|(robot_id, _)| robot_id == "mm_minimal_b")
+            .expect("robot b")
+            .1;
+        let robot_b_joints = world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                let entity = entity_ref.id();
+                let joint = world.get::<Joint>(entity)?;
+                (joint.robot == robot_b && joint.kind != JointKind::Fixed).then_some(entity)
+            })
+            .collect::<Vec<_>>();
+        for joint in robot_b_joints {
+            world.get_mut::<Joint>(joint).expect("joint").position = 0.5;
+        }
+
+        let observation =
+            capture_controller_observation(&world, &controller_robots, 0, SimTime::ZERO)
+                .expect("capture controller observation");
+        let mut scheduler = ControllerScheduler::new();
+        scheduler
+            .register(
+                "servo",
+                Box::new(
+                    VelocityServoController::new("velocity_servo", "shoulder_joint", 1.0, 2.0, 5.0)
+                        .expect("servo"),
+                ),
+                controller_robots
+                    .iter()
+                    .map(|(robot_id, _)| robot_id.clone()),
+            )
+            .expect("register scheduler");
+        scheduler.configure().expect("configure scheduler");
+        scheduler
+            .activate(ControllerResetContext {
+                episode: 0,
+                seed: 44,
+                step: 0,
+                sim_time_ticks: 0,
+            })
+            .expect("activate scheduler");
+        let action = scheduler.step(&observation).expect("step scheduler");
+        let action_json = action.to_json_pretty().expect("action JSON");
+        let replay_action = controller_replay_action(action).expect("controller replay action");
+        let mut command_buffer = ActuatorCommandBuffer::new();
+        apply_replay_action(
+            &world,
+            &mut command_buffer,
+            &[],
+            &replay_action,
+            SimTime::ZERO,
+        )
+        .expect("apply robot-scoped commands");
+        apply_actuator_commands(&mut world, &mut command_buffer);
+        let named_targets = world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                let entity = entity_ref.id();
+                let name = world.get::<Name>(entity)?;
+                let joint = world.get::<Joint>(entity)?;
+                let actuator = world.get::<Actuator>(entity)?;
+                let robot = world.get::<Robot>(joint.robot)?;
+                Some((
+                    (robot.model_name.clone(), name.0.clone()),
+                    actuator.target.velocity_rad_s,
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        scheduler.shutdown().expect("shutdown scheduler");
+        (action_json, named_targets)
+    }
+
+    #[test]
+    fn dual_robot_controller_is_independent_of_ecs_spawn_order() {
+        let forward = dual_robot_controller_result(false);
+        let reversed = dual_robot_controller_result(true);
+        assert_eq!(forward, reversed);
+        assert_eq!(
+            forward
+                .1
+                .get(&("mm_minimal_a".to_string(), "shoulder_joint".to_string())),
+            Some(&2.0)
+        );
+        assert_eq!(
+            forward
+                .1
+                .get(&("mm_minimal_b".to_string(), "shoulder_joint".to_string())),
+            Some(&1.0)
+        );
     }
 
     #[test]

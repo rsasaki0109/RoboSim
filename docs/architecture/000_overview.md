@@ -16,8 +16,16 @@ rne_math → rne_core → rne_ecs → rne_world
                               ↘ rne_robot → rne_physics → rne_physics_rapier
                               ↘ rne_traffic
                               ↘ rne_data / rne_sensor / rne_render / rne_ai / rne_assets
+runner ↔ rne_plugin (versioned robot-native observation/action boundary)
 adapters/ros2/* (optional)
 ```
+
+`rne_plugin` hosts controller policies, not robot entities. Its public control
+schema uses stable robot/joint names, fixed-step integer timestamps, explicit
+units, deterministic ordering, and no renderer, physics-backend, or adapter
+types. The runner owns capability negotiation and the
+`created → configured → active → shutdown` lifecycle; C ABI v2-v3 is an
+implementation boundary beneath that typed schema.
 
 ## Runtime pipeline
 

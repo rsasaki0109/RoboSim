@@ -155,7 +155,7 @@ async function main() {
     version: 1,
     scene: "standard_scene",
     seed: 9,
-    clock: { steps: 1, hz: 60 },
+    clock: { steps: 2, hz: 60 },
     frames: [
       {
         step: 0,
@@ -163,6 +163,27 @@ async function main() {
         action: { kind: "differential_drive", wheel_velocity_rad_s: 2 },
         observation: {},
         physics_hash: 17,
+      },
+      {
+        step: 1,
+        sim_ticks: 2,
+        action: {
+          kind: "robot_joint_velocities",
+          samples: [
+            {
+              robot_id: "robot_a",
+              joint: "shoulder_joint",
+              velocity_rad_s: 1.5,
+            },
+            {
+              robot_id: "robot_b",
+              joint: "shoulder_joint",
+              velocity_rad_s: -0.25,
+            },
+          ],
+        },
+        observation: {},
+        physics_hash: 18,
       },
     ],
     final_report: {},
@@ -178,6 +199,12 @@ async function main() {
   assert.equal(elements["replay-scene"].textContent, "standard_scene");
   assert.equal(elements["replay-action"].textContent, "2.0000 rad/s");
   assert.equal(elements["replay-hash"].textContent, "0xffffffffffffffff");
+  elements["replay-range"].value = "1";
+  elements["replay-range"].listeners.input();
+  assert.equal(
+    elements["replay-action"].textContent,
+    "robot_a/shoulder_joint=1.5000 rad/s, robot_b/shoulder_joint=-0.2500 rad/s",
+  );
 }
 
 main()

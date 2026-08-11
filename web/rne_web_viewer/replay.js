@@ -268,6 +268,49 @@
       }
       return;
     }
+    if (kind === "joint_positions" || kind === "joint_velocities") {
+      if (!Array.isArray(action.samples) || action.samples.length === 0) {
+        throw new Error(`frame ${index} has invalid ${kind} samples`);
+      }
+      const valueKey =
+        kind === "joint_positions" ? "position_rad" : "velocity_rad_s";
+      let previousJoint = null;
+      action.samples.forEach((sample) => {
+        if (
+          !sample ||
+          typeof sample.joint !== "string" ||
+          sample.joint.trim() === "" ||
+          !Number.isFinite(sample[valueKey]) ||
+          (previousJoint !== null && previousJoint >= sample.joint)
+        ) {
+          throw new Error(`frame ${index} has invalid ${kind} samples`);
+        }
+        previousJoint = sample.joint;
+      });
+      return;
+    }
+    if (kind === "robot_joint_velocities") {
+      if (!Array.isArray(action.samples) || action.samples.length === 0) {
+        throw new Error(`frame ${index} has invalid robot joint velocity samples`);
+      }
+      let previousKey = null;
+      action.samples.forEach((sample) => {
+        const key = sample && `${sample.robot_id}\0${sample.joint}`;
+        if (
+          !sample ||
+          typeof sample.robot_id !== "string" ||
+          sample.robot_id.trim() === "" ||
+          typeof sample.joint !== "string" ||
+          sample.joint.trim() === "" ||
+          !Number.isFinite(sample.velocity_rad_s) ||
+          (previousKey !== null && previousKey >= key)
+        ) {
+          throw new Error(`frame ${index} has invalid robot joint velocity samples`);
+        }
+        previousKey = key;
+      });
+      return;
+    }
     if (kind === "behavior_step") {
       return;
     }
@@ -367,6 +410,24 @@
     }
     if (kind === "joint_effort") {
       return `${action.joint}: ${Number(action.effort_nm).toFixed(4)} N·m`;
+    }
+    if (kind === "joint_positions") {
+      return action.samples
+        .map((sample) => `${sample.joint}=${Number(sample.position_rad).toFixed(4)} rad`)
+        .join(", ");
+    }
+    if (kind === "joint_velocities") {
+      return action.samples
+        .map((sample) => `${sample.joint}=${Number(sample.velocity_rad_s).toFixed(4)} rad/s`)
+        .join(", ");
+    }
+    if (kind === "robot_joint_velocities") {
+      return action.samples
+        .map(
+          (sample) =>
+            `${sample.robot_id}/${sample.joint}=${Number(sample.velocity_rad_s).toFixed(4)} rad/s`,
+        )
+        .join(", ");
     }
     if (kind === "behavior_step") {
       return `${action.behavior_action}: evaluate behavior contracts`;
