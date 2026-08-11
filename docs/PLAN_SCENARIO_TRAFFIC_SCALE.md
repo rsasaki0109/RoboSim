@@ -204,6 +204,13 @@ repetitions.
 
 ## Implementation status
 
+Local Windows x86_64 release evidence on 2026-08-12 completed all 100 actors
+for 600 steps in every repetition. The slowest measured repetition sustained
+1,177.9 steps/s against the 60 steps/s bound; minimum gap was 15.6 m, runtime
+ownership was 100/100, actor/action result digest was
+`6732886903736628512`, and every violation-registry count was zero. The named
+GitHub-hosted runner remains the authoritative performance result.
+
 - M5-A contract and canonical scenario evidence: complete.
 - M5-B mixed ownership: complete.
 - M5-C recoverable TraCI: complete.

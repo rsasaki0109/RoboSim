@@ -76,6 +76,10 @@ dependency graph.
 - `TrafficPoseSource::Runtime` (the default when absent) means RNE owns route
   progress and pose updates. `TrafficPoseSource::External` means an adapter
   supplies the pose and RNE must not integrate that actor a second time.
+- Each successful mixed step reports runtime/external ownership counts and a
+  canonical visible-state digest over stable UUID, actor kind, owner, and pose.
+  Missing UUID/pose or a runtime actor without a route follower fails the step
+  before any native actor is mutated.
 - `TrafficRuntime` is per-world deterministic step state.
 - Traffic events carry simulation time and stable entity UUIDs.
 
@@ -108,6 +112,16 @@ Headless execution uses the same steps and is the acceptance path.
 Stages 1 through 5 are implemented. The acceptance coverage includes a
 100-vehicle, 600-step headless replay with a committed state hash and a
 12-second rendered PLATEAU traffic demonstration.
+
+M5 extends that acceptance path through a committed 100-actor OpenSCENARIO
+fixture. Scenario actions use the total order `(start_time_s, entity_name,
+source_action_index)`; final actors are UUID-ordered and the result digest
+covers actor snapshots plus applied-action evidence. `xtask scenario-scale`
+runs 600 fixed steps, repeats the workload after warm-up, classifies every
+violation, and enforces at least 60 headless steps/s on the named CI runner.
+TraCI recovery remains in `rne_traci`: a disconnected session retains its last
+complete mirror and reconnects through a bounded snapshot-only resync without
+adding SUMO types or policy to this core crate.
 
 ## Consequences
 

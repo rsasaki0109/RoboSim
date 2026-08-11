@@ -28,7 +28,7 @@ workflow is truly complete.
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with public capability negotiation plus an executable canonical conformance report | None for the M4 conformance slice; every advertised capability has unit-bearing evidence |
 | Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, bounded DataBus retention, per-step replay stream summaries, full typed payload export, and framed lossless RGB-D/LiDAR frontend payloads preserving stream sequence/capture/availability timestamps | None for the current workflow slice |
 | Rendering | Native wgpu, browser replay viewer, PBR materials, glTF maps, HDR/IBL, TAA, legacy `interactive_viewer --connect`, and production `interactive_viewer --frontend-connect` | Remote diff-drive, scenario traffic, and articulated joints project locally; production binary RGB/depth frames drive PiP and full LiDAR frames drive a bounded display overlay without stepping a second physics world |
-| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), versioned `rne-scenario-replay` artifacts, offline SUMO `.net.xml` road-network import (`rne_sumo`), scenario runs that reference a `.net.xml` directly, and live SUMO co-simulation (`rne_traci` connects to a running SUMO, maps vehicles into the RNE Y-up frame, mirrors them as `TrafficActor` entities tagged with `TrafficPoseSource::External`, and `rne-asset co-sim` runs a deterministic headless co-simulation) | External SUMO poses are not double-integrated; only explicit SUMO commands such as `set_vehicle_speed_m_s` return control to the external simulator |
+| Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, multi-actor OpenSCENARIO 1.0 execution with per-kind routes and canonical action evidence, mixed runtime/external ownership metrics, versioned scenario replay, offline SUMO import, and recoverable live TraCI co-simulation | None for the M5 scenario-scale and TraCI recovery slice; broader OpenSCENARIO action coverage remains future scope |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, `rne-scenario-replay` XOSC/network/clock/result records, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
 
@@ -162,11 +162,12 @@ cargo run --release -p rne_asset_cli -- replay \
   target/runs/scenario_speed.rne-replay
 ```
 
-The JSON discriminator is `rne-scenario-replay`. Schema version 2 records the
+The JSON discriminator is `rne-scenario-replay`. Schema version 4 records the
 XOSC path, resolved traffic-network path, fixed-step options, the consumed
 `pause`/`resume`/`step`/`reset`/`quit` command transcript, completed step count,
-final traffic positions, signal/collision metrics, average speed, and stable
-hash. Interactive artifacts are replayable too: `rne-asset replay` restores the
+UUID-ordered actor state, canonical action evidence and result digest, mixed
+pose ownership, minimum gap, signal/collision metrics, average speed, and
+stable hash. Interactive artifacts are replayable too: `rne-asset replay` restores the
 initial paused state, feeds the recorded commands back through the same
 transport-neutral runner, and compares the final result.
 
@@ -192,6 +193,20 @@ use canonical snapshot hashes; analytic-vs-Rapier and contact-rich checks use
 the versioned SI-unit tolerance registry. The report also exposes Rapier's
 current effective-mass convention: configured body mass is additional to the
 default-density collider mass.
+
+M5 scenario/traffic evidence is emitted by the release-mode scale gate:
+
+```bash
+cargo run -p xtask -- scenario-scale
+```
+
+The committed 2.5 km fixture expands one multi-actor event to 100 canonical
+actions and runs 600 fixed steps. After an untimed warm-up, three repetitions
+must reproduce the actor/action digest exactly; the slowest must sustain at
+least 60 steps/s on the GitHub-hosted Windows parity runner. The JSON report at
+`artifacts/scenario-scale/report.json` includes ownership counts, minimum gap,
+all six violation-registry rows, timing samples, and zero unexplained
+violations.
 
 ## SUMO road-network import
 
@@ -248,6 +263,14 @@ when the caller asks for it, while SUMO remains the motion and routing
 authority. The default `step` path is still observe-and-synchronize and never
 derives commands from an RNE mirror pose; route assignment and richer control
 ownership remain future work.
+
+`CoSimulation` exposes connected, disconnected, and closed states. I/O or
+protocol failure preserves the last complete mirror; bounded `recover` opens a
+fresh endpoint connection and reads a complete sorted snapshot before commit,
+without deliberately repeating the ambiguous `simulationStep`. Existing SUMO
+IDs retain entity identity, additions/removals reconcile transactionally, and
+session metrics expose failed steps, reconnect attempts, and successful
+recoveries.
 
 ## Runner control
 
