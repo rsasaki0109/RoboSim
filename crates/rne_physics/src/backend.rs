@@ -53,6 +53,32 @@ pub enum PhysicsCapability {
     RaycastBatch,
 }
 
+impl PhysicsCapability {
+    /// Every capability known by this engine version in stable wire/report order.
+    pub const ALL: [Self; 7] = [
+        Self::RigidBody,
+        Self::Articulation,
+        Self::GpuRigidBody,
+        Self::DeterministicStep,
+        Self::SoftBody,
+        Self::ContactForce,
+        Self::RaycastBatch,
+    ];
+
+    /// Returns the stable lowercase identifier used by conformance reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RigidBody => "rigid_body",
+            Self::Articulation => "articulation",
+            Self::GpuRigidBody => "gpu_rigid_body",
+            Self::DeterministicStep => "deterministic_step",
+            Self::SoftBody => "soft_body",
+            Self::ContactForce => "contact_force",
+            Self::RaycastBatch => "raycast_batch",
+        }
+    }
+}
+
 /// Physics backend error type.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum PhysicsError {

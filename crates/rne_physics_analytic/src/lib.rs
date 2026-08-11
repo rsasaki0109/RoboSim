@@ -159,6 +159,9 @@ impl PhysicsBackend for AnalyticBackend {
             if let Some(mut transform) = world.get_mut::<Transform3>(body.entity) {
                 transform.translation = body.position;
             }
+            if let Some(mut rigid_body) = world.get_mut::<RigidBody>(body.entity) {
+                rigid_body.linear_velocity_m_s = body.velocity;
+            }
         }
         Ok(())
     }

@@ -6,6 +6,7 @@ pub mod backend;
 pub mod components;
 pub mod events;
 pub mod hash;
+pub mod snapshot;
 
 pub use backend::{
     require_capabilities, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
@@ -17,3 +18,7 @@ pub use components::{
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
 pub use hash::hash_physics_state;
+pub use snapshot::{
+    capture_physics_snapshot, PhysicsBodySnapshot, PhysicsContactSnapshot, PhysicsSnapshot,
+    PhysicsSnapshotError, PHYSICS_SNAPSHOT_SCHEMA_VERSION,
+};
