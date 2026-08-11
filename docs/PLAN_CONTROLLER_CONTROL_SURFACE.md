@@ -1,6 +1,6 @@
 # Stable Controller Control Surface Plan
 
-Status: M2-A through M2-D implemented; exit gates pending full workspace CI
+Status: M2-A through M2-D implemented; all local exit gates passed
 
 ## Goal
 
