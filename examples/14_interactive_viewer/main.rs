@@ -57,7 +57,8 @@ use rne_core::control::{ControlCommand, RunnerControlState};
 use rne_data::transport::{
     decode_image_depth, decode_image_rgb8, decode_lidar_point_cloud, encode_control_command,
     ClientHello, NegotiationReject, ServerHello, StatusMessage, TransportCapabilities,
-    TransportFrame, TransportMessageKind, TRANSPORT_MAX_PAYLOAD_BYTES,
+    TransportFrame, TransportMessageKind, TRANSPORT_HEADER_BYTES, TRANSPORT_MAX_PAYLOAD_BYTES,
+    TRANSPORT_PROTOCOL_MINOR,
 };
 use rne_math::{Quat, Vec3};
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
@@ -446,19 +447,7 @@ impl RemoteControlClient {
         }
         let server = ServerHello::decode_payload(&response.payload)
             .map_err(|error| format!("decode binary ServerHello: {error}"))?;
-        if response.session_id == 0
-            || response.protocol_major != server.negotiated.protocol_major
-            || response.protocol_minor != server.negotiated.protocol_minor
-        {
-            return Err("binary ServerHello header does not match negotiated session".to_string());
-        }
-        if !server
-            .negotiated
-            .capabilities
-            .contains(TransportCapabilities::CONTROL.union(TransportCapabilities::STATUS))
-        {
-            return Err("binary runner omitted required control/status capabilities".to_string());
-        }
+        validate_binary_server_hello(&response, server, hello)?;
         stream
             .set_read_timeout(None)
             .map_err(|error| format!("clear binary read timeout: {error}"))?;
@@ -467,6 +456,7 @@ impl RemoteControlClient {
             .map_err(|error| format!("clone binary runner stream: {error}"))?;
         let session_id = response.session_id;
         let protocol_major = server.negotiated.protocol_major;
+        let protocol_minor = server.negotiated.protocol_minor;
         let max_payload_bytes = server.negotiated.max_payload_bytes as usize;
         let (sender, receiver) = mpsc::sync_channel(REMOTE_BINARY_EVENT_QUEUE_FRAMES);
         thread::Builder::new()
@@ -477,6 +467,7 @@ impl RemoteControlClient {
                     sender,
                     session_id,
                     protocol_major,
+                    protocol_minor,
                     max_payload_bytes,
                 )
             })
@@ -579,6 +570,47 @@ impl RemoteControlClient {
         }
         Ok(())
     }
+}
+
+fn validate_binary_server_hello(
+    response: &TransportFrame,
+    server: ServerHello,
+    offer: ClientHello,
+) -> Result<(), String> {
+    let negotiated = server.negotiated;
+    if response.session_id == 0
+        || response.protocol_major != negotiated.protocol_major
+        || response.protocol_minor != negotiated.protocol_minor
+    {
+        return Err("binary ServerHello header does not match negotiated session".to_string());
+    }
+    if negotiated.protocol_major < offer.min_protocol_major
+        || negotiated.protocol_major > offer.max_protocol_major
+        || negotiated.protocol_minor != TRANSPORT_PROTOCOL_MINOR
+    {
+        return Err("binary runner selected an unsupported protocol version".to_string());
+    }
+    if !offer.capabilities.contains(negotiated.capabilities)
+        || !negotiated
+            .capabilities
+            .contains(offer.required_capabilities)
+    {
+        return Err("binary runner selected invalid capabilities".to_string());
+    }
+    let payload_with_header = negotiated
+        .max_payload_bytes
+        .checked_add(TRANSPORT_HEADER_BYTES as u32);
+    if negotiated.max_payload_bytes == 0
+        || negotiated.max_payload_bytes > offer.max_payload_bytes
+        || negotiated.queue_frame_limit == 0
+        || negotiated.queue_frame_limit > offer.queue_frame_limit
+        || negotiated.queue_byte_limit <= TRANSPORT_HEADER_BYTES as u32
+        || negotiated.queue_byte_limit > offer.queue_byte_limit
+        || payload_with_header.is_none_or(|bytes| bytes > negotiated.queue_byte_limit)
+    {
+        return Err("binary runner selected invalid transport limits".to_string());
+    }
+    Ok(())
 }
 
 fn parse_remote_control_command(command: &str) -> Option<ControlCommand> {
@@ -778,10 +810,14 @@ fn read_binary_remote_events(
     sender: mpsc::SyncSender<RemoteEvent>,
     session_id: u64,
     protocol_major: u16,
+    protocol_minor: u16,
     max_payload_bytes: usize,
 ) {
     while let Ok(Some(frame)) = TransportFrame::read_from(&mut stream, max_payload_bytes) {
-        if frame.session_id != session_id || frame.protocol_major != protocol_major {
+        if frame.session_id != session_id
+            || frame.protocol_major != protocol_major
+            || frame.protocol_minor != protocol_minor
+        {
             break;
         }
         let result = match frame.kind {
@@ -2223,6 +2259,47 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("same-step binary RGB frame was not merged into the latest status");
+    }
+
+    #[test]
+    fn binary_server_hello_cannot_expand_client_limits() {
+        let offer = ClientHello {
+            min_protocol_major: 1,
+            max_protocol_major: 1,
+            capabilities: TransportCapabilities::ALL_V1,
+            required_capabilities: TransportCapabilities::CONTROL
+                .union(TransportCapabilities::STATUS),
+            max_payload_bytes: 4096,
+            queue_frame_limit: 8,
+            queue_byte_limit: 8192,
+            resume_after_sequence: None,
+        };
+        let negotiated = rne_data::transport::negotiate_transport(
+            offer,
+            rne_data::transport::NegotiationPolicy::default(),
+        )
+        .unwrap();
+        let mut server = ServerHello {
+            negotiated,
+            reconnect_generation: 0,
+            current_sequence: 0,
+            dropped_messages: 0,
+        };
+        let mut response =
+            TransportFrame::new(TransportMessageKind::ServerHello, 1, 42, Vec::new());
+        assert!(validate_binary_server_hello(&response, server, offer).is_ok());
+
+        server.negotiated.max_payload_bytes = offer.max_payload_bytes + 1;
+        assert!(validate_binary_server_hello(&response, server, offer)
+            .unwrap_err()
+            .contains("transport limits"));
+
+        server.negotiated = negotiated;
+        server.negotiated.protocol_minor += 1;
+        response.protocol_minor = server.negotiated.protocol_minor;
+        assert!(validate_binary_server_hello(&response, server, offer)
+            .unwrap_err()
+            .contains("unsupported protocol version"));
     }
 
     #[test]
