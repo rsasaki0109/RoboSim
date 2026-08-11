@@ -228,10 +228,22 @@ impl ScenarioReplayArtifact {
             .result
             .final_actors
             .windows(2)
-            .any(|window| window[0].name >= window[1].name)
+            .any(|window| window[0].stable_uuid >= window[1].stable_uuid)
         {
             return Err(ScenarioReplayArtifactError::Invalid(
-                "result.final_actors must have unique names in canonical order".to_string(),
+                "result.final_actors must have unique UUIDs in canonical order".to_string(),
+            ));
+        }
+        let mut names = self
+            .result
+            .final_actors
+            .iter()
+            .map(|actor| actor.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        if names.windows(2).any(|window| window[0] == window[1]) {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.final_actors must have unique names".to_string(),
             ));
         }
         for (actor, position_m) in self
@@ -241,10 +253,13 @@ impl ScenarioReplayArtifact {
             .zip(&self.result.final_positions_m)
         {
             if actor.name.trim().is_empty()
+                || uuid::Uuid::parse_str(&actor.stable_uuid).is_err()
+                || actor.route_id.trim().is_empty()
                 || actor
                     .final_position_m
                     .iter()
                     .any(|value| !value.is_finite())
+                || !actor.final_heading_rad.is_finite()
                 || !actor.final_speed_m_s.is_finite()
                 || actor.final_speed_m_s < 0.0
             {
@@ -257,6 +272,57 @@ impl ScenarioReplayArtifact {
                     "result.final_actors positions must match final_positions_m".to_string(),
                 ));
             }
+        }
+        if self
+            .result
+            .minimum_observed_gap_m
+            .is_some_and(|gap_m| !gap_m.is_finite())
+        {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.minimum_observed_gap_m must be finite".to_string(),
+            ));
+        }
+        let ownership = self.result.ownership;
+        if ownership.runtime_owned_actor_count + ownership.external_owned_actor_count
+            != ownership.total_actor_count
+            || ownership.runtime_advanced_actor_count > ownership.runtime_owned_actor_count
+            || ownership.external_observed_actor_count > ownership.external_owned_actor_count
+            || ownership.invalid_actor_count != 0
+            || (self.executed_steps != 0
+                && ownership.total_actor_count != self.result.final_actors.len())
+        {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.ownership counts are inconsistent".to_string(),
+            ));
+        }
+        if self.result.action_evidence.windows(2).any(|window| {
+            let left = &window[0];
+            let right = &window[1];
+            left.start_time_s
+                .total_cmp(&right.start_time_s)
+                .then_with(|| left.entity_name.cmp(&right.entity_name))
+                .then_with(|| left.source_action_index.cmp(&right.source_action_index))
+                .is_gt()
+        }) || self.result.action_evidence.iter().any(|evidence| {
+            !evidence.start_time_s.is_finite()
+                || evidence.start_time_s < 0.0
+                || evidence.entity_name.trim().is_empty()
+                || evidence.applied_step == 0
+                || evidence.applied_step > self.executed_steps
+        }) {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.action_evidence must be finite and canonically ordered".to_string(),
+            ));
+        }
+        let expected_result_digest = crate::runtime::scenario_result_digest(
+            &self.result.final_actors,
+            &self.result.action_evidence,
+        )
+        .map_err(|error| ScenarioReplayArtifactError::Invalid(error.to_string()))?;
+        if self.result.result_digest != expected_result_digest {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.result_digest does not match actor/action evidence".to_string(),
+            ));
         }
         if self
             .control_commands
@@ -322,17 +388,38 @@ mod tests {
     use super::*;
 
     fn result() -> ScenarioRunResult {
+        let final_actors = vec![crate::ScenarioActorResult {
+            name: "ego".to_string(),
+            stable_uuid: uuid::Uuid::from_u128(0x0001_0000_0000_0000_0000_0000_0000_0000)
+                .to_string(),
+            kind: crate::ScenarioEntityKind::MotorVehicle,
+            pose_source: rne_traffic::TrafficPoseSource::Runtime,
+            route_id: "route:scenario:motor_vehicle".to_string(),
+            final_position_m: [1.0, 0.0, 2.0],
+            final_heading_rad: 0.0,
+            final_speed_m_s: 2.0,
+        }];
+        let action_evidence = Vec::new();
+        let result_digest = crate::runtime::scenario_result_digest(&final_actors, &action_evidence)
+            .expect("result digest");
         ScenarioRunResult {
             stable_hash: 0x1234,
+            result_digest,
             signal_violations: 0,
             collisions: 0,
             final_positions_m: vec![[1.0, 0.0, 2.0]],
-            final_actors: vec![crate::ScenarioActorResult {
-                name: "ego".to_string(),
-                kind: crate::ScenarioEntityKind::MotorVehicle,
-                final_position_m: [1.0, 0.0, 2.0],
-                final_speed_m_s: 2.0,
-            }],
+            final_actors,
+            action_evidence,
+            unapplied_action_count: 0,
+            minimum_observed_gap_m: None,
+            ownership: rne_traffic::TrafficOwnershipMetrics {
+                total_actor_count: 1,
+                runtime_owned_actor_count: 1,
+                external_owned_actor_count: 0,
+                runtime_advanced_actor_count: 1,
+                external_observed_actor_count: 0,
+                invalid_actor_count: 0,
+            },
             route_length_m: 10.0,
             average_speed_m_s: 2.0,
             steps: 4,
@@ -360,6 +447,17 @@ mod tests {
         let json = artifact.to_json().expect("serialize artifact");
         let loaded = ScenarioReplayArtifact::from_json(&json).expect("parse artifact");
         assert_eq!(loaded, artifact);
+    }
+
+    #[test]
+    fn replay_comparison_accepts_sub_nanounit_json_rounding() {
+        let mut recorded = result();
+        recorded.minimum_observed_gap_m = Some(15.599_999_999_986_355);
+        let mut actual = recorded.clone();
+        actual.minimum_observed_gap_m = Some(15.599_999_999_986_357);
+
+        assert_ne!(actual, recorded);
+        assert!(actual.replay_matches(&recorded));
     }
 
     #[test]
@@ -403,6 +501,24 @@ mod tests {
             Err(ScenarioReplayArtifactError::Invalid(message))
                 if message.contains("result.steps")
         ));
+    }
+
+    #[test]
+    fn finite_negative_gap_is_preserved_as_violation_evidence() {
+        let mut overlapping = result();
+        overlapping.minimum_observed_gap_m = Some(-0.25);
+        overlapping.collisions = 1;
+        let artifact = ScenarioReplayArtifact::new(
+            inputs(),
+            ScenarioRunOptions { steps: 4, hz: 60.0 },
+            4,
+            vec![],
+            overlapping,
+        );
+
+        artifact
+            .validate()
+            .expect("a failing run must retain its finite overlap gap");
     }
 
     #[test]

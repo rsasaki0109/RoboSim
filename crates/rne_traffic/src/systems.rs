@@ -8,6 +8,7 @@ use crate::{
 use bevy_ecs::prelude::{Entity, With, World};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::EntityUuid;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -148,7 +149,7 @@ pub struct TrafficFlowMetrics {
 /// Actors without an explicit [`TrafficPoseSource`] are runtime-owned. External
 /// actors are observed for deterministic evidence but are never advanced by
 /// the native kinematic integrator.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrafficOwnershipMetrics {
     /// All traffic actors with valid externally visible state.
     pub total_actor_count: usize,

@@ -3080,7 +3080,7 @@ fn replay_scenario_command(path: &Path, artifact: &ScenarioReplayArtifact) -> Re
         actual.steps
     );
     anyhow::ensure!(
-        actual == artifact.result,
+        actual.replay_matches(&artifact.result),
         "scenario replay result mismatch: expected={:?} actual={:?}",
         artifact.result,
         actual
