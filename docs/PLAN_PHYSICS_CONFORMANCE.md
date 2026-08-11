@@ -131,4 +131,4 @@ or capability coverage check fails.
 - M4-B shared vectors and tolerance registry: complete.
 - M4-C capability-specific validation: complete.
 - M4-D reports and CI integration: complete.
-- M4-E full workspace/CI matrix: in progress.
+- M4-E full workspace/CI matrix: complete.
