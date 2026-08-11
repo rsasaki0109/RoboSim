@@ -102,6 +102,7 @@ members = [
   "examples/71_g1_rgbd_sensor",
   "tests/determinism",
   "tests/dynamics",
+  "tests/physics_conformance",
   "tools/rne_asset_cli",
   "tools/rne_plateau_import",
   "xtask",

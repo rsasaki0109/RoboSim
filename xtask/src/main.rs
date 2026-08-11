@@ -45,6 +45,7 @@ fn run() -> anyhow::Result<()> {
         "ci-rl" => ci_rl(),
         "ci-ros2" => ci_ros2(),
         "ci-ros2-bridge" => ci_ros2_bridge(),
+        "physics-conformance" => physics_conformance(&mut args),
         "parity" => parity(&mut args),
         "house-gif-demo" => house_gif_demo(),
         "hero-media-check" => hero_media_check(),
@@ -78,6 +79,10 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     }
 
     let checks = [
+        (
+            "physics_backend_conformance",
+            "cargo run --locked -q -p rne_physics_conformance --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
+        ),
         (
             "robot_control_replay",
             "cargo run --locked -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive.rne-replay",
@@ -197,6 +202,39 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     println!("OSS parity report: {}", json_path.display());
     anyhow::ensure!(all_passed, "one or more OSS parity checks failed");
     Ok(())
+}
+
+/// Runs the backend-neutral physics capability catalog and writes its JSON report.
+fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let mut output = root.join("artifacts/physics-conformance/report.json");
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--json" => {
+                output = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--json requires a path"))?,
+                );
+            }
+            other => anyhow::bail!("unknown physics-conformance argument: {other}"),
+        }
+    }
+    let output = output.to_string_lossy().into_owned();
+    run_program(
+        Path::new("cargo"),
+        &[
+            "run",
+            "--locked",
+            "-q",
+            "-p",
+            "rne_physics_conformance",
+            "--bin",
+            "rne-physics-conformance",
+            "--",
+            "--output",
+            &output,
+        ],
+    )
 }
 
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {

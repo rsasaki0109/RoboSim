@@ -4,8 +4,8 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    hash_physics_state, require_capabilities, PhysicsBackend, PhysicsCapability, PhysicsError,
-    PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
+    capture_physics_snapshot, require_capabilities, PhysicsBackend, PhysicsCapability,
+    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_analytic::AnalyticBackend;
 use rne_world::Transform3;
@@ -54,6 +54,12 @@ fn dynamic_body_free_falls_under_gravity() {
         (transform.translation.x.abs() + transform.translation.z.abs()) < 1e-12,
         "horizontal drift must be zero"
     );
+    let rigid_body = world.get::<RigidBody>(entity).expect("rigid body");
+    assert!(
+        (rigid_body.linear_velocity_m_s.y + 9.81).abs() < 1.0e-6,
+        "integrated velocity must be written back to ECS: {:?}",
+        rigid_body.linear_velocity_m_s
+    );
 }
 
 #[test]
@@ -66,7 +72,9 @@ fn free_fall_is_bit_deterministic() {
                 rne_physics_analytic::step_physics(&mut backend, &mut world, world_id, dt)
                     .expect("step");
             }
-            hash_physics_state(&world)
+            capture_physics_snapshot(&world, &[], 120, dt.ticks() * 120)
+                .expect("canonical snapshot")
+                .stable_hash()
         })
         .collect::<Vec<_>>();
     assert_eq!(

@@ -156,6 +156,24 @@ pub trait PhysicsBackend: Send + Sync + 'static {
         query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError>;
 
+    /// Executes raycast queries in caller-provided order.
+    ///
+    /// The outer result preserves query order. Each inner hit list follows the
+    /// same distance/entity ordering contract as [`Self::raycast`]. Backends
+    /// advertising [`PhysicsCapability::RaycastBatch`] must pass the conformance
+    /// vector for this method.
+    fn raycast_batch(
+        &self,
+        physics_world: PhysicsWorldId,
+        queries: &[RaycastQuery],
+    ) -> Result<Vec<Vec<RaycastHit>>, PhysicsError> {
+        queries
+            .iter()
+            .copied()
+            .map(|query| self.raycast(physics_world, query))
+            .collect()
+    }
+
     /// Returns contact events from the last simulation step.
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError>;
 

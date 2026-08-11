@@ -137,6 +137,12 @@ jobs:
         with:
           name: oss-parity-report
           path: artifacts/oss-parity/report.json
+      - name: Upload physics conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-conformance-report
+          path: artifacts/physics-conformance/report.json
 
   # Aggregate gate so tooling that watched the old single job has one required
   # context to point at; it passes only when every stage passes.
