@@ -346,6 +346,9 @@ whose ABI version differs is rejected at load time.
 produces identical velocity commands to the built-in `VelocityServoController`;
 a determinism test drives a scene with the loaded library and the built-in
 implementation and requires byte-identical replay frames.
+The independently defined `rne_plugin_abi_v2_fixture` freezes the oldest
+supported controller ABI, and the latest runtime must load and step it in the
+[controller plugin ABI compatibility gate](PLUGIN_ABI_COMPATIBILITY.md).
 
 Plugins can also be discovered by name instead of an explicit path. A manifest
 lists directories to search, and the runner loads the first shared library

@@ -1,0 +1,10 @@
+[package]
+name = "rne_plugin_abi_v2_fixture"
+description = "Frozen independent controller plugin fixture for the RNE C ABI v2"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]

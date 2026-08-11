@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Frozen controller ABI v2 compatibility gate**: an independently defined
+  controller plugin fixture with no RNE dependencies now carries the v2 C
+  layouts, exports, and manifest. The latest runtime builds, loads, and steps
+  that fixture in integration tests, backed by an explicit ABI support policy.
 - **Behavior CI failure replay and minimization**: typed contract/report schema
   v2 now records a deterministic seed manifest and per-violation state digest.
   Failed seeds emit versioned `.rne-replay` artifacts with scripted actions,

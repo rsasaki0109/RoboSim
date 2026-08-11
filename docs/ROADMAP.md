@@ -37,6 +37,11 @@ Cross-cutting rules for every milestone:
 - Performance claims name the fixture, machine class, actor/sensor count, and
   percentile; correctness gates are never waived to meet throughput targets.
 
+M2 begins with the [controller plugin ABI compatibility
+policy](PLUGIN_ABI_COMPATIBILITY.md): ABI v2 is represented by an independent,
+frozen fixture that the latest runtime must load and step. Future controller
+ABI revisions must preserve that gate through an explicit version adapter.
+
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|
 | A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |
