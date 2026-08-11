@@ -1,6 +1,6 @@
 # Robot Behavior CI Plan
 
-Status: Phase 1 implemented
+Status: Phases 1-3 implemented; Phase 4 CI artifact upload active
 
 ## Goal
 
@@ -14,11 +14,12 @@ produce a deterministic failure artifact that can be inspected in a browser.
 
 ## Current implementation
 
-Phase 1 is available through the backend-neutral typed contract API in
-`rne_ai`. It evaluates `Always`, `Eventually`, and `Consecutive` predicates
-against task-owned observations using `SimClock`, runs unique seeds in stable
-ascending order, preserves the first violation, and emits versioned JSON and
-JUnit XML reports.
+The backend-neutral typed contract API in `rne_ai` evaluates `Always`,
+`Eventually`, and `Consecutive` predicates against task-owned observations
+using `SimClock`. It runs unique seeds in stable ascending order, preserves the
+first violation by step and contract declaration order, and emits contract
+report schema v2 JSON plus JUnit XML. Every report embeds engine compatibility
+metadata and a versioned, sorted seed manifest.
 
 The first scenario runs the randomized G1 + Dex3 acquisition task and checks
 finite observations, dual and stable contact before grasp, a three-step
@@ -30,9 +31,31 @@ cargo run -p xtask -- behavior-ci --seeds 0..10
 ```
 
 Reports are written to `artifacts/behavior-ci/report.json` and
-`artifacts/behavior-ci/junit.xml` by default. Tests include a successful real
-G1 seed and an intentionally invalid tray placement that must produce a stable
-inactive-hand contact violation.
+`artifacts/behavior-ci/junit.xml` by default. A failed seed also writes the
+original and minimized replay plus a standalone minimized case under
+`artifacts/behavior-ci/replays/`. JSON and JUnit diagnostics name the seed,
+contract, first step, state digest, relevant entities, and artifact paths.
+
+Reproduce a CI artifact headlessly without policy or rendering code:
+
+```bash
+cargo run -p xtask -- behavior-replay artifacts/behavior-ci/replays/unitree_g1_dex3_acquire-seed-37.rne-replay
+```
+
+Exercise the committed expected-failure fixture and the complete artifact
+pipeline locally:
+
+```bash
+cargo run -p xtask -- behavior-ci \
+  --case crates/rne_ai/tests/fixtures/unitree_g1_dex3_invalid_tray.behavior-case.json
+```
+
+The replay schema stores `initial_observation` / `advance` actions, selected
+typed observations, exact step timestamps and stable same-backend world-state
+digests, ordered contract descriptors, scenario/contract digests, engine
+version, and named randomization dimensions. Exact fields remain bit-for-bit
+checked. Derived floating-point observations use the artifact-pinned absolute
+tolerance `1e-12`; any larger change produces a bounded named-field diff.
 
 The intended command-line experience is:
 
@@ -174,6 +197,8 @@ Definition of done:
 
 ### Phase 2: Deterministic Failure Replay
 
+Status: Implemented.
+
 Deliverables:
 
 - record actions, selected observations, contact events, world hashes, and
@@ -194,6 +219,8 @@ Definition of done:
 
 ### Phase 3: Failure Minimization
 
+Status: Implemented.
+
 Deliverables:
 
 - represent randomization parameters as stable named dimensions;
@@ -211,6 +238,10 @@ Definition of done:
 - the original and minimized replay artifacts name the same violated contract.
 
 ### Phase 4: GitHub Actions Integration
+
+Status: In progress. The ten-seed Linux job and always-on
+`artifacts/behavior-ci/` upload are active; richer PR summaries and baseline
+regression budgets remain.
 
 Deliverables:
 

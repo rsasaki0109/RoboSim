@@ -50,6 +50,7 @@ fn run() -> anyhow::Result<()> {
         "hero-media-check" => hero_media_check(),
         "hero-contact-sheet" => hero_contact_sheet(),
         "behavior-ci" => behavior_ci(&mut args),
+        "behavior-replay" => behavior_replay(&mut args),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -179,6 +180,9 @@ fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let mut seeds = default_behavior_seeds();
     let mut json_path = root.join("artifacts/behavior-ci/report.json");
     let mut junit_path = root.join("artifacts/behavior-ci/junit.xml");
+    let mut artifact_dir = root.join("artifacts/behavior-ci/replays");
+    let mut failure_case_path = None;
+    let mut seeds_explicit = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--seeds" => {
@@ -186,6 +190,7 @@ fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--seeds requires START..END"))?;
                 seeds = parse_seed_range(&value)?;
+                seeds_explicit = true;
             }
             "--json" => {
                 json_path = root.join(
@@ -199,16 +204,125 @@ fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                         .ok_or_else(|| anyhow::anyhow!("--junit requires a path"))?,
                 );
             }
+            "--artifacts" => {
+                artifact_dir = root.join(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--artifacts requires a path"))?,
+                );
+            }
+            "--case" => {
+                failure_case_path = Some(
+                    root.join(
+                        args.next()
+                            .ok_or_else(|| anyhow::anyhow!("--case requires a path"))?,
+                    ),
+                );
+            }
             other => anyhow::bail!("unknown behavior-ci argument: {other}"),
         }
     }
 
-    let report = rne_ai::run_behavior_scenarios("unitree_g1_dex3_acquire", seeds, |seed| {
-        rne_ai::UnitreeG1Dex3BehaviorScenario::new(
-            seed,
-            rne_ai::UnitreeG1Dex3BehaviorConfig::default(),
-        )
-    });
+    anyhow::ensure!(
+        failure_case_path.is_none() || !seeds_explicit,
+        "--case and --seeds cannot be used together"
+    );
+    let (run, expected_failure) = if let Some(case_path) = failure_case_path {
+        let failure_case = rne_ai::BehaviorFailureCase::read_json(&case_path)?;
+        let scenario = failure_case.scenario.clone();
+        let dimensions = failure_case.dimensions.clone();
+        let seed = failure_case.seed;
+        let expected_contract = failure_case.expected_contract;
+        let run = rne_ai::run_behavior_scenarios_with_replays(scenario.clone(), [seed], |seed| {
+            g1_behavior_from_dimensions(&scenario, seed, &dimensions)
+        })?;
+        (run, Some((seed, expected_contract)))
+    } else {
+        let run = rne_ai::run_behavior_scenarios_with_replays(
+            "unitree_g1_dex3_acquire",
+            seeds,
+            |seed| {
+                rne_ai::UnitreeG1Dex3BehaviorScenario::new(
+                    seed,
+                    rne_ai::UnitreeG1Dex3BehaviorConfig::default(),
+                )
+            },
+        )?;
+        (run, None)
+    };
+    let mut report = run.report;
+    let mut artifact_errors = Vec::new();
+    for replay in run.failure_replays {
+        let replay_path = artifact_dir.join(replay.file_name());
+        if let Err(error) = replay.write_json(&replay_path) {
+            let _ = report.set_failure_artifacts(replay.seed, None, None, None);
+            artifact_errors.push(format!(
+                "could not write seed {} replay: {error}",
+                replay.seed
+            ));
+            continue;
+        }
+        let replay_reference = report_path(&root, &replay_path);
+        let _ =
+            report.set_failure_artifacts(replay.seed, Some(replay_reference.clone()), None, None);
+
+        let minimized = rne_ai::minimize_behavior_failure(&replay, |dimensions| {
+            let candidate = rne_ai::run_behavior_scenarios_with_replays(
+                replay.scenario.clone(),
+                [replay.seed],
+                |seed| g1_behavior_from_dimensions(&replay.scenario, seed, dimensions),
+            )?;
+            Ok::<_, rne_ai::BehaviorReplayError>(candidate.failure_replays.into_iter().next())
+        });
+        let minimized = match minimized {
+            Ok(minimized) => minimized,
+            Err(error) => {
+                artifact_errors.push(format!(
+                    "could not minimize seed {} replay: {error}",
+                    replay.seed
+                ));
+                continue;
+            }
+        };
+        if let Err(error) =
+            rne_ai::verify_behavior_replay(&minimized.artifact, |seed, dimensions| {
+                g1_behavior_from_dimensions(&replay.scenario, seed, dimensions)
+            })
+        {
+            artifact_errors.push(format!(
+                "could not verify seed {} minimized replay: {error}",
+                replay.seed
+            ));
+            continue;
+        }
+
+        let minimized_path = artifact_dir.join(minimized.artifact.minimized_file_name());
+        let case_file_name = minimized
+            .artifact
+            .minimized_file_name()
+            .replace(".rne-replay", ".behavior-case.json");
+        let case_path = artifact_dir.join(case_file_name);
+        let failure_case = rne_ai::BehaviorFailureCase::from_replay(&minimized.artifact);
+        if let Err(error) = minimized.artifact.write_json(&minimized_path) {
+            artifact_errors.push(format!(
+                "could not write seed {} minimized replay: {error}",
+                replay.seed
+            ));
+            continue;
+        }
+        if let Err(error) = failure_case.write_json(&case_path) {
+            artifact_errors.push(format!(
+                "could not write seed {} minimized case: {error}",
+                replay.seed
+            ));
+            continue;
+        }
+        let _ = report.set_failure_artifacts(
+            replay.seed,
+            Some(replay_reference),
+            Some(report_path(&root, &minimized_path)),
+            Some(report_path(&root, &case_path)),
+        );
+    }
     if let Some(parent) = json_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -224,27 +338,117 @@ fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         .filter(|seed| seed.status == rne_ai::BehaviorSeedStatus::Passed)
         .count();
     println!(
-        "Behavior CI: {passed}/{} seeds passed\nJSON: {}\nJUnit: {}",
+        "Behavior CI: {passed}/{} seeds passed\nJSON: {}\nJUnit: {}\nReplays: {}",
         report.seeds.len(),
         json_path.display(),
-        junit_path.display()
+        junit_path.display(),
+        artifact_dir.display()
     );
-    if let Some((seed, contract, violation)) = report.seeds.iter().find_map(|seed| {
-        seed.contracts.iter().find_map(|contract| {
-            contract
-                .violation
-                .as_ref()
-                .map(|violation| (seed.seed, contract.name.as_str(), violation))
-        })
-    }) {
+    if let Some((seed, contract, violation)) = first_behavior_failure(&report) {
         eprintln!(
-            "FAIL seed={seed} step={} contract={contract} entities={}",
+            "FAIL seed={seed} step={} contract={contract} state_digest={:#018x} entities={} replay={}",
             violation.step,
-            violation.entities.join(",")
+            violation.state_digest,
+            violation.entities.join(","),
+            report
+                .seeds
+                .iter()
+                .find(|report| report.seed == seed)
+                .and_then(|report| report.replay_artifact.as_deref())
+                .unwrap_or("unavailable")
         );
+    }
+    if !artifact_errors.is_empty() {
+        anyhow::bail!(
+            "Behavior CI artifact processing failed:\n{}",
+            artifact_errors.join("\n")
+        );
+    }
+    if let Some((expected_seed, expected_contract)) = expected_failure {
+        let reproduced = first_behavior_failure(&report).is_some_and(|(seed, contract, _)| {
+            seed == expected_seed && contract == expected_contract
+        });
+        anyhow::ensure!(
+            reproduced,
+            "expected first failure `{expected_contract}` did not reproduce for seed {expected_seed}"
+        );
+        println!(
+            "Expected Behavior CI failure reproduced: seed={expected_seed} contract={expected_contract}"
+        );
+        return Ok(());
     }
     anyhow::ensure!(report.passed(), "one or more behavior contracts failed");
     Ok(())
+}
+
+fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let replay_argument = args
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("behavior-replay requires a .rne-replay path"))?;
+    anyhow::ensure!(
+        args.next().is_none(),
+        "behavior-replay accepts exactly one .rne-replay path"
+    );
+    let replay_path = root.join(replay_argument);
+    let replay = rne_ai::BehaviorReplayArtifact::read_json(&replay_path)?;
+    let verification = rne_ai::verify_behavior_replay(&replay, |seed, dimensions| {
+        g1_behavior_from_dimensions(&replay.scenario, seed, dimensions)
+    })?;
+    println!(
+        "Behavior replay reproduced: seed={} step={} contract={} state_digest={:#018x} matched_frames={}\nReplay: {}",
+        verification.seed,
+        verification.step,
+        verification.contract,
+        verification.state_digest,
+        verification.matched_frames,
+        replay_path.display()
+    );
+    Ok(())
+}
+
+fn g1_behavior_from_dimensions(
+    scenario: &str,
+    seed: u64,
+    dimensions: &[rne_ai::BehaviorDimension],
+) -> Result<rne_ai::UnitreeG1Dex3BehaviorScenario, String> {
+    if !matches!(
+        scenario,
+        "unitree_g1_dex3_acquire" | "unitree_g1_dex3_invalid_tray"
+    ) {
+        return Err(format!("unsupported Behavior CI scenario `{scenario}`"));
+    }
+    rne_ai::UnitreeG1Dex3BehaviorScenario::from_dimensions(
+        seed,
+        rne_ai::UnitreeG1Dex3BehaviorConfig::default(),
+        dimensions,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn report_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn first_behavior_failure(
+    report: &rne_ai::BehaviorReport,
+) -> Option<(u64, &str, &rne_ai::BehaviorViolation)> {
+    report.seeds.iter().find_map(|seed| {
+        seed.contracts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, contract)| {
+                contract
+                    .violation
+                    .as_ref()
+                    .map(|violation| (index, contract.name.as_str(), violation))
+            })
+            .min_by_key(|(index, _, violation)| (violation.step, *index))
+            .map(|(_, contract, violation)| (seed.seed, contract, violation))
+    })
 }
 
 fn parse_seed_range(value: &str) -> anyhow::Result<Vec<u64>> {

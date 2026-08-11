@@ -1,12 +1,16 @@
 //! Deterministic, backend-neutral robot behavior contracts and reports.
 
+use crate::behavior_replay::{
+    BehaviorDimension, BehaviorReplayAction, BehaviorReplayArtifact, BehaviorReplayError,
+    BehaviorReplayFailure, BehaviorReplayFrame, BehaviorSeedManifest,
+    BEHAVIOR_CONTRACT_SCHEMA_VERSION,
+};
 use rne_core::{SimClock, SimDuration, SimTime};
-use serde::Serialize;
-use std::collections::BTreeSet;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Temporal form evaluated by a [`BehaviorContract`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BehaviorContractKind {
     /// The predicate must be true at every evaluated step.
@@ -54,7 +58,7 @@ impl fmt::Display for BehaviorContractError {
 impl std::error::Error for BehaviorContractError {}
 
 /// Result state of one behavior contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BehaviorContractStatus {
     /// The contract was satisfied.
@@ -64,12 +68,15 @@ pub enum BehaviorContractStatus {
 }
 
 /// First observed violation of a behavior contract.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviorViolation {
     /// Zero-based evaluated scenario step.
     pub step: u64,
     /// Simulation timestamp represented as stable integer ticks.
     pub sim_time_ticks: u64,
+    /// Stable same-backend world-state digest at the violation.
+    pub state_digest: u64,
     /// Entities relevant to the failed contract.
     pub entities: Vec<String>,
     /// Human-readable failure explanation.
@@ -77,16 +84,31 @@ pub struct BehaviorViolation {
 }
 
 /// Final result for one behavior contract.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviorContractResult {
     /// Stable contract name.
     pub name: String,
     /// Temporal form that was evaluated.
     pub kind: BehaviorContractKind,
+    /// Stable entity names relevant to the contract.
+    pub entities: Vec<String>,
     /// Final pass/fail state.
     pub status: BehaviorContractStatus,
     /// First violation, present only when the contract failed.
     pub violation: Option<BehaviorViolation>,
+}
+
+/// Versioned, serializable identity of one behavior contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BehaviorContractDescriptor {
+    /// Stable contract name.
+    pub name: String,
+    /// Temporal form evaluated by the contract.
+    pub kind: BehaviorContractKind,
+    /// Stable entity names relevant to the contract.
+    pub entities: Vec<String>,
 }
 
 type BehaviorPredicate<O> = Box<dyn FnMut(&O) -> bool + Send + 'static>;
@@ -184,14 +206,23 @@ impl<O> BehaviorContract<O> {
         Ok(self)
     }
 
-    fn evaluate(&mut self, step: u64, sim_time: SimTime, observation: &O) {
+    /// Returns the serializable identity used by reports and replay artifacts.
+    pub fn descriptor(&self) -> BehaviorContractDescriptor {
+        BehaviorContractDescriptor {
+            name: self.name.clone(),
+            kind: self.kind,
+            entities: self.entities.clone(),
+        }
+    }
+
+    fn evaluate(&mut self, step: u64, sim_time: SimTime, state_digest: u64, observation: &O) {
         if self.resolved.is_some() {
             return;
         }
         let satisfied = (self.predicate)(observation);
         match self.kind {
             BehaviorContractKind::Always if !satisfied => {
-                self.fail(step, sim_time, "predicate was false");
+                self.fail(step, sim_time, state_digest, "predicate was false");
             }
             BehaviorContractKind::Eventually { .. } if satisfied => {
                 self.pass();
@@ -202,6 +233,7 @@ impl<O> BehaviorContract<O> {
                 self.fail(
                     step,
                     sim_time,
+                    state_digest,
                     "deadline elapsed before predicate became true",
                 );
             }
@@ -219,7 +251,7 @@ impl<O> BehaviorContract<O> {
         }
     }
 
-    fn finish(&mut self, step: u64, sim_time: SimTime) {
+    fn finish(&mut self, step: u64, sim_time: SimTime, state_digest: u64) {
         if self.resolved.is_some() {
             return;
         }
@@ -229,12 +261,14 @@ impl<O> BehaviorContract<O> {
                 self.fail(
                     step,
                     sim_time,
+                    state_digest,
                     "scenario ended before predicate became true",
                 );
             }
             BehaviorContractKind::Consecutive { steps } => self.fail(
                 step,
                 sim_time,
+                state_digest,
                 format!(
                     "scenario ended with a consecutive streak of {}, required {steps}",
                     self.streak
@@ -247,19 +281,28 @@ impl<O> BehaviorContract<O> {
         self.resolved = Some(BehaviorContractResult {
             name: self.name.clone(),
             kind: self.kind,
+            entities: self.entities.clone(),
             status: BehaviorContractStatus::Passed,
             violation: None,
         });
     }
 
-    fn fail(&mut self, step: u64, sim_time: SimTime, message: impl Into<String>) {
+    fn fail(
+        &mut self,
+        step: u64,
+        sim_time: SimTime,
+        state_digest: u64,
+        message: impl Into<String>,
+    ) {
         self.resolved = Some(BehaviorContractResult {
             name: self.name.clone(),
             kind: self.kind,
+            entities: self.entities.clone(),
             status: BehaviorContractStatus::Failed,
             violation: Some(BehaviorViolation {
                 step,
                 sim_time_ticks: sim_time.ticks(),
+                state_digest,
                 entities: self.entities.clone(),
                 message: message.into(),
             }),
@@ -292,6 +335,20 @@ pub trait BehaviorScenario {
     /// Observation at scenario step zero.
     fn initial_observation(&self) -> Self::Observation;
 
+    /// Returns a stable same-backend digest for the current scenario state.
+    ///
+    /// The observation is provided so lightweight scenarios can hash semantic
+    /// state without exposing a physics backend through this trait.
+    fn state_digest(&self, observation: &Self::Observation) -> u64;
+
+    /// Returns a stable digest of scenario inputs and fixed configuration.
+    fn scenario_digest(&self) -> u64;
+
+    /// Returns sorted named randomization dimensions used by this scenario.
+    fn behavior_dimensions(&self) -> Vec<BehaviorDimension> {
+        Vec::new()
+    }
+
     /// Fresh stateful contracts for this scenario.
     fn contracts(&self) -> Result<Vec<BehaviorContract<Self::Observation>>, BehaviorContractError>;
 
@@ -300,7 +357,7 @@ pub trait BehaviorScenario {
 }
 
 /// Aggregate state of one seeded scenario run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BehaviorSeedStatus {
     /// Every contract passed.
@@ -310,7 +367,8 @@ pub enum BehaviorSeedStatus {
 }
 
 /// Report for one deterministic seed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviorSeedReport {
     /// Scenario seed.
     pub seed: u64,
@@ -320,26 +378,50 @@ pub struct BehaviorSeedReport {
     pub steps: u64,
     /// Final simulation-time ticks.
     pub sim_time_ticks: u64,
+    /// Stable same-backend digest of the final evaluated state.
+    pub final_state_digest: u64,
     /// Stable contract results in declaration order.
     pub contracts: Vec<BehaviorContractResult>,
     /// Scenario creation or contract setup error.
     pub setup_error: Option<String>,
+    /// Failure replay artifact path, when one was recorded.
+    pub replay_artifact: Option<String>,
+    /// Minimized failure replay artifact path, when minimization succeeded.
+    pub minimized_replay_artifact: Option<String>,
+    /// Standalone minimized failure-case path, when minimization succeeded.
+    pub minimized_case: Option<String>,
 }
 
 /// Stable multi-seed behavior report.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviorReport {
     /// Report schema version.
     pub schema_version: u32,
+    /// RNE engine version that produced the report.
+    pub engine_version: String,
+    /// Typed behavior-contract schema version.
+    pub contract_schema_version: u32,
     /// Stable scenario name.
     pub scenario: String,
+    /// Deterministic seed manifest for this invocation.
+    pub seed_manifest: BehaviorSeedManifest,
     /// Seed reports in ascending numeric order.
     pub seeds: Vec<BehaviorSeedReport>,
 }
 
+/// Multi-seed report plus compact artifacts for each behavior failure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BehaviorRun {
+    /// Stable JSON/JUnit-compatible behavior report.
+    pub report: BehaviorReport,
+    /// Failure replays in ascending seed order.
+    pub failure_replays: Vec<BehaviorReplayArtifact>,
+}
+
 impl BehaviorReport {
     /// Current serialized report schema version.
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 
     /// Returns true when every seed and contract passed.
     pub fn passed(&self) -> bool {
@@ -351,6 +433,25 @@ impl BehaviorReport {
     /// Serializes a human-readable JSON report.
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
+    }
+
+    /// Associates emitted artifact paths with one failed seed.
+    ///
+    /// Returns false when the seed is absent from this report.
+    pub fn set_failure_artifacts(
+        &mut self,
+        seed: u64,
+        replay_artifact: Option<String>,
+        minimized_replay_artifact: Option<String>,
+        minimized_case: Option<String>,
+    ) -> bool {
+        let Some(seed_report) = self.seeds.iter_mut().find(|report| report.seed == seed) else {
+            return false;
+        };
+        seed_report.replay_artifact = replay_artifact;
+        seed_report.minimized_replay_artifact = minimized_replay_artifact;
+        seed_report.minimized_case = minimized_case;
+        true
     }
 
     /// Serializes a JUnit XML test suite suitable for CI annotations.
@@ -396,10 +497,17 @@ impl BehaviorReport {
                     escape_xml(&contract.name)
                 ));
                 if let Some(violation) = &contract.violation {
+                    let replay = seed
+                        .replay_artifact
+                        .as_deref()
+                        .map(|path| format!(" replay={path}"))
+                        .unwrap_or_default();
                     xml.push_str(&format!(
-                        "><failure message=\"{} at step {}\"/></testcase>\n",
+                        "><failure message=\"{} at step {} state_digest={:#018x}{}\"/></testcase>\n",
                         escape_xml(&violation.message),
-                        violation.step
+                        violation.step,
+                        violation.state_digest,
+                        escape_xml(&replay)
                     ));
                 } else {
                     xml.push_str("/>\n");
@@ -422,18 +530,65 @@ where
     E: fmt::Display,
 {
     let scenario = scenario.into();
-    let ordered_seeds = seeds.into_iter().collect::<BTreeSet<_>>();
-    let reports = ordered_seeds
-        .into_iter()
+    let seed_manifest = BehaviorSeedManifest::new(scenario.clone(), seeds);
+    let reports = seed_manifest
+        .seeds
+        .iter()
+        .copied()
         .map(|seed| match factory(seed) {
             Ok(mut scenario) => run_one_seed(seed, &mut scenario),
             Err(error) => setup_failure(seed, error.to_string()),
         })
         .collect();
+    build_report(scenario, seed_manifest, reports)
+}
+
+/// Runs deterministic scenarios while recording compact replay artifacts for failures.
+pub fn run_behavior_scenarios_with_replays<S, E>(
+    scenario: impl Into<String>,
+    seeds: impl IntoIterator<Item = u64>,
+    mut factory: impl FnMut(u64) -> Result<S, E>,
+) -> Result<BehaviorRun, BehaviorReplayError>
+where
+    S: BehaviorScenario,
+    S::Observation: Serialize,
+    E: fmt::Display,
+{
+    let scenario = scenario.into();
+    let seed_manifest = BehaviorSeedManifest::new(scenario.clone(), seeds);
+    let mut reports = Vec::with_capacity(seed_manifest.seeds.len());
+    let mut failure_replays = Vec::new();
+    for seed in seed_manifest.seeds.iter().copied() {
+        match factory(seed) {
+            Ok(mut behavior_scenario) => {
+                let (report, replay) =
+                    run_one_seed_recorded(&scenario, seed, &mut behavior_scenario)?;
+                reports.push(report);
+                if let Some(replay) = replay {
+                    failure_replays.push(replay);
+                }
+            }
+            Err(error) => reports.push(setup_failure(seed, error.to_string())),
+        }
+    }
+    Ok(BehaviorRun {
+        report: build_report(scenario, seed_manifest, reports),
+        failure_replays,
+    })
+}
+
+fn build_report(
+    scenario: String,
+    seed_manifest: BehaviorSeedManifest,
+    seeds: Vec<BehaviorSeedReport>,
+) -> BehaviorReport {
     BehaviorReport {
         schema_version: BehaviorReport::SCHEMA_VERSION,
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        contract_schema_version: BEHAVIOR_CONTRACT_SCHEMA_VERSION,
         scenario,
-        seeds: reports,
+        seed_manifest,
+        seeds,
     }
 }
 
@@ -446,22 +601,29 @@ fn run_one_seed<S: BehaviorScenario>(seed: u64, scenario: &mut S) -> BehaviorSee
     let mut clock = SimClock::new(fixed_delta);
     let mut step = 0;
     let initial = scenario.initial_observation();
+    let mut final_state_digest = scenario.state_digest(&initial);
     for contract in &mut contracts {
-        contract.evaluate(step, clock.sim_time(), &initial);
+        contract.evaluate(step, clock.sim_time(), final_state_digest, &initial);
     }
     loop {
         let scenario_step = scenario.advance();
         step += 1;
         let _ = clock.advance(fixed_delta);
+        final_state_digest = scenario.state_digest(&scenario_step.observation);
         for contract in &mut contracts {
-            contract.evaluate(step, clock.sim_time(), &scenario_step.observation);
+            contract.evaluate(
+                step,
+                clock.sim_time(),
+                final_state_digest,
+                &scenario_step.observation,
+            );
         }
         if scenario_step.done {
             break;
         }
     }
     for contract in &mut contracts {
-        contract.finish(step, clock.sim_time());
+        contract.finish(step, clock.sim_time(), final_state_digest);
     }
     let contracts = contracts
         .into_iter()
@@ -480,9 +642,152 @@ fn run_one_seed<S: BehaviorScenario>(seed: u64, scenario: &mut S) -> BehaviorSee
         status,
         steps: step,
         sim_time_ticks: clock.sim_time().ticks(),
+        final_state_digest,
         contracts,
         setup_error: None,
+        replay_artifact: None,
+        minimized_replay_artifact: None,
+        minimized_case: None,
     }
+}
+
+fn run_one_seed_recorded<S: BehaviorScenario>(
+    scenario_name: &str,
+    seed: u64,
+    scenario: &mut S,
+) -> Result<(BehaviorSeedReport, Option<BehaviorReplayArtifact>), BehaviorReplayError>
+where
+    S::Observation: Serialize,
+{
+    let mut contracts = match scenario.contracts() {
+        Ok(contracts) => contracts,
+        Err(error) => return Ok((setup_failure(seed, error.to_string()), None)),
+    };
+    let contract_descriptors = contracts
+        .iter()
+        .map(BehaviorContract::descriptor)
+        .collect::<Vec<_>>();
+    let scenario_digest = scenario.scenario_digest();
+    let dimensions = scenario.behavior_dimensions();
+    let fixed_delta = scenario.fixed_delta();
+    let mut clock = SimClock::new(fixed_delta);
+    let mut step = 0;
+    let initial = scenario.initial_observation();
+    let mut final_state_digest = scenario.state_digest(&initial);
+    let mut frames = vec![BehaviorReplayFrame {
+        step,
+        sim_time_ticks: clock.sim_time().ticks(),
+        action: BehaviorReplayAction::InitialObservation,
+        observation: serde_json::to_value(&initial)?,
+        state_digest: final_state_digest,
+    }];
+    for contract in &mut contracts {
+        contract.evaluate(step, clock.sim_time(), final_state_digest, &initial);
+    }
+
+    loop {
+        let scenario_step = scenario.advance();
+        step += 1;
+        let _ = clock.advance(fixed_delta);
+        final_state_digest = scenario.state_digest(&scenario_step.observation);
+        frames.push(BehaviorReplayFrame {
+            step,
+            sim_time_ticks: clock.sim_time().ticks(),
+            action: BehaviorReplayAction::Advance,
+            observation: serde_json::to_value(&scenario_step.observation)?,
+            state_digest: final_state_digest,
+        });
+        for contract in &mut contracts {
+            contract.evaluate(
+                step,
+                clock.sim_time(),
+                final_state_digest,
+                &scenario_step.observation,
+            );
+        }
+        if scenario_step.done {
+            break;
+        }
+    }
+    for contract in &mut contracts {
+        contract.finish(step, clock.sim_time(), final_state_digest);
+    }
+    let contract_results = contracts
+        .into_iter()
+        .map(BehaviorContract::into_result)
+        .collect::<Vec<_>>();
+    let status = if contract_results
+        .iter()
+        .all(|contract| contract.status == BehaviorContractStatus::Passed)
+    {
+        BehaviorSeedStatus::Passed
+    } else {
+        BehaviorSeedStatus::Failed
+    };
+
+    let replay = first_failure(&contract_results)
+        .map(|(contract_index, violation)| {
+            let frame_count = usize::try_from(violation.step)
+                .ok()
+                .and_then(|step| step.checked_add(1))
+                .ok_or_else(|| {
+                    BehaviorReplayError::Invalid(
+                        "behavior violation step does not fit in memory".to_string(),
+                    )
+                })?;
+            if frame_count > frames.len() {
+                return Err(BehaviorReplayError::Invalid(format!(
+                    "behavior violation step {} exceeds {} recorded frames",
+                    violation.step,
+                    frames.len()
+                )));
+            }
+            frames.truncate(frame_count);
+            BehaviorReplayArtifact::new(
+                scenario_name,
+                scenario_digest,
+                seed,
+                fixed_delta.ticks(),
+                dimensions,
+                contract_descriptors.clone(),
+                frames,
+                BehaviorReplayFailure {
+                    contract: contract_descriptors[contract_index].clone(),
+                    violation,
+                },
+            )
+        })
+        .transpose()?;
+    let replay_artifact = replay.as_ref().map(BehaviorReplayArtifact::file_name);
+    Ok((
+        BehaviorSeedReport {
+            seed,
+            status,
+            steps: step,
+            sim_time_ticks: clock.sim_time().ticks(),
+            final_state_digest,
+            contracts: contract_results,
+            setup_error: None,
+            replay_artifact,
+            minimized_replay_artifact: None,
+            minimized_case: None,
+        },
+        replay,
+    ))
+}
+
+fn first_failure(contracts: &[BehaviorContractResult]) -> Option<(usize, BehaviorViolation)> {
+    contracts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, contract)| {
+            contract
+                .violation
+                .as_ref()
+                .map(|violation| (index, violation))
+        })
+        .min_by_key(|(index, violation)| (violation.step, *index))
+        .map(|(index, violation)| (index, violation.clone()))
 }
 
 fn setup_failure(seed: u64, error: String) -> BehaviorSeedReport {
@@ -491,8 +796,12 @@ fn setup_failure(seed: u64, error: String) -> BehaviorSeedReport {
         status: BehaviorSeedStatus::Failed,
         steps: 0,
         sim_time_ticks: 0,
+        final_state_digest: 0,
         contracts: Vec::new(),
         setup_error: Some(error),
+        replay_artifact: None,
+        minimized_replay_artifact: None,
+        minimized_case: None,
     }
 }
 
@@ -510,7 +819,7 @@ mod tests {
     use super::*;
     use rne_math::Hertz;
 
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
     struct Sample {
         value: i32,
     }
@@ -531,6 +840,19 @@ mod tests {
             Sample {
                 value: self.values[0],
             }
+        }
+
+        fn state_digest(&self, observation: &Self::Observation) -> u64 {
+            crate::behavior_replay::stable_behavior_digest(&observation.value.to_le_bytes())
+        }
+
+        fn scenario_digest(&self) -> u64 {
+            let bytes = self
+                .values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect::<Vec<_>>();
+            crate::behavior_replay::stable_behavior_digest(&bytes)
         }
 
         fn contracts(
@@ -578,7 +900,7 @@ mod tests {
         let mut zero_deadline =
             BehaviorContract::eventually("immediate", SimDuration::ZERO, |value: &bool| *value)
                 .expect("valid contract");
-        zero_deadline.evaluate(0, SimTime::ZERO, &false);
+        zero_deadline.evaluate(0, SimTime::ZERO, 42, &false);
         assert_eq!(
             zero_deadline.into_result().status,
             BehaviorContractStatus::Failed
@@ -607,9 +929,9 @@ mod tests {
     fn first_violation_is_preserved() {
         let mut contract =
             BehaviorContract::always("first_failure", |value: &bool| *value).expect("contract");
-        contract.evaluate(0, SimTime::ZERO, &false);
-        contract.evaluate(1, SimTime::from_ticks(10), &false);
-        contract.finish(2, SimTime::from_ticks(20));
+        contract.evaluate(0, SimTime::ZERO, 10, &false);
+        contract.evaluate(1, SimTime::from_ticks(10), 11, &false);
+        contract.finish(2, SimTime::from_ticks(20), 12);
         assert_eq!(
             contract
                 .into_result()
@@ -650,7 +972,13 @@ mod tests {
             })
         });
         let json = report.to_json_pretty().expect("JSON report");
-        assert!(json.contains("\"schema_version\": 1"));
+        assert!(json.contains("\"schema_version\": 2"));
+        assert!(json.contains("\"contract_schema_version\": 2"));
+        assert!(json.contains("\"seed_manifest\""));
+        assert_eq!(
+            serde_json::from_str::<BehaviorReport>(&json).expect("report round trip"),
+            report
+        );
         assert!(json.contains("\"scenario\": \"sample<&\""));
         assert_eq!(
             report.to_junit_xml(),
@@ -660,6 +988,27 @@ mod tests {
 <testcase classname=\"sample&lt;&amp;\" name=\"seed_3_reaches_two\"/>\n  \
 <testcase classname=\"sample&lt;&amp;\" name=\"seed_3_two_positive\"/>\n\
 </testsuite>\n"
+        );
+    }
+
+    #[test]
+    fn failing_run_records_only_through_first_violation() {
+        let run = run_behavior_scenarios_with_replays("samples", [7], |_| {
+            Ok::<_, &str>(Samples {
+                values: vec![0, 1, -1, 2],
+                index: 0,
+            })
+        })
+        .expect("recorded run");
+        assert!(!run.report.passed());
+        assert_eq!(run.failure_replays.len(), 1);
+        let replay = &run.failure_replays[0];
+        assert_eq!(replay.failure.contract.name, "non_negative");
+        assert_eq!(replay.failure.violation.step, 2);
+        assert_eq!(replay.frames.len(), 3);
+        assert_eq!(
+            run.report.seeds[0].replay_artifact.as_deref(),
+            Some(replay.file_name().as_str())
         );
     }
 }

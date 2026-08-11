@@ -57,6 +57,13 @@ artifact carries full typed sensor payloads (produced by a run manifest with
 `[[sensors]]` subscriptions), the frame line summarizes each payload — LiDAR
 point count, camera RGB/D dimensions, or IMU / wheel-encoder sequence numbers.
 
+The same file picker accepts `rne_behavior_replay` artifacts emitted by
+`xtask behavior-ci`. Those are normalized into the existing timeline and show
+the scenario seed, failed contract, first violating step, named dimensions,
+G1 phase/contact observation, and exact state digest. The inspector never
+reruns the scenario; use `cargo run -p xtask -- behavior-replay <artifact>` for
+headless verification.
+
 ## Workspace checks
 
 ```powershell
@@ -64,5 +71,6 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p rne_web_viewer --target wasm32-unknown-unknown -- -D warnings
 trunk build
+node replay.test.cjs
 cargo test --workspace
 ```

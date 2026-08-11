@@ -5,6 +5,7 @@
 pub mod action;
 pub mod agent;
 pub mod behavior;
+pub mod behavior_replay;
 pub mod camera;
 pub mod control_eval;
 pub mod domain_randomization;
@@ -36,9 +37,20 @@ pub use agent::{
     DiffDriveAgentState, SharedDiffDriveAgentState,
 };
 pub use behavior::{
-    run_behavior_scenarios, BehaviorContract, BehaviorContractError, BehaviorContractKind,
-    BehaviorContractResult, BehaviorContractStatus, BehaviorReport, BehaviorScenario,
+    run_behavior_scenarios, run_behavior_scenarios_with_replays, BehaviorContract,
+    BehaviorContractDescriptor, BehaviorContractError, BehaviorContractKind,
+    BehaviorContractResult, BehaviorContractStatus, BehaviorReport, BehaviorRun, BehaviorScenario,
     BehaviorScenarioStep, BehaviorSeedReport, BehaviorSeedStatus, BehaviorViolation,
+};
+pub use behavior_replay::{
+    diff_behavior_replays, minimize_behavior_failure, stable_behavior_digest,
+    verify_behavior_replay, BehaviorDimension, BehaviorDimensionValue, BehaviorFailureCase,
+    BehaviorFieldDiff, BehaviorMinimizationMetadata, BehaviorMinimizationResult,
+    BehaviorReplayAction, BehaviorReplayArtifact, BehaviorReplayDiff, BehaviorReplayError,
+    BehaviorReplayFailure, BehaviorReplayFrame, BehaviorReplayVerification, BehaviorSeedManifest,
+    BEHAVIOR_CONTRACT_SCHEMA_VERSION, BEHAVIOR_FAILURE_CASE_SCHEMA_VERSION,
+    BEHAVIOR_MINIMIZATION_BISECTION_STEPS, BEHAVIOR_REPLAY_FLOAT_TOLERANCE, BEHAVIOR_REPLAY_KIND,
+    BEHAVIOR_REPLAY_SCHEMA_VERSION, BEHAVIOR_SEED_MANIFEST_SCHEMA_VERSION,
 };
 pub use camera::{
     sync_wrist_camera_mount, sync_wrist_camera_mounts, wrist_camera_image_valid,

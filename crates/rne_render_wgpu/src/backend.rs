@@ -20,8 +20,16 @@ pub struct WgpuRenderBackend {
 
 impl WgpuRenderBackend {
     /// Creates a renderer using the default GPU adapter.
+    ///
+    /// Windows uses the primary backends so startup does not load legacy
+    /// OpenGL installable client drivers. Use [`Self::with_backends`] when an
+    /// application explicitly needs another backend mask.
     pub fn new() -> Result<Self, RenderError> {
-        Self::with_backends(wgpu::Backends::all())
+        #[cfg(target_os = "windows")]
+        let backends = wgpu::Backends::PRIMARY;
+        #[cfg(not(target_os = "windows"))]
+        let backends = wgpu::Backends::all();
+        Self::with_backends(backends)
     }
 
     /// Creates a renderer restricted to the given backend mask.
