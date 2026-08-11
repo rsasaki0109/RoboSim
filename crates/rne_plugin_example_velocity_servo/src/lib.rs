@@ -14,9 +14,14 @@
 
 use std::ffi::{c_char, c_void, CStr, CString};
 
-/// ABI version this plugin implements. Keep in sync with
-/// `rne_plugin::RNE_PLUGIN_ABI_VERSION`; the loader rejects mismatches.
-pub const ABI_VERSION: u32 = 2;
+/// Current ABI version implemented by this plugin.
+pub const ABI_VERSION: u32 = 3;
+
+const CAP_JOINT_POSITION_OBSERVATION: u64 = 1 << 0;
+const CAP_JOINT_VELOCITY_COMMAND: u64 = 1 << 2;
+const CAP_MULTI_ROBOT: u64 = 1 << 3;
+const CAPABILITIES: u64 =
+    CAP_JOINT_POSITION_OBSERVATION | CAP_JOINT_VELOCITY_COMMAND | CAP_MULTI_ROBOT;
 
 /// Logical plugin name reported through [`rne_plugin_name`].
 pub const PLUGIN_NAME: &str = "velocity_servo";
@@ -41,12 +46,55 @@ pub struct RneJointVelocity {
     pub velocity_rad_s: f64,
 }
 
+/// Robot-scoped ABI-v3 joint observation.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct RneJointObservationV3 {
+    /// Stable robot ID owned by the host for the duration of the call.
+    pub robot_id: *const c_char,
+    /// Joint name owned by the host for the duration of the call.
+    pub name: *const c_char,
+    /// Joint position in radians.
+    pub position_rad: f64,
+    /// Joint velocity in radians per second, or zero when unavailable.
+    pub velocity_rad_s: f64,
+    /// One when velocity is present, zero otherwise.
+    pub has_velocity: u8,
+    /// Reserved zero bytes.
+    pub reserved: [u8; 7],
+}
+
+/// Robot-scoped ABI-v3 joint velocity command.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct RneJointVelocityV3 {
+    /// Stable robot ID copied from the matching observation.
+    pub robot_id: *const c_char,
+    /// Commanded joint name.
+    pub name: *const c_char,
+    /// Commanded joint velocity in radians per second.
+    pub velocity_rad_s: f64,
+}
+
+/// ABI-v3 fixed-step result.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RneControllerStepResultV3 {
+    /// Zero on success.
+    pub status: i32,
+    /// Number of initialized output commands.
+    pub output_count: usize,
+}
+
 /// Controller state owned by the plugin for the lifetime of an instance.
 struct VelocityServoState {
     name: CString,
     target_rad: f64,
     gain: f64,
     max_velocity_rad_s: f64,
+    configured: bool,
+    active: bool,
+    shutdown: bool,
 }
 
 /// Pure velocity-servo policy: `gain * (target - position)`, clamped.
@@ -71,6 +119,12 @@ static PLUGIN_NAME_C: &[u8] = b"velocity_servo\0";
 #[no_mangle]
 pub extern "C" fn rne_plugin_name() -> *const c_char {
     PLUGIN_NAME_C.as_ptr().cast()
+}
+
+/// Reports the supported ABI-v3 capability mask.
+#[no_mangle]
+pub extern "C" fn rne_plugin_capabilities() -> u64 {
+    CAPABILITIES
 }
 
 /// Creates a velocity-servo controller instance.
@@ -131,6 +185,9 @@ pub unsafe extern "C" fn rne_controller_create(
         target_rad,
         gain,
         max_velocity_rad_s,
+        configured: false,
+        active: false,
+        shutdown: false,
     });
     Box::into_raw(state).cast::<c_void>()
 }
@@ -200,6 +257,155 @@ pub unsafe extern "C" fn rne_controller_step(
         };
         return 1;
     }
+    0
+}
+
+/// Accepts the host's negotiated ABI-v3 capability requirements.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_configure_v3(
+    handle: *mut c_void,
+    required_capabilities: u64,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe { &mut *handle.cast::<VelocityServoState>() };
+    if state.shutdown {
+        write_error(error, error_capacity, "controller is shut down");
+        return 1;
+    }
+    if required_capabilities & !CAPABILITIES != 0 {
+        write_error(error, error_capacity, "unsupported required capability");
+        return 1;
+    }
+    state.configured = true;
+    0
+}
+
+/// Activates or resets one deterministic ABI-v3 episode.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_reset_v3(
+    handle: *mut c_void,
+    _episode: u64,
+    _seed: u64,
+    _step: u64,
+    _sim_time_ticks: u64,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe { &mut *handle.cast::<VelocityServoState>() };
+    if !state.configured || state.shutdown {
+        write_error(
+            error,
+            error_capacity,
+            "controller must be configured and not shut down",
+        );
+        return 1;
+    }
+    state.active = true;
+    0
+}
+
+/// Computes robot-scoped velocity commands for one ABI-v3 fixed step.
+///
+/// # Safety
+///
+/// `handle` must be a live instance, `observations` and `output` must point to
+/// arrays of their declared lengths, identifiers must be NUL-terminated, and
+/// `error` must be null or point to `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_step_v3(
+    handle: *mut c_void,
+    _step: u64,
+    _sim_time_ticks: u64,
+    observations: *const RneJointObservationV3,
+    observation_count: usize,
+    output: *mut RneJointVelocityV3,
+    output_capacity: usize,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> RneControllerStepResultV3 {
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe { &mut *handle.cast::<VelocityServoState>() };
+    if !state.active || state.shutdown {
+        write_error(error, error_capacity, "controller is not active");
+        return RneControllerStepResultV3 {
+            status: 1,
+            output_count: 0,
+        };
+    }
+    // SAFETY: the host supplies arrays with the declared lengths.
+    let observations = unsafe { std::slice::from_raw_parts(observations, observation_count) };
+    let mut output_count = 0;
+    for observation in observations {
+        if observation.robot_id.is_null() || observation.name.is_null() {
+            continue;
+        }
+        // SAFETY: observation names are NUL-terminated by contract.
+        if unsafe { CStr::from_ptr(observation.name) }.to_bytes() != state.name.to_bytes() {
+            continue;
+        }
+        if output_count >= output_capacity {
+            write_error(error, error_capacity, "output capacity is too small");
+            return RneControllerStepResultV3 {
+                status: 1,
+                output_count: 0,
+            };
+        }
+        let velocity = velocity_command(
+            state.target_rad,
+            state.gain,
+            state.max_velocity_rad_s,
+            observation.position_rad,
+        );
+        // SAFETY: `output_count < output_capacity`; pointers stay valid until
+        // the host copies the result immediately after this call.
+        unsafe {
+            *output.add(output_count) = RneJointVelocityV3 {
+                robot_id: observation.robot_id,
+                name: state.name.as_ptr(),
+                velocity_rad_s: velocity,
+            }
+        };
+        output_count += 1;
+    }
+    RneControllerStepResultV3 {
+        status: 0,
+        output_count,
+    }
+}
+
+/// Terminates the ABI-v3 lifecycle before instance destruction.
+///
+/// # Safety
+///
+/// `handle` must be a live instance and `error` must be null or point to
+/// `error_capacity` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rne_controller_shutdown_v3(
+    handle: *mut c_void,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> i32 {
+    // SAFETY: `handle` is a live instance by contract.
+    let state = unsafe { &mut *handle.cast::<VelocityServoState>() };
+    if state.shutdown {
+        write_error(error, error_capacity, "controller is already shut down");
+        return 1;
+    }
+    state.active = false;
+    state.shutdown = true;
     0
 }
 

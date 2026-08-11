@@ -1,9 +1,13 @@
 //! Integration tests for loading controller plugins through the C ABI.
 
 use rne_plugin::{
-    load_controller_library, ControllerPlugin, PluginLoadError, VelocityServoController,
+    load_controller_library, ControllerCapability, ControllerConfiguration, ControllerHost,
+    ControllerJointObservation, ControllerLifecycleState, ControllerObservationFrame,
+    ControllerPlugin, ControllerResetContext, ControllerRobotObservation, LoadedControllerPlugin,
+    PluginLoadError, VelocityServoController, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
 };
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 fn target_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
@@ -12,13 +16,13 @@ fn target_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target")
 }
 
-fn library_file_name() -> String {
+fn library_file_name(package: &str) -> String {
     if cfg!(target_os = "windows") {
-        "rne_plugin_example_velocity_servo.dll".to_string()
+        format!("{package}.dll")
     } else if cfg!(target_os = "macos") {
-        "librne_plugin_example_velocity_servo.dylib".to_string()
+        format!("lib{package}.dylib")
     } else {
-        "librne_plugin_example_velocity_servo.so".to_string()
+        format!("lib{package}.so")
     }
 }
 
@@ -28,46 +32,52 @@ fn library_file_name() -> String {
 /// workspace build places it under `target/debug/`; `cargo nextest run` does
 /// not emit `cdylib` artifacts for workspace members, so the helper falls back
 /// to building the crate itself (which also populates `target/debug/`).
-fn find_example_library() -> PathBuf {
+fn find_plugin_library(package: &str) -> PathBuf {
+    static CURRENT: OnceLock<PathBuf> = OnceLock::new();
+    static LEGACY_V2: OnceLock<PathBuf> = OnceLock::new();
+    match package {
+        "rne_plugin_example_velocity_servo" => CURRENT
+            .get_or_init(|| build_plugin_library(package))
+            .clone(),
+        "rne_plugin_legacy_v2_fixture" => LEGACY_V2
+            .get_or_init(|| build_plugin_library(package))
+            .clone(),
+        other => build_plugin_library(other),
+    }
+}
+
+fn build_plugin_library(package: &str) -> PathBuf {
     let debug = target_dir().join("debug");
-    let direct = debug.join(library_file_name());
+    let library_file_name = library_file_name(package);
+    let direct = debug.join(&library_file_name);
     let find_in_deps = || -> Option<PathBuf> {
         let deps = debug.join("deps");
         let prefix = if cfg!(target_os = "windows") {
-            "rne_plugin_example_velocity_servo-"
+            format!("{package}-")
         } else {
-            "librne_plugin_example_velocity_servo-"
+            format!("lib{package}-")
         };
-        let extension = library_file_name()
+        let extension = library_file_name
             .rsplit_once('.')
             .map(|(_, extension)| format!(".{extension}"))
             .expect("library extension");
         let entries = std::fs::read_dir(&deps).ok()?;
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with(prefix) && name.ends_with(extension.as_str()) {
+            if name.starts_with(&prefix) && name.ends_with(extension.as_str()) {
                 return Some(entry.path());
             }
         }
         None
     };
-    if direct.exists() {
-        return direct;
-    }
-    if let Some(found) = find_in_deps() {
-        return found;
-    }
     let status = std::process::Command::new("cargo")
         .arg("build")
         .arg("-p")
-        .arg("rne_plugin_example_velocity_servo")
+        .arg(package)
         .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .status()
         .expect("run cargo to build the example plugin");
-    assert!(
-        status.success(),
-        "cargo build -p rne_plugin_example_velocity_servo failed"
-    );
+    assert!(status.success(), "cargo build -p {package} failed");
     if direct.exists() {
         return direct;
     }
@@ -81,8 +91,14 @@ fn find_example_library() -> PathBuf {
 }
 
 fn load() -> Box<dyn ControllerPlugin> {
-    load_controller_library(&find_example_library(), "shoulder_joint", 1.0, 2.0, 5.0)
-        .expect("load example plugin")
+    load_controller_library(
+        &find_plugin_library("rne_plugin_example_velocity_servo"),
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect("load example plugin")
 }
 
 /// Expected `(joint names, positions, velocity commands)` for the policy tests.
@@ -134,7 +150,7 @@ fn loads_the_example_plugin_and_matches_the_built_in_policy() {
 
 #[test]
 fn discovers_the_plugin_by_name_in_a_search_directory() {
-    let library = find_example_library();
+    let library = find_plugin_library("rne_plugin_example_velocity_servo");
     let search_path = library
         .parent()
         .expect("library parent directory")
@@ -182,7 +198,7 @@ fn discovery_falls_back_to_the_built_in_without_search_paths() {
 
 #[test]
 fn discovery_rejects_an_unknown_plugin_name() {
-    let search_path = find_example_library()
+    let search_path = find_plugin_library("rne_plugin_example_velocity_servo")
         .parent()
         .expect("library parent directory")
         .to_path_buf();
@@ -203,7 +219,7 @@ fn discovery_rejects_an_unknown_plugin_name() {
 
 #[test]
 fn enumerates_available_plugin_names() {
-    let search_path = find_example_library()
+    let search_path = find_plugin_library("rne_plugin_example_velocity_servo")
         .parent()
         .expect("library parent directory")
         .to_path_buf();
@@ -223,8 +239,14 @@ fn enumerates_available_plugin_names() {
 
 #[test]
 fn invalid_create_parameters_are_rejected() {
-    let error = load_controller_library(&find_example_library(), "shoulder_joint", 1.0, -1.0, 5.0)
-        .expect_err("negative gain must be rejected");
+    let error = load_controller_library(
+        &find_plugin_library("rne_plugin_example_velocity_servo"),
+        "shoulder_joint",
+        1.0,
+        -1.0,
+        5.0,
+    )
+    .expect_err("negative gain must be rejected");
     assert!(
         matches!(error, PluginLoadError::Create { .. }),
         "expected a create error, got {error}"
@@ -245,4 +267,144 @@ fn missing_library_is_rejected() {
         matches!(error, PluginLoadError::Open { .. }),
         "expected an open error, got {error}"
     );
+}
+
+fn controller_observation(robot_ids: &[&str]) -> ControllerObservationFrame {
+    ControllerObservationFrame::new(
+        4,
+        40,
+        robot_ids
+            .iter()
+            .map(|robot_id| {
+                ControllerRobotObservation::new(
+                    *robot_id,
+                    vec![ControllerJointObservation::position("shoulder_joint", 0.25)],
+                )
+                .expect("robot observation")
+            })
+            .collect(),
+    )
+    .expect("controller observation")
+}
+
+fn reset_context() -> ControllerResetContext {
+    ControllerResetContext {
+        episode: 0,
+        seed: 42,
+        step: 0,
+        sim_time_ticks: 0,
+    }
+}
+
+#[test]
+fn current_abi_negotiates_lifecycle_and_multi_robot_frames() {
+    let loaded = LoadedControllerPlugin::load(
+        &find_plugin_library("rne_plugin_example_velocity_servo"),
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect("load current plugin");
+    assert_eq!(loaded.abi_version(), RNE_PLUGIN_ABI_VERSION);
+    let mut host = ControllerHost::new(Box::new(loaded)).expect("controller host");
+    host.configure(ControllerConfiguration::new([
+        ControllerCapability::JointPositionObservation,
+        ControllerCapability::JointVelocityCommand,
+        ControllerCapability::MultiRobot,
+    ]))
+    .expect("negotiate current ABI");
+    host.activate(reset_context())
+        .expect("activate current ABI");
+    let action = host
+        .step(&controller_observation(&["robot_b", "robot_a"]))
+        .expect("step current ABI");
+    assert_eq!(action.robots.len(), 2);
+    assert!(action.robots.iter().all(|robot| {
+        robot.joint_velocities.len() == 1
+            && robot.joint_velocities[0].name == "shoulder_joint"
+            && robot.joint_velocities[0].velocity_rad_s == 1.5
+    }));
+    host.shutdown().expect("shutdown current ABI");
+    assert_eq!(host.state(), ControllerLifecycleState::Shutdown);
+}
+
+#[test]
+fn loaded_plugin_serializes_shared_legacy_callbacks_across_threads() {
+    let loaded = Arc::new(
+        LoadedControllerPlugin::load(
+            &find_plugin_library("rne_plugin_example_velocity_servo"),
+            "shoulder_joint",
+            1.0,
+            2.0,
+            5.0,
+        )
+        .expect("load current plugin"),
+    );
+    let workers = (0..4)
+        .map(|_| {
+            let loaded = Arc::clone(&loaded);
+            std::thread::spawn(move || {
+                for _ in 0..16 {
+                    assert_eq!(
+                        loaded.joint_velocity_commands(&["shoulder_joint"], &[0.25]),
+                        [("shoulder_joint".to_string(), 1.5)]
+                    );
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    for worker in workers {
+        worker.join().expect("legacy callback worker");
+    }
+}
+
+#[test]
+fn frozen_abi_v2_plugin_loads_and_steps_in_the_current_runtime() {
+    let loaded = LoadedControllerPlugin::load(
+        &find_plugin_library("rne_plugin_legacy_v2_fixture"),
+        "shoulder_joint",
+        1.0,
+        2.0,
+        5.0,
+    )
+    .expect("load frozen ABI-v2 fixture");
+    assert_eq!(loaded.abi_version(), RNE_PLUGIN_ABI_VERSION_V2);
+    assert!(!loaded
+        .capabilities()
+        .contains(&ControllerCapability::MultiRobot));
+
+    let mut host = ControllerHost::new(Box::new(loaded)).expect("legacy controller host");
+    host.configure(ControllerConfiguration::new([
+        ControllerCapability::JointPositionObservation,
+        ControllerCapability::JointVelocityCommand,
+    ]))
+    .expect("negotiate legacy ABI");
+    host.activate(reset_context()).expect("activate legacy ABI");
+    let action = host
+        .step(&controller_observation(&["robot"]))
+        .expect("step legacy ABI");
+    assert_eq!(action.robots[0].joint_velocities[0].velocity_rad_s, 1.5);
+    host.shutdown().expect("shutdown legacy ABI");
+}
+
+#[test]
+fn committed_plugin_manifests_match_their_binary_names() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for (relative, expected_name) in [
+        (
+            "crates/rne_plugin_example_velocity_servo/rne-plugin.json",
+            "velocity_servo",
+        ),
+        (
+            "crates/rne_plugin_legacy_v2_fixture/rne-plugin.json",
+            "legacy_velocity_servo_v2",
+        ),
+    ] {
+        let text = std::fs::read_to_string(root.join(relative)).expect("read plugin manifest");
+        let manifest: rne_plugin::PluginManifest =
+            serde_json::from_str(&text).expect("parse plugin manifest");
+        manifest.validate().expect("valid plugin manifest");
+        assert_eq!(manifest.name, expected_name);
+    }
 }

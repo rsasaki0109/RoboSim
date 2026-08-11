@@ -19,9 +19,11 @@ pub mod scaffold;
 pub mod scheduler;
 
 pub use cabi::{
-    discover_controller_plugin, discover_plugin_names, load_controller_library, peek_plugin_name,
-    LoadedControllerPlugin, PluginLoadError, RneJointPosition, RneJointVelocity,
-    RNE_PLUGIN_ABI_VERSION,
+    controller_capability_bit, discover_controller_plugin, discover_plugin_names,
+    load_controller_library, peek_plugin_name, LoadedControllerPlugin, PluginLoadError,
+    RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
+    RneJointVelocityV3, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
+    RNE_PLUGIN_MIN_ABI_VERSION,
 };
 pub use control::{
     ControllerActionFrame, ControllerJointObservation, ControllerJointVelocityCommand,

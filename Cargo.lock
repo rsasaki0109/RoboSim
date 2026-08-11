@@ -3620,6 +3620,10 @@ name = "rne_plugin_example_velocity_servo"
 version = "0.14.0-rc.1"
 
 [[package]]
+name = "rne_plugin_legacy_v2_fixture"
+version = "0.1.0"
+
+[[package]]
 name = "rne_py"
 version = "0.14.0-rc.1"
 dependencies = [
