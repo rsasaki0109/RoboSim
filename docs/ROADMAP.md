@@ -37,6 +37,13 @@ Cross-cutting rules for every milestone:
 - Performance claims name the fixture, machine class, actor/sensor count, and
   percentile; correctness gates are never waived to meet throughput targets.
 
+M5 evidence is produced by `cargo run -p xtask -- scenario-scale`. The
+committed OpenSCENARIO reference contains 100 actors and runs 600 fixed steps;
+its golden runtime hash is `7503294308621126381` and its canonical
+actor/action result digest is `6732886903736628512`. The report measures three
+release repetitions on the named runner class and fails below 60 headless
+steps/s or on any classified/unexplained violation.
+
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|
 | A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |

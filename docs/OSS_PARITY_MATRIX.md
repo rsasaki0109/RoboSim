@@ -42,14 +42,14 @@ but a user cannot yet complete the workflow end to end.
 | Controller and actuator I/O | Differential drive, named joint velocity/effort, trajectories, controller plugins, and C ABI discovery | Parity for the current controller slice | Controller commands appear in replay frames and affect the expected actuator state |
 | Sensor simulation | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, and typed payload subscriptions | Parity for the current sensor slice | Payload stream summaries and selected payloads replay with stable values |
 | Physics selection and conformance | Rapier backend, analytic backend, capability negotiation, canonical snapshots, and a deterministic unit-bearing conformance report | Complete for the M4 backend slice | `xtask physics-conformance` proves every advertised capability with shared or capability-specific vectors; exact repeatability uses stable hashes and cross-solver checks use registered tolerances |
-| Scenario authoring | OpenSCENARIO 1.0 subset, parameters, catalogs, speed, lane change, assigned route, signals, controlled fixed-step execution, and versioned scenario replay artifacts | Parity for the current scenario slice | A scenario manifest writes a `rne-scenario-replay` JSON record with engine compatibility and XOSC/network digests; `rne-asset replay` verifies those exact inputs before re-execution and final-result comparison |
-| Native traffic runtime | Routing, signals, reservations, deterministic kinematics, flow metrics, and replay | Parity for the native traffic slice | Spawn-order-independent fleet hash, no forbidden gaps/collisions, stable metrics |
+| Scenario authoring | OpenSCENARIO 1.0 subset, parameters, catalogs, multi-actor event sets, per-kind routing, speed, lane change, assigned route, signals, controlled fixed-step execution, and versioned scenario replay artifacts | Complete for the M5 scenario-scale slice | Canonical UUID-ordered actor state and time/entity/source-index action evidence are covered by a stable result digest; the committed 100-actor fixture repeats under reversed declarations |
+| Native traffic runtime | Routing, signals, reservations, deterministic kinematics, flow metrics, mixed pose-ownership metrics, complete visible-state digest, and replay | Complete for the M5 native/mixed ownership slice | Spawn-order-independent native and visible-state hashes, external-pose preservation, transactional validation, no forbidden gaps/collisions, stable metrics |
 | SUMO road import | `rne-asset sumo-net` and direct `.net.xml` scenario networks | Parity for the import slice | Imported topology and signal wiring match the committed fixture expectations |
-| External traffic co-simulation | `rne_traci::CoSimulation`, live vehicle mirroring, stable hash, explicit `TrafficPoseSource::External`, and opt-in `set_vehicle_speed_m_s` command return | Partial | Observe/synchronize and explicit SUMO speed control are deterministic; route/control ownership beyond speed remains future work |
+| External traffic co-simulation | `rne_traci::CoSimulation`, live vehicle mirroring, explicit `TrafficPoseSource::External`, opt-in `set_vehicle_speed_m_s`, lifecycle metrics, and bounded snapshot-only reconnect | Complete for the M5 recovery slice | A process mock drops an ambiguous step response, retains the last complete mirror, reconnects without double-stepping, reconciles a changed vehicle set, and preserves actor identity |
 | Runner control and remote inspection | stdin/TCP `pause`, `resume`, `step`, `reset`, `quit`, protocol-v1 live robot/traffic/sensor status snapshots, opt-in safety-capped source-resolution RGB-D TCP payloads, versioned command transcripts, and scenario result artifacts | Parity for the current runner-control slice | Process-level TCP E2E verifies source-resolution RGB/depth dimensions and byte lengths; absolute image/status limits prevent unbounded writes, while controlled artifacts replay consumed commands including reset/quit |
 | Frontend and rendering | Native wgpu renderer, browser replay inspector, legacy TCP frontend compatibility, and negotiated framed `interactive_viewer --frontend-connect` projection for diff-drive, scenario traffic, generic URDF joints, lossless RGB/depth PiP, and LiDAR points | Complete for the M3 production transport slice | Protocol golden tests, process-level RGB-D/LiDAR/slow-client checks, and GPU-independent viewer decode/projection tests are parity gates |
 | Extension and integration | Backend-neutral traits, plugin manifests/C ABI, isolated ROS 2 adapter, external importer boundaries | Parity for the current extension slice | Add/remove an integration without changing core simulation types |
-| CI and evaluation | `xtask parity`, stable hashes, robot/scenario replay artifacts, physics conformance JSON, Behavior JSON/JUnit reports, and determinism tests | Partial | The current catalog is green for robot/scenario replay, physics, sensor/traffic/control, RGB-D TCP E2E, and frontend compile/remote-sensor projection slices; broader frontend smoke remains |
+| CI and evaluation | `xtask parity`, `xtask scenario-scale`, stable hashes, robot/scenario replay artifacts, physics/scenario-scale JSON, Behavior JSON/JUnit reports, and determinism tests | Partial | The M5 report classifies every scenario/traffic violation, requires deterministic actor/action evidence and at least 60 headless steps/s for 100 actors on the named CI runner; broader frontend smoke remains |
 
 ## Flagship workflows
 
@@ -83,6 +83,12 @@ assets/runs/sumo_cross.rne.run.toml
   → SUMO network import and route execution
   → signal/traffic metrics
   → deterministic final report
+
+assets/runs/scenario_scale_100.rne.run.toml
+  → 100-actor OpenSCENARIO import and fixed-step execution
+  → canonical actor/action evidence and mixed ownership metrics
+  → three release-mode throughput samples
+  → artifacts/scenario-scale/report.json
 ```
 
 ### Interactive runner control

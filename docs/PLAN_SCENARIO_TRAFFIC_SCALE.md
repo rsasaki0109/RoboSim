@@ -2,138 +2,210 @@
 
 ## Goal
 
-M5 turns the existing traffic-scale demonstrations into one enforceable
-OpenSCENARIO and live-co-simulation contract. A reference OpenSCENARIO run must
-drive 100 actors at a requested 60 Hz, mixed runtime/external ownership must be
-observable without double integration, and a dropped TraCI connection must be
-recoverable without guessing whether a failed simulation step should be sent a
-second time.
+M5 turns the existing OpenSCENARIO, native traffic, and TraCI paths into one
+enforceable headless scale contract. A committed reference scenario must run
+100 actors at at least 60 simulation steps per wall-clock second on the CI
+benchmark class, preserve canonical externally visible ordering, report mixed
+native/external pose ownership, recover a disconnected TraCI session, and end
+with zero unexplained violations.
 
-The traffic runtime remains renderer-, physics-, importer-, and
-external-simulator-neutral. Wall-clock time is used only by the benchmark
-runner; simulation decisions continue to use `SimTime` and `SimDuration`.
+Simulation code continues to use `SimClock`, `SimTime`, and `SimDuration`.
+Wall-clock time is read only by the outer benchmark harness and is never an
+input to simulation behavior or stable evidence.
 
-## Existing baseline
+## Starting baseline and gaps
 
-- The OpenSCENARIO importer reads multiple `ScenarioObject` declarations, but
-  rejects a `ManeuverGroup` containing more than one actor.
-- The scenario executor sorts entity spawns and final poses by name, but
-  derives one route from the first entity kind and gives every assigned-route
-  action the same route ID.
-- The traffic runtime leaves `TrafficPoseSource::External` actors untouched,
-  but its step report and stable hash cover only runtime-integrated actors.
-- `CoSimulation::step` applies mirror updates transactionally, but a caller
-  cannot replace a failed TraCI connection and resynchronize the mirror without
-  reconstructing the bridge.
-- Renderer-free Examples 46 and 47 already prove 100 native actors above
-  60 simulation steps per wall-clock second. M5 extends that gate through the
-  OpenSCENARIO path rather than replacing those tests.
+- `rne_traffic` already advances 100 native actors deterministically, with a
+  spawn-order-independent hash, explicit gaps, signal control, junction
+  reservations, and flow metrics.
+- renderer-free Example 47 already asserts at least 60 headless steps per
+  second for 100 native vehicles, but it is not an OpenSCENARIO reference
+  fixture and does not exercise mixed ownership or TraCI recovery.
+- `rne_openscenario` imports multiple entities and applies actions in stable
+  entity-name order, but execution derives one route from the first entity
+  kind. Assigned routes share one synthetic ID and lane changes share one
+  direction, so independent multi-actor route/action behavior is not yet an
+  enforceable contract.
+- `TrafficPoseSource::External` prevents double integration, but external
+  actors are excluded from flow metrics and the existing fleet hash. A mixed
+  step therefore cannot prove how many actors each subsystem owned or that the
+  complete visible state was canonically ordered.
+- `rne_traci::CoSimulation` mirrors each completed read transactionally, but a
+  connection failure ends the session. It has no public disconnected state,
+  bounded reconnect operation, recovery counters, or snapshot-only resync.
+
+## Boundaries and non-goals
+
+- `rne_traffic` remains backend-neutral and may depend only on `rne_core`,
+  `rne_ecs`, `rne_math`, and `rne_world`. It must not depend on SUMO, TraCI,
+  OpenSCENARIO, a renderer, or a physics backend.
+- `rne_openscenario` owns scenario import and execution policy. It may consume
+  `rne_traffic` APIs without moving scenario types into the traffic core.
+- `rne_traci` owns TCP protocol and external-session recovery. SUMO remains the
+  integration and routing authority for mirrored actors.
+- ROS2 remains an adapter and is not part of this milestone.
+- M5 does not add the complete OpenSCENARIO 1.x condition/action surface,
+  continuous lane-change dynamics, distributed simulation, or a guarantee
+  that unlike external simulators produce identical floating-point state.
+- The 60 Hz gate measures headless throughput, not real-time sleeping or
+  pacing. It never makes wall-clock time part of a replay hash.
 
 ## Contract
 
-### Multi-actor OpenSCENARIO
+### Multi-entity scenario execution
 
-- A non-empty `ManeuverGroup/Actors` set may contain multiple unique
-  `EntityRef` entries. Each supported event is expanded to every referenced
-  actor in deterministic actor order.
-- Every referenced actor must exist in `Entities`; duplicate references are
-  rejected instead of applying an action twice.
-- Runtime routes are derived per road-user kind, and every entity receives a
-  route that admits its kind.
-- Assigned routes use an entity-specific stable ID so simultaneous independent
-  route actions cannot alias each other.
-- Externally visible actor results contain names and are sorted by name. Entity
-  declaration and ECS spawn order cannot change the final actor states or hash.
+Scenario execution has these deterministic rules:
 
-### Mixed ownership observation
+1. Entity identity is the entity name plus a stable UUID derived from the
+   canonical name order, never ECS insertion order.
+2. Each distinct actor kind receives a compatible deterministically derived
+   network route. An entity is never placed on a lane that excludes its kind.
+3. Assigned routes and parallel lane-change routes have per-action stable IDs;
+   one actor's route action cannot overwrite or alias another actor's route.
+4. Due actions are applied in the total order `(start_time_s, entity_name,
+   source_action_index)`. This order is recorded as externally visible action
+   evidence.
+5. Final actor snapshots are ordered by stable UUID and include name, actor
+   kind, pose source, route ID when present, position, heading, and speed.
+6. The scenario result digest covers the canonical final actor snapshots and
+   the ordered action evidence. Reversing document entity or action insertion
+   order without changing their semantic order produces the same result.
 
-Every completed native traffic step reports:
+The reference fixture contains 100 actors with independent initial positions
+and same-tick actions. Its replay test proves actor count, canonical order,
+stable digest, zero collision/signal violations, and exact repeat execution.
 
-- runtime-owned, external-owned, and total actor counts;
-- a canonical observed-state hash over all actor UUIDs, ownership tags, and
-  poses;
-- the existing runtime-only flow metrics and integration hash without changing
-  their compatibility semantics.
+### Mixed pose ownership metrics
 
-External actors require a stable UUID and finite pose for canonical observation
-but never require a route follower and are never advanced by the native
-runtime. A mixed-world test proves that reversing spawn order preserves the
-observed hash while the external pose remains byte-identical.
+Every traffic step reports one ownership snapshot:
+
+- total visible traffic actors;
+- runtime-owned and external-owned actor counts;
+- runtime actors advanced by the native integrator;
+- external poses observed but not advanced;
+- actors missing the stable UUID or pose required for external visibility;
+- a canonical visible-state digest over all valid traffic actors, including
+  external actors.
+
+Absence of `TrafficPoseSource` means `Runtime` for compatibility. Runtime-owned
+actors require a route follower and are updated exactly once. External-owned
+actors require a stable UUID and pose, may omit a route follower, and are never
+mutated by native traffic integration. Invalid externally visible state fails
+before any runtime actor is mutated.
+
+The legacy native fleet digest remains available for native conformance. The
+new visible-state digest is the M5 mixed-ownership evidence and changes when
+either a native or external pose changes.
 
 ### Recoverable TraCI session
 
-`CoSimulation` separates three phases:
+`rne_traci::CoSimulation` exposes a small explicit state machine:
 
-1. request one SUMO simulation step;
-2. read a complete, sorted vehicle snapshot;
-3. commit that snapshot transactionally to ECS.
+```text
+connected --I/O or protocol failure--> disconnected
+disconnected --successful reconnect + snapshot resync--> connected
+connected/disconnected --close--> closed
+```
 
-A connection created from an endpoint remembers that endpoint. After any I/O
-or protocol failure, explicit recovery opens a fresh client and synchronizes
-the current SUMO snapshot **without** issuing `simulationStep` again. The old
-client and ECS mirror remain active until the replacement snapshot has been
-read completely. Successful recovery increments a monotonic session generation
-and reports created, updated, and removed mirror counts. A client injected by a
-caller can be recovered with another injected client, while endpoint-less
-automatic recovery returns a typed error.
+Recovery has these invariants:
+
+- a failed TraCI read never partially mutates the ECS mirror;
+- disconnect keeps the last complete mirror and stable actor mapping;
+- reconnect is available only for endpoint-backed sessions and uses a bounded
+  caller-supplied retry policy;
+- the first successful connection performs a snapshot-only resync before the
+  next simulation step, so recovery does not intentionally double-step SUMO;
+- actors with the same SUMO IDs retain their RNE entities and UUIDs;
+- actors added or removed while disconnected are reconciled in sorted SUMO ID
+  order;
+- session metrics report successful steps, failed steps, reconnect attempts,
+  successful recoveries, and the current state;
+- a closed session rejects step, recovery, and command calls deterministically.
+
+A process-level mock test drops the first TCP connection after a completed
+mirror, accepts a replacement connection, changes the vehicle set while
+disconnected, and proves recovery without partial mutation or identity drift.
+
+### Violation accounting
+
+The M5 report classifies every violation; an unclassified aggregate is not
+accepted. The initial registry is:
+
+| ID | Unit | Meaning | Exit bound |
+|---|---|---|---|
+| `traffic.collision` | count | overlapping actor rectangles or negative same-route bumper gap | 0 |
+| `traffic.signal` | count | front bumper crosses a red stop line | 0 |
+| `traffic.ownership.invalid_state` | count | actor lacks stable UUID/pose or runtime follower | 0 |
+| `traffic.ownership.double_integration` | count | external pose changed by the native step | 0 |
+| `scenario.action.unapplied` | count | scheduled action due within the run was not applied | 0 |
+| `traci.recovery.unreconciled` | count | mirror differs after successful resync | 0 |
+
+The machine-readable report includes every registry row, measured count,
+bound, status, and deterministic evidence. “Zero unexplained violations” means
+all measured failures map to a registry row and every exit-bound row passes.
 
 ### Urban scale budget
 
-The committed reference builds and parses an OpenSCENARIO 1.0 document with
-100 motor vehicles on a 2.5 km corridor, one shared 100-actor speed event, and
-explicit staggered initial poses. It runs 720 fixed steps at a requested 60 Hz.
+The committed benchmark uses:
 
-The scale runner fails unless:
+- exactly 100 actors;
+- 600 fixed steps at 60 Hz simulation time;
+- no renderer, GPU, ROS2, SUMO process, network service, or sleep;
+- a release build on the GitHub-hosted `windows-latest` parity runner, which is
+  the M5 CI benchmark class;
+- three measured repetitions after one untimed warm-up;
+- the minimum repetition throughput as the verdict;
+- a required minimum of 60 completed simulation steps per wall-clock second.
 
-- all 100 actors are present and receive the shared action;
-- forward and reverse entity declaration order produce identical final actor
-  states and stable hashes;
-- signal violations and collisions are zero;
-- minimum bumper gap is at least 2 m;
-- one reference execution sustains at least 60 simulation steps per wall-clock
-  second on the GitHub-hosted Windows/Linux CI class.
-
-The JSON report records the fixture/schema versions, deterministic outcomes,
-budget threshold, measured throughput, and benchmark-class label. Throughput
-is evidence, never an input to simulation state or its stable hash.
+The report records actor/step counts, elapsed nanoseconds and throughput for
+each measured repetition, stable digests, violations, ownership metrics, and
+the final verdict. Timing fields are diagnostic and excluded from deterministic
+digest comparison; all state/ordering/violation evidence must match across
+repetitions.
 
 ## Delivery slices
 
-### M5-A: multi-actor import and execution
+### M5-A: contract and canonical scenario evidence
 
-- Expand actor-set events and validate all references.
-- Derive routes per entity kind and isolate assigned route IDs.
-- Add named ordered actor results and multi-actor parser/runtime tests.
+- Freeze action ordering, actor snapshot, ownership, recovery, violation, and
+  benchmark contracts.
+- Add canonical scenario action events and final actor snapshots.
+- Cover heterogeneous actors, same-tick actions, independent assigned routes,
+  and both lane-change directions.
 
-### M5-B: ownership metrics
+### M5-B: mixed ownership
 
-- Add canonical ownership counts and observed-state hashing.
-- Preserve existing runtime-only flow/hash behavior.
-- Add spawn-order and external-pose preservation tests.
+- Add per-step ownership metrics and complete visible-state digest.
+- Validate all visible actors transactionally before native mutation.
+- Prove that external poses are observed, included in evidence, and never
+  integrated by `rne_traffic`.
 
-### M5-C: TraCI recovery
+### M5-C: recoverable TraCI
 
-- Extract snapshot read/commit from `CoSimulation::step`.
-- Add endpoint and injected-client recovery paths with generation reports.
-- Prove failed reads are transactional and recovery does not double-step.
+- Add explicit session state and metrics.
+- Add bounded reconnect and snapshot-only resync.
+- Add disconnect/reconnect process tests and document failure behavior.
 
-### M5-D: scale report and CI
+### M5-D: 100-actor reference and report
 
-- Add the 100-actor OpenSCENARIO benchmark and deterministic acceptance tests.
-- Emit a JSON report through `xtask scenario-scale`.
-- Add the scale runner to OSS parity and upload its report in CI.
+- Add a committed OpenSCENARIO urban-scale fixture and run manifest.
+- Add a headless scale runner that emits deterministic JSON plus outer-harness
+  timing evidence.
+- Add `xtask scenario-scale` and upload its report from the parity CI job.
 
 ### M5-E: exit gates
 
-- Run formatting, workspace Clippy with `-D warnings`, workspace tests,
-  `xtask parity`, `xtask ci-headless`, and `xtask ci` from the locked graph.
-- Validate the full GitHub Actions matrix on Windows and Linux.
-- Merge the milestone and remove only its dedicated branch/worktree.
+- Add unit, integration, deterministic replay, report-schema, and process-level
+  recovery tests.
+- Run `cargo fmt --all`, workspace Clippy with `-D warnings`, workspace tests,
+  `xtask ci-headless`, and `xtask ci` from the locked dependency graph.
+- Update the roadmap, traffic runtime, OSS parity matrix, examples index, and
+  changelog with measured M5 evidence.
 
 ## Implementation status
 
-- M5-A multi-actor import and execution: in progress.
-- M5-B ownership metrics: pending.
-- M5-C TraCI recovery: pending.
-- M5-D scale report and CI: pending.
-- M5-E full workspace/CI matrix: pending.
+- M5-A contract and canonical scenario evidence: complete.
+- M5-B mixed ownership: complete.
+- M5-C recoverable TraCI: complete.
+- M5-D reference/report: complete locally; CI evidence pending.
+- M5-E full workspace/CI matrix: in progress.
