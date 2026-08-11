@@ -23,11 +23,11 @@ workflow is truly complete.
 | Capability | RNE today | Remaining parity gap |
 |---|---|---|
 | World and robot assets | `.rne.scene.toml`, `.rne.robot.toml`, URDF, OBJ, static glTF/GLB, PLATEAU import, minimal OpenSCENARIO 1.0 import, and minimal SDF (`rne_sdf`) and MJCF (`rne_mjcf`) model import → URDF | None for the current workflow slice |
-| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene or OpenSCENARIO manifest headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; `--control-port PORT` serves the same commands over a local TCP connection with live per-step robot, traffic, and sensor snapshots. `--control-camera-full-resolution` is an opt-in source-resolution RGB-D stream, capped at 1920x1080 per payload, for frontend E2E checks. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | None for the current fixed-step and runner-control slice |
+| Fixed-step execution | `rne-asset simulate` and `rne-asset run` run a scene or OpenSCENARIO manifest headlessly with an explicit rate and step count. `rne-asset run --control-stdin` accepts runner commands on stdin (`pause`, `resume`, `step N`, `reset`, `quit`) through a `rne_core` transport-neutral control state machine; legacy `--control-port PORT` remains supported. Production `--frontend-port PORT` uses explicit binary negotiation, finite socket deadlines, bounded queues, and reconnect-without-quit semantics. `reset` rebuilds the world from the episode's initial conditions and `step N` advances exactly N frames before pausing again | None for the current fixed-step and runner-control slice |
 | Controller I/O | Typed `ActuatorCommand`, named joint velocity/effort/wheel paths, interpolated multi-joint position trajectories in run manifests, controller plugins invoked through a `rne_plugin` trait boundary (`[controller] kind = "plugin"`), dynamically loaded controller libraries through the versioned C ABI, episode APIs, and an isolated ROS 2 adapter | None for the current controller slice; sensor and agent plugin ABIs remain future scope |
 | Physics | Backend-neutral traits with Rapier (full contacts, articulation, contact force) and an analytic deterministic backend (`rne_physics_analytic`, collision-free), selectable per run manifest with a public capability negotiation workflow (`[physics] backend` + `required_capabilities`) | None for the current workflow slice |
-| Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, DataBus, per-step replay stream summaries, and full typed payload export with manifest-level sensor subscriptions | None for the current workflow slice |
-| Rendering | Native wgpu, browser viewer, PBR materials, glTF maps, HDR/IBL, TAA, and the `interactive_viewer --connect HOST:PORT` runner frontend | Remote diff-drive and scenario traffic positions project into the local viewer; bounded RGB camera previews drive PiP, LiDAR previews drive point overlays, IMU/wheel summaries are available in the status contract, and `--control-camera-full-resolution` enables RGB plus GPU depth PiP; binary video transport remains future work |
+| Sensors | LiDAR, IMU, RGB-D/camera, wheel encoders, noise, latency, bounded DataBus retention, per-step replay stream summaries, full typed payload export, and framed lossless RGB-D/LiDAR frontend payloads preserving stream sequence/capture/availability timestamps | None for the current workflow slice |
+| Rendering | Native wgpu, browser replay viewer, PBR materials, glTF maps, HDR/IBL, TAA, legacy `interactive_viewer --connect`, and production `interactive_viewer --frontend-connect` | Remote diff-drive, scenario traffic, and articulated joints project locally; production binary RGB/depth frames drive PiP and full LiDAR frames drive a bounded display overlay without stepping a second physics world |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, minimal OpenSCENARIO 1.0 scenario execution (importer → versioned document → traffic runtime with parameter substitution, speed, lane-change, and assigned-route actions, vehicle catalogs, and network signal timing, wired into run manifests), versioned `rne-scenario-replay` artifacts, offline SUMO `.net.xml` road-network import (`rne_sumo`), scenario runs that reference a `.net.xml` directly, and live SUMO co-simulation (`rne_traci` connects to a running SUMO, maps vehicles into the RNE Y-up frame, mirrors them as `TrafficActor` entities tagged with `TrafficPoseSource::External`, and `rne-asset co-sim` runs a deterministic headless co-simulation) | External SUMO poses are not double-integrated; only explicit SUMO commands such as `set_vehicle_speed_m_s` return control to the external simulator |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, `rne-scenario-replay` XOSC/network/clock/result records, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
 | Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
@@ -320,6 +320,32 @@ cargo run -p interactive_viewer --example 14_interactive_viewer -- \
 cargo run -p interactive_viewer --example 14_interactive_viewer -- \
   --connect 127.0.0.1:9000 --so101
 ```
+
+The production frontend path is a separate framed binary protocol, so legacy
+line clients keep working unchanged. Start the runner and native viewer with:
+
+```bash
+cargo run -p rne_asset_cli -- run \
+  assets/runs/mm_minimal_joint_velocity.rne.run.toml \
+  --frontend-port 9001
+
+cargo run -p interactive_viewer --example 14_interactive_viewer -- \
+  --frontend-connect 127.0.0.1:9001 --so101
+```
+
+The client sends its supported version range, capabilities, maximum payload,
+and frame/byte queue budgets before any live data is sent. The server responds
+with the effective contract or an explicit bounded rejection. Status remains a
+compact JSON metadata payload inside a binary frame; RGB8, depth-f32 metres,
+and LiDAR arrays use typed binary frames with stream sequence and simulation
+capture/availability ticks.
+
+The simulation thread only performs non-blocking latest-only queue publication.
+Dedicated threads own finite-deadline socket I/O. Reliable acknowledgements
+never evict one another; an over-budget client is disconnected instead. Sensor
+and status frames replace stale frames by stable key, emit gap accounting, and
+are discarded on disconnect. A later client reconnects to the same session and
+resumes at current state without an offline backlog or an implicit `quit`.
 
 ## Dynamically loaded controller plugins
 

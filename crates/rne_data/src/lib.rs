@@ -6,6 +6,7 @@ pub mod bus;
 pub mod frame;
 pub mod payloads;
 pub mod stream;
+pub mod transport;
 
 pub use bus::{DataBus, InMemoryDataBus, SubscriptionCursor};
 pub use frame::{Frame, FrameHeader, FramePayload};

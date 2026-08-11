@@ -6,6 +6,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Production sensor/frontend transport (M3)**: `rne_data::transport` defines a
+  fixed-header little-endian framed protocol with explicit version/capability/
+  limit negotiation, bounded rejection messages, stable session and sequence
+  fields, control/status/gap messages, and lossless RGB8, depth-f32, and LiDAR
+  codecs preserving DataBus stream sequences and capture/availability ticks.
+- **Bounded non-blocking runner frontend**: `rne-asset run --frontend-port`
+  performs socket I/O off the simulation thread, bounds egress by frames and
+  bytes, keeps control acknowledgements reliable, replaces stale status/sensor
+  frames latest-only, and accepts reconnects without turning disconnect into
+  `quit` or retaining an offline backlog. The runner DataBus now uses bounded
+  per-stream retention.
+- **Native binary frontend client**: `interactive_viewer --frontend-connect`
+  negotiates the production protocol and projects binary RGB-D and LiDAR into
+  the existing PiP/overlay path. Protocol golden, malformed payload, reconnect,
+  process RGB-D/LiDAR, unread slow-client, and legacy compatibility tests are in
+  the OSS parity catalog.
+
 - **Stable robot-native controller surface (M2)**: versioned typed
   observation/action frames use stable robot and joint identities, explicit
   units, fixed-step timestamps, strict validation, and canonical ordering.

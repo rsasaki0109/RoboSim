@@ -17,6 +17,7 @@ rne_math → rne_core → rne_ecs → rne_world
                               ↘ rne_traffic
                               ↘ rne_data / rne_sensor / rne_render / rne_ai / rne_assets
 runner ↔ rne_plugin (versioned robot-native observation/action boundary)
+runner ↔ rne_data::transport ↔ native frontend (versioned framed sensor boundary)
 adapters/ros2/* (optional)
 ```
 
@@ -26,6 +27,11 @@ units, deterministic ordering, and no renderer, physics-backend, or adapter
 types. The runner owns capability negotiation and the
 `created → configured → active → shutdown` lifecycle; C ABI v2-v3 is an
 implementation boundary beneath that typed schema.
+
+`rne_data::transport` owns production frontend framing, capability negotiation,
+typed RGB-D/LiDAR payload codecs, and frame+byte bounded latest-only queues.
+Socket threads live in the runner and viewer; fixed-step simulation never
+writes to a client, and a disconnect does not become a simulation command.
 
 ## Runtime pipeline
 

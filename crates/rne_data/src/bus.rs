@@ -4,7 +4,8 @@ use crate::frame::{Frame, FramePayload};
 use crate::StreamId;
 use rne_core::SimTime;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroUsize;
 use thiserror::Error;
 
 /// DataBus publish/subscribe error.
@@ -16,6 +17,9 @@ pub enum DataBusError {
     /// Payload type mismatch for stream.
     #[error("payload type mismatch")]
     TypeMismatch,
+    /// A bounded bus requires at least one retained frame per stream.
+    #[error("per-stream frame capacity must be greater than zero")]
+    InvalidCapacity,
 }
 
 /// Cursor for reading frames from a stream in order.
@@ -63,19 +67,35 @@ pub trait DataBus {
 
 struct TypedStream {
     type_id: TypeId,
-    frames: Vec<Box<dyn Any + Send + Sync>>,
+    frames: VecDeque<Box<dyn Any + Send + Sync>>,
+    dropped_frames: u64,
 }
 
 /// In-memory typed DataBus for simulation and tests.
 #[derive(Default)]
 pub struct InMemoryDataBus {
     streams: HashMap<StreamId, TypedStream>,
+    capacity_per_stream: Option<NonZeroUsize>,
 }
 
 impl InMemoryDataBus {
     /// Creates an empty bus.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a bus retaining at most `capacity` newest frames per stream.
+    ///
+    /// Publishing never blocks. When a stream reaches the limit, its oldest
+    /// frame is discarded before the new frame is retained. Subscription
+    /// cursors that fall behind resume at the oldest retained sequence.
+    pub fn with_capacity_per_stream(capacity: usize) -> Result<Self, DataBusError> {
+        let capacity_per_stream =
+            NonZeroUsize::new(capacity).ok_or(DataBusError::InvalidCapacity)?;
+        Ok(Self {
+            streams: HashMap::new(),
+            capacity_per_stream: Some(capacity_per_stream),
+        })
     }
 
     /// Returns the number of frames stored for a stream.
@@ -86,11 +106,20 @@ impl InMemoryDataBus {
             .unwrap_or(0)
     }
 
+    /// Returns the cumulative frames evicted by bounded retention for a stream.
+    pub fn dropped_frame_count(&self, stream: StreamId) -> u64 {
+        self.streams
+            .get(&stream)
+            .map(|state| state.dropped_frames)
+            .unwrap_or(0)
+    }
+
     fn stream_mut<T: FramePayload>(&mut self, stream: StreamId) -> &mut TypedStream {
         let type_id = TypeId::of::<T>();
         self.streams.entry(stream).or_insert_with(|| TypedStream {
             type_id,
-            frames: Vec::new(),
+            frames: VecDeque::new(),
+            dropped_frames: 0,
         })
     }
 
@@ -108,16 +137,21 @@ impl InMemoryDataBus {
 
 impl DataBus for InMemoryDataBus {
     fn publish<T: FramePayload>(&mut self, frame: Frame<T>) {
+        let capacity = self.capacity_per_stream;
         let stream = self.stream_mut::<T>(frame.stream_id);
         debug_assert_eq!(stream.type_id, TypeId::of::<T>());
-        stream.frames.push(Box::new(frame));
+        if capacity.is_some_and(|capacity| stream.frames.len() == capacity.get()) {
+            stream.frames.pop_front();
+            stream.dropped_frames = stream.dropped_frames.saturating_add(1);
+        }
+        stream.frames.push_back(Box::new(frame));
     }
 
     fn latest<T: FramePayload>(&self, stream: StreamId) -> Option<Frame<T>> {
         let stream_state = self.stream::<T>(stream).ok()?;
         stream_state
             .frames
-            .last()?
+            .back()?
             .downcast_ref::<Frame<T>>()
             .cloned()
     }
@@ -145,13 +179,13 @@ impl DataBus for InMemoryDataBus {
         cursor: &mut SubscriptionCursor,
     ) -> Option<Frame<T>> {
         let stream_state = self.stream::<T>(stream).ok()?;
-        let index = cursor.next_sequence as usize;
         let frame = stream_state
             .frames
-            .get(index)?
-            .downcast_ref::<Frame<T>>()
+            .iter()
+            .filter_map(|frame| frame.downcast_ref::<Frame<T>>())
+            .find(|frame| frame.sequence >= cursor.next_sequence)
             .cloned()?;
-        cursor.next_sequence += 1;
+        cursor.next_sequence = frame.sequence.saturating_add(1);
         Some(frame)
     }
 }
@@ -232,5 +266,62 @@ mod tests {
         let late = SimTime::from_seconds(Seconds::new(10.0));
         let frame = bus.latest_available::<ImuSample>(stream, late).unwrap();
         assert_eq!(frame.sequence, 2);
+    }
+
+    #[test]
+    fn bounded_retention_keeps_latest_frames_and_counts_evictions() {
+        let mut world = rne_ecs::World::new();
+        let entity = rne_ecs::spawn_named(&mut world, "source");
+        let stream = StreamId::new(11);
+        let mut bus = InMemoryDataBus::with_capacity_per_stream(2).unwrap();
+        for sequence in 0..5 {
+            bus.publish(Frame::new(
+                stream,
+                entity,
+                sequence,
+                SimTime::from_ticks(sequence),
+                ImuSample::default(),
+            ));
+        }
+
+        assert_eq!(bus.frame_count(stream), 2);
+        assert_eq!(bus.dropped_frame_count(stream), 3);
+        assert_eq!(bus.latest::<ImuSample>(stream).unwrap().sequence, 4);
+    }
+
+    #[test]
+    fn lagging_cursor_resumes_at_oldest_retained_sequence() {
+        let mut world = rne_ecs::World::new();
+        let entity = rne_ecs::spawn_named(&mut world, "source");
+        let stream = StreamId::new(12);
+        let mut bus = InMemoryDataBus::with_capacity_per_stream(2).unwrap();
+        for sequence in 0..4 {
+            bus.publish(Frame::new(
+                stream,
+                entity,
+                sequence,
+                SimTime::from_ticks(sequence),
+                ImuSample::default(),
+            ));
+        }
+
+        let mut cursor = SubscriptionCursor::default();
+        assert_eq!(
+            bus.next::<ImuSample>(stream, &mut cursor).unwrap().sequence,
+            2
+        );
+        assert_eq!(
+            bus.next::<ImuSample>(stream, &mut cursor).unwrap().sequence,
+            3
+        );
+        assert!(bus.next::<ImuSample>(stream, &mut cursor).is_none());
+    }
+
+    #[test]
+    fn bounded_retention_rejects_zero_capacity() {
+        assert!(matches!(
+            InMemoryDataBus::with_capacity_per_stream(0),
+            Err(DataBusError::InvalidCapacity)
+        ));
     }
 }
