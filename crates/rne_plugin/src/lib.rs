@@ -13,12 +13,18 @@
 use serde::{Deserialize, Serialize};
 
 pub mod cabi;
+pub mod control;
 pub mod scaffold;
 
 pub use cabi::{
     discover_controller_plugin, discover_plugin_names, load_controller_library, peek_plugin_name,
     LoadedControllerPlugin, PluginLoadError, RneJointPosition, RneJointVelocity,
     RNE_PLUGIN_ABI_VERSION,
+};
+pub use control::{
+    ControllerActionFrame, ControllerJointObservation, ControllerJointVelocityCommand,
+    ControllerObservationFrame, ControllerRobotAction, ControllerRobotObservation,
+    ControllerSchemaError, CONTROLLER_SCHEMA_VERSION,
 };
 pub use scaffold::{scaffold_controller_plugin, validate_plugin_name, ScaffoldError};
 
