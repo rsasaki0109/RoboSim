@@ -103,6 +103,7 @@ members = [
   "tests/determinism",
   "tests/dynamics",
   "tests/physics_conformance",
+  "tests/scenario_scale",
   "tools/rne_asset_cli",
   "tools/rne_plateau_import",
   "xtask",

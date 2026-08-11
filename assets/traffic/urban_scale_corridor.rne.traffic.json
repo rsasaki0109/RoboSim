@@ -1,0 +1,67 @@
+{
+  "schema": "rne.traffic",
+  "schema_version": 1,
+  "network": {
+    "id": "m5:urban-scale-corridor",
+    "provenance": {
+      "authority": "synthetic",
+      "accuracy": {
+        "class": "scenario_authored",
+        "horizontal_m": null,
+        "vertical_m": null
+      },
+      "sources": [],
+      "method": "m5-urban-scale-reference"
+    },
+    "coordinate_frame": {
+      "frame_id": "map",
+      "axis_convention": "rne_y_up",
+      "origin_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_crs": "local"
+    },
+    "lanes": [
+      {
+        "id": "m5:corridor:eastbound",
+        "provenance": {
+          "authority": "synthetic",
+          "accuracy": {
+            "class": "scenario_authored",
+            "horizontal_m": null,
+            "vertical_m": null
+          },
+          "sources": [],
+          "method": "m5-urban-scale-reference-lane"
+        },
+        "kind": "driving",
+        "allowed_actors": [
+          "motor_vehicle"
+        ],
+        "centerline_m": [
+          [
+            -1250.0,
+            0.0,
+            0.0
+          ],
+          [
+            1250.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "width_m": 3.5,
+        "speed_limit_m_s": 15.0,
+        "road_class": "urban_reference",
+        "road_functions": [
+          "m5_scale_benchmark"
+        ]
+      }
+    ],
+    "junctions": [],
+    "connections": [],
+    "signals": []
+  }
+}

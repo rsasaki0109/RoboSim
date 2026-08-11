@@ -1,0 +1,12 @@
+version = 1
+
+[clock]
+steps = 600
+hz = 60.0
+
+[scenario]
+xosc = "../scenarios/urban_scale_100.xosc"
+
+[output]
+determinism_check = true
+replay_path = "../../target/runs/scenario_scale_100.rne-replay"

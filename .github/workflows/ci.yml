@@ -122,7 +122,8 @@ jobs:
           path: artifacts/behavior-ci/
 
   parity:
-    runs-on: ubuntu-latest
+    # M5 defines the GitHub-hosted Windows parity runner as its benchmark class.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.95.0
@@ -143,6 +144,12 @@ jobs:
         with:
           name: physics-conformance-report
           path: artifacts/physics-conformance/report.json
+      - name: Upload scenario scale report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-scale-report
+          path: artifacts/scenario-scale/report.json
 
   # Aggregate gate so tooling that watched the old single job has one required
   # context to point at; it passes only when every stage passes.
