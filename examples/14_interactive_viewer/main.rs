@@ -402,6 +402,9 @@ impl RemoteControlClient {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .map_err(|error| format!("set binary handshake timeout: {error}"))?;
+        stream
+            .set_write_timeout(Some(REMOTE_BINARY_IO_TIMEOUT))
+            .map_err(|error| format!("set binary write timeout: {error}"))?;
         let hello = ClientHello {
             min_protocol_major: 1,
             max_protocol_major: 1,
@@ -443,6 +446,12 @@ impl RemoteControlClient {
         }
         let server = ServerHello::decode_payload(&response.payload)
             .map_err(|error| format!("decode binary ServerHello: {error}"))?;
+        if response.session_id == 0
+            || response.protocol_major != server.negotiated.protocol_major
+            || response.protocol_minor != server.negotiated.protocol_minor
+        {
+            return Err("binary ServerHello header does not match negotiated session".to_string());
+        }
         if !server
             .negotiated
             .capabilities
@@ -456,16 +465,27 @@ impl RemoteControlClient {
         let read_stream = stream
             .try_clone()
             .map_err(|error| format!("clone binary runner stream: {error}"))?;
+        let session_id = response.session_id;
+        let protocol_major = server.negotiated.protocol_major;
+        let max_payload_bytes = server.negotiated.max_payload_bytes as usize;
         let (sender, receiver) = mpsc::sync_channel(REMOTE_BINARY_EVENT_QUEUE_FRAMES);
         thread::Builder::new()
             .name("rne-viewer-binary-reader".into())
-            .spawn(move || read_binary_remote_events(read_stream, sender))
+            .spawn(move || {
+                read_binary_remote_events(
+                    read_stream,
+                    sender,
+                    session_id,
+                    protocol_major,
+                    max_payload_bytes,
+                )
+            })
             .map_err(|error| format!("spawn binary runner reader: {error}"))?;
 
         Ok(Self {
             writer: RemoteWriter::Binary {
                 writer: BufWriter::new(stream),
-                session_id: response.session_id,
+                session_id,
                 next_command_sequence: 2,
             },
             receiver,
@@ -581,64 +601,143 @@ struct BinarySensorCache {
     lidars: BTreeMap<u64, RemoteLidarPreview>,
 }
 
+enum BinarySensorUpdate {
+    Rgb {
+        stream_id: u64,
+        width: u32,
+        height: u32,
+        rgba8_base64: String,
+    },
+    Depth {
+        camera_stream_id: u64,
+        center_depth_m: f32,
+        depth_hash: u64,
+        width: u32,
+        height: u32,
+        depth_f32_le_base64: String,
+    },
+    Lidar {
+        stream_id: u64,
+        point_count: usize,
+        points_m: Vec<[f64; 3]>,
+    },
+}
+
 impl BinarySensorCache {
-    fn apply_rgb(&mut self, payload: &[u8]) -> Result<(), String> {
+    fn decode_rgb(payload: &[u8]) -> Result<BinarySensorUpdate, String> {
         let (metadata, image) =
             decode_image_rgb8(payload).map_err(|error| format!("decode binary RGB: {error}"))?;
-        let camera = self
-            .cameras
-            .entry(metadata.stream_id)
-            .or_insert_with(empty_remote_camera);
-        camera.width = image.width;
-        camera.height = image.height;
-        camera.rgba8_base64 = base64::encode(image.rgba8);
-        Ok(())
+        Ok(BinarySensorUpdate::Rgb {
+            stream_id: metadata.stream_id,
+            width: image.width,
+            height: image.height,
+            rgba8_base64: base64::encode(image.rgba8),
+        })
     }
 
-    fn apply_depth(&mut self, payload: &[u8]) -> Result<(), String> {
+    fn decode_depth(payload: &[u8]) -> Result<BinarySensorUpdate, String> {
         let (metadata, image) =
             decode_image_depth(payload).map_err(|error| format!("decode binary depth: {error}"))?;
         let camera_stream_id = metadata
             .stream_id
             .checked_sub(rne_sensor::CAMERA_DEPTH_STREAM_OFFSET)
             .ok_or_else(|| "binary depth stream id is below the camera offset".to_string())?;
-        let camera = self
-            .cameras
-            .entry(camera_stream_id)
-            .or_insert_with(empty_remote_camera);
         let mut bytes = Vec::with_capacity(image.depth_m.len() * std::mem::size_of::<f32>());
         for depth in &image.depth_m {
             bytes.extend_from_slice(&depth.to_le_bytes());
         }
-        camera.depth_center_m = Some(image.center_depth_m());
-        camera.depth_hash = Some(image.hash_depth());
-        camera.depth_width = Some(image.width);
-        camera.depth_height = Some(image.height);
-        camera.depth_f32_le_base64 = Some(base64::encode(bytes));
-        Ok(())
+        Ok(BinarySensorUpdate::Depth {
+            camera_stream_id,
+            center_depth_m: image.center_depth_m(),
+            depth_hash: image.hash_depth(),
+            width: image.width,
+            height: image.height,
+            depth_f32_le_base64: base64::encode(bytes),
+        })
     }
 
-    fn apply_lidar(&mut self, payload: &[u8]) -> Result<(), String> {
+    fn decode_lidar(payload: &[u8]) -> Result<BinarySensorUpdate, String> {
         let (metadata, cloud) = decode_lidar_point_cloud(payload)
             .map_err(|error| format!("decode binary LiDAR: {error}"))?;
-        let points_m = downsample_remote_lidar(&cloud.points_m);
-        self.lidars.insert(
-            metadata.stream_id,
-            RemoteLidarPreview {
-                point_count: cloud.points_m.len(),
+        Ok(BinarySensorUpdate::Lidar {
+            stream_id: metadata.stream_id,
+            point_count: cloud.points_m.len(),
+            points_m: downsample_remote_lidar(&cloud.points_m),
+        })
+    }
+
+    fn apply(&mut self, update: BinarySensorUpdate) {
+        match update {
+            BinarySensorUpdate::Rgb {
+                stream_id,
+                width,
+                height,
+                rgba8_base64,
+            } => {
+                make_bounded_room(&mut self.cameras, stream_id);
+                let camera = self
+                    .cameras
+                    .entry(stream_id)
+                    .or_insert_with(empty_remote_camera);
+                camera.width = width;
+                camera.height = height;
+                camera.rgba8_base64 = rgba8_base64;
+            }
+            BinarySensorUpdate::Depth {
+                camera_stream_id,
+                center_depth_m,
+                depth_hash,
+                width,
+                height,
+                depth_f32_le_base64,
+            } => {
+                make_bounded_room(&mut self.cameras, camera_stream_id);
+                let camera = self
+                    .cameras
+                    .entry(camera_stream_id)
+                    .or_insert_with(empty_remote_camera);
+                camera.depth_center_m = Some(center_depth_m);
+                camera.depth_hash = Some(depth_hash);
+                camera.depth_width = Some(width);
+                camera.depth_height = Some(height);
+                camera.depth_f32_le_base64 = Some(depth_f32_le_base64);
+            }
+            BinarySensorUpdate::Lidar {
+                stream_id,
+                point_count,
                 points_m,
-            },
-        );
-        Ok(())
+            } => {
+                make_bounded_room(&mut self.lidars, stream_id);
+                self.lidars.insert(
+                    stream_id,
+                    RemoteLidarPreview {
+                        point_count,
+                        points_m,
+                    },
+                );
+            }
+        }
     }
 
     fn apply_to_snapshot(&self, snapshot: &mut RemoteSnapshot) {
         for stream in &mut snapshot.sensors {
             if stream.kind == "camera" {
-                stream.camera = self.cameras.get(&stream.stream_id).cloned();
+                if let Some(camera) = self.cameras.get(&stream.stream_id) {
+                    stream.camera = Some(camera.clone());
+                }
             } else if stream.kind == "lidar" {
-                stream.lidar = self.lidars.get(&stream.stream_id).cloned();
+                if let Some(lidar) = self.lidars.get(&stream.stream_id) {
+                    stream.lidar = Some(lidar.clone());
+                }
             }
+        }
+    }
+}
+
+fn make_bounded_room<T>(values: &mut BTreeMap<u64, T>, stream_id: u64) {
+    if !values.contains_key(&stream_id) && values.len() >= REMOTE_BINARY_SENSOR_STREAM_LIMIT {
+        if let Some(first) = values.keys().next().copied() {
+            values.remove(&first);
         }
     }
 }
@@ -674,18 +773,23 @@ fn downsample_remote_lidar(points: &[Vec3]) -> Vec<[f64; 3]> {
         .collect()
 }
 
-fn read_binary_remote_events(mut stream: TcpStream, sender: mpsc::Sender<RemoteEvent>) {
-    let mut sensors = BinarySensorCache::default();
-    while let Ok(Some(frame)) = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
-    {
+fn read_binary_remote_events(
+    mut stream: TcpStream,
+    sender: mpsc::SyncSender<RemoteEvent>,
+    session_id: u64,
+    protocol_major: u16,
+    max_payload_bytes: usize,
+) {
+    while let Ok(Some(frame)) = TransportFrame::read_from(&mut stream, max_payload_bytes) {
+        if frame.session_id != session_id || frame.protocol_major != protocol_major {
+            break;
+        }
         let result = match frame.kind {
             TransportMessageKind::Status => StatusMessage::decode_payload(&frame.payload)
                 .map_err(|error| format!("decode binary status: {error}"))
                 .and_then(|status| {
-                    let mut snapshot: RemoteSnapshot =
-                        serde_json::from_slice(&status.snapshot_json)
-                            .map_err(|error| format!("decode binary status JSON: {error}"))?;
-                    sensors.apply_to_snapshot(&mut snapshot);
+                    let snapshot: RemoteSnapshot = serde_json::from_slice(&status.snapshot_json)
+                        .map_err(|error| format!("decode binary status JSON: {error}"))?;
                     let state = match status.state {
                         RunnerControlState::Paused => RemoteRunnerState::Paused,
                         RunnerControlState::Running => RemoteRunnerState::Running,
@@ -699,9 +803,25 @@ fn read_binary_remote_events(mut stream: TcpStream, sender: mpsc::Sender<RemoteE
                         }))
                         .map_err(|_| "viewer event receiver closed".to_string())
                 }),
-            TransportMessageKind::ImageRgb8 => sensors.apply_rgb(&frame.payload),
-            TransportMessageKind::ImageDepthF32 => sensors.apply_depth(&frame.payload),
-            TransportMessageKind::LidarPointCloud => sensors.apply_lidar(&frame.payload),
+            TransportMessageKind::ImageRgb8 => BinarySensorCache::decode_rgb(&frame.payload)
+                .and_then(|update| {
+                    sender
+                        .send(RemoteEvent::BinarySensor(update))
+                        .map_err(|_| "viewer event receiver closed".to_string())
+                }),
+            TransportMessageKind::ImageDepthF32 => BinarySensorCache::decode_depth(&frame.payload)
+                .and_then(|update| {
+                    sender
+                        .send(RemoteEvent::BinarySensor(update))
+                        .map_err(|_| "viewer event receiver closed".to_string())
+                }),
+            TransportMessageKind::LidarPointCloud => {
+                BinarySensorCache::decode_lidar(&frame.payload).and_then(|update| {
+                    sender
+                        .send(RemoteEvent::BinarySensor(update))
+                        .map_err(|_| "viewer event receiver closed".to_string())
+                })
+            }
             TransportMessageKind::ControlAck | TransportMessageKind::Gap => Ok(()),
             _ => Err(format!("unexpected binary runner frame: {:?}", frame.kind)),
         };
@@ -1944,26 +2064,29 @@ mod tests {
         cloud.push_return(Vec3::new(1.0, 2.0, 3.0), 0.5, 0, 1, 0, 0.0);
 
         let mut cache = BinarySensorCache::default();
-        cache
-            .apply_rgb(
+        cache.apply(
+            BinarySensorCache::decode_rgb(
                 &rne_data::transport::encode_image_rgb8(metadata(camera_stream_id), &rgb).unwrap(),
             )
-            .unwrap();
-        cache
-            .apply_depth(
+            .unwrap(),
+        );
+        cache.apply(
+            BinarySensorCache::decode_depth(
                 &rne_data::transport::encode_image_depth(
                     metadata(camera_stream_id + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET),
                     &depth,
                 )
                 .unwrap(),
             )
-            .unwrap();
-        cache
-            .apply_lidar(
+            .unwrap(),
+        );
+        cache.apply(
+            BinarySensorCache::decode_lidar(
                 &rne_data::transport::encode_lidar_point_cloud(metadata(lidar_stream_id), &cloud)
                     .unwrap(),
             )
-            .unwrap();
+            .unwrap(),
+        );
 
         let stream = |stream_id, kind: &str| RemoteSensorStream {
             stream_id,
@@ -2049,6 +2172,38 @@ mod tests {
                 rne_data::transport::decode_control_command(&command.payload).unwrap(),
                 ControlCommand::Step { frames: 3 }
             );
+            TransportFrame::new(
+                TransportMessageKind::Status,
+                2,
+                42,
+                StatusMessage {
+                    step: 3,
+                    sim_time_ticks: 50_000_000,
+                    state: RunnerControlState::Paused,
+                    snapshot_json: br#"{"base":[0.0,0.0,0.0],"sensors":[{"stream_id":7,"kind":"camera","sequence":3}]}"#.to_vec(),
+                }
+                .encode_payload()
+                .unwrap(),
+            )
+            .write_to(&mut stream)
+            .unwrap();
+            TransportFrame::new(
+                TransportMessageKind::ImageRgb8,
+                3,
+                42,
+                rne_data::transport::encode_image_rgb8(
+                    rne_data::transport::SensorFrameMetadata {
+                        stream_id: 7,
+                        sensor_sequence: 3,
+                        capture_ticks: 40_000_000,
+                        available_ticks: 50_000_000,
+                    },
+                    &rne_data::ImageRgb8::from_rgba8(1, 1, vec![1, 2, 3, 4]),
+                )
+                .unwrap(),
+            )
+            .write_to(&mut stream)
+            .unwrap();
         });
 
         let mut client = RemoteControlClient::connect(&RemoteConnection {
@@ -2058,6 +2213,30 @@ mod tests {
         .unwrap();
         client.send("step 3").unwrap();
         server.join().unwrap();
+        for _ in 0..100 {
+            client.poll();
+            if client.latest().is_some_and(|status| {
+                status.snapshot.camera_pip() == Some((vec![1, 2, 3, 4], 1, 1))
+            }) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("same-step binary RGB frame was not merged into the latest status");
+    }
+
+    #[test]
+    fn binary_sensor_cache_has_a_fixed_stream_limit() {
+        let mut cache = BinarySensorCache::default();
+        for stream_id in 0..REMOTE_BINARY_SENSOR_STREAM_LIMIT as u64 + 2 {
+            cache.apply(BinarySensorUpdate::Rgb {
+                stream_id,
+                width: 1,
+                height: 1,
+                rgba8_base64: "AQIDBA==".to_string(),
+            });
+        }
+        assert_eq!(cache.cameras.len(), REMOTE_BINARY_SENSOR_STREAM_LIMIT);
     }
 
     #[test]
