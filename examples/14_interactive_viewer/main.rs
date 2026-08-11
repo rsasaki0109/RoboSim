@@ -29,6 +29,8 @@
 //! Usage:
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer -- \
 //!     --connect 127.0.0.1:9000 assets/scenes/mesh_diff_drive.rne.scene.toml
+//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- \
+//!     --frontend-connect 127.0.0.1:9001 assets/scenes/mesh_diff_drive.rne.scene.toml
 //!
 //! Usage:
 //!   cargo run -p interactive_viewer --example 14_interactive_viewer
@@ -51,14 +53,20 @@ use rne_ai::{
     UrdfCartAction, UrdfKiwiAction, UrdfSceneSim,
 };
 use rne_assets::AssetHotReloader;
+use rne_core::control::{ControlCommand, RunnerControlState};
+use rne_data::transport::{
+    decode_image_depth, decode_image_rgb8, decode_lidar_point_cloud, encode_control_command,
+    ClientHello, NegotiationReject, ServerHello, StatusMessage, TransportCapabilities,
+    TransportFrame, TransportMessageKind, TRANSPORT_MAX_PAYLOAD_BYTES,
+};
 use rne_math::{Quat, Vec3};
 use rne_render::{hash_depth_f32, hash_rgba8, Camera, MeshRenderCache, RenderBackend, VisualShape};
 use rne_render_wgpu::{CameraOrbit, InteractiveViewer, WgpuRenderBackend};
 use rne_world::Transform3;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -77,6 +85,10 @@ const ARM_SPEED_RAD_S: f64 = 2.5;
 const GRIPPER_SPEED_RAD_S: f64 = 2.0;
 const LIFT_SPEED_M_S: f64 = 0.3;
 const REMOTE_LIDAR_COLOR: [f32; 4] = [0.95, 0.80, 0.15, 0.9];
+const REMOTE_BINARY_LIDAR_DISPLAY_MAX_POINTS: usize = 4096;
+const REMOTE_BINARY_EVENT_QUEUE_FRAMES: usize = 32;
+const REMOTE_BINARY_SENSOR_STREAM_LIMIT: usize = 8;
+const REMOTE_BINARY_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Deserialize)]
 struct RemoteSnapshot {
@@ -252,6 +264,7 @@ struct RemoteStatus {
 
 enum RemoteEvent {
     Status(RemoteStatus),
+    BinarySensor(BinarySensorUpdate),
     Disconnected,
 }
 
@@ -285,18 +298,47 @@ fn parse_remote_status(line: &str) -> Option<RemoteStatus> {
     })
 }
 
-/// Small native client for the line-oriented runner frontend protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteProtocol {
+    LegacyLine,
+    Binary,
+}
+
+#[derive(Clone, Debug)]
+struct RemoteConnection {
+    address: String,
+    protocol: RemoteProtocol,
+}
+
+enum RemoteWriter {
+    Legacy(BufWriter<TcpStream>),
+    Binary {
+        writer: BufWriter<TcpStream>,
+        session_id: u64,
+        next_command_sequence: u64,
+    },
+}
+
+/// Small native client for the legacy and production runner protocols.
 struct RemoteControlClient {
-    writer: BufWriter<TcpStream>,
+    writer: RemoteWriter,
     receiver: mpsc::Receiver<RemoteEvent>,
     latest: Option<RemoteStatus>,
+    binary_sensors: BinarySensorCache,
     connected: bool,
 }
 
 impl RemoteControlClient {
-    fn connect(address: &str) -> Result<Self, String> {
+    fn connect(connection: &RemoteConnection) -> Result<Self, String> {
+        match connection.protocol {
+            RemoteProtocol::LegacyLine => Self::connect_legacy(&connection.address),
+            RemoteProtocol::Binary => Self::connect_binary(&connection.address),
+        }
+    }
+
+    fn connect_stream(address: &str) -> Result<TcpStream, String> {
         let mut last_error = None;
-        let stream = address
+        address
             .to_socket_addrs()
             .map_err(|error| format!("resolve runner address {address}: {error}"))?
             .find_map(|socket_address| {
@@ -313,7 +355,11 @@ impl RemoteControlClient {
                     "connect runner at {address}: {}",
                     last_error.unwrap_or_else(|| "no address resolved".to_string())
                 )
-            })?;
+            })
+    }
+
+    fn connect_legacy(address: &str) -> Result<Self, String> {
+        let stream = Self::connect_stream(address)?;
         let read_stream = stream
             .try_clone()
             .map_err(|error| format!("clone runner stream: {error}"))?;
@@ -326,7 +372,7 @@ impl RemoteControlClient {
             return Err(format!("unexpected runner handshake: {}", ready.trim()));
         }
 
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(REMOTE_BINARY_EVENT_QUEUE_FRAMES);
         thread::Builder::new()
             .name("rne-viewer-runner-reader".into())
             .spawn(move || {
@@ -343,9 +389,88 @@ impl RemoteControlClient {
             .map_err(|error| format!("spawn runner reader: {error}"))?;
 
         Ok(Self {
-            writer: BufWriter::new(stream),
+            writer: RemoteWriter::Legacy(BufWriter::new(stream)),
             receiver,
             latest: None,
+            binary_sensors: BinarySensorCache::default(),
+            connected: true,
+        })
+    }
+
+    fn connect_binary(address: &str) -> Result<Self, String> {
+        let mut stream = Self::connect_stream(address)?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .map_err(|error| format!("set binary handshake timeout: {error}"))?;
+        let hello = ClientHello {
+            min_protocol_major: 1,
+            max_protocol_major: 1,
+            capabilities: TransportCapabilities::ALL_V1,
+            required_capabilities: TransportCapabilities::CONTROL
+                .union(TransportCapabilities::STATUS),
+            max_payload_bytes: TRANSPORT_MAX_PAYLOAD_BYTES as u32,
+            queue_frame_limit: 32,
+            queue_byte_limit: 64 * 1024 * 1024,
+            resume_after_sequence: None,
+        };
+        TransportFrame::new(
+            TransportMessageKind::ClientHello,
+            1,
+            0,
+            hello.encode_payload(),
+        )
+        .write_to(&mut stream)
+        .map_err(|error| format!("write binary ClientHello: {error}"))?;
+        stream
+            .flush()
+            .map_err(|error| format!("flush binary ClientHello: {error}"))?;
+        let response = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
+            .map_err(|error| format!("read binary ServerHello: {error}"))?
+            .ok_or_else(|| "runner closed before binary ServerHello".to_string())?;
+        if response.kind == TransportMessageKind::Reject {
+            let rejection = NegotiationReject::decode_payload(&response.payload)
+                .map_err(|error| format!("decode binary rejection: {error}"))?;
+            return Err(format!(
+                "binary protocol rejected ({:?}): {}",
+                rejection.code, rejection.message
+            ));
+        }
+        if response.kind != TransportMessageKind::ServerHello {
+            return Err(format!(
+                "unexpected binary handshake frame: {:?}",
+                response.kind
+            ));
+        }
+        let server = ServerHello::decode_payload(&response.payload)
+            .map_err(|error| format!("decode binary ServerHello: {error}"))?;
+        if !server
+            .negotiated
+            .capabilities
+            .contains(TransportCapabilities::CONTROL.union(TransportCapabilities::STATUS))
+        {
+            return Err("binary runner omitted required control/status capabilities".to_string());
+        }
+        stream
+            .set_read_timeout(None)
+            .map_err(|error| format!("clear binary read timeout: {error}"))?;
+        let read_stream = stream
+            .try_clone()
+            .map_err(|error| format!("clone binary runner stream: {error}"))?;
+        let (sender, receiver) = mpsc::sync_channel(REMOTE_BINARY_EVENT_QUEUE_FRAMES);
+        thread::Builder::new()
+            .name("rne-viewer-binary-reader".into())
+            .spawn(move || read_binary_remote_events(read_stream, sender))
+            .map_err(|error| format!("spawn binary runner reader: {error}"))?;
+
+        Ok(Self {
+            writer: RemoteWriter::Binary {
+                writer: BufWriter::new(stream),
+                session_id: response.session_id,
+                next_command_sequence: 2,
+            },
+            receiver,
+            latest: None,
+            binary_sensors: BinarySensorCache::default(),
             connected: true,
         })
     }
@@ -353,7 +478,16 @@ impl RemoteControlClient {
     fn poll(&mut self) {
         loop {
             match self.receiver.try_recv() {
-                Ok(RemoteEvent::Status(status)) => self.latest = Some(status),
+                Ok(RemoteEvent::Status(mut status)) => {
+                    self.binary_sensors.apply_to_snapshot(&mut status.snapshot);
+                    self.latest = Some(status);
+                }
+                Ok(RemoteEvent::BinarySensor(update)) => {
+                    self.binary_sensors.apply(update);
+                    if let Some(status) = &mut self.latest {
+                        self.binary_sensors.apply_to_snapshot(&mut status.snapshot);
+                    }
+                }
                 Ok(RemoteEvent::Disconnected) => {
                     self.connected = false;
                     break;
@@ -392,12 +526,190 @@ impl RemoteControlClient {
         if !self.connected {
             return Err("runner connection is closed".to_string());
         }
-        if let Err(error) = writeln!(self.writer, "{command}").and_then(|_| self.writer.flush()) {
+        let result = match &mut self.writer {
+            RemoteWriter::Legacy(writer) => {
+                writeln!(writer, "{command}").and_then(|_| writer.flush())
+            }
+            RemoteWriter::Binary {
+                writer,
+                session_id,
+                next_command_sequence,
+            } => (|| -> io::Result<()> {
+                let parsed = parse_remote_control_command(command).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid runner command")
+                })?;
+                let sequence = *next_command_sequence;
+                *next_command_sequence = next_command_sequence.checked_add(1).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "command sequence exhausted")
+                })?;
+                TransportFrame::new(
+                    TransportMessageKind::ControlCommand,
+                    sequence,
+                    *session_id,
+                    encode_control_command(parsed),
+                )
+                .write_to(writer)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+                .and_then(|()| writer.flush())
+            })(),
+        };
+        if let Err(error) = result {
             self.connected = false;
             return Err(format!("send runner command `{command}`: {error}"));
         }
         Ok(())
     }
+}
+
+fn parse_remote_control_command(command: &str) -> Option<ControlCommand> {
+    let mut parts = command.split_whitespace();
+    match parts.next()? {
+        "pause" => Some(ControlCommand::Pause),
+        "resume" => Some(ControlCommand::Resume),
+        "step" => Some(ControlCommand::Step {
+            frames: parts.next()?.parse().ok()?,
+        }),
+        "reset" => Some(ControlCommand::Reset),
+        "quit" => Some(ControlCommand::Quit),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct BinarySensorCache {
+    cameras: BTreeMap<u64, RemoteCameraPreview>,
+    lidars: BTreeMap<u64, RemoteLidarPreview>,
+}
+
+impl BinarySensorCache {
+    fn apply_rgb(&mut self, payload: &[u8]) -> Result<(), String> {
+        let (metadata, image) =
+            decode_image_rgb8(payload).map_err(|error| format!("decode binary RGB: {error}"))?;
+        let camera = self
+            .cameras
+            .entry(metadata.stream_id)
+            .or_insert_with(empty_remote_camera);
+        camera.width = image.width;
+        camera.height = image.height;
+        camera.rgba8_base64 = base64::encode(image.rgba8);
+        Ok(())
+    }
+
+    fn apply_depth(&mut self, payload: &[u8]) -> Result<(), String> {
+        let (metadata, image) =
+            decode_image_depth(payload).map_err(|error| format!("decode binary depth: {error}"))?;
+        let camera_stream_id = metadata
+            .stream_id
+            .checked_sub(rne_sensor::CAMERA_DEPTH_STREAM_OFFSET)
+            .ok_or_else(|| "binary depth stream id is below the camera offset".to_string())?;
+        let camera = self
+            .cameras
+            .entry(camera_stream_id)
+            .or_insert_with(empty_remote_camera);
+        let mut bytes = Vec::with_capacity(image.depth_m.len() * std::mem::size_of::<f32>());
+        for depth in &image.depth_m {
+            bytes.extend_from_slice(&depth.to_le_bytes());
+        }
+        camera.depth_center_m = Some(image.center_depth_m());
+        camera.depth_hash = Some(image.hash_depth());
+        camera.depth_width = Some(image.width);
+        camera.depth_height = Some(image.height);
+        camera.depth_f32_le_base64 = Some(base64::encode(bytes));
+        Ok(())
+    }
+
+    fn apply_lidar(&mut self, payload: &[u8]) -> Result<(), String> {
+        let (metadata, cloud) = decode_lidar_point_cloud(payload)
+            .map_err(|error| format!("decode binary LiDAR: {error}"))?;
+        let points_m = downsample_remote_lidar(&cloud.points_m);
+        self.lidars.insert(
+            metadata.stream_id,
+            RemoteLidarPreview {
+                point_count: cloud.points_m.len(),
+                points_m,
+            },
+        );
+        Ok(())
+    }
+
+    fn apply_to_snapshot(&self, snapshot: &mut RemoteSnapshot) {
+        for stream in &mut snapshot.sensors {
+            if stream.kind == "camera" {
+                stream.camera = self.cameras.get(&stream.stream_id).cloned();
+            } else if stream.kind == "lidar" {
+                stream.lidar = self.lidars.get(&stream.stream_id).cloned();
+            }
+        }
+    }
+}
+
+fn empty_remote_camera() -> RemoteCameraPreview {
+    RemoteCameraPreview {
+        width: 0,
+        height: 0,
+        rgba8_base64: String::new(),
+        depth_center_m: None,
+        depth_hash: None,
+        depth_width: None,
+        depth_height: None,
+        depth_f32_le_base64: None,
+    }
+}
+
+fn downsample_remote_lidar(points: &[Vec3]) -> Vec<[f64; 3]> {
+    let output_len = points.len().min(REMOTE_BINARY_LIDAR_DISPLAY_MAX_POINTS);
+    if output_len == 0 {
+        return Vec::new();
+    }
+    (0..output_len)
+        .map(|index| {
+            let source_index = if output_len == 1 {
+                0
+            } else {
+                index * (points.len() - 1) / (output_len - 1)
+            };
+            let point = points[source_index];
+            [point.x, point.y, point.z]
+        })
+        .collect()
+}
+
+fn read_binary_remote_events(mut stream: TcpStream, sender: mpsc::Sender<RemoteEvent>) {
+    let mut sensors = BinarySensorCache::default();
+    while let Ok(Some(frame)) = TransportFrame::read_from(&mut stream, TRANSPORT_MAX_PAYLOAD_BYTES)
+    {
+        let result = match frame.kind {
+            TransportMessageKind::Status => StatusMessage::decode_payload(&frame.payload)
+                .map_err(|error| format!("decode binary status: {error}"))
+                .and_then(|status| {
+                    let mut snapshot: RemoteSnapshot =
+                        serde_json::from_slice(&status.snapshot_json)
+                            .map_err(|error| format!("decode binary status JSON: {error}"))?;
+                    sensors.apply_to_snapshot(&mut snapshot);
+                    let state = match status.state {
+                        RunnerControlState::Paused => RemoteRunnerState::Paused,
+                        RunnerControlState::Running => RemoteRunnerState::Running,
+                    };
+                    sender
+                        .send(RemoteEvent::Status(RemoteStatus {
+                            step: status.step,
+                            sim_time_s: status.sim_time_ticks as f64 / 1_000_000_000.0,
+                            state,
+                            snapshot,
+                        }))
+                        .map_err(|_| "viewer event receiver closed".to_string())
+                }),
+            TransportMessageKind::ImageRgb8 => sensors.apply_rgb(&frame.payload),
+            TransportMessageKind::ImageDepthF32 => sensors.apply_depth(&frame.payload),
+            TransportMessageKind::LidarPointCloud => sensors.apply_lidar(&frame.payload),
+            TransportMessageKind::ControlAck | TransportMessageKind::Gap => Ok(()),
+            _ => Err(format!("unexpected binary runner frame: {:?}", frame.kind)),
+        };
+        if result.is_err() {
+            break;
+        }
+    }
+    let _ = sender.send(RemoteEvent::Disconnected);
 }
 
 #[derive(Clone, Debug)]
@@ -646,8 +958,8 @@ fn main() {
     }
 
     let event_loop = EventLoop::new().expect("create event loop");
-    let remote_addr = viewer_remote_addr_from_args();
-    let mut app = App::new(profile, remote_addr);
+    let remote_connection = viewer_remote_connection_from_args();
+    let mut app = App::new(profile, remote_connection);
     event_loop.run_app(&mut app).expect("run viewer");
 }
 
@@ -656,16 +968,36 @@ fn default_scene_path() -> PathBuf {
         .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
 }
 
-fn viewer_remote_addr_from_args() -> Option<String> {
+fn viewer_remote_connection_from_args() -> Option<RemoteConnection> {
     let args: Vec<String> = env::args().skip(1).collect();
-    args.windows(2)
+    let binary = args
+        .windows(2)
+        .find(|pair| pair[0] == "--frontend-connect")
+        .map(|pair| pair[1].clone())
+        .or_else(|| {
+            args.iter()
+                .find_map(|arg| arg.strip_prefix("--frontend-connect=").map(str::to_string))
+        })
+        .or_else(|| env::var("RNE_VIEWER_FRONTEND_CONNECT").ok());
+    if let Some(address) = binary {
+        return Some(RemoteConnection {
+            address,
+            protocol: RemoteProtocol::Binary,
+        });
+    }
+    let legacy = args
+        .windows(2)
         .find(|pair| pair[0] == "--connect")
         .map(|pair| pair[1].clone())
         .or_else(|| {
             args.iter()
                 .find_map(|arg| arg.strip_prefix("--connect=").map(str::to_string))
         })
-        .or_else(|| env::var("RNE_VIEWER_CONNECT").ok())
+        .or_else(|| env::var("RNE_VIEWER_CONNECT").ok());
+    legacy.map(|address| RemoteConnection {
+        address,
+        protocol: RemoteProtocol::LegacyLine,
+    })
 }
 
 fn viewer_profile_from_args() -> ViewerProfile {
@@ -1004,7 +1336,7 @@ fn smoke_keys(profile: &ViewerProfile) -> HashSet<KeyCode> {
 
 struct App {
     profile: ViewerProfile,
-    remote_addr: Option<String>,
+    remote_connection: Option<RemoteConnection>,
     window: Option<Arc<Window>>,
     viewer: Option<InteractiveViewer>,
     sim: Option<ViewerSim>,
@@ -1024,10 +1356,10 @@ struct App {
 }
 
 impl App {
-    fn new(profile: ViewerProfile, remote_addr: Option<String>) -> Self {
+    fn new(profile: ViewerProfile, remote_connection: Option<RemoteConnection>) -> Self {
         Self {
             profile,
-            remote_addr,
+            remote_connection,
             window: None,
             viewer: None,
             sim: None,
@@ -1083,20 +1415,25 @@ impl ApplicationHandler for App {
             }
         };
 
-        let remote = if let Some(address) = self.remote_addr.as_deref() {
+        let remote = if let Some(connection) = self.remote_connection.as_ref() {
             if matches!(
                 &self.profile,
                 ViewerProfile::ManipulatorFixed(_)
                     | ViewerProfile::ManipulatorMobile(_)
                     | ViewerProfile::ManipulatorLift(_)
             ) {
-                eprintln!("--connect requires a diff-drive or generic URDF scene profile");
+                eprintln!(
+                    "--connect/--frontend-connect requires a diff-drive or generic URDF scene profile"
+                );
                 event_loop.exit();
                 return;
             }
-            match RemoteControlClient::connect(address) {
+            match RemoteControlClient::connect(connection) {
                 Ok(remote) => {
-                    println!("connected to runner frontend at {address}");
+                    println!(
+                        "connected to {:?} runner frontend at {}",
+                        connection.protocol, connection.address
+                    );
                     Some(remote)
                 }
                 Err(error) => {
@@ -1589,6 +1926,138 @@ mod tests {
     fn remote_status_ignores_command_ack_lines() {
         assert!(parse_remote_status("ok paused").is_none());
         assert!(parse_remote_status("ready paused").is_none());
+    }
+
+    #[test]
+    fn binary_sensor_cache_merges_rgbd_and_lidar_into_status_snapshot() {
+        let camera_stream_id = 100_u64;
+        let lidar_stream_id = 200_u64;
+        let metadata = |stream_id| rne_data::transport::SensorFrameMetadata {
+            stream_id,
+            sensor_sequence: 3,
+            capture_ticks: 10,
+            available_ticks: 12,
+        };
+        let rgb = rne_data::ImageRgb8::from_rgba8(1, 1, vec![1, 2, 3, 4]);
+        let depth = rne_data::ImageDepth::new(1, 1, vec![2.5]);
+        let mut cloud = rne_data::PointCloud::new();
+        cloud.push_return(Vec3::new(1.0, 2.0, 3.0), 0.5, 0, 1, 0, 0.0);
+
+        let mut cache = BinarySensorCache::default();
+        cache
+            .apply_rgb(
+                &rne_data::transport::encode_image_rgb8(metadata(camera_stream_id), &rgb).unwrap(),
+            )
+            .unwrap();
+        cache
+            .apply_depth(
+                &rne_data::transport::encode_image_depth(
+                    metadata(camera_stream_id + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET),
+                    &depth,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        cache
+            .apply_lidar(
+                &rne_data::transport::encode_lidar_point_cloud(metadata(lidar_stream_id), &cloud)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let stream = |stream_id, kind: &str| RemoteSensorStream {
+            stream_id,
+            kind: kind.to_string(),
+            sequence: 3,
+            payload_hash: 0,
+            camera: None,
+            lidar: None,
+            imu: None,
+            wheel_encoder: None,
+        };
+        let mut snapshot = RemoteSnapshot {
+            base: None,
+            base_yaw_rad: None,
+            positions_m: None,
+            joints: None,
+            sensors: vec![
+                stream(camera_stream_id, "camera"),
+                stream(lidar_stream_id, "lidar"),
+            ],
+        };
+        cache.apply_to_snapshot(&mut snapshot);
+
+        assert_eq!(snapshot.camera_pip(), Some((vec![1, 2, 3, 4], 1, 1)));
+        assert_eq!(snapshot.depth_pip(), Some((vec![2.5], 1, 1)));
+        assert_eq!(snapshot.lidar_points(), vec![Vec3::new(1.0, 2.0, 3.0)]);
+    }
+
+    #[test]
+    fn remote_command_parser_matches_binary_runner_vocabulary() {
+        assert_eq!(
+            parse_remote_control_command("step 10"),
+            Some(ControlCommand::Step { frames: 10 })
+        );
+        assert_eq!(
+            parse_remote_control_command("resume"),
+            Some(ControlCommand::Resume)
+        );
+        assert!(parse_remote_control_command("step nope").is_none());
+    }
+
+    #[test]
+    fn binary_remote_client_negotiates_and_sends_framed_command() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let hello_frame = TransportFrame::read_from(
+                &mut stream,
+                rne_data::transport::TRANSPORT_MAX_PAYLOAD_BYTES,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(hello_frame.kind, TransportMessageKind::ClientHello);
+            let hello = ClientHello::decode_payload(&hello_frame.payload).unwrap();
+            let negotiated = rne_data::transport::negotiate_transport(
+                hello,
+                rne_data::transport::NegotiationPolicy::default(),
+            )
+            .unwrap();
+            let response = rne_data::transport::ServerHello {
+                negotiated,
+                reconnect_generation: 1,
+                current_sequence: 0,
+                dropped_messages: 0,
+            };
+            TransportFrame::new(
+                TransportMessageKind::ServerHello,
+                1,
+                42,
+                response.encode_payload(),
+            )
+            .write_to(&mut stream)
+            .unwrap();
+            let command = TransportFrame::read_from(
+                &mut stream,
+                rne_data::transport::TRANSPORT_MAX_PAYLOAD_BYTES,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(command.session_id, 42);
+            assert_eq!(
+                rne_data::transport::decode_control_command(&command.payload).unwrap(),
+                ControlCommand::Step { frames: 3 }
+            );
+        });
+
+        let mut client = RemoteControlClient::connect(&RemoteConnection {
+            address: address.to_string(),
+            protocol: RemoteProtocol::Binary,
+        })
+        .unwrap();
+        client.send("step 3").unwrap();
+        server.join().unwrap();
     }
 
     #[test]

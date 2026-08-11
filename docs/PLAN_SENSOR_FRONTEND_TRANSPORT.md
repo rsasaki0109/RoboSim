@@ -110,3 +110,10 @@ LiDAR parallel-array alignment are validated before allocation or publication.
 - `cargo fmt --all`, workspace Clippy with `-D warnings`, workspace tests,
   `xtask ci-headless`, and `xtask ci` pass from the locked graph.
 
+## Implementation status
+
+- M3-A frozen wire contract: done locally.
+- M3-B production RGB-D/LiDAR payloads: done locally.
+- M3-C bounded delivery and DataBus retention: done locally.
+- M3-D reconnecting runner and native frontend: done locally.
+- M3-E full workspace/CI matrix: in progress.

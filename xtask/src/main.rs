@@ -99,6 +99,18 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
             "cargo run --locked -q -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml --replay-out target/runs/oss_parity_mesh_diff_drive_lidar_payload.rne-replay",
         ),
         (
+            "sensor_transport_protocol_golden",
+            "cargo test --locked -q -p rne_data transport::tests::frame_header_has_platform_independent_golden_bytes",
+        ),
+        (
+            "sensor_transport_binary_process_e2e",
+            "cargo test --locked -q -p rne_asset_cli --test control binary_frontend",
+        ),
+        (
+            "sensor_transport_reconnect",
+            "cargo test --locked -q -p rne_asset_cli frontend_transport::tests::disconnect_does_not_quit_and_same_session_reconnects",
+        ),
+        (
             "scenario_traffic_run",
             "cargo run --locked -q -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml",
         ),
@@ -141,6 +153,10 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         (
             "frontend_remote_sensor_projection_contract",
             "cargo test --locked -q -p interactive_viewer --example 14_interactive_viewer remote_status_decodes_camera_and_lidar_previews",
+        ),
+        (
+            "frontend_binary_sensor_projection_contract",
+            "cargo test --locked -q -p interactive_viewer --example 14_interactive_viewer binary_sensor_cache_merges_rgbd_and_lidar_into_status_snapshot",
         ),
     ];
 
