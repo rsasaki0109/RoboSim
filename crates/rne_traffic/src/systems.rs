@@ -1,9 +1,9 @@
 //! Deterministic traffic runtime systems.
 
 use crate::{
-    SignalAspect, TrafficActor, TrafficConflictControls, TrafficDeparture, TrafficPose,
-    TrafficPoseSource, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower, TrafficRuntime,
-    TrafficSignalControls, TrafficStepCompleted,
+    SignalAspect, TrafficActor, TrafficActorKind, TrafficConflictControls, TrafficDeparture,
+    TrafficPose, TrafficPoseSource, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower,
+    TrafficRuntime, TrafficSignalControls, TrafficStepCompleted,
 };
 use bevy_ecs::prelude::{Entity, With, World};
 use rne_core::{SimDuration, SimTime};
@@ -114,6 +114,10 @@ pub struct KinematicTrafficStep {
     pub minimum_observed_gap_m: Option<f64>,
     /// Stable hash of ordered route follower and pose state.
     pub stable_state_hash: u64,
+    /// Stable digest of every canonically ordered visible actor, regardless of pose ownership.
+    pub externally_visible_state_hash: u64,
+    /// Actor counts proving which subsystem owned and observed each pose.
+    pub ownership: TrafficOwnershipMetrics,
     /// Red stop-line crossings during this step.
     pub signal_violation_count: usize,
     /// Overlapping bumper pairs observed after this step.
@@ -137,6 +141,30 @@ pub struct TrafficFlowMetrics {
     pub completed_trip_count: u64,
     /// Cumulative stopped time across all actors.
     pub cumulative_waiting_time_s: f64,
+}
+
+/// Canonical ownership counts for one successful mixed traffic step.
+///
+/// Actors without an explicit [`TrafficPoseSource`] are runtime-owned. External
+/// actors are observed for deterministic evidence but are never advanced by
+/// the native kinematic integrator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TrafficOwnershipMetrics {
+    /// All traffic actors with valid externally visible state.
+    pub total_actor_count: usize,
+    /// Actors whose pose is owned by the RNE traffic runtime.
+    pub runtime_owned_actor_count: usize,
+    /// Actors whose pose is owned by an external adapter or simulator.
+    pub external_owned_actor_count: usize,
+    /// Runtime-owned actors advanced during this step.
+    pub runtime_advanced_actor_count: usize,
+    /// External-owned poses observed without native integration.
+    pub external_observed_actor_count: usize,
+    /// Invalid actors observed during a successful step.
+    ///
+    /// Successful steps always report zero because invalid state fails before
+    /// any actor is mutated. The explicit field keeps report schemas complete.
+    pub invalid_actor_count: usize,
 }
 
 /// Mutable control resources consumed by one reserved traffic step.
@@ -172,7 +200,9 @@ pub enum KinematicTrafficError {
         field: &'static str,
     },
     /// One or more traffic actors lacked required stable state.
-    #[error("{actor_count} traffic actor(s) are missing EntityUuid, TrafficRouteFollower, or TrafficPose")]
+    #[error(
+        "{actor_count} traffic actor(s) are missing EntityUuid, TrafficPose, or a runtime-owned TrafficRouteFollower"
+    )]
     MissingActorState {
         /// Number of invalid actors.
         actor_count: usize,
@@ -206,6 +236,14 @@ struct ActorSnapshot {
     follower: TrafficRouteFollower,
     pose: TrafficPose,
     departure_time_s: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+struct VisibleActorSnapshot {
+    entity: Entity,
+    uuid: u128,
+    kind: TrafficActorKind,
+    source: TrafficPoseSource,
 }
 
 /// Advances all route followers in stable UUID order using explicit simulation time.
@@ -285,29 +323,54 @@ fn advance_traffic(
         return Err(KinematicTrafficError::ZeroDelta);
     }
     let delta_s = delta.as_seconds().value();
-    let mut query = world.query_filtered::<(
+    let mut query = world.query::<(
         Entity,
+        &TrafficActor,
         Option<&EntityUuid>,
         Option<&TrafficRouteFollower>,
         Option<&TrafficPose>,
         Option<&TrafficDeparture>,
         Option<&TrafficPoseSource>,
-    ), With<TrafficActor>>();
+    )>();
     let mut missing_count = 0;
     let mut actors = Vec::new();
-    for (entity, uuid, follower, pose, departure, pose_source) in query.iter(world) {
-        if pose_source.is_some_and(|source| *source == TrafficPoseSource::External) {
-            continue;
-        }
-        match (uuid, follower, pose) {
-            (Some(uuid), Some(follower), Some(pose)) => actors.push(ActorSnapshot {
-                entity,
-                uuid: uuid.0.as_u128(),
-                follower: follower.clone(),
-                pose: *pose,
-                departure_time_s: departure.map(|departure| departure.departure_time_s),
-            }),
-            _ => missing_count += 1,
+    let mut visible_actors = Vec::new();
+    for (entity, actor, uuid, follower, pose, departure, pose_source) in query.iter(world) {
+        let source = pose_source.copied().unwrap_or_default();
+        match source {
+            TrafficPoseSource::Runtime => match (uuid, follower, pose) {
+                (Some(uuid), Some(follower), Some(pose)) => {
+                    let uuid = uuid.0.as_u128();
+                    validate_pose(uuid, *pose)?;
+                    actors.push(ActorSnapshot {
+                        entity,
+                        uuid,
+                        follower: follower.clone(),
+                        pose: *pose,
+                        departure_time_s: departure.map(|departure| departure.departure_time_s),
+                    });
+                    visible_actors.push(VisibleActorSnapshot {
+                        entity,
+                        uuid,
+                        kind: actor.kind,
+                        source,
+                    });
+                }
+                _ => missing_count += 1,
+            },
+            TrafficPoseSource::External => match (uuid, pose) {
+                (Some(uuid), Some(pose)) => {
+                    let uuid = uuid.0.as_u128();
+                    validate_pose(uuid, *pose)?;
+                    visible_actors.push(VisibleActorSnapshot {
+                        entity,
+                        uuid,
+                        kind: actor.kind,
+                        source,
+                    });
+                }
+                _ => missing_count += 1,
+            },
         }
     }
     if missing_count != 0 {
@@ -315,12 +378,15 @@ fn advance_traffic(
             actor_count: missing_count,
         });
     }
-    actors.sort_by_key(|actor| actor.uuid);
+    visible_actors.sort_by_key(|actor| actor.uuid);
     let mut actor_ids = BTreeSet::new();
-    for actor in &mut actors {
+    for actor in &visible_actors {
         if !actor_ids.insert(actor.uuid) {
             return Err(KinematicTrafficError::DuplicateActorId { uuid: actor.uuid });
         }
+    }
+    actors.sort_by_key(|actor| actor.uuid);
+    for actor in &mut actors {
         validate_follower(actor)?;
         if actor
             .departure_time_s
@@ -443,11 +509,29 @@ fn advance_traffic(
         + cross_route_collision_count(&updated, world, config);
     let flow = record_flow_metrics(runtime, &updated, routes, sim_time, delta);
     let completed = advance_traffic_step(runtime, sim_time);
+    let external_owned_actor_count = visible_actors
+        .iter()
+        .filter(|actor| actor.source == TrafficPoseSource::External)
+        .count();
+    let ownership = TrafficOwnershipMetrics {
+        total_actor_count: visible_actors.len(),
+        runtime_owned_actor_count: updated.len(),
+        external_owned_actor_count,
+        runtime_advanced_actor_count: updated.len(),
+        external_observed_actor_count: external_owned_actor_count,
+        invalid_actor_count: 0,
+    };
     Ok(KinematicTrafficStep {
         completed,
         actor_count: updated.len(),
         minimum_observed_gap_m,
         stable_state_hash: stable_fleet_hash(runtime.step_index(), &updated, world),
+        externally_visible_state_hash: visible_state_hash(
+            runtime.step_index(),
+            &visible_actors,
+            world,
+        ),
+        ownership,
         signal_violation_count: 0,
         collision_count,
         active_reservation_count: conflict_controls
@@ -770,6 +854,13 @@ fn validate_follower(actor: &ActorSnapshot) -> Result<(), KinematicTrafficError>
     Ok(())
 }
 
+fn validate_pose(uuid: u128, pose: TrafficPose) -> Result<(), KinematicTrafficError> {
+    if pose.position_m.iter().any(|value| !value.is_finite()) || !pose.yaw_rad.is_finite() {
+        return Err(KinematicTrafficError::InvalidActorState { uuid });
+    }
+    Ok(())
+}
+
 fn route_groups(actors: &[ActorSnapshot]) -> BTreeMap<crate::TrafficId, Vec<usize>> {
     let mut groups = BTreeMap::<crate::TrafficId, Vec<usize>>::new();
     for (index, actor) in actors.iter().enumerate() {
@@ -843,6 +934,39 @@ fn stable_fleet_hash(step_index: u64, actors: &[ActorSnapshot], world: &World) -
         let pose = world
             .get::<TrafficPose>(actor.entity)
             .expect("pose updated before hashing");
+        for coordinate in pose.position_m {
+            append(&coordinate.to_bits().to_le_bytes());
+        }
+        append(&pose.yaw_rad.to_bits().to_le_bytes());
+    }
+    hash
+}
+
+fn visible_state_hash(step_index: u64, actors: &[VisibleActorSnapshot], world: &World) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    let mut append = |bytes: &[u8]| {
+        for byte in bytes {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+        }
+    };
+    append(&step_index.to_le_bytes());
+    append(&(actors.len() as u64).to_le_bytes());
+    for actor in actors {
+        append(&actor.uuid.to_le_bytes());
+        append(&[match actor.kind {
+            TrafficActorKind::MotorVehicle => 0,
+            TrafficActorKind::Bicycle => 1,
+            TrafficActorKind::Pedestrian => 2,
+        }]);
+        append(&[match actor.source {
+            TrafficPoseSource::Runtime => 0,
+            TrafficPoseSource::External => 1,
+        }]);
+        let pose = world
+            .get::<TrafficPose>(actor.entity)
+            .expect("pose validated before visible-state hashing");
         for coordinate in pose.position_m {
             append(&coordinate.to_bits().to_le_bytes());
         }
