@@ -11,7 +11,7 @@ use thiserror::Error;
 pub const SCENARIO_REPLAY_KIND: &str = "rne-scenario-replay";
 
 /// Current scenario replay artifact schema version.
-pub const SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 3;
+pub const SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 4;
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
@@ -112,7 +112,7 @@ pub struct ScenarioReplayArtifact {
     pub executed_steps: u64,
     /// Whether `rne-asset replay` can reproduce this record automatically.
     ///
-    /// This is always `true` for schema version 3 artifacts. It remains an
+    /// This is always `true` for schema version 4 artifacts. It remains an
     /// explicit field so consumers can distinguish a verified artifact from
     /// an older or externally produced record.
     pub replayable: bool,
@@ -178,7 +178,7 @@ impl ScenarioReplayArtifact {
         }
         if !self.replayable {
             return Err(ScenarioReplayArtifactError::Invalid(
-                "schema version 3 scenario replay artifacts must be replayable".to_string(),
+                "schema version 4 scenario replay artifacts must be replayable".to_string(),
             ));
         }
         if !self.options.hz.is_finite() || self.options.hz <= 0.0 {
@@ -218,6 +218,45 @@ impl ScenarioReplayArtifact {
             return Err(ScenarioReplayArtifactError::Invalid(
                 "result.final_positions_m must contain only finite values".to_string(),
             ));
+        }
+        if self.result.final_actors.len() != self.result.final_positions_m.len() {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.final_actors must correspond one-to-one with final_positions_m".to_string(),
+            ));
+        }
+        if self
+            .result
+            .final_actors
+            .windows(2)
+            .any(|window| window[0].name >= window[1].name)
+        {
+            return Err(ScenarioReplayArtifactError::Invalid(
+                "result.final_actors must have unique names in canonical order".to_string(),
+            ));
+        }
+        for (actor, position_m) in self
+            .result
+            .final_actors
+            .iter()
+            .zip(&self.result.final_positions_m)
+        {
+            if actor.name.trim().is_empty()
+                || actor
+                    .final_position_m
+                    .iter()
+                    .any(|value| !value.is_finite())
+                || !actor.final_speed_m_s.is_finite()
+                || actor.final_speed_m_s < 0.0
+            {
+                return Err(ScenarioReplayArtifactError::Invalid(
+                    "result.final_actors must contain named finite non-negative states".to_string(),
+                ));
+            }
+            if actor.final_position_m != *position_m {
+                return Err(ScenarioReplayArtifactError::Invalid(
+                    "result.final_actors positions must match final_positions_m".to_string(),
+                ));
+            }
         }
         if self
             .control_commands
@@ -288,6 +327,12 @@ mod tests {
             signal_violations: 0,
             collisions: 0,
             final_positions_m: vec![[1.0, 0.0, 2.0]],
+            final_actors: vec![crate::ScenarioActorResult {
+                name: "ego".to_string(),
+                kind: crate::ScenarioEntityKind::MotorVehicle,
+                final_position_m: [1.0, 0.0, 2.0],
+                final_speed_m_s: 2.0,
+            }],
             route_length_m: 10.0,
             average_speed_m_s: 2.0,
             steps: 4,

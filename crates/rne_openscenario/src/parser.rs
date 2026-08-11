@@ -6,6 +6,7 @@ use crate::{
     ScenarioTimedAction,
 };
 use roxmltree::{Document, Node};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// Parses a minimal OpenSCENARIO 1.0 XML file into a validated scenario document.
@@ -257,13 +258,20 @@ fn parse_storyboard_actions<'a, 'input>(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        if actor_refs.len() != 1 {
+        if actor_refs.is_empty() {
             return Err(ScenarioError::UnsupportedElement {
                 element: "ManeuverGroup".to_string(),
-                reason: "actor sets must contain exactly one EntityRef".to_string(),
+                reason: "actor sets must contain at least one EntityRef".to_string(),
             });
         }
-        let entity = actor_refs.into_iter().next().expect("exactly one actor");
+        let unique_actor_refs = actor_refs.iter().cloned().collect::<BTreeSet<_>>();
+        if unique_actor_refs.len() != actor_refs.len() {
+            return Err(ScenarioError::Invalid(
+                "ManeuverGroup actor sets must not contain duplicate EntityRef values".to_string(),
+            ));
+        }
+        let actor_refs = unique_actor_refs.into_iter().collect::<Vec<_>>();
+        let actor_names = actor_refs.join(", ");
 
         for event in descendant_elements(maneuver_group, "Event") {
             let start_time_s = descendant_element(event, "SimulationTimeCondition")
@@ -271,7 +279,7 @@ fn parse_storyboard_actions<'a, 'input>(
                     ScenarioError::UnsupportedElement {
                         element: "Event".to_string(),
                         reason: format!(
-                            "event for entity `{entity}` requires a `SimulationTimeCondition` start time"
+                            "event for actors `{actor_names}` requires a `SimulationTimeCondition` start time"
                         ),
                     }
                 })?
@@ -300,15 +308,15 @@ fn parse_storyboard_actions<'a, 'input>(
                 return Err(ScenarioError::UnsupportedElement {
                     element: "Event".to_string(),
                     reason: format!(
-                        "event for entity `{entity}` requires an `AbsoluteTargetSpeed`, `RelativeTargetLane`, or `AssignRouteAction` action"
+                        "event for actors `{actor_names}` requires an `AbsoluteTargetSpeed`, `RelativeTargetLane`, or `AssignRouteAction` action"
                     ),
                 });
             };
-            actions.push(ScenarioTimedAction {
+            actions.extend(actor_refs.iter().map(|entity| ScenarioTimedAction {
                 entity: entity.clone(),
                 start_time_s,
-                action,
-            });
+                action: action.clone(),
+            }));
         }
     }
     Ok(actions)

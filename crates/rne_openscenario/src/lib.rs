@@ -42,8 +42,8 @@ pub use replay::{
     ScenarioReplayInputs, SCENARIO_REPLAY_KIND, SCENARIO_REPLAY_SCHEMA_VERSION,
 };
 pub use runtime::{
-    actor_length_m, execute_scenario, execute_scenario_with_control, ScenarioRunOptions,
-    ScenarioRunResult,
+    actor_length_m, execute_scenario, execute_scenario_with_control, ScenarioActorResult,
+    ScenarioRunOptions, ScenarioRunResult,
 };
 pub use scenario::{
     ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,

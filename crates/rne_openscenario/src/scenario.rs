@@ -51,7 +51,7 @@ pub enum ScenarioError {
 }
 
 /// Classifies a scenario road user without constraining its robot or policy model.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScenarioEntityKind {
     /// A motor vehicle, including a car, bus, or truck.

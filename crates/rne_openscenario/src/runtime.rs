@@ -16,7 +16,7 @@ use rne_traffic::{
     TrafficRuntime, TrafficSignalControl, TrafficSignalControls,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 /// Fixed-step execution settings for a scenario.
@@ -27,6 +27,20 @@ pub struct ScenarioRunOptions {
     pub steps: u64,
     /// Fixed simulation rate in hertz.
     pub hz: f64,
+}
+
+/// Named final state of one scenario actor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioActorResult {
+    /// Stable OpenSCENARIO entity name.
+    pub name: String,
+    /// Road-user kind declared by the scenario.
+    pub kind: ScenarioEntityKind,
+    /// Final world position in metres.
+    pub final_position_m: [f64; 3],
+    /// Final route-follower speed in metres per second.
+    pub final_speed_m_s: f64,
 }
 
 impl Default for ScenarioRunOptions {
@@ -50,6 +64,9 @@ pub struct ScenarioRunResult {
     pub collisions: usize,
     /// Actor positions after the last step, in actor spawn order.
     pub final_positions_m: Vec<[f64; 3]>,
+    /// Named actor states after the last step, in canonical name order.
+    #[serde(default)]
+    pub final_actors: Vec<ScenarioActorResult>,
     /// Length of the derived traffic route in metres.
     pub route_length_m: f64,
     /// Average speed of departed, unfinished actors after the last step.
@@ -79,7 +96,7 @@ fn actor_kind(kind: ScenarioEntityKind) -> TrafficActorKind {
 struct ScenarioEpisode {
     world: World,
     route: TrafficRoute,
-    parallel_route: Option<TrafficRoute>,
+    parallel_routes: BTreeMap<(TrafficId, i64), TrafficId>,
     routes: TrafficRouteCatalog,
     runtime: TrafficRuntime,
     schedules: ActionSchedule,
@@ -95,6 +112,7 @@ struct ScenarioEpisode {
 #[derive(Serialize)]
 struct ScenarioLiveSnapshot {
     positions_m: Vec<[f64; 3]>,
+    actors: Vec<ScenarioActorResult>,
     signal_violations: usize,
     collisions: usize,
     stable_hash: u64,
@@ -107,15 +125,27 @@ impl ScenarioEpisode {
         network: &TrafficNetwork,
         primary_kind: ScenarioEntityKind,
     ) -> Result<Self, ScenarioError> {
-        let route = derive_route(network, primary_kind)?;
-        let parallel_route = parallel_route_for(&route, document)?;
+        let mut kind_routes = BTreeMap::new();
+        for entity in &document.entities {
+            if let Entry::Vacant(entry) = kind_routes.entry(entity.kind) {
+                let route = derive_route(network, entity.kind, route_id_for_kind(entity.kind))?;
+                entry.insert(route);
+            }
+        }
+        let route = kind_routes
+            .get(&primary_kind)
+            .expect("primary kind was collected from the document")
+            .clone();
 
         let mut world = World::new();
         let mut spawn_order = document.entities.clone();
         spawn_order.sort_by(|left, right| left.name.cmp(&right.name));
         for (index, entity) in spawn_order.iter().enumerate() {
-            let distance_m = spawn_distance_m(&route, entity.initial_world_position_m);
-            let pose = route.sample(distance_m);
+            let entity_route = kind_routes
+                .get(&entity.kind)
+                .expect("all entity kinds have a route");
+            let distance_m = spawn_distance_m(entity_route, entity.initial_world_position_m);
+            let pose = entity_route.sample(distance_m);
             world.spawn((
                 Name(entity.name.clone()),
                 TrafficActor {
@@ -123,7 +153,7 @@ impl ScenarioEpisode {
                 },
                 EntityUuid(Uuid::from_u128(uuid_for_entity(index))),
                 TrafficRouteFollower {
-                    route_id: route.id().clone(),
+                    route_id: entity_route.id().clone(),
                     distance_m,
                     speed_m_s: 0.0,
                     desired_speed_m_s: 0.0,
@@ -137,19 +167,37 @@ impl ScenarioEpisode {
         }
 
         let mut routes = TrafficRouteCatalog::default();
-        routes
-            .insert(route.clone())
-            .map_err(|error| ScenarioError::Invalid(format!("insert route: {error}")))?;
-        if let Some(parallel_route) = &parallel_route {
-            routes.insert(parallel_route.clone()).map_err(|error| {
-                ScenarioError::Invalid(format!("insert parallel route: {error}"))
-            })?;
+        for kind_route in kind_routes.values() {
+            routes
+                .insert(kind_route.clone())
+                .map_err(|error| ScenarioError::Invalid(format!("insert route: {error}")))?;
+        }
+        let mut parallel_routes = BTreeMap::new();
+        let offsets = document
+            .actions
+            .iter()
+            .filter_map(|action| match action.action {
+                ScenarioAction::LaneChange { target_lane_offset } => Some(target_lane_offset),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for kind_route in kind_routes.values() {
+            for offset in &offsets {
+                let parallel_route = parallel_route_for(kind_route, *offset)?;
+                parallel_routes.insert(
+                    (kind_route.id().clone(), *offset),
+                    parallel_route.id().clone(),
+                );
+                routes.insert(parallel_route).map_err(|error| {
+                    ScenarioError::Invalid(format!("insert parallel route: {error}"))
+                })?;
+            }
         }
         let (controls, signal_schedule) = build_signal_schedule(network, &route)?;
         Ok(Self {
             world,
             route,
-            parallel_route,
+            parallel_routes,
             routes,
             runtime: TrafficRuntime::default(),
             schedules: build_action_schedules(document),
@@ -164,8 +212,10 @@ impl ScenarioEpisode {
     }
 
     fn live_snapshot(&self) -> String {
+        let actors = collect_actor_results(&self.world);
         serde_json::to_string(&ScenarioLiveSnapshot {
-            positions_m: collect_positions(&self.world),
+            positions_m: actors.iter().map(|actor| actor.final_position_m).collect(),
+            actors,
             signal_violations: self.signal_violations,
             collisions: self.collisions,
             stable_hash: self.stable_hash,
@@ -234,7 +284,7 @@ pub fn execute_scenario_with_control(
                 &mut episode.routes,
                 &episode.schedules,
                 sim_time,
-                episode.parallel_route.as_ref(),
+                &episode.parallel_routes,
                 &mut episode.applied,
             )?;
             apply_signal_cycle(&mut episode.controls, &episode.signal_schedule, sim_time);
@@ -259,12 +309,17 @@ pub fn execute_scenario_with_control(
             }
         }
 
-        let final_positions_m = collect_positions(&episode.world);
+        let final_actors = collect_actor_results(&episode.world);
+        let final_positions_m = final_actors
+            .iter()
+            .map(|actor| actor.final_position_m)
+            .collect();
         return Ok(ScenarioRunResult {
             stable_hash: episode.stable_hash,
             signal_violations: episode.signal_violations,
             collisions: episode.collisions,
             final_positions_m,
+            final_actors,
             route_length_m: episode.route.total_length_m(),
             average_speed_m_s: episode.average_speed_m_s,
             steps: completed_steps,
@@ -272,26 +327,31 @@ pub fn execute_scenario_with_control(
     }
 }
 
-fn collect_positions(world: &World) -> Vec<[f64; 3]> {
-    let mut positions = world
+fn collect_actor_results(world: &World) -> Vec<ScenarioActorResult> {
+    let mut actors = world
         .iter_entities()
         .filter_map(|entity_ref| {
             let entity = entity_ref.id();
             let name = world.get::<Name>(entity)?;
             let pose = world.get::<TrafficPose>(entity)?;
-            Some((name.0.clone(), pose.position_m))
+            let actor = world.get::<TrafficActor>(entity)?;
+            let follower = world.get::<TrafficRouteFollower>(entity)?;
+            Some(ScenarioActorResult {
+                name: name.0.clone(),
+                kind: scenario_kind(actor.kind),
+                final_position_m: pose.position_m,
+                final_speed_m_s: follower.speed_m_s,
+            })
         })
         .collect::<Vec<_>>();
-    positions.sort_by(|left, right| left.0.cmp(&right.0));
-    positions
-        .into_iter()
-        .map(|(_, position)| position)
-        .collect()
+    actors.sort_by(|left, right| left.name.cmp(&right.name));
+    actors
 }
 
 fn derive_route(
     network: &TrafficNetwork,
     kind: ScenarioEntityKind,
+    route_id: TrafficId,
 ) -> Result<TrafficRoute, ScenarioError> {
     let traffic_asset = rne_traffic::TrafficAsset::new(network.clone());
     traffic_asset
@@ -342,7 +402,6 @@ fn derive_route(
             if let Ok(lane_route) =
                 shortest_lane_route(network, start_lane, goal_lane, actor_kind(kind))
             {
-                let route_id = TrafficId::new("route:scenario").expect("stable route ID");
                 return rne_traffic::materialize_lane_route(network, &lane_route, route_id, false)
                     .map_err(|error| {
                         ScenarioError::Invalid(format!("route materialization: {error}"))
@@ -354,6 +413,23 @@ fn derive_route(
         "no route between any source and sink lane for {:?}",
         kind
     )))
+}
+
+fn route_id_for_kind(kind: ScenarioEntityKind) -> TrafficId {
+    let suffix = match kind {
+        ScenarioEntityKind::MotorVehicle => "motor_vehicle",
+        ScenarioEntityKind::Bicycle => "bicycle",
+        ScenarioEntityKind::Pedestrian => "pedestrian",
+    };
+    TrafficId::new(format!("route:scenario:{suffix}")).expect("stable route ID")
+}
+
+fn scenario_kind(kind: TrafficActorKind) -> ScenarioEntityKind {
+    match kind {
+        TrafficActorKind::MotorVehicle => ScenarioEntityKind::MotorVehicle,
+        TrafficActorKind::Bicycle => ScenarioEntityKind::Bicycle,
+        TrafficActorKind::Pedestrian => ScenarioEntityKind::Pedestrian,
+    }
 }
 
 fn spawn_distance_m(route: &TrafficRoute, position: Option<[f64; 3]>) -> f64 {
@@ -389,21 +465,7 @@ fn uuid_for_entity(index: usize) -> u128 {
 type ActionSchedule = BTreeMap<String, Vec<(f64, ScenarioAction)>>;
 
 /// Builds the parallel route used for lane changes, when any exist.
-fn parallel_route_for(
-    primary: &TrafficRoute,
-    document: &ScenarioDocument,
-) -> Result<Option<TrafficRoute>, ScenarioError> {
-    let offset = document
-        .actions
-        .iter()
-        .filter_map(|action| match &action.action {
-            ScenarioAction::LaneChange { target_lane_offset } => Some(*target_lane_offset),
-            _ => None,
-        })
-        .next();
-    let Some(offset) = offset else {
-        return Ok(None);
-    };
+fn parallel_route_for(primary: &TrafficRoute, offset: i64) -> Result<TrafficRoute, ScenarioError> {
     let path = primary.path_m();
     let mut offset_path = path.to_vec();
     const LANE_WIDTH_M: f64 = 3.5;
@@ -427,9 +489,10 @@ fn parallel_route_for(
         offset_path[index][0] += -dz / length * LANE_WIDTH_M * sign;
         offset_path[index][2] += dx / length * LANE_WIDTH_M * sign;
     }
-    let route_id = TrafficId::new("route:scenario:parallel").expect("stable route ID");
+    let side = if offset > 0 { "left" } else { "right" };
+    let route_id = TrafficId::new(format!("{}:parallel:{side}", primary.id().as_str()))
+        .expect("stable parallel route ID");
     TrafficRoute::new(route_id, offset_path, primary.is_closed())
-        .map(Some)
         .map_err(|error| ScenarioError::Invalid(format!("parallel route: {error}")))
 }
 
@@ -560,7 +623,7 @@ fn apply_due_actions(
     routes: &mut TrafficRouteCatalog,
     schedules: &ActionSchedule,
     sim_time: SimTime,
-    parallel_route: Option<&TrafficRoute>,
+    parallel_routes: &BTreeMap<(TrafficId, i64), TrafficId>,
     applied: &mut std::collections::HashMap<String, usize>,
 ) -> Result<(), ScenarioError> {
     let now_s = sim_time.as_seconds().value();
@@ -592,16 +655,29 @@ fn apply_due_actions(
                         follower.desired_speed_m_s = *target_m_s;
                     }
                 }
-                ScenarioAction::LaneChange { .. } => {
-                    if let Some(parallel_route) = parallel_route {
-                        if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
-                            follower.route_id = parallel_route.id().clone();
-                        }
+                ScenarioAction::LaneChange { target_lane_offset } => {
+                    let current_route_id = world
+                        .get::<TrafficRouteFollower>(entity)
+                        .map(|follower| follower.route_id.clone())
+                        .ok_or_else(|| {
+                            ScenarioError::Invalid(format!(
+                                "entity `{entity_name}` is missing a route follower"
+                            ))
+                        })?;
+                    let target_route_id = parallel_routes
+                        .get(&(current_route_id.clone(), *target_lane_offset))
+                        .cloned()
+                        .ok_or_else(|| {
+                            ScenarioError::Invalid(format!(
+                                "entity `{entity_name}` cannot lane-change from route `{current_route_id}`"
+                            ))
+                        })?;
+                    if let Some(mut follower) = world.get_mut::<TrafficRouteFollower>(entity) {
+                        follower.route_id = target_route_id;
                     }
                 }
                 ScenarioAction::AssignRoute { waypoints } => {
-                    let route_id = TrafficId::new("route:scenario:assigned")
-                        .expect("stable assigned route ID");
+                    let route_id = assigned_route_id(entity_name, index);
                     if routes.get(&route_id).is_none() {
                         let assigned_route =
                             TrafficRoute::new(route_id.clone(), waypoints.clone(), false).map_err(
@@ -627,4 +703,16 @@ fn apply_due_actions(
         }
     }
     Ok(())
+}
+
+fn assigned_route_id(entity_name: &str, action_index: usize) -> TrafficId {
+    let encoded_name = entity_name
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    TrafficId::new(format!(
+        "route:scenario:assigned:{encoded_name}:{action_index}"
+    ))
+    .expect("hex-encoded entity route ID is valid")
 }

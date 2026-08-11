@@ -90,6 +90,29 @@ fn rejects_action_for_unknown_entity() {
 }
 
 #[test]
+fn expands_one_event_to_a_canonical_multi_actor_set() {
+    let text = fixture("minimal_speed.xosc")
+        .replace("<Actors>", "<Actors><EntityRef entityRef=\"walker\"/>");
+    let document =
+        parse_openscenario_xml_with_source("multi_actor.xosc", &text).expect("multi actor set");
+
+    assert_eq!(document.actions.len(), 2);
+    assert_eq!(document.actions[0].entity, "ego");
+    assert_eq!(document.actions[1].entity, "walker");
+    assert_eq!(document.actions[0].action, document.actions[1].action);
+    assert_eq!(document.actions[0].start_time_s, 2.0);
+}
+
+#[test]
+fn rejects_duplicate_actor_references() {
+    let text =
+        fixture("minimal_speed.xosc").replace("<Actors>", "<Actors><EntityRef entityRef=\"ego\"/>");
+    let error = parse_openscenario_xml_with_source("duplicate_actor.xosc", &text)
+        .expect_err("duplicate actor reference");
+    assert!(error.to_string().contains("duplicate EntityRef"));
+}
+
+#[test]
 fn imports_lane_change_scenario() {
     use rne_openscenario::ScenarioAction;
 
