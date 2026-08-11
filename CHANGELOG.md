@@ -6,6 +6,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Stable robot-native controller surface (M2)**: versioned typed
+  observation/action frames use stable robot and joint identities, explicit
+  units, fixed-step timestamps, strict validation, and canonical ordering.
+  Host-owned lifecycle and capability negotiation now gate deterministic
+  multi-controller/multi-robot scheduling before the first step; command
+  conflicts and unknown robot/joint targets are rejected.
+- **Controller C ABI v3 with v2 compatibility**: the loader accepts ABI v2-v3,
+  dispatches version-required symbols, and adds capability, configure, reset,
+  robot-scoped step, and shutdown calls in v3. A frozen independent v2 plugin
+  loads and steps in the current host; the reference plugin and generated
+  scaffolds emit v3 and include plugin manifests.
+- **Robot-scoped controller replay and runner lifecycle**: plugin actions are
+  recorded per stable asset model ID and exact joint, replayed to one actuator,
+  and displayed by the browser inspector. The runner owns configure, episode
+  activation/reset, stepping, and shutdown. A two-robot URDF fixture proves
+  identical action bytes and named actuator targets under reversed ECS spawn
+  order.
 - **Behavior CI failure replay and minimization**: typed contract/report schema
   v2 now records a deterministic seed manifest and per-violation state digest.
   Failed seeds emit versioned `.rne-replay` artifacts with scripted actions,

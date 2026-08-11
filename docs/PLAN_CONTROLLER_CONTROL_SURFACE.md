@@ -1,6 +1,6 @@
 # Stable Controller Control Surface Plan
 
-Status: M2-A through M2-C implemented; M2-D planned
+Status: M2-A through M2-D implemented; exit gates pending full workspace CI
 
 ## Goal
 
@@ -30,27 +30,34 @@ independent of ECS entity IDs and input insertion order.
 
 ## M2-B: Lifecycle and capability negotiation
 
-Implemented with a controller descriptor containing a sorted capability set and a host-owned
-`created -> configured -> active -> shutdown` lifecycle. Configuration must
+Implemented with a controller descriptor containing a sorted capability set
+and a host-owned `created -> configured -> active -> shutdown` lifecycle. Configuration must
 fail before stepping when a controller cannot consume every required
 observation or produce every required action. Reset remains a deterministic
 simulation event and receives fixed-step metadata, never wall-clock time.
 
 ## M2-C: Multi-robot scheduling
 
-Implemented with a scheduler that invokes controllers in stable controller/robot ID order,
-validates every returned action against the paired observation, rejects
+Implemented with a scheduler that invokes controllers in stable
+controller/robot ID order, validates every returned action against the paired observation, rejects
 conflicting commands, and emits one canonical action frame. A reversed-spawn
 fixture must produce byte-identical action frames and equivalent final named
 robot state.
 
 ## M2-D: C ABI compatibility
 
-Extend the C ABI with opt-in capability, lifecycle, and multi-robot symbols
+Implemented ABI v3 capability, lifecycle, and robot-scoped fixed-step symbols
 while retaining the ABI-v2 symbol layouts as the oldest supported contract.
-The loader will dispatch by the plugin-reported ABI version. CI will build an
-independent ABI-v2 fixture and prove that it loads and runs in the newest host,
-while the current example exercises the newest ABI and negotiation path.
+The loader dispatches by the plugin-reported ABI version. Tests build an
+independent frozen ABI-v2 fixture and prove that it loads and runs in the newest
+host, while the current example and generated scaffold exercise ABI v3 and its
+negotiation path. Both plugin crates include committed manifests.
+
+The asset runner now owns scheduler lifecycle, canonicalizes stable asset model
+IDs independently of URDF internal names, records robot-scoped replay actions,
+and resolves those actions back to exact robot/joint actuator targets. A dual
+URDF fixture is spawned in both declaration orders and must produce identical
+action JSON and named actuator state.
 
 ## M2 exit gate
 

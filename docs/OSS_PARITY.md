@@ -178,7 +178,8 @@ cargo run -p xtask -- parity
 
 The default report is `artifacts/oss-parity/report.json` (ignored generated
 output). CI uploads the same report so a failed workflow identifies the exact
-robot, sensor, scenario, traffic, or runner-control slice that regressed.
+robot, controller ABI/multi-robot ordering, sensor, scenario, traffic, or
+runner-control slice that regressed.
 
 ## SUMO road-network import
 
@@ -337,15 +338,20 @@ max_velocity_rad_s = 5.0
 ```
 
 The host and the plugin communicate through a versioned C ABI
-(`rne_plugin::cabi`, currently ABI version 2): the plugin exports
-`rne_plugin_abi_version`, `rne_plugin_name`, `rne_controller_create`,
-`rne_controller_destroy`, and `rne_controller_step`, and all data crosses the
-boundary as `#[repr(C)]` values and NUL-terminated UTF-8 strings. A plugin
-whose ABI version differs is rejected at load time.
+(`rne_plugin::cabi`). The current ABI is v3 and the supported range is v2-v3.
+Every plugin exports the v2 base symbols (`rne_plugin_abi_version`,
+`rne_plugin_name`, `rne_controller_create`, `rne_controller_destroy`, and
+`rne_controller_step`). ABI v3 additionally exports capability negotiation,
+configure/reset/shutdown lifecycle hooks, and a robot-scoped fixed-step call.
+All data crosses the boundary as `#[repr(C)]` values, integer masks/timestamps,
+and NUL-terminated UTF-8 strings. Versions outside the supported range and
+missing version-required symbols are rejected at load time.
 `rne_plugin_example_velocity_servo` is the minimal reference implementation and
 produces identical velocity commands to the built-in `VelocityServoController`;
-a determinism test drives a scene with the loaded library and the built-in
-implementation and requires byte-identical replay frames.
+the frozen `rne_plugin_legacy_v2_fixture` proves the oldest ABI still loads in
+the newest runtime. Runner tests also require byte-identical replay frames for
+loaded versus built-in controllers and spawn-order-independent robot-scoped
+actions for a two-robot scene.
 
 Plugins can also be discovered by name instead of an explicit path. A manifest
 lists directories to search, and the runner loads the first shared library
@@ -373,8 +379,8 @@ cargo run --release -p rne_asset_cli -- plugin new my_controller --dir plugins
 cd plugins/my_controller && cargo build
 ```
 
-The scaffolded crate starts as a velocity-servo policy (so it compiles and
-loads immediately); replace `rne_controller_step` with your controller.
+The scaffolded crate starts as an ABI-v3 velocity-servo policy (so it compiles
+and loads immediately); replace `rne_controller_step_v3` with your controller.
 `rne-asset plugin list --path <dir>` enumerates the built-in `velocity_servo`
 and any discoverable plugin libraries in the given directories. An
 end-to-end test scaffolds, builds, and loads a plugin from the generated
