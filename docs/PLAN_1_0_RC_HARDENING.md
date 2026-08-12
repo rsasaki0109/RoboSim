@@ -157,7 +157,7 @@ point at the tested commit.
 - M6-B supply-chain evidence: complete.
 - M6-C parser/protocol hardening: complete.
 - M6-D artifacts and install rehearsal: complete.
-- M6-E final exit matrix: implementation complete; final clean PR matrix pending.
+- M6-E final exit matrix: complete.
 
 ## M6-A evidence (2026-08-12)
 
@@ -298,7 +298,14 @@ point at the tested commit.
   checks in 516.784 s. Its three 100-actor samples had identical hashes and a
   slowest 3,246.41 steps/s against the 60 steps/s floor, with zero unexplained
   violation.
-- GitHub Actions run `31569498804` passed the complete pre-aggregate CI matrix,
-  and clean-checkout release run `31569498834` passed Linux in 6m44s and
-  Windows in 13m21s. Final acceptance remains pending until this M6-E change
-  itself passes both new aggregate checks from a clean pull-request checkout.
+- PR #162 passed the final clean-checkout matrix and merged as `a4e230f`.
+  GitHub Actions CI run `31577873319` passed every required job, including
+  three workspace-test shards, 22/22 Windows parity checks, and the new
+  `workspace` aggregate. Release run `31577873221` passed Linux in 6m41s,
+  Windows in 12m27s, and the new `release_candidate` aggregate in 3m54s.
+- The uploaded CI and release schema-v1 reports both identify tested commit
+  `f14799361bbd65d86b2bba3b94713b12cf414017` and Cargo.lock SHA-256
+  `d5453946485aab7ef3bbac1968188b4fb789e986f94e0adf4808d41ac6b249a8`.
+  Both independently record a clean checkout, zero open P0/P1 blockers, every
+  required dependency as `success`, and `release_eligible=true`. This closes
+  the M6-E acceptance matrix.
