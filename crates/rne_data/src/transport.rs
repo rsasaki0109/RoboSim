@@ -178,7 +178,10 @@ impl TransportFrame {
         if bytes.len() < TRANSPORT_HEADER_BYTES {
             return Err(TransportError::Truncated);
         }
-        let fields = decode_header(&bytes[..TRANSPORT_HEADER_BYTES], max_payload_bytes)?;
+        let fields = decode_header(
+            &bytes[..TRANSPORT_HEADER_BYTES],
+            max_payload_bytes.min(TRANSPORT_MAX_PAYLOAD_BYTES),
+        )?;
         let expected_len = TRANSPORT_HEADER_BYTES
             .checked_add(fields.payload_len)
             .ok_or(TransportError::InvalidField("payload_len"))?;
@@ -211,7 +214,7 @@ impl TransportFrame {
         reader
             .read_exact(&mut header[1..])
             .map_err(map_read_exact_error)?;
-        let fields = decode_header(&header, max_payload_bytes)?;
+        let fields = decode_header(&header, max_payload_bytes.min(TRANSPORT_MAX_PAYLOAD_BYTES))?;
         let mut payload = vec![0_u8; fields.payload_len];
         reader
             .read_exact(&mut payload)
@@ -370,6 +373,7 @@ impl ClientHello {
 
     /// Decodes a protocol-v1 hello payload.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let hello = Self {
             min_protocol_major: decoder.u16()?,
@@ -501,6 +505,7 @@ impl NegotiationReject {
 
     /// Decodes a bounded rejection payload.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let code = NegotiationRejectCode::try_from(decoder.u16()?)?;
         let len = decoder.u16()? as usize;
@@ -618,6 +623,7 @@ impl ServerHello {
 
     /// Decodes a successful-negotiation payload.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let protocol_major = decoder.u16()?;
         let protocol_minor = decoder.u16()?;
@@ -694,6 +700,7 @@ pub fn encode_image_rgb8(
 pub fn decode_image_rgb8(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, ImageRgb8), TransportError> {
+    validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
     let mut decoder = Decoder::new(payload);
     let metadata = decode_sensor_metadata(&mut decoder)?;
     let width = decoder.u32()?;
@@ -742,6 +749,7 @@ pub fn encode_image_depth(
 pub fn decode_image_depth(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, ImageDepth), TransportError> {
+    validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
     let mut decoder = Decoder::new(payload);
     let metadata = decode_sensor_metadata(&mut decoder)?;
     let width = decoder.u32()?;
@@ -843,6 +851,7 @@ pub fn encode_lidar_point_cloud(
 pub fn decode_lidar_point_cloud(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, PointCloud), TransportError> {
+    validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
     let mut decoder = Decoder::new(payload);
     let metadata = decode_sensor_metadata(&mut decoder)?;
     let count = decoder.u32()? as usize;
@@ -963,6 +972,7 @@ impl StatusMessage {
 
     /// Decodes status metadata.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let step = decoder.u64()?;
         let sim_time_ticks = decoder.u64()?;
@@ -1005,6 +1015,7 @@ pub fn encode_control_command(command: ControlCommand) -> Vec<u8> {
 
 /// Decodes one transport-neutral runner-control command.
 pub fn decode_control_command(payload: &[u8]) -> Result<ControlCommand, TransportError> {
+    validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
     let mut decoder = Decoder::new(payload);
     let kind = decoder.u8()?;
     if decoder.take(7)? != [0; 7] {
@@ -1046,6 +1057,7 @@ impl ControlAck {
 
     /// Decodes an acknowledgement.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let command_sequence = decoder.u64()?;
         let state = match decoder.u8()? {
@@ -1087,6 +1099,7 @@ impl GapNotice {
 
     /// Decodes a gap notice.
     pub fn decode_payload(payload: &[u8]) -> Result<Self, TransportError> {
+        validate_payload_len(payload.len(), TRANSPORT_MAX_PAYLOAD_BYTES)?;
         let mut decoder = Decoder::new(payload);
         let notice = Self {
             first_missing_sequence: decoder.u64()?,
@@ -1482,6 +1495,21 @@ mod tests {
                 actual: 1024,
                 limit: 16
             }
+        ));
+    }
+
+    #[test]
+    fn absolute_payload_limit_applies_even_when_caller_offers_more() {
+        let mut bytes = TransportFrame::new(TransportMessageKind::Status, 1, 2, Vec::new())
+            .encode()
+            .unwrap();
+        bytes[12..16].copy_from_slice(&((TRANSPORT_MAX_PAYLOAD_BYTES as u32) + 1).to_le_bytes());
+        assert!(matches!(
+            TransportFrame::decode(&bytes, usize::MAX),
+            Err(TransportError::PayloadTooLarge {
+                limit: TRANSPORT_MAX_PAYLOAD_BYTES,
+                ..
+            })
         ));
     }
 

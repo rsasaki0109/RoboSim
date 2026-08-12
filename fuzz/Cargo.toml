@@ -1,0 +1,29 @@
+[package]
+name = "rne-cargo-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rne_fuzz_smoke = { path = "../tests/fuzz_smoke" }
+
+[[bin]]
+name = "importers"
+path = "fuzz_targets/importers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transport"
+path = "fuzz_targets/transport.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

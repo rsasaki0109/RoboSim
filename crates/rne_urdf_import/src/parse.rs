@@ -6,8 +6,12 @@ use crate::schema::{
 };
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
+use std::io::Read;
 use std::path::Path;
 use thiserror::Error;
+
+/// Maximum accepted URDF XML input size.
+pub const URDF_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
 /// URDF parse error.
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -30,6 +34,7 @@ pub enum UrdfParseError {
 
 /// Parses a URDF document from XML text.
 pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
+    ensure_input_len(xml.len())?;
     let document =
         Document::parse(xml).map_err(|error| UrdfParseError::InvalidXml(error.to_string()))?;
     let robot = document.root_element();
@@ -66,10 +71,28 @@ pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
 
 /// Parses a URDF document from a file path.
 pub fn parse_urdf_file(path: &Path) -> Result<UrdfRobot, UrdfParseError> {
-    let xml = std::fs::read_to_string(path).map_err(|error| {
-        UrdfParseError::InvalidXml(format!("failed to read {}: {error}", path.display()))
-    })?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take((URDF_MAX_INPUT_BYTES as u64) + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|error| {
+            UrdfParseError::InvalidXml(format!("failed to read {}: {error}", path.display()))
+        })?;
+    ensure_input_len(bytes.len())?;
+    let xml = String::from_utf8(bytes)
+        .map_err(|error| UrdfParseError::InvalidXml(error.utf8_error().to_string()))?;
     parse_urdf(&xml)
+}
+
+fn ensure_input_len(actual: usize) -> Result<(), UrdfParseError> {
+    if actual > URDF_MAX_INPUT_BYTES {
+        return Err(UrdfParseError::InvalidXml(format!(
+            "input is {actual} bytes, limit is {URDF_MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError> {
@@ -421,6 +444,11 @@ mod tests {
             wheel.collisions[0].geometry,
             UrdfGeometry::Cylinder { .. }
         ));
+    }
+
+    #[test]
+    fn rejects_declared_input_size_before_parsing() {
+        assert!(ensure_input_len(URDF_MAX_INPUT_BYTES + 1).is_err());
     }
 
     #[test]

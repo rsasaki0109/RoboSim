@@ -155,7 +155,7 @@ point at the tested commit.
 
 - M6-A freeze and migration policy: complete.
 - M6-B supply-chain evidence: complete.
-- M6-C parser/protocol hardening: pending.
+- M6-C parser/protocol hardening: complete.
 - M6-D artifacts and install rehearsal: pending.
 - M6-E final exit matrix: pending.
 
@@ -204,3 +204,37 @@ point at the tested commit.
   aggregate workspace gate. Its xtask tests passed 13/13; warning-free
   workspace check and Clippy passed on Rust 1.95, and the locked all-target
   workspace check passed on the declared Rust 1.88 MSRV.
+
+## M6-C evidence (2026-08-12)
+
+- The stable-toolchain campaign covers nine explicit boundaries:
+  OpenSCENARIO XML, scenario replay JSON, SDF, MJCF, SUMO network XML, native
+  traffic JSON, URDF, framed transport payloads, and transport negotiation.
+  Its 361 fixed cases include valid and committed regression corpus entries,
+  empty/truncated/invalid-UTF-8/delimiter-heavy inputs, a 64 KiB limit probe,
+  excessive MJCF nesting, and 32 seeded mutations per boundary.
+- Two independent report generations were byte-identical. The schema-v1 report
+  recorded zero panics, corpus digest
+  `sha256:1e5c61f2b084e5369f8c79e188b7128573c45c6249cbfbeb773f2a1bd3d7218e`,
+  and campaign digest
+  `sha256:0d5918b43c5d4403a31a811fe1dfef10714e88d6a648f95f7a09fda9f87f7477`.
+- Public in-memory and file parsers reject oversized input before parsing or
+  full-file allocation. SDF and MJCF use 16 MiB input limits, OpenSCENARIO and
+  URDF use 64 MiB, SUMO/native traffic use 128 MiB, and framed transport keeps
+  its 32 MiB absolute payload ceiling even if a caller offers a larger limit.
+- OpenSCENARIO parameter substitution is single-pass, deterministic, and
+  output-bounded. Catalog directories reject absolute/parent traversal, cache
+  resolved entries, cap each catalog file at 8 MiB, and cap a scan at 1,024
+  files and 64 MiB. Canonical directory and file paths are verified so symlinks
+  cannot escape the scenario directory. MJCF rejects body nesting past 128
+  levels before unbounded recursion.
+- `cargo +nightly fuzz run importers` and `cargo +nightly fuzz run transport`
+  call the same boundary functions without panic catching for longer sanitizer
+  campaigns. Both cargo-fuzz binaries compile warning-free; usage and regression
+  promotion are documented in `docs/FUZZING.md`.
+- `cargo run --locked -p xtask -- fuzz-smoke` validates coverage, accepted valid
+  seeds, accounting, limits, schema, and panic freedom before writing the report.
+  Its required CI job uploads that report and feeds the aggregate workspace
+  gate. Campaign tests passed 3/3, all affected parser/transport unit and
+  integration tests passed, and affected workspace plus cargo-fuzz targets pass
+  Clippy with warnings denied.

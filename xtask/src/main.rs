@@ -92,6 +92,7 @@ fn run() -> anyhow::Result<()> {
         "behavior-replay" => behavior_replay(&mut args),
         "release-check" => release_check(&mut args),
         "supply-chain" => supply_chain(&mut args),
+        "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -275,6 +276,44 @@ fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         sbom.packages.len(),
         sbom.accepted_advisories.len(),
         output_dir.display()
+    );
+    Ok(())
+}
+
+/// Runs deterministic parser campaigns and emits panic-free fuzz evidence.
+fn fuzz_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let mut output_dir = PathBuf::from("artifacts/fuzz-smoke");
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--output-dir" => {
+                output_dir = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--output-dir requires a path"))?,
+                );
+            }
+            other => anyhow::bail!("unknown fuzz-smoke argument: {other}"),
+        }
+    }
+
+    let report = rne_fuzz_smoke::run_fuzz_smoke_campaign();
+    report.validate().map_err(anyhow::Error::msg)?;
+    let root = workspace_root()?;
+    let output_dir = if output_dir.is_absolute() {
+        output_dir
+    } else {
+        root.join(output_dir)
+    };
+    fs::create_dir_all(&output_dir)?;
+    let report_path = output_dir.join("report.json");
+    let mut json = serde_json::to_vec_pretty(&report)?;
+    json.push(b'\n');
+    fs::write(&report_path, json)?;
+    println!(
+        "fuzz-smoke evidence ok: boundaries={} cases={} digest={} output={}",
+        report.boundaries.len(),
+        report.total_cases,
+        report.campaign_digest_sha256,
+        report_path.display()
     );
     Ok(())
 }
@@ -974,6 +1013,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "snapshot",
             u64::from(rne_physics::PHYSICS_SNAPSHOT_SCHEMA_VERSION),
         ),
+        (
+            "evidence",
+            "fuzz_smoke_report",
+            u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
+        ),
     ];
     for (section, key, actual) in expected {
         let declared = registry
@@ -1539,6 +1583,7 @@ fn ci() -> anyhow::Result<()> {
     }
     ci_headless()?;
     parity(&mut std::iter::empty::<String>())?;
+    fuzz_smoke(&mut std::iter::empty::<String>())?;
     behavior_ci(&mut std::iter::empty::<String>())
 }
 
