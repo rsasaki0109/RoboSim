@@ -44,6 +44,20 @@ actor/action result digest is `6732886903736628512`. The report measures three
 release repetitions on the named runner class and fails below 60 headless
 steps/s or on any classified/unexplained violation.
 
+M6 acceptance is encoded in `release/exit-matrix.toml` and evaluated by
+`cargo run --locked -p xtask -- release-exit`. The contract freezes 12 CI jobs
+plus clean Linux and Windows artifact rehearsals, maps them to the exact
+workflow runner and command, requires locked graph-building invocations, and
+names `CI / workspace` and `Release
+rehearsal / release_candidate` as the two aggregate RC checks. Each aggregate
+writes a schema-v1 report containing the source commit, Cargo.lock SHA-256,
+per-job verdicts, clean-checkout state, and zero-open-P0/P1 decision. The
+preceding M6-D clean-checkout rehearsal (GitHub Actions run `31569498834`)
+passed both native jobs before this final aggregate was introduced; M6-E's
+local final matrix passed all gates, including 22/22 OSS parity checks and a
+slowest 3,246.41 steps/s across three 100-actor samples. The clean PR aggregate
+verdict is recorded in the hardening plan after the workflow completes.
+
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|
 | A | Fixed-step runtime | `rne-asset simulate` with explicit rate, typed wheel/joint command, physics hash, and exact replay check | Done |

@@ -32,3 +32,4 @@ snapshot = 1
 fuzz_smoke_report = 1
 release_report = 1
 install_rehearsal_report = 1
+final_exit_report = 1

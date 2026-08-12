@@ -3,6 +3,8 @@ release_version = "1.0.0-rc.1"
 
 # P0: exploitable safety/security issue, data loss, or universal crash.
 # P1: release-blocking correctness, compatibility, determinism, or install issue.
+# P2/P3: non-blocking defects that still require an owner and evidence.
+# Status is exactly "open" or "closed"; unknown values fail the release gate.
 # Add blockers as:
 # [[blocker]]
 # id = "RNE-000"

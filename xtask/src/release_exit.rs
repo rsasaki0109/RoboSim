@@ -1,0 +1,580 @@
+//! Machine-readable final exit matrix for the 1.0 RC.
+
+use super::{validate_blocker_registry, workspace_root, RELEASE_VERSION};
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+
+/// Machine-readable final exit report schema.
+pub(crate) const FINAL_EXIT_REPORT_SCHEMA_VERSION: u32 = 1;
+
+const EXIT_MATRIX_PATH: &str = "release/exit-matrix.toml";
+const EXPECTED_SCOPES: [&str; 2] = ["ci", "release"];
+const EXPECTED_AGGREGATE_CHECKS: [&str; 2] =
+    ["CI / workspace", "Release rehearsal / release_candidate"];
+const EXPECTED_CI_JOBS: [&str; 12] = [
+    "lint",
+    "test",
+    "smoke",
+    "rl",
+    "headless",
+    "msrv",
+    "release_contract",
+    "semver",
+    "behavior_ci",
+    "parity",
+    "supply_chain",
+    "fuzz_smoke",
+];
+const EXPECTED_RELEASE_JOBS: [&str; 2] = ["linux", "windows"];
+
+#[derive(Debug, Deserialize)]
+struct ExitMatrix {
+    schema_version: u32,
+    release_version: String,
+    locked_graph: String,
+    blocker_registry: String,
+    required_aggregate_checks: Vec<String>,
+    scope: Vec<ExitScope>,
+    gate: Vec<ExitGate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExitScope {
+    id: String,
+    workflow: String,
+    aggregate_job: String,
+    required_jobs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExitGate {
+    id: String,
+    scope: String,
+    workflow: String,
+    job: String,
+    runner: String,
+    clean_checkout: bool,
+    commands: Vec<String>,
+}
+
+#[derive(Debug)]
+struct ExitOptions {
+    scope: String,
+    results: BTreeMap<String, String>,
+    output_dir: PathBuf,
+    allow_dirty: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct FinalExitReport {
+    schema_version: u32,
+    release_version: String,
+    scope: String,
+    git_commit: String,
+    cargo_lock_sha256: String,
+    clean_checkout: bool,
+    development_dirty_override: bool,
+    zero_open_p0_p1_blockers: bool,
+    all_required_checks_green: bool,
+    release_eligible: bool,
+    required_aggregate_checks: Vec<String>,
+    jobs: Vec<ExitJobVerdict>,
+    gates: Vec<ExitGateEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExitJobVerdict {
+    job: String,
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ExitGateEvidence {
+    id: String,
+    workflow: String,
+    job: String,
+    runner: String,
+    clean_checkout_required: bool,
+    commands: Vec<String>,
+    status: String,
+}
+
+/// Validates the committed exit contract and records one aggregate workflow verdict.
+pub(crate) fn release_exit(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let options = parse_options(args)?;
+    let matrix = read_and_validate_matrix(&root)?;
+    let scope = matrix
+        .scope
+        .iter()
+        .find(|scope| scope.id == options.scope)
+        .with_context(|| format!("unknown release-exit scope {:?}", options.scope))?;
+
+    let expected_jobs = scope.required_jobs.iter().cloned().collect::<BTreeSet<_>>();
+    let actual_jobs = options.results.keys().cloned().collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        actual_jobs == expected_jobs,
+        "release-exit results differ for scope {}: expected={expected_jobs:?} actual={actual_jobs:?}",
+        scope.id
+    );
+    for (job, result) in &options.results {
+        anyhow::ensure!(
+            matches!(
+                result.as_str(),
+                "success" | "failure" | "cancelled" | "skipped"
+            ),
+            "unsupported result {result:?} for job {job}"
+        );
+    }
+
+    let blocker_path = safe_repo_path(&root, &matrix.blocker_registry)?;
+    let blockers = fs::read_to_string(&blocker_path)
+        .with_context(|| format!("read blocker registry {}", blocker_path.display()))?
+        .parse::<toml::Value>()?;
+    validate_blocker_registry(&blockers)?;
+
+    let clean_checkout = git_worktree_is_clean(&root)?;
+    let all_required_checks_green = options.results.values().all(|value| value == "success");
+    let zero_open_p0_p1_blockers = true;
+    let release_eligible = clean_checkout && zero_open_p0_p1_blockers && all_required_checks_green;
+    let gates = matrix
+        .gate
+        .iter()
+        .filter(|gate| gate.scope == scope.id)
+        .map(|gate| ExitGateEvidence {
+            id: gate.id.clone(),
+            workflow: gate.workflow.clone(),
+            job: gate.job.clone(),
+            runner: gate.runner.clone(),
+            clean_checkout_required: gate.clean_checkout,
+            commands: gate.commands.clone(),
+            status: options
+                .results
+                .get(&gate.job)
+                .expect("validated gate job must have a result")
+                .clone(),
+        })
+        .collect::<Vec<_>>();
+    let lock_bytes = fs::read(safe_repo_path(&root, &matrix.locked_graph)?)?;
+    let report = FinalExitReport {
+        schema_version: FINAL_EXIT_REPORT_SCHEMA_VERSION,
+        release_version: RELEASE_VERSION.to_string(),
+        scope: scope.id.clone(),
+        git_commit: git_output(&root, &["rev-parse", "HEAD"])?,
+        cargo_lock_sha256: format!("{:x}", Sha256::digest(lock_bytes)),
+        clean_checkout,
+        development_dirty_override: options.allow_dirty && !clean_checkout,
+        zero_open_p0_p1_blockers,
+        all_required_checks_green,
+        release_eligible,
+        required_aggregate_checks: matrix.required_aggregate_checks.clone(),
+        jobs: scope
+            .required_jobs
+            .iter()
+            .map(|job| ExitJobVerdict {
+                job: job.clone(),
+                status: options.results[job].clone(),
+            })
+            .collect(),
+        gates,
+    };
+
+    let output_dir = absolute_from(&root, &options.output_dir);
+    fs::create_dir_all(&output_dir)?;
+    let report_path = output_dir.join(format!("{}.json", scope.id));
+    fs::write(&report_path, serde_json::to_vec_pretty(&report)?)?;
+
+    anyhow::ensure!(
+        all_required_checks_green,
+        "scope {} has a non-success required job; inspect {}",
+        scope.id,
+        report_path.display()
+    );
+    anyhow::ensure!(
+        clean_checkout || options.allow_dirty,
+        "release exit evidence requires a clean checkout (use --allow-dirty only for local development)"
+    );
+    println!(
+        "release exit scope passed: scope={} release_eligible={} report={}",
+        scope.id,
+        release_eligible,
+        report_path.display()
+    );
+    Ok(())
+}
+
+/// Checks that the machine-readable matrix and both workflow aggregate gates agree.
+pub(crate) fn validate_exit_matrix(root: &Path) -> anyhow::Result<()> {
+    read_and_validate_matrix(root).map(|_| ())
+}
+
+fn parse_options(args: &mut impl Iterator<Item = String>) -> anyhow::Result<ExitOptions> {
+    let mut scope = None;
+    let mut results = BTreeMap::new();
+    let mut output_dir = PathBuf::from("artifacts/release-exit");
+    let mut allow_dirty = false;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--scope" => scope = Some(next_value(args, "--scope")?),
+            "--result" => {
+                let value = next_value(args, "--result")?;
+                let (job, result) = value
+                    .split_once('=')
+                    .with_context(|| format!("--result must use JOB=STATUS, got {value:?}"))?;
+                anyhow::ensure!(
+                    !job.is_empty() && !result.is_empty(),
+                    "empty --result field"
+                );
+                anyhow::ensure!(
+                    results
+                        .insert(job.to_string(), result.to_string())
+                        .is_none(),
+                    "duplicate result for job {job}"
+                );
+            }
+            "--output-dir" => output_dir = PathBuf::from(next_value(args, "--output-dir")?),
+            "--allow-dirty" => allow_dirty = true,
+            other => anyhow::bail!("unknown release-exit argument: {other}"),
+        }
+    }
+    Ok(ExitOptions {
+        scope: scope.context("release-exit requires --scope ci|release")?,
+        results,
+        output_dir,
+        allow_dirty,
+    })
+}
+
+fn next_value(args: &mut impl Iterator<Item = String>, option: &str) -> anyhow::Result<String> {
+    args.next()
+        .with_context(|| format!("{option} requires a value"))
+}
+
+fn read_and_validate_matrix(root: &Path) -> anyhow::Result<ExitMatrix> {
+    let matrix_path = root.join(EXIT_MATRIX_PATH);
+    let matrix: ExitMatrix = toml::from_str(
+        &fs::read_to_string(&matrix_path)
+            .with_context(|| format!("read exit matrix {}", matrix_path.display()))?,
+    )?;
+    anyhow::ensure!(
+        matrix.schema_version == 1,
+        "exit matrix schema_version must be 1"
+    );
+    anyhow::ensure!(
+        matrix.release_version == RELEASE_VERSION,
+        "exit matrix release_version must be {RELEASE_VERSION}"
+    );
+    anyhow::ensure!(
+        matrix.required_aggregate_checks == EXPECTED_AGGREGATE_CHECKS.map(str::to_string),
+        "exit matrix aggregate checks must be the two frozen RC checks"
+    );
+    anyhow::ensure!(
+        safe_repo_path(root, &matrix.locked_graph)?.is_file(),
+        "exit matrix locked graph is missing"
+    );
+    anyhow::ensure!(
+        safe_repo_path(root, &matrix.blocker_registry)?.is_file(),
+        "exit matrix blocker registry is missing"
+    );
+
+    let scope_ids = matrix
+        .scope
+        .iter()
+        .map(|scope| scope.id.as_str())
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        scope_ids == EXPECTED_SCOPES.into_iter().collect(),
+        "exit matrix must define exactly ci and release scopes"
+    );
+    let mut gate_ids = BTreeSet::new();
+    for gate in &matrix.gate {
+        anyhow::ensure!(
+            gate_ids.insert(gate.id.as_str()),
+            "duplicate exit gate {}",
+            gate.id
+        );
+        anyhow::ensure!(
+            scope_ids.contains(gate.scope.as_str()),
+            "unknown scope for gate {}",
+            gate.id
+        );
+        anyhow::ensure!(
+            gate.clean_checkout,
+            "gate {} must require a clean checkout",
+            gate.id
+        );
+        anyhow::ensure!(!gate.commands.is_empty(), "gate {} has no command", gate.id);
+        for command in &gate.commands {
+            validate_locked_command(&gate.id, command)?;
+        }
+    }
+
+    for scope in &matrix.scope {
+        let expected_jobs = match scope.id.as_str() {
+            "ci" => EXPECTED_CI_JOBS.as_slice(),
+            "release" => EXPECTED_RELEASE_JOBS.as_slice(),
+            _ => unreachable!("scope set already validated"),
+        };
+        anyhow::ensure!(
+            scope.required_jobs == expected_jobs,
+            "scope {} required jobs changed: expected={expected_jobs:?} actual={:?}",
+            scope.id,
+            scope.required_jobs
+        );
+        let gate_jobs = matrix
+            .gate
+            .iter()
+            .filter(|gate| gate.scope == scope.id)
+            .map(|gate| gate.job.as_str())
+            .collect::<BTreeSet<_>>();
+        let scope_gate_count = matrix
+            .gate
+            .iter()
+            .filter(|gate| gate.scope == scope.id)
+            .count();
+        anyhow::ensure!(
+            gate_jobs == expected_jobs.iter().copied().collect()
+                && scope_gate_count == expected_jobs.len(),
+            "scope {} gate jobs differ from its required jobs",
+            scope.id
+        );
+        anyhow::ensure!(
+            matrix
+                .gate
+                .iter()
+                .filter(|gate| gate.scope == scope.id)
+                .all(|gate| gate.workflow == scope.workflow),
+            "scope {} gates must use workflow {}",
+            scope.id,
+            scope.workflow
+        );
+        validate_workflow(root, scope, &matrix.gate)?;
+    }
+    Ok(matrix)
+}
+
+fn validate_locked_command(gate: &str, command: &str) -> anyhow::Result<()> {
+    let graph_command = command.starts_with("cargo run ")
+        || command.starts_with("cargo check ")
+        || command.starts_with("cargo test ")
+        || command.starts_with("cargo build ")
+        || command.starts_with("maturin build ");
+    anyhow::ensure!(
+        !graph_command || command.split_whitespace().any(|part| part == "--locked"),
+        "exit gate {gate} graph command is not locked: {command}"
+    );
+    Ok(())
+}
+
+fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyhow::Result<()> {
+    let workflow_path = safe_repo_path(root, &scope.workflow)?;
+    anyhow::ensure!(
+        scope.workflow.starts_with(".github/workflows/"),
+        "exit scope {} workflow must live under .github/workflows",
+        scope.id
+    );
+    let workflow = fs::read_to_string(&workflow_path)
+        .with_context(|| format!("read workflow {}", workflow_path.display()))?;
+    let workflow_header = workflow
+        .split_once("jobs:")
+        .map_or(workflow.as_str(), |part| part.0);
+    anyhow::ensure!(
+        workflow_header.contains("  pull_request:"),
+        "workflow {} must run for pull requests",
+        scope.workflow
+    );
+    anyhow::ensure!(
+        !workflow_header.contains("    paths:") && !workflow_header.contains("    paths-ignore:"),
+        "workflow {} must not omit release gates through pull-request path filters",
+        scope.workflow
+    );
+    for gate in gates.iter().filter(|gate| gate.scope == scope.id) {
+        let block = workflow_job_block(&workflow, &gate.job)?;
+        let normalized = normalize_workflow(block);
+        anyhow::ensure!(
+            normalized.contains(&normalize_workflow(&format!("runs-on: {}", gate.runner))),
+            "gate {} runner drifted from {}",
+            gate.id,
+            gate.runner
+        );
+        anyhow::ensure!(
+            !gate.clean_checkout || normalized.contains("uses: actions/checkout@v4"),
+            "gate {} no longer starts from actions/checkout@v4",
+            gate.id
+        );
+        for command in &gate.commands {
+            anyhow::ensure!(
+                normalized.contains(&normalize_workflow(command)),
+                "gate {} command drifted from workflow: {}",
+                gate.id,
+                command
+            );
+        }
+    }
+
+    let aggregate = normalize_workflow(workflow_job_block(&workflow, &scope.aggregate_job)?);
+    let expected_needs = format!("needs: [{}]", scope.required_jobs.join(", "));
+    anyhow::ensure!(
+        aggregate.contains(&normalize_workflow(&expected_needs)),
+        "aggregate job {} must need every {} scope job",
+        scope.aggregate_job,
+        scope.id
+    );
+    anyhow::ensure!(
+        aggregate.contains("if: always()"),
+        "aggregate job {} must run even when a dependency fails",
+        scope.aggregate_job
+    );
+    let aggregate_command = format!(
+        "cargo run --locked -p xtask -- release-exit --scope {}",
+        scope.id
+    );
+    anyhow::ensure!(
+        aggregate.contains(&aggregate_command),
+        "aggregate job {} must emit {} exit evidence",
+        scope.aggregate_job,
+        scope.id
+    );
+    if scope.id == "release" {
+        let publish = normalize_workflow(workflow_job_block(&workflow, "publish")?);
+        anyhow::ensure!(
+            publish.contains("needs: [release_candidate]"),
+            "release publishing must depend on the aggregate release_candidate job"
+        );
+    }
+    Ok(())
+}
+
+fn workflow_job_block<'a>(workflow: &'a str, job: &str) -> anyhow::Result<&'a str> {
+    let marker = format!("  {job}:");
+    let mut start = None;
+    let mut offset = 0;
+    for line in workflow.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == marker {
+            start = Some(offset);
+            break;
+        }
+        offset += line.len();
+    }
+    let start = start.with_context(|| format!("workflow omitted job {job}"))?;
+    let header_len = workflow[start..]
+        .find('\n')
+        .map_or(workflow.len() - start, |index| index + 1);
+    let after_header = start + header_len;
+    let mut end = workflow.len();
+    let mut block_offset = after_header;
+    for line in workflow[after_header..].split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.starts_with("  ") && !trimmed.starts_with("   ") && trimmed.ends_with(':') {
+            end = block_offset;
+            break;
+        }
+        block_offset += line.len();
+    }
+    Ok(&workflow[start..end])
+}
+
+fn normalize_workflow(value: &str) -> String {
+    value
+        .replace(['"', '\''], "")
+        .split_whitespace()
+        .filter(|part| *part != "\\" && *part != "`")
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn safe_repo_path(root: &Path, relative: &str) -> anyhow::Result<PathBuf> {
+    let path = Path::new(relative);
+    anyhow::ensure!(
+        !path.is_absolute(),
+        "exit matrix path must be relative: {relative}"
+    );
+    anyhow::ensure!(
+        path.components()
+            .all(|component| matches!(component, Component::Normal(_))),
+        "exit matrix path is unsafe: {relative}"
+    );
+    Ok(root.join(path))
+}
+
+fn absolute_from(root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    }
+}
+
+fn git_worktree_is_clean(root: &Path) -> anyhow::Result<bool> {
+    Ok(git_output(root, &["status", "--porcelain"])?.is_empty())
+}
+
+fn git_output(root: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = Command::new("git").current_dir(root).args(args).output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_workflow, parse_options, validate_exit_matrix, validate_locked_command,
+        workflow_job_block,
+    };
+
+    #[test]
+    fn committed_exit_matrix_matches_workflows() {
+        let root = super::workspace_root().expect("workspace root");
+        validate_exit_matrix(&root).expect("committed exit matrix");
+    }
+
+    #[test]
+    fn parses_exact_job_results() {
+        let mut args = [
+            "--scope",
+            "release",
+            "--result",
+            "linux=success",
+            "--result",
+            "windows=failure",
+        ]
+        .into_iter()
+        .map(str::to_string);
+        let options = parse_options(&mut args).expect("options");
+        assert_eq!(options.scope, "release");
+        assert_eq!(options.results["linux"], "success");
+        assert_eq!(options.results["windows"], "failure");
+    }
+
+    #[test]
+    fn rejects_unlocked_graph_commands() {
+        assert!(validate_locked_command("test", "cargo test --workspace").is_err());
+        assert!(validate_locked_command("test", "cargo test --locked --workspace").is_ok());
+        assert!(validate_locked_command("semver", "cargo semver-checks check-release").is_ok());
+    }
+
+    #[test]
+    fn isolates_workflow_jobs_and_normalizes_shell_continuations() {
+        let workflow = r"jobs:
+  linux:
+    runs-on: ubuntu-latest
+    run: cargo test \
+      --locked
+  windows:
+    runs-on: windows-latest
+";
+        let block = workflow_job_block(workflow, "linux").expect("linux job");
+        assert!(normalize_workflow(block).contains("cargo test --locked"));
+        assert!(!block.contains("windows-latest"));
+    }
+}
