@@ -29,7 +29,7 @@ use rne_render::{
 use rne_render_wgpu::{CameraOrbit, TaaSettings, WgpuRenderBackend};
 
 const PANEL_WIDTH: u32 = 480;
-const PANEL_HEIGHT: u32 = 520;
+const PANEL_HEIGHT: u32 = 530;
 const BANNER_HEIGHT: u32 = 10;
 const FRAME_COUNT: usize = 80;
 const STEPS_PER_FRAME: u64 = 12;
@@ -412,25 +412,40 @@ fn configure_taa(backend: &mut WgpuRenderBackend) {
 }
 
 fn run_smoke() {
-    let mut learned = G1Walker::new(
-        UnitreeG1TorqueOverlay::LEARNED_STRIDE,
-        UnitreeG1VelocityCommand {
-            forward_m_s: 0.0276,
-            yaw_rate_rad_s: 0.05,
-        },
-    );
+    let forward = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: 0.0,
+    };
+    let steering = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: 0.05,
+    };
+    let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO, forward);
+    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, steering);
+    baseline.step_frame(PREROLL_STEPS);
     learned.step_frame(PREROLL_STEPS);
+    baseline.begin_capture();
     learned.begin_capture();
-    learned.step_frame(96);
-    let observed = learned.sim.observe();
+    baseline.step_frame(CAPTURE_STEPS);
+    learned.step_frame(CAPTURE_STEPS);
+    let baseline_min = baseline.minimum_window_m();
+    let learned_min = learned.minimum_window_m();
     assert!(
-        observed.base_y_m > 0.7,
-        "learned G1 smoke fell: {:.3} m",
-        observed.base_y_m
+        learned_min > 2.0 * baseline_min && learned_min > COMMAND_MIN_WINDOW_M,
+        "commanded G1 smoke must clear the path bar: {learned_min:.3} m vs stepper {baseline_min:.3} m",
+    );
+    assert!(
+        learned.min_height_m > 0.7,
+        "learned G1 smoke fell: minimum height {:.3} m",
+        learned.min_height_m,
     );
     println!(
-        "learned G1 stride smoke passed at height {:.3} m",
-        observed.base_y_m
+        "learned G1 stride smoke passed: stepper {:.3}/{:.3} m, learned {:.3}/{:.3} m, minimum height {:.3} m",
+        baseline.window_a_m,
+        baseline.window_b_m,
+        learned.window_a_m,
+        learned.window_b_m,
+        learned.min_height_m,
     );
 }
 

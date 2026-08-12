@@ -190,6 +190,96 @@ impl AckermannDrive {
     }
 }
 
+/// Deterministic multirotor position-flight state and safety limits.
+///
+/// The controller uses the entity's [`rne_world::Transform3`] as the aircraft
+/// pose in a Y-up world. Position targets are converted into bounded velocity
+/// and acceleration commands. Horizontal acceleration tilts the rendered body,
+/// while climb speed, yaw rate, and total acceleration remain independently
+/// limited. Invalid configurations are ignored transactionally by
+/// [`crate::multirotor_flight`].
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MultirotorFlight {
+    /// Maximum horizontal speed in meters per second.
+    pub max_horizontal_speed_m_s: f64,
+    /// Maximum absolute climb or descent speed in meters per second.
+    pub max_climb_speed_m_s: f64,
+    /// Maximum translational acceleration magnitude in meters per second squared.
+    pub max_acceleration_m_s2: f64,
+    /// Maximum yaw rate in radians per second.
+    pub max_yaw_rate_rad_s: f64,
+    /// Maximum body tilt from world up in radians.
+    pub max_tilt_rad: f64,
+    /// Position-error gain in inverse seconds.
+    pub position_gain_s_inv: f64,
+    /// Velocity-error gain in inverse seconds.
+    pub velocity_gain_s_inv: f64,
+    /// First-order rendered-attitude response time in seconds.
+    pub attitude_response_s: f64,
+    /// Current world-space velocity in meters per second.
+    pub velocity_m_s: Vec3,
+    /// Current integrated yaw target in radians.
+    pub yaw_rad: f64,
+    /// Requested world-space position in meters.
+    pub target_position_m: Vec3,
+    /// Requested world-space heading in radians.
+    pub target_yaw_rad: f64,
+    /// Bounded acceleration applied by the most recent simulation step.
+    pub commanded_acceleration_m_s2: Vec3,
+}
+
+impl Default for MultirotorFlight {
+    fn default() -> Self {
+        Self {
+            max_horizontal_speed_m_s: 12.0,
+            max_climb_speed_m_s: 4.0,
+            max_acceleration_m_s2: 6.0,
+            max_yaw_rate_rad_s: 1.2,
+            max_tilt_rad: 0.52,
+            position_gain_s_inv: 0.8,
+            velocity_gain_s_inv: 2.5,
+            attitude_response_s: 0.12,
+            velocity_m_s: Vec3::ZERO,
+            yaw_rad: 0.0,
+            target_position_m: Vec3::ZERO,
+            target_yaw_rad: 0.0,
+            commanded_acceleration_m_s2: Vec3::ZERO,
+        }
+    }
+}
+
+impl MultirotorFlight {
+    /// Returns whether every limit, gain, command, and state value is finite and valid.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.max_horizontal_speed_m_s,
+            self.max_climb_speed_m_s,
+            self.max_acceleration_m_s2,
+            self.max_yaw_rate_rad_s,
+            self.max_tilt_rad,
+            self.position_gain_s_inv,
+            self.velocity_gain_s_inv,
+            self.attitude_response_s,
+            self.yaw_rad,
+            self.target_yaw_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.velocity_m_s.is_finite()
+            && self.target_position_m.is_finite()
+            && self.commanded_acceleration_m_s2.is_finite()
+            && self.max_horizontal_speed_m_s >= 0.0
+            && self.max_climb_speed_m_s >= 0.0
+            && self.max_acceleration_m_s2 >= 0.0
+            && self.max_yaw_rate_rad_s >= 0.0
+            && (0.0..std::f64::consts::FRAC_PI_2).contains(&self.max_tilt_rad)
+            && self.position_gain_s_inv > 0.0
+            && self.velocity_gain_s_inv > 0.0
+            && self.attitude_response_s >= 0.0
+    }
+}
+
 /// Inertial properties for a link.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Inertial {

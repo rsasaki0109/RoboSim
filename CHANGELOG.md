@@ -22,6 +22,14 @@ All notable changes to Robot Native Engine are documented in this file.
   artifacts. Dependency maintenance also updates PyO3 and parser/runtime
   libraries and removes an unused unmaintained font-parsing path.
 
+- **README simulation showcase**: mobile manipulation, G1 biped, Go2
+  quadruped, 100-actor PLATEAU traffic, and a visible controlled quadrotor now
+  have one quantitative media contract. The backend-neutral
+  `MultirotorFlight` controller bounds speed, acceleration, yaw rate, and tilt
+  with deterministic replay tests; the PLATEAU capture shares one detailed
+  streetscape between vehicle and UAV media, and `xtask hero-media-check`
+  enforces references, poster dimensions, and per-file/combined GIF budgets.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4

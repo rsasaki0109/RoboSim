@@ -1701,7 +1701,8 @@ fn run_locomotion_smokes() -> anyhow::Result<()> {
     run_step("cargo run --locked -p g1_heading_turn --example 68_g1_heading_turn -- --smoke")?;
     run_step(
         "cargo run --locked -p g1_heading_turn --example 68_g1_heading_turn -- --train --smoke",
-    )
+    )?;
+    run_step("cargo run --locked -p go2_turn_gif --example 60_go2_turn_gif -- --smoke")
 }
 
 fn run_asset_smokes() -> anyhow::Result<()> {
@@ -1710,7 +1711,8 @@ fn run_asset_smokes() -> anyhow::Result<()> {
         "cargo run --locked -p g1_photoreal_capture --example 70_g1_photoreal_capture -- --smoke",
     )?;
     run_step("cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
-    run_step("cargo run --locked -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")
+    run_step("cargo run --locked -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
+    run_step("cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke")
 }
 
 fn house_gif_demo() -> anyhow::Result<()> {
@@ -1733,6 +1735,12 @@ fn hero_media_check() -> anyhow::Result<()> {
     let cloth_png_path = root.join("docs/media/unitree-g1-cloth.png");
     let learned_g1_gif_path = root.join("docs/media/unitree-g1-learned-stride.gif");
     let learned_g1_png_path = root.join("docs/media/unitree-g1-learned-stride.png");
+    let go2_gif_path = root.join("docs/media/go2-torque-turn.gif");
+    let go2_png_path = root.join("docs/media/go2-torque-turn.png");
+    let vehicle_gif_path = root.join("docs/media/plateau-car.gif");
+    let vehicle_png_path = root.join("docs/media/plateau-car.png");
+    let uav_gif_path = root.join("docs/media/plateau-uav.gif");
+    let uav_png_path = root.join("docs/media/plateau-uav.png");
     let readme = fs::read_to_string(&readme_path)?;
     anyhow::ensure!(
         readme.contains("srcset=\"docs/media/rne-hero.png\""),
@@ -1802,6 +1810,77 @@ fn hero_media_check() -> anyhow::Result<()> {
         learned_g1_png_path.is_file(),
         "README learned G1 stride PNG is missing"
     );
+    let showcase_media = [
+        (
+            "mobile manipulation",
+            &gif_path,
+            &png_path,
+            "docs/media/rne-hero.gif",
+            "docs/media/rne-hero.png",
+        ),
+        (
+            "G1 biped locomotion",
+            &learned_g1_gif_path,
+            &learned_g1_png_path,
+            "docs/media/unitree-g1-learned-stride.gif",
+            "docs/media/unitree-g1-learned-stride.png",
+        ),
+        (
+            "Go2 quadruped locomotion",
+            &go2_gif_path,
+            &go2_png_path,
+            "docs/media/go2-torque-turn.gif",
+            "docs/media/go2-torque-turn.png",
+        ),
+        (
+            "urban vehicle",
+            &vehicle_gif_path,
+            &vehicle_png_path,
+            "docs/media/plateau-car.gif",
+            "docs/media/plateau-car.png",
+        ),
+        (
+            "urban UAV",
+            &uav_gif_path,
+            &uav_png_path,
+            "docs/media/plateau-uav.gif",
+            "docs/media/plateau-uav.png",
+        ),
+    ];
+    let mut showcase_total_bytes = 0_u64;
+    for (label, showcase_gif_path, showcase_png_path, gif_reference, png_reference) in
+        showcase_media
+    {
+        anyhow::ensure!(
+            readme.contains(&format!("src=\"{gif_reference}\""))
+                && readme.contains(&format!("srcset=\"{png_reference}\"")),
+            "README {label} media references are missing"
+        );
+        let showcase_gif = fs::read(showcase_gif_path)?;
+        anyhow::ensure!(
+            showcase_gif.starts_with(b"GIF8")
+                && showcase_gif.ends_with(b";")
+                && showcase_gif.len() > 100_000,
+            "README {label} GIF is missing or malformed"
+        );
+        anyhow::ensure!(
+            showcase_gif.len() <= 5_000_000,
+            "README {label} GIF exceeds 5 MB: {} bytes",
+            showcase_gif.len()
+        );
+        showcase_total_bytes += u64::try_from(showcase_gif.len())?;
+        let poster = image::open(showcase_png_path)?;
+        anyhow::ensure!(
+            poster.width() >= 960 && poster.height() >= 540,
+            "README {label} poster must be at least 960x540, got {}x{}",
+            poster.width(),
+            poster.height()
+        );
+    }
+    anyhow::ensure!(
+        showcase_total_bytes <= 20_000_000,
+        "README showcase GIFs exceed the 20 MB combined budget: {showcase_total_bytes} bytes"
+    );
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     anyhow::ensure!(
         metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
@@ -1829,8 +1908,8 @@ fn hero_media_check() -> anyhow::Result<()> {
         encode["fps"].as_f64() == Some(15.0)
             && encode["animation_frames"].as_u64() == Some(100)
             && encode["hold_frames"].as_u64() == Some(10)
-            && encode["max_colors"].as_u64() == Some(192)
-            && encode["scale_width"].as_u64() == Some(960),
+            && encode["max_colors"].as_u64() == Some(128)
+            && encode["scale_width"].as_u64() == Some(800),
         "README hero encode block does not match the expected hero pipeline"
     );
     let max_byte_size = encode["max_byte_size"]

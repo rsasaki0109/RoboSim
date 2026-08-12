@@ -90,8 +90,9 @@ orange panel's two windows at 0.784 m minimum height. It writes
 `docs/media/unitree-g1-learned-stride.png`. The capture now uses a render-only
 robotics test bay: matte floor panels, safety lane markings, an equipment wall,
 service rail, and suspended LED fixtures. These visual props do not enter the
-physics scene; the example's `--smoke` mode still runs the commanded physics
-path without a renderer so CI does not depend on a GPU.
+physics scene; the example's `--smoke` mode runs the complete two-window 960
+step capture without a renderer and enforces the same 0.12 m progress,
+baseline-ratio, and 0.7 m minimum-height gates, so CI does not depend on a GPU.
 
 The development profile uses `opt-level = 1` and the test profile uses
 `opt-level = 3`, while retaining debug assertions and symbols. Fully

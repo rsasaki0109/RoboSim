@@ -35,23 +35,24 @@ const RENDER_WIDTH: u32 = 640;
 const RENDER_HEIGHT: u32 = 360;
 const POSTER_WIDTH: u32 = 960;
 const POSTER_HEIGHT: u32 = 540;
+const GIF_SCALE_WIDTH: u32 = 800;
 const ANIMATION_FRAME_COUNT: usize = 100;
 const HOLD_FRAME_COUNT: usize = 10;
 const FRAME_COUNT: usize = ANIMATION_FRAME_COUNT + HOLD_FRAME_COUNT;
 const FPS: usize = 15;
-const GIF_MAX_COLORS: u32 = 192;
+const GIF_MAX_COLORS: u32 = 128;
 const GIF_BAYER_SCALE: u32 = 4;
 const HERO_ENCODE_MAX_BYTE_SIZE: u64 = 3_500_000;
 const MAX_HOLD_FRAME_DELTA_RATIO: f64 = 0.02;
-const CAMERA_ORBIT_YAW_START_RAD: f64 = -1.28;
-const CAMERA_ORBIT_YAW_END_RAD: f64 = -0.78;
-const CAMERA_ORBIT_PITCH_RAD: f64 = 0.98;
-const CAMERA_ORBIT_DISTANCE_M: f64 = 2.28;
-const OPENING_CAMERA_BLEND_FRAMES: usize = 25;
-const CAMERA_ORBIT_PITCH_OPENING_RAD: f64 = 0.86;
-const CAMERA_ORBIT_DISTANCE_OPENING_M: f64 = 3.78;
-const CAMERA_FOCUS_Y_M: f64 = 0.36;
-const CAMERA_FOCUS_Y_OPENING_M: f64 = 0.20;
+const CAMERA_ORBIT_YAW_START_RAD: f64 = -1.18;
+const CAMERA_ORBIT_YAW_END_RAD: f64 = -0.70;
+const CAMERA_ORBIT_PITCH_RAD: f64 = 1.10;
+const CAMERA_ORBIT_DISTANCE_M: f64 = 2.05;
+const OPENING_CAMERA_BLEND_FRAMES: usize = 18;
+const CAMERA_ORBIT_PITCH_OPENING_RAD: f64 = 1.02;
+const CAMERA_ORBIT_DISTANCE_OPENING_M: f64 = 3.10;
+const CAMERA_FOCUS_Y_M: f64 = 0.31;
+const CAMERA_FOCUS_Y_OPENING_M: f64 = 0.27;
 const SETTLE_STEPS: usize = 120;
 const POLICY_STEPS: usize = 2800;
 const MIN_BASE_TRAVEL_M: f64 = 0.20;
@@ -129,8 +130,10 @@ const MAX_POST_RELEASE_SLIDE_M: f64 = 0.15;
 const HERO_TASK_CUBE_NAME: &str = "hero_task_cube";
 const HERO_PICK_TABLE_NAME: &str = "hero_pick_table";
 const HERO_PLACE_TRAY_NAME: &str = "hero_place_tray";
-const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.58, 0.50, 0.40, 1.0];
-const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.74, 0.78, 0.84, 1.0];
+const HERO_FLOOR_COLOR_RGBA: [f32; 4] = [0.30, 0.33, 0.36, 1.0];
+const HERO_FLOOR_TILE_A_RGBA: [f32; 4] = [0.36, 0.39, 0.42, 1.0];
+const HERO_FLOOR_TILE_B_RGBA: [f32; 4] = [0.32, 0.35, 0.38, 1.0];
+const HERO_WALL_COLOR_RGBA: [f32; 4] = [0.78, 0.82, 0.88, 1.0];
 const HERO_ROBOT_BODY_COLOR_RGBA: [f32; 4] = [0.20, 0.46, 0.82, 1.0];
 const HERO_ROBOT_ARM_COLOR_RGBA: [f32; 4] = [0.32, 0.58, 0.90, 1.0];
 /// Fallback color `rne_ai::render::build_visual_render_scene` assigns to any
@@ -1442,8 +1445,48 @@ fn append_hero_context(scene: &mut RenderScene, task: &HeroTaskProgress) {
         Vec3::new(8.0, 0.10, 5.8),
         HERO_FLOOR_COLOR_RGBA,
     );
+    // A deterministic rubber-tile floor makes scale and base motion legible
+    // without pretending that the decorative geometry participates in
+    // physics. The real floor collider remains the scene asset's plane.
+    const TILE_SIZE_M: f64 = 0.86;
+    const TILE_COLUMNS: usize = 9;
+    const TILE_ROWS: usize = 7;
+    let tile_origin_x_m = HOUSE_CENTER_M.x - (TILE_COLUMNS as f64 - 1.0) * TILE_SIZE_M * 0.5;
+    let tile_origin_z_m = HOUSE_CENTER_M.z - (TILE_ROWS as f64 - 1.0) * TILE_SIZE_M * 0.5;
+    for row in 0..TILE_ROWS {
+        for column in 0..TILE_COLUMNS {
+            let color_rgba = if (row + column) % 2 == 0 {
+                HERO_FLOOR_TILE_A_RGBA
+            } else {
+                HERO_FLOOR_TILE_B_RGBA
+            };
+            push_box(
+                scene,
+                Vec3::new(
+                    tile_origin_x_m + column as f64 * TILE_SIZE_M,
+                    0.003,
+                    tile_origin_z_m + row as f64 * TILE_SIZE_M,
+                ),
+                Vec3::new(TILE_SIZE_M - 0.012, 0.006, TILE_SIZE_M - 0.012),
+                color_rgba,
+            );
+        }
+    }
     for wall in HERO_WALLS {
         push_box(scene, wall.center_m, wall.size_m, wall.color_rgba);
+    }
+    // High-contrast work-cell pads keep the pick and place intent visible
+    // even when the small dynamic cube is partly occluded by the gripper.
+    for (position_m, color_rgba) in [
+        (PICK_OBJECT_M, [0.96, 0.62, 0.12, 1.0]),
+        (PLACE_TARGET_M, [0.10, 0.78, 0.52, 1.0]),
+    ] {
+        push_box(
+            scene,
+            Vec3::new(position_m.x, 0.011, position_m.z),
+            Vec3::new(0.58, 0.012, 0.58),
+            color_rgba,
+        );
     }
     scene.items.push(RenderScene::item_from_visual(
         Transform3::from_translation_rotation(
@@ -1612,7 +1655,7 @@ fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> f64 {
 fn build_gif(frames_dir: &Path, frame_count: usize, gif_path: &Path) -> std::io::Result<()> {
     let input = frames_dir.join("frame-%03d.png");
     let filter = format!(
-        "fps={FPS},scale={POSTER_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={GIF_MAX_COLORS}[p];[s1][p]paletteuse=dither=bayer:bayer_scale={GIF_BAYER_SCALE}:diff_mode=rectangle"
+        "fps={FPS},scale={GIF_SCALE_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={GIF_MAX_COLORS}[p];[s1][p]paletteuse=dither=bayer:bayer_scale={GIF_BAYER_SCALE}:diff_mode=rectangle"
     );
     let status = Command::new("ffmpeg")
         .args([
