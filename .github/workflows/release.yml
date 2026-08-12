@@ -1,0 +1,196 @@
+name: Release rehearsal
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "CHANGELOG.md"
+      - "LICENSE-*"
+      - "README.md"
+      - "crates/**"
+      - "deny.toml"
+      - "docs/**"
+      - "examples/**"
+      - "tools/rne_asset_cli/**"
+      - "tests/physics_conformance/**"
+      - "tests/scenario_scale/**"
+      - "release/**"
+      - "xtask/**"
+  push:
+    tags: ["v1.0.0-rc.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MATURIN_VERSION: "1.13.3"
+  RELEASE_VERSION: "1.0.0-rc.1"
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux
+      - name: Build the pinned ABI3 wheel
+        run: |
+          python -m pip install --disable-pip-version-check "maturin==${MATURIN_VERSION}"
+          maturin build --locked --release --features extension-module \
+            --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
+      - name: Assemble and test the native bundle
+        shell: bash
+        run: |
+          wheel="$(find artifacts/wheels -maxdepth 1 -name '*.whl' -print -quit)"
+          tag_args=()
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag_args=(--expected-tag "${GITHUB_REF_NAME}")
+          fi
+          cargo run --locked -p xtask -- release-bundle \
+            --target x86_64-unknown-linux-gnu \
+            --wheel "$wheel" \
+            --python python \
+            "${tag_args[@]}"
+      - name: Archive, extract, and independently rehearse
+        shell: bash
+        run: |
+          name="rne-${RELEASE_VERSION}-x86_64-unknown-linux-gnu"
+          archive="artifacts/release/${name}.tar.gz"
+          repeat="artifacts/release/${name}.repeat.tar.gz"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C artifacts/release -czf "$archive" "$name"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C artifacts/release -czf "$repeat" "$name"
+          cmp "$archive" "$repeat"
+          rm "$repeat"
+          mkdir -p artifacts/extracted
+          tar -xzf "$archive" -C artifacts/extracted
+          cargo run --locked -p xtask -- release-install-smoke \
+            --bundle-dir "artifacts/extracted/${name}" \
+            --output-dir artifacts/extracted-evidence \
+            --python python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rne-release-linux
+          if-no-files-found: error
+          path: |
+            artifacts/release/*.tar.gz
+            artifacts/wheels/*.whl
+            artifacts/extracted-evidence/install-rehearsal-report.json
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows
+      - name: Build the pinned ABI3 wheel
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check "maturin==$env:MATURIN_VERSION"
+          maturin build --locked --release --features extension-module `
+            --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
+      - name: Assemble and test the native bundle
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem artifacts/wheels/*.whl | Select-Object -First 1
+          $tagArgs = @()
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tagArgs = @("--expected-tag", $env:GITHUB_REF_NAME)
+          }
+          cargo run --locked -p xtask -- release-bundle `
+            --target x86_64-pc-windows-msvc `
+            --wheel $wheel.FullName `
+            --python python `
+            @tagArgs
+      - name: Archive, extract, and independently rehearse
+        shell: pwsh
+        run: |
+          $name = "rne-$env:RELEASE_VERSION-x86_64-pc-windows-msvc"
+          $archive = "artifacts/release/$name.zip"
+          $repeat = "artifacts/release/$name.repeat.zip"
+          python release/deterministic_zip.py `
+            --source "artifacts/release/$name" `
+            --output $archive
+          python release/deterministic_zip.py `
+            --source "artifacts/release/$name" `
+            --output $repeat
+          $archiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+          $repeatHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $repeat).Hash
+          if ($archiveHash -ne $repeatHash) {
+            throw "release ZIP is not byte-stable"
+          }
+          Remove-Item -LiteralPath $repeat
+          New-Item -ItemType Directory -Force artifacts/extracted | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath artifacts/extracted
+          cargo run --locked -p xtask -- release-install-smoke `
+            --bundle-dir "artifacts/extracted/$name" `
+            --output-dir artifacts/extracted-evidence `
+            --python python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rne-release-windows
+          if-no-files-found: error
+          path: |
+            artifacts/release/*.zip
+            artifacts/wheels/*.whl
+            artifacts/extracted-evidence/install-rehearsal-report.json
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rne-release-*
+          path: dist
+      - name: Publish prerelease assets from the verified tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mapfile -d '' assets < <(
+            find dist -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) \
+              -print0 | sort -z
+          )
+          if [[ "${#assets[@]}" -ne 4 ]]; then
+            printf 'expected 4 release assets, found %s\n' "${#assets[@]}" >&2
+            exit 1
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --prerelease \
+            --generate-notes \
+            --title "${GITHUB_REF_NAME}" \
+            "${assets[@]}"

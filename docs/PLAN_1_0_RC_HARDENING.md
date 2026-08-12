@@ -156,7 +156,7 @@ point at the tested commit.
 - M6-A freeze and migration policy: complete.
 - M6-B supply-chain evidence: complete.
 - M6-C parser/protocol hardening: complete.
-- M6-D artifacts and install rehearsal: pending.
+- M6-D artifacts and install rehearsal: complete.
 - M6-E final exit matrix: pending.
 
 ## M6-A evidence (2026-08-12)
@@ -238,3 +238,34 @@ point at the tested commit.
   gate. Campaign tests passed 3/3, all affected parser/transport unit and
   integration tests passed, and affected workspace plus cargo-fuzz targets pass
   Clippy with warnings denied.
+
+## M6-D evidence (2026-08-12)
+
+- `xtask release-bundle` assembles one native, versioned directory from the
+  locked graph and rejects non-host targets, unsafe target names, dirty release
+  builds unless explicitly allowed for local development, and mismatched RC
+  tags. Schema-v1 provenance records the exact commit, target, Rust/Cargo
+  versions, Cargo.lock digest, contract floors, payload digests, supply-chain
+  verdicts, fuzz digest, and six workflow verdicts. Reproducibility remains
+  false unless a clean worktree is built from the exact `v1.0.0-rc.1` tag.
+- A real Windows x86-64 bundle was built with Rust 1.95.0, Python 3.11,
+  maturin 1.13.3, cargo-deny 0.20.2, and cargo-audit 0.22.2. Its installed-only
+  rehearsal passed robot replay, scenario replay, all advertised analytic and
+  Rapier physics capabilities, the 100-actor/600-step scale case, dynamic
+  discovery of the velocity-servo controller DLL, and fresh installation and
+  execution of the `cp39-abi3` wheel. The scale case's slowest of three local
+  samples measured 2,505.86 headless steps/s against the 60 steps/s floor.
+- The Windows directory was compressed with sorted members, fixed ZIP metadata,
+  and maximum DEFLATE compression, expanded into a fresh path, verified against
+  the exact-member `SHA256SUMS`, and passed all six checks again without
+  source-tree binaries or Python packages. Checksum validation rejects modified,
+  missing, duplicate, traversal, symbolic-link, and unlisted members.
+- The required release workflow repeats assembly, native archive extraction,
+  checksum verification, wheel installation, and all six checks on clean Linux
+  and Windows runners. A verified `v1.0.0-rc.1` tag can publish exactly two
+  archives and two standalone wheels only after both platform jobs pass.
+- The artifact command unit suite passes 17/17 tests, affected crates pass
+  Clippy with warnings denied, and the complete bundle plus extracted-bundle
+  rehearsals pass locally. Two consecutive assemblies produced byte-identical
+  provenance, install, and checksum reports. The release report intentionally
+  records `reproducible=false` for this untagged dirty development run.

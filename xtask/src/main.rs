@@ -1,5 +1,7 @@
 //! Workspace automation tasks for Robot Native Engine.
 
+mod release_artifacts;
+
 use image::AnimationDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -91,6 +93,8 @@ fn run() -> anyhow::Result<()> {
         "behavior-ci" => behavior_ci(&mut args),
         "behavior-replay" => behavior_replay(&mut args),
         "release-check" => release_check(&mut args),
+        "release-bundle" => release_artifacts::release_bundle(&mut args),
+        "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -1017,6 +1021,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "release_report",
+            u64::from(release_artifacts::RELEASE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "install_rehearsal_report",
+            u64::from(release_artifacts::INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION),
         ),
     ];
     for (section, key, actual) in expected {

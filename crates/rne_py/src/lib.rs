@@ -1258,6 +1258,7 @@ impl PyVectorizedMobileManipulatorEnv {
 /// Robot Native Engine Python module.
 #[pymodule]
 fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyDiffDriveSim>()?;
     m.add_class::<PyDiffDriveEpisode>()?;
     m.add_class::<PyObservation>()?;
