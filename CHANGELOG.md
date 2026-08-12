@@ -29,6 +29,16 @@ All notable changes to Robot Native Engine are documented in this file.
   reproducible schema-v1 panic-free evidence in required CI, with matching
   cargo-fuzz importer and transport targets for longer sanitizer runs.
 
+- **Native release artifacts and install rehearsal (M6)**: pinned Linux and
+  Windows bundles include the release CLIs, example controller plugin, ABI3
+  Python wheel, fixtures, licenses, compatibility policy, blocker registry,
+  SBOM, provenance report, and a complete SHA-256 manifest. Assembly and
+  post-extraction checks run robot and scenario replay, physics conformance,
+  the deterministic 100-actor scale gate, plugin discovery, and wheel install
+  from bundled files only. Archive metadata and member ordering are normalized
+  for byte-stable output. Tag builds publish both native archives and wheels
+  only after clean Linux and Windows rehearsals succeed.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4

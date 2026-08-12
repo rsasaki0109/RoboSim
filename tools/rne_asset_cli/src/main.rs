@@ -127,6 +127,7 @@ fn parse_run_sensor_kind(text: &str) -> Result<RunSensorKind, String> {
 #[derive(Parser)]
 #[command(
     name = "rne-asset",
+    version,
     about = "Validate, simulate, and watch RNE asset files"
 )]
 struct Cli {

@@ -18,7 +18,7 @@ except ImportError:
 
 
 def main() -> None:
-    env = rne_py.DiffDriveEpisode(goal_x_m=2.0, max_steps=300)
+    env = rne_py.DiffDriveEpisode(goal_x_m=1.0, max_steps=300)
     step = env.reset()
     wheel_velocity_rad_s = 6.0
 

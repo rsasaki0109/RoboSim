@@ -30,3 +30,5 @@ snapshot = 1
 
 [evidence]
 fuzz_smoke_report = 1
+release_report = 1
+install_rehearsal_report = 1
