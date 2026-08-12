@@ -26,4 +26,4 @@ pub mod error;
 pub mod model;
 
 pub use error::MjcfError;
-pub use model::{mjcf_to_urdf, mjcf_to_urdf_file};
+pub use model::{mjcf_to_urdf, mjcf_to_urdf_file, MJCF_MAX_INPUT_BYTES};

@@ -2,10 +2,17 @@
 
 use crate::SdfError;
 use roxmltree::{Document, Node};
+use std::io::Read;
 use std::path::Path;
+
+/// Maximum accepted SDF XML input size.
+pub const SDF_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+
+const SDF_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Converts a minimal SDF model document into a URDF XML string.
 pub fn sdf_to_urdf(text: &str) -> Result<String, SdfError> {
+    ensure_input_len(text.len())?;
     let document = Document::parse(text).map_err(|error| SdfError::Xml(error.to_string()))?;
     let root = document.root_element();
     if root.tag_name().name() != "sdf" {
@@ -39,9 +46,11 @@ pub fn sdf_to_urdf(text: &str) -> Result<String, SdfError> {
     out.push_str(&format!("<robot name=\"{}\">\n", escape_attr(robot_name)));
     for link in child_elements(model).filter(|node| node.tag_name().name() == "link") {
         out.push_str(&render_link(link)?);
+        ensure_output_len(out.len())?;
     }
     for joint in child_elements(model).filter(|node| node.tag_name().name() == "joint") {
         out.push_str(&render_joint(joint)?);
+        ensure_output_len(out.len())?;
     }
     out.push_str("</robot>\n");
     Ok(out)
@@ -49,8 +58,32 @@ pub fn sdf_to_urdf(text: &str) -> Result<String, SdfError> {
 
 /// Reads an SDF model file and converts it, keeping the model name.
 pub fn sdf_to_urdf_file(path: &Path) -> Result<String, SdfError> {
-    let text = std::fs::read_to_string(path)?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take((SDF_MAX_INPUT_BYTES as u64) + 1)
+        .read_to_end(&mut bytes)?;
+    ensure_input_len(bytes.len())?;
+    let text =
+        String::from_utf8(bytes).map_err(|error| SdfError::Xml(error.utf8_error().to_string()))?;
     sdf_to_urdf(&text)
+}
+
+fn ensure_input_len(actual: usize) -> Result<(), SdfError> {
+    if actual > SDF_MAX_INPUT_BYTES {
+        return Err(SdfError::Invalid(format!(
+            "input is {actual} bytes, limit is {SDF_MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_output_len(actual: usize) -> Result<(), SdfError> {
+    if actual > SDF_MAX_OUTPUT_BYTES {
+        return Err(SdfError::Invalid(format!(
+            "converted URDF exceeds {SDF_MAX_OUTPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn render_link(link: Node<'_, '_>) -> Result<String, SdfError> {
@@ -395,4 +428,15 @@ fn child_elements<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = No
 
 fn first_child_element<'a, 'input>(node: Node<'a, 'input>, name: &str) -> Option<Node<'a, 'input>> {
     child_elements(node).find(|child| child.tag_name().name() == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_declared_input_and_output_sizes() {
+        assert!(ensure_input_len(SDF_MAX_INPUT_BYTES + 1).is_err());
+        assert!(ensure_output_len(SDF_MAX_OUTPUT_BYTES + 1).is_err());
+    }
 }

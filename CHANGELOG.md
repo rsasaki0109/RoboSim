@@ -22,6 +22,13 @@ All notable changes to Robot Native Engine are documented in this file.
   artifacts. Dependency maintenance also updates PyO3 and parser/runtime
   libraries and removes an unused unmaintained font-parsing path.
 
+- **Parser and protocol hardening (M6)**: import and frontend transport
+  boundaries now enforce allocation-safe input ceilings, bounded deterministic
+  OpenSCENARIO substitution, catalog traversal and symlink containment, and an
+  MJCF nesting limit. A fixed 361-case, nine-boundary fuzz-smoke campaign emits
+  reproducible schema-v1 panic-free evidence in required CI, with matching
+  cargo-fuzz importer and transport targets for longer sanitizer runs.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4

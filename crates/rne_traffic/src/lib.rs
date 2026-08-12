@@ -33,6 +33,7 @@ pub use events::TrafficStepCompleted;
 pub use id::TrafficId;
 pub use io::{
     canonical_traffic_asset_bytes, load_traffic_asset, parse_traffic_asset, save_traffic_asset,
+    TRAFFIC_ASSET_MAX_INPUT_BYTES,
 };
 pub use resources::{
     TrafficConflictControl, TrafficConflictControlError, TrafficConflictControls, TrafficRoute,

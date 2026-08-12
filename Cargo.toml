@@ -102,6 +102,7 @@ members = [
   "examples/71_g1_rgbd_sensor",
   "tests/determinism",
   "tests/dynamics",
+  "tests/fuzz_smoke",
   "tests/physics_conformance",
   "tests/scenario_scale",
   "tools/rne_asset_cli",
@@ -133,6 +134,7 @@ rne_core = { version = "=1.0.0-rc.1", path = "crates/rne_core" }
 rne_data = { version = "=1.0.0-rc.1", path = "crates/rne_data" }
 rne_deformable = { version = "=1.0.0-rc.1", path = "crates/rne_deformable" }
 rne_ecs = { version = "=1.0.0-rc.1", path = "crates/rne_ecs" }
+rne_fuzz_smoke = { version = "=0.1.0", path = "tests/fuzz_smoke" }
 rne_log = { version = "=1.0.0-rc.1", path = "crates/rne_log" }
 rne_math = { version = "=1.0.0-rc.1", path = "crates/rne_math" }
 rne_mjcf = { version = "=1.0.0-rc.1", path = "crates/rne_mjcf" }

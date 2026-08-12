@@ -37,10 +37,14 @@ use rne_traffic::{
 use roxmltree::{Document, Node};
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 /// Current importer feature set version.
 pub const SUMO_IMPORT_VERSION: u32 = 1;
+
+/// Maximum accepted SUMO `.net.xml` input size.
+pub const SUMO_MAX_INPUT_BYTES: usize = 128 * 1024 * 1024;
 
 /// Counts describing one completed SUMO import.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -154,6 +158,7 @@ pub enum SumoImportError {
 
 /// Parses a SUMO `.net.xml` document into a lane-only RNE network.
 pub fn parse_sumo_net_xml(bytes: &[u8]) -> Result<LaneNetworkImport, SumoImportError> {
+    ensure_input_len(bytes.len())?;
     let text = std::str::from_utf8(bytes).map_err(|_| SumoImportError::Utf8)?;
     let document =
         Document::parse(text).map_err(|error| SumoImportError::Xml(error.to_string()))?;
@@ -206,11 +211,27 @@ pub fn parse_sumo_net_xml(bytes: &[u8]) -> Result<LaneNetworkImport, SumoImportE
 
 /// Parses a SUMO `.net.xml` file into a lane-only RNE network.
 pub fn parse_sumo_net_file(path: &Path) -> Result<LaneNetworkImport, SumoImportError> {
-    let bytes = fs::read(path).map_err(|error| SumoImportError::Io {
-        path: path.display().to_string(),
-        message: error.to_string(),
-    })?;
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .and_then(|file| {
+            file.take((SUMO_MAX_INPUT_BYTES as u64) + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|error| SumoImportError::Io {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    ensure_input_len(bytes.len())?;
     parse_sumo_net_xml(&bytes)
+}
+
+fn ensure_input_len(actual: usize) -> Result<(), SumoImportError> {
+    if actual > SUMO_MAX_INPUT_BYTES {
+        return Err(SumoImportError::Xml(format!(
+            "input is {actual} bytes, limit is {SUMO_MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 /// Imports a SUMO `.net.xml` document and derives the full traffic asset.
@@ -780,6 +801,11 @@ mod tests {
             .expect("bicycle lane");
         assert_eq!(bicycle.kind, LaneKind::Bicycle);
         assert_eq!(bicycle.allowed_actors, vec![TrafficActorKind::Bicycle]);
+    }
+
+    #[test]
+    fn rejects_declared_input_size_before_parsing() {
+        assert!(ensure_input_len(SUMO_MAX_INPUT_BYTES + 1).is_err());
     }
 
     #[test]

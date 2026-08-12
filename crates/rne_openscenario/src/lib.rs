@@ -47,5 +47,5 @@ pub use runtime::{
 };
 pub use scenario::{
     ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,
-    ScenarioTimedAction, SCENARIO_DOCUMENT_VERSION,
+    ScenarioTimedAction, SCENARIO_DOCUMENT_VERSION, SCENARIO_MAX_INPUT_BYTES,
 };

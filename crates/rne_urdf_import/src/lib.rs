@@ -11,7 +11,7 @@ pub mod spawn;
 pub use articulation::{
     attach_urdf_articulation, UrdfArticulationAttached, UrdfArticulationConfig,
 };
-pub use parse::{parse_urdf, parse_urdf_file, rpy_to_quat, UrdfParseError};
+pub use parse::{parse_urdf, parse_urdf_file, rpy_to_quat, UrdfParseError, URDF_MAX_INPUT_BYTES};
 pub use schema::{
     UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointLimit, UrdfJointMimic, UrdfJointType,
     UrdfLink, UrdfRobot,

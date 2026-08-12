@@ -24,4 +24,4 @@ pub mod error;
 pub mod model;
 
 pub use error::SdfError;
-pub use model::{sdf_to_urdf, sdf_to_urdf_file};
+pub use model::{sdf_to_urdf, sdf_to_urdf_file, SDF_MAX_INPUT_BYTES};

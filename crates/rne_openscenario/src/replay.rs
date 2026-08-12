@@ -1,5 +1,6 @@
 //! Versioned artifacts for deterministic OpenSCENARIO runs.
 
+use crate::scenario::{read_bounded_utf8, SCENARIO_MAX_INPUT_BYTES};
 use crate::{ScenarioRunOptions, ScenarioRunResult};
 use rne_core::ControlCommand;
 use serde::{Deserialize, Serialize};
@@ -344,6 +345,12 @@ impl ScenarioReplayArtifact {
 
     /// Parses and validates a scenario replay artifact from JSON.
     pub fn from_json(text: &str) -> Result<Self, ScenarioReplayArtifactError> {
+        if text.len() > SCENARIO_MAX_INPUT_BYTES {
+            return Err(ScenarioReplayArtifactError::Invalid(format!(
+                "scenario replay input is {} bytes, limit is {SCENARIO_MAX_INPUT_BYTES} bytes",
+                text.len()
+            )));
+        }
         let value: serde_json::Value = serde_json::from_str(text)?;
         if let Some(actual) = value
             .get("schema_version")
@@ -378,7 +385,7 @@ impl ScenarioReplayArtifact {
 
     /// Reads and validates a scenario replay artifact from a file.
     pub fn read_json(path: impl AsRef<Path>) -> Result<Self, ScenarioReplayArtifactError> {
-        let text = fs::read_to_string(path)?;
+        let text = read_bounded_utf8(path.as_ref())?;
         Self::from_json(&text)
     }
 }

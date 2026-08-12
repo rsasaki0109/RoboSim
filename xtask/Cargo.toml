@@ -12,6 +12,7 @@ image = "0.25"
 rne_assets = { workspace = true }
 rne_ai = { workspace = true }
 rne_data = { workspace = true }
+rne_fuzz_smoke = { workspace = true }
 rne_log = { workspace = true }
 rne_openscenario = { workspace = true }
 rne_physics = { workspace = true }

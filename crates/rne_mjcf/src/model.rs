@@ -2,9 +2,15 @@
 
 use crate::MjcfError;
 use roxmltree::{Document, Node};
+use std::io::Read;
 use std::path::Path;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+const MJCF_MAX_BODY_DEPTH: usize = 128;
+const MJCF_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Maximum accepted MJCF XML input size.
+pub const MJCF_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Angular unit convention from the MJCF `<compiler>`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15,6 +21,7 @@ enum AngleConvention {
 
 /// Converts a minimal MJCF model document into a URDF XML string.
 pub fn mjcf_to_urdf(text: &str) -> Result<String, MjcfError> {
+    ensure_input_len(text.len())?;
     let document = Document::parse(text).map_err(|error| MjcfError::Xml(error.to_string()))?;
     let root = document.root_element();
     if root.tag_name().name() != "mujoco" {
@@ -57,31 +64,57 @@ pub fn mjcf_to_urdf(text: &str) -> Result<String, MjcfError> {
     let model_name = root.attribute("model").unwrap_or("model");
     let mut out = String::from("<?xml version=\"1.0\"?>\n");
     out.push_str(&format!("<robot name=\"{}\">\n", escape_attr(model_name)));
-    render_body(root_body, None, angle, &mut out)?;
+    render_body(root_body, None, angle, 0, &mut out)?;
     out.push_str("</robot>\n");
     Ok(out)
 }
 
 /// Reads an MJCF model file and converts it.
 pub fn mjcf_to_urdf_file(path: &Path) -> Result<String, MjcfError> {
-    let text = std::fs::read_to_string(path)?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take((MJCF_MAX_INPUT_BYTES as u64) + 1)
+        .read_to_end(&mut bytes)?;
+    ensure_input_len(bytes.len())?;
+    let text =
+        String::from_utf8(bytes).map_err(|error| MjcfError::Xml(error.utf8_error().to_string()))?;
     mjcf_to_urdf(&text)
+}
+
+fn ensure_input_len(actual: usize) -> Result<(), MjcfError> {
+    if actual > MJCF_MAX_INPUT_BYTES {
+        return Err(MjcfError::Invalid(format!(
+            "input is {actual} bytes, limit is {MJCF_MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn render_body(
     body: Node<'_, '_>,
     parent_link: Option<&str>,
     angle: AngleConvention,
+    depth: usize,
     out: &mut String,
 ) -> Result<(), MjcfError> {
+    if depth > MJCF_MAX_BODY_DEPTH {
+        return Err(MjcfError::Invalid(format!(
+            "body nesting exceeds {MJCF_MAX_BODY_DEPTH} levels"
+        )));
+    }
     reject_body_rotation(body)?;
     let name = required_attr(&body, "body", "name")?;
     if let Some(parent_link) = parent_link {
         render_joint(body, parent_link, name, angle, out)?;
     }
     render_link(body, name, out)?;
+    if out.len() > MJCF_MAX_OUTPUT_BYTES {
+        return Err(MjcfError::Invalid(format!(
+            "converted URDF exceeds {MJCF_MAX_OUTPUT_BYTES} bytes"
+        )));
+    }
     for child in child_elements(body).filter(|node| node.tag_name().name() == "body") {
-        render_body(child, Some(name), angle, out)?;
+        render_body(child, Some(name), angle, depth + 1, out)?;
     }
     Ok(())
 }
@@ -374,4 +407,27 @@ fn child_elements<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = No
 
 fn first_child_element<'a, 'input>(node: Node<'a, 'input>, name: &str) -> Option<Node<'a, 'input>> {
     child_elements(node).find(|child| child.tag_name().name() == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_declared_input_size_before_parsing() {
+        assert!(ensure_input_len(MJCF_MAX_INPUT_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn rejects_excessive_body_nesting_without_recursing_unboundedly() {
+        let mut xml = String::from("<mujoco><worldbody>");
+        for index in 0..(MJCF_MAX_BODY_DEPTH + 3) {
+            xml.push_str(&format!("<body name=\"b{index}\">"));
+        }
+        for _ in 0..(MJCF_MAX_BODY_DEPTH + 3) {
+            xml.push_str("</body>");
+        }
+        xml.push_str("</worldbody></mujoco>");
+        assert!(matches!(mjcf_to_urdf(&xml), Err(MjcfError::Invalid(_))));
+    }
 }

@@ -1,13 +1,26 @@
 //! Minimal OpenSCENARIO 1.0 XML parser.
 
-use crate::scenario::check_revision;
+use crate::scenario::{
+    check_revision, ensure_scenario_input_len, read_bounded_utf8, read_bounded_utf8_with_limit,
+};
 use crate::{
     ScenarioAction, ScenarioDocument, ScenarioEntity, ScenarioEntityKind, ScenarioError,
     ScenarioTimedAction,
 };
 use roxmltree::{Document, Node};
-use std::collections::BTreeSet;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
+
+const OPENSCENARIO_MAX_CATALOG_DIRECTORIES: usize = 64;
+const OPENSCENARIO_MAX_CATALOG_FILES: usize = 1_024;
+const OPENSCENARIO_MAX_CATALOG_FILE_BYTES: usize = 8 * 1024 * 1024;
+const OPENSCENARIO_MAX_CATALOG_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Default)]
+struct CatalogBudget {
+    files: usize,
+    bytes: usize,
+}
 
 /// Parses a minimal OpenSCENARIO 1.0 XML file into a validated scenario document.
 ///
@@ -45,6 +58,7 @@ fn parse_inner(
     text: &str,
     base_dir: Option<&Path>,
 ) -> Result<ScenarioDocument, ScenarioError> {
+    ensure_scenario_input_len(text.len())?;
     let parameters = extract_parameters(text)?;
     let text = substitute_parameters(text, &parameters)?;
     let document = Document::parse(&text)
@@ -90,7 +104,7 @@ fn parse_inner(
 /// Vehicle catalog directories in `CatalogLocations` are resolved relative to
 /// the file's directory.
 pub fn parse_openscenario_xml_file(path: &Path) -> Result<ScenarioDocument, ScenarioError> {
-    let text = std::fs::read_to_string(path)?;
+    let text = read_bounded_utf8(path)?;
     parse_openscenario_xml_with_source_at(
         &path.display().to_string(),
         &text,
@@ -102,8 +116,10 @@ fn parse_entities<'a, 'input>(
     root: Node<'a, 'input>,
     base_dir: Option<&Path>,
 ) -> Result<Vec<ScenarioEntity>, ScenarioError> {
-    let catalog_dirs = catalog_directories(root);
+    let catalog_dirs = catalog_directories(root)?;
     let mut entities = Vec::new();
+    let mut catalog_budget = CatalogBudget::default();
+    let mut catalog_cache = BTreeMap::new();
     for scenario_object in descendant_elements(root, "ScenarioObject") {
         let name = parse_string_attribute(&scenario_object, "name", "ScenarioObject")?;
         let kind = if first_child_element(scenario_object, "Vehicle").is_some() {
@@ -121,7 +137,20 @@ fn parse_entities<'a, 'input>(
             let entry_name = catalog_reference.attribute("entryName").ok_or_else(|| {
                 ScenarioError::Invalid("`CatalogReference` requires `@entryName`".to_string())
             })?;
-            resolve_catalog_entity(catalog_name, entry_name, &catalog_dirs, base_dir)?
+            let cache_key = (catalog_name.to_string(), entry_name.to_string());
+            if let Some(kind) = catalog_cache.get(&cache_key) {
+                *kind
+            } else {
+                let kind = resolve_catalog_entity(
+                    catalog_name,
+                    entry_name,
+                    &catalog_dirs,
+                    base_dir,
+                    &mut catalog_budget,
+                )?;
+                catalog_cache.insert(cache_key, kind);
+                kind
+            }
         } else {
             return Err(ScenarioError::UnsupportedElement {
                 element: "ScenarioObject".to_string(),
@@ -141,12 +170,40 @@ fn parse_entities<'a, 'input>(
 }
 
 /// Collects the `CatalogLocations` directory paths in document order.
-fn catalog_directories(root: Node<'_, '_>) -> Vec<std::path::PathBuf> {
-    descendant_elements(root, "Directory")
+fn catalog_directories(root: Node<'_, '_>) -> Result<Vec<PathBuf>, ScenarioError> {
+    let directories = descendant_elements(root, "Directory")
         .into_iter()
         .filter_map(|directory| directory.attribute("path"))
-        .map(std::path::PathBuf::from)
-        .collect()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    if directories.len() > OPENSCENARIO_MAX_CATALOG_DIRECTORIES {
+        return Err(ScenarioError::Invalid(format!(
+            "CatalogLocations contains {} directories, limit is {OPENSCENARIO_MAX_CATALOG_DIRECTORIES}",
+            directories.len()
+        )));
+    }
+    for directory in &directories {
+        validate_catalog_relative_path(directory)?;
+    }
+    Ok(directories)
+}
+
+fn validate_catalog_relative_path(path: &Path) -> Result<(), ScenarioError> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(ScenarioError::Invalid(format!(
+            "catalog directory must stay below the scenario directory: {}",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Resolves a `CatalogReference` entity kind by scanning the catalog files.
@@ -155,6 +212,7 @@ fn resolve_catalog_entity(
     entry_name: &str,
     catalog_dirs: &[std::path::PathBuf],
     base_dir: Option<&Path>,
+    budget: &mut CatalogBudget,
 ) -> Result<ScenarioEntityKind, ScenarioError> {
     if catalog_name != "VehicleCatalog" {
         return Err(ScenarioError::UnsupportedElement {
@@ -167,29 +225,86 @@ fn resolve_catalog_entity(
             "catalog resolution requires a base directory".to_string(),
         ));
     };
+    let canonical_base = base_dir.canonicalize().map_err(|error| {
+        ScenarioError::Invalid(format!(
+            "resolve scenario directory {}: {error}",
+            base_dir.display()
+        ))
+    })?;
+    if budget.files >= OPENSCENARIO_MAX_CATALOG_FILES
+        || budget.bytes >= OPENSCENARIO_MAX_CATALOG_BYTES
+    {
+        return Err(ScenarioError::Invalid(
+            "OpenSCENARIO catalog scan budget is exhausted".to_string(),
+        ));
+    }
     for directory in catalog_dirs {
-        let directory_path = if directory.is_absolute() {
-            directory.clone()
-        } else {
-            base_dir.join(directory)
-        };
-        let mut files = std::fs::read_dir(&directory_path)
+        validate_catalog_relative_path(directory)?;
+        let directory_path = base_dir.join(directory);
+        let canonical_directory = directory_path.canonicalize().map_err(|error| {
+            ScenarioError::Invalid(format!(
+                "resolve catalog directory {}: {error}",
+                directory_path.display()
+            ))
+        })?;
+        if !canonical_directory.starts_with(&canonical_base) {
+            return Err(ScenarioError::Invalid(format!(
+                "catalog directory escapes scenario directory: {}",
+                directory_path.display()
+            )));
+        }
+        let mut files = std::fs::read_dir(&canonical_directory)
             .map_err(|error| {
                 ScenarioError::Invalid(format!(
                     "read catalog directory {}: {error}",
-                    directory_path.display()
+                    canonical_directory.display()
                 ))
             })?
             .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
+            .filter_map(|entry| {
+                let path = entry.path();
                 path.extension()
                     .is_some_and(|extension| extension == "xosc" || extension == "xml")
+                    .then_some(path)
             })
+            .take(OPENSCENARIO_MAX_CATALOG_FILES.saturating_sub(budget.files) + 1)
             .collect::<Vec<_>>();
+        if files.len() > OPENSCENARIO_MAX_CATALOG_FILES.saturating_sub(budget.files) {
+            return Err(ScenarioError::Invalid(format!(
+                "catalog scan exceeds {OPENSCENARIO_MAX_CATALOG_FILES} XML files at {}",
+                canonical_directory.display()
+            )));
+        }
         files.sort();
         for file in files {
-            let text = std::fs::read_to_string(&file)?;
+            let canonical_file = file.canonicalize().map_err(|error| {
+                ScenarioError::Invalid(format!("resolve catalog file {}: {error}", file.display()))
+            })?;
+            if !canonical_file.starts_with(&canonical_directory) {
+                return Err(ScenarioError::Invalid(format!(
+                    "catalog file escapes catalog directory: {}",
+                    file.display()
+                )));
+            }
+            let file_bytes =
+                usize::try_from(canonical_file.metadata().map_err(ScenarioError::Io)?.len())
+                    .unwrap_or(usize::MAX);
+            if file_bytes > OPENSCENARIO_MAX_CATALOG_FILE_BYTES {
+                return Err(ScenarioError::Invalid(format!(
+                    "catalog file is {file_bytes} bytes, per-file limit is {OPENSCENARIO_MAX_CATALOG_FILE_BYTES}: {}",
+                    canonical_file.display()
+                )));
+            }
+            let next_total = budget.bytes.saturating_add(file_bytes);
+            if next_total > OPENSCENARIO_MAX_CATALOG_BYTES {
+                return Err(ScenarioError::Invalid(format!(
+                    "catalog scan exceeds {OPENSCENARIO_MAX_CATALOG_BYTES} total bytes"
+                )));
+            }
+            budget.files += 1;
+            budget.bytes = next_total;
+            let text =
+                read_bounded_utf8_with_limit(&canonical_file, OPENSCENARIO_MAX_CATALOG_FILE_BYTES)?;
             let document = Document::parse(&text)
                 .map_err(|error| ScenarioError::Invalid(format!("XML syntax: {error}")))?;
             let found = descendant_elements(document.root_element(), "Vehicle")
@@ -429,12 +544,10 @@ fn parse_f64(value: &str, field: &str) -> Result<f64, ScenarioError> {
 /// Parameter values are substituted into `${name}` references before the
 /// document is parsed, so declared values must be plain XML attribute tokens
 /// (numbers for the numeric subset this importer accepts).
-fn extract_parameters(
-    text: &str,
-) -> Result<std::collections::HashMap<String, String>, ScenarioError> {
+fn extract_parameters(text: &str) -> Result<BTreeMap<String, String>, ScenarioError> {
     let document = Document::parse(text)
         .map_err(|error| ScenarioError::Invalid(format!("XML syntax: {error}")))?;
-    let mut parameters = std::collections::HashMap::new();
+    let mut parameters = BTreeMap::new();
     for declaration in descendant_elements(document.root_element(), "ParameterDeclaration") {
         let name = declaration.attribute("name").ok_or_else(|| {
             ScenarioError::Invalid("`ParameterDeclaration` requires `@name`".to_string())
@@ -457,11 +570,74 @@ fn extract_parameters(
 /// Replaces every `$ {name}` reference with its declared value.
 fn substitute_parameters(
     text: &str,
-    parameters: &std::collections::HashMap<String, String>,
+    parameters: &BTreeMap<String, String>,
 ) -> Result<String, ScenarioError> {
-    let mut out = text.to_string();
-    for (name, value) in parameters {
-        out = out.replace(&format!("${{{name}}}"), value);
+    substitute_parameters_with_limit(text, parameters, crate::SCENARIO_MAX_INPUT_BYTES)
+}
+
+fn substitute_parameters_with_limit(
+    text: &str,
+    parameters: &BTreeMap<String, String>,
+    limit: usize,
+) -> Result<String, ScenarioError> {
+    let mut out = String::with_capacity(text.len().min(limit));
+    let mut remaining = text;
+    while let Some(start) = remaining.find("${") {
+        push_bounded(&mut out, &remaining[..start], limit)?;
+        let reference = &remaining[start + 2..];
+        let Some(end) = reference.find('}') else {
+            return Err(ScenarioError::Invalid(
+                "unterminated parameter reference".to_string(),
+            ));
+        };
+        let name = &reference[..end];
+        let value = parameters.get(name).ok_or_else(|| {
+            ScenarioError::Invalid(format!("unknown parameter reference `{name}`"))
+        })?;
+        push_bounded(&mut out, value, limit)?;
+        remaining = &reference[end + 1..];
     }
+    push_bounded(&mut out, remaining, limit)?;
     Ok(out)
+}
+
+fn push_bounded(out: &mut String, value: &str, limit: usize) -> Result<(), ScenarioError> {
+    if out.len().saturating_add(value.len()) > limit {
+        return Err(ScenarioError::Invalid(format!(
+            "parameter substitution exceeds {limit} bytes"
+        )));
+    }
+    out.push_str(value);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_catalog_paths_that_can_escape_the_scenario_directory() {
+        assert!(validate_catalog_relative_path(Path::new("catalogs/vehicles")).is_ok());
+        assert!(validate_catalog_relative_path(Path::new("../outside")).is_err());
+        assert!(validate_catalog_relative_path(Path::new("/absolute")).is_err());
+    }
+
+    #[test]
+    fn parameter_substitution_is_single_pass_and_bounded() {
+        let parameters = BTreeMap::from([
+            ("a".to_string(), "${b}".to_string()),
+            ("b".to_string(), "123".to_string()),
+        ]);
+        assert_eq!(
+            substitute_parameters_with_limit("x=${a};y=${b}", &parameters, 32).unwrap(),
+            "x=${b};y=123"
+        );
+        assert!(substitute_parameters_with_limit("${b}${b}", &parameters, 5).is_err());
+        assert!(substitute_parameters_with_limit("${missing}", &parameters, 32).is_err());
+    }
+
+    #[test]
+    fn rejects_declared_scenario_size_before_parsing() {
+        assert!(ensure_scenario_input_len(crate::SCENARIO_MAX_INPUT_BYTES + 1).is_err());
+    }
 }

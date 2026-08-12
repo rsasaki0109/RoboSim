@@ -3481,6 +3481,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_fuzz_smoke"
+version = "0.1.0"
+dependencies = [
+ "rne_data",
+ "rne_mjcf",
+ "rne_openscenario",
+ "rne_sdf",
+ "rne_sumo",
+ "rne_traffic",
+ "rne_urdf_import",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "rne_log"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -5276,6 +5292,7 @@ dependencies = [
  "rne_ai",
  "rne_assets",
  "rne_data",
+ "rne_fuzz_smoke",
  "rne_log",
  "rne_openscenario",
  "rne_physics",

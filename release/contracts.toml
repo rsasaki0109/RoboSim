@@ -27,3 +27,6 @@ behavior_failure_case = 1
 
 [physics]
 snapshot = 1
+
+[evidence]
+fuzz_smoke_report = 1

@@ -2,11 +2,42 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{self, Read};
 use std::path::Path;
 use thiserror::Error;
 
 /// Current `.rne.scenario.json` schema version.
 pub const SCENARIO_DOCUMENT_VERSION: u32 = 1;
+
+/// Maximum accepted OpenSCENARIO, scenario-document, or replay input size.
+pub const SCENARIO_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
+
+pub(crate) fn ensure_scenario_input_len(actual: usize) -> Result<(), ScenarioError> {
+    if actual > SCENARIO_MAX_INPUT_BYTES {
+        return Err(ScenarioError::Invalid(format!(
+            "scenario input is {actual} bytes, limit is {SCENARIO_MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_bounded_utf8(path: &Path) -> io::Result<String> {
+    read_bounded_utf8_with_limit(path, SCENARIO_MAX_INPUT_BYTES)
+}
+
+pub(crate) fn read_bounded_utf8_with_limit(path: &Path, limit: usize) -> io::Result<String> {
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take((limit as u64) + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("scenario input is larger than {limit} bytes"),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
 
 /// Scenario import, serialization, or validation failure.
 #[derive(Debug, Error)]
@@ -272,6 +303,7 @@ impl ScenarioDocument {
 
     /// Parses and validates a scenario document from JSON text.
     pub fn from_json(text: &str) -> Result<Self, ScenarioError> {
+        ensure_scenario_input_len(text.len())?;
         let document: Self = serde_json::from_str(text)?;
         document.validate()?;
         Ok(document)
@@ -292,7 +324,7 @@ impl ScenarioDocument {
 
     /// Loads and validates a scenario document from a JSON file.
     pub fn read_json(path: impl AsRef<Path>) -> Result<Self, ScenarioError> {
-        let text = fs::read_to_string(path)?;
+        let text = read_bounded_utf8(path.as_ref())?;
         Self::from_json(&text)
     }
 }
