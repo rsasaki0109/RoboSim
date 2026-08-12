@@ -2,6 +2,7 @@
 name = "mobile_clutter_pick_place_e2e"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 publish = false
 
 [dependencies]

@@ -3,14 +3,15 @@ name = "rne_openscenario"
 description = "Minimal OpenSCENARIO 1.0 scenario import for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-rne_core = { path = "../rne_core" }
-rne_ecs = { path = "../rne_ecs" }
-rne_math = { path = "../rne_math" }
-rne_traffic = { path = "../rne_traffic" }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_traffic = { workspace = true }
 roxmltree = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

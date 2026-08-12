@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **1.0 RC hardening (M6)**: the workspace now targets `1.0.0-rc.1`,
+  declares Rust `1.88.0` as its MSRV, gives packaged internal dependencies
+  exact RC requirements, denies undocumented public Rust APIs across every
+  release library, and publishes the compatibility and migration contract plus
+  machine-readable schema and release-blocker registries. Dedicated CI gates
+  exercise the MSRV, warning-free rustdoc, all 27 crate archives, and patch-level
+  SemVer compatibility against the frozen baseline.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4

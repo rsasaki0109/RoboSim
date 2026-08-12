@@ -3,11 +3,12 @@ name = "rne_traci"
 description = "Minimal TraCI client for live SUMO co-simulation"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-rne_ecs = { path = "../rne_ecs" }
-rne_traffic = { path = "../rne_traffic" }
+rne_ecs = { workspace = true }
+rne_traffic = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

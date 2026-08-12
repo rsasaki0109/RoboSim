@@ -2,6 +2,7 @@
 name = "go2_walk_vs_stand_push"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 publish = false
 
 [dependencies]

@@ -24,7 +24,7 @@ that point.
 | M3 | Jan-Feb 2027 | Production sensor/frontend transport: framed binary protocol, explicit negotiation, bounded queues/backpressure, RGB-D/LiDAR payloads, and reconnect semantics ([plan](PLAN_SENSOR_FRONTEND_TRANSPORT.md)) | Slow/disconnected clients cannot stall simulation or grow memory without bound; protocol compatibility and headless sensor references pass on Windows and Linux |
 | M4 | Mar-Apr 2027 | Physics conformance: backend-neutral test vectors, units/tolerance registry, snapshots, contact/joint validation, and analytic-vs-Rapier reports ([plan](PLAN_PHYSICS_CONFORMANCE.md)) | Every advertised backend capability has a conformance test; deterministic tests use stable hashes where valid and documented tolerances otherwise |
 | M5 | May-Jun 2027 | Scenario and traffic scale: multi-entity OpenSCENARIO execution, mixed native/external ownership metrics, recoverable TraCI sessions, and urban scale budgets ([plan](PLAN_SCENARIO_TRAFFIC_SCALE.md)) | Reference scenario runs 100 actors at >=60 Hz headlessly on the CI benchmark class with deterministic externally visible ordering and zero unexplained violations |
-| M6 | Jul 2027 | 1.0 RC hardening: public API freeze, migration and compatibility policy, supply-chain/license audit, fuzzed import/protocol boundaries, release artifacts and examples | No P0/P1 defects, all public APIs documented, two clean release rehearsals pass the full matrix, and `v1.0.0-rc.1` installs and runs every flagship workflow |
+| M6 | Jul 2027 | 1.0 RC hardening: public API freeze, migration and compatibility policy, supply-chain/license audit, fuzzed import/protocol boundaries, release artifacts and examples ([plan](PLAN_1_0_RC_HARDENING.md)) | No P0/P1 defects, all public APIs documented, two clean release rehearsals pass the full matrix, and `v1.0.0-rc.1` installs and runs every flagship workflow |
 
 Cross-cutting rules for every milestone:
 
@@ -524,7 +524,7 @@ After merging release changes, set `RNE_VERSION` to the exact version being
 shipped and run the clean release gate before creating generated release notes:
 
 ```bash
-RNE_VERSION=0.14.0-rc.1
+RNE_VERSION=1.0.0-rc.1
 cargo run --locked -p xtask -- ci
 git diff --exit-code
 git tag -a "v${RNE_VERSION}" -m "Robot Native Engine v${RNE_VERSION}"

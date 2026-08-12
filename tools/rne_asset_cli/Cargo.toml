@@ -3,6 +3,7 @@ name = "rne_asset_cli"
 description = "CLI for validating, running, and hot-reloading RNE asset files"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
@@ -11,29 +12,27 @@ publish = false
 anyhow = { workspace = true }
 base64 = { workspace = true }
 clap = { version = "4", features = ["derive"] }
-rne_assets = { path = "../../crates/rne_assets" }
-rne_core = { path = "../../crates/rne_core" }
-rne_data = { path = "../../crates/rne_data" }
-rne_ecs = { path = "../../crates/rne_ecs" }
-rne_log = { path = "../../crates/rne_log" }
-rne_math = { path = "../../crates/rne_math" }
-rne_physics = { path = "../../crates/rne_physics" }
-rne_physics_analytic = { path = "../../crates/rne_physics_analytic" }
-rne_physics_rapier = { path = "../../crates/rne_physics_rapier" }
-rne_openscenario = { path = "../../crates/rne_openscenario" }
-rne_plugin = { path = "../../crates/rne_plugin" }
-rne_robot = { path = "../../crates/rne_robot" }
-rne_sensor = { path = "../../crates/rne_sensor" }
-rne_sumo = { path = "../../crates/rne_sumo" }
-rne_traci = { path = "../../crates/rne_traci" }
-rne_traffic = { path = "../../crates/rne_traffic" }
+rne_assets = { workspace = true }
+rne_core = { workspace = true }
+rne_data = { workspace = true }
+rne_ecs = { workspace = true }
+rne_log = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_physics_analytic = { workspace = true }
+rne_physics_rapier = { workspace = true }
+rne_openscenario = { workspace = true }
+rne_plugin = { workspace = true }
+rne_robot = { workspace = true }
+rne_sensor = { workspace = true }
+rne_sumo = { workspace = true }
+rne_traci = { workspace = true }
+rne_traffic = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
-rne_world = { path = "../../crates/rne_world" }
-
+rne_world = { workspace = true }
 [dev-dependencies]
-rne_log = { path = "../../crates/rne_log" }
-
+rne_log = { workspace = true }
 [[bin]]
 name = "rne-asset"
 path = "src/main.rs"

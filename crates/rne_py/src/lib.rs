@@ -1,5 +1,7 @@
 //! Python bindings for Robot Native Engine.
 
+#![deny(missing_docs)]
+
 mod sim;
 
 use pyo3::prelude::*;

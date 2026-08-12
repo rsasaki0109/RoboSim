@@ -3,6 +3,7 @@ name = "rne_math"
 description = "Spatial math and explicit units for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

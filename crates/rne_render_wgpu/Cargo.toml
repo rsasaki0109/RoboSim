@@ -3,6 +3,7 @@ name = "rne_render_wgpu"
 description = "wgpu render backend for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -13,8 +14,8 @@ viewer = ["dep:winit"]
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
-rne_math = { path = "../rne_math" }
-rne_render = { path = "../rne_render" }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
 thiserror = { workspace = true }
 wgpu = "24"
 winit = { version = "0.30", optional = true }
@@ -22,6 +23,6 @@ winit = { version = "0.30", optional = true }
 [dev-dependencies]
 naga = "24"
 approx = "0.5"
-rne_ecs = { path = "../rne_ecs" }
-rne_urdf_import = { path = "../rne_urdf_import" }
-rne_world = { path = "../rne_world" }
+rne_ecs = { workspace = true }
+rne_urdf_import = { workspace = true }
+rne_world = { workspace = true }

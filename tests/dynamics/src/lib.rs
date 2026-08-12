@@ -247,7 +247,7 @@ pub fn spawn_pendulum(
     (pivot, bob)
 }
 
-/// Planar tip position from joint angles (q[0] from vertical, q[i] relative for i > 0).
+/// Planar tip position from joint angles (`q[0]` from vertical, `q[i]` relative for `i > 0`).
 pub fn planar_tip_m(lengths_m: &[f64], q_rad: &[f64]) -> Vec3 {
     assert_eq!(lengths_m.len(), q_rad.len());
     let mut angle = q_rad[0];
