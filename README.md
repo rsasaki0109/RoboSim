@@ -6,19 +6,65 @@ simulation, embodied AI, synthetic sensors, and policy evaluation.
 [![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
 [![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
-    <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object" width="800">
-  </picture>
-  <br>
-  <sub>Real capture: deterministic 3D pick-and-place. (<a href="docs/media/rne-hero.json">metadata</a> · <a href="docs/media/generate-hero.sh">regenerate</a>)</sub>
-</p>
-
 RNE combines a headless, replayable simulation core with real wgpu rendering.
 Worlds contain robot, sensor, actuator, agent, and episode entities. Simulation
 does not require a renderer, and ROS 2 is an optional adapter rather than a core
 dependency.
+
+## Real simulation showcase
+
+Every frame below comes from the simulator state rendered by wgpu. Reduced-motion
+clients receive the matching poster PNG. The quantitative gates and exact
+regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.md).
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
+        <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object" width="460">
+      </picture>
+      <br><b>Mobile manipulation</b><br>
+      <sub>Real capture: physics contact grasp, 2.42 m payload transport, release, and 0.091 m placement error. <a href="docs/media/rne-hero.json">metadata</a> · <a href="docs/media/generate-hero.sh">regenerate</a></sub>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-learned-stride.png">
+        <img src="docs/media/unitree-g1-learned-stride.gif" alt="Official Unitree G1 dynamically walking under a bounded torque policy" width="460">
+      </picture>
+      <br><b>G1 biped locomotion</b><br>
+      <sub>Official 23-DoF model; two measured command windows, upright and limit checked.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-torque-turn.png">
+        <img src="docs/media/go2-torque-turn.gif" alt="Official Unitree Go2 torque-controlled straight and steering locomotion comparison" width="460">
+      </picture>
+      <br><b>Go2 quadruped locomotion</b><br>
+      <sub>All-joint torque walk; the contact-gated overlay turns while preserving transport.</sub>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
+        <img src="docs/media/plateau-car.gif" alt="One hundred deterministic traffic actors driving through an official PLATEAU city" width="460">
+      </picture>
+      <br><b>Urban vehicle simulation</b><br>
+      <sub>100 routed actors, live signals, onboard LiDAR/RGB-D, and zero ownership or double-integration violations.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-uav.png">
+        <img src="docs/media/plateau-uav.gif" alt="A bounded controlled quadrotor flying through a detailed official PLATEAU city" width="600">
+      </picture>
+      <br><b>Urban UAV simulation</b><br>
+      <sub>A rendered quadrotor—not a free camera—with bounded acceleration, speed, yaw, tilt, building clearance, and exact replay checks.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Highlights
 
@@ -72,13 +118,6 @@ Model equations, measured errors, and acceptance tests are in
 [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
 ## G1 locomotion
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-learned-stride.png">
-    <img src="docs/media/unitree-g1-learned-stride.gif" alt="Unitree G1 stride comparison in a robotics test bay" width="800">
-  </picture>
-</p>
 
 Example 67 evaluates typed forward, stop, and differential-steering commands
 without a renderer. Example 68 adds a bounded 240-tick true body-heading
@@ -157,10 +196,11 @@ RNE source tree.
 
 ### PLATEAU city and sensors
 
-Example 46 imports a bounded official PLATEAU Sanjo City tile and renders a
-deterministic traffic scene. Example 47 replays the traffic runtime headlessly.
-The same vehicle carries physics-aware LiDAR and RGB-D sensors with seeded
-noise, material response, timing, and replayable output.
+Example 46 imports a bounded official PLATEAU Sanjo City tile once, then renders
+both the deterministic 100-actor traffic capture and a bounded, controlled
+quadrotor flight through the same detailed streetscape. Example 47 replays the
+traffic runtime headlessly. The hero vehicle carries physics-aware LiDAR and
+RGB-D sensors with seeded noise, material response, timing, and replayable output.
 
 ```bash
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif

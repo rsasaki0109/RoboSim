@@ -170,17 +170,28 @@ junction reservations:
 cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
 ```
 
-It writes the twelve-second material-aware LiDAR
-`docs/media/plateau-lidar.gif` animation and matching reduced-motion PNG. The
-traffic-only `plateau-car.gif` remains as the baseline capture. Building
-collision boxes receive non-visual concrete or glass LiDAR properties in the
+It writes the twelve-second material-aware vehicle animations
+`docs/media/plateau-lidar.gif` and `docs/media/plateau-car.gif`, plus matching
+reduced-motion PNGs. The same run writes `docs/media/plateau-uav.gif` and
+`docs/media/plateau-uav.png`: a visible quadrotor controlled through the
+backend-neutral `MultirotorFlight` component follows a smooth route over the
+same street and live traffic. It is not a free-flying camera. The flight gate
+checks bounded speed, acceleration, yaw rate, and tilt; at most 1.0 m RMS
+position error and 0.6 m altitude error; at least 2.0 m building clearance;
+zero collisions; and byte-for-byte identical replay frames and stable hashes.
+Before flight, the example samples the fixed route against the imported,
+road-datum-normalized building AABBs and selects one deterministic minimum
+cruise height that clears every nearby roof; it does not snap altitude while
+the capture is running. Building collision boxes receive non-visual concrete
+or glass LiDAR properties in the
 example layer, and each traffic actor carries a retroreflective licence-plate
 collider; this does not add a runtime dependency from the PLATEAU importer to
 `rne_sensor`. The scanner is a 16-channel spinning sensor sweeping one
 revolution per rendered frame, so azimuth columns are cast from the interpolated
-pose of the moving host vehicle. Frames are rasterized at 1280×720 and downsampled to a 960×540
-GIF. A deterministic CPU presentation pass uses the renderer's linear
-depth buffer for atmospheric perspective, replaces empty pixels with a
+pose of the moving host vehicle. Frames are rasterized at 1280×720 and
+downsampled to a 600-pixel-wide, 128-color GIF; the 1280×720 reduced-motion
+poster is preserved. A deterministic CPU presentation pass uses the renderer's
+linear depth buffer for atmospheric perspective, replaces empty pixels with a
 sky-to-horizon gradient, and applies restrained color balance and vignette.
 This pass changes presentation pixels only; simulation and camera depth outputs
 remain unchanged. Set `RNE_SKIP_GPU=1` to run only the conversion and headless
@@ -197,6 +208,10 @@ captured headlessly for a GPU-free determinism signal and composited into the
 GIF as color and depth insets by the wgpu path. See
 [physics-aware LiDAR](LIDAR_SIMULATION.md) for the equations, timing contract,
 failure behavior, and official-Sanjo acceptance hash.
+
+Use `cargo run -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke`
+to run only the deterministic controlled-UAV gate without importing the
+official tile or initializing a renderer.
 
 Set `RNE_TRAFFIC_DEBUG` to a comma-separated selection of `lanes`, `route`,
 `signals`, `connections`, and `conflicts` (or `all`) to render batched debug

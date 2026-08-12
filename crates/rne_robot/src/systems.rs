@@ -2,7 +2,9 @@
 
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
-use crate::components::{AckermannDrive, Actuator, Joint, JointKind, VehicleDynamics};
+use crate::components::{
+    AckermannDrive, Actuator, Joint, JointKind, MultirotorFlight, VehicleDynamics,
+};
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
 use bevy_ecs::prelude::{Entity, World};
@@ -33,6 +35,139 @@ pub enum AckermannCommandResult {
     InvalidTarget,
     /// At least one command value was non-finite; the previous target was preserved.
     NonFiniteCommand,
+}
+
+/// Result of commanding a multirotor position target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MultirotorCommandResult {
+    /// The finite position and heading target was applied.
+    Applied,
+    /// The target entity has no valid [`MultirotorFlight`].
+    InvalidTarget,
+    /// At least one command value was non-finite; the previous target was preserved.
+    NonFiniteCommand,
+}
+
+/// Applies a world-space position and heading target to one multirotor.
+///
+/// Commands are accepted only when both the target and the existing flight
+/// component are valid. Rejected commands leave the previous target unchanged.
+pub fn command_multirotor(
+    world: &mut World,
+    aircraft: Entity,
+    target_position_m: Vec3,
+    target_yaw_rad: f64,
+) -> MultirotorCommandResult {
+    if !target_position_m.is_finite() || !target_yaw_rad.is_finite() {
+        return MultirotorCommandResult::NonFiniteCommand;
+    }
+    let Some(mut flight) = world.get_mut::<MultirotorFlight>(aircraft) else {
+        return MultirotorCommandResult::InvalidTarget;
+    };
+    if !flight.is_valid() {
+        return MultirotorCommandResult::InvalidTarget;
+    }
+    flight.target_position_m = target_position_m;
+    flight.target_yaw_rad = wrap_angle_rad(target_yaw_rad);
+    MultirotorCommandResult::Applied
+}
+
+/// Advances every valid multirotor in stable entity order for one fixed step.
+///
+/// The deterministic cascade is position error to desired velocity, desired
+/// velocity to bounded acceleration, then semi-implicit position integration.
+/// A Y-up body attitude follows the required thrust direction without exceeding
+/// [`MultirotorFlight::max_tilt_rad`]. Entities with invalid configurations or
+/// without a [`Transform3`] are left unchanged.
+pub fn multirotor_flight(world: &mut World, dt: SimDuration) {
+    let dt_s = dt.as_seconds().value();
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return;
+    }
+    let mut aircraft: Vec<Entity> = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<MultirotorFlight>() && entity.contains::<Transform3>())
+        .map(|entity| entity.id())
+        .collect();
+    aircraft.sort_by_key(|entity| entity.to_bits());
+
+    for entity in aircraft {
+        let Some(mut flight) = world.get::<MultirotorFlight>(entity).copied() else {
+            continue;
+        };
+        let Some(mut transform) = world.get::<Transform3>(entity).copied() else {
+            continue;
+        };
+        if !flight.is_valid()
+            || !transform.translation.is_finite()
+            || !transform.rotation.is_finite()
+        {
+            continue;
+        }
+
+        let position_error_m = flight.target_position_m - transform.translation;
+        let mut desired_velocity_m_s = position_error_m * flight.position_gain_s_inv;
+        desired_velocity_m_s.y = desired_velocity_m_s
+            .y
+            .clamp(-flight.max_climb_speed_m_s, flight.max_climb_speed_m_s);
+        let horizontal_speed_m_s = desired_velocity_m_s.x.hypot(desired_velocity_m_s.z);
+        if horizontal_speed_m_s > flight.max_horizontal_speed_m_s {
+            let scale = flight.max_horizontal_speed_m_s / horizontal_speed_m_s;
+            desired_velocity_m_s.x *= scale;
+            desired_velocity_m_s.z *= scale;
+        }
+
+        let mut acceleration_m_s2 =
+            (desired_velocity_m_s - flight.velocity_m_s) * flight.velocity_gain_s_inv;
+        acceleration_m_s2 = clamp_length(acceleration_m_s2, flight.max_acceleration_m_s2);
+        let horizontal_tilt_limit_m_s2 = 9.81 * flight.max_tilt_rad.tan();
+        let horizontal_acceleration_m_s2 = acceleration_m_s2.x.hypot(acceleration_m_s2.z);
+        if horizontal_acceleration_m_s2 > horizontal_tilt_limit_m_s2 {
+            let scale = horizontal_tilt_limit_m_s2 / horizontal_acceleration_m_s2;
+            acceleration_m_s2.x *= scale;
+            acceleration_m_s2.z *= scale;
+        }
+
+        flight.velocity_m_s += acceleration_m_s2 * dt_s;
+        flight.velocity_m_s.y = flight
+            .velocity_m_s
+            .y
+            .clamp(-flight.max_climb_speed_m_s, flight.max_climb_speed_m_s);
+        let horizontal_velocity_m_s = flight.velocity_m_s.x.hypot(flight.velocity_m_s.z);
+        if horizontal_velocity_m_s > flight.max_horizontal_speed_m_s {
+            let scale = flight.max_horizontal_speed_m_s / horizontal_velocity_m_s;
+            flight.velocity_m_s.x *= scale;
+            flight.velocity_m_s.z *= scale;
+        }
+        transform.translation += flight.velocity_m_s * dt_s;
+
+        let yaw_error_rad = wrap_angle_rad(flight.target_yaw_rad - flight.yaw_rad);
+        let yaw_rate_rad_s =
+            (yaw_error_rad * 3.0).clamp(-flight.max_yaw_rate_rad_s, flight.max_yaw_rate_rad_s);
+        flight.yaw_rad = wrap_angle_rad(flight.yaw_rad + yaw_rate_rad_s * dt_s);
+
+        let horizontal_acceleration = Vec3::new(acceleration_m_s2.x, 0.0, acceleration_m_s2.z);
+        let desired_up = (Vec3::Y + horizontal_acceleration / 9.81).normalize_or_zero();
+        let tilt = Quat::from_rotation_arc(Vec3::Y, desired_up);
+        let yaw = Quat::from_rotation_y(flight.yaw_rad);
+        let desired_rotation = (tilt * yaw).normalize();
+        let attitude_blend = if flight.attitude_response_s == 0.0 {
+            1.0
+        } else {
+            1.0 - (-dt_s / flight.attitude_response_s).exp()
+        };
+        transform.rotation = transform
+            .rotation
+            .slerp(desired_rotation, attitude_blend)
+            .normalize();
+
+        flight.commanded_acceleration_m_s2 = acceleration_m_s2;
+        if let Some(mut body) = world.get_mut::<RigidBody>(entity) {
+            body.linear_velocity_m_s = flight.velocity_m_s;
+            body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rate_rad_s, 0.0);
+        }
+        world.entity_mut(entity).insert((flight, transform));
+    }
 }
 
 /// Applies a bounded speed and steering target to one kinematic Ackermann vehicle.
@@ -300,6 +435,25 @@ fn move_towards(current: f64, target: f64, max_delta: f64) -> f64 {
     } else {
         current + delta.signum() * max_delta
     }
+}
+
+fn clamp_length(value: Vec3, max_length: f64) -> Vec3 {
+    let length = value.length();
+    if length > max_length && length > 0.0 {
+        value * (max_length / length)
+    } else {
+        value
+    }
+}
+
+fn wrap_angle_rad(mut angle_rad: f64) -> f64 {
+    while angle_rad > std::f64::consts::PI {
+        angle_rad -= std::f64::consts::TAU;
+    }
+    while angle_rad < -std::f64::consts::PI {
+        angle_rad += std::f64::consts::TAU;
+    }
+    angle_rad
 }
 
 /// Applies queued actuator commands to actuators and joints.
@@ -662,7 +816,9 @@ pub fn sync_joint_motors_from_actuators(world: &mut World, _drives: &[Differenti
 mod tests {
     use super::*;
     use crate::actuator::ActuatorLimits;
-    use crate::components::{AckermannDrive, JointKind, JointLimits, Link, Robot, RobotId};
+    use crate::components::{
+        AckermannDrive, JointKind, JointLimits, Link, MultirotorFlight, Robot, RobotId,
+    };
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
@@ -856,6 +1012,121 @@ mod tests {
             AckermannCommandResult::NonFiniteCommand
         );
         assert_eq!(world.get::<AckermannDrive>(vehicle).unwrap(), &before);
+    }
+
+    fn run_multirotor_replay() -> (Transform3, MultirotorFlight, f64, f64, f64, f64) {
+        let mut world = World::new();
+        let aircraft = spawn_named(&mut world, "showcase_uav");
+        world.entity_mut(aircraft).insert((
+            Transform3 {
+                translation: Vec3::new(-18.0, 8.0, 12.0),
+                ..Transform3::IDENTITY
+            },
+            MultirotorFlight::default(),
+            RigidBody::default(),
+        ));
+        assert_eq!(
+            command_multirotor(&mut world, aircraft, Vec3::new(22.0, 14.0, -16.0), 1.1,),
+            MultirotorCommandResult::Applied
+        );
+
+        let dt = SimDuration::from_seconds(Seconds::new(1.0 / 60.0));
+        let mut maximum_speed_m_s: f64 = 0.0;
+        let mut maximum_acceleration_m_s2: f64 = 0.0;
+        let mut maximum_tilt_rad: f64 = 0.0;
+        let mut maximum_yaw_rate_rad_s: f64 = 0.0;
+        for _ in 0..720 {
+            multirotor_flight(&mut world, dt);
+            let flight = world.get::<MultirotorFlight>(aircraft).unwrap();
+            let transform = world.get::<Transform3>(aircraft).unwrap();
+            maximum_speed_m_s = maximum_speed_m_s.max(flight.velocity_m_s.length());
+            maximum_acceleration_m_s2 =
+                maximum_acceleration_m_s2.max(flight.commanded_acceleration_m_s2.length());
+            let body_up = transform.rotation * Vec3::Y;
+            maximum_tilt_rad = maximum_tilt_rad.max(body_up.dot(Vec3::Y).clamp(-1.0, 1.0).acos());
+            maximum_yaw_rate_rad_s = maximum_yaw_rate_rad_s.max(
+                world
+                    .get::<RigidBody>(aircraft)
+                    .unwrap()
+                    .angular_velocity_rad_s
+                    .y
+                    .abs(),
+            );
+        }
+        (
+            *world.get::<Transform3>(aircraft).unwrap(),
+            *world.get::<MultirotorFlight>(aircraft).unwrap(),
+            maximum_speed_m_s,
+            maximum_acceleration_m_s2,
+            maximum_tilt_rad,
+            maximum_yaw_rate_rad_s,
+        )
+    }
+
+    #[test]
+    fn multirotor_tracks_target_with_bounded_flight_state() {
+        let (
+            transform,
+            flight,
+            maximum_speed_m_s,
+            maximum_acceleration_m_s2,
+            maximum_tilt_rad,
+            maximum_yaw_rate_rad_s,
+        ) = run_multirotor_replay();
+        let error_m = (transform.translation - flight.target_position_m).length();
+        assert!(error_m < 0.15, "position error was {error_m:.3} m");
+        assert!(
+            maximum_speed_m_s
+                <= flight
+                    .max_horizontal_speed_m_s
+                    .hypot(flight.max_climb_speed_m_s)
+                    + 1.0e-9
+        );
+        assert!(maximum_acceleration_m_s2 <= flight.max_acceleration_m_s2 + 1.0e-9);
+        assert!(maximum_tilt_rad <= flight.max_tilt_rad + 1.0e-6);
+        assert!(maximum_yaw_rate_rad_s <= flight.max_yaw_rate_rad_s + 1.0e-9);
+        assert!(wrap_angle_rad(flight.yaw_rad - flight.target_yaw_rad).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn multirotor_replay_is_exactly_deterministic() {
+        assert_eq!(run_multirotor_replay(), run_multirotor_replay());
+    }
+
+    #[test]
+    fn multirotor_rejects_non_finite_command_without_mutation() {
+        let mut world = World::new();
+        let aircraft = spawn_named(&mut world, "showcase_uav");
+        world
+            .entity_mut(aircraft)
+            .insert((Transform3::IDENTITY, MultirotorFlight::default()));
+        let before = *world.get::<MultirotorFlight>(aircraft).unwrap();
+        assert_eq!(
+            command_multirotor(&mut world, aircraft, Vec3::new(f64::NAN, 2.0, 3.0), 0.0),
+            MultirotorCommandResult::NonFiniteCommand
+        );
+        assert_eq!(*world.get::<MultirotorFlight>(aircraft).unwrap(), before);
+    }
+
+    #[test]
+    fn invalid_multirotor_configuration_is_transactional() {
+        let mut world = World::new();
+        let aircraft = spawn_named(&mut world, "showcase_uav");
+        let flight = MultirotorFlight {
+            max_tilt_rad: std::f64::consts::PI,
+            ..MultirotorFlight::default()
+        };
+        let transform = Transform3 {
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            ..Transform3::IDENTITY
+        };
+        world.entity_mut(aircraft).insert((transform, flight));
+        multirotor_flight(
+            &mut world,
+            SimDuration::from_seconds(Seconds::new(1.0 / 60.0)),
+        );
+        assert_eq!(*world.get::<Transform3>(aircraft).unwrap(), transform);
+        assert_eq!(*world.get::<MultirotorFlight>(aircraft).unwrap(), flight);
     }
 
     #[test]

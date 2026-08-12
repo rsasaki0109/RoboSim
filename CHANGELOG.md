@@ -289,6 +289,13 @@ All notable changes to Robot Native Engine are documented in this file.
   publication depends on the two-platform aggregate verdict. The first clean
   final matrix passed every required CI and native rehearsal job; both uploaded
   aggregate reports recorded `release_eligible=true` before PR #162 merged.
+- **README simulation showcase**: mobile manipulation, G1 biped, Go2
+  quadruped, 100-actor PLATEAU traffic, and a visible controlled quadrotor now
+  have one quantitative media contract. The backend-neutral
+  `MultirotorFlight` controller bounds speed, acceleration, yaw rate, and tilt
+  with deterministic replay tests; the PLATEAU capture shares one detailed
+  streetscape between vehicle and UAV media, and `xtask hero-media-check`
+  enforces references, poster dimensions, and per-file/combined GIF budgets.
 
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible

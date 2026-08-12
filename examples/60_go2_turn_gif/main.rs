@@ -24,7 +24,7 @@ use rne_render::{
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
 const PANEL_WIDTH: u32 = 480;
-const PANEL_HEIGHT: u32 = 360;
+const PANEL_HEIGHT: u32 = 532;
 const BANNER_HEIGHT: u32 = 8;
 const FRAME_COUNT: usize = 80;
 const STEPS_PER_FRAME: u64 = 12;
@@ -58,6 +58,7 @@ struct TorqueWalker {
     previous_yaw: f64,
     total_yaw_rad: f64,
     trail_m: Vec<[f64; 2]>,
+    capture_start_xz_m: [f64; 2],
 }
 
 impl TorqueWalker {
@@ -84,7 +85,22 @@ impl TorqueWalker {
             previous_yaw,
             total_yaw_rad: 0.0,
             trail_m: Vec::new(),
+            capture_start_xz_m: [0.0; 2],
         }
+    }
+
+    fn begin_capture(&mut self) {
+        let observed = self.sim.observe();
+        self.capture_start_xz_m = [observed.base_x_m, observed.base_z_m];
+        self.total_yaw_rad = 0.0;
+        self.previous_yaw = observed.base_relative_yaw_rad;
+        self.trail_m.clear();
+    }
+
+    fn net_displacement_m(&self) -> f64 {
+        let observed = self.sim.observe();
+        (observed.base_x_m - self.capture_start_xz_m[0])
+            .hypot(observed.base_z_m - self.capture_start_xz_m[1])
     }
 
     fn step_frame(&mut self, steps: u64) {
@@ -140,6 +156,18 @@ impl TorqueWalker {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--smoke") {
+        let metrics = run_headless_capture();
+        println!(
+            "Go2 torque-turn smoke ok: straight_yaw={:+.3} rad, turn_yaw={:+.3} rad, turn_displacement={:.2} m, straight_height={:.3} m, turn_height={:.3} m",
+            metrics.straight_yaw_rad,
+            metrics.turn_yaw_rad,
+            metrics.turn_displacement_m,
+            metrics.straight_height_m,
+            metrics.turn_height_m,
+        );
+        return;
+    }
     if std::env::var("RNE_SKIP_GPU").is_ok() {
         return;
     }
@@ -153,8 +181,8 @@ fn main() {
     let mut turning = TorqueWalker::new(UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN);
     straight.step_frame(PREROLL_STEPS);
     turning.step_frame(PREROLL_STEPS);
-    straight.total_yaw_rad = 0.0;
-    turning.total_yaw_rad = 0.0;
+    straight.begin_capture();
+    turning.begin_capture();
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(PANEL_WIDTH, PANEL_HEIGHT, std::f64::consts::FRAC_PI_4);
@@ -200,20 +228,8 @@ fn main() {
 
     // The GIF must show the measured physics: the plain torque walk holds its
     // heading while the overlay carves a genuinely sustained arc.
-    assert!(
-        straight.total_yaw_rad.abs() < 0.25,
-        "plain torque walk should hold heading, drifted {:+.3} rad",
-        straight.total_yaw_rad
-    );
-    assert!(
-        turning.total_yaw_rad > 0.45,
-        "robust overlay should carve an arc, got {:+.3} rad",
-        turning.total_yaw_rad
-    );
-    assert!(
-        straight.sim.observe().base_y_m > 0.12 && turning.sim.observe().base_y_m > 0.12,
-        "both walkers should stay up"
-    );
+    let metrics = TurnCaptureMetrics::from_walkers(&straight, &turning);
+    metrics.assert_showcase_ready();
 
     let gif_path = media_dir.join("go2-torque-turn.gif");
     build_gif(&frames_dir, &gif_path).expect("encode torque-turn gif");
@@ -224,11 +240,71 @@ fn main() {
         .expect("write torque-turn poster");
     let _ = fs::remove_dir_all(&frames_dir);
     println!(
-        "rendered torque-turn media to {} (straight {:+.3} rad, turn {:+.3} rad)",
+        "rendered torque-turn media to {} (straight {:+.3} rad, turn {:+.3} rad, turn displacement {:.2} m)",
         gif_path.display(),
-        straight.total_yaw_rad,
-        turning.total_yaw_rad
+        metrics.straight_yaw_rad,
+        metrics.turn_yaw_rad,
+        metrics.turn_displacement_m,
     );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TurnCaptureMetrics {
+    straight_yaw_rad: f64,
+    turn_yaw_rad: f64,
+    turn_displacement_m: f64,
+    straight_height_m: f64,
+    turn_height_m: f64,
+}
+
+impl TurnCaptureMetrics {
+    fn from_walkers(straight: &TorqueWalker, turning: &TorqueWalker) -> Self {
+        Self {
+            straight_yaw_rad: straight.total_yaw_rad,
+            turn_yaw_rad: turning.total_yaw_rad,
+            turn_displacement_m: turning.net_displacement_m(),
+            straight_height_m: straight.sim.observe().base_y_m,
+            turn_height_m: turning.sim.observe().base_y_m,
+        }
+    }
+
+    fn assert_showcase_ready(self) {
+        assert!(
+            self.straight_yaw_rad.abs() < 0.25,
+            "plain torque walk should hold heading, drifted {:+.3} rad",
+            self.straight_yaw_rad,
+        );
+        assert!(
+            self.turn_yaw_rad > 0.45,
+            "robust overlay should carve an arc, got {:+.3} rad",
+            self.turn_yaw_rad,
+        );
+        assert!(
+            self.straight_height_m > 0.12 && self.turn_height_m > 0.12,
+            "both walkers should stay up (straight {:.3} m, turn {:.3} m)",
+            self.straight_height_m,
+            self.turn_height_m,
+        );
+        assert!(
+            self.turn_displacement_m > 1.0,
+            "turning torque walk must preserve transport, moved only {:.3} m",
+            self.turn_displacement_m,
+        );
+    }
+}
+
+fn run_headless_capture() -> TurnCaptureMetrics {
+    let mut straight = TorqueWalker::new(UnitreeGo2TorqueOverlay::ZERO);
+    let mut turning = TorqueWalker::new(UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN);
+    straight.step_frame(PREROLL_STEPS);
+    turning.step_frame(PREROLL_STEPS);
+    straight.begin_capture();
+    turning.begin_capture();
+    straight.step_frame(FRAME_COUNT as u64 * STEPS_PER_FRAME);
+    turning.step_frame(FRAME_COUNT as u64 * STEPS_PER_FRAME);
+    let metrics = TurnCaptureMetrics::from_walkers(&straight, &turning);
+    metrics.assert_showcase_ready();
+    metrics
 }
 
 fn render_panel(
@@ -244,7 +320,7 @@ fn render_panel(
     scene
         .items
         .retain(|item| !matches!(item.shape, VisualShape::Box { .. }));
-    append_checker_floor(&mut scene, observed.base_x_m, observed.base_z_m, 0.12);
+    append_checker_floor(&mut scene, observed.base_x_m, observed.base_z_m, 0.18);
     for position in &walker.trail_m {
         scene.items.push(RenderSceneItem {
             transform: Transform3 {
@@ -267,8 +343,8 @@ fn render_panel(
     let orbit = CameraOrbit {
         focus: Vec3::new(observed.base_x_m, 0.10, observed.base_z_m),
         yaw_rad: -1.6,
-        pitch_rad: 0.82,
-        distance_m: 2.4,
+        pitch_rad: 1.08,
+        distance_m: 2.15,
     };
     let output = backend
         .render_scene_camera(camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
