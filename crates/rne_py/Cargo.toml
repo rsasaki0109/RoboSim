@@ -12,7 +12,7 @@ name = "rne_py"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.23", features = ["abi3-py39"] }
+pyo3 = { workspace = true }
 rne_ai = { workspace = true }
 serde_json = "1"
 

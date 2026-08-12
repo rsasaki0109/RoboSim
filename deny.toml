@@ -1,0 +1,69 @@
+# Supply-chain policy for the complete Robot Native Engine release graph.
+# CI runs this file with cargo-deny 0.20.2.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+unmaintained = "all"
+unsound = "all"
+ignore = ["RUSTSEC-2024-0436"]
+
+[licenses]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "NCSA",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+exceptions = []
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+deny = []
+skip = [
+    { crate = "bit-vec@0.7.0", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "fixedbitset@0.4.2", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "foldhash@0.1.5", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "getrandom@0.2.17", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "hashbrown@0.14.5", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "hashbrown@0.15.5", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "hashbrown@0.16.1", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "linux-raw-sys@0.4.15", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "petgraph@0.6.5", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "rustc-hash@1.1.0", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "rustix@0.38.44", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "thiserror@1.0.69", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "thiserror-impl@1.0.69", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "windows-sys@0.52.0", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "windows-sys@0.59.0", reason = "documented in release/supply-chain-exceptions.toml" },
+]
+skip-tree = []
+
+[bans.std-replacements]
+scope = "workspace"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

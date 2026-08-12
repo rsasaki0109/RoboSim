@@ -126,7 +126,7 @@ fn atomic_write_checkpoint(path: &Path, content: &str) -> PyResult<()> {
 }
 
 /// Observation returned after each simulation step.
-#[pyclass(name = "Observation")]
+#[pyclass(name = "Observation", skip_from_py_object)]
 #[derive(Clone, Copy)]
 struct PyObservation {
     base_x_m: f64,
@@ -233,7 +233,7 @@ impl From<DiffDriveObservation> for PyObservation {
 }
 
 /// Result of an episode reset or step.
-#[pyclass(name = "StepResult")]
+#[pyclass(name = "StepResult", skip_from_py_object)]
 #[derive(Clone, Copy)]
 struct PyStepResult {
     observation: PyObservation,
@@ -315,7 +315,7 @@ fn unitree_go2_observation_vector(observation: UnitreeGo2Observation) -> Vec<f64
 }
 
 /// Result of a Unitree Go2 gait reset or step.
-#[pyclass(name = "UnitreeGo2StepResult")]
+#[pyclass(name = "UnitreeGo2StepResult", skip_from_py_object)]
 #[derive(Clone)]
 struct PyUnitreeGo2StepResult {
     observation: Vec<f64>,
@@ -512,7 +512,7 @@ fn ik_error_to_py(error: MmLiftIkError) -> PyErr {
 }
 
 /// Joint-space target for the `mm_lift` lift + shoulder + elbow chain.
-#[pyclass(name = "MmLiftJointTarget")]
+#[pyclass(name = "MmLiftJointTarget", from_py_object)]
 #[derive(Clone, Copy)]
 struct PyMmLiftJointTarget {
     lift_m: f64,
@@ -576,7 +576,7 @@ impl From<PyMmLiftJointTarget> for MmLiftJointTarget {
 }
 
 /// World-frame gripper-base target for `mm_lift` analytic IK.
-#[pyclass(name = "MmLiftGripperTarget")]
+#[pyclass(name = "MmLiftGripperTarget", from_py_object)]
 #[derive(Clone, Copy)]
 struct PyMmLiftGripperTarget {
     x_m: f64,
@@ -679,7 +679,7 @@ impl PyMmLiftKinematics {
 }
 
 /// Observation returned by the mobile manipulator environment.
-#[pyclass(name = "MobileManipulatorObservation")]
+#[pyclass(name = "MobileManipulatorObservation", from_py_object)]
 #[derive(Clone, Copy)]
 struct PyMmObservation {
     inner: MobileManipulatorObservation,
@@ -802,7 +802,7 @@ impl From<MobileManipulatorObservation> for PyMmObservation {
 }
 
 /// Result of a mobile manipulator episode reset or step.
-#[pyclass(name = "MobileManipulatorStepResult")]
+#[pyclass(name = "MobileManipulatorStepResult", skip_from_py_object)]
 #[derive(Clone, Copy)]
 struct PyMmStepResult {
     observation: PyMmObservation,
@@ -1302,8 +1302,8 @@ mod tests {
     where
         T: pyo3::type_object::PyTypeInfo,
     {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             assert!(error.is_instance_of::<T>(py));
             assert!(
                 error.value(py).to_string().contains(expected_message),

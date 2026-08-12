@@ -3,13 +3,14 @@ name = "traffic_city_replay"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
 bevy_ecs = { workspace = true }
-rne_core = { path = "../../crates/rne_core" }
-rne_ecs = { path = "../../crates/rne_ecs" }
-rne_traffic = { path = "../../crates/rne_traffic" }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_traffic = { workspace = true }
 uuid = { workspace = true }
 
 [[example]]

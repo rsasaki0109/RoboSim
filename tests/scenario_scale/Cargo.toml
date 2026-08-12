@@ -3,6 +3,7 @@ name = "rne_scenario_scale"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [lib]
@@ -14,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-rne_openscenario = { path = "../../crates/rne_openscenario" }
-rne_traffic = { path = "../../crates/rne_traffic" }
+rne_openscenario = { workspace = true }
+rne_traffic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

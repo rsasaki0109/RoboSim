@@ -3,15 +3,16 @@ name = "go2_walk_vs_stand_push"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
 image = "0.25"
-png = "0.17"
-rne_ai = { path = "../../crates/rne_ai" }
-rne_math = { path = "../../crates/rne_math" }
-rne_render = { path = "../../crates/rne_render" }
-rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
+png = { workspace = true }
+rne_ai = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
 
 [[example]]
 name = "53_go2_walk_vs_stand_push"

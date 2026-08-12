@@ -3,11 +3,12 @@ name = "goal_conditioned_agent"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
-rne_ecs = { path = "../../crates/rne_ecs" }
+rne_ai = { workspace = true }
+rne_ecs = { workspace = true }
 
 [[example]]
 name = "16_goal_conditioned_agent"

@@ -14,6 +14,14 @@ All notable changes to Robot Native Engine are documented in this file.
   exercise the MSRV, warning-free rustdoc, all 27 crate archives, and patch-level
   SemVer compatibility against the frozen baseline.
 
+- **Supply-chain release evidence (M6)**: pinned cargo-deny and cargo-audit
+  gates enforce the crates.io-only source, license, duplicate-version, and
+  advisory policies against the locked graph. A time-bounded exception
+  registry records exact reachability and mitigation, while `xtask
+  supply-chain` emits a deterministic Cargo SBOM and lockfile SHA-256 for CI
+  artifacts. Dependency maintenance also updates PyO3 and parser/runtime
+  libraries and removes an unused unmaintained font-parsing path.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4

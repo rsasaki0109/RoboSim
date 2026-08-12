@@ -3,11 +3,12 @@ name = "urdf_import"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ecs = { path = "../../crates/rne_ecs" }
-rne_urdf_import = { path = "../../crates/rne_urdf_import" }
+rne_ecs = { workspace = true }
+rne_urdf_import = { workspace = true }
 
 [[example]]
 name = "03_urdf_import"

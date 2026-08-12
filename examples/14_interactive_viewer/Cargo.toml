@@ -3,25 +3,26 @@ name = "interactive_viewer"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
 base64 = { workspace = true }
-rne_ai = { path = "../../crates/rne_ai" }
-rne_assets = { path = "../../crates/rne_assets" }
-rne_core = { path = "../../crates/rne_core" }
-rne_data = { path = "../../crates/rne_data" }
-rne_ecs = { path = "../../crates/rne_ecs" }
-rne_math = { path = "../../crates/rne_math" }
-rne_physics = { path = "../../crates/rne_physics" }
-rne_render = { path = "../../crates/rne_render" }
-rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
-rne_robot = { path = "../../crates/rne_robot" }
-rne_sensor = { path = "../../crates/rne_sensor" }
-rne_world = { path = "../../crates/rne_world" }
+rne_ai = { workspace = true }
+rne_assets = { workspace = true }
+rne_core = { workspace = true }
+rne_data = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
+rne_robot = { workspace = true }
+rne_sensor = { workspace = true }
+rne_world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-winit = "0.30"
+winit = { workspace = true }
 
 [[example]]
 name = "14_interactive_viewer"

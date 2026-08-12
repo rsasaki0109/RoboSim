@@ -154,7 +154,7 @@ point at the tested commit.
 ## Implementation status
 
 - M6-A freeze and migration policy: complete.
-- M6-B supply-chain evidence: pending.
+- M6-B supply-chain evidence: complete.
 - M6-C parser/protocol hardening: pending.
 - M6-D artifacts and install rehearsal: pending.
 - M6-E final exit matrix: pending.
@@ -175,3 +175,32 @@ point at the tested commit.
   forcing patch compatibility: 223 checks passed and 30 were inapplicable.
   GitHub CI covers all 27 public crates in seven parallel package groups.
 - The xtask release-contract and blocker-registry unit suite passed 10/10 tests.
+
+## M6-B evidence (2026-08-12)
+
+- `cargo-deny 0.20.2` and `cargo-audit 0.22.2` are pinned in CI. The
+  crates.io-only source policy, explicit license allowlist, wildcard and
+  duplicate-version bans, and advisory policy all pass against the locked
+  530-package graph.
+- The only accepted advisory is the unmaintained `paste 1.0.15`
+  (`RUSTSEC-2024-0436`) build-time macro reached through Rapier's
+  nalgebra/simba graph. Its owner, exact reachability, mitigation, rationale,
+  and 2027-02-12 expiry are recorded in
+  `release/supply-chain-exceptions.toml`; all allowed duplicate versions use
+  the same time-bounded evidence format.
+- Security maintenance advanced `crossbeam-epoch`, `anyhow`, `memmap2`,
+  `pyo3`, `wayland-scanner`, and `quick-xml`. The PyO3 binding was migrated to
+  the current attachment and extraction APIs, and unused winit font features
+  removed the unmaintained `ttf-parser` path.
+- All 75 private example, test, and tooling manifests now carry the workspace
+  license, and their internal RNE dependencies use exact workspace-managed
+  requirements. Direct PNG users share the workspace's maintained PNG line.
+- `cargo run --locked -p xtask -- supply-chain` validates policy/registry
+  agreement, runs both pinned audit tools, and emits a deterministically sorted
+  `sbom.cargo.json` plus `cargo-lock.sha256`. Two independent generations had
+  identical SHA-256 digests. `--generate-only` reproduces the evidence without
+  requiring the audit binaries.
+- The supply-chain CI job uploads both evidence files and is required by the
+  aggregate workspace gate. Its xtask tests passed 13/13; warning-free
+  workspace check and Clippy passed on Rust 1.95, and the locked all-target
+  workspace check passed on the declared Rust 1.88 MSRV.

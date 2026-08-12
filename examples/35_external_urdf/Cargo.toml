@@ -3,11 +3,12 @@ name = "external_urdf"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
-rne_render = { path = "../../crates/rne_render" }
+rne_ai = { workspace = true }
+rne_render = { workspace = true }
 
 [[example]]
 name = "35_external_urdf"

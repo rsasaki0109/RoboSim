@@ -3,11 +3,12 @@ name = "render_clear"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_render = { path = "../../crates/rne_render" }
-rne_render_wgpu = { path = "../../crates/rne_render_wgpu" }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true }
 
 [[example]]
 name = "02_render_clear"
