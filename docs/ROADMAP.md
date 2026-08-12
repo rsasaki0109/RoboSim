@@ -56,7 +56,9 @@ preceding M6-D clean-checkout rehearsal (GitHub Actions run `31569498834`)
 passed both native jobs before this final aggregate was introduced; M6-E's
 local final matrix passed all gates, including 22/22 OSS parity checks and a
 slowest 3,246.41 steps/s across three 100-actor samples. The clean PR aggregate
-verdict is recorded in the hardening plan after the workflow completes.
+verdicts then passed in CI run `31577873319` and release run `31577873221`;
+both uploaded reports record `release_eligible=true`. M6 is complete, and the
+tested release tree merged through PR #162 as `a4e230f`.
 
 | Phase | Area | Deliverable | Status |
 |---|---|---|---|

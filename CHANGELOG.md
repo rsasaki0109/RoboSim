@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-08-12
+
 ### Added
 
 - **1.0 RC hardening (M6)**: the workspace now targets `1.0.0-rc.1`,
@@ -46,7 +48,9 @@ All notable changes to Robot Native Engine are documented in this file.
   and `release_candidate` aggregate checks emit schema-v1 verdict reports,
   reject missing, skipped, cancelled, or failed dependencies, and require zero
   open P0/P1 blockers. Native rehearsals now run on every pull request, and tag
-  publication depends on the two-platform aggregate verdict.
+  publication depends on the two-platform aggregate verdict. The first clean
+  final matrix passed every required CI and native rehearsal job; both uploaded
+  aggregate reports recorded `release_eligible=true` before PR #162 merged.
 
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
