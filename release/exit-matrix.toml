@@ -1,0 +1,164 @@
+schema_version = 1
+release_version = "1.0.0-rc.1"
+locked_graph = "Cargo.lock"
+blocker_registry = "release/blockers.toml"
+required_aggregate_checks = ["CI / workspace", "Release rehearsal / release_candidate"]
+
+[[scope]]
+id = "ci"
+workflow = ".github/workflows/ci.yml"
+aggregate_job = "workspace"
+required_jobs = [
+  "lint",
+  "test",
+  "smoke",
+  "rl",
+  "headless",
+  "msrv",
+  "release_contract",
+  "semver",
+  "behavior_ci",
+  "parity",
+  "supply_chain",
+  "fuzz_smoke",
+]
+
+[[scope]]
+id = "release"
+workflow = ".github/workflows/release.yml"
+aggregate_job = "release_candidate"
+required_jobs = ["linux", "windows"]
+
+[[gate]]
+id = "format_boundaries_clippy"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "lint"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- ci-lint"]
+
+[[gate]]
+id = "workspace_tests"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "test"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- ci-test ${{ matrix.partition }}/3"]
+
+[[gate]]
+id = "flagship_smokes"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "smoke"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- ci-smoke ${{ matrix.partition }}"]
+
+[[gate]]
+id = "python_rl_smokes"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "rl"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- ci-rl"]
+
+[[gate]]
+id = "headless"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "headless"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- ci-headless"]
+
+[[gate]]
+id = "msrv"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "msrv"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo check --locked --workspace --all-targets"]
+
+[[gate]]
+id = "rustdoc_release_contract"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "release_contract"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- release-check"]
+
+[[gate]]
+id = "semver"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "semver"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo semver-checks check-release ${{ matrix.packages }} --baseline-rev $baseline --release-type patch"]
+
+[[gate]]
+id = "behavior_ci"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "behavior_ci"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- behavior-ci"]
+
+[[gate]]
+id = "oss_parity"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "parity"
+runner = "windows-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- parity"]
+
+[[gate]]
+id = "supply_chain"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "supply_chain"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- supply-chain"]
+
+[[gate]]
+id = "fuzz_smoke"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "fuzz_smoke"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- fuzz-smoke"]
+
+[[gate]]
+id = "clean_release_linux"
+scope = "release"
+workflow = ".github/workflows/release.yml"
+job = "linux"
+runner = "ubuntu-latest"
+clean_checkout = true
+commands = [
+  "maturin build --locked --release --features extension-module --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels",
+  "cargo run --locked -p xtask -- release-bundle --target x86_64-unknown-linux-gnu",
+  "cargo run --locked -p xtask -- release-install-smoke",
+]
+
+[[gate]]
+id = "clean_release_windows"
+scope = "release"
+workflow = ".github/workflows/release.yml"
+job = "windows"
+runner = "windows-latest"
+clean_checkout = true
+commands = [
+  "maturin build --locked --release --features extension-module --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels",
+  "cargo run --locked -p xtask -- release-bundle --target x86_64-pc-windows-msvc",
+  "cargo run --locked -p xtask -- release-install-smoke",
+]

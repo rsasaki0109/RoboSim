@@ -251,6 +251,29 @@ jobs:
     needs: [lint, test, smoke, rl, headless, msrv, release_contract, semver, behavior_ci, parity, supply_chain, fuzz_smoke]
     if: always()
     steps:
-      - name: All stages green
-        run: |
-          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: final-exit-ci
+      - name: Record the locked CI exit verdict
+        run: >-
+          cargo run --locked -p xtask -- release-exit --scope ci
+          --result lint=${{ needs.lint.result }}
+          --result test=${{ needs.test.result }}
+          --result smoke=${{ needs.smoke.result }}
+          --result rl=${{ needs.rl.result }}
+          --result headless=${{ needs.headless.result }}
+          --result msrv=${{ needs.msrv.result }}
+          --result release_contract=${{ needs.release_contract.result }}
+          --result semver=${{ needs.semver.result }}
+          --result behavior_ci=${{ needs.behavior_ci.result }}
+          --result parity=${{ needs.parity.result }}
+          --result supply_chain=${{ needs.supply_chain.result }}
+          --result fuzz_smoke=${{ needs.fuzz_smoke.result }}
+      - name: Upload final CI exit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-exit-ci
+          path: artifacts/release-exit/ci.json

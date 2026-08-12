@@ -157,7 +157,7 @@ point at the tested commit.
 - M6-B supply-chain evidence: complete.
 - M6-C parser/protocol hardening: complete.
 - M6-D artifacts and install rehearsal: complete.
-- M6-E final exit matrix: pending.
+- M6-E final exit matrix: implementation complete; final clean PR matrix pending.
 
 ## M6-A evidence (2026-08-12)
 
@@ -269,3 +269,36 @@ point at the tested commit.
   rehearsals pass locally. Two consecutive assemblies produced byte-identical
   provenance, install, and checksum reports. The release report intentionally
   records `reproducible=false` for this untagged dirty development run.
+
+## M6-E implementation evidence (2026-08-12)
+
+- `release/exit-matrix.toml` freezes exactly 12 CI jobs and the Linux/Windows
+  native rehearsal jobs, including their runner class, clean-checkout
+  requirement, and exact command. Graph-building commands must use `--locked`.
+  `xtask release-check` rejects drift
+  between that contract and either workflow, including path filters that could
+  silently omit a pull-request rehearsal.
+- The `workspace` and `release_candidate` aggregate jobs run even after a
+  dependency failure, pass every `needs.*.result` to `xtask release-exit`, and
+  upload schema-v1 evidence. Reports pin the tested commit and Cargo.lock
+  digest and independently record clean checkout, all-green jobs, and zero
+  open P0/P1 blockers. Tag publication now depends on `release_candidate`.
+- The extended xtask unit suite passes 22/22 tests and warning-free Clippy on
+  Rust 1.95; the new code also checks successfully on the Rust 1.88 MSRV.
+  Local positive probes generated complete CI and release reports; because the
+  implementation worktree was dirty they correctly reported
+  `release_eligible=false`. A synthetic Windows failure returned exit code 1
+  and recorded the failed job rather than producing a false-green aggregate.
+- The complete local matrix passed on the final working content: format and
+  warning-free all-target workspace Clippy; all workspace unit, integration,
+  process, plugin-scaffold, and doc tests; warning-free rustdoc and all 27
+  public crate archives; 31 render plus 52 sensor headless tests; 10/10
+  Behavior CI seeds; all example/media and 11 Python RL smokes; the 531-package
+  supply-chain policy; and all 361 fuzz-smoke cases. OSS parity passed 22/22
+  checks in 516.784 s. Its three 100-actor samples had identical hashes and a
+  slowest 3,246.41 steps/s against the 60 steps/s floor, with zero unexplained
+  violation.
+- GitHub Actions run `31569498804` passed the complete pre-aggregate CI matrix,
+  and clean-checkout release run `31569498834` passed Linux in 6m44s and
+  Windows in 13m21s. Final acceptance remains pending until this M6-E change
+  itself passes both new aggregate checks from a clean pull-request checkout.

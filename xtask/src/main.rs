@@ -1,6 +1,7 @@
 //! Workspace automation tasks for Robot Native Engine.
 
 mod release_artifacts;
+mod release_exit;
 
 use image::AnimationDecoder;
 use serde::{Deserialize, Serialize};
@@ -95,6 +96,7 @@ fn run() -> anyhow::Result<()> {
         "release-check" => release_check(&mut args),
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
+        "release-exit" => release_exit::release_exit(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -124,6 +126,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     let contract_text = fs::read_to_string(root.join("release/contracts.toml"))?;
     let contract_registry = contract_text.parse::<toml::Value>()?;
     validate_contract_registry(&contract_registry)?;
+    release_exit::validate_exit_matrix(&root)?;
 
     run_cargo_at(
         &root,
@@ -894,6 +897,7 @@ fn validate_blocker_registry(registry: &toml::Value) -> anyhow::Result<()> {
         .transpose()?
         .map(Vec::as_slice)
         .unwrap_or_default();
+    let mut blocker_ids = BTreeSet::new();
     for blocker in blockers {
         let id = blocker
             .get("id")
@@ -908,9 +912,34 @@ fn validate_blocker_registry(registry: &toml::Value) -> anyhow::Result<()> {
             .and_then(toml::Value::as_str)
             .unwrap_or("<missing-status>");
         anyhow::ensure!(
+            id != "<missing-id>" && !id.trim().is_empty(),
+            "release blocker id must be non-empty"
+        );
+        anyhow::ensure!(
+            blocker_ids.insert(id),
+            "release blocker id is duplicated: {id}"
+        );
+        anyhow::ensure!(
+            matches!(severity, "P0" | "P1" | "P2" | "P3"),
+            "release blocker {id} has unsupported severity {severity:?}"
+        );
+        anyhow::ensure!(
+            matches!(status, "open" | "closed"),
+            "release blocker {id} has unsupported status {status:?}"
+        );
+        anyhow::ensure!(
             !matches!((severity, status), ("P0" | "P1", "open")),
             "release blocker {id} is still open at severity {severity}"
         );
+        for field in ["summary", "owner", "evidence"] {
+            anyhow::ensure!(
+                blocker
+                    .get(field)
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty()),
+                "release blocker {id} must include non-empty {field}"
+            );
+        }
     }
     Ok(())
 }
@@ -1031,6 +1060,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "install_rehearsal_report",
             u64::from(release_artifacts::INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "final_exit_report",
+            u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
         ),
     ];
     for (section, key, actual) in expected {
@@ -2822,6 +2856,25 @@ mod tests {
             id = "RNE-TEST"
             severity = "P1"
             status = "open"
+        "#
+        .parse::<toml::Value>()
+        .expect("blocker TOML");
+        assert!(validate_blocker_registry(&registry).is_err());
+    }
+
+    #[test]
+    fn malformed_release_blocker_cannot_bypass_the_exit_gate() {
+        let registry = r#"
+            schema_version = 1
+            release_version = "1.0.0-rc.1"
+
+            [[blocker]]
+            id = "RNE-TEST"
+            severity = "P1"
+            status = "Open"
+            summary = "case-changing open must not bypass the gate"
+            owner = "release-team"
+            evidence = "test"
         "#
         .parse::<toml::Value>()
         .expect("blocker TOML");

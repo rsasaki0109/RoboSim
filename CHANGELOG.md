@@ -39,6 +39,15 @@ All notable changes to Robot Native Engine are documented in this file.
   for byte-stable output. Tag builds publish both native archives and wheels
   only after clean Linux and Windows rehearsals succeed.
 
+- **Machine-enforced final RC exit matrix (M6)**: a versioned exit contract
+  maps all 12 required CI jobs and both native release rehearsals to their
+  exact runner, clean-checkout requirement, and pinned command; every graph-
+  building command must use the lockfile. The `workspace`
+  and `release_candidate` aggregate checks emit schema-v1 verdict reports,
+  reject missing, skipped, cancelled, or failed dependencies, and require zero
+  open P0/P1 blockers. Native rehearsals now run on every pull request, and tag
+  publication depends on the two-platform aggregate verdict.
+
 - **Scenario and traffic scale (M5)**: OpenSCENARIO maneuver groups expand to
   canonical multi-actor actions, heterogeneous actor kinds receive compatible
   deterministic routes, assigned routes no longer alias, and replay schema v4
