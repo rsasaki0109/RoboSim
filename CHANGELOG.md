@@ -4,6 +4,8 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-08-12
+
 ### Added
 
 - **1.0 RC hardening (M6)**: the workspace now targets `1.0.0-rc.1`,
