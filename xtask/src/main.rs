@@ -1,6 +1,7 @@
 //! Workspace automation tasks for Robot Native Engine.
 
 use image::AnimationDecoder;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufReader;
 use std::process::{Command, ExitCode, Stdio};
 use std::{
@@ -11,6 +12,37 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
+const RELEASE_VERSION: &str = "1.0.0-rc.1";
+const RELEASE_MSRV: &str = "1.88.0";
+const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
+    "rne_adapter_ros2",
+    "rne_ai",
+    "rne_assets",
+    "rne_core",
+    "rne_data",
+    "rne_deformable",
+    "rne_ecs",
+    "rne_log",
+    "rne_math",
+    "rne_mjcf",
+    "rne_openscenario",
+    "rne_physics",
+    "rne_physics_analytic",
+    "rne_physics_rapier",
+    "rne_plateau",
+    "rne_plugin",
+    "rne_py",
+    "rne_render",
+    "rne_render_wgpu",
+    "rne_robot",
+    "rne_sdf",
+    "rne_sensor",
+    "rne_sumo",
+    "rne_traci",
+    "rne_traffic",
+    "rne_urdf_import",
+    "rne_world",
+];
 
 fn main() -> ExitCode {
     match run() {
@@ -53,10 +85,364 @@ fn run() -> anyhow::Result<()> {
         "hero-contact-sheet" => hero_contact_sheet(),
         "behavior-ci" => behavior_ci(&mut args),
         "behavior-replay" => behavior_replay(&mut args),
+        "release-check" => release_check(&mut args),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
+}
+
+/// Validates the frozen 1.0 RC metadata and assembles every publishable crate.
+fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let mut allow_dirty = false;
+    for argument in args {
+        match argument.as_str() {
+            "--allow-dirty" => allow_dirty = true,
+            other => anyhow::bail!("unknown release-check argument: {other}"),
+        }
+    }
+
+    let root = workspace_root()?;
+    let metadata = cargo_metadata(&root)?;
+    validate_release_metadata(&metadata)?;
+    validate_public_docs(&metadata)?;
+
+    let blocker_text = fs::read_to_string(root.join("release/blockers.toml"))?;
+    let blocker_registry = blocker_text.parse::<toml::Value>()?;
+    validate_blocker_registry(&blocker_registry)?;
+    let contract_text = fs::read_to_string(root.join("release/contracts.toml"))?;
+    let contract_registry = contract_text.parse::<toml::Value>()?;
+    validate_contract_registry(&contract_registry)?;
+
+    run_cargo_at(
+        &root,
+        &["doc", "--locked", "--workspace", "--no-deps"],
+        &[("RUSTDOCFLAGS", "-D warnings")],
+    )?;
+
+    let mut package_args = vec![
+        "package".to_string(),
+        "--locked".to_string(),
+        "--no-verify".to_string(),
+    ];
+    if allow_dirty {
+        package_args.push("--allow-dirty".to_string());
+    }
+    for package in PUBLIC_RELEASE_PACKAGES {
+        package_args.push("-p".to_string());
+        package_args.push((*package).to_string());
+    }
+    run_cargo_owned_at(&root, &package_args, &[])?;
+
+    println!(
+        "release metadata ok: version={RELEASE_VERSION} msrv={RELEASE_MSRV} public_packages={}",
+        PUBLIC_RELEASE_PACKAGES.len()
+    );
+    Ok(())
+}
+
+fn cargo_metadata(root: &Path) -> anyhow::Result<serde_json::Value> {
+    let output = Command::new("cargo")
+        .current_dir(root)
+        .args(["metadata", "--locked", "--format-version", "1", "--no-deps"])
+        .output()?;
+    anyhow::ensure!(output.status.success(), "cargo metadata failed");
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+fn validate_release_metadata(metadata: &serde_json::Value) -> anyhow::Result<()> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted packages"))?;
+    let member_ids = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted workspace_members"))?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let members = packages
+        .iter()
+        .filter(|package| {
+            package["id"]
+                .as_str()
+                .is_some_and(|id| member_ids.contains(id))
+        })
+        .map(|package| {
+            let name = package["name"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("workspace package omitted name"))?;
+            Ok((name, package))
+        })
+        .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+
+    for (name, package) in &members {
+        anyhow::ensure!(
+            package["rust_version"].as_str() == Some(RELEASE_MSRV),
+            "workspace package {name} must declare rust-version {RELEASE_MSRV}"
+        );
+    }
+
+    let actual_public = members
+        .iter()
+        .filter(|(_, package)| {
+            package["publish"].is_null()
+                || package["publish"]
+                    .as_array()
+                    .is_some_and(|registries| !registries.is_empty())
+        })
+        .map(|(name, _)| *name)
+        .collect::<BTreeSet<_>>();
+    let expected_public = PUBLIC_RELEASE_PACKAGES
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        actual_public == expected_public,
+        "publishable package set differs: expected={expected_public:?} actual={actual_public:?}"
+    );
+
+    for name in PUBLIC_RELEASE_PACKAGES {
+        let package = members
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("missing public release package {name}"))?;
+        anyhow::ensure!(
+            package["version"].as_str() == Some(RELEASE_VERSION),
+            "public package {name} must have version {RELEASE_VERSION}"
+        );
+        let dependencies = package["dependencies"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("package {name} omitted dependencies"))?;
+        for dependency in dependencies {
+            let Some(dependency_name) = dependency["name"].as_str() else {
+                continue;
+            };
+            if expected_public.contains(dependency_name) {
+                anyhow::ensure!(
+                    dependency["req"].as_str() == Some("=1.0.0-rc.1"),
+                    "{name} -> {dependency_name} must use exact requirement ={RELEASE_VERSION}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_public_docs(metadata: &serde_json::Value) -> anyhow::Result<()> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted packages"))?;
+    for name in PUBLIC_RELEASE_PACKAGES {
+        let package = packages
+            .iter()
+            .find(|package| package["name"].as_str() == Some(name))
+            .ok_or_else(|| anyhow::anyhow!("missing public release package {name}"))?;
+        let lib_target = package["targets"]
+            .as_array()
+            .and_then(|targets| {
+                targets.iter().find(|target| {
+                    target["src_path"]
+                        .as_str()
+                        .is_some_and(|path| path.replace('\\', "/").ends_with("/src/lib.rs"))
+                })
+            })
+            .ok_or_else(|| anyhow::anyhow!("public package {name} has no library target"))?;
+        let source_path = lib_target["src_path"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("library target for {name} omitted src_path"))?;
+        let source = fs::read_to_string(source_path)?;
+        anyhow::ensure!(
+            source
+                .lines()
+                .any(|line| line.trim() == "#![deny(missing_docs)]"),
+            "public package {name} must deny missing_docs"
+        );
+    }
+    Ok(())
+}
+
+fn validate_blocker_registry(registry: &toml::Value) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        registry
+            .get("schema_version")
+            .and_then(toml::Value::as_integer)
+            == Some(1),
+        "release blocker registry schema_version must be 1"
+    );
+    anyhow::ensure!(
+        registry
+            .get("release_version")
+            .and_then(toml::Value::as_str)
+            == Some(RELEASE_VERSION),
+        "release blocker registry version must be {RELEASE_VERSION}"
+    );
+    let blockers = registry
+        .get("blocker")
+        .map(|value| {
+            value
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("release blocker entries must be an array"))
+        })
+        .transpose()?
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    for blocker in blockers {
+        let id = blocker
+            .get("id")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("<missing-id>");
+        let severity = blocker
+            .get("severity")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("<missing-severity>");
+        let status = blocker
+            .get("status")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("<missing-status>");
+        anyhow::ensure!(
+            !matches!((severity, status), ("P0" | "P1", "open")),
+            "release blocker {id} is still open at severity {severity}"
+        );
+    }
+    Ok(())
+}
+
+fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        registry
+            .get("schema_version")
+            .and_then(toml::Value::as_integer)
+            == Some(1),
+        "release contract registry schema_version must be 1"
+    );
+    anyhow::ensure!(
+        registry
+            .get("release_version")
+            .and_then(toml::Value::as_str)
+            == Some(RELEASE_VERSION),
+        "release contract registry version must be {RELEASE_VERSION}"
+    );
+
+    let expected = [
+        (
+            "controller_abi",
+            "minimum",
+            u64::from(rne_plugin::RNE_PLUGIN_MIN_ABI_VERSION),
+        ),
+        (
+            "controller_abi",
+            "current",
+            u64::from(rne_plugin::RNE_PLUGIN_ABI_VERSION),
+        ),
+        (
+            "controller_abi",
+            "controller_schema",
+            u64::from(rne_plugin::CONTROLLER_SCHEMA_VERSION),
+        ),
+        (
+            "frontend_transport",
+            "major",
+            u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MAJOR),
+        ),
+        (
+            "frontend_transport",
+            "minor",
+            u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MINOR),
+        ),
+        (
+            "assets",
+            "run_manifest",
+            u64::from(rne_assets::RUN_MANIFEST_VERSION),
+        ),
+        (
+            "assets",
+            "traffic",
+            u64::from(rne_traffic::TRAFFIC_ASSET_SCHEMA_VERSION),
+        ),
+        (
+            "assets",
+            "scenario_document",
+            u64::from(rne_openscenario::SCENARIO_DOCUMENT_VERSION),
+        ),
+        (
+            "replays",
+            "generic_artifact",
+            u64::from(rne_log::REPLAY_ARTIFACT_VERSION),
+        ),
+        (
+            "replays",
+            "command_log",
+            u64::from(rne_log::REPLAY_LOG_FORMAT_VERSION),
+        ),
+        (
+            "replays",
+            "random_snapshot",
+            u64::from(rne_log::REPLAY_RANDOM_SNAPSHOT_VERSION),
+        ),
+        (
+            "replays",
+            "scenario",
+            u64::from(rne_openscenario::SCENARIO_REPLAY_SCHEMA_VERSION),
+        ),
+        (
+            "replays",
+            "behavior",
+            u64::from(rne_ai::BEHAVIOR_REPLAY_SCHEMA_VERSION),
+        ),
+        (
+            "replays",
+            "behavior_contract",
+            u64::from(rne_ai::BEHAVIOR_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "replays",
+            "behavior_seed_manifest",
+            u64::from(rne_ai::BEHAVIOR_SEED_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "replays",
+            "behavior_failure_case",
+            u64::from(rne_ai::BEHAVIOR_FAILURE_CASE_SCHEMA_VERSION),
+        ),
+        (
+            "physics",
+            "snapshot",
+            u64::from(rne_physics::PHYSICS_SNAPSHOT_SCHEMA_VERSION),
+        ),
+    ];
+    for (section, key, actual) in expected {
+        let declared = registry
+            .get(section)
+            .and_then(|value| value.get(key))
+            .and_then(toml::Value::as_integer)
+            .and_then(|value| u64::try_from(value).ok());
+        anyhow::ensure!(
+            declared == Some(actual),
+            "release contract {section}.{key} must be {actual}, got {declared:?}"
+        );
+    }
+    Ok(())
+}
+
+fn run_cargo_at(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> anyhow::Result<()> {
+    let owned = args
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    run_cargo_owned_at(root, &owned, envs)
+}
+
+fn run_cargo_owned_at(root: &Path, args: &[String], envs: &[(&str, &str)]) -> anyhow::Result<()> {
+    println!("$ cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .current_dir(root)
+        .args(args)
+        .envs(envs.iter().copied())
+        .status()?;
+    anyhow::ensure!(
+        status.success(),
+        "cargo command failed with status {status}"
+    );
+    Ok(())
 }
 
 /// Runs the committed OSS-parity flagship workflows and writes a machine-readable report.
@@ -1716,7 +2102,8 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 mod tests {
     use super::{
         default_behavior_seeds, extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter,
-        parse_seed_range, parse_smoke_partition, SmokePartition,
+        parse_seed_range, parse_smoke_partition, validate_blocker_registry,
+        validate_contract_registry, SmokePartition,
     };
 
     #[test]
@@ -1789,5 +2176,29 @@ mod tests {
             SmokePartition::Media
         );
         assert!(parse_smoke_partition(Some("unknown")).is_err());
+    }
+
+    #[test]
+    fn committed_release_contract_matches_compiled_versions() {
+        let registry = include_str!("../../release/contracts.toml")
+            .parse::<toml::Value>()
+            .expect("release contract TOML");
+        validate_contract_registry(&registry).expect("release contract must match constants");
+    }
+
+    #[test]
+    fn open_critical_release_blocker_is_rejected() {
+        let registry = r#"
+            schema_version = 1
+            release_version = "1.0.0-rc.1"
+
+            [[blocker]]
+            id = "RNE-TEST"
+            severity = "P1"
+            status = "open"
+        "#
+        .parse::<toml::Value>()
+        .expect("blocker TOML");
+        assert!(validate_blocker_registry(&registry).is_err());
     }
 }

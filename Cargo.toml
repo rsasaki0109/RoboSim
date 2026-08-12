@@ -120,9 +120,40 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
-version = "0.14.0-rc.1"
+rust-version = "1.88.0"
+version = "1.0.0-rc.1"
 
 [workspace.dependencies]
+# Internal crates use exact RC requirements so packaged manifests resolve the
+# same release set from a registry after Cargo removes local paths.
+rne_adapter_ros2 = { version = "=1.0.0-rc.1", path = "adapters/ros2/rne_adapter_ros2" }
+rne_ai = { version = "=1.0.0-rc.1", path = "crates/rne_ai" }
+rne_assets = { version = "=1.0.0-rc.1", path = "crates/rne_assets" }
+rne_core = { version = "=1.0.0-rc.1", path = "crates/rne_core" }
+rne_data = { version = "=1.0.0-rc.1", path = "crates/rne_data" }
+rne_deformable = { version = "=1.0.0-rc.1", path = "crates/rne_deformable" }
+rne_ecs = { version = "=1.0.0-rc.1", path = "crates/rne_ecs" }
+rne_log = { version = "=1.0.0-rc.1", path = "crates/rne_log" }
+rne_math = { version = "=1.0.0-rc.1", path = "crates/rne_math" }
+rne_mjcf = { version = "=1.0.0-rc.1", path = "crates/rne_mjcf" }
+rne_openscenario = { version = "=1.0.0-rc.1", path = "crates/rne_openscenario" }
+rne_physics = { version = "=1.0.0-rc.1", path = "crates/rne_physics" }
+rne_physics_analytic = { version = "=1.0.0-rc.1", path = "crates/rne_physics_analytic" }
+rne_physics_rapier = { version = "=1.0.0-rc.1", path = "crates/rne_physics_rapier" }
+rne_plateau = { version = "=1.0.0-rc.1", path = "crates/rne_plateau" }
+rne_plugin = { version = "=1.0.0-rc.1", path = "crates/rne_plugin" }
+rne_py = { version = "=1.0.0-rc.1", path = "crates/rne_py" }
+rne_render = { version = "=1.0.0-rc.1", path = "crates/rne_render" }
+rne_render_wgpu = { version = "=1.0.0-rc.1", path = "crates/rne_render_wgpu" }
+rne_robot = { version = "=1.0.0-rc.1", path = "crates/rne_robot" }
+rne_sdf = { version = "=1.0.0-rc.1", path = "crates/rne_sdf" }
+rne_sensor = { version = "=1.0.0-rc.1", path = "crates/rne_sensor" }
+rne_sumo = { version = "=1.0.0-rc.1", path = "crates/rne_sumo" }
+rne_traci = { version = "=1.0.0-rc.1", path = "crates/rne_traci" }
+rne_traffic = { version = "=1.0.0-rc.1", path = "crates/rne_traffic" }
+rne_urdf_import = { version = "=1.0.0-rc.1", path = "crates/rne_urdf_import" }
+rne_world = { version = "=1.0.0-rc.1", path = "crates/rne_world" }
+
 anyhow = "1"
 base64 = "0.13.1"
 bevy_ecs = "0.15"

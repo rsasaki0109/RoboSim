@@ -1,0 +1,13 @@
+schema_version = 1
+release_version = "1.0.0-rc.1"
+
+# P0: exploitable safety/security issue, data loss, or universal crash.
+# P1: release-blocking correctness, compatibility, determinism, or install issue.
+# Add blockers as:
+# [[blocker]]
+# id = "RNE-000"
+# severity = "P0"
+# status = "open"
+# summary = "Concise actionable description"
+# owner = "github-login"
+# evidence = "issue or report URL"

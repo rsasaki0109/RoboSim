@@ -2,9 +2,8 @@
 //!
 //! This crate is the minimal reference implementation of the controller
 //! plugin C ABI. It compiles to a `cdylib` that
-//! [`rne_plugin::cabi::load_controller_library`] can open, and exposes the same
-//! velocity-servo policy as the built-in
-//! [`rne_plugin::VelocityServoController`].
+//! `rne_plugin::cabi::load_controller_library` can open, and exposes the same
+//! velocity-servo policy as the built-in `rne_plugin::VelocityServoController`.
 //!
 //! The plugin intentionally has no dependency on `rne_plugin`: a stable ABI
 //! means the host and the plugin each carry their own copy of the

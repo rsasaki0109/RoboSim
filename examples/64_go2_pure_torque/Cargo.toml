@@ -2,6 +2,7 @@
 name = "go2_pure_torque"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]

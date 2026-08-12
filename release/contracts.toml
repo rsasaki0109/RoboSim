@@ -1,0 +1,29 @@
+schema_version = 1
+release_version = "1.0.0-rc.1"
+
+[controller_abi]
+minimum = 2
+current = 3
+controller_schema = 1
+
+[frontend_transport]
+major = 1
+minor = 0
+
+[assets]
+run_manifest = 1
+traffic = 1
+scenario_document = 1
+
+[replays]
+generic_artifact = 1
+command_log = 1
+random_snapshot = 1
+scenario = 4
+behavior = 1
+behavior_contract = 2
+behavior_seed_manifest = 1
+behavior_failure_case = 1
+
+[physics]
+snapshot = 1

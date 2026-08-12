@@ -3,6 +3,7 @@ name = "rne_plateau_import"
 description = "Offline PLATEAU CityGML to RNE asset converter"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
@@ -10,8 +11,7 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
-rne_plateau = { path = "../../crates/rne_plateau" }
-
+rne_plateau = { workspace = true }
 [[bin]]
 name = "rne-plateau-import"
 path = "src/main.rs"

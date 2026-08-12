@@ -504,13 +504,13 @@ const FRICTION_GRASP_MIN_IMPULSE_NS: f32 = 1.0e-4;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GraspMode {
     /// Weld the grasped object rigidly to the end-effector on two-finger contact
-    /// (see [`MobileManipulatorSim::update_grasp_weld`]). This is the original
+    /// (see `MobileManipulatorSim::update_grasp_weld`). This is the original
     /// behavior and remains the default so every existing scene, test, and
     /// example is bit-for-bit unchanged.
     #[default]
     Weld,
     /// Hold the grasped object with force-limited finger squeeze and friction
-    /// only (see [`MobileManipulatorSim::update_grasp_friction`]): no weld
+    /// only (see `MobileManipulatorSim::update_grasp_friction`): no weld
     /// joint is inserted, so the object stays a fully free rigid body and can
     /// slip out if the fingers' normal force times the surface friction
     /// coefficient cannot support the carried load.

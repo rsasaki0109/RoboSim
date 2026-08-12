@@ -3,12 +3,13 @@ name = "rne_physics_analytic"
 description = "Deterministic analytic physics backend for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-rne_core = { path = "../rne_core" }
-rne_ecs = { path = "../rne_ecs" }
-rne_math = { path = "../rne_math" }
-rne_physics = { path = "../rne_physics" }
-rne_world = { path = "../rne_world" }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_world = { workspace = true }

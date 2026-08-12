@@ -3,13 +3,14 @@ name = "rne_plateau"
 description = "Deterministic PLATEAU CityGML import pipeline for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
 earcutr = { workspace = true }
-rne_assets = { path = "../rne_assets" }
-rne_traffic = { path = "../rne_traffic" }
+rne_assets = { workspace = true }
+rne_traffic = { workspace = true }
 roxmltree = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,6 +19,6 @@ toml = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }
-rne_ecs = { path = "../rne_ecs" }
-rne_physics = { path = "../rne_physics" }
-rne_render = { path = "../rne_render" }
+rne_ecs = { workspace = true }
+rne_physics = { workspace = true }
+rne_render = { workspace = true }

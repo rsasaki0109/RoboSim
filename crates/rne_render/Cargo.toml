@@ -3,6 +3,7 @@ name = "rne_render"
 description = "Render backend traits for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -10,9 +11,9 @@ repository.workspace = true
 bevy_ecs = { workspace = true }
 gltf = { workspace = true }
 image = { workspace = true }
-rne_core = { path = "../rne_core" }
-rne_math = { path = "../rne_math" }
-rne_world = { path = "../rne_world" }
+rne_core = { workspace = true }
+rne_math = { workspace = true }
+rne_world = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tobj = { workspace = true }

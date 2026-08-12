@@ -3,13 +3,14 @@ name = "rne_traffic"
 description = "Deterministic backend-neutral traffic domain for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
 bevy_ecs = { workspace = true }
-rne_core = { path = "../rne_core" }
-rne_ecs = { path = "../rne_ecs" }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -3,11 +3,12 @@ name = "rne_core"
 description = "Core app, schedule, and simulation time for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-rne_math = { path = "../rne_math" }
+rne_math = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

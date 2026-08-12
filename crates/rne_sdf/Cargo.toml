@@ -3,6 +3,7 @@ name = "rne_sdf"
 description = "Minimal SDF model import (SDF -> URDF) for Robot Native Engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -11,4 +12,4 @@ roxmltree = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-rne_urdf_import = { path = "../rne_urdf_import" }
+rne_urdf_import = { workspace = true }

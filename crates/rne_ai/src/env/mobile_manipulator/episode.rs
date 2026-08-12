@@ -232,7 +232,7 @@ impl MobileManipulatorEpisodeConfig {
     /// Default pick-and-place episode: grasp the center clutter cube and set it down
     /// at the ground target beside the table.
     ///
-    /// Uses the clutter table scene and [`IkClutterPickPlacePolicy`] timing (see
+    /// Uses the clutter table scene and [`crate::IkClutterPickPlacePolicy`] timing (see
     /// `ik_clutter_policy_completes_center_place`): the old transport-side-table
     /// script no longer reaches the ground target once the arm uses two-finger
     /// weld gating and position-held servos — the welded cube stays table-pinned

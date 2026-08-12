@@ -3,20 +3,21 @@ name = "rne_assets"
 description = "RNE scene, robot, and run manifest asset formats"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-rne_data = { path = "../rne_data" }
-rne_deformable = { path = "../rne_deformable" }
-rne_ecs = { path = "../rne_ecs" }
-rne_math = { path = "../rne_math" }
-rne_physics = { path = "../rne_physics" }
-rne_render = { path = "../rne_render" }
-rne_robot = { path = "../rne_robot" }
-rne_sensor = { path = "../rne_sensor" }
-rne_urdf_import = { path = "../rne_urdf_import" }
-rne_world = { path = "../rne_world" }
+rne_data = { workspace = true }
+rne_deformable = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_render = { workspace = true }
+rne_robot = { workspace = true }
+rne_sensor = { workspace = true }
+rne_urdf_import = { workspace = true }
+rne_world = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }

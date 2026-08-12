@@ -58,7 +58,7 @@ pub struct LidarRobotAsset {
 }
 
 impl LidarRobotAsset {
-    /// Converts this asset section into a [`LidarSpec`].
+    /// Converts this asset section into a [`rne_sensor::LidarSpec`].
     pub fn to_spec(&self) -> rne_sensor::LidarSpec {
         rne_sensor::LidarSpec {
             ray_count: self.ray_count,
@@ -101,7 +101,7 @@ pub struct WristCameraRobotAsset {
 }
 
 impl WristCameraRobotAsset {
-    /// Converts this asset section into a [`CameraSpec`].
+    /// Converts this asset section into a [`rne_sensor::CameraSpec`].
     pub fn to_spec(&self) -> rne_sensor::CameraSpec {
         rne_sensor::CameraSpec {
             width: self.width,

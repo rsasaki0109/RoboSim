@@ -3,6 +3,7 @@ name = "rne_plugin_legacy_v2_fixture"
 description = "Independent legacy ABI-v2 controller plugin compatibility fixture"
 version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
