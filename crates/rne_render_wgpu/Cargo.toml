@@ -18,7 +18,7 @@ rne_math = { workspace = true }
 rne_render = { workspace = true }
 thiserror = { workspace = true }
 wgpu = "24"
-winit = { version = "0.30", optional = true }
+winit = { workspace = true, optional = true }
 
 [dev-dependencies]
 naga = "24"

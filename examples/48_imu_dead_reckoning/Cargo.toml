@@ -3,20 +3,21 @@ name = "imu_dead_reckoning"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
 image = "0.25"
-png = "0.17"
-rne_core = { path = "../../crates/rne_core" }
-rne_data = { path = "../../crates/rne_data" }
-rne_ecs = { path = "../../crates/rne_ecs" }
-rne_math = { path = "../../crates/rne_math" }
-rne_physics = { path = "../../crates/rne_physics" }
-rne_render = { path = "../../crates/rne_render" }
-rne_render_wgpu = { path = "../../crates/rne_render_wgpu" }
-rne_sensor = { path = "../../crates/rne_sensor" }
-rne_world = { path = "../../crates/rne_world" }
+png = { workspace = true }
+rne_core = { workspace = true }
+rne_data = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true }
+rne_sensor = { workspace = true }
+rne_world = { workspace = true }
 
 [[example]]
 name = "48_imu_dead_reckoning"

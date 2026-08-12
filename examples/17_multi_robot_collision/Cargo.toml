@@ -3,10 +3,11 @@ name = "multi_robot_collision"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
+rne_ai = { workspace = true }
 
 [[example]]
 name = "17_multi_robot_collision"

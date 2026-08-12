@@ -3,14 +3,15 @@ name = "gltf_humanoid_gpu"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-png = "0.17"
-rne_math = { path = "../../crates/rne_math" }
-rne_render = { path = "../../crates/rne_render" }
-rne_render_wgpu = { path = "../../crates/rne_render_wgpu", features = ["viewer"] }
-rne_world = { path = "../../crates/rne_world" }
+png = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
+rne_world = { workspace = true }
 
 [[example]]
 name = "69_gltf_humanoid_gpu"

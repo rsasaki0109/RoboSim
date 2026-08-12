@@ -3,11 +3,12 @@ name = "go2_velocity_terrain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
-rne_math = { path = "../../crates/rne_math" }
+rne_ai = { workspace = true }
+rne_math = { workspace = true }
 
 [[example]]
 name = "65_go2_velocity_terrain"

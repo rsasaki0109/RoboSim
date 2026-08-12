@@ -3,10 +3,11 @@ name = "g1_commanded_locomotion"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
+rne_ai = { workspace = true }
 
 [[example]]
 name = "67_g1_commanded_locomotion"

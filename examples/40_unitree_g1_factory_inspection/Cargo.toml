@@ -3,10 +3,11 @@ name = "unitree_g1_factory_inspection"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-rne_ai = { path = "../../crates/rne_ai" }
+rne_ai = { workspace = true }
 
 [[example]]
 name = "40_unitree_g1_factory_inspection"

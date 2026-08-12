@@ -1,19 +1,24 @@
 //! Workspace automation tasks for Robot Native Engine.
 
 use image::AnimationDecoder;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufReader;
 use std::process::{Command, ExitCode, Stdio};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
 const RELEASE_VERSION: &str = "1.0.0-rc.1";
 const RELEASE_MSRV: &str = "1.88.0";
+const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
+const CARGO_DENY_VERSION: &str = "0.20.2";
+const CARGO_AUDIT_VERSION: &str = "0.22.2";
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_adapter_ros2",
     "rne_ai",
@@ -86,6 +91,7 @@ fn run() -> anyhow::Result<()> {
         "behavior-ci" => behavior_ci(&mut args),
         "behavior-replay" => behavior_replay(&mut args),
         "release-check" => release_check(&mut args),
+        "supply-chain" => supply_chain(&mut args),
         "asset" => asset_command(&mut args),
         "lint-boundaries" => lint_boundaries(),
         other => anyhow::bail!("unknown xtask command: {other}"),
@@ -139,6 +145,566 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
         PUBLIC_RELEASE_PACKAGES.len()
     );
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct SupplyChainExceptionRegistry {
+    schema_version: u32,
+    release_version: String,
+    policy_date: String,
+    #[serde(default)]
+    advisory: Vec<AdvisoryException>,
+    #[serde(default)]
+    duplicate: Vec<DuplicateException>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdvisoryException {
+    id: String,
+    package: String,
+    version: String,
+    category: String,
+    reachability: String,
+    owner: String,
+    rationale: String,
+    mitigation: String,
+    expires: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DuplicateException {
+    package: String,
+    version: String,
+    reachability: String,
+    owner: String,
+    rationale: String,
+    expires: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct CargoSbom {
+    schema_version: u32,
+    release_version: &'static str,
+    generated_from: &'static str,
+    cargo_lock_sha256: String,
+    accepted_advisories: Vec<SbomAcceptedAdvisory>,
+    packages: Vec<SbomPackage>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct SbomAcceptedAdvisory {
+    id: String,
+    package: String,
+    version: String,
+    expires: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct SbomPackage {
+    bom_ref: String,
+    name: String,
+    version: String,
+    source: Option<String>,
+    checksum: Option<String>,
+    license: Option<String>,
+    workspace: bool,
+    features: Vec<String>,
+    dependencies: Vec<String>,
+}
+
+/// Checks the pinned dependency policy and emits deterministic supply-chain evidence.
+fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let mut output_dir = PathBuf::from("artifacts/supply-chain");
+    let mut check_tools = true;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--output-dir" => {
+                output_dir = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--output-dir requires a path"))?,
+                );
+            }
+            "--generate-only" => check_tools = false,
+            other => anyhow::bail!("unknown supply-chain argument: {other}"),
+        }
+    }
+
+    let root = workspace_root()?;
+    let registry_text = fs::read_to_string(root.join("release/supply-chain-exceptions.toml"))?;
+    let registry: SupplyChainExceptionRegistry = toml::from_str(&registry_text)?;
+    let lock_bytes = fs::read(root.join("Cargo.lock"))?;
+    let lock: toml::Value = toml::from_str(std::str::from_utf8(&lock_bytes)?)?;
+    validate_supply_chain_registry(&registry, &lock, current_unix_days()?)?;
+
+    let deny_text = fs::read_to_string(root.join("deny.toml"))?;
+    let deny: toml::Value = toml::from_str(&deny_text)?;
+    validate_deny_exceptions(&registry, &deny)?;
+
+    if check_tools {
+        verify_tool_version("cargo-deny", CARGO_DENY_VERSION)?;
+        verify_tool_version("cargo-audit", CARGO_AUDIT_VERSION)?;
+        run_supply_tool(&root, "cargo-deny", &["check"])?;
+
+        let mut audit_args = vec!["audit", "--deny", "warnings"];
+        for exception in &registry.advisory {
+            audit_args.push("--ignore");
+            audit_args.push(&exception.id);
+        }
+        run_supply_tool(&root, "cargo-audit", &audit_args)?;
+    }
+
+    let metadata = cargo_metadata_full(&root)?;
+    let lock_digest = sha256_hex(&lock_bytes);
+    let sbom = build_cargo_sbom(&metadata, &registry, lock_digest.clone())?;
+    let output_dir = if output_dir.is_absolute() {
+        output_dir
+    } else {
+        root.join(output_dir)
+    };
+    fs::create_dir_all(&output_dir)?;
+    let mut sbom_json = serde_json::to_vec_pretty(&sbom)?;
+    sbom_json.push(b'\n');
+    fs::write(output_dir.join("sbom.cargo.json"), sbom_json)?;
+    fs::write(
+        output_dir.join("cargo-lock.sha256"),
+        format!("{lock_digest}  Cargo.lock\n"),
+    )?;
+
+    println!(
+        "supply-chain evidence ok: packages={} advisories={} output={}",
+        sbom.packages.len(),
+        sbom.accepted_advisories.len(),
+        output_dir.display()
+    );
+    Ok(())
+}
+
+fn cargo_metadata_full(root: &Path) -> anyhow::Result<serde_json::Value> {
+    let output = Command::new("cargo")
+        .current_dir(root)
+        .args([
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--all-features",
+        ])
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "cargo metadata for the supply-chain graph failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+fn validate_supply_chain_registry(
+    registry: &SupplyChainExceptionRegistry,
+    lock: &toml::Value,
+    today_days: u64,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        registry.schema_version == 1,
+        "supply-chain exception schema_version must be 1"
+    );
+    anyhow::ensure!(
+        registry.release_version == RELEASE_VERSION,
+        "supply-chain exception release_version must be {RELEASE_VERSION}"
+    );
+    anyhow::ensure!(
+        registry.policy_date == SUPPLY_CHAIN_POLICY_DATE,
+        "supply-chain policy_date must be {SUPPLY_CHAIN_POLICY_DATE}"
+    );
+    let policy_days = parse_utc_date_days(&registry.policy_date)?;
+    anyhow::ensure!(
+        today_days >= policy_days,
+        "current date predates the supply-chain policy"
+    );
+
+    let packages = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("Cargo.lock omitted package entries"))?;
+    let lock_contains = |name: &str, version: &str| {
+        packages.iter().any(|package| {
+            package.get("name").and_then(toml::Value::as_str) == Some(name)
+                && package.get("version").and_then(toml::Value::as_str) == Some(version)
+        })
+    };
+
+    let mut advisory_ids = BTreeSet::new();
+    for exception in &registry.advisory {
+        anyhow::ensure!(
+            exception.id.starts_with("RUSTSEC-"),
+            "invalid advisory id {}",
+            exception.id
+        );
+        anyhow::ensure!(
+            advisory_ids.insert(exception.id.as_str()),
+            "duplicate advisory exception {}",
+            exception.id
+        );
+        anyhow::ensure!(
+            matches!(
+                exception.category.as_str(),
+                "unmaintained" | "unsound" | "vulnerability"
+            ),
+            "unsupported advisory category {}",
+            exception.category
+        );
+        validate_exception_text(
+            &exception.package,
+            &exception.version,
+            &exception.reachability,
+            &exception.owner,
+            &exception.rationale,
+            &exception.expires,
+            today_days,
+        )?;
+        anyhow::ensure!(
+            !exception.mitigation.trim().is_empty(),
+            "advisory {} must document mitigation",
+            exception.id
+        );
+        anyhow::ensure!(
+            lock_contains(&exception.package, &exception.version),
+            "advisory exception {} does not match Cargo.lock",
+            exception.id
+        );
+    }
+
+    let mut duplicate_packages = BTreeSet::new();
+    for exception in &registry.duplicate {
+        validate_exception_text(
+            &exception.package,
+            &exception.version,
+            &exception.reachability,
+            &exception.owner,
+            &exception.rationale,
+            &exception.expires,
+            today_days,
+        )?;
+        anyhow::ensure!(
+            duplicate_packages.insert((exception.package.as_str(), exception.version.as_str())),
+            "duplicate dependency exception {}@{}",
+            exception.package,
+            exception.version
+        );
+        anyhow::ensure!(
+            lock_contains(&exception.package, &exception.version),
+            "duplicate exception {}@{} does not match Cargo.lock",
+            exception.package,
+            exception.version
+        );
+    }
+    Ok(())
+}
+
+fn validate_exception_text(
+    package: &str,
+    version: &str,
+    reachability: &str,
+    owner: &str,
+    rationale: &str,
+    expires: &str,
+    today_days: u64,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !package.trim().is_empty(),
+        "exception package must not be empty"
+    );
+    anyhow::ensure!(
+        !version.trim().is_empty(),
+        "exception version must not be empty"
+    );
+    anyhow::ensure!(
+        !reachability.trim().is_empty(),
+        "{package}@{version} must document reachability"
+    );
+    anyhow::ensure!(
+        !owner.trim().is_empty(),
+        "{package}@{version} must document an owner"
+    );
+    anyhow::ensure!(
+        !rationale.trim().is_empty(),
+        "{package}@{version} must document a rationale"
+    );
+    let expiry_days = parse_utc_date_days(expires)?;
+    anyhow::ensure!(
+        expiry_days >= today_days,
+        "{package}@{version} exception expired on {expires}"
+    );
+    Ok(())
+}
+
+fn validate_deny_exceptions(
+    registry: &SupplyChainExceptionRegistry,
+    deny: &toml::Value,
+) -> anyhow::Result<()> {
+    let configured_advisories = deny
+        .get("advisories")
+        .and_then(|value| value.get("ignore"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("deny.toml advisories.ignore must be an array"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("advisory ignores must be RustSec ID strings"))
+        })
+        .collect::<anyhow::Result<BTreeSet<_>>>()?;
+    let documented_advisories = registry
+        .advisory
+        .iter()
+        .map(|exception| exception.id.as_str())
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        configured_advisories == documented_advisories,
+        "deny.toml advisory ignores differ from the exception registry"
+    );
+
+    let configured_duplicates = deny
+        .get("bans")
+        .and_then(|value| value.get("skip"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("deny.toml bans.skip must be an array"))?
+        .iter()
+        .map(|value| {
+            let package_spec = value
+                .get("crate")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("bans.skip entries must declare crate"))?;
+            let (package, version) = package_spec
+                .split_once('@')
+                .ok_or_else(|| anyhow::anyhow!("bans.skip must use package@version"))?;
+            Ok((package, version))
+        })
+        .collect::<anyhow::Result<BTreeSet<_>>>()?;
+    let documented_duplicates = registry
+        .duplicate
+        .iter()
+        .map(|exception| (exception.package.as_str(), exception.version.as_str()))
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        configured_duplicates == documented_duplicates,
+        "deny.toml duplicate skips differ from the exception registry"
+    );
+    anyhow::ensure!(
+        deny.get("bans")
+            .and_then(|value| value.get("multiple-versions"))
+            .and_then(toml::Value::as_str)
+            == Some("deny"),
+        "deny.toml must deny unaccepted duplicate versions"
+    );
+    anyhow::ensure!(
+        deny.get("bans")
+            .and_then(|value| value.get("wildcards"))
+            .and_then(toml::Value::as_str)
+            == Some("deny"),
+        "deny.toml must deny wildcard dependency requirements"
+    );
+    Ok(())
+}
+
+fn verify_tool_version(program: &str, expected: &str) -> anyhow::Result<()> {
+    let output = Command::new(program).arg("--version").output()?;
+    anyhow::ensure!(output.status.success(), "{program} --version failed");
+    let version = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    anyhow::ensure!(
+        version.split_whitespace().any(|token| token == expected),
+        "{program} must be version {expected}, got {}",
+        version.trim()
+    );
+    Ok(())
+}
+
+fn run_supply_tool(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> {
+    println!("$ {program} {}", args.join(" "));
+    let status = Command::new(program)
+        .current_dir(root)
+        .args(args)
+        .status()?;
+    anyhow::ensure!(status.success(), "{program} failed with status {status}");
+    Ok(())
+}
+
+fn build_cargo_sbom(
+    metadata: &serde_json::Value,
+    registry: &SupplyChainExceptionRegistry,
+    lock_digest: String,
+) -> anyhow::Result<CargoSbom> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted packages"))?;
+    let member_ids = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted workspace_members"))?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let nodes = metadata["resolve"]["nodes"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted resolve nodes"))?;
+    let nodes_by_id = nodes
+        .iter()
+        .filter_map(|node| node["id"].as_str().map(|id| (id, node)))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut refs_by_id = BTreeMap::new();
+    for package in packages {
+        let id = json_string(package, "id")?;
+        let name = json_string(package, "name")?;
+        let version = json_string(package, "version")?;
+        let source = package["source"].as_str();
+        let workspace = member_ids.contains(id);
+        let bom_ref = if workspace {
+            format!("workspace:{name}@{version}")
+        } else if let Some(source) = source {
+            format!("{source}:{name}@{version}")
+        } else {
+            format!("path:{name}@{version}")
+        };
+        refs_by_id.insert(id, bom_ref);
+    }
+
+    let mut sbom_packages = Vec::with_capacity(packages.len());
+    for package in packages {
+        let id = json_string(package, "id")?;
+        let node = nodes_by_id
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("resolve graph omitted package {id}"))?;
+        let mut dependencies = node["dependencies"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("resolve node {id} omitted dependencies"))?
+            .iter()
+            .map(|dependency| {
+                let dependency_id = dependency
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("dependency ID must be a string"))?;
+                refs_by_id
+                    .get(dependency_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("unknown dependency ID {dependency_id}"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        dependencies.sort();
+        dependencies.dedup();
+        let mut features = node["features"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("resolve node {id} omitted features"))?
+            .iter()
+            .map(|feature| {
+                feature
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| anyhow::anyhow!("feature must be a string"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        features.sort();
+        features.dedup();
+
+        sbom_packages.push(SbomPackage {
+            bom_ref: refs_by_id[id].clone(),
+            name: json_string(package, "name")?.to_owned(),
+            version: json_string(package, "version")?.to_owned(),
+            source: package["source"].as_str().map(str::to_owned),
+            checksum: package["checksum"].as_str().map(str::to_owned),
+            license: package["license"].as_str().map(str::to_owned),
+            workspace: member_ids.contains(id),
+            features,
+            dependencies,
+        });
+    }
+    sbom_packages.sort_by(|left, right| left.bom_ref.cmp(&right.bom_ref));
+
+    let mut accepted_advisories = registry
+        .advisory
+        .iter()
+        .map(|exception| SbomAcceptedAdvisory {
+            id: exception.id.clone(),
+            package: exception.package.clone(),
+            version: exception.version.clone(),
+            expires: exception.expires.clone(),
+        })
+        .collect::<Vec<_>>();
+    accepted_advisories.sort_by(|left, right| left.id.cmp(&right.id));
+
+    Ok(CargoSbom {
+        schema_version: 1,
+        release_version: RELEASE_VERSION,
+        generated_from: "Cargo.lock and cargo metadata --locked --all-features",
+        cargo_lock_sha256: format!("sha256:{lock_digest}"),
+        accepted_advisories,
+        packages: sbom_packages,
+    })
+}
+
+fn json_string<'a>(value: &'a serde_json::Value, key: &str) -> anyhow::Result<&'a str> {
+    value[key]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("JSON field {key} must be a string"))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn current_unix_days() -> anyhow::Result<u64> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() / 86_400)
+}
+
+fn parse_utc_date_days(date: &str) -> anyhow::Result<u64> {
+    let parts = date
+        .split('-')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()?;
+    anyhow::ensure!(parts.len() == 3, "date must use YYYY-MM-DD: {date}");
+    let (year, month, day) = (parts[0], parts[1], parts[2]);
+    anyhow::ensure!(year >= 1970, "date must not predate Unix epoch: {date}");
+    anyhow::ensure!((1..=12).contains(&month), "invalid month in {date}");
+    let month_lengths = [
+        31,
+        if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            29
+        } else {
+            28
+        },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    anyhow::ensure!(
+        day >= 1 && day <= month_lengths[(month - 1) as usize],
+        "invalid day in {date}"
+    );
+    let mut days = 0_u64;
+    for candidate_year in 1970..year {
+        days += if candidate_year % 4 == 0
+            && (candidate_year % 100 != 0 || candidate_year % 400 == 0)
+        {
+            366
+        } else {
+            365
+        };
+    }
+    days += month_lengths
+        .iter()
+        .take((month - 1) as usize)
+        .map(|days| u64::from(*days))
+        .sum::<u64>();
+    days += u64::from(day - 1);
+    Ok(days)
 }
 
 fn cargo_metadata(root: &Path) -> anyhow::Result<serde_json::Value> {
@@ -2101,9 +2667,10 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_behavior_seeds, extract_hero_digest, frame_delta_ratio, hero_contact_sheet_filter,
-        parse_seed_range, parse_smoke_partition, validate_blocker_registry,
-        validate_contract_registry, SmokePartition,
+        build_cargo_sbom, default_behavior_seeds, extract_hero_digest, frame_delta_ratio,
+        hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition, parse_utc_date_days,
+        validate_blocker_registry, validate_contract_registry, validate_supply_chain_registry,
+        SmokePartition, SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
     };
 
     #[test]
@@ -2200,5 +2767,81 @@ mod tests {
         .parse::<toml::Value>()
         .expect("blocker TOML");
         assert!(validate_blocker_registry(&registry).is_err());
+    }
+
+    #[test]
+    fn committed_supply_chain_exceptions_match_the_lockfile() {
+        let registry: SupplyChainExceptionRegistry =
+            toml::from_str(include_str!("../../release/supply-chain-exceptions.toml"))
+                .expect("supply-chain exception TOML");
+        let lock = include_str!("../../Cargo.lock")
+            .parse::<toml::Value>()
+            .expect("Cargo.lock TOML");
+        let policy_days = parse_utc_date_days(SUPPLY_CHAIN_POLICY_DATE).expect("policy date");
+        validate_supply_chain_registry(&registry, &lock, policy_days)
+            .expect("supply-chain exceptions must match the locked graph");
+    }
+
+    #[test]
+    fn validates_utc_dates_including_leap_days() {
+        assert!(parse_utc_date_days("2024-02-29").is_ok());
+        assert!(parse_utc_date_days("2023-02-29").is_err());
+        assert!(parse_utc_date_days("2026-13-01").is_err());
+    }
+
+    #[test]
+    fn cargo_sbom_sorts_packages_features_and_dependencies() {
+        let registry: SupplyChainExceptionRegistry = toml::from_str(
+            r#"
+                schema_version = 1
+                release_version = "1.0.0-rc.1"
+                policy_date = "2026-08-12"
+            "#,
+        )
+        .expect("registry");
+        let metadata = serde_json::json!({
+            "workspace_members": ["path+file:///repo#app@1.0.0"],
+            "packages": [
+                {
+                    "id": "path+file:///repo#app@1.0.0",
+                    "name": "app",
+                    "version": "1.0.0",
+                    "source": null,
+                    "checksum": null,
+                    "license": "MIT"
+                },
+                {
+                    "id": "registry+https://github.com/rust-lang/crates.io-index#dep@2.0.0",
+                    "name": "dep",
+                    "version": "2.0.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "abc",
+                    "license": "Apache-2.0"
+                }
+            ],
+            "resolve": {
+                "nodes": [
+                    {
+                        "id": "path+file:///repo#app@1.0.0",
+                        "dependencies": [
+                            "registry+https://github.com/rust-lang/crates.io-index#dep@2.0.0",
+                            "registry+https://github.com/rust-lang/crates.io-index#dep@2.0.0"
+                        ],
+                        "features": ["z", "a"]
+                    },
+                    {
+                        "id": "registry+https://github.com/rust-lang/crates.io-index#dep@2.0.0",
+                        "dependencies": [],
+                        "features": []
+                    }
+                ]
+            }
+        });
+
+        let sbom = build_cargo_sbom(&metadata, &registry, "00ff".to_string()).expect("SBOM");
+        assert_eq!(sbom.packages[0].name, "dep");
+        assert_eq!(sbom.packages[1].features, ["a", "z"]);
+        assert_eq!(sbom.packages[1].dependencies.len(), 1);
+        assert_eq!(sbom.cargo_lock_sha256, "sha256:00ff");
     }
 }

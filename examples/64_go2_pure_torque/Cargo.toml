@@ -3,12 +3,13 @@ name = "go2_pure_torque"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
 anyhow.workspace = true
-rne_ai = { path = "../../crates/rne_ai" }
-rne_math = { path = "../../crates/rne_math" }
+rne_ai = { workspace = true }
+rne_math = { workspace = true }
 
 [[example]]
 name = "64_go2_pure_torque"
