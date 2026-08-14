@@ -1,0 +1,45 @@
+{
+  "kind": "rne_benchmark_report",
+  "schema_version": 1,
+  "engine_version": "0.1.0",
+  "cases": [
+    {
+      "id": "physics/example",
+      "source": "physics-conformance",
+      "backend": "analytic",
+      "seed": 7,
+      "steps": 2,
+      "fixed_delta_ticks": 500000000,
+      "fixed_delta_s": 0.5,
+      "state_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "result_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "determinism_contract": {
+        "schema_version": 1,
+        "name": "physics/example",
+        "scope": {
+          "subject": "benchmark.physics/example",
+          "observables": [
+            "state_digest",
+            "result_digest"
+          ],
+          "first_step": 0,
+          "step_count": 2
+        },
+        "guarantee": {
+          "tier": "exact"
+        }
+      },
+      "evidence_refs": [
+        "docs/example.md"
+      ],
+      "passed": true
+    }
+  ],
+  "evidence": [
+    {
+      "path": "docs/example.md",
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "content_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+}

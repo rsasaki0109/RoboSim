@@ -18,6 +18,7 @@ required_jobs = [
   "release_contract",
   "semver",
   "behavior_ci",
+  "evidence",
   "parity",
   "supply_chain",
   "fuzz_smoke",
@@ -109,6 +110,15 @@ job = "behavior_ci"
 runner = "ubuntu-latest"
 clean_checkout = true
 commands = ["cargo run --locked -p xtask -- behavior-ci"]
+
+[[gate]]
+id = "trust_evidence"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "evidence"
+runner = "${{ matrix.os }}"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- evidence"]
 
 [[gate]]
 id = "oss_parity"

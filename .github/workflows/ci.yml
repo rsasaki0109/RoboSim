@@ -177,6 +177,28 @@ jobs:
           name: behavior-ci-report
           path: artifacts/behavior-ci/
 
+  evidence:
+    name: evidence (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evidence-${{ matrix.os }}
+      - name: Generate and verify v0.2 trust evidence
+        run: cargo run --locked -p xtask -- evidence
+      - name: Upload trust evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-evidence-${{ matrix.os }}
+          path: artifacts/evidence/
+
   parity:
     # M5 defines the GitHub-hosted Windows parity runner as its benchmark class.
     runs-on: windows-latest
@@ -248,7 +270,7 @@ jobs:
   # context to point at; it passes only when every stage passes.
   workspace:
     runs-on: ubuntu-latest
-    needs: [lint, test, smoke, rl, headless, msrv, release_contract, semver, behavior_ci, parity, supply_chain, fuzz_smoke]
+    needs: [lint, test, smoke, rl, headless, msrv, release_contract, semver, behavior_ci, evidence, parity, supply_chain, fuzz_smoke]
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -268,6 +290,7 @@ jobs:
           --result release_contract=${{ needs.release_contract.result }}
           --result semver=${{ needs.semver.result }}
           --result behavior_ci=${{ needs.behavior_ci.result }}
+          --result evidence=${{ needs.evidence.result }}
           --result parity=${{ needs.parity.result }}
           --result supply_chain=${{ needs.supply_chain.result }}
           --result fuzz_smoke=${{ needs.fuzz_smoke.result }}

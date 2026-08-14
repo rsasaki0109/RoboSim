@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "physics",
+  "scope": {
+    "subject": "episode",
+    "observables": [
+      "world.state",
+      "sensor.lidar"
+    ],
+    "first_step": 4,
+    "step_count": 3
+  },
+  "guarantee": {
+    "tier": "tolerance",
+    "absolute": 1e-6,
+    "relative": 0.0001
+  }
+}

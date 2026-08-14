@@ -1,0 +1,1 @@
+{"kind":"rne_capability_report","schema_version":1,"release_version":"0.1.0","git_commit":"0123456789012345678901234567890123456789","capabilities":[{"id":"example","name":"Example","status":"complete","evidence":[{"path":"docs/example.md","command":"cargo test --locked -p example"}]}]}

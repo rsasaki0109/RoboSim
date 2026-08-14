@@ -1,5 +1,9 @@
 //! Workspace automation tasks for Robot Native Engine.
 
+mod benchmark;
+mod capability_report;
+mod evidence;
+mod failure_capsule;
 mod release_artifacts;
 mod release_exit;
 
@@ -17,7 +21,7 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
-const RELEASE_VERSION: &str = "0.1.0";
+pub(crate) const RELEASE_VERSION: &str = "0.1.0";
 const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -97,6 +101,10 @@ fn run() -> anyhow::Result<()> {
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
+        "capability-report" => capability_report::capability_report(&mut args),
+        "benchmark" => benchmark::benchmark(&mut args),
+        "evidence" => evidence::evidence(&mut args),
+        "failure-capsule" => failure_capsule::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -1047,6 +1055,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_physics::PHYSICS_SNAPSHOT_SCHEMA_VERSION),
         ),
         (
+            "determinism",
+            "contract",
+            u64::from(rne_core::DETERMINISM_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1065,6 +1078,26 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "final_exit_report",
             u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "capability_report",
+            u64::from(capability_report::CAPABILITY_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "benchmark_report",
+            u64::from(benchmark::BENCHMARK_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "failure_capsule",
+            u64::from(rne_log::FAILURE_CAPSULE_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "evidence_manifest",
+            u64::from(evidence::EVIDENCE_MANIFEST_SCHEMA_VERSION),
         ),
     ];
     for (section, key, actual) in expected {

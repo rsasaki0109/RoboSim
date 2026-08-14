@@ -16,7 +16,7 @@ const EXIT_MATRIX_PATH: &str = "release/exit-matrix.toml";
 const EXPECTED_SCOPES: [&str; 2] = ["ci", "release"];
 const EXPECTED_AGGREGATE_CHECKS: [&str; 2] =
     ["CI / workspace", "Release rehearsal / release_candidate"];
-const EXPECTED_CI_JOBS: [&str; 12] = [
+const EXPECTED_CI_JOBS: [&str; 13] = [
     "lint",
     "test",
     "smoke",
@@ -26,6 +26,7 @@ const EXPECTED_CI_JOBS: [&str; 12] = [
     "release_contract",
     "semver",
     "behavior_ci",
+    "evidence",
     "parity",
     "supply_chain",
     "fuzz_smoke",

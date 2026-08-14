@@ -1,5 +1,12 @@
 # Roadmap
 
+The canonical forward-looking product strategy is
+[PRODUCT_STRATEGY_2026_2029.md](PRODUCT_STRATEGY_2026_2029.md). It defines the
+north star, sequencing, release gates, 1.0 readiness criteria, and immediate
+12-week plan. The sections below retain detailed milestone history and
+implementation evidence; when a forward priority or version label conflicts,
+the product strategy takes precedence.
+
 ## OSS-compatible simulation workflow
 
 The next product arc closes the common workflow gap with open simulators such
@@ -7,6 +14,33 @@ as Choreonoid, Gazebo Sim, and AWSIM: one asset description should be runnable
 headlessly, controllable through typed I/O, recordable, replayable, and
 inspectable without a commercial engine. The baseline and scope are tracked in
 [OSS_PARITY.md](OSS_PARITY.md).
+
+## Post-0.1 product arc: trust, interchangeable backends, and scale
+
+RNE's differentiation is not a longer importer list. The target workflow is:
+define one robot task once, run it against interchangeable backend-neutral
+physics implementations, scale the same task into headless evaluation or RL,
+and turn every failure into portable evidence that another machine can verify.
+
+The labels below are feature tracks and do not require an early public version
+or Git tag. Each track advances only when its machine-readable exit evidence is
+available.
+
+| Track | Outcome | Main exit evidence |
+|---|---|---|
+| 0.2 Trust and benchmark | Backend-neutral determinism contracts, audited capability inventory, timing-free benchmark aggregation, and portable Failure Capsules | `xtask capability-report`, `xtask benchmark`, `xtask failure-capsule verify`, workspace/headless CI |
+| 0.3 Interchangeable dynamics | Promote the optional MuJoCo free-fall spike into conformance-covered rigid bodies and articulations while retaining Rapier and analytic backends | The same committed fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass |
+| 0.4 Scalable learning | Ordered vector environments, deterministic reset streams, batched observations/actions, and accelerator adapters outside core | Single-environment replay matches its lane in a batch; throughput reports name hardware, batch size, and scenario |
+| 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
+| 0.6 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
+
+The 0.2 foundation deliberately keeps performance timings separate from stable
+correctness evidence. `DeterminismContract` describes exact, tolerance, or
+outcome-level promises; benchmark reports embed those promises and hash only
+stable content. Failure Capsules reference existing generic or behavior replay
+artifacts instead of inventing a second action schema. The MuJoCo adapter stays
+`publish = false` and default-off until its advertised capabilities join the
+shared conformance catalog.
 
 ## 0.1 execution plan (August 2026 through July 2027)
 

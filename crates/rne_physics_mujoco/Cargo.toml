@@ -1,0 +1,24 @@
+[package]
+name = "rne_physics_mujoco"
+description = "Optional MuJoCo physics backend spike for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = []
+mujoco = ["dep:mujoco-rs"]
+
+[dependencies]
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_world = { workspace = true }
+thiserror = { workspace = true }
+# Cargo ignores semver build metadata while selecting dependencies; Cargo.lock
+# pins the resolved package to `5.0.0+mj-3.9.0`.
+mujoco-rs = { version = "=5.0.0", default-features = false, optional = true }
