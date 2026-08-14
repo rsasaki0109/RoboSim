@@ -162,6 +162,12 @@ Delivery slices:
 5. **Cross-backend diagnosis** — compare the first divergent observable and
    package the relevant replay and conformance report into a Failure Capsule.
 
+All five v0.3 implementation slices now have executable evidence. The
+cross-backend diagnostic keeps the production 10 cm Rapier-vs-MuJoCo position
+contract passing, injects a separate 1 cm diagnostic bound, captures both
+traces through the first violation, and verifies the resulting replay/report
+pair through the portable Failure Capsule reader on Windows and Linux CI.
+
 Exit evidence:
 
 - each advertised capability has at least one shared committed vector;

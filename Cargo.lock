@@ -3594,6 +3594,7 @@ name = "rne_physics_conformance"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rne_ai",
  "rne_core",
  "rne_ecs",
  "rne_math",

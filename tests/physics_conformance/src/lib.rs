@@ -3,6 +3,11 @@
 #![deny(missing_docs)]
 
 use anyhow::{anyhow, Context};
+#[cfg(feature = "mujoco")]
+use rne_ai::{
+    BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayAction, BehaviorReplayArtifact,
+    BehaviorReplayFailure, BehaviorReplayFrame, BehaviorViolation,
+};
 use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
@@ -31,6 +36,10 @@ const BACKEND_ANALYTIC: &str = "analytic";
 const BACKEND_MUJOCO: &str = "mujoco";
 const BACKEND_RAPIER: &str = "rapier";
 const BACKEND_COMPARISON: &str = "analytic_vs_rapier";
+#[cfg(feature = "mujoco")]
+const BACKEND_ANALYTIC_MUJOCO: &str = "analytic_vs_mujoco";
+#[cfg(feature = "mujoco")]
+const BACKEND_RAPIER_MUJOCO: &str = "rapier_vs_mujoco";
 const CASE_ANALYTIC_RIGID: &str = "analytic.rigid_body.free_fall";
 #[cfg(feature = "mujoco")]
 const CASE_MUJOCO_RIGID: &str = "mujoco.rigid_body.free_fall";
@@ -41,6 +50,14 @@ const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
 const CASE_MUJOCO_CONTACT: &str = "mujoco.contact_force.resting_impulse";
 const CASE_RAPIER_RAYCAST: &str = "rapier.raycast_batch.ordered_hits";
 const CASE_BACKEND_COMPARISON: &str = "analytic_vs_rapier.free_fall";
+#[cfg(feature = "mujoco")]
+const CASE_ANALYTIC_MUJOCO_COMPARISON: &str = "analytic_vs_mujoco.free_fall";
+#[cfg(feature = "mujoco")]
+const CASE_RAPIER_MUJOCO_COMPARISON: &str = "rapier_vs_mujoco.free_fall";
+#[cfg(feature = "mujoco")]
+const CASE_RAPIER_MUJOCO_DIAGNOSTIC: &str = "rapier_vs_mujoco.free_fall.diagnostic_perturbation";
+#[cfg(feature = "mujoco")]
+const DIAGNOSTIC_CONTRACT: &str = "rapier_vs_mujoco.position_delta_m.diagnostic";
 
 const STEP_HZ: f64 = 60.0;
 const FREE_FALL_STEPS: u64 = 60;
@@ -196,6 +213,57 @@ const TOLERANCES: &[ToleranceSpec] = &[
         relative: 0.0,
         rationale: "both solvers integrate the same constant acceleration for the velocity state",
     },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "analytic_mujoco_free_fall_position_delta_m_v1",
+        case_id: CASE_ANALYTIC_MUJOCO_COMPARISON,
+        metric_id: "position_delta_m",
+        unit: MetricUnit::Metre,
+        absolute: 1e-9,
+        relative: 0.0,
+        rationale: "both f64 semi-implicit integrations follow the same fixed-step reference",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "analytic_mujoco_free_fall_velocity_delta_m_s_v1",
+        case_id: CASE_ANALYTIC_MUJOCO_COMPARISON,
+        metric_id: "velocity_delta_m_s",
+        unit: MetricUnit::MetrePerSecond,
+        absolute: 1e-9,
+        relative: 0.0,
+        rationale: "both backends integrate identical constant acceleration in f64",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "rapier_mujoco_free_fall_position_delta_m_v1",
+        case_id: CASE_RAPIER_MUJOCO_COMPARISON,
+        metric_id: "position_delta_m",
+        unit: MetricUnit::Metre,
+        absolute: 0.10,
+        relative: 0.0,
+        rationale: "Rapier and MuJoCo integration conventions differ by one bounded O(dt) term",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "rapier_mujoco_free_fall_velocity_delta_m_s_v1",
+        case_id: CASE_RAPIER_MUJOCO_COMPARISON,
+        metric_id: "velocity_delta_m_s",
+        unit: MetricUnit::MetrePerSecond,
+        absolute: 0.001,
+        relative: 0.0,
+        rationale: "both solvers integrate the same constant acceleration for velocity",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "diagnostic_position_delta_m_v1",
+        case_id: CASE_RAPIER_MUJOCO_DIAGNOSTIC,
+        metric_id: "position_delta_m",
+        unit: MetricUnit::Metre,
+        absolute: 0.01,
+        relative: 0.0,
+        rationale:
+            "deliberately strict fault-injection bound used only to prove divergence capture",
+    },
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -307,13 +375,33 @@ pub fn run_conformance() -> ConformanceReport {
     cases.push(comparison_case(
         analytic.free_fall.as_ref(),
         rapier.free_fall.as_ref(),
+        CASE_BACKEND_COMPARISON,
+        BACKEND_COMPARISON,
+        "backend_free_fall_position_delta_m_v1",
+        "backend_free_fall_velocity_delta_m_s_v1",
     ));
     let backends = vec![analytic.conformance.backend, rapier.conformance.backend];
     #[cfg(feature = "mujoco")]
     let backends = {
         let mut backends = backends;
         let mujoco = execute_backend(MuJoCoBackend::manifest(), &mujoco_backend);
-        cases.extend(mujoco.conformance.cases);
+        cases.extend(mujoco.conformance.cases.clone());
+        cases.push(comparison_case(
+            analytic.free_fall.as_ref(),
+            mujoco.free_fall.as_ref(),
+            CASE_ANALYTIC_MUJOCO_COMPARISON,
+            BACKEND_ANALYTIC_MUJOCO,
+            "analytic_mujoco_free_fall_position_delta_m_v1",
+            "analytic_mujoco_free_fall_velocity_delta_m_s_v1",
+        ));
+        cases.push(comparison_case(
+            rapier.free_fall.as_ref(),
+            mujoco.free_fall.as_ref(),
+            CASE_RAPIER_MUJOCO_COMPARISON,
+            BACKEND_RAPIER_MUJOCO,
+            "rapier_mujoco_free_fall_position_delta_m_v1",
+            "rapier_mujoco_free_fall_velocity_delta_m_s_v1",
+        ));
         backends.push(mujoco.conformance.backend);
         backends
     };
@@ -332,6 +420,230 @@ pub fn run_conformance() -> ConformanceReport {
         cases,
         all_passed,
     }
+}
+
+#[cfg(feature = "mujoco")]
+#[derive(Clone, Debug, PartialEq)]
+struct FreeFallTraceSample {
+    step: u64,
+    sim_time_ticks: u64,
+    position_y_m: f64,
+    velocity_y_m_s: f64,
+    snapshot_hash: u64,
+}
+
+/// Produces an intentionally failing Rapier-vs-MuJoCo diagnostic report and
+/// its existing-schema Behavior replay.
+///
+/// The normal cross-backend contract remains unchanged and passing. This
+/// diagnostic adds a clearly named 1 cm fault-injection bound, locates the
+/// first fixed step that exceeds it, and records both backend observations up
+/// to that violation for Failure Capsule packaging.
+#[cfg(feature = "mujoco")]
+pub fn run_divergence_diagnostic() -> anyhow::Result<(ConformanceReport, BehaviorReplayArtifact)> {
+    let mut report = run_conformance();
+    anyhow::ensure!(
+        report.all_passed(),
+        "baseline conformance must pass before injecting a diagnostic divergence"
+    );
+
+    let rapier = run_free_fall_trace(RapierBackend::new())?;
+    let mujoco = run_free_fall_trace(mujoco_backend())?;
+    anyhow::ensure!(
+        rapier.len() == mujoco.len(),
+        "backend traces have different lengths"
+    );
+    let tolerance = tolerance("diagnostic_position_delta_m_v1");
+    let violation_index = rapier
+        .iter()
+        .zip(&mujoco)
+        .position(|(rapier, mujoco)| {
+            rapier.step > 0
+                && !tolerance.accepts((rapier.position_y_m - mujoco.position_y_m).abs(), 0.0)
+        })
+        .context("fault-injection bound did not expose a cross-backend divergence")?;
+    let rapier_violation = &rapier[violation_index];
+    let mujoco_violation = &mujoco[violation_index];
+    let position_delta_m = (rapier_violation.position_y_m - mujoco_violation.position_y_m).abs();
+    let diagnostic_metrics = vec![metric(
+        "position_delta_m",
+        position_delta_m,
+        0.0,
+        tolerance.id,
+    )];
+    anyhow::ensure!(
+        diagnostic_metrics.iter().any(|metric| !metric.passed),
+        "diagnostic case unexpectedly passed"
+    );
+    report.cases.push(CaseReport {
+        id: CASE_RAPIER_MUJOCO_DIAGNOSTIC.to_string(),
+        backend: BACKEND_RAPIER_MUJOCO.to_string(),
+        capability: PhysicsCapability::RigidBody,
+        passed: false,
+        snapshot_hash: None,
+        metrics: diagnostic_metrics,
+        detail: format!(
+            "deliberate 1 cm fault-injection bound first exceeded at completed step {}; production 10 cm profile remains passing; Rapier follows its continuous-leaning integration while MuJoCo follows the semi-implicit reference",
+            rapier_violation.step
+        ),
+    });
+    report.cases.sort_by(|left, right| left.id.cmp(&right.id));
+    report.all_passed = false;
+
+    let descriptor = BehaviorContractDescriptor {
+        name: DIAGNOSTIC_CONTRACT.to_string(),
+        kind: BehaviorContractKind::Always,
+        entities: vec!["free_fall_body".to_string()],
+    };
+    let frames = rapier
+        .iter()
+        .zip(&mujoco)
+        .take(violation_index + 1)
+        .map(|(rapier, mujoco)| BehaviorReplayFrame {
+            step: rapier.step,
+            sim_time_ticks: rapier.sim_time_ticks,
+            action: if rapier.step == 0 {
+                BehaviorReplayAction::InitialObservation
+            } else {
+                BehaviorReplayAction::Advance
+            },
+            observation: serde_json::json!({
+                "case_id": CASE_RAPIER_MUJOCO_DIAGNOSTIC,
+                "rapier": {
+                    "position_y_m": rapier.position_y_m,
+                    "velocity_y_m_s": rapier.velocity_y_m_s,
+                    "snapshot_hash_hex": format!("{:016x}", rapier.snapshot_hash),
+                },
+                "mujoco": {
+                    "position_y_m": mujoco.position_y_m,
+                    "velocity_y_m_s": mujoco.velocity_y_m_s,
+                    "snapshot_hash_hex": format!("{:016x}", mujoco.snapshot_hash),
+                },
+                "position_delta_m": (rapier.position_y_m - mujoco.position_y_m).abs(),
+                "diagnostic_tolerance": {
+                    "id": tolerance.id,
+                    "absolute_m": tolerance.absolute,
+                },
+            }),
+            state_digest: divergence_state_digest(rapier, mujoco),
+        })
+        .collect::<Vec<_>>();
+    let final_frame = frames.last().context("diagnostic replay is empty")?;
+    let violation = BehaviorViolation {
+        step: final_frame.step,
+        sim_time_ticks: final_frame.sim_time_ticks,
+        state_digest: final_frame.state_digest,
+        entities: descriptor.entities.clone(),
+        message: format!(
+            "Rapier-vs-MuJoCo free-fall position delta {position_delta_m:.12} m exceeded injected 0.010000000000 m bound"
+        ),
+    };
+    let replay = BehaviorReplayArtifact::new(
+        "physics_conformance_rapier_vs_mujoco_free_fall",
+        fnv1a64(b"physics_conformance_rapier_vs_mujoco_free_fall_v1"),
+        0,
+        fixed_dt().ticks(),
+        Vec::new(),
+        vec![descriptor.clone()],
+        frames,
+        BehaviorReplayFailure {
+            contract: descriptor,
+            violation,
+        },
+    )?;
+    Ok((report, replay))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_free_fall_trace<B: PhysicsBackend>(
+    mut backend: B,
+) -> anyhow::Result<Vec<FreeFallTraceSample>> {
+    let mut world = World::new();
+    let physics_world = backend.create_world(PhysicsWorldDesc {
+        gravity_m_s2: Vec3::new(0.0, GRAVITY_M_S2, 0.0),
+        ..PhysicsWorldDesc::default()
+    })?;
+    let body = spawn_named(&mut world, "free_fall_body");
+    world.entity_mut(body).insert((
+        RigidBody {
+            mass_kg: 2.0,
+            linear_velocity_m_s: Vec3::new(1.0, 0.0, 0.0),
+            ..RigidBody::default()
+        },
+        Collider::sphere(0.05),
+        Transform3::from_translation_rotation(
+            Vec3::new(0.0, FREE_FALL_INITIAL_Y_M, 0.0),
+            Quat::IDENTITY,
+        ),
+    ));
+    let dt = fixed_dt();
+    let mut samples = Vec::with_capacity(FREE_FALL_STEPS as usize + 1);
+    samples.push(free_fall_trace_sample(&world, body, &[], 0, 0)?);
+    for step in 1..=FREE_FALL_STEPS {
+        step_backend(&mut backend, &mut world, physics_world, dt)?;
+        let contacts = if backend
+            .capabilities()
+            .contains(&PhysicsCapability::ContactForce)
+        {
+            backend.contacts(physics_world)?
+        } else {
+            &[]
+        };
+        samples.push(free_fall_trace_sample(
+            &world,
+            body,
+            contacts,
+            step,
+            dt.ticks() * step,
+        )?);
+    }
+    Ok(samples)
+}
+
+#[cfg(feature = "mujoco")]
+fn free_fall_trace_sample(
+    world: &World,
+    body: Entity,
+    contacts: &[rne_physics::ContactEvent],
+    step: u64,
+    sim_time_ticks: u64,
+) -> anyhow::Result<FreeFallTraceSample> {
+    let transform = world
+        .get::<Transform3>(body)
+        .context("free-fall trace transform missing")?;
+    let rigid_body = world
+        .get::<RigidBody>(body)
+        .context("free-fall trace rigid body missing")?;
+    let snapshot = capture_physics_snapshot(world, contacts, step, sim_time_ticks)?;
+    Ok(FreeFallTraceSample {
+        step,
+        sim_time_ticks,
+        position_y_m: transform.translation.y,
+        velocity_y_m_s: rigid_body.linear_velocity_m_s.y,
+        snapshot_hash: snapshot.stable_hash(),
+    })
+}
+
+#[cfg(feature = "mujoco")]
+fn divergence_state_digest(rapier: &FreeFallTraceSample, mujoco: &FreeFallTraceSample) -> u64 {
+    let mut bytes = Vec::with_capacity(48);
+    bytes.extend_from_slice(&rapier.snapshot_hash.to_le_bytes());
+    bytes.extend_from_slice(&mujoco.snapshot_hash.to_le_bytes());
+    bytes.extend_from_slice(&rapier.position_y_m.to_bits().to_le_bytes());
+    bytes.extend_from_slice(&mujoco.position_y_m.to_bits().to_le_bytes());
+    bytes.extend_from_slice(&rapier.velocity_y_m_s.to_bits().to_le_bytes());
+    bytes.extend_from_slice(&mujoco.velocity_y_m_s.to_bits().to_le_bytes());
+    fnv1a64(&bytes)
+}
+
+#[cfg(feature = "mujoco")]
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// Applies the shared v2 capability catalog to an arbitrary backend factory.
@@ -815,28 +1127,32 @@ fn run_raycast_case<B: PhysicsBackend>(
 }
 
 fn comparison_case(
-    analytic: Result<&FreeFallResult, &anyhow::Error>,
-    rapier: Result<&FreeFallResult, &anyhow::Error>,
+    left: Result<&FreeFallResult, &anyhow::Error>,
+    right: Result<&FreeFallResult, &anyhow::Error>,
+    case_id: &str,
+    backend_id: &str,
+    position_tolerance_id: &str,
+    velocity_tolerance_id: &str,
 ) -> CaseReport {
-    match (analytic, rapier) {
-        (Ok(analytic), Ok(rapier)) => {
+    match (left, right) {
+        (Ok(left), Ok(right)) => {
             let metrics = vec![
                 metric(
                     "position_delta_m",
-                    (analytic.position_y_m - rapier.position_y_m).abs(),
+                    (left.position_y_m - right.position_y_m).abs(),
                     0.0,
-                    "backend_free_fall_position_delta_m_v1",
+                    position_tolerance_id,
                 ),
                 metric(
                     "velocity_delta_m_s",
-                    (analytic.velocity_y_m_s - rapier.velocity_y_m_s).abs(),
+                    (left.velocity_y_m_s - right.velocity_y_m_s).abs(),
                     0.0,
-                    "backend_free_fall_velocity_delta_m_s_v1",
+                    velocity_tolerance_id,
                 ),
             ];
             CaseReport {
-                id: CASE_BACKEND_COMPARISON.to_string(),
-                backend: BACKEND_COMPARISON.to_string(),
+                id: case_id.to_string(),
+                backend: backend_id.to_string(),
                 capability: PhysicsCapability::RigidBody,
                 passed: metrics.iter().all(|metric| metric.passed),
                 snapshot_hash: None,
@@ -845,8 +1161,8 @@ fn comparison_case(
             }
         }
         (Err(error), _) | (_, Err(error)) => failed_case(
-            CASE_BACKEND_COMPARISON,
-            BACKEND_COMPARISON,
+            case_id,
+            backend_id,
             PhysicsCapability::RigidBody,
             error.to_string(),
         ),
@@ -1061,6 +1377,30 @@ mod tests {
             serde_json::to_string_pretty(&second).unwrap()
         );
         assert!(first.cases.windows(2).all(|pair| pair[0].id < pair[1].id));
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn divergence_diagnostic_is_repeatable_and_preserves_passing_production_bounds() {
+        let (first_report, first_replay) = run_divergence_diagnostic().expect("diagnostic");
+        let (second_report, second_replay) = run_divergence_diagnostic().expect("repeat");
+        assert_eq!(first_report, second_report);
+        assert_eq!(first_replay, second_replay);
+        assert!(!first_report.all_passed());
+        assert!(first_report
+            .cases
+            .iter()
+            .any(|case| { case.id == CASE_RAPIER_MUJOCO_COMPARISON && case.passed }));
+        let diagnostic = first_report
+            .cases
+            .iter()
+            .find(|case| case.id == CASE_RAPIER_MUJOCO_DIAGNOSTIC)
+            .expect("diagnostic case");
+        assert!(!diagnostic.passed);
+        assert!(diagnostic.detail.contains("first exceeded"));
+        assert_eq!(first_replay.failure.violation.step, 10);
+        assert_eq!(first_replay.failure.contract.name, DIAGNOSTIC_CONTRACT);
+        first_replay.validate().expect("valid behavior replay");
     }
 
     #[test]

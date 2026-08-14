@@ -49,3 +49,11 @@ joint state; invalid command units or values fail before stepping. MuJoCo
 contact-point forces are integrated over the fixed step and reduced to the same
 canonical entity-pair evidence as Rapier, without exposing MuJoCo model, data,
 geometry, or contact types through `rne_physics`.
+
+The feature-gated aggregate includes Analytic-vs-MuJoCo and
+Rapier-vs-MuJoCo comparisons with named position/velocity bounds. A separate
+fault-injection case tightens only the Rapier-vs-MuJoCo position bound, records
+the first violating fixed step in the existing Behavior replay schema, and
+packages that replay with report schema v2 in a Failure Capsule. Diagnostic
+failure evidence therefore does not weaken or silently replace the production
+conformance contract.

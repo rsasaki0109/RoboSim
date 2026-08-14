@@ -159,5 +159,8 @@ prismatic position/velocity/effort behavior. MuJoCo now also passes the shared
 `contact_force` vector: per-point solver force is integrated to N*s, aggregated
 by canonical entity pair, and evaluated with
 `mujoco_resting_impulse_n_s_v1`; sensor overlaps remain zero-impulse evidence.
-The next v2 increment packages the first perturbed cross-backend divergence as a
-Failure Capsule.
+Feature runs also compare Analytic-vs-MuJoCo and Rapier-vs-MuJoCo through named
+position/velocity bounds. `rne-physics-divergence` tightens only the latter
+position bound to 1 cm, finds the first violation at a stable fixed step, and
+emits an existing-schema Behavior replay plus a deliberately failing report.
+The MuJoCo Windows/Linux job packages both into a verified Failure Capsule.

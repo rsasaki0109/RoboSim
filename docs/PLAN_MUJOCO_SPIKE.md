@@ -21,6 +21,8 @@ With the `mujoco` feature enabled, `rne_physics_conformance` runs MuJoCo through
 the same Harness v2 rigid-body vector used for Analytic and Rapier. Its named
 position tolerance is `mujoco_free_fall_position_m_v1`. The Windows/Linux MuJoCo
 workflow runs both the backend integration tests and this shared conformance gate.
+It also generates and verifies the Rapier-vs-MuJoCo diagnostic Failure Capsule,
+then uploads the portable capsule directory as a short-lived CI artifact.
 
 The backend also advertises `articulation`. Revolute and prismatic descriptions
 compile into nested hinge/slide joints, scalar state synchronizes through
