@@ -23,6 +23,7 @@ use std::collections::HashMap;
 
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
+    PhysicsCapability::KinematicBody,
     PhysicsCapability::Articulation,
     PhysicsCapability::DeterministicStep,
     PhysicsCapability::ContactForce,

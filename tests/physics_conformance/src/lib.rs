@@ -29,7 +29,7 @@ use std::collections::BTreeSet;
 pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 
 /// Version of the shared capability-to-vector catalog.
-pub const CONFORMANCE_CATALOG_VERSION: u16 = 2;
+pub const CONFORMANCE_CATALOG_VERSION: u16 = 3;
 
 const BACKEND_ANALYTIC: &str = "analytic";
 #[cfg(feature = "mujoco")]
@@ -146,6 +146,25 @@ const TOLERANCES: &[ToleranceSpec] = &[
         absolute: 0.001,
         relative: 0.0,
         rationale: "one second of constant gravity permits only f32 pipeline rounding",
+    },
+    ToleranceSpec {
+        id: "kinematic_translation_m_v1",
+        case_id: "shared.kinematic_pose",
+        metric_id: "translation_error_m",
+        unit: MetricUnit::Metre,
+        absolute: 1e-6,
+        relative: 0.0,
+        rationale: "externally supplied kinematic translation permits only f32 conversion rounding",
+    },
+    ToleranceSpec {
+        id: "kinematic_rotation_rad_v1",
+        case_id: "shared.kinematic_pose",
+        metric_id: "rotation_error_rad",
+        unit: MetricUnit::Radian,
+        absolute: 1e-6,
+        relative: 0.0,
+        rationale:
+            "externally supplied kinematic rotation permits only normalized f32 conversion rounding",
     },
     ToleranceSpec {
         id: "revolute_anchor_m_v1",
@@ -713,6 +732,12 @@ where
                     ),
                 }
             }
+            PhysicsCapability::KinematicBody => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_kinematic_case(factory(), backend_id),
+            ),
             PhysicsCapability::DeterministicStep => determinism_case(
                 &capability_case_id(backend_id, capability),
                 backend_id,
@@ -740,7 +765,9 @@ where
                 &capability_case_id(backend_id, capability),
                 backend_id,
                 capability,
-                "advertised capability has no shared conformance vector in catalog v2".to_string(),
+                format!(
+                    "advertised capability has no shared conformance vector in catalog v{CONFORMANCE_CATALOG_VERSION}"
+                ),
             ),
         })
         .collect::<Vec<_>>();
@@ -761,6 +788,7 @@ where
 fn capability_case_id(backend: &str, capability: PhysicsCapability) -> String {
     let suffix = match capability {
         PhysicsCapability::RigidBody => "rigid_body.free_fall",
+        PhysicsCapability::KinematicBody => "kinematic_body.external_pose",
         PhysicsCapability::Articulation => "articulation.revolute_limit",
         PhysicsCapability::GpuRigidBody => "gpu_rigid_body.catalog_missing",
         PhysicsCapability::DeterministicStep => "deterministic_step.repeat_snapshot",
@@ -870,6 +898,75 @@ fn free_fall_case(
         metrics,
         detail: "shared 60 Hz free-fall vector".to_string(),
     }
+}
+
+fn run_kinematic_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
+    let physics_world = backend.create_world(PhysicsWorldDesc {
+        gravity_m_s2: Vec3::ZERO,
+        ..PhysicsWorldDesc::default()
+    })?;
+    let mut world = World::new();
+    let body = spawn_named(&mut world, "kinematic_body");
+    world.entity_mut(body).insert((
+        RigidBody {
+            body_type: RigidBodyType::Kinematic,
+            ..RigidBody::default()
+        },
+        Collider::sphere(0.1),
+        Transform3::default(),
+    ));
+    let dt = fixed_dt();
+    step_backend(&mut backend, &mut world, physics_world, dt)?;
+
+    let target = Transform3::from_translation_rotation(
+        Vec3::new(1.25, -0.5, 2.75),
+        Quat::from_rotation_z(0.3),
+    );
+    *world
+        .get_mut::<Transform3>(body)
+        .context("kinematic transform missing before external pose")? = target;
+    step_backend(&mut backend, &mut world, physics_world, dt)?;
+    let actual = *world
+        .get::<Transform3>(body)
+        .context("kinematic transform missing after step")?;
+    let translation_error_m = actual.translation.distance(target.translation);
+    let rotation_dot = actual.rotation.dot(target.rotation).abs().clamp(0.0, 1.0);
+    let rotation_error_rad = 2.0 * rotation_dot.acos();
+    let metrics = vec![
+        metric(
+            "translation_error_m",
+            translation_error_m,
+            0.0,
+            "kinematic_translation_m_v1",
+        ),
+        metric(
+            "rotation_error_rad",
+            rotation_error_rad,
+            0.0,
+            "kinematic_rotation_rad_v1",
+        ),
+    ];
+    let contacts = if backend
+        .capabilities()
+        .contains(&PhysicsCapability::ContactForce)
+    {
+        backend.contacts(physics_world)?.to_vec()
+    } else {
+        Vec::new()
+    };
+    let snapshot = capture_physics_snapshot(&world, &contacts, 2, dt.ticks() * 2)?;
+    Ok(CaseReport {
+        id: capability_case_id(backend_id, PhysicsCapability::KinematicBody),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::KinematicBody,
+        passed: metrics.iter().all(|metric| metric.passed),
+        snapshot_hash: Some(snapshot.stable_hash()),
+        metrics,
+        detail: "externally supplied pose remains authoritative across a fixed step".to_string(),
+    })
 }
 
 fn determinism_case<B: PhysicsBackend>(

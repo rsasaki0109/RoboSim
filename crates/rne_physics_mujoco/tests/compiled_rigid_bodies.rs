@@ -121,6 +121,42 @@ fn preflight_accepts_supported_articulation_before_native_model_creation() {
         .expect("supported revolute topology passes preflight");
 }
 
+#[test]
+fn kinematic_body_fails_with_capability_error_before_model_creation() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc::default())
+        .expect("physics world");
+    let mut world = World::new();
+    let entity = spawn_body(
+        &mut world,
+        "kinematic",
+        RigidBodyType::Kinematic,
+        Collider::sphere(0.1),
+        Vec3::Y,
+    );
+
+    assert_eq!(
+        backend.preflight_world(&world),
+        Err(MuJoCoError::MissingCapability {
+            capability: rne_physics::PhysicsCapability::KinematicBody,
+            entity_index: entity.index(),
+        })
+    );
+    assert_eq!(
+        backend.sync_from_ecs(&mut world, physics_world),
+        Err(PhysicsError::MissingCapabilities {
+            missing: vec![rne_physics::PhysicsCapability::KinematicBody],
+        })
+    );
+
+    world.get_mut::<RigidBody>(entity).unwrap().body_type = RigidBodyType::Dynamic;
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .expect("failed preflight did not create or lock a native model");
+}
+
 fn run_revolute(command: JointActuation) -> JointState {
     let dt = SimDuration::from_hertz(Hertz::new(60.0));
     let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");

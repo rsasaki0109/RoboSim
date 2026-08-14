@@ -27,7 +27,7 @@ behavior_failure_case = 1
 
 [physics]
 snapshot = 1
-backend_manifest = 1
+backend_manifest = 2
 conformance_report = 2
 tolerance_registry = 1
 

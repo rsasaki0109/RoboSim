@@ -7,7 +7,8 @@
 //! collisions, which makes it a fast, deterministic backend for planning and
 //! policy iteration where contact response is not needed.
 //!
-//! The backend declares [`PhysicsCapability::RigidBody`] and
+//! The backend declares [`PhysicsCapability::RigidBody`],
+//! [`PhysicsCapability::KinematicBody`], and
 //! [`PhysicsCapability::DeterministicStep`]; runs that require articulation or
 //! contact force must negotiate a different backend.
 
@@ -27,6 +28,7 @@ use std::collections::HashMap;
 /// Backend-agnostic capability set provided by the analytic backend.
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
+    PhysicsCapability::KinematicBody,
     PhysicsCapability::DeterministicStep,
 ];
 

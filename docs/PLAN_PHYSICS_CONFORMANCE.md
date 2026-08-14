@@ -36,8 +36,10 @@ one required case:
 | Backend | Advertised capability | Required evidence |
 |---|---|---|
 | Analytic | `RigidBody` | fixed-step free fall updates pose and velocity in explicit SI units |
+| Analytic | `KinematicBody` | an externally supplied pose remains authoritative across a fixed step |
 | Analytic | `DeterministicStep` | two fresh executions produce the same canonical snapshot hash |
 | Rapier | `RigidBody` | the same free-fall vector stays within the registered reference tolerance |
+| Rapier | `KinematicBody` | the same external-pose vector stays within its named metre/radian tolerances |
 | Rapier | `DeterministicStep` | two fresh executions produce the same canonical snapshot hash |
 | Rapier | `Articulation` | revolute anchor and limit invariants remain bounded under load |
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
@@ -149,6 +151,12 @@ assumption:
 - `JointState` is the backend-neutral completed-step articulation observable;
   Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
   and MuJoCo must implement the same contract before advertising articulation.
+
+Backend-manifest schema v2 adds the `kinematic_body` vocabulary. Analytic and
+Rapier advertise it only after passing the shared external-pose vector. MuJoCo
+does not advertise it: both `preflight_world` and the trait sync boundary reject
+a kinematic entity before native model creation with a typed missing-capability
+error.
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the

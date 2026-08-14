@@ -89,12 +89,15 @@ physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
 hosts. Canonical schema-v1 examples live under `tests/golden/evidence/`.
 
-Physics conformance report schema v2 embeds backend-manifest schema v1,
+Physics conformance report schema v2 embeds backend-manifest schema v2,
 catalog version, tolerance-registry version, declared/runtime capabilities, and
 coverage verdicts. Its canonical shape lives at
 `tests/golden/physics/conformance-report-v2.json`. A backend identifier with no
 registered shared vector or tolerance profile produces a failing case rather
 than silently weakening coverage.
+Manifest schema v2 adds `kinematic_body` as a refinement of `rigid_body`.
+Analytic and Rapier prove it with the shared external-pose vector; MuJoCo
+rejects it at preflight with `MissingCapabilities` before native compilation.
 
 `JointActuation` is a tagged, backend-neutral ECS command with distinct
 revolute/prismatic position, velocity, and effort variants. Field names carry

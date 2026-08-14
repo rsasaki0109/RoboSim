@@ -14,6 +14,9 @@ at an explicit fixed timestep. Model topology is immutable after compilation.
 `MuJoCoBackend::preflight_world` validates the topology before native model
 creation. Kinematic motion, invalid units, malformed joint graphs, and other
 unsupported inputs fail explicitly instead of being silently approximated.
+Kinematic motion is represented by the backend-neutral `kinematic_body`
+capability: MuJoCo leaves it unadvertised and returns a typed missing-capability
+error from both preflight and ECS sync before a native model is created.
 The original caller-owned one-sphere MJCF constructor remains as a compatibility
 fixture, not as the primary backend path.
 

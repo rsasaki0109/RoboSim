@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Current schema version for backend capability manifests.
-pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 1;
+pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 2;
 
 /// Current schema version for aggregate physics conformance reports.
 pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
@@ -50,6 +50,8 @@ impl Default for PhysicsWorldDesc {
 pub enum PhysicsCapability {
     /// Supports rigid body simulation.
     RigidBody,
+    /// Supports externally posed kinematic rigid bodies.
+    KinematicBody,
     /// Supports articulated bodies.
     Articulation,
     /// Supports GPU rigid body simulation.
@@ -166,6 +168,13 @@ impl PhysicsBackendManifest {
         {
             return Err(PhysicsBackendManifestError::ExactRepeatabilityWithoutDeterministicStep);
         }
+        if self
+            .capabilities
+            .contains(&PhysicsCapability::KinematicBody)
+            && !self.capabilities.contains(&PhysicsCapability::RigidBody)
+        {
+            return Err(PhysicsBackendManifestError::KinematicWithoutRigidBody);
+        }
         Ok(())
     }
 }
@@ -199,6 +208,9 @@ pub enum PhysicsBackendManifestError {
     /// Exact repeatability was claimed without the corresponding capability.
     #[error("same-runtime exact repeatability requires deterministic_step capability")]
     ExactRepeatabilityWithoutDeterministicStep,
+    /// Kinematic-body support refines the rigid-body capability.
+    #[error("kinematic_body capability requires rigid_body capability")]
+    KinematicWithoutRigidBody,
 }
 
 fn is_stable_identifier(value: &str) -> bool {
@@ -211,8 +223,9 @@ fn is_stable_identifier(value: &str) -> bool {
 
 impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::RigidBody,
+        Self::KinematicBody,
         Self::Articulation,
         Self::GpuRigidBody,
         Self::DeterministicStep,
@@ -225,6 +238,7 @@ impl PhysicsCapability {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RigidBody => "rigid_body",
+            Self::KinematicBody => "kinematic_body",
             Self::Articulation => "articulation",
             Self::GpuRigidBody => "gpu_rigid_body",
             Self::DeterministicStep => "deterministic_step",
@@ -533,6 +547,20 @@ mod tests {
             PhysicsBackendManifestError::InvalidIdentifier {
                 field: "backend_id"
             }
+        );
+
+        let orphan_kinematic = PhysicsBackendManifest::new(
+            "fixture",
+            "0.1.0",
+            "fixture",
+            "1",
+            [PhysicsCapability::KinematicBody],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("kinematic support refines rigid-body support");
+        assert_eq!(
+            orphan_kinematic,
+            PhysicsBackendManifestError::KinematicWithoutRigidBody
         );
     }
 

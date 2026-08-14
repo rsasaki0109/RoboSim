@@ -3,8 +3,8 @@
 use rne_ecs::{Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointActuation, PhysicsWorldDesc, PrismaticJointDesc,
-    RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, FixedJointDesc, JointActuation, PhysicsCapability, PhysicsWorldDesc,
+    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use std::fmt::Write as _;
@@ -91,6 +91,11 @@ struct BodyInput {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub(crate) enum CompileError {
+    #[error("entity {entity_index} requires unsupported capability {capability:?}")]
+    MissingCapability {
+        capability: PhysicsCapability,
+        entity_index: u32,
+    },
     #[error("MuJoCo rigid-body world is empty")]
     EmptyWorld,
     #[error("entity {entity_index} has a collider but no rigid body")]
@@ -99,8 +104,6 @@ pub(crate) enum CompileError {
     MissingCollider { entity_index: u32 },
     #[error("entity {entity_index} has a rigid body but no Transform3")]
     MissingTransform { entity_index: u32 },
-    #[error("entity {entity_index} uses unsupported kinematic motion")]
-    UnsupportedKinematicBody { entity_index: u32 },
     #[error("entity {entity_index} has multiple joint descriptions")]
     MultipleJointDescriptions { entity_index: u32 },
     #[error("entity {entity_index} references missing parent {parent_index}")]
@@ -502,7 +505,10 @@ fn validate_body(
 ) -> Result<(), CompileError> {
     let entity_index = entity.index();
     if rigid_body.body_type == RigidBodyType::Kinematic {
-        return Err(CompileError::UnsupportedKinematicBody { entity_index });
+        return Err(CompileError::MissingCapability {
+            capability: PhysicsCapability::KinematicBody,
+            entity_index,
+        });
     }
     if !rigid_body.mass_kg.is_finite() || rigid_body.mass_kg <= 0.0 {
         return Err(invalid(entity_index, "mass_kg"));

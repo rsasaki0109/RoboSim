@@ -37,6 +37,12 @@ capability declaration. The schema, manifest, and tolerance-registry versions
 are compiled constants checked against `release/contracts.toml` and a committed
 golden JSON shape.
 
+Backend-manifest schema v2 adds `kinematic_body` as a refinement of
+`rigid_body`. A backend may advertise it only when the catalog's shared
+external-pose vector passes. Analytic and Rapier do so; MuJoCo's compiler maps a
+kinematic entity to a typed missing-capability error before allocating native
+model state.
+
 ## Consequences
 
 Analytic, Rapier, and feature-gated MuJoCo now run through one generic catalog

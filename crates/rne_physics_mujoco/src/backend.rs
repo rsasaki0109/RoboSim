@@ -52,6 +52,14 @@ pub enum MuJoCoError {
     /// The model does not match the supported free-joint sphere fixture.
     #[error("unsupported MuJoCo fixture: {0}")]
     UnsupportedFixture(String),
+    /// The ECS world requires a capability this backend does not advertise.
+    #[error("entity {entity_index} requires unsupported MuJoCo capability {capability:?}")]
+    MissingCapability {
+        /// Capability required by the rejected ECS entity.
+        capability: PhysicsCapability,
+        /// Stable ECS entity index that requires the capability.
+        entity_index: u32,
+    },
     /// The fixed topology changed after the native model was compiled.
     #[error("MuJoCo world topology changed after step 0")]
     TopologyChanged,
@@ -208,6 +216,11 @@ impl MuJoCoBackend {
 
     fn map_error(error: MuJoCoError) -> PhysicsError {
         match error {
+            MuJoCoError::MissingCapability { capability, .. } => {
+                PhysicsError::MissingCapabilities {
+                    missing: vec![capability],
+                }
+            }
             MuJoCoError::InvalidActuation {
                 entity_index,
                 reason,
@@ -222,6 +235,13 @@ impl MuJoCoBackend {
 
 fn map_compile_error(error: CompileError) -> MuJoCoError {
     match error {
+        CompileError::MissingCapability {
+            capability,
+            entity_index,
+        } => MuJoCoError::MissingCapability {
+            capability,
+            entity_index,
+        },
         CompileError::InvalidActuation {
             entity_index,
             reason,

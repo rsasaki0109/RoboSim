@@ -133,7 +133,7 @@ This is the immediate next development milestone.
 
 Current implementation status:
 
-- conformance report schema v2 and backend manifest schema v1 are registered;
+- conformance report schema v2 and backend manifest schema v2 are registered;
 - the capability catalog is callable through a generic `PhysicsBackend`
   factory for Analytic, Rapier, and feature-gated MuJoCo;
 - Rapier synchronizes backend-neutral completed-step `JointState` values into
@@ -141,8 +141,10 @@ Current implementation status:
 - MuJoCo compiles multiple fixed/dynamic ECS bodies into backend-private MJCF,
   synchronizes pose and velocity at an explicit fixed step, and joins the shared
   rigid-body catalog on Windows and Linux;
-- MuJoCo preflight rejects sensors, kinematic bodies, invalid
-  geometry, and post-step-0 topology changes before they can be approximated;
+- MuJoCo reports canonical physical contacts and zero-impulse sensor overlaps;
+  its preflight rejects unadvertised kinematic bodies with a typed capability
+  error, and rejects invalid geometry or post-step-0 topology changes before
+  they can be approximated;
 - Rapier and MuJoCo implement unit-explicit revolute/prismatic position,
   velocity, and effort actuation; MuJoCo now advertises `articulation` and
   passes the same revolute catalog vector as Rapier.

@@ -128,12 +128,13 @@ fn kinematic_and_fixed_bodies_do_not_move() {
 }
 
 #[test]
-fn declares_only_rigid_body_and_deterministic_step() {
+fn declares_rigid_body_kinematic_body_and_deterministic_step() {
     let backend = AnalyticBackend::new();
     assert_eq!(
         backend.capabilities(),
         &[
             PhysicsCapability::RigidBody,
+            PhysicsCapability::KinematicBody,
             PhysicsCapability::DeterministicStep
         ]
     );
@@ -141,6 +142,7 @@ fn declares_only_rigid_body_and_deterministic_step() {
         backend.capabilities(),
         &[
             PhysicsCapability::RigidBody,
+            PhysicsCapability::KinematicBody,
             PhysicsCapability::DeterministicStep,
         ],
     )
