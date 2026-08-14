@@ -8,6 +8,8 @@
 
 #![deny(missing_docs)]
 
+pub mod session;
+
 use rne_ai::{
     ActionSpec, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec, TaskSpec, TensorBounds,
     TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind, TerminationSpec,
@@ -22,6 +24,12 @@ pub const LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION: u32 = 1;
 
 /// Schema version implemented by the companion Python device bridge.
 pub const LEKIWI_DEVICE_BRIDGE_SCHEMA_VERSION: u32 = 1;
+
+/// Device identity emitted by the dependency-free companion mock bridge.
+pub const LEKIWI_MOCK_DEVICE_ID: &str = "rne.lekiwi_so101.mock.v1";
+
+/// Required prefix for a companion bridge connected to physical hardware.
+pub const LEKIWI_PHYSICAL_DEVICE_ID_PREFIX: &str = "rne.lekiwi_so101.physical.v1:";
 
 /// Stable discriminator for LeKiwiReferenceProfile.
 pub const LEKIWI_REFERENCE_PROFILE_KIND: &str = "rne_hardware_reference_profile";

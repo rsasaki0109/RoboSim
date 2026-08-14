@@ -23,6 +23,17 @@ Run the dependency-free child-process conformance suite:
 
     cargo test -p rne_hardware_lekiwi
 
+Run the complete profile-bound host path against the Python mock and write a
+non-overwriting evidence artifact:
+
+    cargo run -p rne_hardware_lekiwi --bin rne-lekiwi-session -- --mock --mode shadow --samples 60 --session-id rne.lekiwi.mock.shadow.001 --output lekiwi-shadow-session.json
+
+The session host injects monotonic host ticks into the gateway and preserves
+Open, every observation/action decision, the final zero stop, Close, and the
+gateway event stream. Mock ready responses use
+`rne.lekiwi_so101.mock.v1`; the physical bridge uses a distinct
+`rne.lekiwi_so101.physical.v1:<robot-id>` identity.
+
 The Python bridge is pinned to LeRobot 0.6.0. Its mock mode has no third-party
 Python dependency:
 

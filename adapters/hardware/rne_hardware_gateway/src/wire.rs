@@ -573,10 +573,24 @@ impl HardwareSessionEvidence {
             });
         }
         match wire_trace.outcome {
-            HardwareWireTraceOutcome::Completed => {}
-            HardwareWireTraceOutcome::Disconnected { .. } => {
+            HardwareWireTraceOutcome::Completed => {
                 if gateway.final_snapshot.connection_state != GatewayConnectionState::Disconnected
-                    || gateway.final_snapshot.safety_latch != Some(SafetyReason::Disconnected)
+                    || gateway.final_snapshot.safety_latch.is_some()
+                    || gateway.final_snapshot.queued_observations != 0
+                    || gateway.final_snapshot.queued_actuations != 0
+                    || gateway.final_snapshot.last_observation_sequence.is_some()
+                    || gateway.final_snapshot.last_action_sequence.is_some()
+                {
+                    return Err(HardwareSessionEvidenceError::TerminalSafetyMismatch);
+                }
+            }
+            HardwareWireTraceOutcome::Disconnected { .. } => {
+                let expected_latch = match gateway.mode {
+                    HardwareMode::Hil | HardwareMode::Live => Some(SafetyReason::Disconnected),
+                    HardwareMode::Playback | HardwareMode::Shadow => None,
+                };
+                if gateway.final_snapshot.connection_state != GatewayConnectionState::Disconnected
+                    || gateway.final_snapshot.safety_latch != expected_latch
                 {
                     return Err(HardwareSessionEvidenceError::TerminalSafetyMismatch);
                 }

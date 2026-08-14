@@ -51,6 +51,13 @@ shadow comparator to recompute first divergence, aggregates, and verdict.
 Missing TaskSpec evidence, inconsistent top-level session metadata, or a
 tampered shadow summary fails before a capsule is accepted.
 
+For the LeKiwi reference path, pass the complete
+`rne_lekiwi_reference_session` output from `rne-lekiwi-session` in place of a
+bare nested session. Creation and verification preserve its concrete kind,
+validate the exact embedded profile and Ready device identity, reconstruct the
+nested wire/gateway session, and require a separate matching TaskSpec evidence
+file. A mock-prefixed device identity remains mock evidence inside the capsule.
+
 Physics conformance reports retain their
 `rne_physics_conformance_report` kind and report schema version in the capsule
 instead of being flattened to generic evidence. The v0.3 fault-injection proof
@@ -93,8 +100,9 @@ absolute/parent-traversal paths, rejects symlink escapes, checks that every
 referenced file exists and matches its digest, and invokes the known replay
 reader/schema validator for generic and behavior replay kinds. Known physics
 conformance evidence is also checked for matching kind and schema metadata. The
-verifier invokes the known TaskSpec, hardware-session, wire-trace, and
-shadow-report validators. It does not trust host paths recorded in the capsule.
+verifier invokes the known TaskSpec, hardware-session, LeKiwi
+reference-session, wire-trace, and shadow-report validators. It does not trust
+host paths recorded in the capsule.
 
 The capsule schema is intentionally independent of transport. A future archive
 or object-store adapter can package the same relative paths without changing

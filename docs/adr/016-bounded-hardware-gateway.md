@@ -6,7 +6,8 @@ Accepted for the v0.6 sim-to-real foundation. The adapter-side state machine,
 bounded process protocol, deterministic process mock, and golden disconnect
 session were implemented on 2026-08-15. The TaskSpec-bound shadow comparator
 and its first-divergence golden are also implemented. The six-case child-process
-fault matrix passes; physical-hardware evidence remains open.
+fault matrix and LeKiwi profile-bound host runner pass; physical-hardware
+evidence remains open.
 
 ## Context
 
@@ -44,6 +45,12 @@ must confirm a device-side safe stop. A deterministic child-process mock
 implements the same public contract without clocks, sleeps, vendor types, or
 network dependencies.
 
+Normal completion is a separate transition from fault disconnect. An
+actuating session must disarm, deliver its resulting zero stop, receive the
+device acknowledgment, and exchange Close before `close_cleanly` can produce a
+disconnected, unlatched, empty final snapshot. Completed session evidence
+rechecks those conditions.
+
 Shadow comparison is a bounded evidence operation, not a new authority mode.
 It compares TaskSpec-normalized hardware and simulation observations using one
 ordered tolerance per tensor, keeps host and simulation timestamps distinct,
@@ -76,5 +83,8 @@ base-action mapping, and adds a direct Python device process with an independent
 500 ms watchdog. Reference profile v1 grants no arm actuation: normal base
 commands hold the latest measured arm pose and safety frames call the base-stop
 operation directly. Camera payloads remain typed dataset streams outside the
-numeric wire. This selection and process conformance do not replace the still
+numeric wire. The injected-clock host runner records the exact profile, bridge
+identity, bounded wire trace, gateway decisions, and terminal state in one
+validated artifact. Mock and physical ready identities are deliberately
+distinct. This selection and process conformance do not replace the still
 required physical shadow, HIL, and live evidence.

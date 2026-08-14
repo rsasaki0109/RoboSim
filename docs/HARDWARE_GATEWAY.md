@@ -5,10 +5,10 @@ shadow, hardware-in-the-loop (HIL), and live robot sessions. It binds directly
 to the portable `TaskSpec`; it does not add hardware, ROS 2, vendor, or
 wall-clock types to simulation crates.
 
-This is the v0.6 foundation, not a claim of real-robot support. A versioned
-process protocol and deterministic process mock now exist, but a vendor
-transport, reference robot, and completed hardware evidence run remain required
-before live support is advertised.
+This is the v0.6 foundation, not a claim of completed real-robot support. A
+versioned process protocol, deterministic process mock, LeKiwi reference
+adapter, and evidence-producing local host runner now exist. The physical
+shadow/HIL/live evidence run remains required before live support is advertised.
 
 ## Time and authority
 
@@ -66,6 +66,12 @@ instead of discarding replay evidence, and it requires strict host/device
 alternation plus request correlation. `HardwareSessionEvidence` joins the
 exact wire trace to gateway events and rejects a disconnect or safety outcome
 that does not match the final gateway latch.
+
+An orderly Completed outcome is stricter than a transport close. HIL/live must
+first relinquish authority, deliver and receive acknowledgment for the queued
+zero stop, and then exchange Close. `close_cleanly` rejects armed authority,
+pending actuator frames, or any safety latch; Completed evidence requires the
+final snapshot to be disconnected, unlatched, and empty.
 
 `rne-hardware-mock-device` implements that public contract in a child process.
 It never reads a clock or sleeps. Observation polls return deterministic zero
@@ -126,5 +132,6 @@ session, wire-trace, shadow-report, and mock-conformance kinds. It keeps a
 corresponding simulation or behavior replay as the capsule replay instead of
 pretending host time is simulation time.
 
-The process-mock exit matrix is complete. The next slice selects a reference
-hardware adapter and records a real shadow run before any live-support claim.
+The process-mock exit matrix and LeKiwi host session path are complete. The
+next external gate records a real elevated shadow run and then the physical
+safety matrix before any live-support claim.

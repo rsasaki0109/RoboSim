@@ -1181,6 +1181,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_hardware_lekiwi::LEKIWI_DEVICE_BRIDGE_SCHEMA_VERSION),
         ),
         (
+            "hardware",
+            "lekiwi_reference_session",
+            u64::from(rne_hardware_lekiwi::session::LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),

@@ -26,7 +26,8 @@ WIRE_KIND_DEVICE = "rne_hardware_device_frame"
 WIRE_SCHEMA_VERSION = 1
 BRIDGE_SCHEMA_VERSION = 1
 TASK_ID = "rne.lekiwi_so101.base_shadow.v1"
-DEVICE_ID = "rne.lekiwi_so101.bridge.v1"
+MOCK_DEVICE_ID = "rne.lekiwi_so101.mock.v1"
+PHYSICAL_DEVICE_ID_PREFIX = "rne.lekiwi_so101.physical.v1:"
 OBSERVATION_WIDTH = 9
 ACTION_WIDTH = 3
 MAX_FRAME_BYTES = 64 * 1024
@@ -250,6 +251,7 @@ class DeviceBridge:
     """One strict RNE session over a concrete robot backend."""
 
     robot: RobotBackend
+    device_id: str
     watchdog_timeout_ms: int = DEFAULT_WATCHDOG_TIMEOUT_MS
 
     def __post_init__(self) -> None:
@@ -334,7 +336,7 @@ class DeviceBridge:
                 frame,
                 {
                     "type": "ready",
-                    "device_id": DEVICE_ID,
+                    "device_id": self.device_id,
                     "task_id": TASK_ID,
                     "observation_width": OBSERVATION_WIDTH,
                     "action_width": ACTION_WIDTH,
@@ -595,7 +597,14 @@ def main() -> int:
     timeout_ms = (
         args.mock_watchdog_timeout_ms if args.mock else DEFAULT_WATCHDOG_TIMEOUT_MS
     )
-    return _run(DeviceBridge(robot=robot, watchdog_timeout_ms=timeout_ms))
+    device_id = MOCK_DEVICE_ID if args.mock else PHYSICAL_DEVICE_ID_PREFIX + args.robot_id
+    return _run(
+        DeviceBridge(
+            robot=robot,
+            device_id=device_id,
+            watchdog_timeout_ms=timeout_ms,
+        )
+    )
 
 
 if __name__ == "__main__":

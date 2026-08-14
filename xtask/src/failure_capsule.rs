@@ -16,6 +16,10 @@ use rne_hardware_gateway::wire::{
     HardwareSessionEvidence, HardwareWireTrace, HARDWARE_SESSION_EVIDENCE_KIND,
     HARDWARE_WIRE_SCHEMA_VERSION, HARDWARE_WIRE_TRACE_KIND,
 };
+use rne_hardware_lekiwi::session::{
+    LeKiwiReferenceSessionEvidence, LEKIWI_REFERENCE_SESSION_KIND,
+    LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION,
+};
 use rne_log::{
     ArtifactRef, BackendMetadata, BuildMetadata, FailureCapsule, FailureMetadata, ReplayArtifact,
     RunMetadata, FAILURE_CAPSULE_KIND as CAPSULE_KIND,
@@ -247,6 +251,7 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
             | HARDWARE_WIRE_TRACE_KIND
             | SHADOW_COMPARISON_REPORT_KIND
             | MOCK_CONFORMANCE_REPORT_KIND
+            | LEKIWI_REFERENCE_SESSION_KIND
     );
     if !recognized {
         return Ok(("evidence".to_string(), 1));
@@ -302,6 +307,28 @@ fn validate_hardware_evidence<'a>(
                     tasks.contains_key(&session.task_id),
                     "hardware session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
                     session.task_id
+                );
+            }
+            LEKIWI_REFERENCE_SESSION_KIND => {
+                let reference: LeKiwiReferenceSessionEvidence = serde_json::from_slice(bytes)
+                    .context("invalid LeKiwi reference-session evidence JSON")?;
+                anyhow::ensure!(
+                    reference.schema_version == LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION,
+                    "unsupported LeKiwi reference-session schema {}",
+                    reference.schema_version
+                );
+                reference.validate().map_err(|error| {
+                    anyhow::anyhow!("invalid LeKiwi reference-session evidence: {error}")
+                })?;
+                let task = tasks.get(&reference.profile.task.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "LeKiwi reference-session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        reference.profile.task.task_id
+                    )
+                })?;
+                anyhow::ensure!(
+                    task == &reference.profile.task,
+                    "LeKiwi reference-session embedded TaskSpec differs from matching evidence"
                 );
             }
             HARDWARE_WIRE_TRACE_KIND => {
@@ -844,10 +871,92 @@ mod tests {
         BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayFailure,
         BehaviorReplayFrame, BehaviorViolation,
     };
+    use rne_hardware_gateway::wire::{
+        DeviceWireFrame, DeviceWirePayload, HostWireFrame, HostWirePayload,
+    };
+    use rne_hardware_gateway::HardwareMode;
+    use rne_hardware_lekiwi::lekiwi_base_task_spec;
+    use rne_hardware_lekiwi::session::{
+        LeKiwiMonotonicClock, LeKiwiReferenceSampleOutcome, LeKiwiReferenceSessionConfig,
+        LeKiwiReferenceSessionRunner, LeKiwiTransportError, LeKiwiWireTransport,
+    };
     use rne_log::{
         ReplayAction, ReplayClock, ReplayContact, ReplayControllerKind, ReplayFailureKind,
         ReplayFinalReport, ReplayFrame, ReplayObservation,
     };
+
+    #[derive(Debug, Default)]
+    struct FixtureClock(u64);
+
+    impl LeKiwiMonotonicClock for FixtureClock {
+        fn now_ms(&mut self) -> u64 {
+            let now_ms = self.0;
+            self.0 += 1;
+            now_ms
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct FixtureLeKiwiTransport {
+        observation_sequence: u64,
+    }
+
+    impl LeKiwiWireTransport for FixtureLeKiwiTransport {
+        fn exchange(
+            &mut self,
+            request: &HostWireFrame,
+        ) -> Result<DeviceWireFrame, LeKiwiTransportError> {
+            let payload = match &request.payload {
+                HostWirePayload::Open {
+                    task_id,
+                    observation_width,
+                    action_width,
+                    ..
+                } => DeviceWirePayload::Ready {
+                    device_id: rne_hardware_lekiwi::LEKIWI_MOCK_DEVICE_ID.to_string(),
+                    task_id: task_id.clone(),
+                    observation_width: *observation_width,
+                    action_width: *action_width,
+                },
+                HostWirePayload::PollObservation => {
+                    self.observation_sequence += 1;
+                    DeviceWirePayload::Observation {
+                        sequence: self.observation_sequence,
+                        values: vec![0.0; 9],
+                    }
+                }
+                HostWirePayload::Actuate { frame } => DeviceWirePayload::ActuationAccepted {
+                    action_sequence: frame.action_sequence,
+                    safety_stop: frame.safety_stop,
+                },
+                HostWirePayload::Close => DeviceWirePayload::Closed,
+            };
+            Ok(DeviceWireFrame::new(
+                request.session_id.clone(),
+                request.sequence,
+                payload,
+            ))
+        }
+    }
+
+    fn lekiwi_reference_session_fixture() -> LeKiwiReferenceSessionEvidence {
+        let mut runner = LeKiwiReferenceSessionRunner::new(
+            FixtureLeKiwiTransport::default(),
+            FixtureClock::default(),
+            LeKiwiReferenceSessionConfig::new(
+                "rne.lekiwi.capsule.fixture",
+                HardwareMode::Shadow,
+                1,
+            ),
+        )
+        .expect("build reference runner");
+        runner.open().expect("open reference runner");
+        assert!(matches!(
+            runner.sample(vec![0.0; 3]).expect("sample"),
+            LeKiwiReferenceSampleOutcome::Sample(_)
+        ));
+        runner.close().expect("close reference runner")
+    }
     use serde_json::Value;
     use tempfile::TempDir;
 
@@ -1064,12 +1173,31 @@ mod tests {
             include_bytes!("../../tests/golden/hardware/gateway-mock-conformance-v1.json"),
         )
         .expect("write mock conformance evidence");
+        let lekiwi_task_path = temp.path().join("lekiwi-task.json");
+        fs::write(
+            &lekiwi_task_path,
+            serde_json::to_vec_pretty(&lekiwi_base_task_spec()).unwrap(),
+        )
+        .expect("write LeKiwi TaskSpec evidence");
+        let lekiwi_session_path = temp.path().join("lekiwi-reference-session.json");
+        fs::write(
+            &lekiwi_session_path,
+            serde_json::to_vec_pretty(&lekiwi_reference_session_fixture()).unwrap(),
+        )
+        .expect("write LeKiwi reference-session evidence");
         let output = temp.path().join("hardware-capsule");
 
         invoke_create(
             &replay_path,
             &output,
-            &[&task_path, &session_path, &shadow_path, &conformance_path],
+            &[
+                &task_path,
+                &session_path,
+                &shadow_path,
+                &conformance_path,
+                &lekiwi_task_path,
+                &lekiwi_session_path,
+            ],
         )
         .expect("create hardware evidence capsule");
         invoke_verify(&output).expect("verify hardware evidence capsule");
@@ -1081,6 +1209,7 @@ mod tests {
             HARDWARE_SESSION_EVIDENCE_KIND,
             SHADOW_COMPARISON_REPORT_KIND,
             MOCK_CONFORMANCE_REPORT_KIND,
+            LEKIWI_REFERENCE_SESSION_KIND,
         ] {
             assert!(capsule
                 .artifacts

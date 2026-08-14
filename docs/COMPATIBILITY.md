@@ -160,10 +160,18 @@ confirmation and gateway zero-stop delivery; reconnect additionally proves an
 explicit rearm. The canonical all-pass report is
 `tests/golden/hardware/gateway-mock-conformance-v1.json`.
 
+LeKiwi reference-session schema v1 binds the exact reference profile and
+device-bridge schema to a promoted device identity plus the complete nested
+hardware session evidence. Its validator reconstructs the nested session,
+checks Open dimensions against the strict profile, and requires the promoted
+device identity to equal the Ready handshake. Mock and physical bridge
+identities are distinct. A Completed outcome additionally requires a clean,
+unlatched, disconnected gateway with no pending actuation.
+
 Failure Capsule tooling preserves the concrete TaskSpec, hardware-session,
-wire-trace, shadow-report, and mock-conformance kinds instead of flattening
-them to generic evidence. Creation and verification require matching TaskSpec
-evidence and rerun the known validators. Hardware host ticks are never
+LeKiwi reference-session, wire-trace, shadow-report, and mock-conformance kinds
+instead of flattening them to generic evidence. Creation and verification
+require matching TaskSpec evidence and rerun the known validators. Hardware host ticks are never
 substituted for the capsule's simulation replay timestamps; a corresponding
 generic or behavior failure replay remains mandatory.
 

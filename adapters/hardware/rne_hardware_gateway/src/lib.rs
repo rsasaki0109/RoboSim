@@ -474,6 +474,12 @@ pub enum GatewayError {
     /// The bounded actuator queue is full.
     #[error("actuator queue is full")]
     ActuationQueueFull,
+    /// A clean close requires authority to be relinquished first.
+    #[error("hardware gateway must be disarmed before a clean close")]
+    ArmedOnCleanClose,
+    /// A clean close requires every queued actuator frame to be delivered.
+    #[error("hardware gateway has pending actuation during clean close")]
+    PendingActuationOnCleanClose,
 }
 
 /// Task-bound, fail-closed gateway state machine.
@@ -624,6 +630,35 @@ impl HardwareGateway {
         Ok(())
     }
 
+    /// Completes an orderly transport close without latching a disconnect fault.
+    ///
+    /// Actuating sessions must first be disarmed and deliver the resulting safe
+    /// stop. Any armed authority or pending actuator frame rejects the close.
+    pub fn close_cleanly(&mut self, now_ms: u64) -> Result<(), GatewayError> {
+        self.advance_clock(now_ms)?;
+        self.require_connected()?;
+        if self.armed {
+            return Err(GatewayError::ArmedOnCleanClose);
+        }
+        if !self.actuations.is_empty() {
+            return Err(GatewayError::PendingActuationOnCleanClose);
+        }
+        if let Some(reason) = self.safety_latch {
+            return Err(GatewayError::SafetyLatched(reason));
+        }
+        self.connected = false;
+        self.armed_at_ms = None;
+        self.observations.clear();
+        self.last_observation_sequence = None;
+        self.last_action_sequence = None;
+        self.last_action_observation_sequence = None;
+        self.last_action_time_ms = None;
+        self.record_event(GatewayEvent::Disconnected {
+            host_time_ms: now_ms,
+        });
+        Ok(())
+    }
+
     /// Clears a safety latch without re-arming the session.
     pub fn clear_safety_latch(&mut self, now_ms: u64) -> Result<(), GatewayError> {
         self.advance_clock(now_ms)?;
@@ -679,6 +714,22 @@ impl HardwareGateway {
     pub fn emergency_stop(&mut self, now_ms: u64) -> Result<(), GatewayError> {
         self.advance_clock(now_ms)?;
         self.trip_safety(SafetyReason::EmergencyStop, now_ms);
+        Ok(())
+    }
+
+    /// Mirrors a device-side safety signal into the gateway safety latch.
+    ///
+    /// Device adapters call this only after the peer has independently
+    /// confirmed its stop. The gateway still queues its own zero stop in an
+    /// actuating mode so the final snapshot records both safety layers.
+    pub fn device_safety_signal(
+        &mut self,
+        reason: SafetyReason,
+        now_ms: u64,
+    ) -> Result<(), GatewayError> {
+        self.advance_clock(now_ms)?;
+        self.require_connected()?;
+        self.trip_safety(reason, now_ms);
         Ok(())
     }
 
@@ -1262,6 +1313,69 @@ mod tests {
             .unwrap();
         gateway.arm(3).unwrap();
         assert_eq!(gateway.connection_state(), GatewayConnectionState::Armed);
+    }
+
+    #[test]
+    fn clean_close_requires_disarm_and_delivery_of_the_zero_stop() {
+        let mut gateway = gateway(HardwareMode::Live);
+        gateway.connect(0).unwrap();
+        gateway
+            .ingest_observation(0, 0, observation(&gateway))
+            .unwrap();
+        gateway.arm(0).unwrap();
+        assert_eq!(
+            gateway.close_cleanly(1),
+            Err(GatewayError::ArmedOnCleanClose)
+        );
+
+        gateway.disarm(1).unwrap();
+        assert_eq!(
+            gateway.close_cleanly(1),
+            Err(GatewayError::PendingActuationOnCleanClose)
+        );
+        let stop = gateway.poll_actuation(1).unwrap().unwrap();
+        assert!(stop.safety_stop);
+        assert_eq!(stop.reason, Some(SafetyReason::ManualDisarm));
+
+        gateway.close_cleanly(2).unwrap();
+        let evidence = gateway.take_evidence();
+        assert_eq!(
+            evidence.final_snapshot.connection_state,
+            GatewayConnectionState::Disconnected
+        );
+        assert_eq!(evidence.final_snapshot.safety_latch, None);
+        assert_eq!(evidence.final_snapshot.queued_actuations, 0);
+        assert!(evidence
+            .events
+            .contains(&GatewayEvent::Disarmed { host_time_ms: 1 }));
+        assert!(evidence
+            .events
+            .contains(&GatewayEvent::Disconnected { host_time_ms: 2 }));
+    }
+
+    #[test]
+    fn device_safety_signal_latches_and_queues_an_independent_stop() {
+        let mut gateway = gateway(HardwareMode::Live);
+        gateway.connect(0).unwrap();
+        gateway
+            .ingest_observation(0, 0, observation(&gateway))
+            .unwrap();
+        gateway.arm(0).unwrap();
+
+        gateway
+            .device_safety_signal(SafetyReason::CommandStale, 1)
+            .unwrap();
+        assert_eq!(
+            gateway.snapshot().safety_latch,
+            Some(SafetyReason::CommandStale)
+        );
+        assert_eq!(
+            gateway.connection_state(),
+            GatewayConnectionState::Connected
+        );
+        let stop = gateway.poll_actuation(1).unwrap().unwrap();
+        assert!(stop.safety_stop);
+        assert_eq!(stop.reason, Some(SafetyReason::CommandStale));
     }
 
     #[test]

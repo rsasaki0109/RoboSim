@@ -60,6 +60,7 @@ shadow_comparison = 1
 mock_conformance = 1
 reference_profile = 1
 lekiwi_device_bridge = 1
+lekiwi_reference_session = 1
 
 [evidence]
 fuzz_smoke_report = 1

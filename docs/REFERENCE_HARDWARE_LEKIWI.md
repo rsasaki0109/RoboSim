@@ -1,7 +1,7 @@
 # LeKiwi + SO-101 reference hardware
 
-Status: selected and executable profile; physical shadow/HIL/live evidence not
-yet captured.
+Status: selected profile, device bridge, and profile-bound evidence runner;
+physical shadow/HIL/live evidence not yet captured.
 
 ## Selection
 
@@ -32,6 +32,14 @@ The exact profile is frozen in
 tests/golden/hardware/lekiwi-reference-profile-v1.json and the portable task in
 assets/tasks/lekiwi_so101_base.task.json. The executable source of truth is
 rne_hardware_lekiwi::lekiwi_reference_profile_v1.
+
+`rne-lekiwi-session` runs the same Open -> poll -> gateway -> optional actuator
+write -> zero-stop -> Close lifecycle in mock, shadow, HIL, and live tests. Its
+versioned output embeds the exact profile, device identity, complete bounded
+wire trace, gateway events, and final snapshot. A Completed artifact is valid
+only when the gateway is disarmed, has no pending actuation or safety latch,
+the device acknowledged the final zero stop in HIL/live, and the explicit
+Close response was followed by a clean local disconnect.
 
 | Direction | RNE tensor | Shape | Unit | Upstream fields |
 |---|---|---:|---|---|
@@ -97,6 +105,21 @@ adapters/hardware/rne_hardware_lekiwi/python/rne_hardware_lekiwi_device.py to
 the device checkout. It imports LeRobot only when not in mock mode and refuses
 an installed version other than 0.6.0.
 
+Before touching hardware, exercise the exact host lifecycle with the bundled
+dependency-free mock:
+
+    mkdir -p artifacts
+    cargo run -p rne_hardware_lekiwi --bin rne-lekiwi-session -- \
+      --mock --mode shadow --samples 60 \
+      --session-id rne.lekiwi.mock.shadow.001 \
+      --output artifacts/lekiwi-mock-shadow.json
+
+The command refuses to overwrite an existing artifact. Every child exchange
+has a finite host response timeout. A device/gateway safety terminal still
+writes valid evidence and exits with code 3. An incomplete exchange, such as a
+host I/O timeout with no response, cannot be relabelled as a complete trace and
+exits without a session artifact.
+
 ## Staged validation
 
 Each stage starts a new process and a new RNE session. Never reuse authority
@@ -108,22 +131,35 @@ after a safety trip.
    backend.
 2. Playback: verify the selected TaskSpec, profile golden, recorded calibration,
    and camera metadata without connecting hardware.
-3. Elevated shadow: connect the device with all wheels raised. Open shadow
-   mode, poll observations for 1,800 samples, and confirm that the bridge rejects
-   any non-safety actuation.
+3. Elevated shadow: connect the device with all wheels raised. Run the host in
+   shadow mode for 1,800 samples and confirm that the evidence contains no
+   Actuate host frame.
 4. Elevated HIL: use only zero then low-amplitude base commands. Inject command
    deadline, host-process termination, reconnect, stale command, limit, and
    emergency-stop cases. Confirm both the gateway stop and physical wheel stop.
 5. Floor live: start at 0.02 m/s in a clear bounded area, then increase only
    within the profile limits. A second operator owns the physical cutoff.
 
-The production device command is:
+The bundled host launches the bridge as a local child process. On the prepared
+Raspberry Pi, capture elevated shadow evidence with:
 
-    python rne_hardware_lekiwi_device.py --robot-id <calibration-id> --port /dev/ttyACM0
+    mkdir -p artifacts
+    cargo run -p rne_hardware_lekiwi --bin rne-lekiwi-session -- \
+      --physical-session --mode shadow --samples 1800 \
+      --session-id <run-id> --robot-id <calibration-id> --port /dev/ttyACM0 \
+      --bridge ./rne_hardware_lekiwi_device.py \
+      --output artifacts/lekiwi-elevated-shadow.json
+
+HIL/live additionally require the explicit `--allow-actuation` switch. Begin
+with zero commands, then use the bounded `--action-vx-m-s`,
+`--action-vy-m-s`, and `--action-wz-rad-s` flags only after the staged safety
+checks above.
 
 Standard input and output are exclusively hardware wire v1 JSON Lines. Run the
-process locally on the Pi or behind an unbuffered SSH standard-I/O transport.
-Standard error may be retained as diagnostics but is not protocol evidence.
+bundled CLI locally on the Pi. The Rust runner exposes a transport-neutral
+interface for a separately reviewed SSH transport, but this release does not
+claim one. Standard error may be retained as diagnostics but is not protocol
+evidence.
 
 ## Required exit evidence
 
@@ -131,7 +167,9 @@ The v0.6 reference-device claim remains open until one source commit has all of
 the following:
 
 - the exact reference profile and TaskSpec;
-- a complete bounded wire trace and correlated gateway session evidence;
+- a complete `rne_lekiwi_reference_session` artifact whose physical device ID
+  begins with `rne.lekiwi_so101.physical.v1:`; mock identity is never physical
+  evidence;
 - an elevated shadow comparison with declared per-tensor tolerances;
 - all six safety cases on the physical device, including explicit reconnect and
   rearm;
