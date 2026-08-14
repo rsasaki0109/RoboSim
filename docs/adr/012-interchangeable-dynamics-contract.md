@@ -42,6 +42,7 @@ golden JSON shape.
 Analytic, Rapier, and feature-gated MuJoCo now run through one generic catalog
 without exposing backend-only observation APIs. Experimental backends can call
 the kit before promotion and receive an honest failing report for missing
-profiles. MuJoCo has joined with `rigid_body` while remaining default-off, and
-cannot claim articulation until it synchronizes the same backend-neutral joint
-state.
+profiles. MuJoCo has joined with `rigid_body` and `articulation` while remaining
+default-off. Rapier and MuJoCo consume the same unit-explicit `JointActuation`
+commands and synchronize the same backend-neutral joint state; invalid command
+units or values fail before stepping.

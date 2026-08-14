@@ -269,6 +269,158 @@ pub struct JointMotor {
     pub max_force: f64,
 }
 
+/// Unit-explicit actuation command for a one-degree-of-freedom joint.
+///
+/// Physics backends apply this component before each fixed step. Commands with
+/// non-finite values, negative gains, negative limits, or a revolute/prismatic
+/// mode that disagrees with the joint description must be rejected before the
+/// step. A zero maximum effort/force disables output rather than meaning
+/// unbounded output.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointActuation {
+    /// No actuator output.
+    #[default]
+    Disabled,
+    /// Revolute position servo.
+    RevolutePosition {
+        /// Desired angular position in radians.
+        target_position_rad: f64,
+        /// Proportional stiffness in newton-metres per radian.
+        stiffness_nm_per_rad: f64,
+        /// Damping in newton-metre-seconds per radian.
+        damping_nm_s_per_rad: f64,
+        /// Symmetric output limit in newton-metres.
+        max_effort_nm: f64,
+    },
+    /// Revolute velocity servo.
+    RevoluteVelocity {
+        /// Desired angular velocity in radians per second.
+        target_velocity_rad_s: f64,
+        /// Velocity error gain in newton-metre-seconds per radian.
+        gain_nm_s_per_rad: f64,
+        /// Symmetric output limit in newton-metres.
+        max_effort_nm: f64,
+    },
+    /// Direct revolute torque command.
+    RevoluteEffort {
+        /// Requested torque in newton-metres.
+        effort_nm: f64,
+        /// Symmetric output limit in newton-metres.
+        max_effort_nm: f64,
+    },
+    /// Prismatic position servo.
+    PrismaticPosition {
+        /// Desired translation in metres.
+        target_position_m: f64,
+        /// Proportional stiffness in newtons per metre.
+        stiffness_n_per_m: f64,
+        /// Damping in newton-seconds per metre.
+        damping_n_s_per_m: f64,
+        /// Symmetric output limit in newtons.
+        max_force_n: f64,
+    },
+    /// Prismatic velocity servo.
+    PrismaticVelocity {
+        /// Desired linear velocity in metres per second.
+        target_velocity_m_s: f64,
+        /// Velocity error gain in newton-seconds per metre.
+        gain_n_s_per_m: f64,
+        /// Symmetric output limit in newtons.
+        max_force_n: f64,
+    },
+    /// Direct prismatic force command.
+    PrismaticEffort {
+        /// Requested force in newtons.
+        force_n: f64,
+        /// Symmetric output limit in newtons.
+        max_force_n: f64,
+    },
+}
+
+impl JointActuation {
+    /// Returns true when every value is finite and every gain/limit is non-negative.
+    pub fn has_valid_values(self) -> bool {
+        match self {
+            Self::Disabled => true,
+            Self::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            } => {
+                target_position_rad.is_finite()
+                    && non_negative(stiffness_nm_per_rad)
+                    && non_negative(damping_nm_s_per_rad)
+                    && non_negative(max_effort_nm)
+            }
+            Self::RevoluteVelocity {
+                target_velocity_rad_s,
+                gain_nm_s_per_rad,
+                max_effort_nm,
+            } => {
+                target_velocity_rad_s.is_finite()
+                    && non_negative(gain_nm_s_per_rad)
+                    && non_negative(max_effort_nm)
+            }
+            Self::RevoluteEffort {
+                effort_nm,
+                max_effort_nm,
+            } => effort_nm.is_finite() && non_negative(max_effort_nm),
+            Self::PrismaticPosition {
+                target_position_m,
+                stiffness_n_per_m,
+                damping_n_s_per_m,
+                max_force_n,
+            } => {
+                target_position_m.is_finite()
+                    && non_negative(stiffness_n_per_m)
+                    && non_negative(damping_n_s_per_m)
+                    && non_negative(max_force_n)
+            }
+            Self::PrismaticVelocity {
+                target_velocity_m_s,
+                gain_n_s_per_m,
+                max_force_n,
+            } => {
+                target_velocity_m_s.is_finite()
+                    && non_negative(gain_n_s_per_m)
+                    && non_negative(max_force_n)
+            }
+            Self::PrismaticEffort {
+                force_n,
+                max_force_n,
+            } => force_n.is_finite() && non_negative(max_force_n),
+        }
+    }
+
+    /// Returns true for disabled or revolute commands.
+    pub const fn supports_revolute(self) -> bool {
+        matches!(
+            self,
+            Self::Disabled
+                | Self::RevolutePosition { .. }
+                | Self::RevoluteVelocity { .. }
+                | Self::RevoluteEffort { .. }
+        )
+    }
+
+    /// Returns true for disabled or prismatic commands.
+    pub const fn supports_prismatic(self) -> bool {
+        matches!(
+            self,
+            Self::Disabled
+                | Self::PrismaticPosition { .. }
+                | Self::PrismaticVelocity { .. }
+                | Self::PrismaticEffort { .. }
+        )
+    }
+}
+
+fn non_negative(value: f64) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
 /// Backend-neutral completed-step state of a single-degree-of-freedom joint.
 ///
 /// Physics backends insert or update this component during
@@ -326,5 +478,44 @@ impl Default for JointMotor {
             target_position: 0.0,
             max_force: 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JointActuation;
+
+    #[test]
+    fn joint_actuation_has_explicit_units_and_fail_closed_values() {
+        let command = JointActuation::PrismaticVelocity {
+            target_velocity_m_s: 0.5,
+            gain_n_s_per_m: 12.0,
+            max_force_n: 40.0,
+        };
+        assert!(command.has_valid_values());
+        assert!(command.supports_prismatic());
+        assert!(!command.supports_revolute());
+        assert_eq!(
+            serde_json::to_value(command).unwrap(),
+            serde_json::json!({
+                "mode": "prismatic_velocity",
+                "target_velocity_m_s": 0.5,
+                "gain_n_s_per_m": 12.0,
+                "max_force_n": 40.0,
+            })
+        );
+
+        assert!(!JointActuation::RevoluteEffort {
+            effort_nm: f64::NAN,
+            max_effort_nm: 10.0,
+        }
+        .has_valid_values());
+        assert!(!JointActuation::PrismaticPosition {
+            target_position_m: 0.0,
+            stiffness_n_per_m: -1.0,
+            damping_n_s_per_m: 1.0,
+            max_force_n: 10.0,
+        }
+        .has_valid_values());
     }
 }

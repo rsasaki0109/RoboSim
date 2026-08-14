@@ -96,6 +96,11 @@ coverage verdicts. Its canonical shape lives at
 registered shared vector or tolerance profile produces a failing case rather
 than silently weakening coverage.
 
+`JointActuation` is a tagged, backend-neutral ECS command with distinct
+revolute/prismatic position, velocity, and effort variants. Field names carry
+their SI units. A backend rejects unknown variants, non-finite values, negative
+gains/limits, and joint-kind mismatches before a physics step.
+
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, and evidence constants; changing

@@ -615,12 +615,10 @@ fn run_articulation_case<B: PhysicsBackend>(
             lower_rad: Some(-0.2),
             upper_rad: Some(0.2),
         },
-        rne_physics::JointMotor {
-            velocity_rad_s: 2.0,
-            gain: 1.0,
-            stiffness: 0.0,
-            target_position: 0.0,
-            max_force: 50.0,
+        rne_physics::JointActuation::RevoluteVelocity {
+            target_velocity_rad_s: 2.0,
+            gain_nm_s_per_rad: 1.0,
+            max_effort_nm: 50.0,
         },
     ));
     for _ in 0..180 {
@@ -654,7 +652,14 @@ fn run_articulation_case<B: PhysicsBackend>(
             "revolute_limit_rad_v1",
         ),
     ];
-    let contacts = backend.contacts(physics_world)?.to_vec();
+    let contacts = if backend
+        .capabilities()
+        .contains(&PhysicsCapability::ContactForce)
+    {
+        backend.contacts(physics_world)?.to_vec()
+    } else {
+        Vec::new()
+    };
     let snapshot = capture_physics_snapshot(&world, &contacts, 180, fixed_dt().ticks() * 180)?;
     Ok(CaseReport {
         id: capability_case_id(backend_id, PhysicsCapability::Articulation),

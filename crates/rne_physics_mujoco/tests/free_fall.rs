@@ -33,7 +33,13 @@ fn runtime_line_is_explicit() {
 #[test]
 fn fixture_loads_only_when_the_runtime_is_installed() {
     let backend = MuJoCoBackend::from_mjcf(FREE_FALL_MJCF).expect("fixture should load");
-    assert_eq!(backend.capabilities(), &[PhysicsCapability::RigidBody]);
+    assert_eq!(
+        backend.capabilities(),
+        &[
+            PhysicsCapability::RigidBody,
+            PhysicsCapability::Articulation
+        ]
+    );
 }
 
 fn fixture_world() -> (World, Entity) {

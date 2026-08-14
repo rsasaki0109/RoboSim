@@ -2,6 +2,7 @@
 
 use crate::compiler::{
     compile_rigid_body_model, BodyBinding, BodyTopology, CompileError, CompiledRigidBodyModel,
+    JointBinding,
 };
 use crate::EXPECTED_MUJOCO_VERSION_PREFIX;
 use mujoco_rs::prelude::{MjData, MjModel, MjtObj};
@@ -9,8 +10,9 @@ use rne_core::SimDuration;
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
+    ColliderShape, ContactEvent, JointActuation, JointMotor, JointState, PhysicsBackend,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
+    RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use std::collections::HashMap;
@@ -21,7 +23,10 @@ const FREE_FALL_JOINT_NAME: &str = "rne_free_fall_joint";
 const EXPECTED_FREE_JOINT_QPOS_LEN: usize = 7;
 const EXPECTED_FREE_JOINT_QVEL_LEN: usize = 6;
 
-const CAPABILITIES: &[PhysicsCapability] = &[PhysicsCapability::RigidBody];
+const CAPABILITIES: &[PhysicsCapability] = &[
+    PhysicsCapability::RigidBody,
+    PhysicsCapability::Articulation,
+];
 
 /// Errors specific to the optional MuJoCo adapter.
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -55,6 +60,14 @@ pub enum MuJoCoError {
     /// The fixed topology changed after the native model was compiled.
     #[error("MuJoCo world topology changed after step 0")]
     TopologyChanged,
+    /// A unit-explicit joint actuation command is invalid.
+    #[error("invalid MuJoCo joint actuation on entity {entity_index}: {reason}")]
+    InvalidActuation {
+        /// Stable ECS entity index carrying the rejected command.
+        entity_index: u32,
+        /// Static validation reason.
+        reason: &'static str,
+    },
     /// A fixed-step duration did not match the model timestep.
     #[error("MuJoCo timestep mismatch: expected {expected_s:.12} s, got {actual_s:.12} s")]
     TimestepMismatch {
@@ -190,6 +203,13 @@ impl MuJoCoBackend {
             MuJoCoError::MissingCapability { capability } => PhysicsError::MissingCapabilities {
                 missing: vec![capability],
             },
+            MuJoCoError::InvalidActuation {
+                entity_index,
+                reason,
+            } => PhysicsError::InvalidActuation {
+                entity_index,
+                reason,
+            },
             _ => PhysicsError::InitializationFailed,
         }
     }
@@ -200,6 +220,13 @@ fn map_compile_error(error: CompileError) -> MuJoCoError {
         CompileError::MissingCapability(capability) => {
             MuJoCoError::MissingCapability { capability }
         }
+        CompileError::InvalidActuation {
+            entity_index,
+            reason,
+        } => MuJoCoError::InvalidActuation {
+            entity_index,
+            reason,
+        },
         other => MuJoCoError::UnsupportedFixture(other.to_string()),
     }
 }
@@ -286,29 +313,58 @@ fn validate_caller_fixture_world(world: &World) -> Result<CompiledRigidBodyModel
             "caller MJCF requires one dynamic sphere".to_owned(),
         ));
     }
-    compiled.bindings[0].joint_name = Some(FREE_FALL_JOINT_NAME.to_owned());
+    compiled.bindings[0].body_name = FREE_FALL_BODY_NAME.to_owned();
+    compiled.bindings[0].joint = JointBinding::Free {
+        joint_name: FREE_FALL_JOINT_NAME.to_owned(),
+    };
     Ok(compiled)
 }
 
 fn require_compiled_model(model: &MjModel, bindings: &[BodyBinding]) -> Result<(), MuJoCoError> {
-    let dynamic_count = bindings
-        .iter()
-        .filter(|binding| binding.joint_name.is_some())
-        .count();
-    let expected_nq = dynamic_count * EXPECTED_FREE_JOINT_QPOS_LEN;
-    let expected_nv = dynamic_count * EXPECTED_FREE_JOINT_QVEL_LEN;
+    let (expected_nq, expected_nv) = bindings.iter().fold((0, 0), |counts, binding| {
+        let dimensions = match binding.joint {
+            JointBinding::Free { .. } => {
+                (EXPECTED_FREE_JOINT_QPOS_LEN, EXPECTED_FREE_JOINT_QVEL_LEN)
+            }
+            JointBinding::Revolute { .. } | JointBinding::Prismatic { .. } => (1, 1),
+            JointBinding::Fixed => (0, 0),
+        };
+        (counts.0 + dimensions.0, counts.1 + dimensions.1)
+    });
     if model.nq() as usize != expected_nq || model.nv() as usize != expected_nv {
         return Err(MuJoCoError::UnsupportedFixture(format!(
-            "compiled free-joint dimensions must be nq={expected_nq}, nv={expected_nv}"
+            "compiled joint dimensions must be nq={expected_nq}, nv={expected_nv}"
         )));
     }
     for binding in bindings {
-        if let Some(name) = binding.joint_name.as_deref() {
+        if model
+            .name_to_id(MjtObj::mjOBJ_BODY, &binding.body_name)
+            .is_none()
+        {
+            return Err(MuJoCoError::UnsupportedFixture(format!(
+                "compiled model is missing body {}",
+                binding.body_name
+            )));
+        }
+        if let Some(name) = binding.joint.joint_name() {
             if model.name_to_id(MjtObj::mjOBJ_JOINT, name).is_none() {
                 return Err(MuJoCoError::UnsupportedFixture(format!(
                     "compiled model is missing joint {name}"
                 )));
             }
+        }
+        let actuator_name = match &binding.joint {
+            JointBinding::Revolute { actuator_name, .. }
+            | JointBinding::Prismatic { actuator_name, .. } => Some(actuator_name.as_str()),
+            JointBinding::Free { .. } | JointBinding::Fixed => None,
+        };
+        if actuator_name
+            .is_some_and(|name| model.name_to_id(MjtObj::mjOBJ_ACTUATOR, name).is_none())
+        {
+            return Err(MuJoCoError::UnsupportedFixture(format!(
+                "compiled model is missing actuator {}",
+                actuator_name.expect("checked Some")
+            )));
         }
     }
     Ok(())
@@ -320,55 +376,247 @@ fn sync_from_ecs_state(
     world: &World,
 ) -> Result<(), MuJoCoError> {
     for binding in bindings {
-        let Some(joint_name) = binding.joint_name.as_deref() else {
-            continue;
-        };
-        let rigid_body = world.get::<RigidBody>(binding.entity).ok_or_else(|| {
-            MuJoCoError::UnsupportedFixture("rigid body disappeared during sync".to_owned())
-        })?;
-        let transform = world.get::<Transform3>(binding.entity).ok_or_else(|| {
-            MuJoCoError::UnsupportedFixture("transform disappeared during sync".to_owned())
-        })?;
-        finite_vec3(transform.translation, "position")?;
-        finite_quat(transform.rotation, "rotation")?;
-        finite_vec3(rigid_body.linear_velocity_m_s, "linear velocity")?;
-        finite_vec3(rigid_body.angular_velocity_rad_s, "angular velocity")?;
-
-        let joint = data.joint(joint_name).ok_or_else(|| {
-            MuJoCoError::UnsupportedFixture(format!("missing compiled joint {joint_name}"))
-        })?;
-        let mut joint_view = joint.view_mut(data);
-        if joint_view.qpos.len() != EXPECTED_FREE_JOINT_QPOS_LEN
-            || joint_view.qvel.len() != EXPECTED_FREE_JOINT_QVEL_LEN
-        {
-            return Err(MuJoCoError::UnsupportedFixture(format!(
-                "joint {joint_name} is not a free joint"
-            )));
+        match &binding.joint {
+            JointBinding::Free { joint_name } => {
+                sync_free_joint_from_ecs(data, binding.entity, joint_name, world)?;
+            }
+            JointBinding::Revolute {
+                joint_name,
+                actuator_name,
+            } => sync_scalar_joint_from_ecs(
+                data,
+                binding.entity,
+                joint_name,
+                actuator_name,
+                true,
+                world,
+            )?,
+            JointBinding::Prismatic {
+                joint_name,
+                actuator_name,
+            } => sync_scalar_joint_from_ecs(
+                data,
+                binding.entity,
+                joint_name,
+                actuator_name,
+                false,
+                world,
+            )?,
+            JointBinding::Fixed => {}
         }
-        joint_view.qpos[..3].copy_from_slice(&[
-            transform.translation.x,
-            transform.translation.y,
-            transform.translation.z,
-        ]);
-        joint_view.qpos[3..7].copy_from_slice(&[
-            transform.rotation.w,
-            transform.rotation.x,
-            transform.rotation.y,
-            transform.rotation.z,
-        ]);
-        joint_view.qvel[..3].copy_from_slice(&[
-            rigid_body.linear_velocity_m_s.x,
-            rigid_body.linear_velocity_m_s.y,
-            rigid_body.linear_velocity_m_s.z,
-        ]);
-        joint_view.qvel[3..6].copy_from_slice(&[
-            rigid_body.angular_velocity_rad_s.x,
-            rigid_body.angular_velocity_rad_s.y,
-            rigid_body.angular_velocity_rad_s.z,
-        ]);
     }
     data.forward();
     Ok(())
+}
+
+fn sync_free_joint_from_ecs(
+    data: &mut MjData<Box<MjModel>>,
+    entity: rne_ecs::Entity,
+    joint_name: &str,
+    world: &World,
+) -> Result<(), MuJoCoError> {
+    let rigid_body = world.get::<RigidBody>(entity).ok_or_else(|| {
+        MuJoCoError::UnsupportedFixture("rigid body disappeared during sync".to_owned())
+    })?;
+    let transform = world.get::<Transform3>(entity).ok_or_else(|| {
+        MuJoCoError::UnsupportedFixture("transform disappeared during sync".to_owned())
+    })?;
+    finite_vec3(transform.translation, "position")?;
+    finite_quat(transform.rotation, "rotation")?;
+    finite_vec3(rigid_body.linear_velocity_m_s, "linear velocity")?;
+    finite_vec3(rigid_body.angular_velocity_rad_s, "angular velocity")?;
+
+    let joint = data.joint(joint_name).ok_or_else(|| {
+        MuJoCoError::UnsupportedFixture(format!("missing compiled joint {joint_name}"))
+    })?;
+    let mut joint_view = joint.view_mut(data);
+    if joint_view.qpos.len() != EXPECTED_FREE_JOINT_QPOS_LEN
+        || joint_view.qvel.len() != EXPECTED_FREE_JOINT_QVEL_LEN
+    {
+        return Err(MuJoCoError::UnsupportedFixture(format!(
+            "joint {joint_name} is not a free joint"
+        )));
+    }
+    joint_view.qpos[..3].copy_from_slice(&[
+        transform.translation.x,
+        transform.translation.y,
+        transform.translation.z,
+    ]);
+    joint_view.qpos[3..7].copy_from_slice(&[
+        transform.rotation.w,
+        transform.rotation.x,
+        transform.rotation.y,
+        transform.rotation.z,
+    ]);
+    joint_view.qvel[..3].copy_from_slice(&[
+        rigid_body.linear_velocity_m_s.x,
+        rigid_body.linear_velocity_m_s.y,
+        rigid_body.linear_velocity_m_s.z,
+    ]);
+    joint_view.qvel[3..6].copy_from_slice(&[
+        rigid_body.angular_velocity_rad_s.x,
+        rigid_body.angular_velocity_rad_s.y,
+        rigid_body.angular_velocity_rad_s.z,
+    ]);
+    Ok(())
+}
+
+fn sync_scalar_joint_from_ecs(
+    data: &mut MjData<Box<MjModel>>,
+    entity: rne_ecs::Entity,
+    joint_name: &str,
+    actuator_name: &str,
+    revolute: bool,
+    world: &World,
+) -> Result<(), MuJoCoError> {
+    let joint = data.joint(joint_name).ok_or_else(|| {
+        MuJoCoError::UnsupportedFixture(format!("missing compiled joint {joint_name}"))
+    })?;
+    let initial_state = world.get::<JointState>(entity).copied();
+    if let Some(state) = initial_state {
+        let (position, velocity) = match (revolute, state) {
+            (
+                true,
+                JointState::Revolute {
+                    position_rad,
+                    velocity_rad_s,
+                },
+            ) => (position_rad, velocity_rad_s),
+            (
+                false,
+                JointState::Prismatic {
+                    position_m,
+                    velocity_m_s,
+                },
+            ) => (position_m, velocity_m_s),
+            _ => {
+                return Err(MuJoCoError::InvalidActuation {
+                    entity_index: entity.index(),
+                    reason: "JointState kind does not match joint",
+                });
+            }
+        };
+        if !position.is_finite() || !velocity.is_finite() {
+            return Err(MuJoCoError::InvalidActuation {
+                entity_index: entity.index(),
+                reason: "JointState is non-finite",
+            });
+        }
+        let mut view = joint.view_mut(data);
+        if view.qpos.len() != 1 || view.qvel.len() != 1 {
+            return Err(MuJoCoError::UnsupportedFixture(format!(
+                "joint {joint_name} is not scalar"
+            )));
+        }
+        view.qpos[0] = position;
+        view.qvel[0] = velocity;
+    }
+    let view = joint.view(data);
+    if view.qpos.len() != 1 || view.qvel.len() != 1 {
+        return Err(MuJoCoError::UnsupportedFixture(format!(
+            "joint {joint_name} is not scalar"
+        )));
+    }
+    let control = joint_control(world, entity, revolute, view.qpos[0], view.qvel[0])?;
+    let actuator_id = data
+        .model()
+        .name_to_id(MjtObj::mjOBJ_ACTUATOR, actuator_name)
+        .ok_or_else(|| {
+            MuJoCoError::UnsupportedFixture(format!("missing actuator {actuator_name}"))
+        })?;
+    data.ctrl_mut()[actuator_id] = control;
+    Ok(())
+}
+
+fn joint_control(
+    world: &World,
+    entity: rne_ecs::Entity,
+    revolute: bool,
+    position: f64,
+    velocity: f64,
+) -> Result<f64, MuJoCoError> {
+    if let Some(command) = world.get::<JointActuation>(entity).copied() {
+        if !command.has_valid_values()
+            || (revolute && !command.supports_revolute())
+            || (!revolute && !command.supports_prismatic())
+        {
+            return Err(MuJoCoError::InvalidActuation {
+                entity_index: entity.index(),
+                reason: "mode, value, gain, or limit",
+            });
+        }
+        let (effort, limit) = match command {
+            JointActuation::Disabled => (0.0, 0.0),
+            JointActuation::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            } => (
+                stiffness_nm_per_rad * (target_position_rad - position)
+                    - damping_nm_s_per_rad * velocity,
+                max_effort_nm,
+            ),
+            JointActuation::RevoluteVelocity {
+                target_velocity_rad_s,
+                gain_nm_s_per_rad,
+                max_effort_nm,
+            } => (
+                gain_nm_s_per_rad * (target_velocity_rad_s - velocity),
+                max_effort_nm,
+            ),
+            JointActuation::RevoluteEffort {
+                effort_nm,
+                max_effort_nm,
+            } => (effort_nm, max_effort_nm),
+            JointActuation::PrismaticPosition {
+                target_position_m,
+                stiffness_n_per_m,
+                damping_n_s_per_m,
+                max_force_n,
+            } => (
+                stiffness_n_per_m * (target_position_m - position) - damping_n_s_per_m * velocity,
+                max_force_n,
+            ),
+            JointActuation::PrismaticVelocity {
+                target_velocity_m_s,
+                gain_n_s_per_m,
+                max_force_n,
+            } => (
+                gain_n_s_per_m * (target_velocity_m_s - velocity),
+                max_force_n,
+            ),
+            JointActuation::PrismaticEffort {
+                force_n,
+                max_force_n,
+            } => (force_n, max_force_n),
+        };
+        return Ok(effort.clamp(-limit, limit));
+    }
+    let Some(motor) = world.get::<JointMotor>(entity) else {
+        return Ok(0.0);
+    };
+    if !motor.velocity_rad_s.is_finite()
+        || !motor.gain.is_finite()
+        || !motor.stiffness.is_finite()
+        || !motor.target_position.is_finite()
+        || !motor.max_force.is_finite()
+        || motor.gain < 0.0
+        || motor.stiffness < 0.0
+        || motor.max_force < 0.0
+    {
+        return Err(MuJoCoError::InvalidActuation {
+            entity_index: entity.index(),
+            reason: "legacy JointMotor value, gain, or limit",
+        });
+    }
+    let effort = motor.stiffness * (motor.target_position - position)
+        + motor.gain * (motor.velocity_rad_s - velocity);
+    Ok(if motor.max_force > 0.0 {
+        effort.clamp(-motor.max_force, motor.max_force)
+    } else {
+        effort
+    })
 }
 
 impl PhysicsBackend for MuJoCoBackend {
@@ -497,33 +745,83 @@ impl PhysicsBackend for MuJoCoBackend {
             .as_ref()
             .ok_or(PhysicsError::InitializationFailed)?;
         for binding in &world_state.bindings {
-            let Some(joint_name) = binding.joint_name.as_deref() else {
-                continue;
-            };
-            let joint = data
-                .joint(joint_name)
-                .ok_or(PhysicsError::InitializationFailed)?;
-            let joint_view = joint.view(data);
-            if joint_view.qpos.len() != EXPECTED_FREE_JOINT_QPOS_LEN
-                || joint_view.qvel.len() != EXPECTED_FREE_JOINT_QVEL_LEN
-                || !joint_view.qpos.iter().all(|value| value.is_finite())
-                || !joint_view.qvel.iter().all(|value| value.is_finite())
-            {
-                return Err(Self::map_error(MuJoCoError::NonFiniteState("body state")));
-            }
-            let rotation = Quat::from_xyzw(
-                joint_view.qpos[4],
-                joint_view.qpos[5],
-                joint_view.qpos[6],
-                joint_view.qpos[3],
-            );
-            if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
-                transform.translation = Vec3::from_slice(&joint_view.qpos[..3]);
-                transform.rotation = rotation;
-            }
-            if let Some(mut rigid_body) = world.get_mut::<RigidBody>(binding.entity) {
-                rigid_body.linear_velocity_m_s = Vec3::from_slice(&joint_view.qvel[..3]);
-                rigid_body.angular_velocity_rad_s = Vec3::from_slice(&joint_view.qvel[3..6]);
+            match &binding.joint {
+                JointBinding::Free { joint_name } => {
+                    let joint = data
+                        .joint(joint_name)
+                        .ok_or(PhysicsError::InitializationFailed)?;
+                    let joint_view = joint.view(data);
+                    if joint_view.qpos.len() != EXPECTED_FREE_JOINT_QPOS_LEN
+                        || joint_view.qvel.len() != EXPECTED_FREE_JOINT_QVEL_LEN
+                        || !joint_view.qpos.iter().all(|value| value.is_finite())
+                        || !joint_view.qvel.iter().all(|value| value.is_finite())
+                    {
+                        return Err(Self::map_error(MuJoCoError::NonFiniteState("body state")));
+                    }
+                    let rotation = Quat::from_xyzw(
+                        joint_view.qpos[4],
+                        joint_view.qpos[5],
+                        joint_view.qpos[6],
+                        joint_view.qpos[3],
+                    );
+                    if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
+                        transform.translation = Vec3::from_slice(&joint_view.qpos[..3]);
+                        transform.rotation = rotation;
+                    }
+                    if let Some(mut rigid_body) = world.get_mut::<RigidBody>(binding.entity) {
+                        rigid_body.linear_velocity_m_s = Vec3::from_slice(&joint_view.qvel[..3]);
+                        rigid_body.angular_velocity_rad_s =
+                            Vec3::from_slice(&joint_view.qvel[3..6]);
+                    }
+                }
+                JointBinding::Revolute { joint_name, .. }
+                | JointBinding::Prismatic { joint_name, .. } => {
+                    let joint = data
+                        .joint(joint_name)
+                        .ok_or(PhysicsError::InitializationFailed)?;
+                    let joint_view = joint.view(data);
+                    if joint_view.qpos.len() != 1
+                        || joint_view.qvel.len() != 1
+                        || !joint_view.qpos[0].is_finite()
+                        || !joint_view.qvel[0].is_finite()
+                    {
+                        return Err(Self::map_error(MuJoCoError::NonFiniteState("joint state")));
+                    }
+                    let joint_state = match binding.joint {
+                        JointBinding::Revolute { .. } => JointState::Revolute {
+                            position_rad: joint_view.qpos[0],
+                            velocity_rad_s: joint_view.qvel[0],
+                        },
+                        JointBinding::Prismatic { .. } => JointState::Prismatic {
+                            position_m: joint_view.qpos[0],
+                            velocity_m_s: joint_view.qvel[0],
+                        },
+                        JointBinding::Free { .. } | JointBinding::Fixed => unreachable!(),
+                    };
+                    let body = data
+                        .body(&binding.body_name)
+                        .ok_or(PhysicsError::InitializationFailed)?;
+                    let body_view = body.view(data);
+                    let rotation = Quat::from_xyzw(
+                        body_view.xquat[1],
+                        body_view.xquat[2],
+                        body_view.xquat[3],
+                        body_view.xquat[0],
+                    );
+                    if !rotation.is_finite()
+                        || !body_view.xpos.iter().all(|value| value.is_finite())
+                    {
+                        return Err(Self::map_error(MuJoCoError::NonFiniteState(
+                            "articulated body pose",
+                        )));
+                    }
+                    if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
+                        transform.translation = Vec3::from_slice(&body_view.xpos);
+                        transform.rotation = rotation;
+                    }
+                    world.entity_mut(binding.entity).insert(joint_state);
+                }
+                JointBinding::Fixed => {}
             }
         }
         Ok(())

@@ -13,9 +13,9 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointMotor, JointState, MultibodyLink, PhysicsBackend,
-    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
-    PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
+    Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointState, MultibodyLink,
+    PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability,
+    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
     RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
@@ -336,7 +336,7 @@ impl PhysicsBackend for RapierBackend {
         }
 
         sync_joints_from_ecs(world, state)?;
-        apply_joint_motors(world, state);
+        apply_joint_motors(world, state)?;
         state.query_pipeline.update(&state.colliders);
 
         Ok(())
@@ -792,35 +792,17 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
     Ok(())
 }
 
-fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
+fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
     for (entity, joint_handle) in &state.entity_to_joint {
-        let Some(motor) = world.get::<JointMotor>(*entity) else {
-            continue;
-        };
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
         };
         let Some(joint) = state.impulse_joints.get_mut(*joint_handle) else {
             continue;
         };
-        // With zero stiffness this is exactly a velocity motor (set_motor_velocity);
-        // a positive stiffness adds a position spring that holds a load without drift.
-        joint.data.set_motor(
-            axis,
-            motor.target_position as f32,
-            motor.velocity_rad_s as f32,
-            motor.stiffness as f32,
-            motor.gain as f32,
-        );
-        // A per-motor force override takes precedence over the per-joint-type cap.
-        if motor.max_force > 0.0 {
-            joint.data.set_motor_max_force(axis, motor.max_force as f32);
-        }
+        apply_motor_command(world, *entity, axis, &mut joint.data)?;
     }
     for (entity, joint_handle) in &state.entity_to_multibody_joint {
-        let Some(motor) = world.get::<JointMotor>(*entity) else {
-            continue;
-        };
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
         };
@@ -830,18 +812,187 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) {
         let Some(link) = multibody.link_mut(link_id) else {
             continue;
         };
-        link.joint.data.set_motor(
-            axis,
-            motor.target_position as f32,
-            motor.velocity_rad_s as f32,
-            motor.stiffness as f32,
-            motor.gain as f32,
-        );
-        if motor.max_force > 0.0 {
-            link.joint
-                .data
-                .set_motor_max_force(axis, motor.max_force as f32);
+        apply_motor_command(world, *entity, axis, &mut link.joint.data)?;
+    }
+    apply_direct_joint_efforts(world, state)?;
+    Ok(())
+}
+
+fn apply_motor_command(
+    world: &World,
+    entity: Entity,
+    axis: JointAxis,
+    joint: &mut GenericJoint,
+) -> Result<(), PhysicsError> {
+    if let Some(command) = world.get::<JointActuation>(entity).copied() {
+        let revolute = world.get::<RevoluteJointDesc>(entity).is_some();
+        if !command.has_valid_values()
+            || (revolute && !command.supports_revolute())
+            || (!revolute && !command.supports_prismatic())
+        {
+            return Err(invalid_actuation(entity, "mode, value, gain, or limit"));
         }
+        let motor = match command {
+            JointActuation::Disabled => Some((0.0, 0.0, 0.0, 0.0, 0.0)),
+            JointActuation::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            } => Some((
+                target_position_rad,
+                0.0,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            )),
+            JointActuation::RevoluteVelocity {
+                target_velocity_rad_s,
+                gain_nm_s_per_rad,
+                max_effort_nm,
+            } => Some((
+                0.0,
+                target_velocity_rad_s,
+                0.0,
+                gain_nm_s_per_rad,
+                max_effort_nm,
+            )),
+            JointActuation::PrismaticPosition {
+                target_position_m,
+                stiffness_n_per_m,
+                damping_n_s_per_m,
+                max_force_n,
+            } => Some((
+                target_position_m,
+                0.0,
+                stiffness_n_per_m,
+                damping_n_s_per_m,
+                max_force_n,
+            )),
+            JointActuation::PrismaticVelocity {
+                target_velocity_m_s,
+                gain_n_s_per_m,
+                max_force_n,
+            } => Some((0.0, target_velocity_m_s, 0.0, gain_n_s_per_m, max_force_n)),
+            JointActuation::RevoluteEffort { .. } | JointActuation::PrismaticEffort { .. } => None,
+        };
+        if let Some((position, velocity, stiffness, damping, max_force)) = motor {
+            joint.set_motor(
+                axis,
+                position as f32,
+                velocity as f32,
+                stiffness as f32,
+                damping as f32,
+            );
+            joint.set_motor_max_force(axis, max_force as f32);
+        } else {
+            joint.set_motor(axis, 0.0, 0.0, 0.0, 0.0);
+            joint.set_motor_max_force(axis, 0.0);
+        }
+        return Ok(());
+    }
+
+    let Some(motor) = world.get::<JointMotor>(entity) else {
+        return Ok(());
+    };
+    // Legacy motor compatibility: zero stiffness is a velocity motor and a
+    // positive stiffness adds a position spring.
+    joint.set_motor(
+        axis,
+        motor.target_position as f32,
+        motor.velocity_rad_s as f32,
+        motor.stiffness as f32,
+        motor.gain as f32,
+    );
+    if motor.max_force > 0.0 {
+        joint.set_motor_max_force(axis, motor.max_force as f32);
+    }
+    Ok(())
+}
+
+fn apply_direct_joint_efforts(
+    world: &World,
+    state: &mut RapierWorldState,
+) -> Result<(), PhysicsError> {
+    for entity in sorted_entities(world) {
+        let Some(command) = world.get::<JointActuation>(entity).copied() else {
+            continue;
+        };
+        let (parent, axis_local, effort, revolute) = match command {
+            JointActuation::RevoluteEffort {
+                effort_nm,
+                max_effort_nm,
+            } => {
+                let Some(desc) = world.get::<RevoluteJointDesc>(entity) else {
+                    return Err(invalid_actuation(
+                        entity,
+                        "revolute effort on non-revolute joint",
+                    ));
+                };
+                (
+                    desc.parent,
+                    desc.axis,
+                    effort_nm.clamp(-max_effort_nm, max_effort_nm),
+                    true,
+                )
+            }
+            JointActuation::PrismaticEffort {
+                force_n,
+                max_force_n,
+            } => {
+                let Some(desc) = world.get::<PrismaticJointDesc>(entity) else {
+                    return Err(invalid_actuation(
+                        entity,
+                        "prismatic effort on non-prismatic joint",
+                    ));
+                };
+                (
+                    desc.parent,
+                    desc.axis,
+                    force_n.clamp(-max_force_n, max_force_n),
+                    false,
+                )
+            }
+            _ => continue,
+        };
+        if !command.has_valid_values() {
+            return Err(invalid_actuation(
+                entity,
+                "non-finite effort or negative limit",
+            ));
+        }
+        let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
+        if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
+            return Err(invalid_actuation(
+                entity,
+                "joint axis is zero or non-finite",
+            ));
+        }
+        for (target, sign) in [(entity, 1.0), (parent, -1.0)] {
+            let Some(handle) = state.entity_to_body.get(&target).copied() else {
+                continue;
+            };
+            let Some(body) = state.bodies.get_mut(handle) else {
+                continue;
+            };
+            let vector = vec3_to_rapier(axis_world * (effort * sign));
+            if revolute {
+                body.add_torque(vector, true);
+            } else {
+                body.add_force(vector, true);
+            }
+            if !state.impulse_forced.contains(&handle) {
+                state.impulse_forced.push(handle);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn invalid_actuation(entity: Entity, reason: &'static str) -> PhysicsError {
+    PhysicsError::InvalidActuation {
+        entity_index: entity.index(),
+        reason,
     }
 }
 
@@ -1362,5 +1513,165 @@ mod tests {
             displacement > 0.5,
             "multibody motor should lift its child, displacement={displacement}"
         );
+    }
+
+    fn run_revolute_actuation(command: JointActuation) -> JointState {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "actuation_parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::sphere(0.05),
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "actuation_child");
+        world.entity_mut(child).insert((
+            RigidBody::default(),
+            Collider::sphere(0.05),
+            MultibodyLink,
+            Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::Y,
+                lower_rad: Some(-1.0),
+                upper_rad: Some(1.0),
+            },
+            command,
+        ));
+        for _ in 0..30 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+        }
+        *world.get::<JointState>(child).expect("joint state")
+    }
+
+    #[test]
+    fn unit_explicit_revolute_position_velocity_and_effort_move_joint() {
+        let position = run_revolute_actuation(JointActuation::RevolutePosition {
+            target_position_rad: 0.4,
+            stiffness_nm_per_rad: 40.0,
+            damping_nm_s_per_rad: 4.0,
+            max_effort_nm: 20.0,
+        });
+        let velocity = run_revolute_actuation(JointActuation::RevoluteVelocity {
+            target_velocity_rad_s: 1.0,
+            gain_nm_s_per_rad: 4.0,
+            max_effort_nm: 20.0,
+        });
+        let effort = run_revolute_actuation(JointActuation::RevoluteEffort {
+            effort_nm: 2.0,
+            max_effort_nm: 2.0,
+        });
+        assert!(position.position_rad().unwrap() > 0.1);
+        assert!(velocity.position_rad().unwrap() > 0.1);
+        assert!(effort.position_rad().unwrap().abs() > 0.01);
+    }
+
+    fn run_prismatic_actuation(command: JointActuation) -> JointState {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "slider_parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "slider_child");
+        world.entity_mut(child).insert((
+            RigidBody::default(),
+            MultibodyLink,
+            Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
+            PrismaticJointDesc {
+                parent,
+                axis: Vec3::X,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::Y,
+                lower_m: Some(-0.25),
+                upper_m: Some(0.25),
+            },
+            command,
+        ));
+        for _ in 0..30 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+        }
+        *world.get::<JointState>(child).expect("joint state")
+    }
+
+    #[test]
+    fn unit_explicit_prismatic_position_velocity_and_effort_move_joint() {
+        let position = run_prismatic_actuation(JointActuation::PrismaticPosition {
+            target_position_m: 0.15,
+            stiffness_n_per_m: 80.0,
+            damping_n_s_per_m: 8.0,
+            max_force_n: 30.0,
+        });
+        let velocity = run_prismatic_actuation(JointActuation::PrismaticVelocity {
+            target_velocity_m_s: 0.4,
+            gain_n_s_per_m: 10.0,
+            max_force_n: 30.0,
+        });
+        let effort = run_prismatic_actuation(JointActuation::PrismaticEffort {
+            force_n: 2.0,
+            max_force_n: 2.0,
+        });
+        assert!(position.position_m().unwrap() > 0.05);
+        assert!(velocity.position_m().unwrap() > 0.05);
+        assert!(effort.position_m().unwrap().abs() > 0.01);
+    }
+
+    #[test]
+    fn mismatched_unit_explicit_actuation_fails_before_step() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "child");
+        world.entity_mut(child).insert((
+            RigidBody::default(),
+            Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::Y,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointActuation::PrismaticEffort {
+                force_n: 1.0,
+                max_force_n: 2.0,
+            },
+        ));
+        assert!(matches!(
+            backend.sync_from_ecs(&mut world, physics_world),
+            Err(PhysicsError::InvalidActuation { .. })
+        ));
     }
 }

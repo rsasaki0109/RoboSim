@@ -250,6 +250,14 @@ pub enum PhysicsError {
         /// Capabilities the backend does not provide.
         missing: Vec<PhysicsCapability>,
     },
+    /// A joint actuation command is invalid for the target entity.
+    #[error("invalid joint actuation on entity {entity_index}: {reason}")]
+    InvalidActuation {
+        /// Stable ECS entity index carrying the rejected command.
+        entity_index: u32,
+        /// Static validation reason shared by backend implementations.
+        reason: &'static str,
+    },
 }
 
 /// Verifies a backend's declared capabilities satisfy every required one.

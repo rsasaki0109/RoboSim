@@ -27,7 +27,10 @@ pub fn backend_manifest() -> PhysicsBackendManifest {
         env!("CARGO_PKG_VERSION"),
         "mujoco",
         "3.9.0",
-        [PhysicsCapability::RigidBody],
+        [
+            PhysicsCapability::RigidBody,
+            PhysicsCapability::Articulation,
+        ],
         PhysicsBackendRepeatability::ToleranceBounded,
     )
     .expect("the built-in MuJoCo backend manifest is valid")
@@ -54,7 +57,13 @@ mod tests {
     fn manifest_is_available_without_loading_mujoco() {
         let manifest = backend_manifest();
         assert_eq!(manifest.backend_id, "mujoco");
-        assert_eq!(manifest.capabilities, vec![PhysicsCapability::RigidBody]);
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::Articulation
+            ]
+        );
         assert_eq!(
             manifest.repeatability,
             PhysicsBackendRepeatability::ToleranceBounded

@@ -15,8 +15,8 @@ pub use backend::{
     PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 pub use components::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, JointState,
-    MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
+    JointState, MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
     RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};

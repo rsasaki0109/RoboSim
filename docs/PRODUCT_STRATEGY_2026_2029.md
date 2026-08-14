@@ -141,8 +141,11 @@ Current implementation status:
 - MuJoCo compiles multiple fixed/dynamic ECS bodies into backend-private MJCF,
   synchronizes pose and velocity at an explicit fixed step, and joins the shared
   rigid-body catalog on Windows and Linux;
-- MuJoCo preflight rejects articulation, sensors, kinematic bodies, invalid
-  geometry, and post-step-0 topology changes before they can be approximated.
+- MuJoCo preflight rejects sensors, kinematic bodies, invalid
+  geometry, and post-step-0 topology changes before they can be approximated;
+- Rapier and MuJoCo implement unit-explicit revolute/prismatic position,
+  velocity, and effort actuation; MuJoCo now advertises `articulation` and
+  passes the same revolute catalog vector as Rapier.
 
 Delivery slices:
 

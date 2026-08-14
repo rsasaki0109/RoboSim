@@ -152,6 +152,9 @@ assumption:
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
-`rne_physics_conformance/mujoco` feature. The next v2 increment adds
-backend-neutral revolute/prismatic actuation and `JointState` synchronization
-before MuJoCo may advertise `articulation`.
+`rne_physics_conformance/mujoco` feature. It also advertises `articulation` after
+passing the shared revolute vector with unit-explicit `JointActuation` and
+backend-neutral `JointState`; backend integration tests cover revolute and
+prismatic position/velocity/effort behavior. The next v2 increment promotes
+canonical MuJoCo contact evidence and packages the first perturbed cross-backend
+divergence as a Failure Capsule.
