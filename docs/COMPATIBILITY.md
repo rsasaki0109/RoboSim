@@ -129,6 +129,14 @@ normalized to zero-based dataset-local sequence values; stream identity,
 timestamps, physical payload values, calibration, declared storage resolution,
 and noise behavior remain semantic.
 
+Hardware-gateway evidence schema v1 freezes the artifact discriminator,
+TaskSpec identity, authority mode, ordered typed events, connection state,
+safety latch, bounded queue counts, drop counters, and last accepted sequence
+identities. Unknown fields are rejected. Host ticks describe adapter-side I/O
+decisions and never replace SimClock or enter deterministic simulation-state
+hashes. The canonical fail-closed live session is
+`tests/golden/hardware/gateway-fail-closed-session-v1.json`.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across

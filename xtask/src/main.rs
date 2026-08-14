@@ -37,6 +37,7 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_data",
     "rne_deformable",
     "rne_ecs",
+    "rne_hardware_gateway",
     "rne_log",
     "rne_math",
     "rne_mjcf",
@@ -1139,6 +1140,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
         ),
         (
+            "hardware",
+            "gateway_evidence",
+            u64::from(rne_hardware_gateway::HARDWARE_GATEWAY_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1838,6 +1844,7 @@ fn ci_headless() -> anyhow::Result<()> {
     accelerator::validate_contract(&workspace_root()?)?;
     run_step("cargo test --locked -p rne_render --lib")?;
     run_step("cargo test --locked -p rne_sensor --lib")?;
+    run_step("cargo test --locked -p rne_hardware_gateway")?;
     dataset::dataset_reference_smoke()
 }
 

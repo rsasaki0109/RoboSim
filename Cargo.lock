@@ -3534,6 +3534,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_hardware_gateway"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_log"
 version = "0.1.0"
 dependencies = [
@@ -5347,6 +5357,7 @@ dependencies = [
  "rne_core",
  "rne_data",
  "rne_fuzz_smoke",
+ "rne_hardware_gateway",
  "rne_log",
  "rne_openscenario",
  "rne_physics",

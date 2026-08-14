@@ -1,0 +1,43 @@
+{
+  "kind": "rne_hardware_gateway_evidence",
+  "schema_version": 1,
+  "task_id": "rne.diff_drive.goal.v1",
+  "mode": "live",
+  "events": [
+    {
+      "type": "connected",
+      "host_time_ms": 0
+    },
+    {
+      "type": "observation_accepted",
+      "sequence": 0
+    },
+    {
+      "type": "armed",
+      "host_time_ms": 0
+    },
+    {
+      "type": "safety_tripped",
+      "host_time_ms": 1,
+      "reason": "actuator_limit"
+    },
+    {
+      "type": "actuation_delivered",
+      "action_sequence": null,
+      "safety_stop": true
+    }
+  ],
+  "final_snapshot": {
+    "schema_version": 1,
+    "task_id": "rne.diff_drive.goal.v1",
+    "mode": "live",
+    "connection_state": "connected",
+    "safety_latch": "actuator_limit",
+    "queued_observations": 1,
+    "queued_actuations": 0,
+    "dropped_events": 0,
+    "dropped_observations": 0,
+    "last_observation_sequence": 0,
+    "last_action_sequence": null
+  }
+}

@@ -241,6 +241,14 @@ Exit evidence:
 
 ### v0.6: sim-to-real and hardware in the loop
 
+Implementation foundation: ADR 016 places a vendor-neutral
+`rne_hardware_gateway` state machine under `adapters/hardware`, never in core.
+It binds TaskSpec observation/action order, injects rather than reads monotonic
+host time, distinguishes playback/shadow/HIL/live authority, enforces bounded
+queues and explicit action limits, and produces schema-v1 event/snapshot
+evidence. Unit and golden cases cover the in-process safety contract. This is
+not yet process-level or physical-hardware exit evidence.
+
 Delivery slices:
 
 - define a bounded hardware gateway outside core with explicit deadlines,

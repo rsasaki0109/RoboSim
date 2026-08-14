@@ -53,6 +53,15 @@ cross-platform equality; a completed clean CI run is still required before
 treating that equality as external platform evidence. A renderer-specific
 capture remains separate evidence rather than a headless requirement.
 
+The v0.6 foundation has started without pulling hardware concerns into core.
+`rne_hardware_gateway` binds the same TaskSpec to playback, shadow, HIL, and
+live authority modes, accepts injected monotonic host ticks, bounds every
+queue, and fails closed on deadline, stale data, disconnect, actuator limit,
+clock regression, queue overrun, and emergency stop. A golden over-limit
+session freezes schema-v1 events and final state. Process-level mock evidence,
+trace/Failure Capsule integration, shadow comparison, and selected reference
+hardware remain open.
+
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or
 outcome-level promises; benchmark reports embed those promises and hash only

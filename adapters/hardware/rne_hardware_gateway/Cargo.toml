@@ -1,0 +1,16 @@
+[package]
+name = "rne_hardware_gateway"
+description = "Bounded fail-closed hardware gateway contracts for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_ai = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
