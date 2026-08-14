@@ -102,6 +102,7 @@ members = [
   "examples/70_g1_photoreal_capture",
   "examples/71_g1_rgbd_sensor",
   "examples/72_mobile_lift_friction_pick_place",
+  "examples/73_diff_drive_dataset_capture",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",

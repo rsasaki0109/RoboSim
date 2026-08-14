@@ -192,12 +192,18 @@ jobs:
           shared-key: evidence-${{ matrix.os }}
       - name: Generate and verify v0.2 trust evidence
         run: cargo run --locked -p xtask -- evidence
+      - name: Capture and verify the headless reference dataset
+        run: |
+          cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
+          cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
       - name: Upload trust evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trust-evidence-${{ matrix.os }}
-          path: artifacts/evidence/
+          path: |
+            artifacts/evidence/
+            artifacts/datasets/diff-drive-reference.rne-dataset/
 
   parity:
     # M5 defines the GitHub-hosted Windows parity runner as its benchmark class.

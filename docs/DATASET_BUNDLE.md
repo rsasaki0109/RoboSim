@@ -114,6 +114,38 @@ IMU/transform/action/outcome/annotation shard digest, corrupt a record digest,
 inject an unknown manifest field, omit a sequence, reject non-finite actions,
 and forge internally consistent report metrics to prove fail-closed behavior.
 
+## Reference robot capture
+
+Example 73 runs a real renderer-free diff-drive episode through the kinematic
+drive system, Rapier world queries, IMU sampler, and LiDAR sampler. It records
+the committed TaskSpec, action, task outcome, base transform, IMU, and LiDAR
+streams into one bundle:
+
+```powershell
+cargo run -p diff_drive_dataset_capture `
+  --example 73_diff_drive_dataset_capture -- `
+  artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
+cargo run -p xtask -- dataset-check `
+  artifacts/datasets/diff-drive-reference.rne-dataset
+```
+
+DataBus sensor counters begin at one, while bundle sequences are defined as
+dataset-local and zero-based. The capture adapter therefore renumbers records
+while retaining physical sensor values, capture time, availability time,
+stream ID, and noise seed. LiDAR positions and intensities are stored at the
+manifest-declared 1 micrometre and 1 ppm resolutions before lossless encoding;
+this removes irrelevant platform-math ULP differences without hiding a
+sensor-scale difference. Reference asset line endings are fixed to LF. The
+summary freezes both manifest and complete-shard SHA-256 values, all five
+stream counts, zero dropped records, and the successful terminal outcome.
+The selected one-metre goal is retained as a typed, seed-bearing run decision
+instead of being inferred from the resulting trajectory.
+
+`xtask ci-headless` regenerates this capture in a fresh temporary target and
+checks the golden. The Windows/Linux evidence matrix performs the same capture
+from a clean checkout, verifies the complete bundle, and uploads it for
+inspection. A digest mismatch fails the job rather than being normalized away.
+
 ## Compatibility
 
 Dataset bundle schema v1, dataset-native payload schema v1, and

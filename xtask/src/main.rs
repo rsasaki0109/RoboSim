@@ -1837,7 +1837,8 @@ fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartiti
 fn ci_headless() -> anyhow::Result<()> {
     accelerator::validate_contract(&workspace_root()?)?;
     run_step("cargo test --locked -p rne_render --lib")?;
-    run_step("cargo test --locked -p rne_sensor --lib")
+    run_step("cargo test --locked -p rne_sensor --lib")?;
+    dataset::dataset_reference_smoke()
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.

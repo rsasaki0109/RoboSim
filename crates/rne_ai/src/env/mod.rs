@@ -6,7 +6,7 @@ pub mod urdf_scene;
 
 pub use diff_drive::DiffDriveSim;
 pub use diff_drive::{
-    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
+    diff_drive_goal_task_spec, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
     DiffDriveEpisodeSnapshotError, VectorizedDiffDriveConfig, VectorizedDiffDriveEnv,
     VectorizedDiffDriveSnapshot, VectorizedDiffDriveSnapshotError, VectorizedDiffDriveStep,
 };

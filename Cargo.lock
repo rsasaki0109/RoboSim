@@ -910,6 +910,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff_drive_dataset_capture"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "rne_data",
+ "rne_math",
+ "rne_sensor",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "diff_drive_lidar"
 version = "0.1.0"
 dependencies = [

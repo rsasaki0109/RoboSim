@@ -1,0 +1,20 @@
+[package]
+name = "diff_drive_dataset_capture"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+rne_data = { workspace = true }
+rne_math = { workspace = true }
+rne_sensor = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[[example]]
+name = "73_diff_drive_dataset_capture"
+path = "main.rs"

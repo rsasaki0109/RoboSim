@@ -120,6 +120,12 @@ rejected. Canonical shapes live under `tests/golden/datasets/`.
 Dataset-native payload encodings `imu.v1`, `pose2d.v1`, `action_f64.v1`,
 `task_outcome.v1`, and `ground_truth_f64.v1` use fixed little-endian metadata
 and reject trailing bytes; their combined reference shard digest is frozen.
+The real diff-drive reference capture additionally freezes its TaskSpec,
+manifest, complete shard, per-stream counts, and terminal verdict in
+`tests/golden/datasets/diff-drive-reference-summary-v1.json`. DataBus sensor
+sequence values are normalized to zero-based dataset-local sequence values;
+stream identity, timestamps, physical payload values, calibration, declared
+storage resolution, and noise behavior remain semantic.
 
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,

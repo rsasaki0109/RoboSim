@@ -4,6 +4,50 @@ use anyhow::{Context, Result};
 use rne_data::{DatasetBundle, DepthPairMetricSpec, StreamId};
 use std::path::{Path, PathBuf};
 
+pub(crate) fn dataset_reference_smoke() -> Result<()> {
+    let root = super::workspace_root()?;
+    let relative = PathBuf::from(format!(
+        "target/rne-dataset-reference-smoke-{}",
+        std::process::id()
+    ));
+    let output = root.join(&relative);
+    anyhow::ensure!(
+        !output.exists(),
+        "dataset reference smoke target already exists: {}",
+        output.display()
+    );
+    let portable = relative.to_string_lossy().replace('\\', "/");
+    let capture = super::run_step(&format!(
+        "cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- {portable} --verify-golden"
+    ));
+    if let Err(error) = capture {
+        if output.exists() {
+            std::fs::remove_dir_all(&output)
+                .with_context(|| format!("remove failed reference capture {}", output.display()))?;
+        }
+        return Err(error);
+    }
+
+    let verification = DatasetBundle::open(&output)
+        .and_then(|bundle| bundle.verify())
+        .with_context(|| format!("verify generated reference capture {}", output.display()));
+    std::fs::remove_dir_all(&output)
+        .with_context(|| format!("remove reference capture {}", output.display()))?;
+    let verification = verification?;
+    anyhow::ensure!(
+        verification.stream_count == 5
+            && verification.record_count == 419
+            && verification.sample_count == 419
+            && verification.dropped_count == 0,
+        "reference capture counts changed: {verification:?}"
+    );
+    println!(
+        "dataset reference smoke ok: records={} manifest={}",
+        verification.record_count, verification.manifest_sha256
+    );
+    Ok(())
+}
+
 pub(crate) fn dataset_check(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let root = super::workspace_root()?;
     let bundle_argument = args
