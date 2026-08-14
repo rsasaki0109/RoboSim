@@ -107,6 +107,8 @@ fn run() -> anyhow::Result<()> {
         "benchmark" => benchmark::benchmark(&mut args),
         "task-scale" => task_scale::task_scale(&mut args),
         "accelerator-check" => accelerator::accelerator_check(&mut args),
+        "accelerator-conformance" => accelerator::accelerator_conformance(&mut args),
+        "accelerator-scale" => accelerator::accelerator_scale(&mut args),
         "evidence" => evidence::evidence(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
@@ -1094,6 +1096,31 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(accelerator::ACCELERATOR_MANIFEST_SCHEMA_VERSION),
         ),
         (
+            "accelerators",
+            "protocol",
+            u64::from(accelerator::ACCELERATOR_PROTOCOL_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "capability_report",
+            u64::from(accelerator::ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "conformance_report",
+            u64::from(accelerator::ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "runtime_contract",
+            u64::from(accelerator::ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "scale_report",
+            u64::from(accelerator::ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1790,7 +1817,7 @@ fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartiti
 
 /// Runs the explicit CPU-only headless renderer and sensor test gates.
 fn ci_headless() -> anyhow::Result<()> {
-    accelerator::validate_selected_manifest(&workspace_root()?)?;
+    accelerator::validate_contract(&workspace_root()?)?;
     run_step("cargo test --locked -p rne_render --lib")?;
     run_step("cargo test --locked -p rne_sensor --lib")
 }

@@ -100,6 +100,15 @@ step/partial-reset operations. The legacy `VectorizedEpisode` API and its
 checkpoint remain unchanged for patch compatibility; new portable execution
 uses the separately additive `PortableBatchRunner` API.
 
+Accelerator protocol v1 and accelerator capability-report v1 are frozen
+contracts. Adapters reject unknown envelope fields and unsupported TaskSpecs
+before stepping. Adding an operation or field requires a protocol-version
+change unless the existing schema explicitly marks it optional. Runtime-private
+state is not a substitute for portable batch-checkpoint v2.
+Accelerator conformance-report v1 and runtime-contract v1 are versioned as
+well. A report made by the dependency-free fake is explicitly `contract_test`
+evidence and cannot be re-labelled as hardware evidence.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
@@ -123,7 +132,7 @@ gains/limits, and joint-kind mismatches before a physics step.
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,
-and evidence constants; changing one side alone fails.
+accelerator-protocol, and evidence constants; changing one side alone fails.
 
 ## Replay migration
 

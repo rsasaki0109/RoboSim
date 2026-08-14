@@ -69,6 +69,28 @@ Until then, the manifest status remains `experimental`, release and headless CI
 validate only the boundary and contract, and RNE makes no accelerator throughput
 claim.
 
+As of 2026-08-15, protocol v1, capability-report v1, a bounded free-fall
+TaskSpec/MJCF binding, deterministic process-contract backend, and the
+production MJX-Warp stepping path are implemented. The contract suite proves
+seed agreement, stable lanes, partial-reset isolation, deferred auto-reset, and
+checkpoint replay without installing accelerator packages. The local host is
+still CPU-only for JAX, so real GPU conformance and performance gates remain
+open and the adapter stays experimental.
+
+The promotion runtime is pinned to Linux x86-64, Python 3.12, CUDA 13, driver
+580 or newer, JAX/JAXlib/CUDA plugin 0.10.2, MuJoCo/MJX 3.9.0, and Warp 1.12.1.
+The MuJoCo line intentionally matches the existing RNE CPU backend. Official
+JAX documentation marks native Windows NVIDIA GPU support unavailable and
+documents the Linux CUDA 13 wheels and driver floor, while the MuJoCo/MJX 3.9.0
+package metadata pins Warp 1.12.1. Runtime drift fails the probe rather than
+falling back to CPU.
+
+The repository includes a manual, trusted self-hosted Linux NVIDIA workflow.
+It cannot run from pull requests. The workflow installs the pinned runtime,
+executes all four required widths, proves injected divergence is rejected, and
+uploads conformance plus hardware/package provenance. Its existence is not
+evidence; only a successful retained artifact can satisfy the open GPU gates.
+
 ## Consequences
 
 RNE gets the shortest path from its existing MuJoCo/MJCF work to device batches

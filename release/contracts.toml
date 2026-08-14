@@ -40,6 +40,11 @@ batch_checkpoint = 2
 
 [accelerators]
 manifest = 1
+protocol = 1
+capability_report = 1
+conformance_report = 1
+runtime_contract = 1
+scale_report = 1
 
 [evidence]
 fuzz_smoke_report = 1

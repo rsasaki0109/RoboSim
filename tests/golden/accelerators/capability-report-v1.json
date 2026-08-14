@@ -1,0 +1,68 @@
+{
+  "adapter_id": "mjx_warp",
+  "batch_checkpoint_schema": 2,
+  "conformance_report_schema": 1,
+  "execution_boundary": "out_of_process_python",
+  "kind": "rne_accelerator_capability_report",
+  "precision": "f64",
+  "protocol_schema": 1,
+  "requires_nvidia_gpu": true,
+  "runtime": {
+    "jax_backend": null,
+    "jax_cuda_plugin_version": null,
+    "jax_devices": [],
+    "jax_version": null,
+    "jaxlib_version": null,
+    "mujoco_version": null,
+    "machine": "<runtime>",
+    "mujoco_mjx_version": null,
+    "nvidia_driver_version": null,
+    "platform": "<runtime>",
+    "python_version": "<runtime>",
+    "warp_version": null
+  },
+  "runtime_contract": {
+    "architecture": "x86_64",
+    "cuda_major": 13,
+    "nvidia_driver_minimum": 580,
+    "official_sources": [
+      "https://docs.jax.dev/en/latest/installation.html",
+      "https://pypi.org/pypi/jax/0.10.2/json",
+      "https://pypi.org/pypi/mujoco-mjx/3.9.0/json"
+    ],
+    "operating_system": "linux",
+    "packages": {
+      "jax": "0.10.2",
+      "jax_cuda_plugin": "0.10.2",
+      "jaxlib": "0.10.2",
+      "mujoco": "3.9.0",
+      "mujoco_mjx": "3.9.0",
+      "warp_lang": "1.12.1"
+    },
+    "python": "3.12",
+    "schema_version": 1
+  },
+  "runtime_contract_schema": 1,
+  "runtime_id": "mujoco_mjx_warp",
+  "scale_report_schema": 1,
+  "schema_version": 1,
+  "status": "test_only",
+  "supported_batch_widths": [
+    1,
+    16,
+    256,
+    4096
+  ],
+  "supported_task_ids": [
+    "rne.physics.free_fall.mjx.v1"
+  ],
+  "task_spec_schema": 1,
+  "unavailable_reason_code": null,
+  "unsupported_features": [
+    "automatic_differentiation",
+    "midpoint_implicitfast_integrator",
+    "noslip_solver",
+    "pgs_solver",
+    "plugin_sensors"
+  ]
+}

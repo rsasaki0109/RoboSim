@@ -4,10 +4,17 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 pub(crate) const ACCELERATOR_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ACCELERATOR_PROTOCOL_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION: u32 = 1;
 const SELECTED_MANIFEST: &str = "adapters/mjx/accelerator.toml";
 const BATCH_WIDTHS: [usize; 4] = [1, 16, 256, 4096];
+const TASK_ID: &str = "rne.physics.free_fall.mjx.v1";
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -17,14 +24,47 @@ pub(crate) struct AcceleratorManifest {
     selected: bool,
     status: String,
     runtime: String,
+    precision: String,
     execution_boundary: String,
     core_dependency: bool,
     requires_nvidia_gpu: bool,
     task_spec_schema: u32,
     batch_checkpoint_schema: u32,
+    protocol_schema: u32,
+    capability_report_schema: u32,
+    conformance_report_schema: u32,
+    scale_report_schema: u32,
     supported_batch_widths: Vec<usize>,
+    binding_task_spec: String,
+    binding_model: String,
+    runtime_contract: String,
+    requirements: String,
     selection_adr: String,
     official_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct RuntimeContract {
+    schema_version: u32,
+    operating_system: String,
+    architecture: String,
+    python: String,
+    cuda_major: u32,
+    nvidia_driver_minimum: u32,
+    packages: RuntimePackages,
+    official_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct RuntimePackages {
+    jax: String,
+    jaxlib: String,
+    jax_cuda_plugin: String,
+    mujoco: String,
+    mujoco_mjx: String,
+    warp_lang: String,
 }
 
 pub(crate) fn accelerator_check(args: &mut impl Iterator<Item = String>) -> Result<()> {
@@ -33,12 +73,62 @@ pub(crate) fn accelerator_check(args: &mut impl Iterator<Item = String>) -> Resu
         "accelerator-check accepts no arguments"
     );
     let root = super::workspace_root()?;
-    let manifest = validate_selected_manifest(&root)?;
+    let manifest = validate_contract(&root)?;
     println!(
         "accelerator selection ok: id={} runtime={} status={}",
         manifest.id, manifest.runtime, manifest.status
     );
     Ok(())
+}
+
+pub(crate) fn accelerator_conformance(args: &mut impl Iterator<Item = String>) -> Result<()> {
+    let root = super::workspace_root()?;
+    let manifest = validate_selected_manifest(&root)?;
+    validate_task_binding(&root, &manifest)?;
+    validate_runtime_contract(&root, &manifest)?;
+    let python = super::python_command()?;
+    let forwarded: Vec<String> = args.collect();
+    let status = Command::new(python)
+        .current_dir(&root)
+        .arg(root.join("adapters/mjx/conformance.py"))
+        .args(forwarded)
+        .status()
+        .context("run MJX adapter conformance")?;
+    anyhow::ensure!(status.success(), "MJX adapter conformance failed");
+    Ok(())
+}
+
+pub(crate) fn accelerator_scale(args: &mut impl Iterator<Item = String>) -> Result<()> {
+    run_python_evidence_command("scale.py", "scale", args)
+}
+
+fn run_python_evidence_command(
+    script_name: &str,
+    label: &str,
+    args: &mut impl Iterator<Item = String>,
+) -> Result<()> {
+    let root = super::workspace_root()?;
+    let manifest = validate_selected_manifest(&root)?;
+    validate_task_binding(&root, &manifest)?;
+    validate_runtime_contract(&root, &manifest)?;
+    let python = super::python_command()?;
+    let forwarded: Vec<String> = args.collect();
+    let status = Command::new(python)
+        .current_dir(&root)
+        .arg(root.join("adapters/mjx").join(script_name))
+        .args(forwarded)
+        .status()
+        .with_context(|| format!("run MJX adapter {label}"))?;
+    anyhow::ensure!(status.success(), "MJX adapter {label} failed");
+    Ok(())
+}
+
+pub(crate) fn validate_contract(root: &Path) -> Result<AcceleratorManifest> {
+    let manifest = validate_selected_manifest(root)?;
+    validate_task_binding(root, &manifest)?;
+    validate_runtime_contract(root, &manifest)?;
+    run_python_contract_tests(root)?;
+    Ok(manifest)
 }
 
 pub(crate) fn validate_selected_manifest(root: &Path) -> Result<AcceleratorManifest> {
@@ -67,6 +157,10 @@ fn validate_manifest(root: &Path, manifest: &AcceleratorManifest) -> Result<()> 
     );
     anyhow::ensure!(manifest.runtime == "mujoco_mjx_warp", "runtime mismatch");
     anyhow::ensure!(
+        manifest.precision == "f64",
+        "accelerator precision mismatch"
+    );
+    anyhow::ensure!(
         manifest.execution_boundary == "out_of_process_python",
         "accelerator must remain behind the Python process boundary"
     );
@@ -85,6 +179,22 @@ fn validate_manifest(root: &Path, manifest: &AcceleratorManifest) -> Result<()> 
     anyhow::ensure!(
         manifest.batch_checkpoint_schema == rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION,
         "accelerator checkpoint schema mismatch"
+    );
+    anyhow::ensure!(
+        manifest.protocol_schema == ACCELERATOR_PROTOCOL_SCHEMA_VERSION,
+        "accelerator protocol schema mismatch"
+    );
+    anyhow::ensure!(
+        manifest.capability_report_schema == ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
+        "accelerator capability-report schema mismatch"
+    );
+    anyhow::ensure!(
+        manifest.conformance_report_schema == ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+        "accelerator conformance-report schema mismatch"
+    );
+    anyhow::ensure!(
+        manifest.scale_report_schema == ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
+        "accelerator scale-report schema mismatch"
     );
     anyhow::ensure!(
         manifest.supported_batch_widths == BATCH_WIDTHS,
@@ -107,6 +217,123 @@ fn validate_manifest(root: &Path, manifest: &AcceleratorManifest) -> Result<()> 
     Ok(())
 }
 
+fn validate_task_binding(root: &Path, manifest: &AcceleratorManifest) -> Result<()> {
+    let task_path = root.join(&manifest.binding_task_spec);
+    let task_text = fs::read_to_string(&task_path)
+        .with_context(|| format!("read accelerator TaskSpec {}", task_path.display()))?;
+    let task_spec: rne_ai::TaskSpec = serde_json::from_str(&task_text)
+        .with_context(|| format!("parse accelerator TaskSpec {}", task_path.display()))?;
+    task_spec
+        .validate()
+        .with_context(|| format!("validate accelerator TaskSpec {}", task_path.display()))?;
+    anyhow::ensure!(
+        task_spec.task_id == TASK_ID,
+        "accelerator task binding ID mismatch"
+    );
+
+    let model_path = root.join(&manifest.binding_model);
+    let model = fs::read_to_string(&model_path)
+        .with_context(|| format!("read accelerator model {}", model_path.display()))?;
+    anyhow::ensure!(
+        model.len() <= 1024 * 1024
+            && model.contains("<mujoco model=\"rne-free-fall\">")
+            && model.contains("timestep=\"0.016666666\"")
+            && model.contains("gravity=\"0 -9.81 0\"")
+            && model.contains("<freejoint name=\"rne_free_fall_joint\"/>")
+            && model.contains("<geom name=\"rne_free_fall_sphere\""),
+        "accelerator model must remain the bounded free-fall binding"
+    );
+    anyhow::ensure!(
+        root.join("adapters/mjx/conformance.py").is_file(),
+        "accelerator conformance runner is missing"
+    );
+    anyhow::ensure!(
+        root.join("adapters/mjx/scale.py").is_file(),
+        "accelerator scale runner is missing"
+    );
+    Ok(())
+}
+
+fn validate_runtime_contract(root: &Path, manifest: &AcceleratorManifest) -> Result<()> {
+    let contract_path = root.join(&manifest.runtime_contract);
+    let contract_text = fs::read_to_string(&contract_path)
+        .with_context(|| format!("read accelerator runtime {}", contract_path.display()))?;
+    let contract: RuntimeContract = toml::from_str(&contract_text)
+        .with_context(|| format!("parse accelerator runtime {}", contract_path.display()))?;
+    anyhow::ensure!(
+        contract.schema_version == ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION,
+        "accelerator runtime-contract schema mismatch"
+    );
+    anyhow::ensure!(
+        contract.operating_system == "linux"
+            && contract.architecture == "x86_64"
+            && contract.python == "3.12"
+            && contract.cuda_major == 13
+            && contract.nvidia_driver_minimum == 580,
+        "accelerator runtime host contract drifted"
+    );
+    anyhow::ensure!(
+        contract.packages
+            == (RuntimePackages {
+                jax: "0.10.2".to_string(),
+                jaxlib: "0.10.2".to_string(),
+                jax_cuda_plugin: "0.10.2".to_string(),
+                mujoco: "3.9.0".to_string(),
+                mujoco_mjx: "3.9.0".to_string(),
+                warp_lang: "1.12.1".to_string(),
+            }),
+        "accelerator package pins drifted"
+    );
+    anyhow::ensure!(
+        contract.official_sources.len() == 3
+            && contract
+                .official_sources
+                .iter()
+                .all(|source| source.starts_with("https://")),
+        "accelerator runtime contract must retain three official sources"
+    );
+
+    let requirements_path = root.join(&manifest.requirements);
+    let requirements = fs::read_to_string(&requirements_path).with_context(|| {
+        format!(
+            "read accelerator requirements {}",
+            requirements_path.display()
+        )
+    })?;
+    for pin in [
+        "jax[cuda13]==0.10.2",
+        "jaxlib==0.10.2",
+        "jax-cuda13-plugin[with-cuda]==0.10.2",
+        "mujoco==3.9.0",
+        "mujoco-mjx[warp]==3.9.0",
+        "warp-lang==1.12.1",
+    ] {
+        anyhow::ensure!(
+            requirements.lines().any(|line| line.trim() == pin),
+            "accelerator requirements are missing {pin}"
+        );
+    }
+    Ok(())
+}
+
+fn run_python_contract_tests(root: &Path) -> Result<()> {
+    let python = super::python_command()?;
+    let status = Command::new(python)
+        .current_dir(root)
+        .args([
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "adapters/mjx/tests",
+            "-v",
+        ])
+        .status()
+        .context("run MJX adapter protocol tests")?;
+    anyhow::ensure!(status.success(), "MJX adapter protocol tests failed");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,6 +345,8 @@ mod tests {
         assert!(manifest.selected);
         assert!(!manifest.core_dependency);
         assert_eq!(manifest.supported_batch_widths, BATCH_WIDTHS);
+        validate_task_binding(&root, &manifest).expect("task binding");
+        validate_runtime_contract(&root, &manifest).expect("runtime contract");
     }
 
     #[test]

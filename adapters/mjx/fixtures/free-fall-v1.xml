@@ -1,0 +1,10 @@
+<mujoco model="rne-free-fall">
+  <compiler angle="radian"/>
+  <option timestep="0.016666666" gravity="0 -9.81 0"/>
+  <worldbody>
+    <body name="rne_free_fall_body" pos="0 5 0">
+      <freejoint name="rne_free_fall_joint"/>
+      <geom name="rne_free_fall_sphere" type="sphere" size="0.05"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,8 @@
+# Linux x86_64 / Python 3.12 / CUDA 13. Runtime pins are validated against
+# runtime.toml before an adapter session is created.
+jax[cuda13]==0.10.2
+jaxlib==0.10.2
+jax-cuda13-plugin[with-cuda]==0.10.2
+mujoco==3.9.0
+mujoco-mjx[warp]==3.9.0
+warp-lang==1.12.1
