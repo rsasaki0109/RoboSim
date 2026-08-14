@@ -246,8 +246,16 @@ Implementation foundation: ADR 016 places a vendor-neutral
 It binds TaskSpec observation/action order, injects rather than reads monotonic
 host time, distinguishes playback/shadow/HIL/live authority, enforces bounded
 queues and explicit action limits, and produces schema-v1 event/snapshot
-evidence. Unit and golden cases cover the in-process safety contract. This is
-not yet process-level or physical-hardware exit evidence.
+evidence. A byte-bounded versioned process protocol and deterministic child
+process now add strict session/request correlation, exact trace capture, and a
+golden injected disconnect with both device watchdog and gateway stops. The
+TaskSpec-bound shadow comparator also freezes ordered tolerances, distinct
+host/SimClock timestamps, first divergence, and a revalidated golden verdict.
+Failure Capsule tooling now retains and revalidates TaskSpec, session, wire,
+shadow, and mock-conformance artifacts beside a real simulation failure replay.
+The six child-process cases now cover deadline, disconnect, reconnect, stale
+command, limit, and emergency stop. An actual reference-device shadow run and
+physical-hardware exit evidence remain open.
 
 Delivery slices:
 

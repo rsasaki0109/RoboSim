@@ -1,0 +1,55 @@
+{
+  "kind": "rne_hardware_mock_conformance",
+  "schema_version": 1,
+  "cases": [
+    {
+      "case": "command_deadline",
+      "gateway_reason": "command_deadline_missed",
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": false,
+      "passed": true
+    },
+    {
+      "case": "disconnect",
+      "gateway_reason": "disconnected",
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": false,
+      "passed": true
+    },
+    {
+      "case": "reconnect",
+      "gateway_reason": null,
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": true,
+      "passed": true
+    },
+    {
+      "case": "command_stale",
+      "gateway_reason": "command_stale",
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": false,
+      "passed": true
+    },
+    {
+      "case": "actuator_limit",
+      "gateway_reason": "actuator_limit",
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": false,
+      "passed": true
+    },
+    {
+      "case": "emergency_stop",
+      "gateway_reason": "emergency_stop",
+      "device_stop_confirmed": true,
+      "gateway_stop_delivered": true,
+      "reconnect_rearmed": false,
+      "passed": true
+    }
+  ],
+  "all_passed": true
+}

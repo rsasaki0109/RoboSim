@@ -10,7 +10,5 @@ repository.workspace = true
 [dependencies]
 rne_ai = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
 serde_json = { workspace = true }
+thiserror = { workspace = true }

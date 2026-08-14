@@ -4,13 +4,24 @@
 //! `failure-capsule create|verify`.
 
 use anyhow::{bail, Context, Result};
-use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact};
+use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact, TaskSpec, TASK_SPEC_KIND};
 use rne_core::{DeterminismContract, DeterminismScope};
+use rne_hardware_gateway::mock::{
+    MockConformanceReport, MOCK_CONFORMANCE_REPORT_KIND, MOCK_CONFORMANCE_SCHEMA_VERSION,
+};
+use rne_hardware_gateway::shadow::{
+    ShadowComparisonReport, SHADOW_COMPARISON_REPORT_KIND, SHADOW_COMPARISON_SCHEMA_VERSION,
+};
+use rne_hardware_gateway::wire::{
+    HardwareSessionEvidence, HardwareWireTrace, HARDWARE_SESSION_EVIDENCE_KIND,
+    HARDWARE_WIRE_SCHEMA_VERSION, HARDWARE_WIRE_TRACE_KIND,
+};
 use rne_log::{
     ArtifactRef, BackendMetadata, BuildMetadata, FailureCapsule, FailureMetadata, ReplayArtifact,
     RunMetadata, FAILURE_CAPSULE_KIND as CAPSULE_KIND,
 };
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -212,6 +223,12 @@ fn build_copy_plans(
             pair[1].relative_path_string
         );
     }
+    validate_hardware_evidence(
+        plans
+            .iter()
+            .filter(|plan| plan.role == "evidence")
+            .map(|plan| (plan.kind.as_str(), plan.bytes.as_slice())),
+    )?;
     Ok(plans)
 }
 
@@ -219,9 +236,19 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return Ok(("evidence".to_string(), 1));
     };
-    if value.get("kind").and_then(serde_json::Value::as_str)
-        != Some(PHYSICS_CONFORMANCE_REPORT_KIND)
-    {
+    let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
+        return Ok(("evidence".to_string(), 1));
+    };
+    let recognized = matches!(
+        kind,
+        PHYSICS_CONFORMANCE_REPORT_KIND
+            | TASK_SPEC_KIND
+            | HARDWARE_SESSION_EVIDENCE_KIND
+            | HARDWARE_WIRE_TRACE_KIND
+            | SHADOW_COMPARISON_REPORT_KIND
+            | MOCK_CONFORMANCE_REPORT_KIND
+    );
+    if !recognized {
         return Ok(("evidence".to_string(), 1));
     }
     let schema_version = value
@@ -229,12 +256,100 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
         .and_then(serde_json::Value::as_u64)
         .and_then(|version| u32::try_from(version).ok())
         .filter(|version| *version > 0)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "{PHYSICS_CONFORMANCE_REPORT_KIND} evidence requires a positive u32 schema_version"
-            )
-        })?;
-    Ok((PHYSICS_CONFORMANCE_REPORT_KIND.to_string(), schema_version))
+        .ok_or_else(|| anyhow::anyhow!("{kind} evidence requires a positive u32 schema_version"))?;
+    Ok((kind.to_string(), schema_version))
+}
+
+fn validate_hardware_evidence<'a>(
+    evidence: impl Iterator<Item = (&'a str, &'a [u8])>,
+) -> Result<()> {
+    let evidence = evidence.collect::<Vec<_>>();
+    let mut tasks = BTreeMap::<String, TaskSpec>::new();
+    for (kind, bytes) in &evidence {
+        if *kind != TASK_SPEC_KIND {
+            continue;
+        }
+        let task: TaskSpec = serde_json::from_slice(bytes)
+            .with_context(|| format!("invalid {TASK_SPEC_KIND} hardware evidence"))?;
+        task.validate()
+            .map_err(|error| anyhow::anyhow!("invalid hardware evidence TaskSpec: {error}"))?;
+        anyhow::ensure!(
+            tasks.insert(task.task_id.clone(), task).is_none(),
+            "duplicate hardware evidence TaskSpec identity"
+        );
+    }
+
+    for (kind, bytes) in evidence {
+        match kind {
+            HARDWARE_SESSION_EVIDENCE_KIND => {
+                let session: HardwareSessionEvidence = serde_json::from_slice(bytes)
+                    .context("invalid hardware session evidence JSON")?;
+                anyhow::ensure!(
+                    session.schema_version == HARDWARE_WIRE_SCHEMA_VERSION,
+                    "unsupported hardware session evidence schema {}",
+                    session.schema_version
+                );
+                let normalized = HardwareSessionEvidence::new(
+                    session.wire_trace.clone(),
+                    session.gateway.clone(),
+                )
+                .map_err(|error| anyhow::anyhow!("invalid hardware session evidence: {error}"))?;
+                anyhow::ensure!(
+                    normalized == session,
+                    "hardware session evidence top-level metadata is inconsistent"
+                );
+                anyhow::ensure!(
+                    tasks.contains_key(&session.task_id),
+                    "hardware session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                    session.task_id
+                );
+            }
+            HARDWARE_WIRE_TRACE_KIND => {
+                let trace: HardwareWireTrace =
+                    serde_json::from_slice(bytes).context("invalid hardware wire trace JSON")?;
+                trace
+                    .validate()
+                    .map_err(|error| anyhow::anyhow!("invalid hardware wire trace: {error}"))?;
+                anyhow::ensure!(
+                    tasks.contains_key(&trace.task_id),
+                    "hardware wire trace requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                    trace.task_id
+                );
+            }
+            SHADOW_COMPARISON_REPORT_KIND => {
+                let report: ShadowComparisonReport = serde_json::from_slice(bytes)
+                    .context("invalid hardware shadow comparison JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == SHADOW_COMPARISON_SCHEMA_VERSION,
+                    "unsupported hardware shadow comparison schema {}",
+                    report.schema_version
+                );
+                let task = tasks.get(&report.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "hardware shadow comparison requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        report.task_id
+                    )
+                })?;
+                report.validate_against(task).map_err(|error| {
+                    anyhow::anyhow!("invalid hardware shadow comparison evidence: {error}")
+                })?;
+            }
+            MOCK_CONFORMANCE_REPORT_KIND => {
+                let report: MockConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid hardware mock conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == MOCK_CONFORMANCE_SCHEMA_VERSION,
+                    "unsupported hardware mock conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!("invalid hardware mock conformance evidence: {error}")
+                })?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn replay_kind(bytes: &[u8]) -> Result<String> {
@@ -356,9 +471,16 @@ fn verify_directory(root: &Path) -> Result<()> {
         .validate()
         .map_err(|error| anyhow::anyhow!("invalid failure capsule: {error}"))?;
 
+    let mut verified_artifacts = Vec::with_capacity(capsule.artifacts.len());
     for artifact in &capsule.artifacts {
-        verify_artifact_path(&canonical_root, root, artifact)?;
+        let bytes = verify_artifact_path(&canonical_root, root, artifact)?;
+        verified_artifacts.push((artifact.kind.as_str(), bytes));
     }
+    validate_hardware_evidence(
+        verified_artifacts
+            .iter()
+            .map(|(kind, bytes)| (*kind, bytes.as_slice())),
+    )?;
     println!(
         "verified failure capsule {} ({} artifacts)",
         root.display(),
@@ -367,7 +489,11 @@ fn verify_directory(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_artifact_path(canonical_root: &Path, root: &Path, artifact: &ArtifactRef) -> Result<()> {
+fn verify_artifact_path(
+    canonical_root: &Path,
+    root: &Path,
+    artifact: &ArtifactRef,
+) -> Result<Vec<u8>> {
     let normalized = rne_log::normalize_relative_path(&artifact.path)
         .map_err(|error| anyhow::anyhow!("invalid artifact path `{}`: {error}", artifact.path))?;
     anyhow::ensure!(
@@ -428,7 +554,7 @@ fn verify_artifact_path(canonical_root: &Path, root: &Path, artifact: &ArtifactR
             artifact.path
         );
     }
-    Ok(())
+    Ok(bytes)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -903,6 +1029,108 @@ mod tests {
             .expect("evidence reference");
         assert_eq!(report.kind, PHYSICS_CONFORMANCE_REPORT_KIND);
         assert_eq!(report.schema_version, 2);
+    }
+
+    #[test]
+    fn hardware_evidence_roundtrips_with_task_bound_validation() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("shadow-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let task_path = temp.path().join("diff-drive-task.json");
+        fs::write(
+            &task_path,
+            include_bytes!("../../assets/tasks/diff_drive_goal.task.json"),
+        )
+        .expect("write TaskSpec evidence");
+        let session_path = temp.path().join("hardware-session.json");
+        fs::write(
+            &session_path,
+            include_bytes!(
+                "../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+            ),
+        )
+        .expect("write session evidence");
+        let shadow_path = temp.path().join("shadow-comparison.json");
+        fs::write(
+            &shadow_path,
+            include_bytes!("../../tests/golden/hardware/gateway-shadow-comparison-v1.json"),
+        )
+        .expect("write shadow evidence");
+        let conformance_path = temp.path().join("mock-conformance.json");
+        fs::write(
+            &conformance_path,
+            include_bytes!("../../tests/golden/hardware/gateway-mock-conformance-v1.json"),
+        )
+        .expect("write mock conformance evidence");
+        let output = temp.path().join("hardware-capsule");
+
+        invoke_create(
+            &replay_path,
+            &output,
+            &[&task_path, &session_path, &shadow_path, &conformance_path],
+        )
+        .expect("create hardware evidence capsule");
+        invoke_verify(&output).expect("verify hardware evidence capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule json");
+        for expected_kind in [
+            TASK_SPEC_KIND,
+            HARDWARE_SESSION_EVIDENCE_KIND,
+            SHADOW_COMPARISON_REPORT_KIND,
+            MOCK_CONFORMANCE_REPORT_KIND,
+        ] {
+            assert!(capsule
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == expected_kind));
+        }
+    }
+
+    #[test]
+    fn hardware_evidence_rejects_missing_task_and_tampered_summary() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("shadow-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let session_path = temp.path().join("hardware-session.json");
+        fs::write(
+            &session_path,
+            include_bytes!(
+                "../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+            ),
+        )
+        .expect("write session evidence");
+        let missing_task_output = temp.path().join("missing-task-capsule");
+        let error = invoke_create(&replay_path, &missing_task_output, &[&session_path])
+            .expect_err("hardware session without TaskSpec must reject");
+        assert!(error
+            .to_string()
+            .contains("requires matching rne_task_spec"));
+        assert!(!missing_task_output.exists());
+
+        let task_path = temp.path().join("diff-drive-task.json");
+        fs::write(
+            &task_path,
+            include_bytes!("../../assets/tasks/diff_drive_goal.task.json"),
+        )
+        .expect("write TaskSpec evidence");
+        let mut shadow: Value = serde_json::from_slice(include_bytes!(
+            "../../tests/golden/hardware/gateway-shadow-comparison-v1.json"
+        ))
+        .expect("shadow json");
+        shadow["summary"]["passed"] = Value::Bool(true);
+        let shadow_path = temp.path().join("tampered-shadow.json");
+        fs::write(&shadow_path, serde_json::to_vec_pretty(&shadow).unwrap())
+            .expect("write tampered shadow");
+        let tampered_output = temp.path().join("tampered-capsule");
+        let error = invoke_create(&replay_path, &tampered_output, &[&task_path, &shadow_path])
+            .expect_err("tampered shadow summary must reject");
+        assert!(error.to_string().contains("summary does not match"));
+        assert!(!tampered_output.exists());
     }
 
     #[test]

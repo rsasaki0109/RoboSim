@@ -1145,6 +1145,31 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_hardware_gateway::HARDWARE_GATEWAY_SCHEMA_VERSION),
         ),
         (
+            "hardware",
+            "wire_protocol",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "wire_trace",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "session_evidence",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "shadow_comparison",
+            u64::from(rne_hardware_gateway::shadow::SHADOW_COMPARISON_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "mock_conformance",
+            u64::from(rne_hardware_gateway::mock::MOCK_CONFORMANCE_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),

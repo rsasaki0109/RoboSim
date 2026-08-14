@@ -58,9 +58,16 @@ The v0.6 foundation has started without pulling hardware concerns into core.
 live authority modes, accepts injected monotonic host ticks, bounds every
 queue, and fails closed on deadline, stale data, disconnect, actuator limit,
 clock regression, queue overrun, and emergency stop. A golden over-limit
-session freezes schema-v1 events and final state. Process-level mock evidence,
-trace/Failure Capsule integration, shadow comparison, and selected reference
-hardware remain open.
+session freezes schema-v1 events and final state. A byte-bounded versioned
+process protocol and deterministic child-process mock now freeze an injected
+disconnect with both device watchdog and gateway stops. The remaining process
+fault matrix now passes six child-process cases: deadline, disconnect,
+reconnect, stale command, limit, and emergency stop. A TaskSpec-bound shadow
+comparator records ordered tolerances, separate host/SimClock timestamps, first
+divergence, and a revalidated golden verdict. Failure Capsule create/verify preserves these
+typed artifacts beside the corresponding simulation replay and rejects missing
+TaskSpec or tampered aggregates. A real shadow run on selected reference
+hardware remains open.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

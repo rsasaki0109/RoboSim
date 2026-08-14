@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted for the v0.6 sim-to-real foundation. The adapter-side state machine
-and golden fail-closed session were implemented on 2026-08-15; process and
-physical-hardware evidence remain open.
+Accepted for the v0.6 sim-to-real foundation. The adapter-side state machine,
+bounded process protocol, deterministic process mock, and golden disconnect
+session were implemented on 2026-08-15. The TaskSpec-bound shadow comparator
+and its first-divergence golden are also implemented. The six-case child-process
+fault matrix passes; physical-hardware evidence remains open.
 
 ## Context
 
@@ -35,6 +37,25 @@ Gateway event/snapshot evidence is schema-versioned and has a committed golden
 shape. It records decisions made from injected host ticks, but those ticks do
 not participate in simulation determinism or stable simulation-state hashes.
 
+The process boundary uses a versioned, byte-bounded JSON Lines protocol with
+separate host/device kinds, session and request correlation, strict payloads,
+and a bounded trace that never overwrites evidence. Terminal device responses
+must confirm a device-side safe stop. A deterministic child-process mock
+implements the same public contract without clocks, sleeps, vendor types, or
+network dependencies.
+
+Shadow comparison is a bounded evidence operation, not a new authority mode.
+It compares TaskSpec-normalized hardware and simulation observations using one
+ordered tolerance per tensor, keeps host and simulation timestamps distinct,
+and preserves the first field outside tolerance. Discrete dtypes compare
+exactly. Reports can be rebound to the TaskSpec and their aggregate verdicts
+recomputed without hardware access.
+
+Failure Capsules retain their existing simulation/behavior replay requirement.
+Hardware session and shadow artifacts are typed evidence beside that replay,
+never a synthetic simulation clock. Capsule creation and verification require
+a matching TaskSpec and rerun session, wire-trace, and shadow-report validation.
+
 ## Consequences
 
 Core crates remain ROS 2-, vendor-, network-, and wall-clock-free. A ROS 2,
@@ -42,8 +63,9 @@ C/Python, or vendor process can share the same authority contract without
 changing TaskSpec or simulation types. Tests can cover every timing boundary
 without sleeping.
 
-The gateway is not itself a physical-hardware claim. A process protocol, mock
-disconnect/reconnect suite, trace/Failure Capsule bridge, shadow comparison,
-and selected reference robot must still supply v0.6 exit evidence. A future
-protocol may wrap these types, but may not weaken their queue, deadline, limit,
-or explicit-rearm invariants.
+The gateway is not itself a physical-hardware claim. The process mock proves
+command deadline, disconnect, reconnect, stale command, limit, and emergency
+stop behavior, but the selected reference robot must still supply an actual
+shadow run and v0.6 exit evidence. Future protocol revisions may not weaken
+byte/queue/deadline/limit, device-stop confirmation, comparison, capsule
+validation, or explicit-rearm invariants.

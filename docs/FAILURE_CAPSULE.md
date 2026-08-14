@@ -26,6 +26,31 @@ to `replay/`, optional evidence is copied to `evidence/`, and each reference
 gets a lowercase SHA-256 digest. The destination must not already exist;
 creation never overwrites an existing capsule directory.
 
+Hardware and shadow failures keep that replay requirement: a hardware trace is
+not mislabeled as simulation time or a simulation action schema. Supply the
+corresponding simulation/behavior failure replay and add the portable TaskSpec,
+hardware session evidence, and shadow comparison as evidence:
+
+```text
+cargo run -p xtask -- failure-capsule create \
+  --replay artifacts/shadow-run/failure.rne-replay \
+  --evidence assets/tasks/diff_drive_goal.task.json \
+  --evidence artifacts/shadow-run/hardware-session.json \
+  --evidence artifacts/shadow-run/shadow-comparison.json \
+  --output artifacts/failure-capsules/shadow-failure \
+  --backend shadow \
+  --backend-version wire-v1
+```
+
+Known hardware session, wire, shadow, and mock-conformance evidence retains its
+concrete kind and schema in artifact references. Creation and verification both
+require every session, wire trace, and shadow report to have a matching
+TaskSpec evidence file. Session evidence is reconstructed from its wire trace
+and gateway events; normalized hardware/simulation vectors replay through the
+shadow comparator to recompute first divergence, aggregates, and verdict.
+Missing TaskSpec evidence, inconsistent top-level session metadata, or a
+tampered shadow summary fails before a capsule is accepted.
+
 Physics conformance reports retain their
 `rne_physics_conformance_report` kind and report schema version in the capsule
 instead of being flattened to generic evidence. The v0.3 fault-injection proof
@@ -67,8 +92,9 @@ inventing counts.
 absolute/parent-traversal paths, rejects symlink escapes, checks that every
 referenced file exists and matches its digest, and invokes the known replay
 reader/schema validator for generic and behavior replay kinds. Known physics
-conformance evidence is also checked for matching kind and schema metadata. It
-does not trust host paths recorded in the capsule.
+conformance evidence is also checked for matching kind and schema metadata. The
+verifier invokes the known TaskSpec, hardware-session, wire-trace, and
+shadow-report validators. It does not trust host paths recorded in the capsule.
 
 The capsule schema is intentionally independent of transport. A future archive
 or object-store adapter can package the same relative paths without changing

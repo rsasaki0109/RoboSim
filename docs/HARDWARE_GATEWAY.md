@@ -5,9 +5,10 @@ shadow, hardware-in-the-loop (HIL), and live robot sessions. It binds directly
 to the portable `TaskSpec`; it does not add hardware, ROS 2, vendor, or
 wall-clock types to simulation crates.
 
-This is the v0.6 foundation, not a claim of real-robot support. A vendor
-transport, process-level mock, reference robot, and completed hardware evidence
-run remain required before live support is advertised.
+This is the v0.6 foundation, not a claim of real-robot support. A versioned
+process protocol and deterministic process mock now exist, but a vendor
+transport, reference robot, and completed hardware evidence run remain required
+before live support is advertised.
 
 ## Time and authority
 
@@ -50,12 +51,62 @@ The observation ring, actuator queue, and audit event ring are bounded. Old
 observations may be discarded with an audited counter; actuator commands are
 never overwritten by a newer command. A full actuator queue trips safety.
 
+## Process protocol and mock
+
+Protocol v1 uses strict JSON Lines with distinct host/device discriminators,
+an exact schema version, caller-selected session identity, monotonic request
+sequence, and correlated response sequence. `HardwareWireCodec` enforces a
+64 KiB default encoded-frame bound and reads through `BufRead::fill_buf`
+without allowing an unterminated peer message to grow memory without limit.
+Unknown fields, embedded line separators, zero widths, non-finite numeric
+payloads, and inconsistent stop fields are rejected.
+
+`HardwareWireTraceRecorder` has a hard entry capacity. It refuses a new frame
+instead of discarding replay evidence, and it requires strict host/device
+alternation plus request correlation. `HardwareSessionEvidence` joins the
+exact wire trace to gateway events and rejects a disconnect or safety outcome
+that does not match the final gateway latch.
+
+`rne-hardware-mock-device` implements that public contract in a child process.
+It never reads a clock or sleeps. Observation polls return deterministic zero
+vectors, and command-line fault plans inject an exact-count disconnect or
+emergency stop. A terminal response is valid only when it confirms the device
+watchdog applied a safe stop. The mock is conformance infrastructure, not a
+robot dynamics model or a vendor transport.
+
+## Shadow comparison
+
+`ShadowComparator` binds hardware observations and deterministic simulation
+steps to the same TaskSpec observation order. Its configuration provides
+exactly one absolute tolerance per tensor; integer and boolean tensors require
+zero tolerance. Hardware sequence, injected receipt tick, simulation step, and
+SimClock ticks remain distinct. Shape/dtype checks run on both sides before
+metrics are computed.
+
+The comparator retains a configured maximum number of samples and fails when
+that capacity is reached. Its report preserves normalized hardware/simulation
+vectors, per-sample sum/mean/max error, violation count, the first
+tensor/element/unit divergence, aggregate metrics, and a pass/fail verdict.
+`validate_against` rebinds an untrusted report to the TaskSpec and replays every
+vector through the comparator. This establishes the portable comparison
+contract; an actual reference-device shadow run is still required.
+
 ## Evidence and current gate
 
 Gateway evidence schema v1 contains the retained ordered event stream and a
-final bounded snapshot. Its contract is registered in
-`release/contracts.toml`; the canonical over-limit live session is
-`tests/golden/hardware/gateway-fail-closed-session-v1.json`.
+final bounded snapshot. Wire protocol/trace/session-evidence schemas are also
+registered in `release/contracts.toml`. Canonical evidence includes:
+
+- `tests/golden/hardware/gateway-fail-closed-session-v1.json`: in-process live
+  over-limit stop;
+- `tests/golden/hardware/gateway-process-disconnect-session-v1.json`:
+  process-isolated HIL command, injected disconnect, device watchdog stop, and
+  correlated gateway stop;
+- `tests/golden/hardware/gateway-shadow-comparison-v1.json`: TaskSpec-bound
+  comparison with one preserved first divergence and recomputed verdict;
+- `tests/golden/hardware/gateway-mock-conformance-v1.json`: six actual child
+  process cases covering command deadline, disconnect, explicit reconnect,
+  stale command, actuator limit, and device emergency stop.
 
 Run the focused gate with:
 
@@ -65,10 +116,15 @@ cargo clippy -p rne_hardware_gateway --all-targets -- -D warnings
 ```
 
 `xtask ci-headless` also executes this gate. Unit and golden tests currently
-cover shadow suppression, armed live delivery, limit stop, missed deadline,
+cover bounded wire decoding, strict trace correlation, process isolation,
+shadow suppression, armed HIL/live delivery, limit stop, missed deadline,
 stale queued command, disconnect/reconnect, emergency stop, bounded
 observations, clock regression, and missing action limits.
 
-The next slices are a versioned process protocol and mock, observation/action
-trace recording, shadow-vs-simulation comparison, Failure Capsule integration,
-and only then a selected reference hardware adapter.
+`xtask failure-capsule create|verify` now preserves and validates TaskSpec,
+session, wire-trace, shadow-report, and mock-conformance kinds. It keeps a
+corresponding simulation or behavior replay as the capsule replay instead of
+pretending host time is simulation time.
+
+The process-mock exit matrix is complete. The next slice selects a reference
+hardware adapter and records a real shadow run before any live-support claim.

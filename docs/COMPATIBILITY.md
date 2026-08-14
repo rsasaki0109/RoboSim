@@ -137,6 +137,36 @@ decisions and never replace SimClock or enter deterministic simulation-state
 hashes. The canonical fail-closed live session is
 `tests/golden/hardware/gateway-fail-closed-session-v1.json`.
 
+Hardware wire protocol/trace/session-evidence schemas v1 freeze directional
+frame kinds, strict JSON Lines encoding, session and request correlation,
+typed commands/responses, terminal device-stop confirmation, exact trace
+ordering, and correlation with gateway safety state. The default frame limit is
+64 KiB; a trace that reaches its configured capacity fails instead of dropping
+replay frames. The process-isolated disconnect fixture is
+`tests/golden/hardware/gateway-process-disconnect-session-v1.json`.
+
+Shadow-comparison report schema v1 freezes the TaskSpec identity and ordered
+tensor tolerances, separate host/simulation timestamps, normalized observation
+vectors, per-sample sum/mean/max errors, first violating tensor/element/unit,
+aggregate counts, and verdict. Discrete observation tensors require exact
+comparison. An untrusted report replays every vector against its TaskSpec; its
+canonical failing fixture is
+`tests/golden/hardware/gateway-shadow-comparison-v1.json`.
+
+Hardware mock-conformance report schema v1 requires exactly six canonically
+ordered cases: command deadline, disconnect, reconnect, stale command,
+actuator limit, and emergency stop. Every case must prove device zero-output
+confirmation and gateway zero-stop delivery; reconnect additionally proves an
+explicit rearm. The canonical all-pass report is
+`tests/golden/hardware/gateway-mock-conformance-v1.json`.
+
+Failure Capsule tooling preserves the concrete TaskSpec, hardware-session,
+wire-trace, shadow-report, and mock-conformance kinds instead of flattening
+them to generic evidence. Creation and verification require matching TaskSpec
+evidence and rerun the known validators. Hardware host ticks are never
+substituted for the capsule's simulation replay timestamps; a corresponding
+generic or behavior failure replay remains mandatory.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
@@ -160,8 +190,8 @@ gains/limits, and joint-kind mismatches before a physics step.
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,
-accelerator-protocol, dataset, and evidence constants; changing one side alone
-fails.
+accelerator-protocol, dataset, hardware, and evidence constants; changing one
+side alone fails.
 
 ## Replay migration
 

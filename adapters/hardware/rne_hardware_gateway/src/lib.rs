@@ -7,6 +7,10 @@
 
 #![deny(missing_docs)]
 
+pub mod mock;
+pub mod shadow;
+pub mod wire;
+
 use rne_ai::{TaskSpec, TaskSpecValidationError, TensorDType, TensorSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
