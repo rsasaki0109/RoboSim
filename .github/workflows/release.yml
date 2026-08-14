@@ -3,7 +3,7 @@ name: Release rehearsal
 on:
   pull_request:
   push:
-    tags: ["v1.0.0-rc.*"]
+    tags: ["v0.1.*"]
   workflow_dispatch:
 
 permissions:
