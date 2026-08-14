@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+mujoco = ["dep:rne_physics_mujoco", "rne_physics_mujoco/mujoco"]
+
 [lib]
 path = "src/lib.rs"
 
@@ -20,6 +24,7 @@ rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_analytic = { workspace = true }
+rne_physics_mujoco = { path = "../../crates/rne_physics_mujoco", optional = true }
 rne_physics_rapier = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }

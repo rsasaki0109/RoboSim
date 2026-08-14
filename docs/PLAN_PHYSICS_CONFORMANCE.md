@@ -150,5 +150,8 @@ assumption:
   Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
   and MuJoCo must implement the same contract before advertising articulation.
 
-The next v2 increment adds MuJoCo rigid-body compilation and registers its
-free-fall tolerance profile in the same catalog.
+MuJoCo rigid-body compilation now registers
+`mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
+`rne_physics_conformance/mujoco` feature. The next v2 increment adds
+backend-neutral revolute/prismatic actuation and `JointState` synchronization
+before MuJoCo may advertise `articulation`.

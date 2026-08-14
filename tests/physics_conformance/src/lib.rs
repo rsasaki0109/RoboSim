@@ -13,6 +13,8 @@ use rne_physics::{
     PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION, PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 use rne_physics_analytic::AnalyticBackend;
+#[cfg(feature = "mujoco")]
+use rne_physics_mujoco::MuJoCoBackend;
 use rne_physics_rapier::RapierBackend;
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -25,9 +27,13 @@ pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 pub const CONFORMANCE_CATALOG_VERSION: u16 = 2;
 
 const BACKEND_ANALYTIC: &str = "analytic";
+#[cfg(feature = "mujoco")]
+const BACKEND_MUJOCO: &str = "mujoco";
 const BACKEND_RAPIER: &str = "rapier";
 const BACKEND_COMPARISON: &str = "analytic_vs_rapier";
 const CASE_ANALYTIC_RIGID: &str = "analytic.rigid_body.free_fall";
+#[cfg(feature = "mujoco")]
+const CASE_MUJOCO_RIGID: &str = "mujoco.rigid_body.free_fall";
 const CASE_RAPIER_RIGID: &str = "rapier.rigid_body.free_fall";
 const CASE_RAPIER_ARTICULATION: &str = "rapier.articulation.revolute_limit";
 const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
@@ -102,6 +108,16 @@ const TOLERANCES: &[ToleranceSpec] = &[
         absolute: 0.03,
         relative: 0.0,
         rationale: "Rapier f32 integration is within 3 cm of continuous free fall at 60 Hz",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "mujoco_free_fall_position_m_v1",
+        case_id: CASE_MUJOCO_RIGID,
+        metric_id: "position_y_m",
+        unit: MetricUnit::Metre,
+        absolute: 1e-9,
+        relative: 0.0,
+        rationale: "MuJoCo f64 Euler integration follows the closed discrete reference",
     },
     ToleranceSpec {
         id: "free_fall_velocity_m_s_v1",
@@ -280,9 +296,17 @@ pub fn run_conformance() -> ConformanceReport {
         analytic.free_fall.as_ref(),
         rapier.free_fall.as_ref(),
     ));
+    let backends = vec![analytic.conformance.backend, rapier.conformance.backend];
+    #[cfg(feature = "mujoco")]
+    let backends = {
+        let mut backends = backends;
+        let mujoco = execute_backend(MuJoCoBackend::manifest(), &mujoco_backend);
+        cases.extend(mujoco.conformance.cases);
+        backends.push(mujoco.conformance.backend);
+        backends
+    };
     cases.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let backends = vec![analytic.conformance.backend, rapier.conformance.backend];
     let all_passed = cases.iter().all(|case| case.passed)
         && backends
             .iter()
@@ -430,6 +454,11 @@ fn free_fall_position_contract(backend: &str) -> Option<(f64, &'static str)> {
             "analytic_free_fall_position_m_v1",
         )),
         BACKEND_RAPIER => Some((continuous_free_fall_y(), "rapier_free_fall_position_m_v1")),
+        #[cfg(feature = "mujoco")]
+        BACKEND_MUJOCO => Some((
+            semi_implicit_free_fall_y(),
+            "mujoco_free_fall_position_m_v1",
+        )),
         _ => None,
     }
 }
@@ -459,7 +488,14 @@ fn run_free_fall<B: PhysicsBackend>(mut backend: B) -> anyhow::Result<FreeFallRe
         backend.step(physics_world, dt)?;
         backend.sync_to_ecs(&mut world, physics_world)?;
     }
-    let contacts = backend.contacts(physics_world)?.to_vec();
+    let contacts = if backend
+        .capabilities()
+        .contains(&PhysicsCapability::ContactForce)
+    {
+        backend.contacts(physics_world)?.to_vec()
+    } else {
+        Vec::new()
+    };
     let snapshot = capture_physics_snapshot(
         &world,
         &contacts,
@@ -902,6 +938,11 @@ fn step_backend<B: PhysicsBackend>(
 
 fn fixed_dt() -> SimDuration {
     SimDuration::from_hertz(Hertz::new(STEP_HZ))
+}
+
+#[cfg(feature = "mujoco")]
+fn mujoco_backend() -> MuJoCoBackend {
+    MuJoCoBackend::new(fixed_dt()).expect("MuJoCo 3.9 runtime must be available")
 }
 
 fn semi_implicit_free_fall_y() -> f64 {

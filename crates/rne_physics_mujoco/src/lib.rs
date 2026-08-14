@@ -2,13 +2,17 @@
 //!
 //! The crate deliberately keeps MuJoCo behind the `mujoco` feature.  A normal
 //! workspace build therefore does not require a MuJoCo runtime or a native
-//! library.  The feature-gated backend is an intentionally small conformance
-//! spike: it loads a known MJCF free-joint sphere fixture and exposes only the
-//! backend-neutral [`rne_physics::PhysicsBackend`] trait.
+//! library. The feature-gated backend compiles backend-neutral ECS rigid bodies
+//! into a backend-private MJCF model before step 0, then exposes simulation only
+//! through the [`rne_physics::PhysicsBackend`] trait. A caller-owned MJCF
+//! constructor remains available for the original bounded compatibility fixture.
 
 #![deny(missing_docs)]
 
 use rne_physics::{PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability};
+
+#[cfg(any(feature = "mujoco", test))]
+mod compiler;
 
 /// The MuJoCo feature is enabled in this build.
 pub const MUJOCO_FEATURE_ENABLED: bool = cfg!(feature = "mujoco");

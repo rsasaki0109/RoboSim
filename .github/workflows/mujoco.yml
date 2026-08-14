@@ -6,15 +6,19 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "crates/rne_physics/**"
       - "crates/rne_physics_mujoco/**"
       - "docs/PLAN_MUJOCO_SPIKE.md"
+      - "tests/physics_conformance/**"
       - ".github/workflows/mujoco.yml"
   pull_request:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "crates/rne_physics/**"
       - "crates/rne_physics_mujoco/**"
       - "docs/PLAN_MUJOCO_SPIKE.md"
+      - "tests/physics_conformance/**"
       - ".github/workflows/mujoco.yml"
   workflow_dispatch:
 
@@ -108,7 +112,11 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --locked -p rne_physics_mujoco --features mujoco --all-targets -- -D warnings
+        run: |
+          cargo clippy --locked -p rne_physics_mujoco --features mujoco --all-targets -- -D warnings
+          cargo clippy --locked -p rne_physics_conformance --features mujoco --all-targets -- -D warnings
 
       - name: MuJoCo feature tests
-        run: cargo test --locked -p rne_physics_mujoco --features mujoco
+        run: |
+          cargo test --locked -p rne_physics_mujoco --features mujoco
+          cargo test --locked -p rne_physics_conformance --features mujoco

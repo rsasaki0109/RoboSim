@@ -135,11 +135,14 @@ Current implementation status:
 
 - conformance report schema v2 and backend manifest schema v1 are registered;
 - the capability catalog is callable through a generic `PhysicsBackend`
-  factory for Analytic and Rapier;
+  factory for Analytic, Rapier, and feature-gated MuJoCo;
 - Rapier synchronizes backend-neutral completed-step `JointState` values into
   ECS, removing the conformance runner's dependency on a Rapier-only getter;
-- MuJoCo publishes a default-off manifest, but does not join the aggregate
-  catalog until its ECS model compiler replaces the bounded fixture loader.
+- MuJoCo compiles multiple fixed/dynamic ECS bodies into backend-private MJCF,
+  synchronizes pose and velocity at an explicit fixed step, and joins the shared
+  rigid-body catalog on Windows and Linux;
+- MuJoCo preflight rejects articulation, sensors, kinematic bodies, invalid
+  geometry, and post-step-0 topology changes before they can be approximated.
 
 Delivery slices:
 

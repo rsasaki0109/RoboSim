@@ -3599,6 +3599,7 @@ dependencies = [
  "rne_math",
  "rne_physics",
  "rne_physics_analytic",
+ "rne_physics_mujoco",
  "rne_physics_rapier",
  "rne_world",
  "serde",
