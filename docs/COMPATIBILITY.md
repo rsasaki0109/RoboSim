@@ -38,6 +38,14 @@ documented migration notes.
 baseline. Workspace rustdoc runs with warnings denied, and public libraries
 deny missing documentation.
 
+The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive
+`PhysicsCapability` and `PhysicsError` enums with `KinematicBody` and
+`InvalidActuation`. Downstream exhaustive matches must add arms for those
+variants. `KinematicBody` is appended after the frozen capability variants, so
+their discriminants and derived ordering do not change. The `rne_physics`
+SemVer policy reports enum additions as warnings during 0.x while continuing
+to reject removals, payload changes, and variant reordering.
+
 ## C ABI and plugin compatibility
 
 Controller ABI v3 is the current authoring ABI. The host continues to load the

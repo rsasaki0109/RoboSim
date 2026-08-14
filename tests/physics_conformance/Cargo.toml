@@ -30,7 +30,7 @@ rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_analytic = { workspace = true }
-rne_physics_mujoco = { path = "../../crates/rne_physics_mujoco", optional = true }
+rne_physics_mujoco = { version = "=0.1.0", path = "../../crates/rne_physics_mujoco", optional = true }
 rne_physics_rapier = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }

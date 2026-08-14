@@ -134,8 +134,8 @@ fn declares_rigid_body_kinematic_body_and_deterministic_step() {
         backend.capabilities(),
         &[
             PhysicsCapability::RigidBody,
-            PhysicsCapability::KinematicBody,
-            PhysicsCapability::DeterministicStep
+            PhysicsCapability::DeterministicStep,
+            PhysicsCapability::KinematicBody
         ]
     );
     require_capabilities(

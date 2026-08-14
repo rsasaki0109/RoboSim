@@ -1,2 +1,3 @@
 *.rs text eol=lf
 *.rne.traffic.json text eol=lf
+tests/golden/**/*.json text eol=lf

@@ -28,8 +28,8 @@ use std::collections::HashMap;
 /// Backend-agnostic capability set provided by the analytic backend.
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
-    PhysicsCapability::KinematicBody,
     PhysicsCapability::DeterministicStep,
+    PhysicsCapability::KinematicBody,
 ];
 
 /// One integrated dynamic body inside an [`AnalyticWorld`].

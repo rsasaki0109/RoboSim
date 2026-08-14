@@ -50,8 +50,6 @@ impl Default for PhysicsWorldDesc {
 pub enum PhysicsCapability {
     /// Supports rigid body simulation.
     RigidBody,
-    /// Supports externally posed kinematic rigid bodies.
-    KinematicBody,
     /// Supports articulated bodies.
     Articulation,
     /// Supports GPU rigid body simulation.
@@ -64,6 +62,8 @@ pub enum PhysicsCapability {
     ContactForce,
     /// Supports batched raycasts.
     RaycastBatch,
+    /// Supports externally posed kinematic rigid bodies.
+    KinematicBody,
 }
 
 /// Repeatability promise made by a physics backend manifest.
@@ -225,13 +225,13 @@ impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
     pub const ALL: [Self; 8] = [
         Self::RigidBody,
-        Self::KinematicBody,
         Self::Articulation,
         Self::GpuRigidBody,
         Self::DeterministicStep,
         Self::SoftBody,
         Self::ContactForce,
         Self::RaycastBatch,
+        Self::KinematicBody,
     ];
 
     /// Returns the stable lowercase identifier used by conformance reports.
