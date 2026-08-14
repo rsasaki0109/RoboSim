@@ -34,6 +34,13 @@ tolerance_registry = 1
 [determinism]
 contract = 1
 
+[tasks]
+task_spec = 1
+batch_checkpoint = 2
+
+[accelerators]
+manifest = 1
+
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1
@@ -41,5 +48,6 @@ install_rehearsal_report = 1
 final_exit_report = 1
 capability_report = 1
 benchmark_report = 1
+task_scale_report = 1
 failure_capsule = 1
 evidence_manifest = 1

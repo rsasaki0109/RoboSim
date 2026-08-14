@@ -66,8 +66,8 @@ pub use unitree_g1_parts_episode::{
     UnitreeG1PartsObservation, UnitreeG1PartsPhase,
 };
 pub use unitree_go2_episode::{
-    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
-    UnitreeGo2Push,
+    unitree_go2_task_spec, UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig,
+    UnitreeGo2Observation, UnitreeGo2Push,
 };
 pub use unitree_go2_gait::{
     unitree_go2_scheduled_targets, unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay,

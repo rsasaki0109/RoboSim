@@ -1,0 +1,17 @@
+schema_version = 1
+id = "mjx_warp"
+selected = true
+status = "experimental"
+runtime = "mujoco_mjx_warp"
+execution_boundary = "out_of_process_python"
+core_dependency = false
+requires_nvidia_gpu = true
+task_spec_schema = 1
+batch_checkpoint_schema = 2
+supported_batch_widths = [1, 16, 256, 4096]
+selection_adr = "docs/adr/014-mjx-warp-accelerator-selection.md"
+official_sources = [
+  "https://mujoco.readthedocs.io/en/latest/mjx.html",
+  "https://genesis-world.readthedocs.io/en/latest/user_guide/overview/installation.html",
+  "https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html",
+]

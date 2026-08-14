@@ -92,6 +92,14 @@ benchmark, and Failure Capsule artifacts. OpenSCENARIO, SDF, MJCF, URDF, SUMO,
 and PLATEAU inputs are import formats: accepted subsets are documented, and
 unsupported constructs remain explicit import errors.
 
+TaskSpec schema v1 rejects unknown fields and validates fixed tensor shape,
+dtype, row-major order, units, bounds, reward terms, termination, reset,
+curriculum, and randomization before execution. Ordered arrays are semantic.
+Portable batch checkpoint schema v2 embeds its TaskSpec and chronological
+step/partial-reset operations. The legacy `VectorizedEpisode` API and its
+checkpoint remain unchanged for patch compatibility; new portable execution
+uses the separately additive `PortableBatchRunner` API.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
@@ -114,8 +122,8 @@ gains/limits, and joint-kind mismatches before a physics step.
 
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
-transport, asset, replay, physics, determinism, and evidence constants; changing
-one side alone fails.
+transport, asset, replay, physics, determinism, task, accelerator-selection,
+and evidence constants; changing one side alone fails.
 
 ## Replay migration
 

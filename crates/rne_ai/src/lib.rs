@@ -20,10 +20,12 @@ pub mod mm_minimal_kinematics;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
+pub mod portable_batch;
 pub mod reach;
 pub mod render;
 pub mod reward;
 pub mod rng;
+pub mod task;
 pub mod transport;
 pub mod vectorized;
 
@@ -72,9 +74,10 @@ pub use env::{
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_inspection_targets,
     unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path, unitree_go2_dynamic_scene_path,
-    unitree_go2_scene_path, unitree_go2_scheduled_targets, unitree_go2_terrain_scene_path,
-    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s,
-    ClutterPickConfig, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
+    unitree_go2_scene_path, unitree_go2_scheduled_targets, unitree_go2_task_spec,
+    unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
+    unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s, ClutterPickConfig,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
     DiffDriveEpisodeSnapshotError, DiffDriveSim, GraspMode, HumanoidAction, HumanoidEpisode,
     HumanoidEpisodeConfig, HumanoidObservation, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeProgressSnapshot,
@@ -145,6 +148,11 @@ pub use policy::{
     LocomotionPolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase, Policy,
     VisuomotorReachPolicy,
 };
+pub use portable_batch::{
+    PortableBatchCheckpoint, PortableBatchConfig, PortableBatchError, PortableBatchLaneCheckpoint,
+    PortableBatchOperation, PortableBatchRunner, PortableBatchStep,
+    PORTABLE_BATCH_CHECKPOINT_VERSION,
+};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
     JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,
@@ -156,6 +164,14 @@ pub use render::{
 };
 pub use reward::{DiffDriveRewardConfig, MobileManipulatorRewardConfig, MobileManipulatorTask};
 pub use rng::DeterministicRng;
+pub use task::{
+    derive_episode_seed, ActionSpec, CurriculumSpec, CurriculumStageSpec, EpisodeSeedStrategy,
+    ObservationSpec, RandomDistributionSpec, RandomizationParameterSpec, RandomizationSpec,
+    ResetSpec, RewardAggregation, RewardSpec, RewardTermSpec, TaskParameterSpec, TaskSpec,
+    TaskSpecValidationError, TensorBounds, TensorDType, TensorLayout, TensorSpec,
+    TerminationConditionSpec, TerminationKind, TerminationSpec, TASK_SPEC_KIND,
+    TASK_SPEC_SCHEMA_VERSION,
+};
 pub use transport::{
     body_moved_at_least_m, body_within_zone_m, displacement_m, had_finger_contact,
     named_translation_m, TRANSPORT_SUCCESS_M,

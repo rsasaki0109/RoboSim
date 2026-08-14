@@ -1,7 +1,11 @@
 use super::{
     unitree_go2_dynamic_scene_path, unitree_go2_trot_targets, UnitreeGo2GaitCommand, UrdfSceneSim,
 };
-use crate::{Episode, EpisodeStep};
+use crate::{
+    ActionSpec, Episode, EpisodeStep, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec,
+    TaskSpec, TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind,
+    TerminationSpec,
+};
 use rne_assets::AssetError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -108,7 +112,7 @@ impl Default for UnitreeGo2Action {
 }
 
 /// Observation returned by [`UnitreeGo2Episode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnitreeGo2Observation {
     /// Base X position in meters.
     pub base_x_m: f64,
@@ -146,6 +150,65 @@ pub struct UnitreeGo2Observation {
     pub gait_phase: f64,
     /// Normalized episode progress in `[0, 1]`.
     pub progress: f64,
+}
+
+/// Returns the portable task contract for the Python/Rust Go2 gait episode.
+///
+/// Observation tensors flatten to the exact 21-value order emitted by the
+/// Python binding. The action tensor flattens to stride, foot lift, roll
+/// correction, pitch correction, and lateral extension in that order.
+pub fn unitree_go2_task_spec(max_episode_steps: u64) -> TaskSpec {
+    TaskSpec::new(
+        "rne.unitree_go2.gait.v1",
+        1.0 / 60.0,
+        ObservationSpec::new(vec![
+            TensorSpec::new("base_position_m", TensorDType::F64, vec![3], "m"),
+            TensorSpec::new("base_orientation_rad", TensorDType::F64, vec![3], "rad"),
+            TensorSpec::new("base_linear_velocity_m_s", TensorDType::F64, vec![3], "m/s"),
+            TensorSpec::new(
+                "base_angular_velocity_rad_s",
+                TensorDType::F64,
+                vec![3],
+                "rad/s",
+            ),
+            TensorSpec::new(
+                "base_relative_orientation_rad",
+                TensorDType::F64,
+                vec![3],
+                "rad",
+            ),
+            TensorSpec::new("foot_contact_impulse_ns", TensorDType::F64, vec![4], "N*s"),
+            TensorSpec::new("gait_phase", TensorDType::F64, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 1.0)),
+            TensorSpec::new("episode_progress", TensorDType::F64, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 1.0)),
+        ]),
+        ActionSpec::new(vec![TensorSpec::new(
+            "gait_control_rad",
+            TensorDType::F64,
+            vec![5],
+            "rad",
+        )
+        .with_bounds(TensorBounds::new(
+            vec![0.0, 0.0, -0.8, -0.3, -0.5],
+            vec![0.3, 0.4, 0.8, 0.3, 0.5],
+        ))]),
+        RewardSpec::weighted_sum(vec![
+            RewardTermSpec::new("alive", 0.5, "1"),
+            RewardTermSpec::new("locomotion_delta_m", 50.0, "m"),
+            RewardTermSpec::new("height_error_m", -2.0, "m"),
+            RewardTermSpec::new("tilt_rad", -0.2, "rad"),
+            RewardTermSpec::new("fallen", -10.0, "1"),
+        ]),
+        TerminationSpec::new(
+            vec![TerminationConditionSpec::new(
+                "fallen",
+                TerminationKind::Failure,
+            )],
+            Some(max_episode_steps),
+        ),
+        ResetSpec::splitmix64(true),
+    )
 }
 
 /// Deterministic locomotion episode for the official Unitree Go2 model.
@@ -338,6 +401,27 @@ fn settle(sim: &mut UrdfSceneSim, config: &UnitreeGo2EpisodeConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_task_spec_matches_go2_flattened_spaces() {
+        let spec = unitree_go2_task_spec(600);
+        spec.validate().expect("Go2 TaskSpec");
+        let observation_elements = spec
+            .observation
+            .tensors
+            .iter()
+            .map(|tensor| tensor.shape.iter().product::<usize>())
+            .sum::<usize>();
+        let action_elements = spec
+            .action
+            .tensors
+            .iter()
+            .map(|tensor| tensor.shape.iter().product::<usize>())
+            .sum::<usize>();
+        assert_eq!(observation_elements, 21);
+        assert_eq!(action_elements, 5);
+        assert_eq!(spec.termination.max_episode_steps, Some(600));
+    }
 
     #[test]
     fn go2_episode_replays_short_trot_exactly() {
