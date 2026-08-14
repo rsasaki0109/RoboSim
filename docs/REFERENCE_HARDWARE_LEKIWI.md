@@ -155,6 +155,32 @@ with zero commands, then use the bounded `--action-vx-m-s`,
 `--action-vy-m-s`, and `--action-wz-rad-s` flags only after the staged safety
 checks above.
 
+The bundled CLI makes four safety paths repeatable without changing the bridge:
+
+    # Observation accepted, then controller exceeds the 75 ms deadline.
+    rne-lekiwi-session ... --mode hil --allow-actuation \
+      --samples 1 --controller-delay-ms 80 --output deadline.json
+
+    # Host does not refresh before both gateway and device watchdog bounds.
+    rne-lekiwi-session ... --mode hil --allow-actuation \
+      --samples 2 --sample-period-ms 600 --output watchdog.json
+
+    # Gateway rejects the over-limit action and sends only a zero stop.
+    rne-lekiwi-session ... --mode hil --allow-actuation \
+      --samples 1 --action-vx-m-s 0.100001 --output limit.json
+
+    # Operator emergency stop after one acknowledged zero command.
+    rne-lekiwi-session ... --mode hil --allow-actuation \
+      --samples 1 --emergency-stop-after-samples 1 --output emergency.json
+
+Replace `...` with the physical-session, session-id, robot-id, port, and bridge
+arguments from the shadow command. Each safety terminal writes validated
+evidence and exits 3. Host-process termination and reconnect remain external
+procedures: terminate one live host under the physical observer, confirm the
+independent device stop, then start a new process and session ID. A terminated
+request with no device response is intentionally not called a complete wire
+trace.
+
 Standard input and output are exclusively hardware wire v1 JSON Lines. Run the
 bundled CLI locally on the Pi. The Rust runner exposes a transport-neutral
 interface for a separately reviewed SSH transport, but this release does not

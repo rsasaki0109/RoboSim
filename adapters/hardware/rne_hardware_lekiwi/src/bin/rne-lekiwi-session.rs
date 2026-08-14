@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 const USAGE: &str = "usage: rne-lekiwi-session --output PATH [--mock | --physical-session] \
     [--session-id ID] [--mode shadow|hil|live] [--samples N] \
     [--action-vx-m-s V] [--action-vy-m-s V] [--action-wz-rad-s V] \
-    [--sample-period-ms N] [--response-timeout-ms N] [--python PATH] \
+    [--sample-period-ms N] [--controller-delay-ms N] \
+    [--emergency-stop-after-samples N] [--response-timeout-ms N] [--python PATH] \
     [--bridge PATH] [--robot-id ID] [--port PATH] [--allow-actuation]";
 
 fn main() {
@@ -84,16 +85,32 @@ fn run() -> Result<(PathBuf, LeKiwiReferenceSessionEvidence), String> {
 
     let period = Duration::from_millis(args.sample_period_ms);
     let mut next_sample = Instant::now();
-    let mut terminal = None;
+    let mut terminal = if args.emergency_stop_after_samples == Some(0) {
+        Some(runner.emergency_stop().map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
     for sample_index in 0..args.samples {
+        if terminal.is_some() {
+            break;
+        }
         if sample_index > 0 {
             sleep_until(next_sample);
         }
         match runner
-            .sample(args.action.to_vec())
+            .sample_with_controller(|_| {
+                if args.controller_delay_ms > 0 {
+                    std::thread::sleep(Duration::from_millis(args.controller_delay_ms));
+                }
+                args.action.to_vec()
+            })
             .map_err(|error| error.to_string())?
         {
-            LeKiwiReferenceSampleOutcome::Sample(_) => {}
+            LeKiwiReferenceSampleOutcome::Sample(_) => {
+                if args.emergency_stop_after_samples == Some(sample_index + 1) {
+                    terminal = Some(runner.emergency_stop().map_err(|error| error.to_string())?);
+                }
+            }
             LeKiwiReferenceSampleOutcome::Terminal(evidence) => {
                 terminal = Some(*evidence);
                 break;
@@ -121,6 +138,8 @@ struct CliArgs {
     samples: usize,
     action: [f64; 3],
     sample_period_ms: u64,
+    controller_delay_ms: u64,
+    emergency_stop_after_samples: Option<usize>,
     response_timeout_ms: u64,
     python: Option<PathBuf>,
     bridge: PathBuf,
@@ -141,6 +160,8 @@ impl CliArgs {
         let mut samples = 3_usize;
         let mut action = [0.0_f64; 3];
         let mut sample_period_ms = 34_u64;
+        let mut controller_delay_ms = 0_u64;
+        let mut emergency_stop_after_samples = None;
         let mut response_timeout_ms = 2_000_u64;
         let mut python = None;
         let mut bridge =
@@ -174,6 +195,12 @@ impl CliArgs {
                 "--sample-period-ms" => {
                     sample_period_ms = take_parse(&arguments, &mut index, flag)?
                 }
+                "--controller-delay-ms" => {
+                    controller_delay_ms = take_parse(&arguments, &mut index, flag)?
+                }
+                "--emergency-stop-after-samples" => {
+                    emergency_stop_after_samples = Some(take_parse(&arguments, &mut index, flag)?)
+                }
                 "--response-timeout-ms" => {
                     response_timeout_ms = take_parse(&arguments, &mut index, flag)?
                 }
@@ -199,6 +226,17 @@ impl CliArgs {
         }
         if sample_period_ms == 0 || response_timeout_ms == 0 {
             return Err("sample period and response timeout must be greater than zero".to_string());
+        }
+        if controller_delay_ms > 0 && !matches!(mode, HardwareMode::Hil | HardwareMode::Live) {
+            return Err("--controller-delay-ms requires HIL or live mode".to_string());
+        }
+        if emergency_stop_after_samples.is_some()
+            && !matches!(mode, HardwareMode::Hil | HardwareMode::Live)
+        {
+            return Err("--emergency-stop-after-samples requires HIL or live mode".to_string());
+        }
+        if emergency_stop_after_samples.is_some_and(|count| count > samples) {
+            return Err("--emergency-stop-after-samples exceeds --samples".to_string());
         }
         if action.iter().any(|value| !value.is_finite()) {
             return Err("action values must be finite".to_string());
@@ -232,6 +270,8 @@ impl CliArgs {
             samples,
             action,
             sample_period_ms,
+            controller_delay_ms,
+            emergency_stop_after_samples,
             response_timeout_ms,
             python,
             bridge,

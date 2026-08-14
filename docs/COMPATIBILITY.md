@@ -145,6 +145,10 @@ ordering, and correlation with gateway safety state. The default frame limit is
 replay frames. The process-isolated disconnect fixture is
 `tests/golden/hardware/gateway-process-disconnect-session-v1.json`.
 
+The v1 safety-reason vocabulary includes `controller_fault`. Reference hosts
+use it when an observation-driven controller returns a malformed action in an
+actuating mode; the device must acknowledge the resulting zero stop.
+
 Shadow-comparison report schema v1 freezes the TaskSpec identity and ordered
 tensor tolerances, separate host/simulation timestamps, normalized observation
 vectors, per-sample sum/mean/max errors, first violating tensor/element/unit,

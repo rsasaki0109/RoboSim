@@ -90,6 +90,15 @@ impl LeKiwiReferenceSessionConfig {
     }
 }
 
+/// One accepted observation passed to a host controller.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeKiwiReferenceObservation {
+    /// Connection-local observation sequence emitted by the device.
+    pub sequence: u64,
+    /// TaskSpec-ordered normalized observation values.
+    pub values: Vec<f64>,
+}
+
 /// One accepted device observation and its gateway command decision.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeKiwiReferenceSample {
@@ -377,12 +386,31 @@ where
         Ok(())
     }
 
-    /// Polls one observation, submits one TaskSpec-ordered action, and delivers
-    /// it only when the selected mode grants authority.
+    /// Polls one observation and submits a precomputed TaskSpec-ordered action.
+    ///
+    /// Use [`Self::sample_with_controller`] when the action depends on the
+    /// current observation or controller compute time must count toward the
+    /// command deadline.
     pub fn sample(
         &mut self,
         action_values: Vec<f64>,
     ) -> Result<LeKiwiReferenceSampleOutcome, LeKiwiReferenceSessionError> {
+        self.sample_with_controller(|_| action_values)
+    }
+
+    /// Polls one observation, passes it to a host controller, and delivers the
+    /// returned action only when the selected mode grants authority.
+    ///
+    /// The injected clock is read after the controller returns, so controller
+    /// computation contributes to the observation-to-command deadline. An
+    /// invalid controller result in HIL/live trips a typed fail-closed stop.
+    pub fn sample_with_controller<F>(
+        &mut self,
+        controller: F,
+    ) -> Result<LeKiwiReferenceSampleOutcome, LeKiwiReferenceSessionError>
+    where
+        F: FnOnce(&LeKiwiReferenceObservation) -> Vec<f64>,
+    {
         self.require_open()?;
         if let Some(evidence) = self.check_gateway_safety()? {
             return Ok(LeKiwiReferenceSampleOutcome::Terminal(Box::new(evidence)));
@@ -392,13 +420,6 @@ where
                 capacity: self.sample_capacity,
             });
         }
-        if action_values.len() != self.profile.action_bindings.len() {
-            return Err(LeKiwiReferenceSessionError::ActionWidth {
-                expected: self.profile.action_bindings.len(),
-                actual: action_values.len(),
-            });
-        }
-
         let response = self.exchange(HostWirePayload::PollObservation)?;
         if let Some(evidence) = self.finish_from_terminal_payload(&response.payload)? {
             return Ok(LeKiwiReferenceSampleOutcome::Terminal(Box::new(evidence)));
@@ -415,6 +436,22 @@ where
         {
             let now_ms = self.clock.now_ms();
             self.gateway_mut()?.arm(now_ms)?;
+        }
+
+        let observation = LeKiwiReferenceObservation {
+            sequence,
+            values: values.clone(),
+        };
+        let action_values = controller(&observation);
+        if action_values.len() != self.profile.action_bindings.len() {
+            if can_actuate(self.mode) {
+                let evidence = self.finish_controller_fault()?;
+                return Ok(LeKiwiReferenceSampleOutcome::Terminal(Box::new(evidence)));
+            }
+            return Err(LeKiwiReferenceSessionError::ActionWidth {
+                expected: self.profile.action_bindings.len(),
+                actual: action_values.len(),
+            });
         }
 
         let action_sequence = self.next_action_sequence;
@@ -436,6 +473,8 @@ where
                         let evidence = self.finish_gateway_safety(reason)?;
                         return Ok(LeKiwiReferenceSampleOutcome::Terminal(Box::new(evidence)));
                     }
+                    let evidence = self.finish_controller_fault()?;
+                    return Ok(LeKiwiReferenceSampleOutcome::Terminal(Box::new(evidence)));
                 }
                 return Err(error.into());
             }
@@ -467,7 +506,7 @@ where
         Ok(LeKiwiReferenceSampleOutcome::Sample(
             LeKiwiReferenceSample {
                 observation_sequence: sequence,
-                observation_values: values,
+                observation_values: observation.values,
                 command_disposition: disposition,
             },
         ))
@@ -501,6 +540,20 @@ where
         let now_ms = self.clock.now_ms();
         self.gateway_mut()?.close_cleanly(now_ms)?;
         self.finalize(HardwareWireTraceOutcome::Completed)
+    }
+
+    /// Asserts an operator emergency stop, confirms the device-side zero stop,
+    /// and returns terminal session evidence.
+    pub fn emergency_stop(
+        &mut self,
+    ) -> Result<LeKiwiReferenceSessionEvidence, LeKiwiReferenceSessionError> {
+        self.require_open()?;
+        if let Some(evidence) = self.check_gateway_safety()? {
+            return Ok(evidence);
+        }
+        let now_ms = self.clock.now_ms();
+        self.gateway_mut()?.emergency_stop(now_ms)?;
+        self.finish_gateway_safety(SafetyReason::EmergencyStop)
     }
 
     /// Returns shared access to the injected transport.
@@ -582,6 +635,14 @@ where
             return Ok(evidence);
         }
         self.finalize(HardwareWireTraceOutcome::GatewaySafetyStopped { reason })
+    }
+
+    fn finish_controller_fault(
+        &mut self,
+    ) -> Result<LeKiwiReferenceSessionEvidence, LeKiwiReferenceSessionError> {
+        let now_ms = self.clock.now_ms();
+        self.gateway_mut()?.controller_fault(now_ms)?;
+        self.finish_gateway_safety(SafetyReason::ControllerFault)
     }
 
     fn check_gateway_safety(
@@ -1026,6 +1087,38 @@ mod tests {
             Some(SafetyReason::ActuatorLimit)
         );
         assert_eq!(evidence.session.gateway.final_snapshot.queued_actuations, 0);
+    }
+
+    #[test]
+    fn invalid_controller_output_and_emergency_stop_are_typed_terminals() {
+        let mut controller_fault = runner(HardwareMode::Live, 1);
+        controller_fault.open().unwrap();
+        let LeKiwiReferenceSampleOutcome::Terminal(controller_evidence) = controller_fault
+            .sample_with_controller(|observation| {
+                assert_eq!(observation.sequence, 1);
+                assert_eq!(observation.values.len(), 9);
+                vec![0.0; 2]
+            })
+            .unwrap()
+        else {
+            panic!("invalid controller output did not terminate");
+        };
+        assert_eq!(
+            controller_evidence.session.wire_trace.outcome,
+            HardwareWireTraceOutcome::GatewaySafetyStopped {
+                reason: SafetyReason::ControllerFault
+            }
+        );
+
+        let mut emergency = runner(HardwareMode::Hil, 1);
+        emergency.open().unwrap();
+        let emergency_evidence = emergency.emergency_stop().unwrap();
+        assert_eq!(
+            emergency_evidence.session.wire_trace.outcome,
+            HardwareWireTraceOutcome::GatewaySafetyStopped {
+                reason: SafetyReason::EmergencyStop
+            }
+        );
     }
 
     #[test]

@@ -93,6 +93,54 @@ fn session_cli_persists_gateway_safety_terminal_before_nonzero_exit() {
     std::fs::remove_file(output).unwrap();
 }
 
+#[test]
+fn session_cli_counts_controller_time_and_exposes_emergency_stop() {
+    for (name, fault_args, expected_reason) in [
+        (
+            "deadline",
+            vec!["--controller-delay-ms", "80"],
+            rne_hardware_gateway::SafetyReason::CommandDeadlineMissed,
+        ),
+        (
+            "emergency",
+            vec!["--emergency-stop-after-samples", "1"],
+            rne_hardware_gateway::SafetyReason::EmergencyStop,
+        ),
+    ] {
+        let output = output_path(name);
+        if output.exists() {
+            std::fs::remove_file(&output).unwrap();
+        }
+        let status = Command::new(env!("CARGO_BIN_EXE_rne-lekiwi-session"))
+            .args([
+                "--mock",
+                "--mode",
+                "live",
+                "--samples",
+                "1",
+                "--session-id",
+                &format!("rne.lekiwi.cli.{name}"),
+                "--output",
+            ])
+            .arg(&output)
+            .args(fault_args)
+            .status()
+            .expect("run injected LeKiwi session host");
+        assert_eq!(status.code(), Some(3));
+
+        let evidence: LeKiwiReferenceSessionEvidence =
+            serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+        evidence.validate().unwrap();
+        assert_eq!(
+            evidence.session.wire_trace.outcome,
+            HardwareWireTraceOutcome::GatewaySafetyStopped {
+                reason: expected_reason,
+            }
+        );
+        std::fs::remove_file(output).unwrap();
+    }
+}
+
 fn output_path(mode: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "rne-lekiwi-session-cli-{}-{mode}.json",

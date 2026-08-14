@@ -26,7 +26,8 @@ I/O boundary. A decreasing tick is a safety fault.
 
 Playback and shadow cannot arm. HIL/live lose authority on disconnect, stale
 observation, missed observation-to-command deadline, stale queued command,
-actuator-limit violation, queue overrun, clock regression, or emergency stop.
+actuator-limit violation, invalid controller output, queue overrun, clock
+regression, or emergency stop.
 The pending queue is cleared and replaced by a zero action carrying the fault
 reason. Recovery requires an explicit latch clear, a fresh observation, and a
 new arm operation.
@@ -40,6 +41,12 @@ float range, integer integrality/range, exactly representable `i64`, `u8`, and
 boolean 0/1. Hardware actions are restricted to float tensors with explicit,
 finite TaskSpec bounds. Every submitted value is checked before authority or a
 transport queue is touched.
+
+The LeKiwi host exposes an observation-driven controller closure. The gateway
+clock is sampled after that closure returns, so controller compute time counts
+toward the command deadline. A malformed controller action in HIL/live becomes
+a typed `controller_fault` zero stop rather than leaving the previous command
+active.
 
 Queue sizes and three timing limits are mandatory and non-zero:
 

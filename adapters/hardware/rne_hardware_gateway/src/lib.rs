@@ -170,6 +170,8 @@ pub enum SafetyReason {
     ClockRegression,
     /// An operator or hardware input asserted emergency stop.
     EmergencyStop,
+    /// The host controller failed to produce a valid action contract.
+    ControllerFault,
     /// An operator deliberately disarmed the session.
     ManualDisarm,
 }
@@ -713,7 +715,16 @@ impl HardwareGateway {
     /// Latches emergency stop and queues a zero action in an actuating mode.
     pub fn emergency_stop(&mut self, now_ms: u64) -> Result<(), GatewayError> {
         self.advance_clock(now_ms)?;
+        self.require_connected()?;
         self.trip_safety(SafetyReason::EmergencyStop, now_ms);
+        Ok(())
+    }
+
+    /// Latches a host-controller failure and queues a zero action.
+    pub fn controller_fault(&mut self, now_ms: u64) -> Result<(), GatewayError> {
+        self.advance_clock(now_ms)?;
+        self.require_connected()?;
+        self.trip_safety(SafetyReason::ControllerFault, now_ms);
         Ok(())
     }
 
