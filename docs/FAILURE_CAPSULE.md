@@ -1,0 +1,45 @@
+# Failure Capsule
+
+Failure Capsules are portable, deterministic envelopes around a failed replay.
+The envelope stores immutable run/build/backend metadata and sorted references
+to replay/evidence files. It does not duplicate replay actions and does not
+embed archive bytes, so the same `capsule.json` can later be transported as a
+directory, archive, or remote bundle.
+
+The `xtask` module is wired by the top-level dispatcher as:
+
+```text
+cargo run -p xtask -- failure-capsule create \
+  --replay artifacts/behavior-ci/replays/failure.rne-replay \
+  --evidence artifacts/behavior-ci/report.json \
+  --output artifacts/failure-capsules/failure-1 \
+  --backend rapier \
+  --backend-version 0.22
+
+cargo run -p xtask -- failure-capsule verify \
+  artifacts/failure-capsules/failure-1
+```
+
+`create` accepts either the generic `rne_log::ReplayArtifact` JSON schema or
+the `rne_ai::BehaviorReplayArtifact` JSON schema. The source replay is copied
+to `replay/`, optional evidence is copied to `evidence/`, and each reference
+gets a lowercase SHA-256 digest. The destination must not already exist;
+creation never overwrites an existing capsule directory.
+
+Generic replays must carry `final_report.failure`; successful generic replays
+are not converted into failure capsules. Their fixed timestep is derived from
+the recorded frame timestamps and every frame must match the same fixed-step
+sequence. Behavior replay minimization provenance remains in the copied
+behavior replay. Because its metadata does not include original step/action
+counts, the capsule deliberately leaves `minimization` unset instead of
+inventing counts.
+
+`verify` validates `capsule.json`, requires a replay reference, rejects
+absolute/parent-traversal paths, rejects symlink escapes, checks that every
+referenced file exists and matches its digest, and invokes the known replay
+reader/schema validator for generic and behavior replay kinds. It does not
+trust host paths recorded in the capsule.
+
+The capsule schema is intentionally independent of transport. A future archive
+or object-store adapter can package the same relative paths without changing
+`capsule.json`.

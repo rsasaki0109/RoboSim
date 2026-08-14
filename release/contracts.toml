@@ -28,8 +28,14 @@ behavior_failure_case = 1
 [physics]
 snapshot = 1
 
+[determinism]
+contract = 1
+
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1
 install_rehearsal_report = 1
 final_exit_report = 1
+capability_report = 1
+benchmark_report = 1
+failure_capsule = 1

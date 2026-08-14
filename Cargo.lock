@@ -2286,6 +2286,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mujoco-rs"
+version = "5.0.0+mj-3.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41caa96c0b5f41a695230a9f54a28a4196b03c4ae90990b3d653a35f729f8c40"
+dependencies = [
+ "bytemuck",
+ "paste",
+ "pkg-config",
+]
+
+[[package]]
 name = "multi_robot_agent"
 version = "0.1.0"
 dependencies = [
@@ -3414,6 +3425,7 @@ dependencies = [
  "approx",
  "rne_math",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -3590,6 +3602,19 @@ dependencies = [
  "rne_world",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rne_physics_mujoco"
+version = "0.1.0"
+dependencies = [
+ "mujoco-rs",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_world",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5298,6 +5323,7 @@ dependencies = [
  "image",
  "rne_ai",
  "rne_assets",
+ "rne_core",
  "rne_data",
  "rne_fuzz_smoke",
  "rne_log",
