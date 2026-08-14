@@ -3544,6 +3544,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_hardware_lekiwi"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "rne_hardware_gateway",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_log"
 version = "0.1.0"
 dependencies = [
@@ -5358,6 +5369,7 @@ dependencies = [
  "rne_data",
  "rne_fuzz_smoke",
  "rne_hardware_gateway",
+ "rne_hardware_lekiwi",
  "rne_log",
  "rne_openscenario",
  "rne_physics",

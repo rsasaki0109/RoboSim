@@ -31,6 +31,7 @@ members = [
   "crates/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
   "adapters/hardware/rne_hardware_gateway",
+  "adapters/hardware/rne_hardware_lekiwi",
   "examples/00_hello_world",
   "examples/01_falling_cube",
   "examples/01_diff_drive_lidar",
@@ -133,6 +134,7 @@ version = "0.1.0"
 # same release set from a registry after Cargo removes local paths.
 rne_adapter_ros2 = { version = "=0.1.0", path = "adapters/ros2/rne_adapter_ros2" }
 rne_hardware_gateway = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_gateway" }
+rne_hardware_lekiwi = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_lekiwi" }
 rne_ai = { version = "=0.1.0", path = "crates/rne_ai" }
 rne_assets = { version = "=0.1.0", path = "crates/rne_assets" }
 rne_core = { version = "=0.1.0", path = "crates/rne_core" }

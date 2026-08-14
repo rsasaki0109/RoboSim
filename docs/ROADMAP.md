@@ -66,8 +66,11 @@ reconnect, stale command, limit, and emergency stop. A TaskSpec-bound shadow
 comparator records ordered tolerances, separate host/SimClock timestamps, first
 divergence, and a revalidated golden verdict. Failure Capsule create/verify preserves these
 typed artifacts beside the corresponding simulation replay and rejects missing
-TaskSpec or tampered aggregates. A real shadow run on selected reference
-hardware remains open.
+TaskSpec or tampered aggregates. LeKiwi + SO-101 is now the selected reference:
+the brand-specific adapter pins LeRobot v0.6.0, freezes a base-only TaskSpec and
+unit mapping, holds the observed arm pose, and passes strict child-process
+bridge, shadow-authority, and independent-watchdog tests. A real LeKiwi shadow,
+HIL safety matrix, and low-speed live run remain open.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

@@ -69,3 +69,12 @@ stop behavior, but the selected reference robot must still supply an actual
 shadow run and v0.6 exit evidence. Future protocol revisions may not weaken
 byte/queue/deadline/limit, device-stop confirmation, comparison, capsule
 validation, or explicit-rearm invariants.
+
+LeKiwi + SO-101 is the selected v0.6 reference robot. Its brand-specific
+adapter pins LeRobot v0.6.0, freezes the nine-value observation and three-value
+base-action mapping, and adds a direct Python device process with an independent
+500 ms watchdog. Reference profile v1 grants no arm actuation: normal base
+commands hold the latest measured arm pose and safety frames call the base-stop
+operation directly. Camera payloads remain typed dataset streams outside the
+numeric wire. This selection and process conformance do not replace the still
+required physical shadow, HIL, and live evidence.

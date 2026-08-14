@@ -1,0 +1,264 @@
+{
+  "kind": "rne_hardware_reference_profile",
+  "schema_version": 1,
+  "profile_id": "rne.lekiwi_so101.base.v1",
+  "wire_schema_version": 1,
+  "upstream": {
+    "project": "Hugging Face LeRobot LeKiwi",
+    "repository": "https://github.com/huggingface/lerobot",
+    "version": "v0.6.0",
+    "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce"
+  },
+  "supported_modes": [
+    "shadow",
+    "hil",
+    "live"
+  ],
+  "task": {
+    "kind": "rne_task_spec",
+    "schema_version": 1,
+    "task_id": "rne.lekiwi_so101.base_shadow.v1",
+    "control_step_s": 0.03333333333333333,
+    "observation": {
+      "tensors": [
+        {
+          "name": "arm_joint_position_rad",
+          "dtype": "f64",
+          "shape": [
+            5
+          ],
+          "unit": "rad",
+          "layout": "row_major",
+          "bounds": null
+        },
+        {
+          "name": "gripper_position_pct",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "pct",
+          "layout": "row_major",
+          "bounds": {
+            "lower": [
+              0.0
+            ],
+            "upper": [
+              100.0
+            ]
+          }
+        },
+        {
+          "name": "base_linear_velocity_m_s",
+          "dtype": "f64",
+          "shape": [
+            2
+          ],
+          "unit": "m/s",
+          "layout": "row_major",
+          "bounds": null
+        },
+        {
+          "name": "base_angular_velocity_rad_s",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "rad/s",
+          "layout": "row_major",
+          "bounds": null
+        }
+      ]
+    },
+    "action": {
+      "tensors": [
+        {
+          "name": "base_linear_velocity_m_s",
+          "dtype": "f64",
+          "shape": [
+            2
+          ],
+          "unit": "m/s",
+          "layout": "row_major",
+          "bounds": {
+            "lower": [
+              -0.1
+            ],
+            "upper": [
+              0.1
+            ]
+          }
+        },
+        {
+          "name": "base_angular_velocity_rad_s",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "rad/s",
+          "layout": "row_major",
+          "bounds": {
+            "lower": [
+              -0.5235987755982988
+            ],
+            "upper": [
+              0.5235987755982988
+            ]
+          }
+        }
+      ]
+    },
+    "reward": {
+      "aggregation": "weighted_sum",
+      "terms": [
+        {
+          "name": "shadow_tracking_error",
+          "weight": -1.0,
+          "unit": "1"
+        }
+      ]
+    },
+    "termination": {
+      "conditions": [
+        {
+          "name": "operator_complete",
+          "kind": "success"
+        },
+        {
+          "name": "safety_trip",
+          "kind": "failure"
+        }
+      ],
+      "max_episode_steps": 1800
+    },
+    "reset": {
+      "seed_strategy": "split_mix64_lane_episode_v1",
+      "supports_partial_reset": false
+    },
+    "curriculum": null,
+    "randomization": null
+  },
+  "observation_bindings": [
+    {
+      "vendor_key": "arm_shoulder_pan.pos",
+      "vendor_unit": "deg",
+      "tensor_name": "arm_joint_position_rad",
+      "tensor_element": 0,
+      "task_unit": "rad",
+      "vendor_to_task_scale": 0.017453292519943295
+    },
+    {
+      "vendor_key": "arm_shoulder_lift.pos",
+      "vendor_unit": "deg",
+      "tensor_name": "arm_joint_position_rad",
+      "tensor_element": 1,
+      "task_unit": "rad",
+      "vendor_to_task_scale": 0.017453292519943295
+    },
+    {
+      "vendor_key": "arm_elbow_flex.pos",
+      "vendor_unit": "deg",
+      "tensor_name": "arm_joint_position_rad",
+      "tensor_element": 2,
+      "task_unit": "rad",
+      "vendor_to_task_scale": 0.017453292519943295
+    },
+    {
+      "vendor_key": "arm_wrist_flex.pos",
+      "vendor_unit": "deg",
+      "tensor_name": "arm_joint_position_rad",
+      "tensor_element": 3,
+      "task_unit": "rad",
+      "vendor_to_task_scale": 0.017453292519943295
+    },
+    {
+      "vendor_key": "arm_wrist_roll.pos",
+      "vendor_unit": "deg",
+      "tensor_name": "arm_joint_position_rad",
+      "tensor_element": 4,
+      "task_unit": "rad",
+      "vendor_to_task_scale": 0.017453292519943295
+    },
+    {
+      "vendor_key": "arm_gripper.pos",
+      "vendor_unit": "pct",
+      "tensor_name": "gripper_position_pct",
+      "tensor_element": 0,
+      "task_unit": "pct",
+      "vendor_to_task_scale": 1.0
+    },
+    {
+      "vendor_key": "x.vel",
+      "vendor_unit": "m/s",
+      "tensor_name": "base_linear_velocity_m_s",
+      "tensor_element": 0,
+      "task_unit": "m/s",
+      "vendor_to_task_scale": 1.0
+    },
+    {
+      "vendor_key": "y.vel",
+      "vendor_unit": "m/s",
+      "tensor_name": "base_linear_velocity_m_s",
+      "tensor_element": 1,
+      "task_unit": "m/s",
+      "vendor_to_task_scale": 1.0
+    },
+    {
+      "vendor_key": "theta.vel",
+      "vendor_unit": "deg/s",
+      "tensor_name": "base_angular_velocity_rad_s",
+      "tensor_element": 0,
+      "task_unit": "rad/s",
+      "vendor_to_task_scale": 0.017453292519943295
+    }
+  ],
+  "action_bindings": [
+    {
+      "tensor_name": "base_linear_velocity_m_s",
+      "tensor_element": 0,
+      "task_unit": "m/s",
+      "vendor_key": "x.vel",
+      "vendor_unit": "m/s",
+      "task_to_vendor_scale": 1.0
+    },
+    {
+      "tensor_name": "base_linear_velocity_m_s",
+      "tensor_element": 1,
+      "task_unit": "m/s",
+      "vendor_key": "y.vel",
+      "vendor_unit": "m/s",
+      "task_to_vendor_scale": 1.0
+    },
+    {
+      "tensor_name": "base_angular_velocity_rad_s",
+      "tensor_element": 0,
+      "task_unit": "rad/s",
+      "vendor_key": "theta.vel",
+      "vendor_unit": "deg/s",
+      "task_to_vendor_scale": 57.29577951308232
+    }
+  ],
+  "camera_streams": [
+    {
+      "stream_name": "lekiwi.front.color",
+      "vendor_key": "front",
+      "configured_width_px": 640,
+      "configured_height_px": 480,
+      "rotation_deg": 180,
+      "out_of_band_dataset_stream": true
+    },
+    {
+      "stream_name": "lekiwi.wrist.color",
+      "vendor_key": "wrist",
+      "configured_width_px": 480,
+      "configured_height_px": 640,
+      "rotation_deg": 90,
+      "out_of_band_dataset_stream": true
+    }
+  ],
+  "safety": {
+    "max_observation_age_ms": 100,
+    "command_deadline_ms": 75,
+    "max_command_age_ms": 100,
+    "device_watchdog_timeout_ms": 500,
+    "max_linear_speed_m_s": 0.1,
+    "max_angular_speed_rad_s": 0.5235987755982988,
+    "disconnect_disables_torque": true,
+    "arm_actuation_enabled": false,
+    "physical_emergency_stop_required": true
+  }
+}

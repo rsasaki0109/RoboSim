@@ -58,6 +58,8 @@ wire_trace = 1
 session_evidence = 1
 shadow_comparison = 1
 mock_conformance = 1
+reference_profile = 1
+lekiwi_device_bridge = 1
 
 [evidence]
 fuzz_smoke_report = 1

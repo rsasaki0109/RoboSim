@@ -38,6 +38,7 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_deformable",
     "rne_ecs",
     "rne_hardware_gateway",
+    "rne_hardware_lekiwi",
     "rne_log",
     "rne_math",
     "rne_mjcf",
@@ -1170,6 +1171,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_hardware_gateway::mock::MOCK_CONFORMANCE_SCHEMA_VERSION),
         ),
         (
+            "hardware",
+            "reference_profile",
+            u64::from(rne_hardware_lekiwi::LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "lekiwi_device_bridge",
+            u64::from(rne_hardware_lekiwi::LEKIWI_DEVICE_BRIDGE_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1870,6 +1881,7 @@ fn ci_headless() -> anyhow::Result<()> {
     run_step("cargo test --locked -p rne_render --lib")?;
     run_step("cargo test --locked -p rne_sensor --lib")?;
     run_step("cargo test --locked -p rne_hardware_gateway")?;
+    run_step("cargo test --locked -p rne_hardware_lekiwi")?;
     dataset::dataset_reference_smoke()
 }
 

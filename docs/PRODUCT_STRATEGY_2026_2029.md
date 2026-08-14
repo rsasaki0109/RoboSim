@@ -254,8 +254,12 @@ host/SimClock timestamps, first divergence, and a revalidated golden verdict.
 Failure Capsule tooling now retains and revalidates TaskSpec, session, wire,
 shadow, and mock-conformance artifacts beside a real simulation failure replay.
 The six child-process cases now cover deadline, disconnect, reconnect, stale
-command, limit, and emergency stop. An actual reference-device shadow run and
-physical-hardware exit evidence remain open.
+command, limit, and emergency stop. LeKiwi + SO-101 is selected as the first
+reference robot. Its separate adapter pins LeRobot v0.6.0, freezes a conservative
+base-only TaskSpec and degree/radian mapping, holds the measured arm pose, and
+passes process tests for live mapping, shadow authority denial, direct base stop,
+and its independent watchdog. An actual LeKiwi shadow run, physical safety
+matrix, and low-speed live exit evidence remain open.
 
 Delivery slices:
 
@@ -265,8 +269,8 @@ Delivery slices:
 - support playback, shadow, HIL, and live modes without teaching simulation
   logic about wall-clock time;
 - harden the ROS 2 adapter and retain a direct C/Python controller path;
-- choose one affordable reference robot before implementation; brand-specific
-  types remain in an adapter.
+- keep the selected LeKiwi + SO-101 profile brand-specific, and require physical
+  evidence before extending its v1 base-only authority to the arm.
 
 Exit evidence:
 

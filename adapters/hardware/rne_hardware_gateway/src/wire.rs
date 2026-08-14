@@ -145,6 +145,10 @@ pub enum WireRejectionCode {
     NonFiniteValue,
     /// The device has already entered a terminal state.
     TerminalState,
+    /// The selected device adapter does not implement the requested mode.
+    UnsupportedMode,
+    /// The open mode does not grant the requested actuator operation.
+    AuthorityDenied,
 }
 
 /// Device response carried inside a [`DeviceWireFrame`].
