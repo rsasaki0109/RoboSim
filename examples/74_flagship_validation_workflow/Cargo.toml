@@ -1,0 +1,24 @@
+[package]
+name = "flagship_validation_workflow"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+bevy_ecs = { workspace = true }
+rne_ai = { workspace = true }
+rne_assets = { workspace = true }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_physics = { workspace = true }
+rne_traffic = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[[example]]
+name = "74_flagship_validation_workflow"
+path = "main.rs"

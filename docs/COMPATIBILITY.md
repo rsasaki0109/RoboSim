@@ -194,6 +194,13 @@ physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
 hosts. Canonical schema-v1 examples live under `tests/golden/evidence/`.
 
+Flagship workflow report schema v1 binds the portable TaskSpec, imported asset
+digest, deterministic event catalog, successful behavior-contract verdict, and
+minimized failure provenance. The generated Failure Capsule carries that
+report, the TaskSpec, both behavior reports, the minimized replay, and the
+self-contained browser inspector; `xtask flagship` regenerates and verifies
+the set together.
+
 Physics conformance report schema v2 embeds backend-manifest schema v2,
 catalog version, tolerance-registry version, declared/runtime capabilities, and
 coverage verdicts. Its canonical shape lives at

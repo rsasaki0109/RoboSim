@@ -32,7 +32,7 @@ available.
 | 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, and canonical contact evidence while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; a deliberately tightened first divergence reproduces from a verified replay/report Failure Capsule on Windows and Linux |
 | 0.4 Scalable learning | Ordered vector environments, deterministic reset streams, batched observations/actions, and accelerator adapters outside core | Single-environment replay matches its lane in a batch; throughput reports name hardware, batch size, and scenario |
 | 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
-| 0.6 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
+| 0.7 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
 
 The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
@@ -77,6 +77,15 @@ A versioned physical-evidence manifest and staged verifier now prevent mock,
 mixed-device, incomplete safety, unverified dataset, or checklist-only output
 from satisfying the exit. A real LeKiwi shadow, HIL safety matrix, and
 low-speed live run remain open.
+
+The first v0.7 flagship slice is also integrated. `cargo run --locked -p xtask
+-- flagship` coordinates imported mobile-lift assets, RGB-D inspection,
+signal-controlled traffic, navigation, and friction pick/place in one fixed-step
+runner. It emits a passing seven-contract report, minimizes a seeded
+perception blackout from three active dimensions to one, verifies the replay
+and Failure Capsule, and writes a self-contained browser inspector. Windows and
+Linux run the same command in CI. A second production physics execution path
+for this exact workflow remains open.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or
@@ -123,7 +132,7 @@ release repetitions on the named runner class and fails below 60 headless
 steps/s or on any classified/unexplained violation.
 
 M6 acceptance is encoded in `release/exit-matrix.toml` and evaluated by
-`cargo run --locked -p xtask -- release-exit`. The contract freezes 12 CI jobs
+`cargo run --locked -p xtask -- release-exit`. The contract freezes 14 CI jobs
 plus clean Linux and Windows artifact rehearsals, maps them to the exact
 workflow runner and command, requires locked graph-building invocations, and
 names `CI / workspace` and `Release

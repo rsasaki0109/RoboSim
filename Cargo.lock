@@ -1147,6 +1147,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
+name = "flagship_validation_workflow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bevy_ecs",
+ "rne_ai",
+ "rne_assets",
+ "rne_core",
+ "rne_ecs",
+ "rne_physics",
+ "rne_traffic",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

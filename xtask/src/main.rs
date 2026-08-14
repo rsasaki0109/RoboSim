@@ -30,6 +30,8 @@ const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
 const CARGO_AUDIT_VERSION: &str = "0.22.2";
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_adapter_ros2",
     "rne_ai",
@@ -103,6 +105,7 @@ fn run() -> anyhow::Result<()> {
         "hero-contact-sheet" => hero_contact_sheet(),
         "behavior-ci" => behavior_ci(&mut args),
         "behavior-replay" => behavior_replay(&mut args),
+        "flagship" => flagship(&mut args),
         "release-check" => release_check(&mut args),
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
@@ -1253,6 +1256,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence_manifest",
             u64::from(evidence::EVIDENCE_MANIFEST_SCHEMA_VERSION),
         ),
+        (
+            "evidence",
+            "flagship_workflow_report",
+            u64::from(FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION),
+        ),
     ];
     for (section, key, actual) in expected {
         let declared = registry
@@ -1739,6 +1747,116 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
     Ok(())
 }
 
+/// Reproduces the v0.7 shared-aisle flagship success, minimized failure, and capsule.
+fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        args.next().is_none(),
+        "flagship does not accept arguments; output is artifacts/flagship-validation"
+    );
+    let root = workspace_root()?;
+    let artifacts = root.join("artifacts");
+    fs::create_dir_all(&artifacts)?;
+    let artifacts_metadata = fs::symlink_metadata(&artifacts)?;
+    anyhow::ensure!(
+        artifacts_metadata.is_dir() && !artifacts_metadata.file_type().is_symlink(),
+        "workspace artifacts path must be a real directory"
+    );
+    let artifacts = artifacts.canonicalize()?;
+    let output = artifacts.join("flagship-validation");
+    if output.exists() {
+        let metadata = fs::symlink_metadata(&output)?;
+        anyhow::ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "refusing to replace non-directory or symlinked flagship output {}",
+            output.display()
+        );
+        let resolved = output.canonicalize()?;
+        anyhow::ensure!(
+            resolved.parent() == Some(artifacts.as_path()),
+            "refusing to remove flagship output outside {}",
+            artifacts.display()
+        );
+        fs::remove_dir_all(&resolved)?;
+    }
+
+    run_step(
+        "cargo run --locked -p flagship_validation_workflow --example 74_flagship_validation_workflow -- artifacts/flagship-validation",
+    )?;
+    let replay = output.join("failure-minimized.rne-replay");
+    let report = output.join("workflow-report.json");
+    let success = output.join("success.behavior-report.json");
+    let failure = output.join("failure.behavior-report.json");
+    let inspector = output.join("replay-inspector.html");
+    let task_spec = output.join("flagship.task.json");
+    let capsule = output.join("failure-capsule");
+    let mut create_args = vec![
+        "create".to_string(),
+        "--replay".to_string(),
+        replay.display().to_string(),
+        "--evidence".to_string(),
+        report.display().to_string(),
+        "--evidence".to_string(),
+        success.display().to_string(),
+        "--evidence".to_string(),
+        failure.display().to_string(),
+        "--evidence".to_string(),
+        inspector.display().to_string(),
+        "--evidence".to_string(),
+        task_spec.display().to_string(),
+        "--output".to_string(),
+        capsule.display().to_string(),
+        "--backend".to_string(),
+        "rapier-native".to_string(),
+        "--backend-version".to_string(),
+        "0.22".to_string(),
+    ]
+    .into_iter();
+    failure_capsule::run(&mut create_args)?;
+    let mut verify_args = vec!["verify".to_string(), capsule.display().to_string()].into_iter();
+    failure_capsule::run(&mut verify_args)?;
+
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&report)?)?;
+    anyhow::ensure!(
+        report.get("kind").and_then(serde_json::Value::as_str)
+            == Some(FLAGSHIP_WORKFLOW_REPORT_KIND)
+            && report
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(u64::from(FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION)),
+        "flagship report kind/schema mismatch"
+    );
+    anyhow::ensure!(
+        report
+            .pointer("/success/status")
+            .and_then(serde_json::Value::as_str)
+            == Some("passed"),
+        "flagship report does not contain a passing success run"
+    );
+    anyhow::ensure!(
+        report
+            .pointer("/intentional_failure/expected_contract")
+            .and_then(serde_json::Value::as_str)
+            == Some("perception_stream_alive")
+            && report
+                .pointer("/intentional_failure/active_dimensions_before")
+                .and_then(serde_json::Value::as_u64)
+                == Some(3)
+            && report
+                .pointer("/intentional_failure/active_dimensions_after")
+                .and_then(serde_json::Value::as_u64)
+                == Some(1),
+        "flagship failure was not minimized from three dimensions to the blackout"
+    );
+    let inspector_text = fs::read_to_string(&inspector)?;
+    anyhow::ensure!(
+        inspector_text.contains("id=\"replay-data\"")
+            && inspector_text.contains("minimized failure"),
+        "flagship browser inspector is incomplete"
+    );
+    println!("v0.7 flagship evidence verified: {}", output.display());
+    Ok(())
+}
+
 fn g1_behavior_from_dimensions(
     scenario: &str,
     seed: u64,
@@ -1910,7 +2028,8 @@ fn ci_headless() -> anyhow::Result<()> {
     run_step("cargo test --locked -p rne_sensor --lib")?;
     run_step("cargo test --locked -p rne_hardware_gateway")?;
     run_step("cargo test --locked -p rne_hardware_lekiwi")?;
-    dataset::dataset_reference_smoke()
+    dataset::dataset_reference_smoke()?;
+    flagship(&mut std::iter::empty::<String>())
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.

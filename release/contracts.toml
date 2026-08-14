@@ -75,3 +75,4 @@ benchmark_report = 1
 task_scale_report = 1
 failure_capsule = 1
 evidence_manifest = 1
+flagship_workflow_report = 1

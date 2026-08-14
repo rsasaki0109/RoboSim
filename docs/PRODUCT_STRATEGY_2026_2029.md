@@ -303,6 +303,16 @@ Exit evidence is a single clean-checkout command that reproduces the success
 and failure on Windows and Linux. Every subsystem included in the demo must be
 replaceable or testable independently; no special-case core logic is allowed.
 
+The first integrated slice is now executable as `cargo run --locked -p xtask
+-- flagship`. Example 74 loads the mobile-lift scene/robot/URDF, advances
+signal-controlled traffic and the robot at one fixed timestep, gates motion on
+RGB-D inspection and aisle clearance, evaluates seven typed behavior
+contracts, and produces both a successful pick/place and a seeded fail-closed
+perception blackout. The failure minimizes from three active dimensions to one,
+replays identically, is sealed into a verified Failure Capsule, and ships with
+a self-contained browser inspector. The native path is complete; the same
+workflow on a second production physics path remains the next v0.7 exit gap.
+
 ### v0.8-v0.9: ecosystem and compatibility
 
 The final pre-1.0 program focuses on other people successfully extending RNE:

@@ -252,6 +252,7 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
             | SHADOW_COMPARISON_REPORT_KIND
             | MOCK_CONFORMANCE_REPORT_KIND
             | LEKIWI_REFERENCE_SESSION_KIND
+            | super::FLAGSHIP_WORKFLOW_REPORT_KIND
     );
     if !recognized {
         return Ok(("evidence".to_string(), 1));
@@ -372,6 +373,48 @@ fn validate_hardware_evidence<'a>(
                 report.validate().map_err(|error| {
                     anyhow::anyhow!("invalid hardware mock conformance evidence: {error}")
                 })?;
+            }
+            super::FLAGSHIP_WORKFLOW_REPORT_KIND => {
+                let report: serde_json::Value = serde_json::from_slice(bytes)
+                    .context("invalid flagship workflow report JSON")?;
+                anyhow::ensure!(
+                    report
+                        .get("schema_version")
+                        .and_then(serde_json::Value::as_u64)
+                        == Some(u64::from(super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION)),
+                    "unsupported flagship workflow report schema"
+                );
+                let task_id = report
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .context("flagship workflow report requires task_id")?;
+                anyhow::ensure!(
+                    tasks.contains_key(task_id),
+                    "flagship workflow report requires matching {TASK_SPEC_KIND} evidence for {task_id:?}"
+                );
+                anyhow::ensure!(
+                    report
+                        .pointer("/success/status")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("passed"),
+                    "flagship workflow report requires a passing success run"
+                );
+                anyhow::ensure!(
+                    report
+                        .pointer("/intentional_failure/expected_contract")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("perception_stream_alive")
+                        && report
+                            .pointer("/intentional_failure/active_dimensions_before")
+                            .and_then(serde_json::Value::as_u64)
+                            == Some(3)
+                        && report
+                            .pointer("/intentional_failure/active_dimensions_after")
+                            .and_then(serde_json::Value::as_u64)
+                            == Some(1),
+                    "flagship workflow report requires the minimized perception failure"
+                );
             }
             _ => {}
         }
@@ -1138,6 +1181,65 @@ mod tests {
             .expect("evidence reference");
         assert_eq!(report.kind, PHYSICS_CONFORMANCE_REPORT_KIND);
         assert_eq!(report.schema_version, 2);
+    }
+
+    #[test]
+    fn flagship_report_preserves_schema_and_requires_matching_task() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("flagship-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let task_id = "rne.flagship.mobile_lift_shared_aisle.v1";
+        let mut task: TaskSpec = serde_json::from_slice(include_bytes!(
+            "../../assets/tasks/diff_drive_goal.task.json"
+        ))
+        .expect("fixture TaskSpec");
+        task.task_id = task_id.to_string();
+        let task_path = temp.path().join("flagship.task.json");
+        fs::write(&task_path, serde_json::to_vec_pretty(&task).unwrap())
+            .expect("write flagship TaskSpec");
+        let report_path = temp.path().join("workflow-report.json");
+        fs::write(
+            &report_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "kind": super::super::FLAGSHIP_WORKFLOW_REPORT_KIND,
+                "schema_version": super::super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION,
+                "task_id": task_id,
+                "success": { "status": "passed" },
+                "intentional_failure": {
+                    "expected_contract": "perception_stream_alive",
+                    "active_dimensions_before": 3,
+                    "active_dimensions_after": 1
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write flagship report");
+
+        let missing_task_output = temp.path().join("missing-task-capsule");
+        let error = invoke_create(&replay_path, &missing_task_output, &[&report_path])
+            .expect_err("flagship report without TaskSpec must reject");
+        assert!(error
+            .to_string()
+            .contains("requires matching rne_task_spec"));
+
+        let output = temp.path().join("flagship-capsule");
+        invoke_create(&replay_path, &output, &[&task_path, &report_path])
+            .expect("create flagship capsule");
+        invoke_verify(&output).expect("verify flagship capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule json");
+        let report = capsule
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == super::super::FLAGSHIP_WORKFLOW_REPORT_KIND)
+            .expect("typed flagship report");
+        assert_eq!(
+            report.schema_version,
+            super::super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION
+        );
     }
 
     #[test]

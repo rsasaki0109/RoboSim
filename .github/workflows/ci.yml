@@ -91,6 +91,27 @@ jobs:
       - name: Explicit CPU-only headless gate
         run: cargo run --locked -p xtask -- ci-headless
 
+  flagship:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: flagship-${{ matrix.os }}
+      - name: Reproduce flagship success, failure, replay, and capsule
+        run: cargo run --locked -p xtask -- flagship
+      - name: Upload flagship evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagship-evidence-${{ matrix.os }}
+          path: artifacts/flagship-validation/
+
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -278,7 +299,7 @@ jobs:
   # context to point at; it passes only when every stage passes.
   workspace:
     runs-on: ubuntu-latest
-    needs: [lint, test, smoke, rl, headless, msrv, release_contract, semver, behavior_ci, evidence, parity, supply_chain, fuzz_smoke]
+    needs: [lint, test, smoke, rl, headless, flagship, msrv, release_contract, semver, behavior_ci, evidence, parity, supply_chain, fuzz_smoke]
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -294,6 +315,7 @@ jobs:
           --result smoke=${{ needs.smoke.result }}
           --result rl=${{ needs.rl.result }}
           --result headless=${{ needs.headless.result }}
+          --result flagship=${{ needs.flagship.result }}
           --result msrv=${{ needs.msrv.result }}
           --result release_contract=${{ needs.release_contract.result }}
           --result semver=${{ needs.semver.result }}

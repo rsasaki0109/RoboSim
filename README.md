@@ -186,6 +186,7 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p xtask -- ci-headless
+cargo run --locked -p xtask -- flagship
 cargo run -p xtask -- ci
 ```
 
@@ -209,6 +210,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Roadmap](docs/ROADMAP.md)
 - [OSS parity baseline](docs/OSS_PARITY.md)
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
+- [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

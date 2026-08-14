@@ -105,6 +105,7 @@ members = [
   "examples/71_g1_rgbd_sensor",
   "examples/72_mobile_lift_friction_pick_place",
   "examples/73_diff_drive_dataset_capture",
+  "examples/74_flagship_validation_workflow",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
