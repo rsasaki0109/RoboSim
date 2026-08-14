@@ -86,6 +86,18 @@ impl MmLiftKinematics {
         }
     }
 
+    /// Geometry for the shipped `mm_mobile_lift` asset in its zero base pose.
+    ///
+    /// The arm chain matches [`Self::mm_lift`], while the mobile chassis places
+    /// the lift origin 0.25 m above the ground.
+    pub fn mm_mobile_lift() -> Self {
+        Self {
+            base_y_m: 0.25,
+            anchor_y_m: 0.0,
+            ..Self::mm_lift()
+        }
+    }
+
     /// Shoulder pivot in world XZ when the lift carriage is at `lift_m`.
     pub fn shoulder_xz_m(&self, _lift_m: f64) -> (f64, f64) {
         (self.anchor_x_m + self.shoulder_offset_x_m, 0.0)
@@ -98,16 +110,53 @@ impl MmLiftKinematics {
         self.base_y_m + lift_m
     }
 
+    /// Computes the world-frame gripper pose for a lift robot on a planar mobile base.
+    ///
+    /// The base uses the engine's Y-up pose convention. `base_yaw_rad` follows the
+    /// same sign convention exposed by `MobileManipulatorObservation`.
+    pub fn forward_kinematics_at_base(
+        &self,
+        base_x_m: f64,
+        base_y_m: f64,
+        base_z_m: f64,
+        base_yaw_rad: f64,
+        joints: MmLiftJointTarget,
+    ) -> MmLiftGripperTarget {
+        let local = Self { base_y_m, ..*self }.forward_kinematics(joints);
+        let (world_x, world_z) = rotate_y_xz(local.x_m, local.z_m, -base_yaw_rad);
+        MmLiftGripperTarget::new(base_x_m + world_x, local.y_m, base_z_m + world_z)
+    }
+
+    /// Solves lift and arm joints for a world-frame target at a planar mobile-base pose.
+    pub fn inverse_kinematics_at_base(
+        &self,
+        base_x_m: f64,
+        base_y_m: f64,
+        base_z_m: f64,
+        base_yaw_rad: f64,
+        target: MmLiftGripperTarget,
+    ) -> Result<MmLiftJointTarget, MmLiftIkError> {
+        let (local_x, local_z) =
+            rotate_y_xz(target.x_m - base_x_m, target.z_m - base_z_m, base_yaw_rad);
+        Self { base_y_m, ..*self }
+            .inverse_kinematics(MmLiftGripperTarget::new(local_x, target.y_m, local_z))
+    }
+
     /// Computes the world-frame gripper-base pose from joint targets.
     ///
     /// `joints` uses the same shoulder sign convention as the simulation motors.
     pub fn forward_kinematics(&self, joints: MmLiftJointTarget) -> MmLiftGripperTarget {
         let (shoulder_x, shoulder_z) = self.shoulder_xz_m(joints.lift_m);
+        let elbow_sign = if self.is_mobile_lift_geometry() {
+            -1.0
+        } else {
+            1.0
+        };
         let (dx, dz) = planar_chain_tip(
             self.upper_arm_m,
             self.forearm_m,
             -joints.shoulder_rad,
-            joints.elbow_rad,
+            elbow_sign * joints.elbow_rad,
         );
         MmLiftGripperTarget {
             x_m: shoulder_x + dx,
@@ -144,8 +193,16 @@ impl MmLiftKinematics {
         Ok(MmLiftJointTarget {
             lift_m,
             shoulder_rad: -shoulder_rad,
-            elbow_rad,
+            elbow_rad: if self.is_mobile_lift_geometry() {
+                -elbow_rad
+            } else {
+                elbow_rad
+            },
         })
+    }
+
+    fn is_mobile_lift_geometry(&self) -> bool {
+        self.base_y_m < 0.5 && self.anchor_y_m.abs() <= f64::EPSILON
     }
 
     fn planar_inverse_kinematics(
@@ -169,7 +226,11 @@ impl MmLiftKinematics {
         }
 
         let cos_elbow = ((reach * reach - l1 * l1 - l2 * l2) / (2.0 * l1 * l2)).clamp(-1.0, 1.0);
-        let elbow_rad = cos_elbow.acos();
+        let elbow_rad = if self.is_mobile_lift_geometry() {
+            -cos_elbow.acos()
+        } else {
+            cos_elbow.acos()
+        };
         let shoulder_rad =
             planar_chain_shoulder(rx, rz, l1, l2, elbow_rad).ok_or(MmLiftIkError::ReachTooFar)?;
         Ok((shoulder_rad, elbow_rad))
@@ -247,6 +308,26 @@ mod tests {
             assert_relative_eq!(joints.shoulder_rad, solved.shoulder_rad, epsilon = 1e-6);
             assert_relative_eq!(joints.elbow_rad, solved.elbow_rad, epsilon = 1e-6);
             assert_relative_eq!(joints.lift_m, solved.lift_m, epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn mobile_base_fk_ik_roundtrip_with_yaw() {
+        let kin = MmLiftKinematics::mm_mobile_lift();
+        let joints = MmLiftJointTarget {
+            lift_m: 0.2,
+            shoulder_rad: 0.5,
+            elbow_rad: 0.7,
+        };
+        let base = (1.2_f64, 0.25_f64, -0.8_f64);
+        for yaw_rad in [0.0, 0.6, -1.1, 2.4] {
+            let target = kin.forward_kinematics_at_base(base.0, base.1, base.2, yaw_rad, joints);
+            let solved = kin
+                .inverse_kinematics_at_base(base.0, base.1, base.2, yaw_rad, target)
+                .expect("reachable rotated target");
+            assert_relative_eq!(solved.lift_m, joints.lift_m, epsilon = 1e-9);
+            assert_relative_eq!(solved.shoulder_rad, joints.shoulder_rad, epsilon = 1e-9);
+            assert_relative_eq!(solved.elbow_rad, joints.elbow_rad, epsilon = 1e-9);
         }
     }
 

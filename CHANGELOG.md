@@ -4,17 +4,29 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
-## [1.0.0-rc.1] - 2026-08-12
+## [0.1.0] - 2026-08-14
 
 ### Added
 
-- **1.0 RC hardening (M6)**: the workspace now targets `1.0.0-rc.1`,
+- **0.1 release hardening (M6)**: the workspace now targets `0.1.0`,
   declares Rust `1.88.0` as its MSRV, gives packaged internal dependencies
-  exact RC requirements, denies undocumented public Rust APIs across every
+  exact release requirements, denies undocumented public Rust APIs across every
   release library, and publishes the compatibility and migration contract plus
   machine-readable schema and release-blocker registries. Dedicated CI gates
   exercise the MSRV, warning-free rustdoc, all 27 crate archives, and patch-level
-  SemVer compatibility against the frozen baseline.
+  SemVer compatibility against the frozen baseline. Pinned cargo-deny and
+  cargo-audit checks now enforce the approved licenses, crates.io-only sources,
+  reviewed duplicate-version exceptions, and RustSec policy; `xtask
+  supply-chain` emits a deterministic sorted Cargo SBOM plus SHA-256 evidence
+  for the lockfile and policy. Parser/protocol hardening adds 256 KiB importer
+  limits, an absolute 32 MiB frontend payload ceiling, deterministic
+  `xtask fuzz-smoke` evidence, and independent sanitizer-ready `cargo fuzz`
+  targets. `xtask release-artifacts` now builds native CLI/controller bundles
+  with SBOM, provenance, path-sorted SHA-256 checksums, installed-bundle smoke,
+  and an ABI3 Python wheel install/import rehearsal; tag/manual release CI runs
+  the same gate on Linux and Windows. `xtask release-exit` now records the
+  complete M6-E exit matrix, including blocker, clean-checkout/tag, all CI,
+  supply-chain, and release-rehearsal verdicts with per-stage durations.
 
 - **Supply-chain release evidence (M6)**: pinned cargo-deny and cargo-audit
   gates enforce the crates.io-only source, license, duplicate-version, and
@@ -153,10 +165,10 @@ All notable changes to Robot Native Engine are documented in this file.
   flagship robot replay, scenario replay, sensor payload, traffic ownership,
   TraCI, runner-control, RGB-D, and frontend contracts and writes a machine-
   readable report. The catalog is an explicit CI gate.
-- **M0-to-1.0 execution plan**: the roadmap now defines dated M0-M6 outcomes
+- **M0-to-0.1 execution plan**: the roadmap now defines dated M0-M6 outcomes
   and objective exit gates for release consolidation, Behavior CI replay,
   stable control schemas, production sensor transport, physics conformance,
-  scenario scale, and 1.0 RC hardening.
+  scenario scale, and 0.1 release hardening.
 - **Headless SUMO co-simulation run** (`rne-asset co-sim <net.xml> --routes
   <rou.xml> --steps N`): spawns SUMO, connects over TraCI, mirrors vehicles
   through `rne_traci::CoSimulation`, and reports a deterministic stable hash

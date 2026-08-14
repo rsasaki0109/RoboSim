@@ -1,8 +1,8 @@
 # Compatibility and migration policy
 
-This policy applies to Robot Native Engine 1.x. The `1.0.0-rc.1` release
-candidate freezes the supported surface; later RCs may tighten validation but
-must not silently reinterpret accepted input.
+This policy applies to Robot Native Engine 0.x. The `0.1.0` release freezes
+the supported surface for this milestone; later 0.x releases may tighten
+validation but must not silently reinterpret accepted input.
 
 ## Supported toolchains and platforms
 
@@ -14,20 +14,23 @@ must not silently reinterpret accepted input.
 - ROS2 remains an adapter and follows the ROS distribution/toolchain declared
   by the adapter workflow; it is not required by core crates.
 
-An MSRV increase in 1.x requires a minor release and release-note entry. The
+An MSRV increase in 0.x requires a minor release and release-note entry. The
 locked graph may require a newer compiler than an individual RNE crate when an
 optional backend is enabled; the full default workspace is the release MSRV
 authority.
 
 ## Rust API
 
-Public items in publishable `rne_*` crates are stable under SemVer after 1.0.
+Public items in publishable `rne_*` crates remain pre-1.0 and may evolve with
+documented migration notes.
 
 - Patch releases may fix behavior without removing, renaming, or changing the
   type of a public item.
-- Minor releases may add APIs and deprecate old APIs. A deprecated API remains
-  through at least the next minor release.
-- Removing or incompatibly changing a stable API requires 2.0.
+- Minor releases may add APIs, deprecate old APIs, or make documented breaking
+  changes while the engine remains below 1.0. A deprecated API remains through
+  at least the next minor release.
+- Once 1.0 is declared, removing or incompatibly changing a stable API
+  requires a major release.
 - APIs explicitly documented as experimental are exempt until promoted, but
   must remain memory-safe and must produce actionable errors.
 
@@ -37,7 +40,7 @@ deny missing documentation.
 
 ## C ABI and plugin compatibility
 
-Controller ABI v3 is the 1.0 authoring ABI. The host continues to load the
+Controller ABI v3 is the current authoring ABI. The host continues to load the
 frozen v2 compatibility fixture. Plugins must negotiate ABI version and
 capabilities before configuration or stepping.
 
@@ -46,21 +49,21 @@ capabilities before configuration or stepping.
   robot-scoped step, and shutdown.
 - Struct layout, ownership, and nullability rules are part of the ABI contract.
 - A future ABI version is additive unless it is assigned a new major number;
-  v2 support cannot be removed in a 1.x patch release.
+  v2 support cannot be removed without an explicit migration note.
 
 Core crates never expose adapter or backend-specific types to make an external
 ABI fit.
 
 ## Frontend protocol
 
-Runner/frontend protocol v1 is supported throughout 1.x. Negotiation rejects
+Runner/frontend protocol v1 is supported throughout 0.x. Negotiation rejects
 incompatible major versions before simulation control. Unknown optional frame
 kinds may be skipped only when the negotiated capability set allows it;
 malformed lengths, limits, or required fields are errors. Slow or disconnected
 frontends must not stall simulation or retain unbounded data.
 
 Legacy line-oriented `--control-port` protocol v1 remains available during the
-1.0 transition. Command acknowledgement precedes the corresponding applied
+0.x transition. Command acknowledgement precedes the corresponding applied
 status boundary.
 
 ## Assets, manifests, and reports
@@ -75,7 +78,7 @@ follow these rules:
 - migration never fabricates sensor frames, actions, random state, or physics
   hashes that were absent in the source artifact.
 
-Stable 1.0 formats include scene, robot, run, plugin, traffic, replay, Behavior
+Current 0.1 formats include scene, robot, run, plugin, traffic, replay, Behavior
 CI, physics-conformance, and scenario-scale artifacts. OpenSCENARIO, SDF, MJCF,
 URDF, SUMO, and PLATEAU inputs are import formats: accepted subsets are
 documented, and unsupported constructs remain explicit import errors.
@@ -103,7 +106,7 @@ lossless migration command in a future minor release.
 ## Python API
 
 The wheel uses `abi3-py39`. Python class, method, task, and keyword names follow
-the same 1.x compatibility rules as public Rust APIs. Pickled Python objects are
+the same documented 0.x compatibility rules as public Rust APIs. Pickled Python objects are
 not a stable artifact format; use versioned RNE JSON/replay/checkpoint formats.
 
 ## Determinism compatibility

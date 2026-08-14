@@ -69,10 +69,18 @@ pub struct MobileManipulatorObservation {
     pub shoulder_position_rad: f64,
     /// Elbow joint position in radians.
     pub elbow_position_rad: f64,
+    /// Wrist yaw joint position in radians (zero when no actuated wrist exists).
+    pub wrist_yaw_position_rad: f64,
     /// Average parallel finger joint position in radians (zero when no gripper).
     pub gripper_position_rad: f64,
+    /// Average parallel linear-finger closing displacement in meters (zero for
+    /// revolute grippers).
+    pub gripper_position_m: f64,
     /// Vertical lift displacement in meters (zero when the robot has no lift).
     pub lift_position_m: f64,
+    /// Whether the gripper currently maintains a grasp according to the active
+    /// grasp model. In friction mode this becomes false after contact is lost.
+    pub is_grasping: bool,
     /// RGBA8 byte count in the latest wrist camera frame (zero when absent).
     pub wrist_camera_pixels: usize,
     /// Number of joints in the latest DataBus joint-state frame.
@@ -87,6 +95,16 @@ pub struct MobileManipulatorObservation {
     pub wrist_depth_center_m: f64,
     /// Minimum wrist depth in meters across the latest frame (zero when absent).
     pub wrist_depth_min_m: f64,
+    /// Selected nearest finite wrist-depth pixel horizontal coordinate (zero when absent).
+    pub wrist_target_pixel_u_px: u32,
+    /// Selected nearest finite wrist-depth pixel vertical coordinate (zero when absent).
+    pub wrist_target_pixel_v_px: u32,
+    /// Selected wrist-depth target distance in meters (zero when absent).
+    pub wrist_target_depth_m: f64,
+    /// Selected target offset on the wrist camera local +X axis in meters.
+    pub wrist_target_offset_x_m: f64,
+    /// Selected target offset on the wrist camera local +Y axis in meters.
+    pub wrist_target_offset_y_m: f64,
     /// Index of the target clutter object when a multi-object pick task is active.
     pub target_object_index: u32,
     /// World-frame pick object position for Place tasks before grasp (zero otherwise).

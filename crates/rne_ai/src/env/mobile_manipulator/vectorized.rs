@@ -1,8 +1,8 @@
 //! Batched mobile manipulator episodes for population-based / parallel RL rollouts.
 
 use super::{
-    MobileManipulatorEpisode, MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeSnapshot,
-    MobileManipulatorEpisodeSnapshotError,
+    GraspMode, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    MobileManipulatorEpisodeSnapshot, MobileManipulatorEpisodeSnapshotError,
 };
 use crate::action::MobileManipulatorAction;
 use crate::episode::Episode;
@@ -137,6 +137,16 @@ impl VectorizedMobileManipulatorEnv {
             step.truncated.push(result.truncated);
         }
         step
+    }
+
+    /// Selects the grasp mode for every underlying episode.
+    ///
+    /// Call after [`Self::reset`] when using a mode-specific workflow; reset
+    /// rebuilds each simulation with its default weld mode.
+    pub fn set_grasp_mode(&mut self, mode: GraspMode) {
+        for episode in &mut self.episodes {
+            episode.set_grasp_mode(mode);
+        }
     }
 
     /// Steps all environments with the corresponding actions.

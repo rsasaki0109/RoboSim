@@ -592,6 +592,566 @@ impl Policy<crate::MobileManipulatorEpisode> for IkMobileClutterPickPlacePolicy 
     }
 }
 
+const MOBILE_LIFT_SETTLE_STEPS: u64 = 600;
+const MOBILE_LIFT_NAVIGATE_STEPS: u64 = 540;
+const MOBILE_LIFT_APPROACH_STEPS: u64 = 900;
+const MOBILE_LIFT_LOWER_TO_PICK_STEPS: u64 = 1400;
+const MOBILE_LIFT_GRASP_STEPS: u64 = 300;
+const MOBILE_LIFT_GRASP_SETTLE_STEPS: u64 = 30;
+const MOBILE_LIFT_RAISE_STEPS: u64 = 600;
+const MOBILE_LIFT_TRANSPORT_STEPS: u64 = 1800;
+const MOBILE_LIFT_LOWER_STEPS: u64 = 1200;
+const MOBILE_LIFT_RELEASE_STEPS: u64 = 120;
+const MOBILE_LIFT_PICK_BASE_STANDOFF_M: f64 = 0.90;
+// The finger-link joint origin is 0.02 m below the gripper base and each pad
+// extends 0.035 m downward.  Keeping the pad center at least 0.235 m above the
+// low pickup rail's 0.20 m top prevents the rail from masking the two-sided
+// parallel-jaw contact gate while still overlapping the cube at y≈0.234 m.
+const MOBILE_LIFT_GRIPPER_CLEARANCE_M: f64 = 0.145;
+const MOBILE_LIFT_CARRY_HEIGHT_M: f64 = 0.48;
+const MOBILE_LIFT_PLACE_HEIGHT_M: f64 = -0.02;
+const MOBILE_LIFT_LOWER_TARGET_STEP_M: f64 = 0.00025;
+const MOBILE_LIFT_OPEN_GRIPPER_M_S: f64 = 0.04;
+const MOBILE_LIFT_CLOSE_GRIPPER_M_S: f64 = -0.04;
+const MOBILE_LIFT_TARGET_STEP_M: f64 = 0.01;
+const MOBILE_LIFT_CARRY_TARGET_STEP_M: f64 = 0.0005;
+const MOBILE_LIFT_ARM_TARGET_STEP_RAD: f64 = 0.015;
+
+/// Observable phase of [`IkMobileLiftPickPlacePolicy`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MobileLiftPickPlacePhase {
+    /// Let the articulation settle while raising toward the pickup height.
+    Settle,
+    /// Drive the base to an arm-reachable pickup standoff.
+    Navigate,
+    /// Track the tabletop cube with mobile-base lift/arm IK.
+    Approach,
+    /// Lower vertically after horizontal alignment puts the cube between the fingers.
+    LowerToPick,
+    /// Close both fingers until a physical friction grasp is detected.
+    Grasp,
+    /// Raise the friction-held object clear of the pickup table.
+    Lift,
+    /// Move the carried object toward the ground placement target.
+    Transport,
+    /// Lower the object to its resting height.
+    Lower,
+    /// Open the fingers and release the object.
+    Release,
+    /// Hold after the sequence has completed.
+    Done,
+}
+
+/// Failure classification for one observation of the lift-capable mobile
+/// pick-and-place policy.
+///
+/// The classifier is deliberately derived from the typed phase, fixed-step
+/// budget, and observation only. It never inspects a physics backend or wall
+/// clock, so a failure report is stable across headless replay and vectorized
+/// evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MobileLiftFailureClass {
+    /// The policy is still within its phase budget or has completed successfully.
+    None,
+    /// The base did not reach the pickup standoff in time.
+    NavigateTimeout,
+    /// The arm did not reach the high pickup pose in time.
+    ApproachTimeout,
+    /// The arm did not align and lower into the pickup pocket in time.
+    PickupAlignmentTimeout,
+    /// Both fingers failed to acquire a friction grasp before the grasp budget ended.
+    GraspTimeout,
+    /// A previously acquired friction grasp was lost during lift or transport.
+    GraspSlip,
+    /// The grasped payload did not clear the pickup height in time.
+    LiftClearanceTimeout,
+    /// The carried payload did not reach the placement target in time.
+    TransportTimeout,
+    /// The lift did not reach the placement height in time.
+    LowerTimeout,
+    /// The release phase ended without a completed placement.
+    ReleaseTimeout,
+}
+
+/// Closed-loop lift-capable mobile pick-and-place policy.
+///
+/// The policy composes the existing differential-drive controller with mobile-base
+/// lift/arm IK. It approaches a tabletop object, acquires it through
+/// [`crate::GraspMode::Friction`], raises it before transport, then lowers and
+/// releases it at the episode's ground target. The phase machine is driven by the
+/// typed observation rather than wall-clock time; per-phase step budgets only bound
+/// failed attempts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IkMobileLiftPickPlacePolicy {
+    phase: MobileLiftPickPlacePhase,
+    phase_step: u64,
+    total_step: u64,
+    kinematics: MmLiftKinematics,
+    grasp_settle_started_step: Option<u64>,
+    carry_joint_target: Option<MmLiftJointTarget>,
+    lower_to_pick_start_lift_m: f64,
+}
+
+impl Default for IkMobileLiftPickPlacePolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IkMobileLiftPickPlacePolicy {
+    /// Creates a policy at the start of the settle phase.
+    pub fn new() -> Self {
+        Self {
+            phase: MobileLiftPickPlacePhase::Settle,
+            phase_step: 0,
+            total_step: 0,
+            kinematics: MmLiftKinematics::mm_mobile_lift(),
+            grasp_settle_started_step: None,
+            carry_joint_target: None,
+            lower_to_pick_start_lift_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+        }
+    }
+
+    /// Returns the active behavior phase.
+    pub fn phase(&self) -> MobileLiftPickPlacePhase {
+        self.phase
+    }
+
+    /// Returns the number of actions emitted since construction.
+    pub fn current_step(&self) -> u64 {
+        self.total_step
+    }
+
+    /// Returns the maximum number of actions emitted before the policy reaches Done.
+    pub fn total_steps(&self) -> u64 {
+        MOBILE_LIFT_SETTLE_STEPS
+            + MOBILE_LIFT_NAVIGATE_STEPS
+            + MOBILE_LIFT_APPROACH_STEPS
+            + MOBILE_LIFT_LOWER_TO_PICK_STEPS
+            + MOBILE_LIFT_GRASP_STEPS
+            + MOBILE_LIFT_RAISE_STEPS
+            + MOBILE_LIFT_TRANSPORT_STEPS
+            + MOBILE_LIFT_LOWER_STEPS
+            + MOBILE_LIFT_RELEASE_STEPS
+    }
+
+    /// Classifies the current phase and observation for deterministic failure
+    /// reporting. `None` means the policy is progressing normally (or is in
+    /// `Done`). Call this before requesting the next action when a caller needs
+    /// to distinguish a timeout from a physical grasp slip.
+    pub fn failure_class(
+        &self,
+        observation: &MobileManipulatorObservation,
+    ) -> MobileLiftFailureClass {
+        match self.phase {
+            MobileLiftPickPlacePhase::Navigate if self.phase_step >= MOBILE_LIFT_NAVIGATE_STEPS => {
+                MobileLiftFailureClass::NavigateTimeout
+            }
+            MobileLiftPickPlacePhase::Approach if self.phase_step >= MOBILE_LIFT_APPROACH_STEPS => {
+                MobileLiftFailureClass::ApproachTimeout
+            }
+            MobileLiftPickPlacePhase::LowerToPick
+                if self.phase_step >= MOBILE_LIFT_LOWER_TO_PICK_STEPS =>
+            {
+                MobileLiftFailureClass::PickupAlignmentTimeout
+            }
+            MobileLiftPickPlacePhase::Grasp
+                if self.phase_step >= MOBILE_LIFT_GRASP_STEPS && !observation.is_grasping =>
+            {
+                MobileLiftFailureClass::GraspTimeout
+            }
+            MobileLiftPickPlacePhase::Lift if !observation.is_grasping => {
+                MobileLiftFailureClass::GraspSlip
+            }
+            MobileLiftPickPlacePhase::Lift
+                if self.phase_step >= MOBILE_LIFT_RAISE_STEPS
+                    && observation.lift_position_m <= MOBILE_LIFT_CARRY_HEIGHT_M - 0.04 =>
+            {
+                MobileLiftFailureClass::LiftClearanceTimeout
+            }
+            MobileLiftPickPlacePhase::Transport if !observation.is_grasping => {
+                MobileLiftFailureClass::GraspSlip
+            }
+            MobileLiftPickPlacePhase::Transport
+                if self.phase_step >= MOBILE_LIFT_TRANSPORT_STEPS
+                    && observation.target_dx_m.hypot(observation.target_dz_m) >= 0.06 =>
+            {
+                MobileLiftFailureClass::TransportTimeout
+            }
+            MobileLiftPickPlacePhase::Lower if !observation.is_grasping => {
+                MobileLiftFailureClass::GraspSlip
+            }
+            MobileLiftPickPlacePhase::Lower
+                if self.phase_step >= MOBILE_LIFT_LOWER_STEPS
+                    && observation.lift_position_m > MOBILE_LIFT_PLACE_HEIGHT_M + 0.04 =>
+            {
+                MobileLiftFailureClass::LowerTimeout
+            }
+            MobileLiftPickPlacePhase::Release
+                if self.phase_step >= MOBILE_LIFT_RELEASE_STEPS && observation.is_grasping =>
+            {
+                MobileLiftFailureClass::ReleaseTimeout
+            }
+            _ => MobileLiftFailureClass::None,
+        }
+    }
+
+    /// Returns an action for the current observation and advances the phase machine.
+    pub fn next_action(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        self.advance_phase(observation);
+        let action = match self.phase {
+            MobileLiftPickPlacePhase::Settle => self.closed_loop_hold_action(
+                observation,
+                MmLiftJointTarget {
+                    lift_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+                    shoulder_rad: 0.0,
+                    elbow_rad: 0.0,
+                },
+                crate::MobileManipulatorAction {
+                    gripper_velocity_m_s: MOBILE_LIFT_OPEN_GRIPPER_M_S,
+                    ..crate::MobileManipulatorAction::default()
+                },
+            ),
+            MobileLiftPickPlacePhase::Navigate => self.navigate_action(observation),
+            MobileLiftPickPlacePhase::Approach => self.high_pick_pose_action(observation),
+            MobileLiftPickPlacePhase::LowerToPick => self.lower_to_pick_action(observation),
+            MobileLiftPickPlacePhase::Grasp => self.carry_hold_action(
+                observation,
+                self.carry_joint_target
+                    .map_or(observation.lift_position_m, |target| target.lift_m),
+                crate::MobileManipulatorAction {
+                    gripper_velocity_m_s: MOBILE_LIFT_CLOSE_GRIPPER_M_S,
+                    ..crate::MobileManipulatorAction::default()
+                },
+            ),
+            MobileLiftPickPlacePhase::Lift => self.carry_hold_action(
+                observation,
+                MOBILE_LIFT_CARRY_HEIGHT_M,
+                crate::MobileManipulatorAction {
+                    gripper_velocity_m_s: MOBILE_LIFT_CLOSE_GRIPPER_M_S,
+                    ..crate::MobileManipulatorAction::default()
+                },
+            ),
+            MobileLiftPickPlacePhase::Transport => {
+                let mut drive = mobile_carry_object_toward_action(observation);
+                drive.left_wheel_velocity_rad_s *= 0.4;
+                drive.right_wheel_velocity_rad_s *= 0.4;
+                drive.gripper_velocity_m_s = MOBILE_LIFT_CLOSE_GRIPPER_M_S;
+                self.carry_hold_action(observation, MOBILE_LIFT_CARRY_HEIGHT_M, drive)
+            }
+            MobileLiftPickPlacePhase::Lower => self.carry_hold_action(
+                observation,
+                MOBILE_LIFT_PLACE_HEIGHT_M,
+                crate::MobileManipulatorAction {
+                    gripper_velocity_m_s: MOBILE_LIFT_CLOSE_GRIPPER_M_S,
+                    ..crate::MobileManipulatorAction::default()
+                },
+            ),
+            MobileLiftPickPlacePhase::Release => {
+                let action = crate::MobileManipulatorAction {
+                    gripper_velocity_m_s: 0.08,
+                    ..crate::MobileManipulatorAction::default()
+                };
+                self.carry_hold_action(observation, MOBILE_LIFT_PLACE_HEIGHT_M, action)
+            }
+            MobileLiftPickPlacePhase::Done => crate::MobileManipulatorAction::default(),
+        };
+        self.phase_step += 1;
+        self.total_step += 1;
+        action
+    }
+
+    fn advance_phase(&mut self, observation: &MobileManipulatorObservation) {
+        let grasped = observation.is_grasping;
+        if self.phase == MobileLiftPickPlacePhase::Grasp
+            && grasped
+            && self.grasp_settle_started_step.is_none()
+        {
+            self.grasp_settle_started_step = Some(self.phase_step);
+            self.carry_joint_target = Some(MmLiftJointTarget {
+                lift_m: observation.lift_position_m,
+                shoulder_rad: observation.shoulder_position_rad,
+                elbow_rad: observation.elbow_position_rad,
+            });
+        }
+        let next = match self.phase {
+            MobileLiftPickPlacePhase::Settle
+                if (self.phase_step >= 120
+                    && observation.lift_position_m > MOBILE_LIFT_CARRY_HEIGHT_M - 0.04
+                    && observation.shoulder_position_rad.abs() < 0.08
+                    && observation.elbow_position_rad.abs() < 0.08)
+                    || self.phase_step >= MOBILE_LIFT_SETTLE_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::Navigate)
+            }
+            MobileLiftPickPlacePhase::Navigate
+                if self.pick_base_error_m(observation) < 0.04
+                    || self.phase_step >= MOBILE_LIFT_NAVIGATE_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::Approach)
+            }
+            MobileLiftPickPlacePhase::Approach
+                if self.gripper_pick_error_m(observation) < 0.03
+                    && self.gripper_high_pick_height_error_m(observation) < 0.03
+                    || self.phase_step >= MOBILE_LIFT_APPROACH_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::LowerToPick)
+            }
+            MobileLiftPickPlacePhase::LowerToPick
+                if (self.phase_step >= 60
+                    && self.gripper_pick_error_m(observation) < 0.015
+                    && self.gripper_pick_height_error_m(observation) < 0.02)
+                    || self.phase_step >= MOBILE_LIFT_LOWER_TO_PICK_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::Grasp)
+            }
+            MobileLiftPickPlacePhase::Grasp
+                if self.grasp_settle_started_step.is_some_and(|started| {
+                    self.phase_step.saturating_sub(started) >= MOBILE_LIFT_GRASP_SETTLE_STEPS
+                }) =>
+            {
+                Some(MobileLiftPickPlacePhase::Lift)
+            }
+            MobileLiftPickPlacePhase::Lift
+                if grasped
+                    && (observation.lift_position_m > MOBILE_LIFT_CARRY_HEIGHT_M - 0.04
+                        || self.phase_step >= MOBILE_LIFT_RAISE_STEPS) =>
+            {
+                Some(MobileLiftPickPlacePhase::Transport)
+            }
+            MobileLiftPickPlacePhase::Transport
+                if observation.target_dx_m.hypot(observation.target_dz_m) < 0.06
+                    || self.phase_step >= MOBILE_LIFT_TRANSPORT_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::Lower)
+            }
+            MobileLiftPickPlacePhase::Lower
+                if observation.lift_position_m < MOBILE_LIFT_PLACE_HEIGHT_M + 0.04
+                    || self.phase_step >= MOBILE_LIFT_LOWER_STEPS =>
+            {
+                Some(MobileLiftPickPlacePhase::Release)
+            }
+            MobileLiftPickPlacePhase::Release if self.phase_step >= MOBILE_LIFT_RELEASE_STEPS => {
+                Some(MobileLiftPickPlacePhase::Done)
+            }
+            _ => None,
+        };
+        if let Some(next) = next {
+            if next == MobileLiftPickPlacePhase::LowerToPick {
+                self.lower_to_pick_start_lift_m = observation.lift_position_m;
+            }
+            if next == MobileLiftPickPlacePhase::Grasp {
+                self.carry_joint_target = Some(MmLiftJointTarget {
+                    lift_m: observation.lift_position_m,
+                    shoulder_rad: observation.shoulder_position_rad,
+                    elbow_rad: observation.elbow_position_rad,
+                });
+            }
+            self.phase = next;
+            self.phase_step = 0;
+            if next == MobileLiftPickPlacePhase::Grasp {
+                self.grasp_settle_started_step = None;
+            }
+        }
+    }
+
+    fn navigate_action(
+        &self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        let mut action = mobile_drive_toward_action(
+            observation,
+            observation.pick_object_x_m - MOBILE_LIFT_PICK_BASE_STANDOFF_M,
+            observation.pick_object_z_m,
+            0.20,
+        );
+        action.gripper_velocity_m_s = MOBILE_LIFT_OPEN_GRIPPER_M_S;
+        self.closed_loop_hold_action(
+            observation,
+            MmLiftJointTarget {
+                lift_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+                shoulder_rad: 0.0,
+                elbow_rad: 0.0,
+            },
+            action,
+        )
+    }
+
+    fn high_pick_pose_action(
+        &self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        let fallback = MmLiftJointTarget {
+            lift_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+            shoulder_rad: 0.0,
+            elbow_rad: 0.0,
+        };
+        let target = self
+            .kinematics
+            .inverse_kinematics_at_base(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+                observation.base_yaw_rad,
+                MmLiftGripperTarget::new(
+                    observation.pick_object_x_m,
+                    observation.base_y_m + MOBILE_LIFT_CARRY_HEIGHT_M,
+                    observation.pick_object_z_m,
+                ),
+            )
+            .unwrap_or(fallback);
+        self.closed_loop_hold_action(
+            observation,
+            target,
+            crate::MobileManipulatorAction {
+                gripper_velocity_m_s: MOBILE_LIFT_OPEN_GRIPPER_M_S,
+                ..crate::MobileManipulatorAction::default()
+            },
+        )
+    }
+
+    fn lower_to_pick_action(
+        &self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        let fallback = MmLiftJointTarget {
+            lift_m: (observation.pick_object_y_m + MOBILE_LIFT_GRIPPER_CLEARANCE_M
+                - observation.base_y_m)
+                .clamp(-0.5, 0.5),
+            shoulder_rad: observation.shoulder_position_rad,
+            elbow_rad: observation.elbow_position_rad,
+        };
+        let target = self
+            .kinematics
+            .inverse_kinematics_at_base(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+                observation.base_yaw_rad,
+                MmLiftGripperTarget::new(
+                    observation.pick_object_x_m,
+                    observation.pick_object_y_m + MOBILE_LIFT_GRIPPER_CLEARANCE_M,
+                    observation.pick_object_z_m,
+                ),
+            )
+            .unwrap_or(fallback);
+        let lift_target_m = (self.lower_to_pick_start_lift_m
+            - (self.phase_step + 1) as f64 * MOBILE_LIFT_LOWER_TARGET_STEP_M)
+            .max(target.lift_m);
+        crate::MobileManipulatorAction {
+            gripper_velocity_m_s: MOBILE_LIFT_OPEN_GRIPPER_M_S,
+            ..crate::MobileManipulatorAction::default()
+        }
+        .with_lift_joint_target(MmLiftJointTarget {
+            lift_m: lift_target_m,
+            shoulder_rad: rate_limited_target(
+                observation.shoulder_position_rad,
+                target.shoulder_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+            elbow_rad: rate_limited_target(
+                observation.elbow_position_rad,
+                target.elbow_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+        })
+    }
+
+    fn carry_hold_action(
+        &self,
+        observation: &MobileManipulatorObservation,
+        lift_m: f64,
+        action: crate::MobileManipulatorAction,
+    ) -> crate::MobileManipulatorAction {
+        let arm = self.carry_joint_target.unwrap_or(MmLiftJointTarget {
+            lift_m: observation.lift_position_m,
+            shoulder_rad: observation.shoulder_position_rad,
+            elbow_rad: observation.elbow_position_rad,
+        });
+        let phase_elapsed_m = (self.phase_step + 1) as f64 * MOBILE_LIFT_CARRY_TARGET_STEP_M;
+        let lift_target_m = match self.phase {
+            MobileLiftPickPlacePhase::Grasp => arm.lift_m,
+            MobileLiftPickPlacePhase::Lift => (arm.lift_m + phase_elapsed_m).min(lift_m),
+            MobileLiftPickPlacePhase::Lower => {
+                (MOBILE_LIFT_CARRY_HEIGHT_M - phase_elapsed_m).max(lift_m)
+            }
+            MobileLiftPickPlacePhase::Transport | MobileLiftPickPlacePhase::Release => lift_m,
+            _ => rate_limited_target(
+                observation.lift_position_m,
+                lift_m,
+                MOBILE_LIFT_TARGET_STEP_M,
+            ),
+        };
+        action.with_lift_joint_target(MmLiftJointTarget {
+            lift_m: lift_target_m,
+            shoulder_rad: arm.shoulder_rad,
+            elbow_rad: arm.elbow_rad,
+        })
+    }
+
+    fn closed_loop_hold_action(
+        &self,
+        observation: &MobileManipulatorObservation,
+        target: MmLiftJointTarget,
+        action: crate::MobileManipulatorAction,
+    ) -> crate::MobileManipulatorAction {
+        action.with_lift_joint_target(MmLiftJointTarget {
+            lift_m: rate_limited_target(
+                observation.lift_position_m,
+                target.lift_m,
+                MOBILE_LIFT_TARGET_STEP_M,
+            ),
+            shoulder_rad: rate_limited_target(
+                observation.shoulder_position_rad,
+                target.shoulder_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+            elbow_rad: rate_limited_target(
+                observation.elbow_position_rad,
+                target.elbow_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+        })
+    }
+
+    fn pick_base_error_m(&self, observation: &MobileManipulatorObservation) -> f64 {
+        let target_x = observation.pick_object_x_m - MOBILE_LIFT_PICK_BASE_STANDOFF_M;
+        (target_x - observation.base_x_m).hypot(observation.pick_object_z_m - observation.base_z_m)
+    }
+
+    fn gripper_pick_error_m(&self, observation: &MobileManipulatorObservation) -> f64 {
+        observation
+            .gripper_target_dx_m
+            .hypot(observation.gripper_target_dz_m)
+    }
+
+    fn gripper_pick_height_error_m(&self, observation: &MobileManipulatorObservation) -> f64 {
+        (observation.gripper_target_dy_m + MOBILE_LIFT_GRIPPER_CLEARANCE_M).abs()
+    }
+
+    fn gripper_high_pick_height_error_m(&self, observation: &MobileManipulatorObservation) -> f64 {
+        let target_delta_y_m =
+            observation.pick_object_y_m - (observation.base_y_m + MOBILE_LIFT_CARRY_HEIGHT_M);
+        (observation.gripper_target_dy_m - target_delta_y_m).abs()
+    }
+}
+
+fn rate_limited_target(current: f64, target: f64, max_step: f64) -> f64 {
+    current + (target - current).clamp(-max_step, max_step)
+}
+
+impl Policy<crate::MobileManipulatorEpisode> for IkMobileLiftPickPlacePolicy {
+    fn act(
+        &mut self,
+        observation: &crate::MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        self.next_action(observation)
+    }
+}
+
 /// IK-assisted pick-and-place for the fixed-base `mm_minimal` clutter episodes.
 ///
 /// Uses analytic IK during approach, then a tuned fixed-velocity carry that tracks
@@ -1279,5 +1839,32 @@ mod tests {
         obs.wrist_depth_center_m = 5.0;
         let action = policy.act(&obs);
         assert_relative_eq!(action.shoulder_velocity_rad_s, 0.875, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn mobile_lift_failure_classifier_distinguishes_slip_and_timeout() {
+        let mut policy = IkMobileLiftPickPlacePolicy::new();
+        let mut observation = crate::MobileManipulatorObservation::default();
+        policy.phase = MobileLiftPickPlacePhase::Lift;
+        assert_eq!(
+            policy.failure_class(&observation),
+            MobileLiftFailureClass::GraspSlip
+        );
+
+        policy.phase = MobileLiftPickPlacePhase::Grasp;
+        policy.phase_step = MOBILE_LIFT_GRASP_STEPS;
+        assert_eq!(
+            policy.failure_class(&observation),
+            MobileLiftFailureClass::GraspTimeout
+        );
+
+        observation.is_grasping = true;
+        policy.phase = MobileLiftPickPlacePhase::Transport;
+        policy.phase_step = MOBILE_LIFT_TRANSPORT_STEPS;
+        observation.target_dx_m = 1.0;
+        assert_eq!(
+            policy.failure_class(&observation),
+            MobileLiftFailureClass::TransportTimeout
+        );
     }
 }

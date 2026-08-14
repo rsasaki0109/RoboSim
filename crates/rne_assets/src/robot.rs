@@ -205,6 +205,9 @@ pub struct UrdfRobotAsset {
     /// When true, the backend uses reduced-coordinate multibody joints.
     #[serde(default)]
     pub multibody: bool,
+    /// When true, positive URDF inertial masses override legacy link defaults.
+    #[serde(default)]
+    pub use_declared_inertial_masses: bool,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -248,6 +251,7 @@ impl UrdfRobotAsset {
             attach_colliders: self.collisions,
             attach_mesh_colliders: self.mesh_collisions,
             self_collisions: self.self_collisions,
+            use_declared_inertial_masses: self.use_declared_inertial_masses,
             ..UrdfSpawnConfig::default()
         }
     }

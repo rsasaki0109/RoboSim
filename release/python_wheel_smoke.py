@@ -12,7 +12,7 @@ def main() -> None:
     version = metadata.version("rne_py")
     if version != "1.0.0rc1":
         raise SystemExit(f"unexpected rne_py wheel version: {version}")
-    if rne_py.__version__ != "1.0.0-rc.1":
+    if rne_py.__version__ != "0.1.0":
         raise SystemExit(f"unexpected rne_py module version: {rne_py.__version__}")
 
     episode = rne_py.DiffDriveEpisode(goal_x_m=1.0, max_steps=300)

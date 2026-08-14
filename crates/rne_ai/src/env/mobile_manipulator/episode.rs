@@ -349,6 +349,25 @@ impl MobileManipulatorEpisodeConfig {
         }
     }
 
+    /// Navigate, friction-grasp from a low table, lift, transport, and place on
+    /// the ground with the built-in lift-capable mobile manipulator.
+    pub fn mobile_lift_pick_place() -> Self {
+        Self {
+            max_steps: 6_000,
+            scene_path: crate::mm_mobile_lift_pick_place_scene_path(),
+            task: MobileManipulatorTask::Place {
+                object_name: "mobile_lift_cube".into(),
+                target: crate::reach::ReachTarget::new(0.0, 0.035, 0.0),
+                place_tolerance_m: 0.12,
+            },
+            reward: MobileManipulatorRewardConfig::default(),
+            reach_randomization: None,
+            reach_curriculum: None,
+            clutter_pick: None,
+            rng_seed: 0,
+        }
+    }
+
     /// Vertical pick-and-place on the `mm_lift` robot: lower the top-down claw over a
     /// cube on the ground, grasp it, lift it, carry it to a target, and set it down.
     ///
@@ -2029,6 +2048,122 @@ mod tests {
             }
         }
         panic!("expected mobile clutter policy to place clutter_cube_a");
+    }
+
+    #[test]
+    fn mobile_lift_friction_policy_places_cube_after_table_clearance() {
+        use crate::{IkMobileLiftPickPlacePolicy, Policy};
+        use rne_physics::{FixedJointDesc, RigidBody, RigidBodyType};
+
+        let mut episode =
+            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::mobile_lift_pick_place());
+        let mut policy = IkMobileLiftPickPlacePolicy::new();
+        let mut step = episode.reset();
+        episode.set_grasp_mode(crate::GraspMode::Friction);
+        let resting_y = episode
+            .simulation()
+            .named_translation_m("mobile_lift_cube")
+            .expect("mobile lift cube")
+            .1;
+        let mut grasped = false;
+        let mut max_cube_y = resting_y;
+
+        for _ in 0..policy.total_steps() {
+            step = episode.step(policy.act(&step.observation));
+            grasped |= episode.simulation().is_grasping();
+            max_cube_y = max_cube_y.max(
+                episode
+                    .simulation()
+                    .named_translation_m("mobile_lift_cube")
+                    .expect("mobile lift cube")
+                    .1,
+            );
+            if step.terminated {
+                break;
+            }
+        }
+
+        let placed = episode
+            .simulation()
+            .named_translation_m("mobile_lift_cube")
+            .expect("mobile lift cube");
+        assert!(
+            grasped,
+            "expected a weld-free friction grasp; phase={:?}, base=({:.3},{:.3}), gripper_error=({:.3},{:.3},{:.3}), lift={:.3}, cube=({:.3},{:.3},{:.3})",
+            policy.phase(),
+            step.observation.base_x_m,
+            step.observation.base_z_m,
+            step.observation.gripper_target_dx_m,
+            step.observation.gripper_target_dy_m,
+            step.observation.gripper_target_dz_m,
+            step.observation.lift_position_m,
+            placed.0,
+            placed.1,
+            placed.2,
+        );
+        let cube = episode
+            .simulation()
+            .entity_named("mobile_lift_cube")
+            .expect("mobile lift cube entity");
+        assert!(
+            episode
+                .simulation()
+                .world()
+                .get::<FixedJointDesc>(cube)
+                .is_none(),
+            "friction mode must not insert a weld joint"
+        );
+        assert_eq!(
+            episode
+                .simulation()
+                .world()
+                .get::<RigidBody>(cube)
+                .expect("mobile lift cube body")
+                .body_type,
+            RigidBodyType::Dynamic
+        );
+        assert!(
+            max_cube_y > resting_y + 0.12,
+            "cube must clear the pickup table before transport: resting_y={resting_y:.3}, max_y={max_cube_y:.3}"
+        );
+        assert!(
+            step.terminated,
+            "expected ground placement, phase={:?}, cube=({:.3}, {:.3}, {:.3})",
+            policy.phase(),
+            placed.0,
+            placed.1,
+            placed.2
+        );
+    }
+
+    #[test]
+    fn mobile_lift_pick_place_checkpoint_replays_bitwise() {
+        use crate::{IkMobileLiftPickPlacePolicy, Policy};
+
+        fn run_once() -> MobileManipulatorEpisodeSnapshot {
+            let mut episode = MobileManipulatorEpisode::new(
+                MobileManipulatorEpisodeConfig::mobile_lift_pick_place(),
+            );
+            let mut step = episode.reset();
+            episode.set_grasp_mode(crate::GraspMode::Friction);
+            let mut policy = IkMobileLiftPickPlacePolicy::new();
+            for _ in 0..policy.total_steps() {
+                step = episode.step(policy.act(&step.observation));
+                if step.terminated {
+                    break;
+                }
+            }
+            assert!(
+                step.terminated,
+                "deterministic rollout should place the cube"
+            );
+            episode.checkpoint()
+        }
+
+        // A fresh run starts with the same seed, topology, and fixed-step
+        // schedule. Its completed checkpoint is therefore a stable replay
+        // artifact suitable for deterministic hash/replay comparisons.
+        assert_eq!(run_once(), run_once());
     }
 
     #[test]

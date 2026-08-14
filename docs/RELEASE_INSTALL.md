@@ -4,14 +4,14 @@ Robot Native Engine release bundles are native, self-contained rehearsal
 artifacts for Linux x86-64 and Windows x86-64. Select the archive whose target
 matches the host:
 
-- `rne-1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz`
-- `rne-1.0.0-rc.1-x86_64-pc-windows-msvc.zip`
+- `rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz`
+- `rne-0.1.0-x86_64-pc-windows-msvc.zip`
 
 Extract the archive without flattening its top-level directory. Before running
 anything, verify every entry listed in `SHA256SUMS`. On Linux:
 
 ```bash
-cd rne-1.0.0-rc.1-x86_64-unknown-linux-gnu
+cd rne-0.1.0-x86_64-unknown-linux-gnu
 sha256sum --check SHA256SUMS
 ./bin/rne-asset --version
 ```
@@ -20,7 +20,7 @@ On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 `release-report.json` records the tested commit, Rust/Cargo versions, target,
 Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, and every
 bundle-member digest. `reproducible` is true only for a clean build whose exact
-`v1.0.0-rc.1` tag points to the tested commit.
+`v0.1.0` tag points to the tested commit.
 
 ## Installed workflows
 

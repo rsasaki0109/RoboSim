@@ -31,6 +31,11 @@ pub struct UrdfSpawnConfig {
     ///
     /// When `None`, mesh collision elements are skipped (legacy behavior).
     pub mesh_assets_root: Option<PathBuf>,
+    /// When true, positive `<inertial><mass>` values override legacy link masses.
+    ///
+    /// This is opt-in so existing URDF assets keep their historical dynamics;
+    /// authored assets that rely on physical inertial data can enable it explicitly.
+    pub use_declared_inertial_masses: bool,
 }
 
 impl Default for UrdfSpawnConfig {
@@ -43,6 +48,7 @@ impl Default for UrdfSpawnConfig {
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
             mesh_assets_root: None,
+            use_declared_inertial_masses: false,
         }
     }
 }
@@ -248,7 +254,12 @@ fn attach_link_geometry(
         };
         world.entity_mut(entity).insert(RigidBody {
             body_type,
-            mass_kg: if is_base_link { 5.0 } else { 1.0 },
+            mass_kg: config
+                .use_declared_inertial_masses
+                .then_some(link.inertial_mass_kg)
+                .flatten()
+                .filter(|mass_kg| *mass_kg > 0.0)
+                .unwrap_or(if is_base_link { 5.0 } else { 1.0 }),
             ..RigidBody::default()
         });
     }
@@ -345,6 +356,38 @@ mod tests {
         let left_wheel = spawned.links["left_wheel"];
         let collider = world.get::<Collider>(left_wheel).expect("wheel collider");
         assert!(matches!(collider.shape, ColliderShape::Capsule { .. }));
+    }
+
+    #[test]
+    fn spawn_uses_declared_link_inertial_mass() {
+        let urdf = parse_urdf(
+            r#"
+            <robot name="weighted">
+              <link name="base_link">
+                <inertial><mass value="2.5"/></inertial>
+                <collision><geometry><box size="1 1 1"/></geometry></collision>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot_with_config(
+            &mut world,
+            &urdf,
+            UrdfSpawnConfig {
+                use_declared_inertial_masses: true,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            world
+                .get::<RigidBody>(spawned.base_link)
+                .expect("base rigid body")
+                .mass_kg,
+            2.5
+        );
     }
 
     #[test]

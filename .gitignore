@@ -1,4 +1,5 @@
 /target
+/fuzz/target/
 /artifacts/
 .venv/
 __pycache__/

@@ -103,19 +103,44 @@ fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError>
 
     let mut collisions = Vec::new();
     let mut visuals = Vec::new();
+    let mut inertial_mass_kg = None;
     for child in node.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
             "collision" => collisions.push(parse_geometry_element(child)?),
             "visual" => visuals.push(parse_geometry_element(child)?),
+            "inertial" => inertial_mass_kg = parse_inertial_mass_kg(child)?,
             _ => {}
         }
     }
 
     Ok(UrdfLink {
         name,
+        inertial_mass_kg,
         collisions,
         visuals,
     })
+}
+
+fn parse_inertial_mass_kg(
+    inertial: roxmltree::Node<'_, '_>,
+) -> Result<Option<f64>, UrdfParseError> {
+    let Some(mass) = inertial
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "mass")
+    else {
+        return Ok(None);
+    };
+    let value = mass
+        .attribute("value")
+        .ok_or_else(|| UrdfParseError::Missing("inertial/mass@value".into()))?;
+    let mass_kg = parse_f64(value)?;
+    if !mass_kg.is_finite() || mass_kg < 0.0 {
+        return Err(UrdfParseError::InvalidValue {
+            field: "inertial/mass@value".into(),
+            value: value.into(),
+        });
+    }
+    Ok(Some(mass_kg))
 }
 
 fn parse_geometry_element(
@@ -449,6 +474,55 @@ mod tests {
     #[test]
     fn rejects_declared_input_size_before_parsing() {
         assert!(ensure_input_len(URDF_MAX_INPUT_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn parses_link_inertial_mass() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="weighted">
+              <link name="finger">
+                <inertial><mass value="0.05"/></inertial>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        assert_eq!(robot.links[0].inertial_mass_kg, Some(0.05));
+    }
+
+    #[test]
+    fn rejects_negative_link_inertial_mass() {
+        let error = parse_urdf(
+            r#"
+            <robot name="weightless">
+              <link name="finger">
+                <inertial><mass value="-1"/></inertial>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            UrdfParseError::InvalidValue { ref field, .. }
+                if field == "inertial/mass@value"
+        ));
+    }
+
+    #[test]
+    fn accepts_zero_mass_fixed_link() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="fixed">
+              <link name="visual_only">
+                <inertial><mass value="0"/></inertial>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        assert_eq!(robot.links[0].inertial_mass_kg, Some(0.0));
     }
 
     #[test]

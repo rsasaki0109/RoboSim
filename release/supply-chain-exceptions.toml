@@ -1,5 +1,5 @@
 schema_version = 1
-release_version = "1.0.0-rc.1"
+release_version = "0.1.0"
 policy_date = "2026-08-12"
 
 [[advisory]]

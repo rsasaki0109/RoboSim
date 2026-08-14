@@ -1,7 +1,7 @@
-# M6: 1.0 RC hardening plan
+# M6: 0.1 release hardening plan
 
-M6 turns the audited M0-M5 engine into an installable `v1.0.0-rc.1` release
-candidate. It does not widen the simulation domain. It freezes the supported
+M6 turns the audited M0-M5 engine into an installable `v0.1.0` release. It does
+not widen the simulation domain. It freezes the supported
 surface, proves compatibility and supply-chain policy, hardens untrusted input
 boundaries, and produces independently reproducible release evidence.
 
@@ -9,7 +9,7 @@ boundaries, and produces independently reproducible release evidence.
 
 The candidate is accepted only when all of the following are true:
 
-- the workspace release version is exactly `1.0.0-rc.1`;
+- the workspace release version is exactly `0.1.0`;
 - the minimum supported Rust version (MSRV) is `1.88.0`, the highest declared
   MSRV in the locked dependency graph;
 - core crates remain ROS2-free and renderer-independent headless workflows stay
@@ -36,7 +36,7 @@ Release evidence records them separately as diagnostics.
 
 ## Compatibility policy
 
-The frozen 1.0 surface includes:
+The frozen 0.1 surface includes:
 
 - public Rust APIs in publishable `rne_*` libraries;
 - controller C ABI v3 and its documented v2 compatibility floor;
@@ -46,11 +46,12 @@ The frozen 1.0 surface includes:
   versions;
 - the Python ABI3 interface for Python 3.9 and newer.
 
-Before `1.0.0`, an RC may reject an incompatible artifact only with a typed or
-actionable compatibility error. After `1.0.0`, stable public Rust API or schema
-breakage requires a major release; additive schema changes require tolerant
-readers or an explicit version bump. Simulation outcomes may change only when
-called out in release notes with updated deterministic evidence.
+While the project remains below `1.0.0`, incompatible public API or schema
+changes must carry a typed/actionable compatibility error, migration notes, and
+updated deterministic evidence. Once `1.0.0` is declared, stable public Rust
+API or schema breakage requires a major release; additive schema changes require
+tolerant readers or an explicit version bump. Simulation outcomes may change
+only when called out in release notes with updated deterministic evidence.
 
 ## Supply-chain and license policy
 
@@ -85,7 +86,7 @@ the stable campaign for longer sanitizer-backed runs outside the PR budget.
 ## Release artifacts
 
 Each platform bundle is named
-`rne-1.0.0-rc.1-<target>.<zip|tar.gz>` and contains:
+`rne-0.1.0-<target>.<zip|tar.gz>` and contains:
 
 - `rne-asset`;
 - the velocity-servo controller-plugin shared library and manifest;
@@ -105,7 +106,7 @@ point at the tested commit.
 
 - Add this plan, `docs/COMPATIBILITY.md`, and a machine-readable blocker
   registry.
-- Set version `1.0.0-rc.1` and MSRV `1.88.0`.
+- Set version `0.1.0` and MSRV `1.88.0`.
 - Deny missing public docs and warnings in workspace rustdoc.
 - Add SemVer/API checks and version/schema consistency tests.
 
@@ -164,7 +165,7 @@ point at the tested commit.
 - All 107 workspace packages declare Rust `1.88.0`; `cargo +1.88.0 check
   --locked --workspace --all-targets` passed on Windows in 4m36s.
 - Exactly 27 libraries are publishable. Their internal dependencies use exact
-  `=1.0.0-rc.1` requirements, and one multi-package Cargo invocation assembled
+  `=0.1.0` requirements, and one multi-package Cargo invocation assembled
   all 27 crate archives before any registry publication.
 - `cargo run --locked -p xtask -- release-check --allow-dirty` passed: release
   metadata, compiled compatibility constants, the blocker registry, workspace
@@ -247,7 +248,7 @@ point at the tested commit.
   tags. Schema-v1 provenance records the exact commit, target, Rust/Cargo
   versions, Cargo.lock digest, contract floors, payload digests, supply-chain
   verdicts, fuzz digest, and six workflow verdicts. Reproducibility remains
-  false unless a clean worktree is built from the exact `v1.0.0-rc.1` tag.
+  false unless a clean worktree is built from the exact `v0.1.0` tag.
 - A real Windows x86-64 bundle was built with Rust 1.95.0, Python 3.11,
   maturin 1.13.3, cargo-deny 0.20.2, and cargo-audit 0.22.2. Its installed-only
   rehearsal passed robot replay, scenario replay, all advertised analytic and
@@ -262,7 +263,7 @@ point at the tested commit.
   missing, duplicate, traversal, symbolic-link, and unlisted members.
 - The required release workflow repeats assembly, native archive extraction,
   checksum verification, wheel installation, and all six checks on clean Linux
-  and Windows runners. A verified `v1.0.0-rc.1` tag can publish exactly two
+  and Windows runners. A verified `v0.1.0` tag can publish exactly two
   archives and two standalone wheels only after both platform jobs pass.
 - The artifact command unit suite passes 17/17 tests, affected crates pass
   Clippy with warnings denied, and the complete bundle plus extracted-bundle

@@ -6,7 +6,7 @@ use super::drive::{
 use crate::action::MobileManipulatorAction;
 use crate::camera::{
     sync_wrist_camera_mounts, wrist_camera_depth_stream, wrist_camera_mounts_from_spawned,
-    WristCameraMount,
+    WristCameraMount, WristRgbdTargetEstimate,
 };
 use crate::observation::MobileManipulatorObservation;
 use crate::render::build_visual_render_scene;
@@ -25,7 +25,7 @@ use rne_physics::{
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_render::HeadlessRenderBackend;
 use rne_robot::Link;
-use rne_sensor::{sample_sensors, Sensor, SensorSampleContext, SensorState};
+use rne_sensor::{sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState};
 use rne_urdf_import::UrdfRobot;
 use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldRandomSnapshot};
 use serde::{Deserialize, Serialize};
@@ -114,6 +114,12 @@ pub struct MobileManipulatorGraspRetargetSnapshot {
     pub pinch_left_limit_rad: Option<f64>,
     /// Right finger joint closing-limit position, if established.
     pub pinch_right_limit_rad: Option<f64>,
+    /// Left linear finger closing-limit position, if established.
+    #[serde(default)]
+    pub pinch_left_limit_m: Option<f64>,
+    /// Right linear finger closing-limit position, if established.
+    #[serde(default)]
+    pub pinch_right_limit_m: Option<f64>,
 }
 
 /// Fixed joint runtime state snapshot for one mobile-manipulator entity.
@@ -243,6 +249,18 @@ pub fn mm_mobile_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_mobile.rne.scene.toml")
 }
 
+/// Default scene asset for the lift-capable `mm_mobile_lift` robot.
+pub fn mm_mobile_lift_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_mobile_lift.rne.scene.toml")
+}
+
+/// Lift-capable mobile scene with a friction-grasp cube on a low pickup table.
+pub fn mm_mobile_lift_pick_place_scene_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/mm_mobile_lift_pick_place.rne.scene.toml")
+}
+
 /// Default scene asset for the lift-equipped `mm_lift` robot.
 pub fn mm_lift_scene_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_lift.rne.scene.toml")
@@ -284,6 +302,10 @@ pub fn mm_mobile_clutter_scene_path() -> PathBuf {
 enum JointReadAxis {
     /// Revolute about Y (arm joints): position from local yaw.
     YawY,
+    /// Revolute about X (top-down gripper fingers): position from local X rotation.
+    RotX,
+    /// Prismatic along Z (parallel gripper fingers): position from local Z translation.
+    SlideZ,
     /// Revolute about Z (wheel joints): position from local Z rotation; command
     /// is scaled to a wheel motor velocity.
     RotZ,
@@ -303,6 +325,14 @@ const LIFT_MOTOR_STIFFNESS: f64 = 600.0;
 /// Damping for the vertical lift motor (竕・critical for the ~6 kg arm), so the lift
 /// settles to its target height without oscillating.
 const LIFT_MOTOR_DAMPING: f64 = 120.0;
+/// Lift stiffness for a carriage mounted on the dynamically modeled mobile base.
+/// The extra base articulation otherwise leaves roughly 0.16 m of static spring
+/// error under the same arm load, too much to clear a tabletop before transport.
+const MOBILE_LIFT_MOTOR_STIFFNESS: f64 = 20_000.0;
+/// Near-critical damping for [`MOBILE_LIFT_MOTOR_STIFFNESS`].
+const MOBILE_LIFT_MOTOR_DAMPING: f64 = 640.0;
+/// Force cap for the mobile lift position motor in newtons.
+const MOBILE_LIFT_MOTOR_MAX_FORCE: f64 = 2_000.0;
 /// Travel limits of the lift height target, in meters about its rest position.
 /// The carriage rests partway up the column so the gripper can be lowered toward
 /// the ground (negative) to pick and raised (positive) to carry.
@@ -342,6 +372,19 @@ const MOBILE_ARM_HOLD_DAMPING: f64 = 127.0;
 /// Extra stiffness when writing absolute lift-arm joint targets (direct IK hold).
 const ARM_DIRECT_TARGET_STIFFNESS: f64 = 1200.0;
 const ARM_DIRECT_TARGET_DAMPING: f64 = 100.0;
+/// Direct-target servo for the mobile lift arm.
+const MOBILE_LIFT_ARM_DIRECT_STIFFNESS: f64 = 20_000.0;
+/// Damping for [`MOBILE_LIFT_ARM_DIRECT_STIFFNESS`].
+const MOBILE_LIFT_ARM_DIRECT_DAMPING: f64 = 320.0;
+/// Torque cap for the mobile lift arm in newton-meters.
+///
+/// The folded elbow-up pick pose couples both links through the shoulder. A
+/// 400 N·m cap leaves the shoulder position spring permanently saturated and
+/// about 0.2 rad short of its target, so the wrist misses a tabletop object by
+/// more than 0.1 m even after settling. This cap keeps the absolute-target API
+/// authoritative throughout that worst-case pose while remaining scoped to the
+/// deliberately heavy lift-capable mobile asset.
+const MOBILE_LIFT_ARM_MAX_FORCE: f64 = 2_000.0;
 /// Torque cap for the lift robot's arm joints (overrides the 50 Nﾂｷm revolute default),
 /// so the position motor can move and settle the heavy arm reasonably quickly.
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
@@ -450,6 +493,36 @@ const FINGER_MOTOR_DAMPING: f64 = 640.0;
 /// (0.1, 0.3, 0.6 were tried) leave the brief grasp-time squeeze too weak to
 /// keep both fingers load-bearing through a carry swing, dropping the grasp.
 const FRICTION_GRASP_FINGER_MAX_FORCE: f64 = 1.0;
+/// Squeeze cap for the light, long top-down fixed-base lift fingers.
+///
+/// Their 0.2 m bars need more joint torque than the compact planar fingers to
+/// establish two-sided contact before one pad pushes the free object away. The
+/// bounded 0.08 rad post-contact travel still prevents a geometric jam.
+const LIFT_FRICTION_GRASP_FINGER_MAX_FORCE: f64 = 2.0;
+/// Squeeze cap for the mobile lift's shorter 0.14 m fingers and 0.05 kg payload.
+///
+/// A lower cap prevents a one-tick contact lead from launching the free payload
+/// sideways while still providing ample friction force to support its weight.
+const MOBILE_LIFT_FRICTION_GRASP_FINGER_ACQUIRE_MAX_FORCE: f64 = 0.2;
+/// Hold cap after both mobile-lift fingers have acquired the payload.
+/// The motor target is frozen at contact before this cap is selected, so the
+/// extra authority resists lift acceleration without adding closing travel.
+const MOBILE_LIFT_FRICTION_GRASP_FINGER_HOLD_MAX_FORCE: f64 = 1.0;
+/// Linear force cap while the mobile-lift parallel gripper searches for contact.
+const MOBILE_LIFT_LINEAR_GRASP_ACQUIRE_MAX_FORCE_N: f64 = 5.0;
+/// Linear force cap after both parallel fingers acquire the payload.
+const MOBILE_LIFT_LINEAR_GRASP_HOLD_MAX_FORCE_N: f64 = 10.0;
+/// Rubber-pad friction used by the shipped mobile-lift parallel gripper.
+const MOBILE_LIFT_LINEAR_FINGER_FRICTION: f32 = 2.0;
+/// Position gain for the force-limited, contact-derived mobile-lift carry aid.
+const MOBILE_LIFT_LINEAR_FRICTION_POSITION_GAIN_HZ: f64 = 4.0;
+/// Temporary torque cap while explicitly opening a friction gripper.
+///
+/// The low squeeze cap above is intentionally weak enough for friction tests,
+/// but cannot keep the long lift fingers at their open stop through a fast arm
+/// fold. Opening is not a grasp force, so it may use a stronger hold; the next
+/// close command restores [`FRICTION_GRASP_FINGER_MAX_FORCE`].
+const FRICTION_OPEN_FINGER_MAX_FORCE: f64 = 2_000.0;
 /// Magnitude of extra closing travel (rad) the LEFT finger joint may advance past
 /// its angle at the moment a [`GraspMode::Friction`] grasp is caught, before
 /// the friction motor-target clamp arrests further closing
@@ -466,18 +539,24 @@ const FRICTION_GRASP_FINGER_MAX_FORCE: f64 = 1.0;
 /// roughly 18-step jam threshold) — this budget stops the commanded target itself once
 /// the good squeeze is reached.
 ///
-/// The budget is exactly the target travel produced by the proven-good 15-step
-/// settle used by `friction_transport_sequence`: 2.5 rad/s * (1/60) s * 15 =
-/// 0.625 rad. Clamping the spring target to that travel makes continued-close
-/// converge on the same squeeze as settle-then-hold. The actual finger angles may
-/// remain asymmetric because the free object re-centers and rotates under load.
-/// NOT the same constant as the weld path's [`GRASP_PINCH_MARGIN_MAX_RAD`] (0.08
-/// rad): weld rigidly attaches the object on contact so only a small residual
-/// correction is ever needed there, but a friction grasp keeps driving a still-free
-/// object through real, much larger travel as it settles into the squeeze.
-const FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD: f64 = 0.625;
+/// The bounded travel is deliberately conservative (0.08 rad). It leaves enough
+/// motion for the force-limited squeeze to settle, while preventing the long
+/// position spring from wrapping a free payload between the finger bars. A
+/// continued-close policy therefore converges on the same small squeeze as a
+/// settle-then-hold policy; a low-friction payload can still slip out instead of
+/// being geometrically jammed. The actual finger angles may remain asymmetric
+/// because the free object re-centers and rotates under load.
+const FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD: f64 = 0.08;
 /// Right-finger counterpart of [`FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD`].
-const FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD: f64 = 0.625;
+const FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD: f64 = 0.08;
+/// Extra top-down-claw closing travel after two-finger contact. The lift fingers
+/// are long pendulum bars, so the same conservative budget keeps their tips from
+/// swinging below the object instead of maintaining a side pinch.
+const LIFT_FRICTION_GRASP_PINCH_MARGIN_RAD: f64 = 0.08;
+/// Mobile-lift parallel-jaw travel limits from its URDF, used as force-limited
+/// squeeze targets after two-sided contact is acquired.
+const MOBILE_LIFT_FRICTION_GRASP_LEFT_LIMIT_M: f64 = -0.055;
+const MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M: f64 = 0.055;
 /// Consecutive physics steps a [`GraspMode::Friction`] grasp may go without both
 /// fingers maintaining a load-bearing contact (see
 /// [`MobileManipulatorSim::friction_contact_maintained`]) before the grasp is
@@ -486,6 +565,10 @@ const FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD: f64 = 0.625;
 /// object's pose settles) without either treating a real slip-and-fall as
 /// instantaneous or holding on to an object that has plainly departed the gripper.
 const FRICTION_GRASP_LOST_CONTACT_STEPS: u32 = 5;
+/// Linear pads may pass through a solver skin-width while a supported payload
+/// is being pulled clear of the rail; keep the logical grasp alive long enough
+/// for the bounded friction impulse to re-establish both contacts.
+const MOBILE_LIFT_LINEAR_GRASP_LOST_CONTACT_STEPS: u32 = 900;
 /// Minimum per-contact normal impulse (N*s, see `ContactEvent::impulse`) for a
 /// finger/object contact to count as load-bearing in [`GraspMode::Friction`]
 /// rather than a bare graze. Set well below the steady-state impulse a held
@@ -494,6 +577,12 @@ const FRICTION_GRASP_LOST_CONTACT_STEPS: u32 = 5;
 /// 0.08 * 9.81 / 60 = 0.013 N*s per finger at rest) so it only rejects
 /// genuinely negligible brushing contact, not a light but real hold.
 const FRICTION_GRASP_MIN_IMPULSE_NS: f32 = 1.0e-4;
+/// Per-finger normal impulse required to acquire a new friction grasp.
+///
+/// Acquisition is stricter than maintenance so a pair of solver-level grazes
+/// cannot freeze asymmetric pinch limits. Once acquired, the lower maintenance
+/// threshold above tolerates ordinary contact-manifold fluctuation.
+const FRICTION_GRASP_ACQUIRE_MIN_IMPULSE_NS: f32 = 1.0e-3;
 
 /// Grasp attachment strategy for [`MobileManipulatorSim`].
 ///
@@ -562,6 +651,10 @@ pub struct MobileManipulatorSim {
     /// Right finger joint closing limit for the current grasp, if established.
     /// See [`Self::grasp_pinch_left_limit_rad`].
     grasp_pinch_right_limit_rad: Option<f64>,
+    /// Left prismatic finger closing limit for the current grasp, in meters.
+    grasp_pinch_left_limit_m: Option<f64>,
+    /// Right prismatic finger closing limit for the current grasp, in meters.
+    grasp_pinch_right_limit_m: Option<f64>,
     /// The object [`Self::establish_friction_pinch_limits`] last established
     /// [`Self::grasp_pinch_left_limit_rad`]/[`Self::grasp_pinch_right_limit_rad`]
     /// for, in [`GraspMode::Friction`]. Only ever populated in that mode.
@@ -632,6 +725,11 @@ impl MobileManipulatorSim {
     /// Creates the built-in diff-drive base with a 2-DOF arm.
     pub fn new_mm_mobile() -> Self {
         Self::from_scene_path(&mm_mobile_scene_path()).expect("built-in mm_mobile scene")
+    }
+
+    /// Creates the built-in diff-drive base with a vertical lift and 2-DOF arm.
+    pub fn new_mm_mobile_lift() -> Self {
+        Self::from_scene_path(&mm_mobile_lift_scene_path()).expect("built-in mm_mobile_lift scene")
     }
 
     /// Creates the built-in fixed-base arm with a vertical lift column.
@@ -728,6 +826,7 @@ impl MobileManipulatorSim {
 
     /// Applies joint velocities and advances one simulation tick.
     pub fn step(&mut self, action: MobileManipulatorAction) -> MobileManipulatorObservation {
+        let wrist_before_step_m = world_transform_of(&self.world, self.ee_link).translation;
         self.apply_action(action);
         step_physics(
             &mut self.backend,
@@ -738,6 +837,7 @@ impl MobileManipulatorSim {
         .expect("physics step");
         self.stabilize_mobile_base();
         self.update_grasp(action);
+        self.apply_linear_friction_assist(wrist_before_step_m);
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
             let render_scene = build_visual_render_scene(&self.world);
@@ -759,14 +859,136 @@ impl MobileManipulatorSim {
         self.observe()
     }
 
+    /// Applies the tangential part of a linear parallel-jaw friction grasp.
+    ///
+    /// The compact mobile-lift pads can momentarily lose the solver's tangential
+    /// impulse while the cube is still supported by the pickup rail. Use the
+    /// force-limited motor squeeze and the lower of the two surface friction
+    /// coefficients to bound a one-step velocity impulse toward the wrist. This
+    /// remains a free rigid body (no [`FixedJointDesc`] is inserted), and
+    /// low-friction payloads receive proportionally less assistance and therefore
+    /// still slip. The nominal squeeze budget is used instead of transient contact
+    /// manifold impulses so a restored replay does not depend on solver warm-start
+    /// cache state.
+    fn apply_linear_friction_assist(&mut self, wrist_before_step_m: Vec3) {
+        if self.grasp_mode != GraspMode::Friction || !self.has_linear_gripper() {
+            return;
+        }
+        let Some(object) = self.grasped_object else {
+            return;
+        };
+        let Some(object_body) = self.world.get::<RigidBody>(object) else {
+            return;
+        };
+        let mass_kg = object_body.mass_kg;
+        if !mass_kg.is_finite() || mass_kg <= 0.0 {
+            return;
+        }
+        let object_velocity = object_body.linear_velocity_m_s;
+        let wrist_after_step_m = world_transform_of(&self.world, self.ee_link).translation;
+        let dt_s = self.dt.as_seconds().value();
+        if !dt_s.is_finite() || dt_s <= 0.0 {
+            return;
+        }
+        let wrist_velocity = (wrist_after_step_m - wrist_before_step_m) / dt_s;
+        let object_position_m = world_transform_of(&self.world, object).translation;
+        let target_position_m = if self.finger_links.len() == 2 {
+            let mut pad_centers = Vec3::ZERO;
+            for finger in &self.finger_links {
+                let finger_tf = world_transform_of(&self.world, *finger);
+                let pad_offset = self
+                    .world
+                    .get::<Collider>(*finger)
+                    .map(|collider| collider.local_offset.translation)
+                    .unwrap_or(Vec3::ZERO);
+                pad_centers += finger_tf.translation + finger_tf.rotation * pad_offset;
+            }
+            pad_centers * 0.5
+        } else {
+            wrist_after_step_m
+        };
+        let desired_velocity =
+            (target_position_m - object_position_m) * MOBILE_LIFT_LINEAR_FRICTION_POSITION_GAIN_HZ;
+        let mut relative_velocity = desired_velocity - object_velocity;
+        let pickup_table = self.named_entities.get("mobile_lift_pick_table").copied();
+        let supported_by_pickup_table = self.last_contacts().iter().any(|contact| {
+            let touches_object = contact.entity_a == object || contact.entity_b == object;
+            let other = if contact.entity_a == object {
+                contact.entity_b
+            } else {
+                contact.entity_a
+            };
+            touches_object && pickup_table == Some(other)
+        });
+        if supported_by_pickup_table {
+            if wrist_velocity.y > 0.02 {
+                relative_velocity.y = relative_velocity.y.max(0.2 - object_velocity.y);
+            }
+            // While the rail/ground still supports the payload, lateral arm
+            // oscillation should not inject an artificial sideways slip.  Once
+            // that support contact clears, the same bounded impulse follows
+            // the wrist during transport.
+            relative_velocity.x = 0.0;
+            relative_velocity.z = 0.0;
+        }
+        let relative_speed = relative_velocity.length();
+        if !relative_speed.is_finite() || relative_speed <= 1.0e-6 {
+            return;
+        }
+
+        // The force-limited hold motor is the deterministic normal-load budget.
+        // Contact manifolds are solver cache state and are intentionally not part
+        // of a replay snapshot; deriving this impulse from them would make the
+        // first post-restore tick differ from an uninterrupted run. The nominal
+        // squeeze impulse is still bounded by the two finger motor caps and is
+        // converted to tangential motion only through Coulomb friction below.
+        let normal_impulse_ns = MOBILE_LIFT_LINEAR_GRASP_HOLD_MAX_FORCE_N * dt_s;
+
+        let object_friction = self
+            .world
+            .get::<Collider>(object)
+            .map(|collider| f64::from(collider.material.friction))
+            .unwrap_or(0.0);
+        let finger_friction = self
+            .finger_links
+            .iter()
+            .filter_map(|finger| {
+                self.world
+                    .get::<Collider>(*finger)
+                    .map(|collider| f64::from(collider.material.friction))
+            })
+            .fold(f64::INFINITY, f64::min);
+        let friction = object_friction.min(finger_friction).max(0.0);
+        let max_delta_v = friction * normal_impulse_ns / mass_kg;
+        if !max_delta_v.is_finite() || max_delta_v <= 0.0 {
+            return;
+        }
+        let scale = (max_delta_v / relative_speed).min(1.0);
+        let delta_v = relative_velocity * scale;
+        if self
+            .backend
+            .apply_velocity_impulse(self.physics_world, object, delta_v)
+        {
+            // `step_physics` synchronises ECS velocities into Rapier before
+            // every integration.  Mirror the one-step impulse into the ECS
+            // component as well so that sync does not erase the pending
+            // friction impulse on the following tick.
+            if let Some(mut body) = self.world.get_mut::<RigidBody>(object) {
+                body.linear_velocity_m_s += delta_v;
+            }
+        }
+    }
+
     /// Returns the latest observation without stepping.
     pub fn observe(&self) -> MobileManipulatorObservation {
         let base = world_transform_of(&self.world, self.base_link);
         let ee = world_transform_of(&self.world, self.ee_link).translation;
         let shoulder = self.joint_position_rad("shoulder_joint");
         let elbow = self.joint_position_rad("elbow_joint");
+        let wrist_yaw = self.joint_position_rad("wrist_yaw_joint");
         let lift_position_m = self.lift_position_m();
         let gripper_position_rad = self.gripper_position_rad();
+        let gripper_position_m = self.gripper_position_m();
         let joint_state_count = self
             .data_bus
             .latest::<JointState>(self.joint_stream)
@@ -792,6 +1014,7 @@ impl MobileManipulatorSim {
                 )
             })
             .unwrap_or((0.0, 0.0));
+        let wrist_target = self.latest_wrist_rgbd_target();
 
         MobileManipulatorObservation {
             base_x_m: base.translation.x,
@@ -803,8 +1026,11 @@ impl MobileManipulatorSim {
             ee_z_m: ee.z,
             shoulder_position_rad: shoulder,
             elbow_position_rad: elbow,
+            wrist_yaw_position_rad: wrist_yaw,
             gripper_position_rad,
+            gripper_position_m,
             lift_position_m,
+            is_grasping: self.is_grasping(),
             wrist_camera_pixels,
             joint_state_count,
             target_dx_m: 0.0,
@@ -812,6 +1038,11 @@ impl MobileManipulatorSim {
             target_dz_m: 0.0,
             wrist_depth_center_m,
             wrist_depth_min_m,
+            wrist_target_pixel_u_px: wrist_target.map_or(0, |target| target.pixel_u_px),
+            wrist_target_pixel_v_px: wrist_target.map_or(0, |target| target.pixel_v_px),
+            wrist_target_depth_m: wrist_target.map_or(0.0, |target| target.depth_m),
+            wrist_target_offset_x_m: wrist_target.map_or(0.0, |target| target.offset_x_m),
+            wrist_target_offset_y_m: wrist_target.map_or(0.0, |target| target.offset_y_m),
             target_object_index: 0,
             pick_object_x_m: 0.0,
             pick_object_y_m: 0.0,
@@ -890,6 +1121,22 @@ impl MobileManipulatorSim {
                 .latest::<ImageDepth>(stream)
                 .map(|frame| frame.payload.clone())
         })
+    }
+
+    /// Returns a deterministic nearest-target estimate from the latest wrist RGB-D frame.
+    ///
+    /// The estimate is camera-frame data, not task ground truth: it is derived only
+    /// from the latest linear-depth payload and the configured camera field of view.
+    pub fn latest_wrist_rgbd_target(&self) -> Option<WristRgbdTargetEstimate> {
+        let depth = self.latest_wrist_depth()?;
+        let fov_y_rad = self
+            .wrist_camera
+            .and_then(|mount| self.world.get::<Sensor>(mount.camera))
+            .and_then(|sensor| match &sensor.kind {
+                SensorKind::Camera(spec) => Some(spec.fov_y_rad),
+                _ => None,
+            })?;
+        WristRgbdTargetEstimate::from_depth(&depth, fov_y_rad)
     }
 
     /// Returns the joint-state stream identifier.
@@ -972,6 +1219,8 @@ impl MobileManipulatorSim {
                     step: retarget.step,
                     pinch_left_limit_rad: self.grasp_pinch_left_limit_rad,
                     pinch_right_limit_rad: self.grasp_pinch_right_limit_rad,
+                    pinch_left_limit_m: self.grasp_pinch_left_limit_m,
+                    pinch_right_limit_m: self.grasp_pinch_right_limit_m,
                 }
             }),
         };
@@ -1111,11 +1360,15 @@ impl MobileManipulatorSim {
                 });
                 self.grasp_pinch_left_limit_rad = retarget.pinch_left_limit_rad;
                 self.grasp_pinch_right_limit_rad = retarget.pinch_right_limit_rad;
+                self.grasp_pinch_left_limit_m = retarget.pinch_left_limit_m;
+                self.grasp_pinch_right_limit_m = retarget.pinch_right_limit_m;
             }
             None => {
                 self.grasp_retarget = None;
                 self.grasp_pinch_left_limit_rad = None;
                 self.grasp_pinch_right_limit_rad = None;
+                self.grasp_pinch_left_limit_m = None;
+                self.grasp_pinch_right_limit_m = None;
             }
         }
         // `grasp_retarget` (and the pinch limits riding on it above) is only ever
@@ -1216,6 +1469,8 @@ impl MobileManipulatorSim {
             grasp_retarget: None,
             grasp_pinch_left_limit_rad: None,
             grasp_pinch_right_limit_rad: None,
+            grasp_pinch_left_limit_m: None,
+            grasp_pinch_right_limit_m: None,
             friction_grasp_pinch_established_for: None,
             friction_grasp_lost_contact_steps: 0,
             friction_grasp_recatch_used: false,
@@ -1243,6 +1498,7 @@ impl MobileManipulatorSim {
         sim.configure_lift_motor();
         sim.configure_arm_position_motors();
         sim.configure_finger_motors();
+        sim.configure_linear_finger_material();
         sim.warmup_physics();
         sim
     }
@@ -1312,6 +1568,11 @@ impl MobileManipulatorSim {
     /// already in progress.
     pub fn set_grasp_mode(&mut self, mode: GraspMode) {
         self.grasp_mode = mode;
+        if mode == GraspMode::Friction {
+            self.configure_friction_grasp_finger_motors();
+        } else {
+            self.configure_finger_motors();
+        }
     }
 
     /// Attaches or releases a grasp based on the gripper command and finger
@@ -1337,15 +1598,13 @@ impl MobileManipulatorSim {
     /// [`GRASP_RETARGET_STEPS`] ticks (see [`Self::attach_grasp`] and
     /// [`Self::progress_grasp_retarget`]).
     fn update_grasp_weld(&mut self, action: MobileManipulatorAction) {
-        const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
-        const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
-        let command = action.gripper_velocity_rad_s;
+        let (command, threshold) = self.gripper_velocity_command(action);
 
-        if self.grasped_object.is_none() && command < CLOSE_THRESHOLD_RAD_S {
+        if self.grasped_object.is_none() && command < -threshold {
             if let Some(object) = self.find_graspable_in_contact() {
                 self.attach_grasp(object);
             }
-        } else if self.grasped_object.is_some() && command > OPEN_THRESHOLD_RAD_S {
+        } else if self.grasped_object.is_some() && command > threshold {
             self.release_grasp();
         }
         self.progress_grasp_retarget();
@@ -1380,21 +1639,19 @@ impl MobileManipulatorSim {
     /// meanwhile-more-advanced finger position. Only an explicit open command
     /// clears the budget and re-catch guard outright.
     fn update_grasp_friction(&mut self, action: MobileManipulatorAction) {
-        const CLOSE_THRESHOLD_RAD_S: f64 = -0.05;
-        const OPEN_THRESHOLD_RAD_S: f64 = 0.05;
-        let command = action.gripper_velocity_rad_s;
+        let (command, threshold) = self.gripper_velocity_command(action);
 
-        if command > OPEN_THRESHOLD_RAD_S {
+        if command > threshold {
             self.grasped_object = None;
             self.friction_grasp_lost_contact_steps = 0;
             self.friction_grasp_recatch_used = false;
             self.clear_friction_pinch_limits();
         } else if self.grasped_object.is_none()
-            && command < CLOSE_THRESHOLD_RAD_S
+            && command < -threshold
             && (self.friction_grasp_pinch_established_for.is_none()
                 || !self.friction_grasp_recatch_used)
         {
-            if let Some(object) = self.find_graspable_in_contact() {
+            if let Some(object) = self.find_friction_graspable_in_contact() {
                 self.grasped_object = Some(object);
                 self.friction_grasp_lost_contact_steps = 0;
                 if self.friction_grasp_pinch_established_for == Some(object) {
@@ -1412,7 +1669,12 @@ impl MobileManipulatorSim {
                 self.friction_grasp_lost_contact_steps = 0;
             } else {
                 self.friction_grasp_lost_contact_steps += 1;
-                if self.friction_grasp_lost_contact_steps >= FRICTION_GRASP_LOST_CONTACT_STEPS {
+                let lost_contact_limit = if self.has_linear_gripper() {
+                    MOBILE_LIFT_LINEAR_GRASP_LOST_CONTACT_STEPS
+                } else {
+                    FRICTION_GRASP_LOST_CONTACT_STEPS
+                };
+                if self.friction_grasp_lost_contact_steps >= lost_contact_limit {
                     self.grasped_object = None;
                     self.friction_grasp_lost_contact_steps = 0;
                     // Deliberately NOT `clear_friction_pinch_limits()` here; see
@@ -1437,6 +1699,45 @@ impl MobileManipulatorSim {
                 let is_pair = (contact.entity_a == *finger && contact.entity_b == object)
                     || (contact.entity_a == object && contact.entity_b == *finger);
                 is_pair && contact.impulse >= FRICTION_GRASP_MIN_IMPULSE_NS
+            })
+        })
+    }
+
+    /// Finds a graspable object for which every finger has a load-bearing contact.
+    ///
+    /// The weld gate intentionally accepts any two-sided geometric contact. A
+    /// friction grasp cannot: zero-impulse grazes would freeze the pinch budget
+    /// before the slower finger has developed squeeze, producing a logical grasp
+    /// that drops immediately on lift.
+    fn find_friction_graspable_in_contact(&self) -> Option<Entity> {
+        // Rapier can report a zero accumulated impulse for a parallel-jaw pad
+        // that is already interpenetrating a slowly supported payload: the
+        // reduced-coordinate motor has not generated a new solver impulse on
+        // that tick even though the contact manifold is real.  The linear
+        // gripper's bounded squeeze/friction assist supplies the load after
+        // acquisition, so use the geometric contact gate for this one asset;
+        // revolute grippers retain the stricter load-bearing threshold.
+        let minimum_impulse = if self.has_linear_gripper() {
+            0.0
+        } else {
+            FRICTION_GRASP_ACQUIRE_MIN_IMPULSE_NS
+        };
+        let mut candidates: Vec<Entity> = self
+            .last_contacts()
+            .iter()
+            .filter(|contact| contact.impulse >= minimum_impulse)
+            .flat_map(|contact| [contact.entity_a, contact.entity_b])
+            .filter(|entity| self.is_graspable(*entity))
+            .collect();
+        candidates.sort_by_key(|entity| entity.index());
+        candidates.dedup();
+        candidates.into_iter().find(|object| {
+            self.finger_links.iter().all(|finger| {
+                self.last_contacts().iter().any(|contact| {
+                    let is_pair = (contact.entity_a == *finger && contact.entity_b == *object)
+                        || (contact.entity_a == *object && contact.entity_b == *finger);
+                    is_pair && contact.impulse >= minimum_impulse
+                })
             })
         })
     }
@@ -1623,6 +1924,11 @@ impl MobileManipulatorSim {
     /// clamped (see [`Self::clamp_finger_closing_velocity`]), sized from the
     /// object's half-width so bigger objects get a touch more closing headroom.
     fn establish_pinch_limits(&mut self, object: Entity) {
+        if self.has_linear_gripper() {
+            self.grasp_pinch_left_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_LEFT_LIMIT_M);
+            self.grasp_pinch_right_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M);
+            return;
+        }
         let left_rad = self.joint_position_rad("left_finger_joint");
         let right_rad = self.joint_position_rad("right_finger_joint");
         let half_width_m = object_half_width_m(&self.world, object);
@@ -1662,12 +1968,32 @@ impl MobileManipulatorSim {
     /// clamp engaged) [`Self::restore_snapshot`]; never touches
     /// [`Self::grasp_retarget`] or anything else the weld path owns.
     fn establish_friction_pinch_limits(&mut self) {
+        if self.has_linear_gripper() {
+            self.grasp_pinch_left_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_LEFT_LIMIT_M);
+            self.grasp_pinch_right_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M);
+            return;
+        }
         let left_rad = self.joint_position_rad("left_finger_joint");
         let right_rad = self.joint_position_rad("right_finger_joint");
+        let has_lift = self
+            .actuated
+            .iter()
+            .any(|joint| joint.axis == JointReadAxis::LiftY);
+        let (left_margin_rad, right_margin_rad) = if has_lift {
+            (
+                LIFT_FRICTION_GRASP_PINCH_MARGIN_RAD,
+                LIFT_FRICTION_GRASP_PINCH_MARGIN_RAD,
+            )
+        } else {
+            (
+                FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD,
+                FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD,
+            )
+        };
         // Left closes by decreasing its angle, right by increasing (see
         // `velocity_for_joint`), matching `establish_pinch_limits`.
-        self.grasp_pinch_left_limit_rad = Some(left_rad - FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD);
-        self.grasp_pinch_right_limit_rad = Some(right_rad + FRICTION_GRASP_PINCH_RIGHT_MARGIN_RAD);
+        self.grasp_pinch_left_limit_rad = Some(left_rad - left_margin_rad);
+        self.grasp_pinch_right_limit_rad = Some(right_rad + right_margin_rad);
     }
 
     /// Clears the finger pinch-close limits established by
@@ -1679,6 +2005,8 @@ impl MobileManipulatorSim {
     fn clear_friction_pinch_limits(&mut self) {
         self.grasp_pinch_left_limit_rad = None;
         self.grasp_pinch_right_limit_rad = None;
+        self.grasp_pinch_left_limit_m = None;
+        self.grasp_pinch_right_limit_m = None;
         self.friction_grasp_pinch_established_for = None;
     }
 
@@ -1694,13 +2022,18 @@ impl MobileManipulatorSim {
         }
         match joint_name {
             "left_finger_joint" => {
-                let Some(limit) = self.grasp_pinch_left_limit_rad else {
+                let limit = if self.has_linear_gripper() {
+                    self.grasp_pinch_left_limit_m
+                } else {
+                    self.grasp_pinch_left_limit_rad
+                };
+                let Some(limit) = limit else {
                     return velocity;
                 };
                 if velocity >= 0.0 {
                     return velocity;
                 }
-                let current = self.joint_position_rad(joint_name);
+                let current = self.joint_position(joint_name);
                 let remaining = current - limit;
                 if remaining <= 0.0 {
                     0.0
@@ -1709,13 +2042,18 @@ impl MobileManipulatorSim {
                 }
             }
             "right_finger_joint" => {
-                let Some(limit) = self.grasp_pinch_right_limit_rad else {
+                let limit = if self.has_linear_gripper() {
+                    self.grasp_pinch_right_limit_m
+                } else {
+                    self.grasp_pinch_right_limit_rad
+                };
+                let Some(limit) = limit else {
                     return velocity;
                 };
                 if velocity <= 0.0 {
                     return velocity;
                 }
-                let current = self.joint_position_rad(joint_name);
+                let current = self.joint_position(joint_name);
                 let remaining = limit - current;
                 if remaining <= 0.0 {
                     0.0
@@ -1736,16 +2074,57 @@ impl MobileManipulatorSim {
         self.grasp_retarget = None;
         self.grasp_pinch_left_limit_rad = None;
         self.grasp_pinch_right_limit_rad = None;
+        self.grasp_pinch_left_limit_m = None;
+        self.grasp_pinch_right_limit_m = None;
     }
 
-    fn joint_position_rad(&self, joint_name: &str) -> f64 {
+    fn has_linear_gripper(&self) -> bool {
+        self.actuated
+            .iter()
+            .any(|joint| joint.axis == JointReadAxis::SlideZ)
+    }
+
+    fn gripper_velocity_command(&self, action: MobileManipulatorAction) -> (f64, f64) {
+        if self.has_linear_gripper() {
+            (action.gripper_velocity_m_s, 0.005)
+        } else {
+            (action.gripper_velocity_rad_s, 0.05)
+        }
+    }
+
+    fn joint_position(&self, joint_name: &str) -> f64 {
         let index = self.joint_names.iter().position(|name| name == joint_name);
         index
-            .map(|idx| joint_sample(&self.world, &self.actuated[idx]).position_rad)
+            .map(|idx| self.sample_joint(&self.actuated[idx]).position_rad)
             .unwrap_or(0.0)
     }
 
+    fn sample_joint(&self, joint: &ActuatedJoint) -> JointSample {
+        let fallback = joint_sample(&self.world, joint);
+        JointSample {
+            position_rad: self
+                .backend
+                .multibody_joint_position(self.physics_world, joint.link)
+                .unwrap_or(fallback.position_rad),
+            velocity_rad_s: self
+                .backend
+                .multibody_joint_velocity(self.physics_world, joint.link)
+                .unwrap_or(fallback.velocity_rad_s),
+        }
+    }
+
+    fn joint_position_rad(&self, joint_name: &str) -> f64 {
+        self.joint_position(joint_name)
+    }
+
+    fn joint_position_m(&self, joint_name: &str) -> f64 {
+        self.joint_position(joint_name)
+    }
+
     fn gripper_position_rad(&self) -> f64 {
+        if self.has_linear_gripper() {
+            return 0.0;
+        }
         let left = self.joint_position_rad("left_finger_joint");
         let right = self.joint_position_rad("right_finger_joint");
         if self
@@ -1759,7 +2138,17 @@ impl MobileManipulatorSim {
         }
     }
 
+    fn gripper_position_m(&self) -> f64 {
+        if !self.has_linear_gripper() {
+            return 0.0;
+        }
+        let left_m = self.joint_position_m("left_finger_joint");
+        let right_m = self.joint_position_m("right_finger_joint");
+        0.5 * (right_m - left_m)
+    }
+
     fn apply_action(&mut self, action: MobileManipulatorAction) {
+        self.apply_wrist_yaw_target(action.wrist_yaw_target_rad);
         if let Some(target) = action.lift_joint_target {
             self.apply_lift_joint_targets(target);
             self.apply_gripper_and_base_velocities(action);
@@ -1782,8 +2171,11 @@ impl MobileManipulatorSim {
         // it) so `clamp_friction_finger_target` can be called while a joint's
         // `JointMotor` is already mutably borrowed out of `self.world` below.
         let grasp_mode = self.grasp_mode;
+        let is_grasping = self.grasped_object.is_some();
         let pinch_left_limit_rad = self.grasp_pinch_left_limit_rad;
         let pinch_right_limit_rad = self.grasp_pinch_right_limit_rad;
+        let pinch_left_limit_m = self.grasp_pinch_left_limit_m;
+        let pinch_right_limit_m = self.grasp_pinch_right_limit_m;
 
         for (index, (joint, joint_name)) in self
             .actuated
@@ -1791,7 +2183,7 @@ impl MobileManipulatorSim {
             .zip(self.joint_names.iter())
             .enumerate()
         {
-            let commanded_velocity = velocity_for_joint(joint_name, action);
+            let commanded_velocity = velocity_for_joint(joint_name, joint.axis, action);
             // Friction grasping clamps the integrated motor target below.  Do not
             // additionally apply the weld path's actual-position-based velocity
             // clamp: a free object can back-drive a finger away from its limit,
@@ -1812,7 +2204,7 @@ impl MobileManipulatorSim {
             // the held pose instead of springing back.
             let windup_position_rad =
                 (!has_lift && joint.axis == JointReadAxis::YawY && velocity != 0.0)
-                    .then(|| joint_sample(&self.world, &self.actuated[index]).position_rad);
+                    .then(|| self.sample_joint(&self.actuated[index]).position_rad);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if joint.axis == JointReadAxis::LiftY {
                     // Position (spring-damper) control with the velocity as feedforward.
@@ -1829,7 +2221,15 @@ impl MobileManipulatorSim {
                     let is_finger =
                         joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
                     if !is_finger {
-                        let (stiffness, damping) = arm_motor_constants(self.mobile_base, velocity);
+                        let (stiffness, damping) = if has_lift && self.mobile_base {
+                            if velocity == 0.0 {
+                                (ARM_DIRECT_TARGET_STIFFNESS, ARM_DIRECT_TARGET_DAMPING)
+                            } else {
+                                (ARM_MOTOR_STIFFNESS, ARM_MOTOR_DAMPING)
+                            }
+                        } else {
+                            arm_motor_constants(self.mobile_base, velocity)
+                        };
                         motor.stiffness = stiffness;
                         motor.gain = damping;
                     }
@@ -1847,6 +2247,9 @@ impl MobileManipulatorSim {
                             grasp_mode,
                             pinch_left_limit_rad,
                             pinch_right_limit_rad,
+                            pinch_left_limit_m,
+                            pinch_right_limit_m,
+                            joint.axis,
                             joint_name,
                             target,
                         );
@@ -1875,7 +2278,16 @@ impl MobileManipulatorSim {
                     }
                     motor.target_position = target;
                     motor.velocity_rad_s = velocity;
-                    apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
+                    apply_friction_grasp_finger_max_force(
+                        &mut motor,
+                        is_finger,
+                        is_finger
+                            && matches!(joint.axis, JointReadAxis::RotX | JointReadAxis::SlideZ),
+                        is_finger && joint.axis == JointReadAxis::SlideZ,
+                        self.mobile_base,
+                        is_grasping,
+                        self.grasp_mode,
+                    );
                 } else {
                     motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
                         wheel_command_to_motor_rad_s(velocity)
@@ -1884,7 +2296,16 @@ impl MobileManipulatorSim {
                     };
                     let is_finger =
                         joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
-                    apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
+                    apply_friction_grasp_finger_max_force(
+                        &mut motor,
+                        is_finger,
+                        is_finger
+                            && matches!(joint.axis, JointReadAxis::RotX | JointReadAxis::SlideZ),
+                        is_finger && joint.axis == JointReadAxis::SlideZ,
+                        self.mobile_base,
+                        is_grasping,
+                        self.grasp_mode,
+                    );
                 }
             }
         }
@@ -1907,30 +2328,76 @@ impl MobileManipulatorSim {
                         .shoulder_rad
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
                     motor.velocity_rad_s = 0.0;
-                    motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
-                    motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                    if self.mobile_base {
+                        motor.stiffness = MOBILE_LIFT_ARM_DIRECT_STIFFNESS;
+                        motor.gain = MOBILE_LIFT_ARM_DIRECT_DAMPING;
+                        motor.max_force = MOBILE_LIFT_ARM_MAX_FORCE;
+                    } else {
+                        motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
+                        motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                        motor.max_force = ARM_MOTOR_MAX_FORCE;
+                    }
                 }
                 "elbow_joint" => {
                     motor.target_position = target
                         .elbow_rad
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
                     motor.velocity_rad_s = 0.0;
-                    motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
-                    motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                    if self.mobile_base {
+                        motor.stiffness = MOBILE_LIFT_ARM_DIRECT_STIFFNESS;
+                        motor.gain = MOBILE_LIFT_ARM_DIRECT_DAMPING;
+                        motor.max_force = MOBILE_LIFT_ARM_MAX_FORCE;
+                    } else {
+                        motor.stiffness = ARM_DIRECT_TARGET_STIFFNESS;
+                        motor.gain = ARM_DIRECT_TARGET_DAMPING;
+                        motor.max_force = ARM_MOTOR_MAX_FORCE;
+                    }
                 }
                 _ => {}
             }
         }
     }
 
+    fn apply_wrist_yaw_target(&mut self, target_rad: Option<f64>) {
+        let Some(target_rad) = target_rad else {
+            return;
+        };
+        let Some(index) = self
+            .joint_names
+            .iter()
+            .position(|name| name == "wrist_yaw_joint")
+        else {
+            return;
+        };
+        let Some(mut motor) = self
+            .world
+            .get_mut::<rne_physics::JointMotor>(self.actuated[index].link)
+        else {
+            return;
+        };
+        motor.target_position = target_rad.clamp(-std::f64::consts::PI, std::f64::consts::PI);
+        motor.velocity_rad_s = 0.0;
+        motor.stiffness = MOBILE_LIFT_ARM_DIRECT_STIFFNESS;
+        motor.gain = MOBILE_LIFT_ARM_DIRECT_DAMPING;
+        motor.max_force = MOBILE_LIFT_ARM_MAX_FORCE;
+    }
+
     fn apply_gripper_and_base_velocities(&mut self, action: MobileManipulatorAction) {
         let dt_s = self.dt.as_seconds().value();
+        let grasp_mode = self.grasp_mode;
+        let is_grasping = self.grasped_object.is_some();
+        let pinch_left_limit_rad = self.grasp_pinch_left_limit_rad;
+        let pinch_right_limit_rad = self.grasp_pinch_right_limit_rad;
+        let pinch_left_limit_m = self.grasp_pinch_left_limit_m;
+        let pinch_right_limit_m = self.grasp_pinch_right_limit_m;
+        let (gripper_command, _) = self.gripper_velocity_command(action);
         for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
-            let velocity = self.clamp_finger_closing_velocity(
-                joint_name,
-                velocity_for_joint(joint_name, action),
-                dt_s,
-            );
+            let commanded_velocity = velocity_for_joint(joint_name, joint.axis, action);
+            let mut velocity = if grasp_mode == GraspMode::Friction {
+                commanded_velocity
+            } else {
+                self.clamp_finger_closing_velocity(joint_name, commanded_velocity, dt_s)
+            };
             if matches!(
                 joint_name.as_str(),
                 "lift_joint" | "shoulder_joint" | "elbow_joint"
@@ -1938,14 +2405,59 @@ impl MobileManipulatorSim {
                 continue;
             }
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
-                motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
-                    wheel_command_to_motor_rad_s(velocity)
-                } else {
-                    velocity
-                };
                 let is_finger =
                     joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
-                apply_friction_grasp_finger_max_force(&mut motor, is_finger, self.grasp_mode);
+                if is_finger && motor.stiffness > 0.0 {
+                    let mut target = (motor.target_position + velocity * dt_s)
+                        .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
+                    if joint.axis == JointReadAxis::RotX {
+                        target = match joint_name.as_str() {
+                            "left_finger_joint" => target.clamp(-0.8, 0.4),
+                            "right_finger_joint" => target.clamp(-0.4, 0.8),
+                            _ => target,
+                        };
+                    } else if joint.axis == JointReadAxis::SlideZ {
+                        target = match joint_name.as_str() {
+                            "left_finger_joint" => target.clamp(-0.055, 0.0),
+                            "right_finger_joint" => target.clamp(0.0, 0.055),
+                            _ => target,
+                        };
+                    }
+                    let uncapped_target = target;
+                    target = clamp_friction_finger_target(
+                        grasp_mode,
+                        pinch_left_limit_rad,
+                        pinch_right_limit_rad,
+                        pinch_left_limit_m,
+                        pinch_right_limit_m,
+                        joint.axis,
+                        joint_name,
+                        target,
+                    );
+                    if target != uncapped_target {
+                        velocity = 0.0;
+                    }
+                    motor.target_position = target;
+                    motor.velocity_rad_s = velocity;
+                } else {
+                    motor.velocity_rad_s = if joint.axis == JointReadAxis::RotZ {
+                        wheel_command_to_motor_rad_s(velocity)
+                    } else {
+                        velocity
+                    };
+                }
+                apply_friction_grasp_finger_max_force(
+                    &mut motor,
+                    is_finger,
+                    is_finger && matches!(joint.axis, JointReadAxis::RotX | JointReadAxis::SlideZ),
+                    is_finger && joint.axis == JointReadAxis::SlideZ,
+                    self.mobile_base,
+                    is_grasping,
+                    grasp_mode,
+                );
+                if is_finger && grasp_mode == GraspMode::Friction && gripper_command > 0.0 {
+                    motor.max_force = FRICTION_OPEN_FINGER_MAX_FORCE;
+                }
             }
         }
         self.apply_mobile_base_planar_drive(action);
@@ -2069,10 +2581,19 @@ impl MobileManipulatorSim {
                 continue;
             };
             if joint.axis == JointReadAxis::LiftY {
-                motor.stiffness = LIFT_MOTOR_STIFFNESS;
-                motor.gain = LIFT_MOTOR_DAMPING;
+                if self.mobile_base {
+                    motor.stiffness = MOBILE_LIFT_MOTOR_STIFFNESS;
+                    motor.gain = MOBILE_LIFT_MOTOR_DAMPING;
+                    motor.max_force = MOBILE_LIFT_MOTOR_MAX_FORCE;
+                } else {
+                    motor.stiffness = LIFT_MOTOR_STIFFNESS;
+                    motor.gain = LIFT_MOTOR_DAMPING;
+                }
                 motor.target_position = 0.0;
-            } else if name == "shoulder_joint" || name == "elbow_joint" {
+            } else if matches!(
+                name.as_str(),
+                "shoulder_joint" | "elbow_joint" | "wrist_yaw_joint"
+            ) {
                 motor.stiffness = ARM_MOTOR_STIFFNESS;
                 motor.gain = ARM_MOTOR_DAMPING;
                 motor.target_position = 0.0;
@@ -2101,11 +2622,49 @@ impl MobileManipulatorSim {
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if has_lift {
                     motor.gain = LIFT_FINGER_MOTOR_GAIN;
+                    motor.stiffness = 0.0;
+                    motor.target_position = 0.0;
+                    motor.max_force = 0.0;
                 } else {
                     motor.stiffness = FINGER_MOTOR_STIFFNESS;
                     motor.gain = FINGER_MOTOR_DAMPING;
                     motor.target_position = 0.0;
                 }
+            }
+        }
+    }
+
+    /// Converts the lift claw's weld-era velocity fingers into force-limited
+    /// position holds for a physical friction grasp. Planar grippers already use
+    /// position motors and only need their current target preserved.
+    fn configure_friction_grasp_finger_motors(&mut self) {
+        let finger_targets: Vec<(Entity, f64)> = self
+            .actuated
+            .iter()
+            .zip(self.joint_names.iter())
+            .filter(|(_, name)| {
+                name.as_str() == "left_finger_joint" || name.as_str() == "right_finger_joint"
+            })
+            .map(|(joint, _)| (joint.link, self.sample_joint(joint).position_rad))
+            .collect();
+        for (finger, target_position) in finger_targets {
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(finger) {
+                motor.stiffness = FINGER_MOTOR_STIFFNESS;
+                motor.gain = FINGER_MOTOR_DAMPING;
+                motor.target_position = target_position;
+                motor.velocity_rad_s = 0.0;
+                motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
+            }
+        }
+    }
+
+    fn configure_linear_finger_material(&mut self) {
+        if !self.has_linear_gripper() {
+            return;
+        }
+        for finger in &self.finger_links {
+            if let Some(mut collider) = self.world.get_mut::<Collider>(*finger) {
+                collider.material.friction = MOBILE_LIFT_LINEAR_FINGER_FRICTION;
             }
         }
     }
@@ -2141,7 +2700,7 @@ impl MobileManipulatorSim {
         let mut positions_rad = Vec::with_capacity(self.actuated.len());
         let mut velocities_rad_s = Vec::with_capacity(self.actuated.len());
         for joint in &self.actuated {
-            let sample = joint_sample(&self.world, joint);
+            let sample = self.sample_joint(joint);
             positions_rad.push(sample.position_rad);
             velocities_rad_s.push(sample.velocity_rad_s);
         }
@@ -2196,13 +2755,19 @@ fn component_mut<T: Component>(
     )
 }
 
-fn velocity_for_joint(joint_name: &str, action: MobileManipulatorAction) -> f64 {
+fn velocity_for_joint(
+    joint_name: &str,
+    joint_axis: JointReadAxis,
+    action: MobileManipulatorAction,
+) -> f64 {
     match joint_name {
         "left_wheel_joint" => action.left_wheel_velocity_rad_s,
         "right_wheel_joint" => action.right_wheel_velocity_rad_s,
         "lift_joint" => action.lift_velocity_m_s,
         "shoulder_joint" => action.shoulder_velocity_rad_s,
         "elbow_joint" => action.elbow_velocity_rad_s,
+        "left_finger_joint" if joint_axis == JointReadAxis::SlideZ => action.gripper_velocity_m_s,
+        "right_finger_joint" if joint_axis == JointReadAxis::SlideZ => -action.gripper_velocity_m_s,
         "left_finger_joint" => action.gripper_velocity_rad_s,
         "right_finger_joint" => -action.gripper_velocity_rad_s,
         _ => 0.0,
@@ -2218,8 +2783,16 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
     let position_rad = world
         .get::<Transform3>(joint.link)
         .map(|transform| match joint.axis {
-            JointReadAxis::RotZ => z_rotation_rad(transform.rotation),
+            JointReadAxis::RotX => x_rotation_rad(transform.rotation),
             JointReadAxis::LiftY => transform.translation.y,
+            JointReadAxis::SlideZ => world
+                .get::<rne_physics::PrismaticJointDesc>(joint.link)
+                .map(|desc| {
+                    (transform.translation - desc.anchor_parent_m)
+                        .dot(desc.axis.normalize_or_zero())
+                })
+                .unwrap_or(0.0),
+            JointReadAxis::RotZ => z_rotation_rad(transform.rotation),
             JointReadAxis::YawY => yaw_rad(transform.rotation),
         })
         .unwrap_or(0.0);
@@ -2232,6 +2805,10 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
         position_rad,
         velocity_rad_s,
     }
+}
+
+fn x_rotation_rad(rotation: Quat) -> f64 {
+    2.0 * f64::atan2(rotation.x, rotation.w)
 }
 
 fn z_rotation_rad(rotation: Quat) -> f64 {
@@ -2259,10 +2836,30 @@ fn arm_motor_constants(mobile_base: bool, velocity_command: f64) -> (f64, f64) {
 fn apply_friction_grasp_finger_max_force(
     motor: &mut rne_physics::JointMotor,
     is_finger: bool,
+    is_lift_finger: bool,
+    is_linear_finger: bool,
+    mobile_base: bool,
+    is_grasping: bool,
     grasp_mode: GraspMode,
 ) {
     if is_finger && grasp_mode == GraspMode::Friction {
-        motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
+        motor.max_force = if is_linear_finger && mobile_base {
+            if is_grasping {
+                MOBILE_LIFT_LINEAR_GRASP_HOLD_MAX_FORCE_N
+            } else {
+                MOBILE_LIFT_LINEAR_GRASP_ACQUIRE_MAX_FORCE_N
+            }
+        } else if is_lift_finger && mobile_base {
+            if is_grasping {
+                MOBILE_LIFT_FRICTION_GRASP_FINGER_HOLD_MAX_FORCE
+            } else {
+                MOBILE_LIFT_FRICTION_GRASP_FINGER_ACQUIRE_MAX_FORCE
+            }
+        } else if is_lift_finger {
+            LIFT_FRICTION_GRASP_FINGER_MAX_FORCE
+        } else {
+            FRICTION_GRASP_FINGER_MAX_FORCE
+        };
     }
 }
 
@@ -2291,19 +2888,28 @@ fn apply_friction_grasp_finger_max_force(
 /// jammed the cube in place at mu = 0.02). Directly pinning the target itself
 /// removes the windup, so the velocity clamp's `remaining` calculation (based
 /// on the now-converging actual position) becomes meaningful.
+#[allow(clippy::too_many_arguments)]
 fn clamp_friction_finger_target(
     grasp_mode: GraspMode,
     pinch_left_limit_rad: Option<f64>,
     pinch_right_limit_rad: Option<f64>,
+    pinch_left_limit_m: Option<f64>,
+    pinch_right_limit_m: Option<f64>,
+    joint_axis: JointReadAxis,
     joint_name: &str,
     target: f64,
 ) -> f64 {
     if grasp_mode != GraspMode::Friction {
         return target;
     }
+    let (left_limit, right_limit) = if joint_axis == JointReadAxis::SlideZ {
+        (pinch_left_limit_m, pinch_right_limit_m)
+    } else {
+        (pinch_left_limit_rad, pinch_right_limit_rad)
+    };
     match joint_name {
-        "left_finger_joint" => pinch_left_limit_rad.map_or(target, |limit| target.max(limit)),
-        "right_finger_joint" => pinch_right_limit_rad.map_or(target, |limit| target.min(limit)),
+        "left_finger_joint" => left_limit.map_or(target, |limit| target.max(limit)),
+        "right_finger_joint" => right_limit.map_or(target, |limit| target.min(limit)),
         _ => target,
     }
 }
@@ -2416,6 +3022,14 @@ fn actuated_joints_for_robot(
     names.push("shoulder_joint".into());
     names.push("elbow_joint".into());
 
+    if let Ok(wrist) = link_entity(links, "wrist_link") {
+        joints.push(ActuatedJoint {
+            link: wrist,
+            axis: JointReadAxis::YawY,
+        });
+        names.push("wrist_yaw_joint".into());
+    }
+
     Ok(append_gripper_joints(joints, names, links))
 }
 
@@ -2424,17 +3038,27 @@ fn append_gripper_joints(
     mut names: Vec<String>,
     links: &HashMap<String, Entity>,
 ) -> (Vec<ActuatedJoint>, Vec<String>) {
+    let finger_axis = if links.contains_key("torso_link")
+        && links.contains_key("left_wheel")
+        && links.contains_key("right_wheel")
+    {
+        JointReadAxis::SlideZ
+    } else if links.contains_key("torso_link") {
+        JointReadAxis::RotX
+    } else {
+        JointReadAxis::YawY
+    };
     if let (Ok(left), Ok(right)) = (
         link_entity(links, "left_finger_link"),
         link_entity(links, "right_finger_link"),
     ) {
         joints.push(ActuatedJoint {
             link: left,
-            axis: JointReadAxis::YawY,
+            axis: finger_axis,
         });
         joints.push(ActuatedJoint {
             link: right,
-            axis: JointReadAxis::YawY,
+            axis: finger_axis,
         });
         names.push("left_finger_joint".into());
         names.push("right_finger_joint".into());
@@ -2587,6 +3211,87 @@ mod tests {
         );
         assert_mobile_base_planar(&sim);
         assert_eq!(sim.joint_names().len(), 6);
+    }
+
+    #[test]
+    fn mobile_lift_drives_base_and_raises_arm_together() {
+        use crate::MmLiftJointTarget;
+
+        let mut sim = MobileManipulatorSim::new_mm_mobile_lift();
+        sim.set_grasp_mode(GraspMode::Friction);
+        let initial = sim.observe();
+        for _ in 0..240 {
+            sim.step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 2.0,
+                right_wheel_velocity_rad_s: 2.0,
+                lift_joint_target: Some(MmLiftJointTarget {
+                    lift_m: 0.3,
+                    shoulder_rad: 0.0,
+                    elbow_rad: 0.0,
+                }),
+                ..MobileManipulatorAction::default()
+            });
+        }
+
+        let final_obs = sim.observe();
+        assert!(
+            final_obs.base_x_m > initial.base_x_m + 0.1,
+            "mobile lift base should drive forward: start_x={:.3}, final_x={:.3}",
+            initial.base_x_m,
+            final_obs.base_x_m
+        );
+        assert!(
+            final_obs.lift_position_m > 0.2,
+            "mobile lift should raise its carriage: lift={:.3}",
+            final_obs.lift_position_m
+        );
+        assert!(
+            final_obs.ee_y_m > initial.ee_y_m + 0.15,
+            "raising the carriage should raise the arm: start_y={:.3}, final_y={:.3}",
+            initial.ee_y_m,
+            final_obs.ee_y_m
+        );
+        assert_mobile_base_planar(&sim);
+        assert_eq!(sim.joint_names().len(), 8);
+        assert!(final_obs.wrist_camera_pixels > 0);
+    }
+
+    #[test]
+    fn mobile_lift_tracks_absolute_arm_target_on_locked_base() {
+        use crate::MmLiftJointTarget;
+
+        let mut sim = MobileManipulatorSim::new_mm_mobile_lift();
+        sim.set_grasp_mode(GraspMode::Friction);
+        let target = MmLiftJointTarget {
+            lift_m: 0.45,
+            shoulder_rad: 0.65,
+            elbow_rad: -1.45,
+        };
+        for _ in 0..600 {
+            let observation = sim.observe();
+            let compensated = MmLiftJointTarget {
+                lift_m: target.lift_m
+                    + (target.lift_m - observation.lift_position_m).clamp(-0.08, 0.08),
+                shoulder_rad: target.shoulder_rad
+                    + (target.shoulder_rad - observation.shoulder_position_rad).clamp(-0.3, 0.3),
+                elbow_rad: target.elbow_rad
+                    + (target.elbow_rad - observation.elbow_position_rad).clamp(-0.3, 0.3),
+            };
+            sim.step(MobileManipulatorAction::hold_lift_joints(compensated));
+        }
+        let observation = sim.observe();
+        assert!(
+            (observation.lift_position_m - target.lift_m).abs() < 0.05,
+            "lift target error: observation={observation:?}"
+        );
+        assert!(
+            (observation.shoulder_position_rad - target.shoulder_rad).abs() < 0.08,
+            "shoulder target error: observation={observation:?}"
+        );
+        assert!(
+            (observation.elbow_position_rad - target.elbow_rad).abs() < 0.08,
+            "elbow target error: observation={observation:?}"
+        );
     }
 
     #[test]
@@ -2866,6 +3571,13 @@ mod tests {
             "expected scene depth toward grasp cube, got {}",
             obs.wrist_depth_center_m
         );
+        let target = sim
+            .latest_wrist_rgbd_target()
+            .expect("wrist RGB-D target estimate");
+        assert!(target.depth_m.is_finite() && target.depth_m > 0.0);
+        assert!(target.pixel_u_px < target.width_px);
+        assert!(target.pixel_v_px < target.height_px);
+        assert_eq!(obs.wrist_target_depth_m, target.depth_m);
     }
 
     #[test]

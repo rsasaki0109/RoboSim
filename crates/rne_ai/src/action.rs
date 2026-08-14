@@ -34,6 +34,9 @@ pub struct MobileManipulatorAction {
     pub elbow_velocity_rad_s: f64,
     /// Parallel gripper open/close velocity in radians per second (both fingers).
     pub gripper_velocity_rad_s: f64,
+    /// Parallel linear-gripper open/close velocity in meters per second. Positive
+    /// opens the fingers and negative closes them. Revolute grippers ignore it.
+    pub gripper_velocity_m_s: f64,
     /// Vertical lift (prismatic column) velocity in meters per second. Positive
     /// raises the arm. Only the lift-equipped robot acts on this; other robots
     /// ignore it.
@@ -41,6 +44,9 @@ pub struct MobileManipulatorAction {
     /// When set on the `mm_lift` robot, drives lift / shoulder / elbow position
     /// motors directly to these targets instead of integrating velocity commands.
     pub lift_joint_target: Option<MmLiftJointTarget>,
+    /// Optional wrist-yaw position target in radians. Robots without an actuated
+    /// wrist ignore it.
+    pub wrist_yaw_target_rad: Option<f64>,
 }
 
 impl MobileManipulatorAction {
@@ -48,6 +54,7 @@ impl MobileManipulatorAction {
     pub fn hold_lift_joints(target: MmLiftJointTarget) -> Self {
         Self {
             lift_joint_target: Some(target),
+            wrist_yaw_target_rad: Some(-(target.shoulder_rad + target.elbow_rad)),
             ..Self::default()
         }
     }
@@ -55,6 +62,7 @@ impl MobileManipulatorAction {
     /// Attaches a lift joint-space target to an existing velocity command.
     pub fn with_lift_joint_target(mut self, target: MmLiftJointTarget) -> Self {
         self.lift_joint_target = Some(target);
+        self.wrist_yaw_target_rad = Some(-(target.shoulder_rad + target.elbow_rad));
         self
     }
 }

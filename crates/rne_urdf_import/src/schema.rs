@@ -18,6 +18,8 @@ pub struct UrdfRobot {
 pub struct UrdfLink {
     /// Link name.
     pub name: String,
+    /// Optional mass declared by `<inertial><mass value="..."/></inertial>`, in kilograms.
+    pub inertial_mass_kg: Option<f64>,
     /// Collision elements.
     pub collisions: Vec<UrdfGeometryElement>,
     /// Visual elements.

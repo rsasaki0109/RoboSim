@@ -206,6 +206,10 @@ pub struct PrismaticJointDesc {
     pub anchor_parent_m: Vec3,
     /// Anchor point in the child body's local frame.
     pub anchor_child_m: Vec3,
+    /// Optional lower translation limit in meters.
+    pub lower_m: Option<f64>,
+    /// Optional upper translation limit in meters.
+    pub upper_m: Option<f64>,
 }
 
 /// Fixed (weld) joint description for physics backends.

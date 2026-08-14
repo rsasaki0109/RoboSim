@@ -1495,7 +1495,7 @@ dependencies = [
 
 [[package]]
 name = "go2_pure_torque"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "rne_ai",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "go2_velocity_terrain"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "locomotion_vectorized"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_ai",
 ]
@@ -2180,6 +2180,13 @@ dependencies = [
 
 [[package]]
 name = "mobile_clutter_pick_place_e2e"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
+name = "mobile_lift_friction_pick_place"
 version = "0.1.0"
 dependencies = [
  "rne_ai",
@@ -3316,7 +3323,7 @@ checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 
 [[package]]
 name = "rne_adapter_ros2"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -3328,7 +3335,7 @@ dependencies = [
 
 [[package]]
 name = "rne_ai"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3354,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "rne_asset_cli"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3382,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "rne_assets"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rne_data",
@@ -3402,7 +3409,7 @@ dependencies = [
 
 [[package]]
 name = "rne_core"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rne_math",
@@ -3413,7 +3420,7 @@ dependencies = [
 
 [[package]]
 name = "rne_data"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -3426,7 +3433,7 @@ dependencies = [
 
 [[package]]
 name = "rne_deformable"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3470,7 +3477,7 @@ dependencies = [
 
 [[package]]
 name = "rne_ecs"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "rne_core",
@@ -3498,7 +3505,7 @@ dependencies = [
 
 [[package]]
 name = "rne_log"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_core",
  "rne_data",
@@ -3513,7 +3520,7 @@ dependencies = [
 
 [[package]]
 name = "rne_math"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "glam",
@@ -3522,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "rne_mjcf"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_urdf_import",
  "roxmltree",
@@ -3531,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "rne_openscenario"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -3546,7 +3553,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3560,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_analytic"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -3587,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_rapier"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rapier3d",
@@ -3601,7 +3608,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plateau"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "earcutr",
  "image",
@@ -3619,7 +3626,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plateau_import"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3628,7 +3635,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plugin"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "libloading",
  "serde",
@@ -3638,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plugin_example_velocity_servo"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 
 [[package]]
 name = "rne_plugin_legacy_v2_fixture"
@@ -3646,7 +3653,7 @@ version = "0.1.0"
 
 [[package]]
 name = "rne_py"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "pyo3",
@@ -3657,7 +3664,7 @@ dependencies = [
 
 [[package]]
 name = "rne_render"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3673,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "rne_render_wgpu"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bytemuck",
@@ -3691,7 +3698,7 @@ dependencies = [
 
 [[package]]
 name = "rne_robot"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3718,7 +3725,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sdf"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_urdf_import",
  "roxmltree",
@@ -3727,7 +3734,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sensor"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3745,7 +3752,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sumo"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_traffic",
  "roxmltree",
@@ -3754,7 +3761,7 @@ dependencies = [
 
 [[package]]
 name = "rne_traci"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "rne_ecs",
  "rne_traffic",
@@ -3764,7 +3771,7 @@ dependencies = [
 
 [[package]]
 name = "rne_traffic"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "rne_core",
@@ -3777,7 +3784,7 @@ dependencies = [
 
 [[package]]
 name = "rne_urdf_import"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -3794,7 +3801,7 @@ dependencies = [
 
 [[package]]
 name = "rne_world"
-version = "1.0.0-rc.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "bevy_ecs",

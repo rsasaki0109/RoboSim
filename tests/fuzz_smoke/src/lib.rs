@@ -12,7 +12,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 /// Machine-readable fuzz-smoke report schema version.
 pub const FUZZ_SMOKE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Release version covered by the campaign.
-pub const FUZZ_SMOKE_RELEASE_VERSION: &str = "1.0.0-rc.1";
+pub const FUZZ_SMOKE_RELEASE_VERSION: &str = "0.1.0";
 /// Maximum bytes passed to any parser during the bounded CI campaign.
 pub const FUZZ_SMOKE_MAX_INPUT_BYTES: usize = 64 * 1024;
 /// Fixed seed used by every deterministic mutation stream.

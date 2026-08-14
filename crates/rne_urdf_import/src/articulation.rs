@@ -116,12 +116,18 @@ pub fn attach_urdf_articulation(
             }
             UrdfJointType::Prismatic => {
                 ensure_dynamic_link(world, child);
+                let (lower_m, upper_m) = joint
+                    .limit
+                    .map(|limit| (Some(limit.lower), Some(limit.upper)))
+                    .unwrap_or((None, None));
                 world.entity_mut(child).insert((
                     PrismaticJointDesc {
                         parent,
                         axis: normalize_axis(joint.axis),
                         anchor_parent_m: joint.origin_xyz,
                         anchor_child_m: Vec3::ZERO,
+                        lower_m,
+                        upper_m,
                     },
                     JointMotor::default(),
                 ));
@@ -299,7 +305,11 @@ mod tests {
         assert_eq!(attached.revolute_joints, 0);
         assert_eq!(attached.prismatic_joints, 1);
         let slider = spawned.links["slider_link"];
-        assert!(world.get::<PrismaticJointDesc>(slider).is_some());
+        let joint = world
+            .get::<PrismaticJointDesc>(slider)
+            .expect("prismatic joint description");
+        assert_eq!(joint.lower_m, Some(0.0));
+        assert_eq!(joint.upper_m, Some(0.15));
         assert!(world.get::<JointMotor>(slider).is_some());
     }
 
@@ -349,6 +359,11 @@ mod tests {
         assert!(
             moved.x > 0.1,
             "slider should advance along +X under the linear motor, moved.x={}",
+            moved.x
+        );
+        assert!(
+            moved.x <= 0.151,
+            "slider must stop at its 0.15 m URDF upper limit, moved.x={}",
             moved.x
         );
         assert!(

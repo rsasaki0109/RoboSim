@@ -7,8 +7,8 @@ mod sim;
 use pyo3::prelude::*;
 use rne_ai::{
     DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
-    IkMobileClutterPickPlacePolicy, Policy, UnitreeGo2Action, UnitreeGo2Episode,
-    UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+    IkMobileClutterPickPlacePolicy, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, Policy,
+    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
@@ -30,6 +30,7 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
         "reach_curriculum" => Ok(MobileManipulatorEpisodeConfig::reach_curriculum(0)),
         "place" => Ok(MobileManipulatorEpisodeConfig::place()),
         "lift_place" => Ok(MobileManipulatorEpisodeConfig::lift_pick_place()),
+        "mobile_lift_place" => Ok(MobileManipulatorEpisodeConfig::mobile_lift_pick_place()),
         "clutter_place" => Ok(MobileManipulatorEpisodeConfig::clutter_pick_place(0)),
         "clutter_place_center" => Ok(MobileManipulatorEpisodeConfig::clutter_pick_place_center(0)),
         "mobile_clutter_place_center" => {
@@ -39,7 +40,7 @@ fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
         "transport" => Ok(MobileManipulatorEpisodeConfig::transport()),
         "inspect" => Ok(MobileManipulatorEpisodeConfig::inspect()),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'clutter_place', 'clutter_place_center', 'mobile_clutter_place', 'mobile_clutter_place_center', 'transport', or 'inspect'"
+            "unknown task '{other}', expected 'reach', 'reach_random', 'reach_curriculum', 'place', 'lift_place', 'mobile_lift_place', 'clutter_place', 'clutter_place_center', 'mobile_clutter_place', 'mobile_clutter_place_center', 'transport', or 'inspect'"
         ))),
     }
 }
@@ -575,6 +576,124 @@ impl From<PyMmLiftJointTarget> for MmLiftJointTarget {
     }
 }
 
+/// Full mobile-manipulator action, including optional lift joint targets.
+///
+/// Use this type with `step_action()` when a controller emits absolute lift-arm
+/// targets, as the scripted lift pick-and-place policy does. The velocity-only
+/// `step()` methods remain available for ordinary RL rollouts.
+#[pyclass(name = "MobileManipulatorAction", from_py_object)]
+#[derive(Clone, Copy)]
+struct PyMmAction {
+    inner: MobileManipulatorAction,
+}
+
+#[pymethods]
+impl PyMmAction {
+    /// Creates a velocity action with optional absolute lift-arm targets.
+    #[new]
+    #[pyo3(signature = (
+        left_wheel_velocity_rad_s=0.0,
+        right_wheel_velocity_rad_s=0.0,
+        shoulder_velocity_rad_s=0.0,
+        elbow_velocity_rad_s=0.0,
+        gripper_velocity_rad_s=0.0,
+        gripper_velocity_m_s=0.0,
+        lift_velocity_m_s=0.0,
+        lift_joint_target=None,
+        wrist_yaw_target_rad=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        left_wheel_velocity_rad_s: f64,
+        right_wheel_velocity_rad_s: f64,
+        shoulder_velocity_rad_s: f64,
+        elbow_velocity_rad_s: f64,
+        gripper_velocity_rad_s: f64,
+        gripper_velocity_m_s: f64,
+        lift_velocity_m_s: f64,
+        lift_joint_target: Option<PyMmLiftJointTarget>,
+        wrist_yaw_target_rad: Option<f64>,
+    ) -> Self {
+        Self {
+            inner: MobileManipulatorAction {
+                left_wheel_velocity_rad_s,
+                right_wheel_velocity_rad_s,
+                shoulder_velocity_rad_s,
+                elbow_velocity_rad_s,
+                gripper_velocity_rad_s,
+                gripper_velocity_m_s,
+                lift_velocity_m_s,
+                lift_joint_target: lift_joint_target.map(Into::into),
+                wrist_yaw_target_rad,
+            },
+        }
+    }
+
+    #[getter]
+    fn left_wheel_velocity_rad_s(&self) -> f64 {
+        self.inner.left_wheel_velocity_rad_s
+    }
+
+    #[getter]
+    fn right_wheel_velocity_rad_s(&self) -> f64 {
+        self.inner.right_wheel_velocity_rad_s
+    }
+
+    #[getter]
+    fn shoulder_velocity_rad_s(&self) -> f64 {
+        self.inner.shoulder_velocity_rad_s
+    }
+
+    #[getter]
+    fn elbow_velocity_rad_s(&self) -> f64 {
+        self.inner.elbow_velocity_rad_s
+    }
+
+    #[getter]
+    fn gripper_velocity_rad_s(&self) -> f64 {
+        self.inner.gripper_velocity_rad_s
+    }
+
+    #[getter]
+    fn gripper_velocity_m_s(&self) -> f64 {
+        self.inner.gripper_velocity_m_s
+    }
+
+    #[getter]
+    fn lift_velocity_m_s(&self) -> f64 {
+        self.inner.lift_velocity_m_s
+    }
+
+    #[getter]
+    fn lift_joint_target(&self) -> Option<PyMmLiftJointTarget> {
+        self.inner.lift_joint_target.map(Into::into)
+    }
+
+    #[getter]
+    fn wrist_yaw_target_rad(&self) -> Option<f64> {
+        self.inner.wrist_yaw_target_rad
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MobileManipulatorAction(wheels=({:.3}, {:.3}), arm=({:.3}, {:.3}), gripper=({:.3} rad/s, {:.3} m/s), lift={:.3} m/s)",
+            self.inner.left_wheel_velocity_rad_s,
+            self.inner.right_wheel_velocity_rad_s,
+            self.inner.shoulder_velocity_rad_s,
+            self.inner.elbow_velocity_rad_s,
+            self.inner.gripper_velocity_rad_s,
+            self.inner.gripper_velocity_m_s,
+            self.inner.lift_velocity_m_s,
+        )
+    }
+}
+
+impl From<MobileManipulatorAction> for PyMmAction {
+    fn from(inner: MobileManipulatorAction) -> Self {
+        Self { inner }
+    }
+}
+
 /// World-frame gripper-base target for `mm_lift` analytic IK.
 #[pyclass(name = "MmLiftGripperTarget", from_py_object)]
 #[derive(Clone, Copy)]
@@ -733,13 +852,28 @@ impl PyMmObservation {
     }
 
     #[getter]
+    fn wrist_yaw_position(&self) -> f64 {
+        self.inner.wrist_yaw_position_rad
+    }
+
+    #[getter]
     fn gripper_position(&self) -> f64 {
         self.inner.gripper_position_rad
     }
 
     #[getter]
+    fn gripper_position_m(&self) -> f64 {
+        self.inner.gripper_position_m
+    }
+
+    #[getter]
     fn lift_position_m(&self) -> f64 {
         self.inner.lift_position_m
+    }
+
+    #[getter]
+    fn is_grasping(&self) -> bool {
+        self.inner.is_grasping
     }
 
     #[getter]
@@ -775,6 +909,31 @@ impl PyMmObservation {
     #[getter]
     fn wrist_depth_min_m(&self) -> f64 {
         self.inner.wrist_depth_min_m
+    }
+
+    #[getter]
+    fn wrist_target_pixel_u_px(&self) -> u32 {
+        self.inner.wrist_target_pixel_u_px
+    }
+
+    #[getter]
+    fn wrist_target_pixel_v_px(&self) -> u32 {
+        self.inner.wrist_target_pixel_v_px
+    }
+
+    #[getter]
+    fn wrist_target_depth_m(&self) -> f64 {
+        self.inner.wrist_target_depth_m
+    }
+
+    #[getter]
+    fn wrist_target_offset_x_m(&self) -> f64 {
+        self.inner.wrist_target_offset_x_m
+    }
+
+    #[getter]
+    fn wrist_target_offset_y_m(&self) -> f64 {
+        self.inner.wrist_target_offset_y_m
     }
 
     #[getter]
@@ -865,7 +1024,8 @@ struct PyMobileManipulatorSim {
 
 #[pymethods]
 impl PyMobileManipulatorSim {
-    /// Creates a sim for `"mm_minimal"` (default), `"mm_mobile"`, or `"mm_lift"`.
+    /// Creates a sim for `"mm_minimal"` (default), `"mm_mobile"`, `"mm_lift"`,
+    /// or the lift-capable `"mm_mobile_lift"` robot.
     #[new]
     #[pyo3(signature = (mode="mm_minimal"))]
     fn new(mode: &str) -> PyResult<Self> {
@@ -873,9 +1033,10 @@ impl PyMobileManipulatorSim {
             "mm_minimal" => MobileManipulatorSim::new_mm_minimal(),
             "mm_mobile" => MobileManipulatorSim::new_mm_mobile(),
             "mm_lift" => MobileManipulatorSim::new_mm_lift(),
+            "mm_mobile_lift" => MobileManipulatorSim::new_mm_mobile_lift(),
             other => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown mode '{other}', expected 'mm_minimal', 'mm_mobile', or 'mm_lift'"
+                    "unknown mode '{other}', expected 'mm_minimal', 'mm_mobile', 'mm_lift', or 'mm_mobile_lift'"
                 )))
             }
         };
@@ -893,6 +1054,7 @@ impl PyMobileManipulatorSim {
         elbow_velocity_rad_s=0.0,
         gripper_velocity_rad_s=0.0,
         lift_velocity_m_s=0.0,
+        gripper_velocity_m_s=0.0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn step(
@@ -903,6 +1065,7 @@ impl PyMobileManipulatorSim {
         elbow_velocity_rad_s: f64,
         gripper_velocity_rad_s: f64,
         lift_velocity_m_s: f64,
+        gripper_velocity_m_s: f64,
     ) -> PyMmObservation {
         self.inner
             .step(MobileManipulatorAction {
@@ -911,20 +1074,42 @@ impl PyMobileManipulatorSim {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
+                gripper_velocity_m_s,
                 lift_velocity_m_s,
                 ..MobileManipulatorAction::default()
             })
             .into()
     }
 
+    /// Applies a full action object, preserving optional lift-arm targets.
+    fn step_action(&mut self, action: PyMmAction) -> PyMmObservation {
+        self.inner.step(action.inner).into()
+    }
+
+    /// Selects `"weld"` or `"friction"` grasping for the next contact-triggered grasp.
+    fn set_grasp_mode(&mut self, mode: &str) -> PyResult<()> {
+        let mode = match mode {
+            "weld" => GraspMode::Weld,
+            "friction" => GraspMode::Friction,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "grasp mode must be 'weld' or 'friction'",
+                ));
+            }
+        };
+        self.inner.set_grasp_mode(mode);
+        Ok(())
+    }
+
     /// Steps the sim while holding absolute lift-arm joint targets.
-    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0))]
+    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0))]
     fn step_hold_lift_joints(
         &mut self,
         lift_m: f64,
         shoulder_rad: f64,
         elbow_rad: f64,
         gripper_velocity_rad_s: f64,
+        gripper_velocity_m_s: f64,
     ) -> PyMmObservation {
         let mut action = MobileManipulatorAction::hold_lift_joints(MmLiftJointTarget {
             lift_m,
@@ -932,6 +1117,7 @@ impl PyMobileManipulatorSim {
             elbow_rad,
         });
         action.gripper_velocity_rad_s = gripper_velocity_rad_s;
+        action.gripper_velocity_m_s = gripper_velocity_m_s;
         self.inner.step(action).into()
     }
 
@@ -955,8 +1141,8 @@ struct PyMobileManipulatorEpisode {
 #[pymethods]
 impl PyMobileManipulatorEpisode {
     /// Creates an episode for the `"reach"`, `"place"` (default), `"lift_place"`,
-    /// `"transport"`, or `"inspect"` task. `"lift_place"` needs the `lift_velocity_m_s`
-    /// step argument to drive the vertical lift.
+    /// `"mobile_lift_place"`, `"transport"`, or `"inspect"` task. Lift tasks accept
+    /// the `lift_velocity_m_s` and `gripper_velocity_m_s` step arguments.
     #[new]
     #[pyo3(signature = (task="place"))]
     fn new(task: &str) -> PyResult<Self> {
@@ -992,6 +1178,7 @@ impl PyMobileManipulatorEpisode {
         elbow_velocity_rad_s=0.0,
         gripper_velocity_rad_s=0.0,
         lift_velocity_m_s=0.0,
+        gripper_velocity_m_s=0.0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn step(
@@ -1002,6 +1189,7 @@ impl PyMobileManipulatorEpisode {
         elbow_velocity_rad_s: f64,
         gripper_velocity_rad_s: f64,
         lift_velocity_m_s: f64,
+        gripper_velocity_m_s: f64,
     ) -> PyMmStepResult {
         self.inner
             .step(MobileManipulatorAction {
@@ -1010,20 +1198,27 @@ impl PyMobileManipulatorEpisode {
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
                 gripper_velocity_rad_s,
+                gripper_velocity_m_s,
                 lift_velocity_m_s,
                 ..MobileManipulatorAction::default()
             })
             .into()
     }
 
+    /// Applies a full action object, preserving optional lift-arm targets.
+    fn step_action(&mut self, action: PyMmAction) -> PyMmStepResult {
+        self.inner.step(action.inner).into()
+    }
+
     /// Steps the episode while holding absolute lift-arm joint targets.
-    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0))]
+    #[pyo3(signature = (lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0))]
     fn step_hold_lift_joints(
         &mut self,
         lift_m: f64,
         shoulder_rad: f64,
         elbow_rad: f64,
         gripper_velocity_rad_s: f64,
+        gripper_velocity_m_s: f64,
     ) -> PyMmStepResult {
         let mut action = MobileManipulatorAction::hold_lift_joints(MmLiftJointTarget {
             lift_m,
@@ -1031,6 +1226,7 @@ impl PyMobileManipulatorEpisode {
             elbow_rad,
         });
         action.gripper_velocity_rad_s = gripper_velocity_rad_s;
+        action.gripper_velocity_m_s = gripper_velocity_m_s;
         self.inner.step(action).into()
     }
 
@@ -1124,6 +1320,57 @@ impl PyIkMobileClutterPickPlacePolicy {
     }
 }
 
+/// Scripted weld-free mobile-lift friction pick-and-place policy.
+#[pyclass(name = "IkMobileLiftPickPlacePolicy")]
+struct PyIkMobileLiftPickPlacePolicy {
+    inner: IkMobileLiftPickPlacePolicy,
+}
+
+fn mobile_lift_failure_name(failure: MobileLiftFailureClass) -> &'static str {
+    match failure {
+        MobileLiftFailureClass::None => "none",
+        MobileLiftFailureClass::NavigateTimeout => "navigate_timeout",
+        MobileLiftFailureClass::ApproachTimeout => "approach_timeout",
+        MobileLiftFailureClass::PickupAlignmentTimeout => "pickup_alignment_timeout",
+        MobileLiftFailureClass::GraspTimeout => "grasp_timeout",
+        MobileLiftFailureClass::GraspSlip => "grasp_slip",
+        MobileLiftFailureClass::LiftClearanceTimeout => "lift_clearance_timeout",
+        MobileLiftFailureClass::TransportTimeout => "transport_timeout",
+        MobileLiftFailureClass::LowerTimeout => "lower_timeout",
+        MobileLiftFailureClass::ReleaseTimeout => "release_timeout",
+    }
+}
+
+#[pymethods]
+impl PyIkMobileLiftPickPlacePolicy {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: IkMobileLiftPickPlacePolicy::new(),
+        }
+    }
+
+    /// Maximum scripted actions through release.
+    fn total_steps(&self) -> u64 {
+        self.inner.total_steps()
+    }
+
+    /// Current scripted phase as a stable Rust enum debug name.
+    fn phase(&self) -> String {
+        format!("{:?}", self.inner.phase())
+    }
+
+    /// Deterministic failure category for the current observation.
+    fn failure_class(&self, observation: PyMmObservation) -> &'static str {
+        mobile_lift_failure_name(self.inner.failure_class(&observation.inner))
+    }
+
+    /// Returns a full action object, including the absolute lift-arm target.
+    fn act(&mut self, observation: PyMmObservation) -> PyMmAction {
+        self.inner.act(&observation.inner).into()
+    }
+}
+
 /// Batched mobile manipulator environment for population-based / parallel RL.
 #[pyclass(name = "VectorizedMobileManipulatorEnv")]
 struct PyVectorizedMobileManipulatorEnv {
@@ -1164,7 +1411,8 @@ impl PyVectorizedMobileManipulatorEnv {
 
     /// Steps all environments; returns per-env `(observations, done)`.
     ///
-    /// Each action is `(left_wheel, right_wheel, shoulder, elbow, gripper)` in rad/s.
+    /// Each action is `(left_wheel, right_wheel, shoulder, elbow, gripper)` in
+    /// rad/s (or meters/s for a linear gripper).
     fn step(
         &mut self,
         actions: Vec<(f64, f64, f64, f64, f64)>,
@@ -1203,6 +1451,50 @@ impl PyVectorizedMobileManipulatorEnv {
             .map(PyMmObservation::from)
             .collect();
         Ok((observations, done))
+    }
+
+    /// Steps all environments with full action objects, including lift targets.
+    fn step_actions(
+        &mut self,
+        actions: Vec<PyMmAction>,
+    ) -> PyResult<(Vec<PyMmObservation>, Vec<bool>)> {
+        if actions.len() != self.inner.num_envs() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected {} actions, got {}",
+                self.inner.num_envs(),
+                actions.len()
+            )));
+        }
+        let actions: Vec<MobileManipulatorAction> =
+            actions.into_iter().map(|action| action.inner).collect();
+        let step = self.inner.step(&actions);
+        let done = step
+            .terminated
+            .iter()
+            .zip(&step.truncated)
+            .map(|(terminated, truncated)| *terminated || *truncated)
+            .collect();
+        let observations = step
+            .observations
+            .into_iter()
+            .map(PyMmObservation::from)
+            .collect();
+        Ok((observations, done))
+    }
+
+    /// Selects the grasp mode for every environment after reset.
+    fn set_grasp_mode(&mut self, mode: &str) -> PyResult<()> {
+        let mode = match mode {
+            "weld" => GraspMode::Weld,
+            "friction" => GraspMode::Friction,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "grasp mode must be 'weld' or 'friction'",
+                ));
+            }
+        };
+        self.inner.set_grasp_mode(mode);
+        Ok(())
     }
 
     /// Cumulative reward of one environment's current episode.
@@ -1267,11 +1559,13 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyUnitreeGo2StepResult>()?;
     m.add_class::<PyMmLiftJointTarget>()?;
     m.add_class::<PyMmLiftGripperTarget>()?;
+    m.add_class::<PyMmAction>()?;
     m.add_class::<PyMmLiftKinematics>()?;
     m.add_class::<PyMobileManipulatorSim>()?;
     m.add_class::<PyMobileManipulatorEpisode>()?;
     m.add_class::<PyIkClutterPickPlacePolicy>()?;
     m.add_class::<PyIkMobileClutterPickPlacePolicy>()?;
+    m.add_class::<PyIkMobileLiftPickPlacePolicy>()?;
     m.add_class::<PyVectorizedMobileManipulatorEnv>()?;
     m.add_class::<PyMmObservation>()?;
     m.add_class::<PyMmStepResult>()?;
@@ -1405,6 +1699,76 @@ mod tests {
             }
         }
         panic!("expected mobile manipulator place episode to terminate");
+    }
+
+    #[test]
+    fn python_mobile_lift_mode_exposes_linear_gripper_observation() {
+        let mut sim = PyMobileManipulatorSim::new("mm_mobile_lift").unwrap();
+        let observation = sim.reset();
+        assert!(observation.lift_position_m().is_finite());
+        assert!(observation.gripper_position_m().is_finite());
+        assert_eq!(observation.gripper_position(), 0.0);
+        let stepped = sim.step(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.01);
+        assert!(stepped.wrist_yaw_position().is_finite());
+        assert!(stepped.wrist_target_depth_m().is_finite());
+        assert!(!sim.is_grasping());
+    }
+
+    #[test]
+    fn python_mobile_lift_policy_action_completes_friction_place() {
+        let mut episode = PyMobileManipulatorEpisode::new("mobile_lift_place").unwrap();
+        let mut step = episode.reset();
+        episode.set_grasp_mode("friction").unwrap();
+        let mut policy = PyIkMobileLiftPickPlacePolicy::new();
+        let mut native_policy = IkMobileLiftPickPlacePolicy::new();
+        let native_action = native_policy.act(&step.observation().inner);
+        let python_action = policy.act(step.observation());
+        assert_eq!(python_action.inner, native_action);
+        step = episode.step_action(python_action);
+        for _ in 0..policy.total_steps() {
+            let action = policy.act(step.observation());
+            step = episode.step_action(action);
+            if step.done() {
+                break;
+            }
+        }
+        assert!(
+            step.terminated(),
+            "Python lift policy should place the cube: phase={} failure={} steps={} grasping={} target=({:.3},{:.3},{:.3})",
+            policy.phase(),
+            policy.failure_class(step.observation()),
+            episode.step_in_episode(),
+            episode.is_grasping(),
+            step.observation().target_dx(),
+            step.observation().target_dy(),
+            step.observation().target_dz(),
+        );
+        assert_eq!(policy.failure_class(step.observation()), "none");
+    }
+
+    #[test]
+    fn python_vectorized_mobile_lift_accepts_full_actions() {
+        let mut env = PyVectorizedMobileManipulatorEnv::new("mobile_lift_place", 2).unwrap();
+        let observations = env.reset();
+        assert_eq!(observations.len(), 2);
+        env.set_grasp_mode("friction").unwrap();
+        let action = PyMmAction {
+            inner: MobileManipulatorAction {
+                lift_joint_target: Some(MmLiftJointTarget {
+                    lift_m: 0.48,
+                    shoulder_rad: 0.0,
+                    elbow_rad: 0.0,
+                }),
+                gripper_velocity_m_s: -0.02,
+                ..MobileManipulatorAction::default()
+            },
+        };
+        let (next, done) = env.step_actions(vec![action, action]).unwrap();
+        assert_eq!(next.len(), 2);
+        assert_eq!(done.len(), 2);
+        assert!(next
+            .iter()
+            .all(|observation| observation.lift_position_m().is_finite()));
     }
 
     #[test]

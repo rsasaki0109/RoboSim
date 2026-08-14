@@ -7,7 +7,7 @@ messages with a versioned, framed binary transport. The simulation remains the
 only authority: a slow, disconnected, or incompatible frontend must not block a
 fixed step or retain unbounded memory.
 
-The existing `--control-port` protocol v1 remains supported during the 1.0
+The existing `--control-port` protocol v1 remains supported during the 0.x
 transition. The production protocol is exposed separately and shares the
 transport-neutral runner-control state machine.
 

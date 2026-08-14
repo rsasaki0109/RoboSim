@@ -55,7 +55,7 @@ pub use behavior_replay::{
 pub use camera::{
     sync_wrist_camera_mount, sync_wrist_camera_mounts, wrist_camera_image_valid,
     wrist_camera_mounts_from_spawned, wrist_camera_pixel_count, wrist_camera_stream_for_index,
-    WristCameraMount,
+    WristCameraMount, WristRgbdTargetEstimate,
 };
 pub use control_eval::{ControlEvalReport, ControlMetrics, ControlTrackingSample, MetricSpread};
 pub use domain_randomization::DiffDriveDomainRandomization;
@@ -64,11 +64,11 @@ pub use env::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, mm_lift_pick_scene_path,
     mm_lift_scene_path, mm_minimal_clutter_scene_path, mm_minimal_grasp_scene_path,
     mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_clutter_scene_path,
-    mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, quadruped_scene_path,
-    quadruped_trot_targets, run_unitree_g1_commanded_gait,
-    run_unitree_g1_commanded_gait_with_policy, so101_scene_path, unitree_g1_dex3_pick_targets,
-    unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path, unitree_g1_factory_scene_path,
-    unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
+    mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path, mm_mobile_scene_path,
+    mm_mobile_twist_to_wheel_velocities, quadruped_scene_path, quadruped_trot_targets,
+    run_unitree_g1_commanded_gait, run_unitree_g1_commanded_gait_with_policy, so101_scene_path,
+    unitree_g1_dex3_pick_targets, unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path,
+    unitree_g1_factory_scene_path, unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_inspection_targets,
     unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path, unitree_go2_dynamic_scene_path,
@@ -141,7 +141,8 @@ pub use multi_robot::{
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{
     ConstantVelocityPolicy, IkClutterPickPlacePolicy, IkLiftPickPlacePolicy,
-    IkMobileClutterPickPlacePolicy, LiftPickPlacePolicy, LocomotionPolicy, Policy,
+    IkMobileClutterPickPlacePolicy, IkMobileLiftPickPlacePolicy, LiftPickPlacePolicy,
+    LocomotionPolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase, Policy,
     VisuomotorReachPolicy,
 };
 pub use reach::{

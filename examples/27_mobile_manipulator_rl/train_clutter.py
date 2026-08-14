@@ -60,12 +60,20 @@ def act(params, obs, step_idx):
     hold_end = carry_end + HOLD_STEPS
     release_end = hold_end + RELEASE_STEPS
     if step_idx < approach_end:
+        # Keep the finger pocket open while the arm is still crossing the
+        # workspace. Closing early lets the leading pad shove the cube away
+        # before the trailing pad reaches it; the native IK policy uses the
+        # same contact-gated handoff. The CEM still learns the closing speed,
+        # but only after the object is inside the final approach pocket.
+        close_command = 0.0
+        if (obs.target_dx * obs.target_dx + obs.target_dz * obs.target_dz) ** 0.5 < 0.12:
+            close_command = clamp(gripper_close)
         return [
             0.0,
             0.0,
             clamp(shoulder_gain * obs.target_dx),
             clamp(elbow_gain * obs.target_dz),
-            clamp(gripper_close),
+            close_command,
         ]
     if step_idx < carry_end:
         return [

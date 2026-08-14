@@ -664,10 +664,13 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
                 Some(JointAxis::AngX),
             )
         } else if let Some(desc) = world.get::<PrismaticJointDesc>(entity) {
-            let joint = PrismaticJointBuilder::new(normalized_axis(desc.axis))
+            let mut builder = PrismaticJointBuilder::new(normalized_axis(desc.axis))
                 .local_anchor1(vec3_to_point(desc.anchor_parent_m))
-                .local_anchor2(vec3_to_point(desc.anchor_child_m))
-                .build();
+                .local_anchor2(vec3_to_point(desc.anchor_child_m));
+            if let (Some(lower_m), Some(upper_m)) = (desc.lower_m, desc.upper_m) {
+                builder = builder.limits([lower_m as f32, upper_m as f32]);
+            }
+            let joint = builder.build();
             (
                 desc.parent,
                 GenericJoint::from(joint),
@@ -1263,6 +1266,8 @@ mod tests {
                 axis: Vec3::new(0.0, 1.0, 0.0),
                 anchor_parent_m: Vec3::new(0.0, -2.5, 0.0),
                 anchor_child_m: Vec3::ZERO,
+                lower_m: None,
+                upper_m: None,
             },
             JointMotor {
                 velocity_rad_s: 1.0,

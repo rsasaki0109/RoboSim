@@ -17,7 +17,7 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
-const RELEASE_VERSION: &str = "1.0.0-rc.1";
+const RELEASE_VERSION: &str = "0.1.0";
 const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -830,7 +830,7 @@ fn validate_release_metadata(metadata: &serde_json::Value) -> anyhow::Result<()>
             };
             if expected_public.contains(dependency_name) {
                 anyhow::ensure!(
-                    dependency["req"].as_str() == Some("=1.0.0-rc.1"),
+                    dependency["req"].as_str() == Some("=0.1.0"),
                     "{name} -> {dependency_name} must use exact requirement ={RELEASE_VERSION}"
                 );
             }
@@ -2850,7 +2850,7 @@ mod tests {
     fn open_critical_release_blocker_is_rejected() {
         let registry = r#"
             schema_version = 1
-            release_version = "1.0.0-rc.1"
+            release_version = "0.1.0"
 
             [[blocker]]
             id = "RNE-TEST"
@@ -2866,7 +2866,7 @@ mod tests {
     fn malformed_release_blocker_cannot_bypass_the_exit_gate() {
         let registry = r#"
             schema_version = 1
-            release_version = "1.0.0-rc.1"
+            release_version = "0.1.0"
 
             [[blocker]]
             id = "RNE-TEST"
@@ -2906,7 +2906,7 @@ mod tests {
         let registry: SupplyChainExceptionRegistry = toml::from_str(
             r#"
                 schema_version = 1
-                release_version = "1.0.0-rc.1"
+                release_version = "0.1.0"
                 policy_date = "2026-08-12"
             "#,
         )

@@ -1,0 +1,26 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 51
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_mobile_lift.rne.robot.toml"
+
+# A low, narrow support rail keeps the pickup above the chassis while leaving
+# both top-down finger pads a clear path below the cube's side faces.
+[[obstacles]]
+name = "mobile_lift_pick_table"
+translation_m = [2.2, 0.10, 0.0]
+half_extents_m = [0.35, 0.10, 0.005]
+body_type = "fixed"
+friction = 0.0
+
+[[obstacles]]
+name = "mobile_lift_cube"
+translation_m = [2.2, 0.235, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.05
+friction = 0.8
