@@ -1040,6 +1040,18 @@ mod tests {
     }
 
     #[test]
+    fn report_schema_serialization_matches_committed_golden() {
+        let golden = include_str!("../../tests/golden/evidence/benchmark-report-v1.json");
+        let report: BenchmarkReport = serde_json::from_str(golden).expect("parse golden report");
+        assert_eq!(report.kind, BENCHMARK_REPORT_KIND);
+        assert_eq!(report.schema_version, BENCHMARK_REPORT_SCHEMA_VERSION);
+        assert_eq!(
+            serde_json::to_string_pretty(&report).expect("serialize golden report"),
+            golden.trim_end()
+        );
+    }
+
+    #[test]
     fn invalid_source_digest_is_rejected() {
         let root = fixture_root();
         let mut physics = physics_fixture();

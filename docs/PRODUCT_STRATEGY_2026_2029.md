@@ -106,15 +106,16 @@ The implementation foundation already exists on the current development
 branch: `DeterminismContract`, capability and benchmark reports, Failure
 Capsules, and the default-off MuJoCo spike.
 
-Remaining release work:
+Implemented on the development branch:
 
-- merge through the normal review path and run Linux/Windows CI from the merged
-  commit;
 - expose a single `xtask evidence` aggregate that runs capability, benchmark,
   conformance, and capsule-fixture verification;
 - publish JSON schemas or equivalent golden shapes for all four new artifacts;
 - add a clean-install tutorial that reproduces a committed failure capsule;
 - keep all reports timing-free and versioned in `release/contracts.toml`.
+
+Remaining release work is to merge through the normal review path and confirm
+the new Linux/Windows evidence jobs from the merged commit.
 
 Exit evidence:
 

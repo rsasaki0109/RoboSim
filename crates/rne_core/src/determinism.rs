@@ -450,26 +450,8 @@ mod tests {
         let contract = DeterminismContract::tolerance("physics", scope(), 1.0e-6, 1.0e-4)
             .expect("valid tolerance");
         let json = serde_json::to_string_pretty(&contract).expect("serialize contract");
-        let expected = concat!(
-            "{\n",
-            "  \"schema_version\": 1,\n",
-            "  \"name\": \"physics\",\n",
-            "  \"scope\": {\n",
-            "    \"subject\": \"episode\",\n",
-            "    \"observables\": [\n",
-            "      \"world.state\",\n",
-            "      \"sensor.lidar\"\n",
-            "    ],\n",
-            "    \"first_step\": 4,\n",
-            "    \"step_count\": 3\n",
-            "  },\n",
-            "  \"guarantee\": {\n",
-            "    \"tier\": \"tolerance\",\n",
-            "    \"absolute\": 1e-6,\n",
-            "    \"relative\": 0.0001\n",
-            "  }\n",
-            "}"
-        );
+        let expected =
+            include_str!("../../../tests/golden/evidence/determinism-contract-v1.json").trim_end();
 
         assert_eq!(json, expected);
         let decoded: DeterminismContract = serde_json::from_str(&json).expect("deserialize");

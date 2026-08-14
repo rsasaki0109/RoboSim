@@ -11,6 +11,9 @@ The default output is `artifacts/capability-report/report.json`. A different pat
 can be selected with `--output PATH` (the `--json PATH` spelling is retained as an
 alias for consistency with other `xtask` reports).
 
+The complete release evidence path is available through `cargo run --locked -p
+xtask -- evidence`; see [EVIDENCE_QUICKSTART.md](EVIDENCE_QUICKSTART.md).
+
 The schema-v1 report uses the stable top-level discriminator
 `kind = "rne_capability_report"`, records the RNE release version and exact Git
 commit, and emits the 13 capabilities in the same explicit order as

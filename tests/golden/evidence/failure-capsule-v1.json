@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "rne_failure_capsule",
+  "failure": {
+    "id": "failure-1",
+    "contract": "contact_failure",
+    "message": "contact contract violated",
+    "step": 2,
+    "sim_time_ticks": 20,
+    "state_digest": 4660
+  },
+  "run": {
+    "id": "run-1",
+    "scenario": "arm_pick",
+    "seed": 7,
+    "fixed_delta_ticks": 10,
+    "step_count": 3,
+    "action_count": 2
+  },
+  "build": {
+    "engine_version": "0.2.0",
+    "git_commit": "0123456789abcdef",
+    "profile": "release",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "rustc_version": "rustc 1.88.0",
+    "cargo_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "backend": {
+    "name": "rapier",
+    "version": "0.22"
+  },
+  "determinism": {
+    "schema_version": 1,
+    "name": "contact_failure",
+    "scope": {
+      "subject": "episode",
+      "observables": [
+        "world.state"
+      ],
+      "first_step": 0,
+      "step_count": 3
+    },
+    "guarantee": {
+      "tier": "exact"
+    }
+  },
+  "artifacts": [
+    {
+      "role": "replay",
+      "kind": "rne_replay",
+      "schema_version": 1,
+      "path": "replays/run-1.rne-replay",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

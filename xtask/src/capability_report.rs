@@ -266,6 +266,10 @@ const ADVERTISED_CAPABILITIES: &[CapabilityDefinition] = &[
                 path: "docs/adr/011-determinism-contract.md",
                 command: "cargo test --locked -p rne_core determinism",
             },
+            CapabilityEvidenceDefinition {
+                path: "docs/EVIDENCE_QUICKSTART.md",
+                command: "cargo run --locked -p xtask -- evidence",
+            },
         ],
     },
 ];
@@ -578,10 +582,10 @@ mod tests {
             }],
         };
         let json = serde_json::to_string(&report).expect("serialize capability report");
-        assert_eq!(
-            json,
-            r#"{"kind":"rne_capability_report","schema_version":1,"release_version":"0.1.0","git_commit":"0123456789012345678901234567890123456789","capabilities":[{"id":"example","name":"Example","status":"complete","evidence":[{"path":"docs/example.md","command":"cargo test --locked -p example"}]}]}"#
-        );
+        let golden = include_str!("../../tests/golden/evidence/capability-report-v1.json");
+        assert_eq!(json, golden.trim_end());
+        let decoded: CapabilityReport = serde_json::from_str(golden).expect("parse golden");
+        assert_eq!(decoded, report);
     }
 
     #[test]

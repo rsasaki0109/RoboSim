@@ -31,3 +31,7 @@ cargo run --locked -p xtask -- benchmark --timings
 This writes `artifacts/benchmarks/timings.json`; use `--timings-output` for a
 different location. Timing and host fields in that artifact are volatile and
 must not be used to compare stable benchmark report bytes.
+
+For the full capability, conformance, benchmark, and Failure Capsule gate, run
+`cargo run --locked -p xtask -- evidence` as documented in
+[EVIDENCE_QUICKSTART.md](EVIDENCE_QUICKSTART.md).

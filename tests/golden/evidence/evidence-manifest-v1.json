@@ -1,0 +1,37 @@
+{
+  "kind": "rne_evidence_manifest",
+  "schema_version": 1,
+  "engine_version": "0.1.0",
+  "source_commit": "0123456789012345678901234567890123456789",
+  "all_passed": true,
+  "artifacts": [
+    {
+      "id": "benchmark_report",
+      "kind": "rne_benchmark_report",
+      "schema_version": 1,
+      "path": "benchmark-report.json",
+      "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "capability_report",
+      "kind": "rne_capability_report",
+      "schema_version": 1,
+      "path": "capability-report.json",
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "id": "failure_capsule",
+      "kind": "rne_failure_capsule",
+      "schema_version": 1,
+      "path": "failure-capsule/capsule.json",
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "id": "physics_conformance",
+      "kind": "rne_physics_conformance_report",
+      "schema_version": 1,
+      "path": "physics-conformance.json",
+      "sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ]
+}

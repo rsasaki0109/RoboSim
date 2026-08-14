@@ -84,6 +84,11 @@ benchmark, and Failure Capsule artifacts. OpenSCENARIO, SDF, MJCF, URDF, SUMO,
 and PLATEAU inputs are import formats: accepted subsets are documented, and
 unsupported constructs remain explicit import errors.
 
+The evidence-manifest schema inventories one verified run of the capability,
+physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
+not a claim that compiler- and platform-bearing capsule bytes match across
+hosts. Canonical schema-v1 examples live under `tests/golden/evidence/`.
+
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, and evidence constants; changing

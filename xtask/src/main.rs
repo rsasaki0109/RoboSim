@@ -2,6 +2,7 @@
 
 mod benchmark;
 mod capability_report;
+mod evidence;
 mod failure_capsule;
 mod release_artifacts;
 mod release_exit;
@@ -102,6 +103,7 @@ fn run() -> anyhow::Result<()> {
         "release-exit" => release_exit::release_exit(&mut args),
         "capability-report" => capability_report::capability_report(&mut args),
         "benchmark" => benchmark::benchmark(&mut args),
+        "evidence" => evidence::evidence(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
@@ -1091,6 +1093,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "failure_capsule",
             u64::from(rne_log::FAILURE_CAPSULE_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "evidence_manifest",
+            u64::from(evidence::EVIDENCE_MANIFEST_SCHEMA_VERSION),
         ),
     ];
     for (section, key, actual) in expected {

@@ -39,3 +39,4 @@ final_exit_report = 1
 capability_report = 1
 benchmark_report = 1
 failure_capsule = 1
+evidence_manifest = 1
