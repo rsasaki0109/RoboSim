@@ -117,8 +117,9 @@ and forge internally consistent report metrics to prove fail-closed behavior.
 ## Reference robot capture
 
 Example 73 runs a real renderer-free diff-drive episode through the kinematic
-drive system, Rapier world queries, IMU sampler, and LiDAR sampler. It records
-the committed TaskSpec, action, task outcome, base transform, IMU, and LiDAR
+drive system, Rapier world queries, IMU/LiDAR samplers, and the scene-aware
+headless RGB-D camera pipeline. It records the committed TaskSpec, action,
+task outcome, base transform, IMU, LiDAR, RGB, sensor depth, and ideal depth
 streams into one bundle:
 
 ```powershell
@@ -127,6 +128,9 @@ cargo run -p diff_drive_dataset_capture `
   artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
 cargo run -p xtask -- dataset-check `
   artifacts/datasets/diff-drive-reference.rne-dataset
+cargo run -p xtask -- dataset-evaluate-depth `
+  artifacts/datasets/diff-drive-reference.rne-dataset `
+  401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
 ```
 
 DataBus sensor counters begin at one, while bundle sequences are defined as
@@ -135,16 +139,23 @@ while retaining physical sensor values, capture time, availability time,
 stream ID, and noise seed. LiDAR positions and intensities are stored at the
 manifest-declared 1 micrometre and 1 ppm resolutions before lossless encoding;
 this removes irrelevant platform-math ULP differences without hiding a
-sensor-scale difference. Reference asset line endings are fixed to LF. The
-summary freezes both manifest and complete-shard SHA-256 values, all five
-stream counts, zero dropped records, and the successful terminal outcome.
-The selected one-metre goal is retained as a typed, seed-bearing run decision
-instead of being inferred from the resulting trajectory.
+sensor-scale difference. Camera depth is likewise stored at a declared
+0.1-millimetre resolution. The reference sensor applies a declared 5 mm fixed
+depth bias and 3 ms output latency; its paired ideal stream shares sequence,
+capture time, dimensions, scene, and calibration. The bundle-local
+`depth-evaluation.json` is written only after its metrics have been recomputed
+from all 17 pairs (52,224 pixels), and the 10 mm gate must pass. Reference
+asset line endings are fixed to LF. The v2 summary freezes manifest, complete
+shard, evaluation-report SHA-256 values, all eight stream counts, zero dropped
+records, and the successful terminal outcome. The v1 summary remains as a
+compatibility fixture. The selected one-metre goal is retained as a typed,
+seed-bearing run decision instead of being inferred from the trajectory.
 
 `xtask ci-headless` regenerates this capture in a fresh temporary target and
 checks the golden. The Windows/Linux evidence matrix performs the same capture
-from a clean checkout, verifies the complete bundle, and uploads it for
-inspection. A digest mismatch fails the job rather than being normalized away.
+from a clean checkout, verifies the complete bundle, independently regenerates
+the depth report, and uploads both for inspection. A digest mismatch fails the
+job rather than being normalized away.
 
 ## Compatibility
 
