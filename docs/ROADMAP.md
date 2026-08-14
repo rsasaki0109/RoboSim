@@ -34,6 +34,14 @@ available.
 | 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
 | 0.6 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
 
+The v0.5 track is now in progress. Dataset bundle v1 streams records with
+payload/shard/manifest hashes, preserves capture/availability latency,
+calibration, noise seeds, assets, domain-randomization decisions, and explicit
+drop gaps. Offline depth-pair evaluation is renderer-free and recomputes
+committed metrics from the bundle. RGB8/depth/LiDAR reference codecs are bound;
+full capture coverage for IMU/transforms/actions/outcomes and seeded
+cross-platform reproduction evidence remain open.
+
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or
 outcome-level promises; benchmark reports embed those promises and hash only

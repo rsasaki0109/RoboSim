@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "dataset_id": "rne.reference.depth-pair.v1",
+  "task_spec_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "fixed_step_ticks": 10,
+  "world_seed": 42,
+  "streams": [
+    {
+      "stream_id": 10,
+      "name": "predicted_depth",
+      "kind": "depth_f32",
+      "payload_encoding": "rne.transport.image_depth_f32.v1",
+      "source_entity": "reference_camera",
+      "frame_id": "camera_optical",
+      "fields": [
+        {
+          "name": "depth_m",
+          "dtype": "f32[]",
+          "unit": "m"
+        }
+      ],
+      "calibration": {
+        "model": "pinhole.v1",
+        "reference_frame": "camera_optical",
+        "parameters": {
+          "cx_px": 0.5,
+          "cy_px": 0.5,
+          "fx_px": 100.0,
+          "fy_px": 100.0
+        }
+      },
+      "timing": {
+        "nominal_period_ticks": 10,
+        "latency": {
+          "model": "fixed",
+          "fixed_ticks": 2,
+          "max_ticks": 2
+        },
+        "gap_policy": "explicit_records"
+      },
+      "noise": {
+        "model": "none.v1",
+        "seed": 100,
+        "parameters": {}
+      }
+    },
+    {
+      "stream_id": 11,
+      "name": "ground_truth_depth",
+      "kind": "depth_f32",
+      "payload_encoding": "rne.transport.image_depth_f32.v1",
+      "source_entity": "reference_camera",
+      "frame_id": "camera_optical",
+      "fields": [
+        {
+          "name": "depth_m",
+          "dtype": "f32[]",
+          "unit": "m"
+        }
+      ],
+      "calibration": {
+        "model": "pinhole.v1",
+        "reference_frame": "camera_optical",
+        "parameters": {
+          "cx_px": 0.5,
+          "cy_px": 0.5,
+          "fx_px": 100.0,
+          "fy_px": 100.0
+        }
+      },
+      "timing": {
+        "nominal_period_ticks": 10,
+        "latency": {
+          "model": "fixed",
+          "fixed_ticks": 2,
+          "max_ticks": 2
+        },
+        "gap_policy": "explicit_records"
+      },
+      "noise": {
+        "model": "none.v1",
+        "seed": 101,
+        "parameters": {}
+      }
+    }
+  ],
+  "assets": [
+    {
+      "role": "scene",
+      "path": "assets/reference-room.rne.json",
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "randomization": [
+    {
+      "key": "lighting.intensity",
+      "seed": 9001,
+      "value": {
+        "type": "scalar",
+        "value": 1.25,
+        "unit": "unitless"
+      }
+    }
+  ],
+  "shards": [
+    {
+      "path": "records.rnedata",
+      "byte_len": 736,
+      "record_count": 6,
+      "sample_count": 4,
+      "dropped_count": 2,
+      "sha256": "sha256:cdd53532104064a6a971c10170fe05cfc9acb1b4e9be8183ed44a6b3175f17d6",
+      "streams": [
+        {
+          "stream_id": 10,
+          "record_count": 3,
+          "sample_count": 2,
+          "dropped_count": 1,
+          "first_sequence": 0,
+          "next_sequence": 3
+        },
+        {
+          "stream_id": 11,
+          "record_count": 3,
+          "sample_count": 2,
+          "dropped_count": 1,
+          "first_sequence": 0,
+          "next_sequence": 3
+        }
+      ]
+    }
+  ],
+  "content_sha256": "sha256:f16a82b0e9f3159c999afaa4de1be6e32d0ec5c98d8466a447042ab2b2864b14"
+}

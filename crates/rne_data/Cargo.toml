@@ -12,8 +12,10 @@ rne_core = { workspace = true }
 rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"
-serde_json = { workspace = true }
+tempfile = "3"

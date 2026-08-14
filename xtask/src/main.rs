@@ -3,6 +3,7 @@
 mod accelerator;
 mod benchmark;
 mod capability_report;
+mod dataset;
 mod evidence;
 mod failure_capsule;
 mod release_artifacts;
@@ -109,6 +110,8 @@ fn run() -> anyhow::Result<()> {
         "accelerator-check" => accelerator::accelerator_check(&mut args),
         "accelerator-conformance" => accelerator::accelerator_conformance(&mut args),
         "accelerator-scale" => accelerator::accelerator_scale(&mut args),
+        "dataset-check" => dataset::dataset_check(&mut args),
+        "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
         "evidence" => evidence::evidence(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
@@ -1119,6 +1122,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "accelerators",
             "scale_report",
             u64::from(accelerator::ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
+            "bundle",
+            u64::from(rne_data::DATASET_BUNDLE_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
+            "offline_evaluation",
+            u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
         ),
         (
             "evidence",

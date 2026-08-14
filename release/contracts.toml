@@ -46,6 +46,10 @@ conformance_report = 1
 runtime_contract = 1
 scale_report = 1
 
+[datasets]
+bundle = 1
+offline_evaluation = 1
+
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1

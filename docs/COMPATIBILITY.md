@@ -109,6 +109,15 @@ Accelerator conformance-report v1 and runtime-contract v1 are versioned as
 well. A report made by the dependency-free fake is explicitly `contract_test`
 evidence and cannot be re-labelled as hardware evidence.
 
+Dataset bundle schema v1 freezes the `RNEDATA1` file header, 80-byte record
+header, stream/field ordering, simulation capture and availability ticks,
+explicit gap records, calibration/noise declarations, payload hashes, shard
+hashes, and manifest self-hash. Offline evaluation report schema v1 freezes
+the depth-pair metric fields and digest construction. A report is trusted only
+after metrics are recomputed from its referenced verified bundle. Unknown
+fields, implicit sequence gaps, non-finite values, and unknown schemas are
+rejected. Canonical shapes live under `tests/golden/datasets/`.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
@@ -132,7 +141,8 @@ gains/limits, and joint-kind mismatches before a physics step.
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,
-accelerator-protocol, and evidence constants; changing one side alone fails.
+accelerator-protocol, dataset, and evidence constants; changing one side alone
+fails.
 
 ## Replay migration
 
