@@ -269,6 +269,50 @@ pub struct JointMotor {
     pub max_force: f64,
 }
 
+/// Backend-neutral completed-step state of a single-degree-of-freedom joint.
+///
+/// Physics backends insert or update this component during
+/// [`crate::PhysicsBackend::sync_to_ecs`]. The enum keeps revolute and
+/// prismatic units explicit instead of overloading one untyped coordinate.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointState {
+    /// Angular coordinate and velocity of a revolute joint.
+    Revolute {
+        /// Joint position in radians.
+        position_rad: f64,
+        /// Joint velocity in radians per second.
+        velocity_rad_s: f64,
+    },
+    /// Linear coordinate and velocity of a prismatic joint.
+    Prismatic {
+        /// Joint position in metres.
+        position_m: f64,
+        /// Joint velocity in metres per second.
+        velocity_m_s: f64,
+    },
+    /// A fixed joint with no free coordinate.
+    Fixed,
+}
+
+impl JointState {
+    /// Returns the revolute position in radians when this is a revolute joint.
+    pub const fn position_rad(self) -> Option<f64> {
+        match self {
+            Self::Revolute { position_rad, .. } => Some(position_rad),
+            Self::Prismatic { .. } | Self::Fixed => None,
+        }
+    }
+
+    /// Returns the prismatic position in metres when this is a prismatic joint.
+    pub const fn position_m(self) -> Option<f64> {
+        match self {
+            Self::Prismatic { position_m, .. } => Some(position_m),
+            Self::Revolute { .. } | Self::Fixed => None,
+        }
+    }
+}
+
 fn default_motor_gain() -> f64 {
     1.0
 }

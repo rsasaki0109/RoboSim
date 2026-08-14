@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use rne_log::FailureCapsule;
+use rne_physics::PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -234,7 +235,7 @@ fn run_evidence_producers(root: &Path, staging: &Path) -> Result<()> {
         validate_json_artifact(
             "physics_conformance",
             "rne_physics_conformance_report",
-            1,
+            u32::from(PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION),
             &physics_path,
             staging,
             None,
@@ -419,7 +420,11 @@ mod tests {
         EvidenceArtifact {
             id: id.to_string(),
             kind: kind.to_string(),
-            schema_version: 1,
+            schema_version: if id == "physics_conformance" {
+                u32::from(PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION)
+            } else {
+                1
+            },
             path: path.to_string(),
             sha256: format!("sha256:{}", byte.to_string().repeat(64)),
         }

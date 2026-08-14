@@ -7,9 +7,10 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    capture_physics_snapshot, Collider, MultibodyLink, PhysicsBackend, PhysicsCapability,
-    PhysicsMaterial, PhysicsSnapshot, PhysicsWorldDesc, RaycastQuery, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    capture_physics_snapshot, Collider, JointState, MultibodyLink, PhysicsBackend,
+    PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot, PhysicsWorldDesc,
+    RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION, PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 use rne_physics_analytic::AnalyticBackend;
 use rne_physics_rapier::RapierBackend;
@@ -17,16 +18,17 @@ use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-const CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 1;
-const TOLERANCE_REGISTRY_VERSION: u16 = 1;
+/// Stable kind identifier for aggregate physics conformance reports.
+pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
+
+/// Version of the shared capability-to-vector catalog.
+pub const CONFORMANCE_CATALOG_VERSION: u16 = 2;
 
 const BACKEND_ANALYTIC: &str = "analytic";
 const BACKEND_RAPIER: &str = "rapier";
 const BACKEND_COMPARISON: &str = "analytic_vs_rapier";
 const CASE_ANALYTIC_RIGID: &str = "analytic.rigid_body.free_fall";
-const CASE_ANALYTIC_DETERMINISM: &str = "analytic.deterministic_step.repeat_snapshot";
 const CASE_RAPIER_RIGID: &str = "rapier.rigid_body.free_fall";
-const CASE_RAPIER_DETERMINISM: &str = "rapier.deterministic_step.repeat_snapshot";
 const CASE_RAPIER_ARTICULATION: &str = "rapier.articulation.revolute_limit";
 const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
 const CASE_RAPIER_RAYCAST: &str = "rapier.raycast_batch.ordered_hits";
@@ -169,6 +171,7 @@ const TOLERANCES: &[ToleranceSpec] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToleranceReport {
     id: String,
     absolute: f64,
@@ -178,6 +181,7 @@ struct ToleranceReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MetricReport {
     id: String,
     unit: String,
@@ -189,10 +193,11 @@ struct MetricReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaseReport {
     id: String,
     backend: String,
-    capability: String,
+    capability: PhysicsCapability,
     passed: bool,
     snapshot_hash: Option<u64>,
     metrics: Vec<MetricReport>,
@@ -200,17 +205,23 @@ struct CaseReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BackendReport {
-    name: String,
-    advertised_capabilities: Vec<String>,
-    covered_capabilities: Vec<String>,
+    manifest: PhysicsBackendManifest,
+    runtime_capabilities: Vec<PhysicsCapability>,
+    manifest_passed: bool,
+    covered_capabilities: Vec<PhysicsCapability>,
     coverage_passed: bool,
+    detail: String,
 }
 
 /// Deterministic result of the complete backend capability catalog.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConformanceReport {
+    kind: String,
     schema_version: u16,
+    catalog_version: u16,
     tolerance_registry_version: u16,
     backends: Vec<BackendReport>,
     cases: Vec<CaseReport>,
@@ -224,11 +235,32 @@ impl ConformanceReport {
     }
 }
 
+/// Result of applying the shared capability catalog to one backend factory.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendConformance {
+    backend: BackendReport,
+    cases: Vec<CaseReport>,
+    all_passed: bool,
+}
+
+impl BackendConformance {
+    /// Returns true when the manifest matches runtime declarations and all cases pass.
+    pub const fn all_passed(&self) -> bool {
+        self.all_passed
+    }
+}
+
 #[derive(Clone, Debug)]
 struct FreeFallResult {
     position_y_m: f64,
     velocity_y_m_s: f64,
     snapshot: PhysicsSnapshot,
+}
+
+struct BackendExecution {
+    conformance: BackendConformance,
+    free_fall: anyhow::Result<FreeFallResult>,
 }
 
 fn tolerance(id: &str) -> &'static ToleranceSpec {
@@ -240,86 +272,165 @@ fn tolerance(id: &str) -> &'static ToleranceSpec {
 
 /// Executes every deterministic and tolerance-bounded physics conformance case.
 pub fn run_conformance() -> ConformanceReport {
-    let analytic_capabilities = capability_names(AnalyticBackend::new().capabilities());
-    let rapier_capabilities = capability_names(RapierBackend::new().capabilities());
-
-    let analytic = run_free_fall(AnalyticBackend::new());
-    let rapier = run_free_fall(RapierBackend::new());
-    let mut cases = vec![
-        result_case(
-            CASE_ANALYTIC_RIGID,
-            BACKEND_ANALYTIC,
-            PhysicsCapability::RigidBody,
-            analytic.as_ref().map(|result| {
-                free_fall_case(
-                    CASE_ANALYTIC_RIGID,
-                    BACKEND_ANALYTIC,
-                    PhysicsCapability::RigidBody,
-                    result,
-                    semi_implicit_free_fall_y(),
-                    "analytic_free_fall_position_m_v1",
-                )
-            }),
-        ),
-        determinism_case::<AnalyticBackend>(
-            CASE_ANALYTIC_DETERMINISM,
-            BACKEND_ANALYTIC,
-            AnalyticBackend::new,
-        ),
-        result_case(
-            CASE_RAPIER_RIGID,
-            BACKEND_RAPIER,
-            PhysicsCapability::RigidBody,
-            rapier.as_ref().map(|result| {
-                free_fall_case(
-                    CASE_RAPIER_RIGID,
-                    BACKEND_RAPIER,
-                    PhysicsCapability::RigidBody,
-                    result,
-                    continuous_free_fall_y(),
-                    "rapier_free_fall_position_m_v1",
-                )
-            }),
-        ),
-        determinism_case::<RapierBackend>(
-            CASE_RAPIER_DETERMINISM,
-            BACKEND_RAPIER,
-            RapierBackend::new,
-        ),
-        result_case(
-            CASE_RAPIER_ARTICULATION,
-            BACKEND_RAPIER,
-            PhysicsCapability::Articulation,
-            run_articulation_case(),
-        ),
-        result_case(
-            CASE_RAPIER_CONTACT,
-            BACKEND_RAPIER,
-            PhysicsCapability::ContactForce,
-            run_contact_case(),
-        ),
-        result_case(
-            CASE_RAPIER_RAYCAST,
-            BACKEND_RAPIER,
-            PhysicsCapability::RaycastBatch,
-            run_raycast_case(),
-        ),
-        comparison_case(analytic.as_ref(), rapier.as_ref()),
-    ];
+    let analytic = execute_backend(AnalyticBackend::manifest(), &AnalyticBackend::new);
+    let rapier = execute_backend(RapierBackend::manifest(), &RapierBackend::new);
+    let mut cases = analytic.conformance.cases.clone();
+    cases.extend(rapier.conformance.cases.clone());
+    cases.push(comparison_case(
+        analytic.free_fall.as_ref(),
+        rapier.free_fall.as_ref(),
+    ));
     cases.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let backends = vec![
-        backend_report(BACKEND_ANALYTIC, analytic_capabilities, &cases),
-        backend_report(BACKEND_RAPIER, rapier_capabilities, &cases),
-    ];
+    let backends = vec![analytic.conformance.backend, rapier.conformance.backend];
     let all_passed = cases.iter().all(|case| case.passed)
-        && backends.iter().all(|backend| backend.coverage_passed);
+        && backends
+            .iter()
+            .all(|backend| backend.manifest_passed && backend.coverage_passed);
     ConformanceReport {
-        schema_version: CONFORMANCE_REPORT_SCHEMA_VERSION,
-        tolerance_registry_version: TOLERANCE_REGISTRY_VERSION,
+        kind: CONFORMANCE_REPORT_KIND.to_string(),
+        schema_version: PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION,
+        catalog_version: CONFORMANCE_CATALOG_VERSION,
+        tolerance_registry_version: PHYSICS_TOLERANCE_REGISTRY_VERSION,
         backends,
         cases,
         all_passed,
+    }
+}
+
+/// Applies the shared v2 capability catalog to an arbitrary backend factory.
+///
+/// A backend may be called through this API before it is accepted into the
+/// built-in aggregate. Missing tolerance profiles or capability vectors become
+/// deterministic failing cases instead of being silently skipped.
+pub fn run_backend_conformance<B, F>(
+    manifest: PhysicsBackendManifest,
+    factory: F,
+) -> BackendConformance
+where
+    B: PhysicsBackend,
+    F: Fn() -> B,
+{
+    execute_backend(manifest, &factory).conformance
+}
+
+fn execute_backend<B, F>(manifest: PhysicsBackendManifest, factory: &F) -> BackendExecution
+where
+    B: PhysicsBackend,
+    F: Fn() -> B,
+{
+    let backend_id = if manifest.backend_id.trim().is_empty() {
+        "invalid_backend"
+    } else {
+        manifest.backend_id.as_str()
+    };
+    let runtime_capabilities = factory().capabilities().to_vec();
+    let free_fall = if manifest
+        .capabilities
+        .contains(&PhysicsCapability::RigidBody)
+    {
+        run_free_fall(factory())
+    } else {
+        Err(anyhow!("backend does not advertise rigid_body"))
+    };
+    let mut cases = manifest
+        .capabilities
+        .iter()
+        .copied()
+        .map(|capability| match capability {
+            PhysicsCapability::RigidBody => {
+                let id = capability_case_id(backend_id, capability);
+                match free_fall_position_contract(backend_id) {
+                    Some((expected_y_m, tolerance_id)) => result_case(
+                        &id,
+                        backend_id,
+                        capability,
+                        free_fall.as_ref().map(|result| {
+                            free_fall_case(
+                                &id,
+                                backend_id,
+                                capability,
+                                result,
+                                expected_y_m,
+                                tolerance_id,
+                            )
+                        }),
+                    ),
+                    None => failed_case(
+                        &id,
+                        backend_id,
+                        capability,
+                        "no named free-fall tolerance profile is registered for this backend"
+                            .to_string(),
+                    ),
+                }
+            }
+            PhysicsCapability::DeterministicStep => determinism_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                factory,
+            ),
+            PhysicsCapability::Articulation => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_articulation_case(factory(), backend_id),
+            ),
+            PhysicsCapability::ContactForce => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_contact_case(factory(), backend_id),
+            ),
+            PhysicsCapability::RaycastBatch => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_raycast_case(factory(), backend_id),
+            ),
+            PhysicsCapability::GpuRigidBody | PhysicsCapability::SoftBody => failed_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                "advertised capability has no shared conformance vector in catalog v2".to_string(),
+            ),
+        })
+        .collect::<Vec<_>>();
+    cases.sort_by(|left, right| left.id.cmp(&right.id));
+    let backend = backend_report(manifest, runtime_capabilities, &cases);
+    let all_passed =
+        backend.manifest_passed && backend.coverage_passed && cases.iter().all(|case| case.passed);
+    BackendExecution {
+        conformance: BackendConformance {
+            backend,
+            cases,
+            all_passed,
+        },
+        free_fall,
+    }
+}
+
+fn capability_case_id(backend: &str, capability: PhysicsCapability) -> String {
+    let suffix = match capability {
+        PhysicsCapability::RigidBody => "rigid_body.free_fall",
+        PhysicsCapability::Articulation => "articulation.revolute_limit",
+        PhysicsCapability::GpuRigidBody => "gpu_rigid_body.catalog_missing",
+        PhysicsCapability::DeterministicStep => "deterministic_step.repeat_snapshot",
+        PhysicsCapability::SoftBody => "soft_body.catalog_missing",
+        PhysicsCapability::ContactForce => "contact_force.resting_impulse",
+        PhysicsCapability::RaycastBatch => "raycast_batch.ordered_hits",
+    };
+    format!("{backend}.{suffix}")
+}
+
+fn free_fall_position_contract(backend: &str) -> Option<(f64, &'static str)> {
+    match backend {
+        BACKEND_ANALYTIC => Some((
+            semi_implicit_free_fall_y(),
+            "analytic_free_fall_position_m_v1",
+        )),
+        BACKEND_RAPIER => Some((continuous_free_fall_y(), "rapier_free_fall_position_m_v1")),
+        _ => None,
     }
 }
 
@@ -393,7 +504,7 @@ fn free_fall_case(
     CaseReport {
         id: case_id.to_string(),
         backend: backend.to_string(),
-        capability: capability.as_str().to_string(),
+        capability,
         passed: metrics.iter().all(|metric| metric.passed),
         snapshot_hash: Some(result.snapshot.stable_hash()),
         metrics,
@@ -414,7 +525,7 @@ fn determinism_case<B: PhysicsBackend>(
             CaseReport {
                 id: case_id.to_string(),
                 backend: backend.to_string(),
-                capability: PhysicsCapability::DeterministicStep.as_str().to_string(),
+                capability: PhysicsCapability::DeterministicStep,
                 passed,
                 snapshot_hash: Some(first.snapshot.stable_hash()),
                 metrics: Vec::new(),
@@ -434,8 +545,10 @@ fn determinism_case<B: PhysicsBackend>(
     }
 }
 
-fn run_articulation_case() -> anyhow::Result<CaseReport> {
-    let mut backend = RapierBackend::new();
+fn run_articulation_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
     let physics_world = backend.create_world(PhysicsWorldDesc {
         gravity_m_s2: Vec3::ZERO,
         solver_iterations: 16,
@@ -475,7 +588,7 @@ fn run_articulation_case() -> anyhow::Result<CaseReport> {
         },
     ));
     for _ in 0..180 {
-        rne_physics_rapier::step_physics(&mut backend, &mut world, physics_world, fixed_dt())?;
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
     }
     let parent_transform = *world
         .get::<Transform3>(parent)
@@ -486,9 +599,10 @@ fn run_articulation_case() -> anyhow::Result<CaseReport> {
     let parent_anchor = parent_transform.translation;
     let child_anchor = child_transform.translation + child_transform.rotation * anchor_child_m;
     let anchor_error_m = parent_anchor.distance(child_anchor);
-    let joint_angle_abs_rad = backend
-        .multibody_joint_position(physics_world, child)
-        .context("reduced-coordinate joint position missing")?
+    let joint_angle_abs_rad = world
+        .get::<JointState>(child)
+        .and_then(|state| state.position_rad())
+        .context("backend did not synchronize a revolute JointState")?
         .abs();
     let metrics = vec![
         metric(
@@ -507,9 +621,9 @@ fn run_articulation_case() -> anyhow::Result<CaseReport> {
     let contacts = backend.contacts(physics_world)?.to_vec();
     let snapshot = capture_physics_snapshot(&world, &contacts, 180, fixed_dt().ticks() * 180)?;
     Ok(CaseReport {
-        id: CASE_RAPIER_ARTICULATION.to_string(),
-        backend: BACKEND_RAPIER.to_string(),
-        capability: PhysicsCapability::Articulation.as_str().to_string(),
+        id: capability_case_id(backend_id, PhysicsCapability::Articulation),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::Articulation,
         passed: metrics.iter().all(|metric| metric.passed),
         snapshot_hash: Some(snapshot.stable_hash()),
         metrics,
@@ -517,8 +631,10 @@ fn run_articulation_case() -> anyhow::Result<CaseReport> {
     })
 }
 
-fn run_contact_case() -> anyhow::Result<CaseReport> {
-    let mut backend = RapierBackend::new();
+fn run_contact_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
     let physics_world = backend.create_world(PhysicsWorldDesc::default())?;
     let mut world = World::new();
     let ground = spawn_named(&mut world, "contact_ground");
@@ -542,7 +658,7 @@ fn run_contact_case() -> anyhow::Result<CaseReport> {
     ));
     let mut impulses = Vec::new();
     for step in 0..180 {
-        rne_physics_rapier::step_physics(&mut backend, &mut world, physics_world, fixed_dt())?;
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
         if step >= 120 {
             if let Some(contact) = backend.contacts(physics_world)?.iter().find(|contact| {
                 (contact.entity_a == ground && contact.entity_b == cube)
@@ -574,9 +690,9 @@ fn run_contact_case() -> anyhow::Result<CaseReport> {
             && contact.normal_impulse_n_s > 0.0
     });
     Ok(CaseReport {
-        id: CASE_RAPIER_CONTACT.to_string(),
-        backend: BACKEND_RAPIER.to_string(),
-        capability: PhysicsCapability::ContactForce.as_str().to_string(),
+        id: capability_case_id(backend_id, PhysicsCapability::ContactForce),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::ContactForce,
         passed: pair_is_present && metrics.iter().all(|metric| metric.passed),
         snapshot_hash: Some(snapshot.stable_hash()),
         metrics,
@@ -587,8 +703,10 @@ fn run_contact_case() -> anyhow::Result<CaseReport> {
     })
 }
 
-fn run_raycast_case() -> anyhow::Result<CaseReport> {
-    let mut backend = RapierBackend::new();
+fn run_raycast_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
     let physics_world = backend.create_world(PhysicsWorldDesc::default())?;
     let mut world = World::new();
     spawn_fixed_cuboid(&mut world, "ray_near", Vec3::new(0.0, 0.0, 0.0));
@@ -622,9 +740,9 @@ fn run_raycast_case() -> anyhow::Result<CaseReport> {
         Vec::new()
     };
     Ok(CaseReport {
-        id: CASE_RAPIER_RAYCAST.to_string(),
-        backend: BACKEND_RAPIER.to_string(),
-        capability: PhysicsCapability::RaycastBatch.as_str().to_string(),
+        id: capability_case_id(backend_id, PhysicsCapability::RaycastBatch),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::RaycastBatch,
         passed: shape_ok && ordering_ok && repeat_ok && metrics.iter().all(|metric| metric.passed),
         snapshot_hash: None,
         metrics,
@@ -657,7 +775,7 @@ fn comparison_case(
             CaseReport {
                 id: CASE_BACKEND_COMPARISON.to_string(),
                 backend: BACKEND_COMPARISON.to_string(),
-                capability: PhysicsCapability::RigidBody.as_str().to_string(),
+                capability: PhysicsCapability::RigidBody,
                 passed: metrics.iter().all(|metric| metric.passed),
                 snapshot_hash: None,
                 metrics,
@@ -714,7 +832,7 @@ fn failed_case(
     CaseReport {
         id: id.to_string(),
         backend: backend.to_string(),
-        capability: capability.as_str().to_string(),
+        capability,
         passed: false,
         snapshot_hash: None,
         metrics: Vec::new(),
@@ -723,35 +841,63 @@ fn failed_case(
 }
 
 fn backend_report(
-    name: &str,
-    advertised_capabilities: Vec<String>,
+    manifest: PhysicsBackendManifest,
+    runtime_capabilities: Vec<PhysicsCapability>,
     cases: &[CaseReport],
 ) -> BackendReport {
+    let manifest_validation = manifest.validate();
+    let runtime_is_canonical =
+        canonical_capabilities(&runtime_capabilities) == runtime_capabilities;
+    let declarations_match = runtime_capabilities == manifest.capabilities;
+    let manifest_passed = manifest_validation.is_ok() && runtime_is_canonical && declarations_match;
     let covered = cases
         .iter()
-        .filter(|case| case.backend == name && case.passed)
-        .map(|case| case.capability.clone())
+        .filter(|case| case.backend == manifest.backend_id && case.passed)
+        .map(|case| case.capability)
         .collect::<BTreeSet<_>>();
-    let covered_capabilities = advertised_capabilities
+    let covered_capabilities = manifest
+        .capabilities
         .iter()
         .filter(|capability| covered.contains(*capability))
-        .cloned()
+        .copied()
         .collect::<Vec<_>>();
-    let coverage_passed = covered_capabilities == advertised_capabilities;
+    let coverage_passed = covered_capabilities == manifest.capabilities;
+    let detail = if let Err(error) = manifest_validation {
+        error.to_string()
+    } else if !runtime_is_canonical {
+        "runtime capabilities are duplicated or not canonically ordered".to_string()
+    } else if !declarations_match {
+        "manifest capabilities do not match the runtime backend declaration".to_string()
+    } else {
+        "manifest and runtime capability declarations match".to_string()
+    };
     BackendReport {
-        name: name.to_string(),
-        advertised_capabilities,
+        manifest,
+        runtime_capabilities,
+        manifest_passed,
         covered_capabilities,
         coverage_passed,
+        detail,
     }
 }
 
-fn capability_names(capabilities: &[PhysicsCapability]) -> Vec<String> {
+fn canonical_capabilities(capabilities: &[PhysicsCapability]) -> Vec<PhysicsCapability> {
     PhysicsCapability::ALL
         .iter()
         .filter(|capability| capabilities.contains(capability))
-        .map(|capability| capability.as_str().to_string())
+        .copied()
         .collect()
+}
+
+fn step_backend<B: PhysicsBackend>(
+    backend: &mut B,
+    world: &mut World,
+    physics_world: rne_physics::PhysicsWorldId,
+    dt: SimDuration,
+) -> Result<(), rne_physics::PhysicsError> {
+    backend.sync_from_ecs(world, physics_world)?;
+    backend.step(physics_world, dt)?;
+    backend.sync_to_ecs(world, physics_world)
 }
 
 fn fixed_dt() -> SimDuration {
@@ -805,7 +951,37 @@ mod tests {
         assert!(report
             .backends
             .iter()
-            .all(|backend| backend.coverage_passed));
+            .all(|backend| backend.manifest_passed && backend.coverage_passed));
+    }
+
+    #[test]
+    fn public_v2_runner_accepts_any_backend_factory_and_checks_its_manifest() {
+        let valid = run_backend_conformance(AnalyticBackend::manifest(), AnalyticBackend::new);
+        assert!(valid.all_passed());
+
+        let mut mismatch = AnalyticBackend::manifest();
+        mismatch.capabilities = vec![PhysicsCapability::RigidBody];
+        mismatch.repeatability = rne_physics::PhysicsBackendRepeatability::ToleranceBounded;
+        mismatch
+            .validate()
+            .expect("modified manifest is structurally valid");
+        let mismatch = run_backend_conformance(mismatch, AnalyticBackend::new);
+        assert!(!mismatch.all_passed());
+        assert!(!mismatch.backend.manifest_passed);
+        assert!(mismatch.backend.detail.contains("do not match the runtime"));
+    }
+
+    #[test]
+    fn unregistered_backend_tolerance_becomes_explicit_failure() {
+        let mut manifest = AnalyticBackend::manifest();
+        manifest.backend_id = "third_party".to_string();
+        let report = run_backend_conformance(manifest, AnalyticBackend::new);
+        assert!(!report.all_passed());
+        assert!(report.cases.iter().any(|case| {
+            case.id == "third_party.rigid_body.free_fall"
+                && !case.passed
+                && case.detail.contains("no named free-fall tolerance")
+        }));
     }
 
     #[test]
@@ -835,5 +1011,25 @@ mod tests {
                 && tolerance.absolute >= 0.0
                 && tolerance.relative >= 0.0
         }));
+    }
+
+    #[test]
+    fn report_v2_schema_matches_committed_golden_and_rejects_unknown_fields() {
+        let golden = include_str!("../../golden/physics/conformance-report-v2.json");
+        let report: ConformanceReport = serde_json::from_str(golden).expect("parse v2 golden");
+        assert_eq!(report.kind, CONFORMANCE_REPORT_KIND);
+        assert_eq!(
+            report.schema_version,
+            PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION
+        );
+        assert_eq!(report.catalog_version, CONFORMANCE_CATALOG_VERSION);
+        assert_eq!(
+            serde_json::to_string_pretty(&report).expect("serialize v2 golden"),
+            golden.trim_end()
+        );
+
+        let mut value = serde_json::to_value(report).expect("report value");
+        value["unexpected"] = serde_json::Value::Bool(true);
+        assert!(serde_json::from_value::<ConformanceReport>(value).is_err());
     }
 }

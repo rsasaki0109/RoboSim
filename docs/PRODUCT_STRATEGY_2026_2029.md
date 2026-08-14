@@ -102,11 +102,11 @@ evidence passes. Missing a gate moves the date; it does not weaken the gate.
 
 ### v0.2: trust and evidence
 
-The implementation foundation already exists on the current development
-branch: `DeterminismContract`, capability and benchmark reports, Failure
-Capsules, and the default-off MuJoCo spike.
+The implementation foundation was merged to `main` by PR #164:
+`DeterminismContract`, capability and benchmark reports, Failure Capsules, the
+aggregate evidence gate, and the default-off MuJoCo spike.
 
-Implemented on the development branch:
+Implemented on `main`:
 
 - expose a single `xtask evidence` aggregate that runs capability, benchmark,
   conformance, and capsule-fixture verification;
@@ -114,8 +114,9 @@ Implemented on the development branch:
 - add a clean-install tutorial that reproduces a committed failure capsule;
 - keep all reports timing-free and versioned in `release/contracts.toml`.
 
-Remaining release work is to merge through the normal review path and confirm
-the new Linux/Windows evidence jobs from the merged commit.
+The merge gate confirmed the Linux and Windows evidence jobs, full workspace
+aggregate, release rehearsal, parity, MSRV, supply-chain, ROS2 adapter, and
+dedicated MuJoCo jobs from the same source commit.
 
 Exit evidence:
 
@@ -129,6 +130,16 @@ Exit evidence:
 ### v0.3: interchangeable dynamics
 
 This is the immediate next development milestone.
+
+Current implementation status:
+
+- conformance report schema v2 and backend manifest schema v1 are registered;
+- the capability catalog is callable through a generic `PhysicsBackend`
+  factory for Analytic and Rapier;
+- Rapier synchronizes backend-neutral completed-step `JointState` values into
+  ECS, removing the conformance runner's dependency on a Rapier-only getter;
+- MuJoCo publishes a default-off manifest, but does not join the aggregate
+  catalog until its ECS model compiler replaces the bounded fixture loader.
 
 Delivery slices:
 

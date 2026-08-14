@@ -132,3 +132,23 @@ or capability coverage check fails.
 - M4-C capability-specific validation: complete.
 - M4-D reports and CI integration: complete.
 - M4-E full workspace/CI matrix: complete.
+
+## v2 follow-on for interchangeable dynamics
+
+The v0.3 harness keeps the M4 measurements but removes the built-in-runner
+assumption:
+
+- `rne_physics::PhysicsBackendManifest` declares stable backend/engine versions,
+  canonical capabilities, and the same-runtime repeatability class without
+  exposing a native backend type;
+- `run_backend_conformance` applies the shared capability catalog to any
+  `PhysicsBackend` factory and fails closed when a capability vector or named
+  tolerance profile is missing;
+- conformance report schema v2 embeds the validated manifest and the actual
+  runtime capability declaration so drift is visible in evidence;
+- `JointState` is the backend-neutral completed-step articulation observable;
+  Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
+  and MuJoCo must implement the same contract before advertising articulation.
+
+The next v2 increment adds MuJoCo rigid-body compilation and registers its
+free-fall tolerance profile in the same catalog.

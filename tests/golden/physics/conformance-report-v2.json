@@ -1,0 +1,58 @@
+{
+  "kind": "rne_physics_conformance_report",
+  "schema_version": 2,
+  "catalog_version": 2,
+  "tolerance_registry_version": 1,
+  "backends": [
+    {
+      "manifest": {
+        "schema_version": 1,
+        "backend_id": "fixture",
+        "adapter_version": "0.1.0",
+        "engine_id": "fixture_engine",
+        "engine_version": "1",
+        "capabilities": [
+          "rigid_body"
+        ],
+        "repeatability": "tolerance_bounded"
+      },
+      "runtime_capabilities": [
+        "rigid_body"
+      ],
+      "manifest_passed": true,
+      "covered_capabilities": [
+        "rigid_body"
+      ],
+      "coverage_passed": true,
+      "detail": "manifest and runtime capability declarations match"
+    }
+  ],
+  "cases": [
+    {
+      "id": "fixture.rigid_body.free_fall",
+      "backend": "fixture",
+      "capability": "rigid_body",
+      "passed": true,
+      "snapshot_hash": 7,
+      "metrics": [
+        {
+          "id": "position_y_m",
+          "unit": "m",
+          "measured": 0.1,
+          "expected": 0.1,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "fixture_position_m_v1",
+            "absolute": 0.001,
+            "relative": 0.0,
+            "allowed_error": 0.001,
+            "rationale": "schema fixture"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "schema fixture"
+    }
+  ],
+  "all_passed": true
+}

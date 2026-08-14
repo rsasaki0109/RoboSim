@@ -13,18 +13,26 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointMotor, MultibodyLink, PhysicsBackend,
-    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
-    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ContactEvent, FixedJointDesc, JointMotor, JointState, MultibodyLink, PhysicsBackend,
+    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
+
+const CAPABILITIES: &[PhysicsCapability] = &[
+    PhysicsCapability::RigidBody,
+    PhysicsCapability::Articulation,
+    PhysicsCapability::DeterministicStep,
+    PhysicsCapability::ContactForce,
+    PhysicsCapability::RaycastBatch,
+];
 
 /// Rapier-backed physics simulation.
 pub struct RapierBackend {
     worlds: HashMap<PhysicsWorldId, RapierWorldState>,
     next_world_id: u32,
-    capabilities: Vec<PhysicsCapability>,
 }
 
 struct RapierWorldState {
@@ -57,14 +65,20 @@ impl RapierBackend {
         Self {
             worlds: HashMap::new(),
             next_world_id: 0,
-            capabilities: vec![
-                PhysicsCapability::RigidBody,
-                PhysicsCapability::Articulation,
-                PhysicsCapability::DeterministicStep,
-                PhysicsCapability::ContactForce,
-                PhysicsCapability::RaycastBatch,
-            ],
         }
+    }
+
+    /// Returns the versioned conformance manifest for this backend.
+    pub fn manifest() -> PhysicsBackendManifest {
+        PhysicsBackendManifest::new(
+            "rapier",
+            env!("CARGO_PKG_VERSION"),
+            "rapier3d",
+            "0.22",
+            CAPABILITIES.iter().copied(),
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect("the built-in Rapier backend manifest is valid")
     }
 
     fn world_mut(&mut self, id: PhysicsWorldId) -> Result<&mut RapierWorldState, PhysicsError> {
@@ -149,31 +163,7 @@ impl RapierBackend {
         entity: Entity,
     ) -> Option<f64> {
         let state = self.worlds.get(&physics_world)?;
-        let handle = state.entity_to_multibody_joint.get(&entity)?;
-        let (multibody, link_id) = state.multibody_joints.get(*handle)?;
-        let link = multibody.link(link_id)?;
-        let joint = &link.joint;
-        if joint.ndofs() != 1 {
-            return None;
-        }
-        let data = &joint.data;
-        // body_to_parent = local_frame1 * translation(coords) * joint_rot * local_frame2^-1,
-        // so conjugating by the local frames leaves exactly the joint coordinate.
-        let rel = data.local_frame1.inverse() * joint.body_to_parent() * data.local_frame2;
-        let free_bits = (!data.locked_axes.bits()) & 0b11_1111;
-        let dof = free_bits.trailing_zeros() as usize;
-        if dof < 3 {
-            Some(rel.translation.vector[dof] as f64)
-        } else {
-            let quat = rel.rotation.quaternion();
-            let mut angle = 2.0 * (quat.imag()[dof - 3] as f64).atan2(quat.w as f64);
-            if angle > std::f64::consts::PI {
-                angle -= 2.0 * std::f64::consts::PI;
-            } else if angle < -std::f64::consts::PI {
-                angle += 2.0 * std::f64::consts::PI;
-            }
-            Some(angle)
-        }
+        multibody_joint_coordinate(state, entity).map(|(position, _)| position)
     }
 
     /// Reads the generalized velocity of an entity's single-DoF multibody joint:
@@ -187,14 +177,37 @@ impl RapierBackend {
         entity: Entity,
     ) -> Option<f64> {
         let state = self.worlds.get(&physics_world)?;
-        let handle = state.entity_to_multibody_joint.get(&entity)?;
-        let (multibody, link_id) = state.multibody_joints.get(*handle)?;
-        let link = multibody.link(link_id)?;
-        if link.joint.ndofs() != 1 {
-            return None;
-        }
-        Some(multibody.joint_velocity(link)[0] as f64)
+        multibody_joint_coordinate(state, entity).map(|(_, velocity)| velocity)
     }
+}
+
+fn multibody_joint_coordinate(state: &RapierWorldState, entity: Entity) -> Option<(f64, f64)> {
+    let handle = state.entity_to_multibody_joint.get(&entity)?;
+    let (multibody, link_id) = state.multibody_joints.get(*handle)?;
+    let link = multibody.link(link_id)?;
+    let joint = &link.joint;
+    if joint.ndofs() != 1 {
+        return None;
+    }
+    let data = &joint.data;
+    // body_to_parent = local_frame1 * translation(coords) * joint_rot * local_frame2^-1,
+    // so conjugating by the local frames leaves exactly the joint coordinate.
+    let rel = data.local_frame1.inverse() * joint.body_to_parent() * data.local_frame2;
+    let free_bits = (!data.locked_axes.bits()) & 0b11_1111;
+    let dof = free_bits.trailing_zeros() as usize;
+    let position = if dof < 3 {
+        rel.translation.vector[dof] as f64
+    } else {
+        let quat = rel.rotation.quaternion();
+        let mut angle = 2.0 * (quat.imag()[dof - 3] as f64).atan2(quat.w as f64);
+        if angle > std::f64::consts::PI {
+            angle -= 2.0 * std::f64::consts::PI;
+        } else if angle < -std::f64::consts::PI {
+            angle += 2.0 * std::f64::consts::PI;
+        }
+        angle
+    };
+    Some((position, multibody.joint_velocity(link)[0] as f64))
 }
 
 impl Default for RapierBackend {
@@ -323,6 +336,7 @@ impl PhysicsBackend for RapierBackend {
         }
 
         sync_joints_from_ecs(world, state)?;
+        apply_joint_motors(world, state);
         state.query_pipeline.update(&state.colliders);
 
         Ok(())
@@ -456,6 +470,46 @@ impl PhysicsBackend for RapierBackend {
             }
         }
 
+        let mut joint_entities = state
+            .entity_to_multibody_joint
+            .keys()
+            .chain(state.entity_to_joint.keys())
+            .copied()
+            .collect::<Vec<_>>();
+        joint_entities.sort_unstable();
+        joint_entities.dedup();
+        let joint_states = joint_entities
+            .into_iter()
+            .filter_map(|entity| {
+                if world.get::<FixedJointDesc>(entity).is_some() {
+                    return Some((entity, JointState::Fixed));
+                }
+                let (position, velocity) = multibody_joint_coordinate(state, entity)?;
+                if world.get::<RevoluteJointDesc>(entity).is_some() {
+                    Some((
+                        entity,
+                        JointState::Revolute {
+                            position_rad: position,
+                            velocity_rad_s: velocity,
+                        },
+                    ))
+                } else if world.get::<PrismaticJointDesc>(entity).is_some() {
+                    Some((
+                        entity,
+                        JointState::Prismatic {
+                            position_m: position,
+                            velocity_m_s: velocity,
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for (entity, joint_state) in joint_states {
+            world.entity_mut(entity).insert(joint_state);
+        }
+
         Ok(())
     }
 
@@ -506,7 +560,7 @@ impl PhysicsBackend for RapierBackend {
     }
 
     fn capabilities(&self) -> &[PhysicsCapability] {
-        &self.capabilities
+        CAPABILITIES
     }
 }
 
@@ -822,10 +876,6 @@ pub fn step_physics(
     dt: SimDuration,
 ) -> Result<(), PhysicsError> {
     backend.sync_from_ecs(world, physics_world)?;
-    {
-        let state = backend.world_mut(physics_world)?;
-        apply_joint_motors(world, state);
-    }
     backend.step(physics_world, dt)?;
     backend.sync_to_ecs(world, physics_world)
 }

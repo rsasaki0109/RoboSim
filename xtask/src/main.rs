@@ -1055,6 +1055,21 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_physics::PHYSICS_SNAPSHOT_SCHEMA_VERSION),
         ),
         (
+            "physics",
+            "backend_manifest",
+            u64::from(rne_physics::PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "physics",
+            "conformance_report",
+            u64::from(rne_physics::PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "physics",
+            "tolerance_registry",
+            u64::from(rne_physics::PHYSICS_TOLERANCE_REGISTRY_VERSION),
+        ),
+        (
             "determinism",
             "contract",
             u64::from(rne_core::DETERMINISM_CONTRACT_SCHEMA_VERSION),

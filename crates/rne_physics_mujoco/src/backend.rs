@@ -85,6 +85,11 @@ struct MuJoCoWorld {
 }
 
 impl MuJoCoBackend {
+    /// Returns the versioned conformance manifest without loading the native runtime.
+    pub fn manifest() -> rne_physics::PhysicsBackendManifest {
+        crate::backend_manifest()
+    }
+
     /// Creates a backend from a bounded, caller-owned MJCF fixture.
     ///
     /// The native MuJoCo runtime is checked immediately.  The fixture must
