@@ -48,6 +48,7 @@ scale_report = 1
 
 [datasets]
 bundle = 1
+payload = 1
 offline_evaluation = 1
 
 [evidence]

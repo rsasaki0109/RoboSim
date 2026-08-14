@@ -117,6 +117,9 @@ the depth-pair metric fields and digest construction. A report is trusted only
 after metrics are recomputed from its referenced verified bundle. Unknown
 fields, implicit sequence gaps, non-finite values, and unknown schemas are
 rejected. Canonical shapes live under `tests/golden/datasets/`.
+Dataset-native payload encodings `imu.v1`, `pose2d.v1`, `action_f64.v1`,
+`task_outcome.v1`, and `ground_truth_f64.v1` use fixed little-endian metadata
+and reject trailing bytes; their combined reference shard digest is frozen.
 
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,

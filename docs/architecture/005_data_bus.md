@@ -49,6 +49,9 @@ without retaining the complete run. Each record preserves stream sequence,
 capture ticks, availability ticks, payload kind, and payload SHA-256. The
 manifest freezes calibration, field units, latency/noise behavior, seeds,
 assets, and explicit gap semantics; it also hashes the complete record shard.
+Dataset-native codecs carry IMU, planar transforms, TaskSpec-ordered actions,
+task outcomes, and ground-truth annotations through the same typed `Frame<T>`
+and embedded timestamp metadata contract.
 
 `rne_data::offline` verifies depth prediction against ground truth with two
 streaming scans and no renderer dependency. See

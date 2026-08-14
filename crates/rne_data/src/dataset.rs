@@ -9,7 +9,15 @@ use crate::transport::{
     encode_image_rgb8, encode_lidar_point_cloud, SensorFrameMetadata, TransportError,
     TRANSPORT_MAX_PAYLOAD_BYTES,
 };
-use crate::{Frame, ImageDepth, ImageRgb8, PointCloud, StreamId};
+use crate::{
+    decode_dataset_action, decode_dataset_annotation, decode_dataset_imu,
+    decode_dataset_task_outcome, decode_dataset_transform, encode_dataset_action,
+    encode_dataset_annotation, encode_dataset_imu, encode_dataset_task_outcome,
+    encode_dataset_transform, DatasetActionSample, DatasetGroundTruthAnnotation,
+    DatasetTaskOutcomeSample, Frame, ImageDepth, ImageRgb8, ImuSample, PointCloud, PoseSample,
+    StreamId, DATASET_ACTION_ENCODING, DATASET_ANNOTATION_ENCODING, DATASET_IMU_ENCODING,
+    DATASET_TASK_OUTCOME_ENCODING, DATASET_TRANSFORM_ENCODING,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -635,6 +643,58 @@ impl DatasetBundleWriter {
         ))
     }
 
+    /// Encodes and appends one IMU DataBus frame.
+    pub fn write_imu(&mut self, frame: &Frame<ImuSample>) -> Result<(), DatasetError> {
+        let payload = encode_dataset_imu(sensor_metadata(frame), &frame.payload)?;
+        self.write_record(&record_from_frame(DatasetRecordKind::Imu, frame, payload))
+    }
+
+    /// Encodes and appends one planar pose/transform DataBus frame.
+    pub fn write_transform(&mut self, frame: &Frame<PoseSample>) -> Result<(), DatasetError> {
+        let payload = encode_dataset_transform(sensor_metadata(frame), &frame.payload)?;
+        self.write_record(&record_from_frame(
+            DatasetRecordKind::Transform,
+            frame,
+            payload,
+        ))
+    }
+
+    /// Encodes and appends one flat ActionSpec-ordered action frame.
+    pub fn write_action(&mut self, frame: &Frame<DatasetActionSample>) -> Result<(), DatasetError> {
+        let payload = encode_dataset_action(sensor_metadata(frame), &frame.payload)?;
+        self.write_record(&record_from_frame(
+            DatasetRecordKind::Action,
+            frame,
+            payload,
+        ))
+    }
+
+    /// Encodes and appends one task transition outcome frame.
+    pub fn write_task_outcome(
+        &mut self,
+        frame: &Frame<DatasetTaskOutcomeSample>,
+    ) -> Result<(), DatasetError> {
+        let payload = encode_dataset_task_outcome(sensor_metadata(frame), &frame.payload)?;
+        self.write_record(&record_from_frame(
+            DatasetRecordKind::TaskOutcome,
+            frame,
+            payload,
+        ))
+    }
+
+    /// Encodes and appends one numeric ground-truth annotation frame.
+    pub fn write_ground_truth_annotation(
+        &mut self,
+        frame: &Frame<DatasetGroundTruthAnnotation>,
+    ) -> Result<(), DatasetError> {
+        let payload = encode_dataset_annotation(sensor_metadata(frame), &frame.payload)?;
+        self.write_record(&record_from_frame(
+            DatasetRecordKind::GroundTruthAnnotation,
+            frame,
+            payload,
+        ))
+    }
+
     /// Flushes the shard, computes all summaries and hashes, and atomically
     /// publishes the final shard and manifest names.
     pub fn finish(mut self) -> Result<DatasetManifest, DatasetError> {
@@ -1088,11 +1148,11 @@ fn validate_stream(stream: &DatasetStreamSpec) -> Result<(), DatasetError> {
         DatasetStreamKind::Rgb8 => Some("rne.transport.image_rgb8.v1"),
         DatasetStreamKind::DepthF32 => Some("rne.transport.image_depth_f32.v1"),
         DatasetStreamKind::LidarPointCloud => Some("rne.transport.lidar_point_cloud.v1"),
-        DatasetStreamKind::Imu
-        | DatasetStreamKind::Transform
-        | DatasetStreamKind::Action
-        | DatasetStreamKind::TaskOutcome
-        | DatasetStreamKind::GroundTruthAnnotation => None,
+        DatasetStreamKind::Imu => Some(DATASET_IMU_ENCODING),
+        DatasetStreamKind::Transform => Some(DATASET_TRANSFORM_ENCODING),
+        DatasetStreamKind::Action => Some(DATASET_ACTION_ENCODING),
+        DatasetStreamKind::TaskOutcome => Some(DATASET_TASK_OUTCOME_ENCODING),
+        DatasetStreamKind::GroundTruthAnnotation => Some(DATASET_ANNOTATION_ENCODING),
     };
     if let Some(expected) = expected_encoding {
         if stream.payload_encoding != expected {
@@ -1314,12 +1374,14 @@ fn validate_payload(record: &DatasetRecord) -> Result<(), DatasetError> {
         DatasetRecordKind::Rgb8 => Some(decode_image_rgb8(&record.payload)?.0),
         DatasetRecordKind::DepthF32 => Some(decode_image_depth(&record.payload)?.0),
         DatasetRecordKind::LidarPointCloud => Some(decode_lidar_point_cloud(&record.payload)?.0),
+        DatasetRecordKind::Imu => Some(decode_dataset_imu(&record.payload)?.0),
+        DatasetRecordKind::Transform => Some(decode_dataset_transform(&record.payload)?.0),
+        DatasetRecordKind::Action => Some(decode_dataset_action(&record.payload)?.0),
+        DatasetRecordKind::TaskOutcome => Some(decode_dataset_task_outcome(&record.payload)?.0),
+        DatasetRecordKind::GroundTruthAnnotation => {
+            Some(decode_dataset_annotation(&record.payload)?.0)
+        }
         DatasetRecordKind::Gap => unreachable!("gap returned above"),
-        DatasetRecordKind::Imu
-        | DatasetRecordKind::Transform
-        | DatasetRecordKind::Action
-        | DatasetRecordKind::TaskOutcome
-        | DatasetRecordKind::GroundTruthAnnotation => None,
     };
     if embedded.is_some_and(|metadata| metadata != expected) {
         return Err(invalid(

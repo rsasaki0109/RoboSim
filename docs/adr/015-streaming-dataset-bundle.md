@@ -45,8 +45,10 @@ be checked on Windows or Linux in headless CI. Dataset types add only JSON and
 SHA-256 dependencies to `rne_data`; no adapter, renderer, or external robotics
 type enters core crates.
 
-Schema v1 uses one shard and convenience writers only for the three existing
-lossless sensor codecs. More payload codecs, capture examples, annotations,
-and seeded reproduction evidence must be added without weakening the frozen
-ordering, timing, gap, or digest rules. Self-hashes provide integrity, not
+Schema v1 uses one shard. RGB8, depth, and LiDAR reuse the three existing
+lossless sensor codecs; dataset-native v1 codecs cover IMU, planar transform,
+flat action, task outcome, and numeric ground-truth annotation. The complete
+run-stream shard has a frozen integration digest. Real scenario capture and
+seeded cross-platform reproduction evidence must be added without weakening
+the ordering, timing, gap, or digest rules. Self-hashes provide integrity, not
 authenticity; signed provenance belongs to the later ecosystem milestone.

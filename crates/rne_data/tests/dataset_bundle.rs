@@ -1,11 +1,16 @@
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
-    DatasetAsset, DatasetBundle, DatasetBundleWriter, DatasetCalibration, DatasetError,
-    DatasetFieldSpec, DatasetGapPolicy, DatasetLatencyModel, DatasetLatencySpec, DatasetManifest,
-    DatasetNoiseSpec, DatasetRandomizationDecision, DatasetRandomizationValue, DatasetStreamKind,
-    DatasetStreamSpec, DatasetTimingSpec, DepthPairEvaluationReport, DepthPairMetricSpec, Frame,
-    ImageDepth, StreamId,
+    decode_dataset_action, decode_dataset_annotation, decode_dataset_imu,
+    decode_dataset_task_outcome, decode_dataset_transform, DatasetActionSample, DatasetAsset,
+    DatasetBundle, DatasetBundleWriter, DatasetCalibration, DatasetError, DatasetFieldSpec,
+    DatasetGapPolicy, DatasetGroundTruthAnnotation, DatasetLatencyModel, DatasetLatencySpec,
+    DatasetManifest, DatasetNoiseSpec, DatasetRandomizationDecision, DatasetRandomizationValue,
+    DatasetRecordKind, DatasetStreamKind, DatasetStreamSpec, DatasetTaskOutcomeSample,
+    DatasetTimingSpec, DepthPairEvaluationReport, DepthPairMetricSpec, Frame, ImageDepth,
+    ImuSample, PoseSample, StreamId, DATASET_ACTION_ENCODING, DATASET_ANNOTATION_ENCODING,
+    DATASET_IMU_ENCODING, DATASET_TASK_OUTCOME_ENCODING, DATASET_TRANSFORM_ENCODING,
 };
+use rne_math::Vec3;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -186,6 +191,144 @@ fn bundle_recomputation_rejects_a_self_consistent_forged_report() {
     ));
 }
 
+#[test]
+fn all_run_streams_have_versioned_round_trip_codecs() {
+    let temp = tempfile::tempdir().unwrap();
+    let bundle_path = temp.path().join("bundle");
+    let mut writer = DatasetBundleWriter::create(&bundle_path, run_stream_manifest()).unwrap();
+    let (_world, entity) = source_entity();
+    let capture = SimTime::from_ticks(100);
+    let latency = SimDuration::from_ticks(1);
+
+    let imu = ImuSample {
+        angular_velocity_rad_s: Vec3::new(0.1, -0.2, 0.3),
+        linear_acceleration_m_s2: Vec3::new(1.0, 2.0, 9.81),
+    };
+    writer
+        .write_imu(&Frame::new(StreamId::new(20), entity, 0, capture, imu).with_latency(latency))
+        .unwrap();
+    let transform = PoseSample {
+        position_m: Vec3::new(1.0, 2.0, 3.0),
+        yaw_rad: 0.25,
+    };
+    writer
+        .write_transform(
+            &Frame::new(StreamId::new(21), entity, 0, capture, transform).with_latency(latency),
+        )
+        .unwrap();
+    let action = DatasetActionSample {
+        values: vec![0.5, -0.25],
+    };
+    writer
+        .write_action(
+            &Frame::new(StreamId::new(22), entity, 0, capture, action.clone())
+                .with_latency(latency),
+        )
+        .unwrap();
+    let outcome = DatasetTaskOutcomeSample {
+        episode_index: 7,
+        step_in_episode: 12,
+        reward: 1.5,
+        cumulative_reward: 9.0,
+        terminated: true,
+        truncated: false,
+        success: Some(true),
+    };
+    writer
+        .write_task_outcome(
+            &Frame::new(StreamId::new(23), entity, 0, capture, outcome).with_latency(latency),
+        )
+        .unwrap();
+    let annotation = DatasetGroundTruthAnnotation {
+        class_id: 3,
+        instance_id: 99,
+        values: vec![1.0, 2.0, 0.5, 0.75],
+    };
+    writer
+        .write_ground_truth_annotation(
+            &Frame::new(StreamId::new(24), entity, 0, capture, annotation.clone())
+                .with_latency(latency),
+        )
+        .unwrap();
+    let manifest = writer.finish().unwrap();
+    assert_eq!(manifest.shards[0].record_count, 5);
+    assert_eq!(manifest.shards[0].sample_count, 5);
+    assert_eq!(
+        manifest.shards[0].sha256,
+        "sha256:09341137a0c4722b29b080f2eb46bb7a6537bc4585c2f4a18971d289ecb4b98f"
+    );
+
+    let bundle = DatasetBundle::open(bundle_path).unwrap();
+    let verification = bundle.verify().unwrap();
+    assert_eq!(verification.stream_count, 5);
+    assert_eq!(verification.record_count, 5);
+    let records = bundle
+        .records()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(records.len(), 5);
+    assert_eq!(records[0].kind, DatasetRecordKind::Imu);
+    assert_eq!(decode_dataset_imu(&records[0].payload).unwrap().1, imu);
+    assert_eq!(records[1].kind, DatasetRecordKind::Transform);
+    assert_eq!(
+        decode_dataset_transform(&records[1].payload).unwrap().1,
+        transform
+    );
+    assert_eq!(records[2].kind, DatasetRecordKind::Action);
+    assert_eq!(
+        decode_dataset_action(&records[2].payload).unwrap().1,
+        action
+    );
+    assert_eq!(records[3].kind, DatasetRecordKind::TaskOutcome);
+    assert_eq!(
+        decode_dataset_task_outcome(&records[3].payload).unwrap().1,
+        outcome
+    );
+    assert_eq!(records[4].kind, DatasetRecordKind::GroundTruthAnnotation);
+    assert_eq!(
+        decode_dataset_annotation(&records[4].payload).unwrap().1,
+        annotation
+    );
+}
+
+#[test]
+fn non_finite_action_and_trailing_payload_bytes_fail_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut writer =
+        DatasetBundleWriter::create(temp.path().join("bundle"), run_stream_manifest()).unwrap();
+    let (_world, entity) = source_entity();
+    let frame = Frame::new(
+        StreamId::new(22),
+        entity,
+        0,
+        SimTime::from_ticks(0),
+        DatasetActionSample {
+            values: vec![f64::NAN],
+        },
+    )
+    .with_latency(SimDuration::from_ticks(1));
+    assert!(matches!(
+        writer.write_action(&frame),
+        Err(DatasetError::Transport(_))
+    ));
+
+    let metadata = rne_data::transport::SensorFrameMetadata {
+        stream_id: 22,
+        sensor_sequence: 0,
+        capture_ticks: 0,
+        available_ticks: 1,
+    };
+    let mut payload =
+        rne_data::encode_dataset_action(metadata, &DatasetActionSample { values: vec![0.0] })
+            .unwrap();
+    payload.push(0);
+    assert!(matches!(
+        decode_dataset_action(&payload),
+        Err(rne_data::transport::TransportError::TrailingBytes)
+    ));
+}
+
 fn write_reference_bundle(root: &Path) -> (DatasetManifest, DepthPairEvaluationReport) {
     let bundle_path = root.join("bundle");
     write_reference_bundle_at(&bundle_path)
@@ -294,6 +437,103 @@ fn reference_manifest() -> DatasetManifest {
         },
     });
     manifest
+}
+
+fn run_stream_manifest() -> DatasetManifest {
+    let latency = DatasetLatencySpec {
+        model: DatasetLatencyModel::Fixed,
+        fixed_ticks: Some(1),
+        max_ticks: 1,
+    };
+    let timing = || DatasetTimingSpec {
+        nominal_period_ticks: 10,
+        latency: latency.clone(),
+        gap_policy: DatasetGapPolicy::ExplicitRecords,
+    };
+    let scalar_field = |name: &str, dtype: &str, unit: &str| DatasetFieldSpec {
+        name: name.to_string(),
+        dtype: dtype.to_string(),
+        unit: unit.to_string(),
+    };
+    let imu = DatasetStreamSpec {
+        stream_id: StreamId::new(20),
+        name: "imu".to_string(),
+        kind: DatasetStreamKind::Imu,
+        payload_encoding: DATASET_IMU_ENCODING.to_string(),
+        source_entity: "reference_camera".to_string(),
+        frame_id: "imu_link".to_string(),
+        fields: vec![
+            scalar_field("angular_velocity_rad_s", "f64[3]", "rad_s"),
+            scalar_field("linear_acceleration_m_s2", "f64[3]", "m_s2"),
+        ],
+        calibration: Some(DatasetCalibration {
+            model: "imu_intrinsic.v1".to_string(),
+            reference_frame: "imu_link".to_string(),
+            parameters: BTreeMap::new(),
+        }),
+        timing: timing(),
+        noise: Some(DatasetNoiseSpec {
+            model: "none.v1".to_string(),
+            seed: 20,
+            parameters: BTreeMap::new(),
+        }),
+    };
+    let plain = |stream_id, name: &str, kind, encoding: &str, fields| DatasetStreamSpec {
+        stream_id: StreamId::new(stream_id),
+        name: name.to_string(),
+        kind,
+        payload_encoding: encoding.to_string(),
+        source_entity: "reference_camera".to_string(),
+        frame_id: "world".to_string(),
+        fields,
+        calibration: None,
+        timing: timing(),
+        noise: None,
+    };
+    DatasetManifest::new(
+        "rne.reference.run-streams.v1",
+        TASK_DIGEST,
+        10,
+        42,
+        vec![
+            imu,
+            plain(
+                21,
+                "transform",
+                DatasetStreamKind::Transform,
+                DATASET_TRANSFORM_ENCODING,
+                vec![
+                    scalar_field("position_m", "f64[3]", "m"),
+                    scalar_field("yaw_rad", "f64", "rad"),
+                ],
+            ),
+            plain(
+                22,
+                "action",
+                DatasetStreamKind::Action,
+                DATASET_ACTION_ENCODING,
+                vec![scalar_field("values", "f64[]", "task_spec")],
+            ),
+            plain(
+                23,
+                "task_outcome",
+                DatasetStreamKind::TaskOutcome,
+                DATASET_TASK_OUTCOME_ENCODING,
+                vec![
+                    scalar_field("reward", "f64", "reward"),
+                    scalar_field("terminated", "bool", "boolean"),
+                    scalar_field("truncated", "bool", "boolean"),
+                ],
+            ),
+            plain(
+                24,
+                "annotation",
+                DatasetStreamKind::GroundTruthAnnotation,
+                DATASET_ANNOTATION_ENCODING,
+                vec![scalar_field("values", "f64[]", "stream_declared")],
+            ),
+        ],
+    )
 }
 
 fn source_entity() -> (rne_ecs::World, rne_ecs::Entity) {

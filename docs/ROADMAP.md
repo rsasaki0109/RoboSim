@@ -38,8 +38,9 @@ The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
 calibration, noise seeds, assets, domain-randomization decisions, and explicit
 drop gaps. Offline depth-pair evaluation is renderer-free and recomputes
-committed metrics from the bundle. RGB8/depth/LiDAR reference codecs are bound;
-full capture coverage for IMU/transforms/actions/outcomes and seeded
+committed metrics from the bundle. RGB8/depth/LiDAR plus dataset-native
+IMU/transform/action/outcome/annotation codecs are bound and one headless
+fixture freezes their complete shard digest. Real scenario capture and seeded
 cross-platform reproduction evidence remain open.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable

@@ -1130,6 +1130,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "datasets",
+            "payload",
+            u64::from(rne_data::DATASET_PAYLOAD_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
             "offline_evaluation",
             u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
         ),
