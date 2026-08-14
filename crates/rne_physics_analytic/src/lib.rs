@@ -7,7 +7,8 @@
 //! collisions, which makes it a fast, deterministic backend for planning and
 //! policy iteration where contact response is not needed.
 //!
-//! The backend declares [`PhysicsCapability::RigidBody`] and
+//! The backend declares [`PhysicsCapability::RigidBody`],
+//! [`PhysicsCapability::KinematicBody`], and
 //! [`PhysicsCapability::DeterministicStep`]; runs that require articulation or
 //! contact force must negotiate a different backend.
 
@@ -17,8 +18,9 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
 use rne_physics::{
-    ContactEvent, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
+    ContactEvent, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
+    RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use std::collections::HashMap;
@@ -27,6 +29,7 @@ use std::collections::HashMap;
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
     PhysicsCapability::DeterministicStep,
+    PhysicsCapability::KinematicBody,
 ];
 
 /// One integrated dynamic body inside an [`AnalyticWorld`].
@@ -79,6 +82,19 @@ impl AnalyticBackend {
     /// Creates an analytic backend with no worlds.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the versioned conformance manifest for this backend.
+    pub fn manifest() -> PhysicsBackendManifest {
+        PhysicsBackendManifest::new(
+            "analytic",
+            env!("CARGO_PKG_VERSION"),
+            "rne_analytic",
+            "semi_implicit_euler_v1",
+            CAPABILITIES.iter().copied(),
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect("the built-in analytic backend manifest is valid")
     }
 
     fn world(&self, physics_world: PhysicsWorldId) -> Result<&AnalyticWorld, PhysicsError> {

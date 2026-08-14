@@ -8,7 +8,7 @@ use crate::joint::{validate_joint_position, validate_joint_velocity, JointValida
 use bevy_ecs::prelude::{Entity, World};
 use rne_core::SimDuration;
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, ColliderShape, JointMotor, RigidBody, RigidBodyType};
+use rne_physics::{Collider, ColliderShape, JointActuation, JointMotor, RigidBody, RigidBodyType};
 use rne_world::Transform3;
 
 /// Result of applying one actuator command.
@@ -545,11 +545,12 @@ fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Tr
     }
 }
 
-/// Copies every actuator's backend-neutral target into its linked [`JointMotor`].
+/// Copies every actuator target into unit-explicit [`JointActuation`].
 ///
 /// The optional `drives` argument on [`sync_joint_motors_from_actuators`] is kept
 /// for source compatibility with older diff-drive callers. Named URDF actuators
 /// use this function directly and are resolved through their [`Joint`] child link.
+/// Existing [`JointMotor`] components are updated as a compatibility path.
 pub fn sync_all_joint_motors_from_actuators(world: &mut World) {
     let mut actuator_entities: Vec<_> = world
         .iter_entities()
@@ -559,28 +560,96 @@ pub fn sync_all_joint_motors_from_actuators(world: &mut World) {
     actuator_entities.sort_unstable();
 
     for actuator_entity in actuator_entities {
-        let Some((joint_entity, mode, target)) = world
-            .get::<Actuator>(actuator_entity)
-            .map(|actuator| (actuator.joint, actuator.mode, actuator.target))
+        let Some((joint_entity, mode, target, limits)) =
+            world.get::<Actuator>(actuator_entity).map(|actuator| {
+                (
+                    actuator.joint,
+                    actuator.mode,
+                    actuator.target,
+                    actuator.limits,
+                )
+            })
         else {
             continue;
         };
         let Some(joint_entity) = joint_entity else {
             continue;
         };
-        let Some(child_link) = world
+        let Some((child_link, joint_kind)) = world
             .get::<Joint>(joint_entity)
-            .map(|joint| joint.child_link)
+            .map(|joint| (joint.child_link, joint.kind))
         else {
             continue;
         };
-        let Some(mut motor) = world.get_mut::<JointMotor>(child_link) else {
-            continue;
+        let tuning = world
+            .get::<JointMotor>(child_link)
+            .copied()
+            .unwrap_or_default();
+        let max_output = if limits.max_effort_nm.is_finite() {
+            limits.max_effort_nm.max(0.0)
+        } else {
+            0.0
         };
-        motor.velocity_rad_s = match mode {
-            ControlMode::Velocity => target.velocity_rad_s,
-            ControlMode::Position | ControlMode::Effort => 0.0,
+        let stiffness = if tuning.stiffness.is_finite() && tuning.stiffness > 0.0 {
+            tuning.stiffness
+        } else {
+            40.0
         };
+        let gain = if tuning.gain.is_finite() && tuning.gain >= 0.0 {
+            tuning.gain
+        } else {
+            1.0
+        };
+        let actuation = match (joint_kind, mode) {
+            (JointKind::Revolute | JointKind::Continuous, ControlMode::Position) => {
+                JointActuation::RevolutePosition {
+                    target_position_rad: target.position_rad,
+                    stiffness_nm_per_rad: stiffness,
+                    damping_nm_s_per_rad: gain,
+                    max_effort_nm: max_output,
+                }
+            }
+            (JointKind::Revolute | JointKind::Continuous, ControlMode::Velocity) => {
+                JointActuation::RevoluteVelocity {
+                    target_velocity_rad_s: target.velocity_rad_s,
+                    gain_nm_s_per_rad: gain,
+                    max_effort_nm: max_output,
+                }
+            }
+            (JointKind::Revolute | JointKind::Continuous, ControlMode::Effort) => {
+                JointActuation::RevoluteEffort {
+                    effort_nm: target.effort_nm,
+                    max_effort_nm: max_output,
+                }
+            }
+            (JointKind::Prismatic, ControlMode::Position) => JointActuation::PrismaticPosition {
+                target_position_m: target.position_rad,
+                stiffness_n_per_m: stiffness,
+                damping_n_s_per_m: gain,
+                max_force_n: max_output,
+            },
+            (JointKind::Prismatic, ControlMode::Velocity) => JointActuation::PrismaticVelocity {
+                target_velocity_m_s: target.velocity_rad_s,
+                gain_n_s_per_m: gain,
+                max_force_n: max_output,
+            },
+            (JointKind::Prismatic, ControlMode::Effort) => JointActuation::PrismaticEffort {
+                force_n: target.effort_nm,
+                max_force_n: max_output,
+            },
+            (JointKind::Fixed, _) => JointActuation::Disabled,
+        };
+        world.entity_mut(child_link).insert(actuation);
+        if let Some(mut motor) = world.get_mut::<JointMotor>(child_link) {
+            motor.velocity_rad_s = match mode {
+                ControlMode::Velocity => target.velocity_rad_s,
+                ControlMode::Position | ControlMode::Effort => 0.0,
+            };
+            if mode == ControlMode::Position {
+                motor.target_position = target.position_rad;
+                motor.stiffness = stiffness;
+            }
+        }
     }
 }
 
@@ -662,6 +731,38 @@ mod tests {
             3.0
         );
         assert_eq!(world.get::<Joint>(joint).unwrap().velocity, 3.0);
+    }
+
+    #[test]
+    fn actuator_modes_map_to_unit_explicit_physics_commands() {
+        let (mut world, _, joint, actuator) = setup_robot_with_joint();
+        {
+            let mut actuator = world.get_mut::<Actuator>(actuator).unwrap();
+            actuator.mode = ControlMode::Position;
+            actuator.target.position_rad = 0.4;
+        }
+        sync_all_joint_motors_from_actuators(&mut world);
+        assert!(matches!(
+            world.get::<JointActuation>(joint),
+            Some(JointActuation::RevolutePosition {
+                target_position_rad: 0.4,
+                ..
+            })
+        ));
+
+        {
+            let mut actuator = world.get_mut::<Actuator>(actuator).unwrap();
+            actuator.mode = ControlMode::Effort;
+            actuator.target.effort_nm = 12.0;
+        }
+        sync_all_joint_motors_from_actuators(&mut world);
+        assert_eq!(
+            world.get::<JointActuation>(joint),
+            Some(&JointActuation::RevoluteEffort {
+                effort_nm: 12.0,
+                max_effort_nm: 100.0,
+            })
+        );
     }
 
     #[test]

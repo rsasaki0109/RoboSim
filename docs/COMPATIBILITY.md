@@ -38,6 +38,14 @@ documented migration notes.
 baseline. Workspace rustdoc runs with warnings denied, and public libraries
 deny missing documentation.
 
+The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive
+`PhysicsCapability` and `PhysicsError` enums with `KinematicBody` and
+`InvalidActuation`. Downstream exhaustive matches must add arms for those
+variants. `KinematicBody` is appended after the frozen capability variants, so
+their discriminants and derived ordering do not change. The `rne_physics`
+SemVer policy reports enum additions as warnings during 0.x while continuing
+to reject removals, payload changes, and variant reordering.
+
 ## C ABI and plugin compatibility
 
 Controller ABI v3 is the current authoring ABI. The host continues to load the
@@ -88,6 +96,21 @@ The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
 hosts. Canonical schema-v1 examples live under `tests/golden/evidence/`.
+
+Physics conformance report schema v2 embeds backend-manifest schema v2,
+catalog version, tolerance-registry version, declared/runtime capabilities, and
+coverage verdicts. Its canonical shape lives at
+`tests/golden/physics/conformance-report-v2.json`. A backend identifier with no
+registered shared vector or tolerance profile produces a failing case rather
+than silently weakening coverage.
+Manifest schema v2 adds `kinematic_body` as a refinement of `rigid_body`.
+Analytic and Rapier prove it with the shared external-pose vector; MuJoCo
+rejects it at preflight with `MissingCapabilities` before native compilation.
+
+`JointActuation` is a tagged, backend-neutral ECS command with distinct
+revolute/prismatic position, velocity, and effort variants. Field names carry
+their SI units. A backend rejects unknown variants, non-finite values, negative
+gains/limits, and joint-kind mismatches before a physics step.
 
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,

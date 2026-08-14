@@ -4,7 +4,17 @@ use crate::{ContactEvent, RaycastHit, RaycastQuery};
 use rne_core::SimDuration;
 use rne_ecs::World;
 use rne_math::Vec3;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+/// Current schema version for backend capability manifests.
+pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 2;
+
+/// Current schema version for aggregate physics conformance reports.
+pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
+
+/// Current version of the named, unit-bearing physics tolerance registry.
+pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 1;
 
 /// Identifier for a backend-owned physics world instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -35,7 +45,8 @@ impl Default for PhysicsWorldDesc {
 }
 
 /// Optional physics backend capabilities.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PhysicsCapability {
     /// Supports rigid body simulation.
     RigidBody,
@@ -51,11 +62,168 @@ pub enum PhysicsCapability {
     ContactForce,
     /// Supports batched raycasts.
     RaycastBatch,
+    /// Supports externally posed kinematic rigid bodies.
+    KinematicBody,
+}
+
+/// Repeatability promise made by a physics backend manifest.
+///
+/// This classifies fresh executions on the same supported runtime. Cross-backend
+/// and cross-platform comparisons remain governed by the conformance report's
+/// named tolerance registry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicsBackendRepeatability {
+    /// Canonical snapshots must compare exactly on the same runtime and platform.
+    SameRuntimeExact,
+    /// Numeric observables are compared only through named conformance tolerances.
+    ToleranceBounded,
+}
+
+/// Versioned, backend-neutral declaration consumed by conformance runners.
+///
+/// Backend crates construct this value from stable identifiers and capability
+/// declarations. Engine-specific handles and native types never enter the
+/// manifest or the [`PhysicsBackend`] trait.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicsBackendManifest {
+    /// Manifest schema version.
+    pub schema_version: u16,
+    /// Stable lowercase backend identifier, such as `analytic` or `rapier`.
+    pub backend_id: String,
+    /// Version of the RNE backend adapter.
+    pub adapter_version: String,
+    /// Stable identifier of the underlying dynamics engine.
+    pub engine_id: String,
+    /// Version of the underlying dynamics engine or algorithm contract.
+    pub engine_version: String,
+    /// Capabilities in [`PhysicsCapability::ALL`] order without duplicates.
+    pub capabilities: Vec<PhysicsCapability>,
+    /// Same-runtime repeatability promised by this backend.
+    pub repeatability: PhysicsBackendRepeatability,
+}
+
+impl PhysicsBackendManifest {
+    /// Creates and validates a backend manifest using the current schema.
+    pub fn new(
+        backend_id: impl Into<String>,
+        adapter_version: impl Into<String>,
+        engine_id: impl Into<String>,
+        engine_version: impl Into<String>,
+        capabilities: impl IntoIterator<Item = PhysicsCapability>,
+        repeatability: PhysicsBackendRepeatability,
+    ) -> Result<Self, PhysicsBackendManifestError> {
+        let manifest = Self {
+            schema_version: PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION,
+            backend_id: backend_id.into(),
+            adapter_version: adapter_version.into(),
+            engine_id: engine_id.into(),
+            engine_version: engine_version.into(),
+            capabilities: capabilities.into_iter().collect(),
+            repeatability,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Validates schema, identifiers, canonical capability order, and repeatability.
+    pub fn validate(&self) -> Result<(), PhysicsBackendManifestError> {
+        if self.schema_version != PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION {
+            return Err(PhysicsBackendManifestError::UnsupportedSchemaVersion {
+                expected: PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION,
+                actual: self.schema_version,
+            });
+        }
+        for (field, value) in [
+            ("backend_id", self.backend_id.as_str()),
+            ("adapter_version", self.adapter_version.as_str()),
+            ("engine_id", self.engine_id.as_str()),
+            ("engine_version", self.engine_version.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(PhysicsBackendManifestError::EmptyField { field });
+            }
+        }
+        for (field, value) in [
+            ("backend_id", self.backend_id.as_str()),
+            ("engine_id", self.engine_id.as_str()),
+        ] {
+            if !is_stable_identifier(value) {
+                return Err(PhysicsBackendManifestError::InvalidIdentifier { field });
+            }
+        }
+        let canonical = PhysicsCapability::ALL
+            .iter()
+            .filter(|capability| self.capabilities.contains(capability))
+            .copied()
+            .collect::<Vec<_>>();
+        if canonical != self.capabilities {
+            return Err(PhysicsBackendManifestError::NonCanonicalCapabilities);
+        }
+        if self.repeatability == PhysicsBackendRepeatability::SameRuntimeExact
+            && !self
+                .capabilities
+                .contains(&PhysicsCapability::DeterministicStep)
+        {
+            return Err(PhysicsBackendManifestError::ExactRepeatabilityWithoutDeterministicStep);
+        }
+        if self
+            .capabilities
+            .contains(&PhysicsCapability::KinematicBody)
+            && !self.capabilities.contains(&PhysicsCapability::RigidBody)
+        {
+            return Err(PhysicsBackendManifestError::KinematicWithoutRigidBody);
+        }
+        Ok(())
+    }
+}
+
+/// Invalid backend-manifest declaration.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum PhysicsBackendManifestError {
+    /// The manifest schema is not supported by this engine version.
+    #[error("unsupported physics backend manifest schema: expected {expected}, got {actual}")]
+    UnsupportedSchemaVersion {
+        /// Manifest schema understood by this engine.
+        expected: u16,
+        /// Manifest schema supplied by the backend.
+        actual: u16,
+    },
+    /// A required stable identifier or version is empty.
+    #[error("physics backend manifest field {field} must not be empty")]
+    EmptyField {
+        /// Name of the empty manifest field.
+        field: &'static str,
+    },
+    /// A backend or engine identifier is not stable lowercase ASCII.
+    #[error("physics backend manifest field {field} must match [a-z][a-z0-9_]*")]
+    InvalidIdentifier {
+        /// Name of the invalid manifest field.
+        field: &'static str,
+    },
+    /// Capabilities are duplicated or not in the canonical engine order.
+    #[error("physics backend manifest capabilities must be unique and canonically ordered")]
+    NonCanonicalCapabilities,
+    /// Exact repeatability was claimed without the corresponding capability.
+    #[error("same-runtime exact repeatability requires deterministic_step capability")]
+    ExactRepeatabilityWithoutDeterministicStep,
+    /// Kinematic-body support refines the rigid-body capability.
+    #[error("kinematic_body capability requires rigid_body capability")]
+    KinematicWithoutRigidBody,
+}
+
+fn is_stable_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_lowercase())
+        && chars.all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        })
 }
 
 impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::RigidBody,
         Self::Articulation,
         Self::GpuRigidBody,
@@ -63,12 +231,14 @@ impl PhysicsCapability {
         Self::SoftBody,
         Self::ContactForce,
         Self::RaycastBatch,
+        Self::KinematicBody,
     ];
 
     /// Returns the stable lowercase identifier used by conformance reports.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RigidBody => "rigid_body",
+            Self::KinematicBody => "kinematic_body",
             Self::Articulation => "articulation",
             Self::GpuRigidBody => "gpu_rigid_body",
             Self::DeterministicStep => "deterministic_step",
@@ -93,6 +263,14 @@ pub enum PhysicsError {
     MissingCapabilities {
         /// Capabilities the backend does not provide.
         missing: Vec<PhysicsCapability>,
+    },
+    /// A joint actuation command is invalid for the target entity.
+    #[error("invalid joint actuation on entity {entity_index}: {reason}")]
+    InvalidActuation {
+        /// Stable ECS entity index carrying the rejected command.
+        entity_index: u32,
+        /// Static validation reason shared by backend implementations.
+        reason: &'static str,
     },
 }
 
@@ -282,6 +460,108 @@ mod tests {
             PhysicsError::MissingCapabilities { missing }
                 if missing == vec![PhysicsCapability::GpuRigidBody, PhysicsCapability::SoftBody]
         ));
+    }
+
+    #[test]
+    fn backend_manifest_round_trips_with_canonical_capabilities() {
+        let manifest = PhysicsBackendManifest::new(
+            "analytic",
+            "0.1.0",
+            "rne_analytic",
+            "1",
+            [
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::DeterministicStep,
+            ],
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect("valid manifest");
+
+        let json = serde_json::to_string(&manifest).expect("serialize manifest");
+        let decoded: PhysicsBackendManifest =
+            serde_json::from_str(&json).expect("deserialize manifest");
+        assert_eq!(decoded, manifest);
+        decoded
+            .validate()
+            .expect("round-tripped manifest validates");
+    }
+
+    #[test]
+    fn backend_manifest_rejects_order_duplicates_and_false_exact_claims() {
+        let unordered = PhysicsBackendManifest::new(
+            "rapier",
+            "0.1.0",
+            "rapier3d",
+            "0.22",
+            [
+                PhysicsCapability::DeterministicStep,
+                PhysicsCapability::RigidBody,
+            ],
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect_err("non-canonical order must fail");
+        assert_eq!(
+            unordered,
+            PhysicsBackendManifestError::NonCanonicalCapabilities
+        );
+
+        let duplicate = PhysicsBackendManifest::new(
+            "rapier",
+            "0.1.0",
+            "rapier3d",
+            "0.22",
+            [PhysicsCapability::RigidBody, PhysicsCapability::RigidBody],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("duplicate capability must fail");
+        assert_eq!(
+            duplicate,
+            PhysicsBackendManifestError::NonCanonicalCapabilities
+        );
+
+        let false_exact = PhysicsBackendManifest::new(
+            "mujoco",
+            "0.1.0",
+            "mujoco",
+            "3.9.0",
+            [PhysicsCapability::RigidBody],
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect_err("exact claim needs deterministic capability");
+        assert_eq!(
+            false_exact,
+            PhysicsBackendManifestError::ExactRepeatabilityWithoutDeterministicStep
+        );
+
+        let invalid_id = PhysicsBackendManifest::new(
+            "MuJoCo",
+            "0.1.0",
+            "mujoco",
+            "3.9.0",
+            [PhysicsCapability::RigidBody],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("wire identifiers must be stable lowercase ASCII");
+        assert_eq!(
+            invalid_id,
+            PhysicsBackendManifestError::InvalidIdentifier {
+                field: "backend_id"
+            }
+        );
+
+        let orphan_kinematic = PhysicsBackendManifest::new(
+            "fixture",
+            "0.1.0",
+            "fixture",
+            "1",
+            [PhysicsCapability::KinematicBody],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("kinematic support refines rigid-body support");
+        assert_eq!(
+            orphan_kinematic,
+            PhysicsBackendManifestError::KinematicWithoutRigidBody
+        );
     }
 
     #[test]

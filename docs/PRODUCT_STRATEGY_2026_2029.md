@@ -102,11 +102,11 @@ evidence passes. Missing a gate moves the date; it does not weaken the gate.
 
 ### v0.2: trust and evidence
 
-The implementation foundation already exists on the current development
-branch: `DeterminismContract`, capability and benchmark reports, Failure
-Capsules, and the default-off MuJoCo spike.
+The implementation foundation was merged to `main` by PR #164:
+`DeterminismContract`, capability and benchmark reports, Failure Capsules, the
+aggregate evidence gate, and the default-off MuJoCo spike.
 
-Implemented on the development branch:
+Implemented on `main`:
 
 - expose a single `xtask evidence` aggregate that runs capability, benchmark,
   conformance, and capsule-fixture verification;
@@ -114,8 +114,9 @@ Implemented on the development branch:
 - add a clean-install tutorial that reproduces a committed failure capsule;
 - keep all reports timing-free and versioned in `release/contracts.toml`.
 
-Remaining release work is to merge through the normal review path and confirm
-the new Linux/Windows evidence jobs from the merged commit.
+The merge gate confirmed the Linux and Windows evidence jobs, full workspace
+aggregate, release rehearsal, parity, MSRV, supply-chain, ROS2 adapter, and
+dedicated MuJoCo jobs from the same source commit.
 
 Exit evidence:
 
@@ -129,6 +130,24 @@ Exit evidence:
 ### v0.3: interchangeable dynamics
 
 This is the immediate next development milestone.
+
+Current implementation status:
+
+- conformance report schema v2 and backend manifest schema v2 are registered;
+- the capability catalog is callable through a generic `PhysicsBackend`
+  factory for Analytic, Rapier, and feature-gated MuJoCo;
+- Rapier synchronizes backend-neutral completed-step `JointState` values into
+  ECS, removing the conformance runner's dependency on a Rapier-only getter;
+- MuJoCo compiles multiple fixed/dynamic ECS bodies into backend-private MJCF,
+  synchronizes pose and velocity at an explicit fixed step, and joins the shared
+  rigid-body catalog on Windows and Linux;
+- MuJoCo reports canonical physical contacts and zero-impulse sensor overlaps;
+  its preflight rejects unadvertised kinematic bodies with a typed capability
+  error, and rejects invalid geometry or post-step-0 topology changes before
+  they can be approximated;
+- Rapier and MuJoCo implement unit-explicit revolute/prismatic position,
+  velocity, and effort actuation; MuJoCo now advertises `articulation` and
+  passes the same revolute catalog vector as Rapier.
 
 Delivery slices:
 
@@ -144,6 +163,12 @@ Delivery slices:
    documented cross-backend tolerance profile.
 5. **Cross-backend diagnosis** — compare the first divergent observable and
    package the relevant replay and conformance report into a Failure Capsule.
+
+All five v0.3 implementation slices now have executable evidence. The
+cross-backend diagnostic keeps the production 10 cm Rapier-vs-MuJoCo position
+contract passing, injects a separate 1 cm diagnostic bound, captures both
+traces through the first violation, and verifies the resulting replay/report
+pair through the portable Failure Capsule reader on Windows and Linux CI.
 
 Exit evidence:
 

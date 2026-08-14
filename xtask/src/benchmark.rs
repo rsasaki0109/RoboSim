@@ -8,6 +8,7 @@
 
 use anyhow::{Context, Result};
 use rne_core::{DeterminismContract, DeterminismScope};
+use rne_physics::PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -280,9 +281,10 @@ fn build_report_from_inputs(
 }
 
 fn validate_source_reports(physics: &Value, scenario: &Value) -> Result<()> {
+    let physics_schema_version = u64::from(PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION);
     anyhow::ensure!(
-        physics.get("schema_version").and_then(Value::as_u64) == Some(1),
-        "physics benchmark report must use schema_version 1"
+        physics.get("schema_version").and_then(Value::as_u64) == Some(physics_schema_version),
+        "physics benchmark report must use schema_version {physics_schema_version}"
     );
     anyhow::ensure!(
         physics.get("all_passed").and_then(Value::as_bool) == Some(true),
@@ -858,7 +860,7 @@ mod tests {
 
     fn physics_fixture() -> Value {
         serde_json::json!({
-            "schema_version": 1,
+            "schema_version": PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION,
             "all_passed": true,
             "cases": [
                 {

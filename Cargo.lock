@@ -3574,6 +3574,7 @@ dependencies = [
  "rne_math",
  "rne_world",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3593,11 +3594,13 @@ name = "rne_physics_conformance"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rne_ai",
  "rne_core",
  "rne_ecs",
  "rne_math",
  "rne_physics",
  "rne_physics_analytic",
+ "rne_physics_mujoco",
  "rne_physics_rapier",
  "rne_world",
  "serde",

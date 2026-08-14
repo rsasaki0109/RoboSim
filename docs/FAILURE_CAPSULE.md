@@ -26,6 +26,35 @@ to `replay/`, optional evidence is copied to `evidence/`, and each reference
 gets a lowercase SHA-256 digest. The destination must not already exist;
 creation never overwrites an existing capsule directory.
 
+Physics conformance reports retain their
+`rne_physics_conformance_report` kind and report schema version in the capsule
+instead of being flattened to generic evidence. The v0.3 fault-injection proof
+generates a replay through the existing Behavior replay schema, then packages
+and verifies both artifacts:
+
+```text
+cargo run -p rne_physics_conformance --features mujoco \
+  --bin rne-physics-divergence -- \
+  --report artifacts/physics-divergence-source/conformance-report.json \
+  --replay artifacts/physics-divergence-source/divergence.rne-replay
+
+cargo run -p xtask -- failure-capsule create \
+  --replay artifacts/physics-divergence-source/divergence.rne-replay \
+  --evidence artifacts/physics-divergence-source/conformance-report.json \
+  --output artifacts/physics-divergence-capsule \
+  --backend rapier-vs-mujoco \
+  --backend-version rapier-0.22+mujoco-3.9.0
+
+cargo run -p xtask -- failure-capsule verify \
+  artifacts/physics-divergence-capsule
+```
+
+The production Rapier-vs-MuJoCo free-fall comparison remains within its named
+10 cm tolerance. The diagnostic deliberately injects a 1 cm bound, records
+both backend observations through the first violating step, and marks only that
+fault-injection case as failed. This keeps an expected solver difference
+distinct from a production conformance regression.
+
 Generic replays must carry `final_report.failure`; successful generic replays
 are not converted into failure capsules. Their fixed timestep is derived from
 the recorded frame timestamps and every frame must match the same fixed-step
@@ -37,8 +66,9 @@ inventing counts.
 `verify` validates `capsule.json`, requires a replay reference, rejects
 absolute/parent-traversal paths, rejects symlink escapes, checks that every
 referenced file exists and matches its digest, and invokes the known replay
-reader/schema validator for generic and behavior replay kinds. It does not
-trust host paths recorded in the capsule.
+reader/schema validator for generic and behavior replay kinds. Known physics
+conformance evidence is also checked for matching kind and schema metadata. It
+does not trust host paths recorded in the capsule.
 
 The capsule schema is intentionally independent of transport. A future archive
 or object-store adapter can package the same relative paths without changing

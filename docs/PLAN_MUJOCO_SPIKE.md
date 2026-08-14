@@ -1,16 +1,47 @@
-# MuJoCo backend spike
+# MuJoCo backend
 
-`rne_physics_mujoco` is an optional, `publish = false` backend spike.  The
+`rne_physics_mujoco` is an optional, `publish = false` backend. The
 default workspace does not enable its `mujoco` feature and therefore does not
 require a MuJoCo runtime or native library.
 
-The spike is deliberately limited to one MJCF fixture: a dynamic sphere with a
-free joint, named `rne_free_fall_body` / `rne_free_fall_joint`.  It synchronizes
-one backend-neutral RNE rigid body, steps at the timestep compiled into the
-fixture (`0.016666666` seconds, matching RNE's nanosecond-quantized 60 Hz
-duration), and synchronizes position and velocity back to ECS.  Its only declared
-capability is `rigid_body`; contacts, raycasts, articulation, and general
-ECS-to-MJCF compilation are not implemented.
+The current `rigid_body` implementation compiles a deterministic MJCF model from
+ECS before step 0. It supports multiple dynamic and fixed bodies with sphere,
+cuboid, capsule, or fixed-plane colliders. Dynamic bodies are represented by
+backend-private free joints; fixed bodies are welded into the model. Position,
+orientation, linear velocity, and angular velocity synchronize in both directions
+at an explicit fixed timestep. Model topology is immutable after compilation.
+
+`MuJoCoBackend::preflight_world` validates the topology before native model
+creation. Kinematic motion, invalid units, malformed joint graphs, and other
+unsupported inputs fail explicitly instead of being silently approximated.
+Kinematic motion is represented by the backend-neutral `kinematic_body`
+capability: MuJoCo leaves it unadvertised and returns a typed missing-capability
+error from both preflight and ECS sync before a native model is created.
+The original caller-owned one-sphere MJCF constructor remains as a compatibility
+fixture, not as the primary backend path.
+
+With the `mujoco` feature enabled, `rne_physics_conformance` runs MuJoCo through
+the same Harness v2 rigid-body vector used for Analytic and Rapier. Its named
+position tolerance is `mujoco_free_fall_position_m_v1`. The Windows/Linux MuJoCo
+workflow runs both the backend integration tests and this shared conformance gate.
+It also generates and verifies the Rapier-vs-MuJoCo diagnostic Failure Capsule,
+then uploads the portable capsule directory as a short-lived CI artifact.
+
+The backend also advertises `articulation`. Revolute and prismatic descriptions
+compile into nested hinge/slide joints, scalar state synchronizes through
+`JointState`, and the unit-explicit `JointActuation` contract supports position,
+velocity, and direct effort/force modes. Invalid values or a command whose units
+do not match the joint kind return `PhysicsError::InvalidActuation` before the
+step. Rapier implements the same command contract, and the shared revolute vector
+uses it directly.
+
+The backend also advertises `contact_force`. Native contact-point forces are
+integrated over the fixed step, summed across every point for the same canonical
+entity pair, and emitted with a stable A-to-B normal. Disabled-response sensor
+geometries are checked explicitly and emit zero-normal, zero-impulse overlaps.
+The shared resting-load vector uses the unit-bearing
+`mujoco_resting_impulse_n_s_v1` tolerance and records a canonical snapshot hash.
+Raycasts are not yet advertised by MuJoCo.
 
 ## Runtime and provenance
 

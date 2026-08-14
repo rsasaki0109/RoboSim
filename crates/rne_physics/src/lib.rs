@@ -9,12 +9,15 @@ pub mod hash;
 pub mod snapshot;
 
 pub use backend::{
-    require_capabilities, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId,
+    require_capabilities, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendManifestError,
+    PhysicsBackendRepeatability, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
+    PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION, PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 pub use components::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,
-    PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
+    JointState, MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
 pub use hash::hash_physics_state;

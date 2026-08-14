@@ -36,8 +36,10 @@ one required case:
 | Backend | Advertised capability | Required evidence |
 |---|---|---|
 | Analytic | `RigidBody` | fixed-step free fall updates pose and velocity in explicit SI units |
+| Analytic | `KinematicBody` | an externally supplied pose remains authoritative across a fixed step |
 | Analytic | `DeterministicStep` | two fresh executions produce the same canonical snapshot hash |
 | Rapier | `RigidBody` | the same free-fall vector stays within the registered reference tolerance |
+| Rapier | `KinematicBody` | the same external-pose vector stays within its named metre/radian tolerances |
 | Rapier | `DeterministicStep` | two fresh executions produce the same canonical snapshot hash |
 | Rapier | `Articulation` | revolute anchor and limit invariants remain bounded under load |
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
@@ -132,3 +134,41 @@ or capability coverage check fails.
 - M4-C capability-specific validation: complete.
 - M4-D reports and CI integration: complete.
 - M4-E full workspace/CI matrix: complete.
+
+## v2 follow-on for interchangeable dynamics
+
+The v0.3 harness keeps the M4 measurements but removes the built-in-runner
+assumption:
+
+- `rne_physics::PhysicsBackendManifest` declares stable backend/engine versions,
+  canonical capabilities, and the same-runtime repeatability class without
+  exposing a native backend type;
+- `run_backend_conformance` applies the shared capability catalog to any
+  `PhysicsBackend` factory and fails closed when a capability vector or named
+  tolerance profile is missing;
+- conformance report schema v2 embeds the validated manifest and the actual
+  runtime capability declaration so drift is visible in evidence;
+- `JointState` is the backend-neutral completed-step articulation observable;
+  Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
+  and MuJoCo must implement the same contract before advertising articulation.
+
+Backend-manifest schema v2 adds the `kinematic_body` vocabulary. Analytic and
+Rapier advertise it only after passing the shared external-pose vector. MuJoCo
+does not advertise it: both `preflight_world` and the trait sync boundary reject
+a kinematic entity before native model creation with a typed missing-capability
+error.
+
+MuJoCo rigid-body compilation now registers
+`mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
+`rne_physics_conformance/mujoco` feature. It also advertises `articulation` after
+passing the shared revolute vector with unit-explicit `JointActuation` and
+backend-neutral `JointState`; backend integration tests cover revolute and
+prismatic position/velocity/effort behavior. MuJoCo now also passes the shared
+`contact_force` vector: per-point solver force is integrated to N*s, aggregated
+by canonical entity pair, and evaluated with
+`mujoco_resting_impulse_n_s_v1`; sensor overlaps remain zero-impulse evidence.
+Feature runs also compare Analytic-vs-MuJoCo and Rapier-vs-MuJoCo through named
+position/velocity bounds. `rne-physics-divergence` tightens only the latter
+position bound to 1 cm, finds the first violation at a stable fixed step, and
+emits an existing-schema Behavior replay plus a deliberately failing report.
+The MuJoCo Windows/Linux job packages both into a verified Failure Capsule.

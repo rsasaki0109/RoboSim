@@ -17,6 +17,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const PHYSICS_CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
+
 /// Runs the `failure-capsule create|verify` subcommand.
 pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let command = args.next().ok_or_else(|| {
@@ -191,13 +193,14 @@ fn build_copy_plans(
 
     for (path, bytes) in evidence {
         let name = safe_file_name(&path)?;
+        let (kind, schema_version) = evidence_metadata(&bytes)?;
         plans.push(CopyPlan {
             relative_path: PathBuf::from("evidence").join(&name),
             relative_path_string: format!("evidence/{name}"),
             bytes,
             role: "evidence".to_string(),
-            kind: "evidence".to_string(),
-            schema_version: 1,
+            kind,
+            schema_version,
         });
     }
 
@@ -210,6 +213,28 @@ fn build_copy_plans(
         );
     }
     Ok(plans)
+}
+
+fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Ok(("evidence".to_string(), 1));
+    };
+    if value.get("kind").and_then(serde_json::Value::as_str)
+        != Some(PHYSICS_CONFORMANCE_REPORT_KIND)
+    {
+        return Ok(("evidence".to_string(), 1));
+    }
+    let schema_version = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .filter(|version| *version > 0)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{PHYSICS_CONFORMANCE_REPORT_KIND} evidence requires a positive u32 schema_version"
+            )
+        })?;
+    Ok((PHYSICS_CONFORMANCE_REPORT_KIND.to_string(), schema_version))
 }
 
 fn replay_kind(bytes: &[u8]) -> Result<String> {
@@ -385,6 +410,23 @@ fn verify_artifact_path(canonical_root: &Path, root: &Path, artifact: &ArtifactR
         BehaviorReplayArtifact::from_json(text).map_err(|error| {
             anyhow::anyhow!("invalid behavior replay `{}`: {error}", artifact.path)
         })?;
+    } else if artifact.kind == PHYSICS_CONFORMANCE_REPORT_KIND {
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .with_context(|| format!("invalid conformance report `{}`", artifact.path))?;
+        anyhow::ensure!(
+            value.get("kind").and_then(serde_json::Value::as_str)
+                == Some(PHYSICS_CONFORMANCE_REPORT_KIND),
+            "conformance report kind mismatch in `{}`",
+            artifact.path
+        );
+        anyhow::ensure!(
+            value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(u64::from(artifact.schema_version)),
+            "conformance report schema mismatch in `{}`",
+            artifact.path
+        );
     }
     Ok(())
 }
@@ -832,6 +874,35 @@ mod tests {
         assert_ne!(capsule.failure.id, capsule.run.id);
         assert!(capsule.failure.id.contains("fixture_failure-step-0"));
         assert!(capsule.minimization.is_none());
+    }
+
+    #[test]
+    fn physics_conformance_evidence_preserves_kind_and_schema() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("divergence.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let report_path = temp.path().join("conformance-report.json");
+        fs::write(
+            &report_path,
+            br#"{"kind":"rne_physics_conformance_report","schema_version":2,"all_passed":false}"#,
+        )
+        .expect("write conformance evidence");
+        let output = temp.path().join("capsule");
+
+        invoke_create(&replay_path, &output, &[&report_path]).expect("create capsule");
+        invoke_verify(&output).expect("verify capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule json");
+        let report = capsule
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.role == "evidence")
+            .expect("evidence reference");
+        assert_eq!(report.kind, PHYSICS_CONFORMANCE_REPORT_KIND);
+        assert_eq!(report.schema_version, 2);
     }
 
     #[test]

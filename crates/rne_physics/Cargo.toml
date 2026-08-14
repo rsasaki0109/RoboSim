@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# RNE 0.x permits documented capability/error enum growth. Keep additions
+# visible in semver CI while rejecting removals, field changes, and reordering.
+[package.metadata.cargo-semver-checks.lints]
+enum_variant_added = "warn"
+
 [dependencies]
 bevy_ecs = { workspace = true }
 rne_core = { workspace = true }
@@ -18,3 +23,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"
+serde_json = { workspace = true }
