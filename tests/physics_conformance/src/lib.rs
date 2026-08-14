@@ -37,6 +37,8 @@ const CASE_MUJOCO_RIGID: &str = "mujoco.rigid_body.free_fall";
 const CASE_RAPIER_RIGID: &str = "rapier.rigid_body.free_fall";
 const CASE_RAPIER_ARTICULATION: &str = "rapier.articulation.revolute_limit";
 const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
+#[cfg(feature = "mujoco")]
+const CASE_MUJOCO_CONTACT: &str = "mujoco.contact_force.resting_impulse";
 const CASE_RAPIER_RAYCAST: &str = "rapier.raycast_batch.ordered_hits";
 const CASE_BACKEND_COMPARISON: &str = "analytic_vs_rapier.free_fall";
 
@@ -155,6 +157,16 @@ const TOLERANCES: &[ToleranceSpec] = &[
         relative: 0.35,
         rationale:
             "TGS contact stabilization biases manifold impulse above mass times gravity times dt",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "mujoco_resting_impulse_n_s_v1",
+        case_id: CASE_MUJOCO_CONTACT,
+        metric_id: "mean_normal_impulse_n_s",
+        unit: MetricUnit::NewtonSecond,
+        absolute: 0.002,
+        relative: 0.02,
+        rationale: "settled MuJoCo contact force integrated over one fixed step tracks body weight",
     },
     ToleranceSpec {
         id: "raycast_distance_m_v1",
@@ -713,15 +725,24 @@ fn run_contact_case<B: PhysicsBackend>(
         return Err(anyhow!("resting contact did not produce impulse evidence"));
     }
     let measured = impulses.iter().sum::<f64>() / impulses.len() as f64;
-    // Rapier currently interprets `RigidBody::mass_kg` as additional mass and
-    // adds the cuboid's unit-density 0.5 m ^ 3 shape mass.
-    let effective_mass_kg = mass_kg + 0.5_f64.powi(3);
+    let (effective_mass_kg, tolerance_id) = match backend_id {
+        // Rapier currently interprets `RigidBody::mass_kg` as additional mass
+        // and adds the cuboid's unit-density 0.5 m ^ 3 shape mass.
+        BACKEND_RAPIER => (mass_kg + 0.5_f64.powi(3), "resting_impulse_n_s_v1"),
+        #[cfg(feature = "mujoco")]
+        BACKEND_MUJOCO => (mass_kg, "mujoco_resting_impulse_n_s_v1"),
+        _ => {
+            return Err(anyhow!(
+                "{backend_id} has no registered contact mass profile"
+            ))
+        }
+    };
     let expected = effective_mass_kg * GRAVITY_M_S2.abs() * fixed_dt().as_seconds().value();
     let metrics = vec![metric(
         "mean_normal_impulse_n_s",
         measured,
         expected,
-        "resting_impulse_n_s_v1",
+        tolerance_id,
     )];
     let contacts = backend.contacts(physics_world)?.to_vec();
     let snapshot = capture_physics_snapshot(&world, &contacts, 180, fixed_dt().ticks() * 180)?;

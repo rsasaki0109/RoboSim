@@ -155,6 +155,9 @@ MuJoCo rigid-body compilation now registers
 `rne_physics_conformance/mujoco` feature. It also advertises `articulation` after
 passing the shared revolute vector with unit-explicit `JointActuation` and
 backend-neutral `JointState`; backend integration tests cover revolute and
-prismatic position/velocity/effort behavior. The next v2 increment promotes
-canonical MuJoCo contact evidence and packages the first perturbed cross-backend
-divergence as a Failure Capsule.
+prismatic position/velocity/effort behavior. MuJoCo now also passes the shared
+`contact_force` vector: per-point solver force is integrated to N*s, aggregated
+by canonical entity pair, and evaluated with
+`mujoco_resting_impulse_n_s_v1`; sensor overlaps remain zero-impulse evidence.
+The next v2 increment packages the first perturbed cross-backend divergence as a
+Failure Capsule.

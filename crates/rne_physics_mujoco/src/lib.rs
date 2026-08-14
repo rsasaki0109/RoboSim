@@ -30,6 +30,7 @@ pub fn backend_manifest() -> PhysicsBackendManifest {
         [
             PhysicsCapability::RigidBody,
             PhysicsCapability::Articulation,
+            PhysicsCapability::ContactForce,
         ],
         PhysicsBackendRepeatability::ToleranceBounded,
     )
@@ -61,7 +62,8 @@ mod tests {
             manifest.capabilities,
             vec![
                 PhysicsCapability::RigidBody,
-                PhysicsCapability::Articulation
+                PhysicsCapability::Articulation,
+                PhysicsCapability::ContactForce,
             ]
         );
         assert_eq!(

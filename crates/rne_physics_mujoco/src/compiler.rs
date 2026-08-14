@@ -3,8 +3,8 @@
 use rne_ecs::{Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointActuation, PhysicsCapability, PhysicsWorldDesc,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, FixedJointDesc, JointActuation, PhysicsWorldDesc, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use std::fmt::Write as _;
@@ -91,8 +91,6 @@ struct BodyInput {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub(crate) enum CompileError {
-    #[error("MuJoCo backend lacks required capability {0:?}")]
-    MissingCapability(PhysicsCapability),
     #[error("MuJoCo rigid-body world is empty")]
     EmptyWorld,
     #[error("entity {entity_index} has a collider but no rigid body")]
@@ -545,11 +543,6 @@ fn validate_body(
     {
         return Err(invalid(entity_index, "restitution"));
     }
-    if collider.sensor {
-        return Err(CompileError::MissingCapability(
-            PhysicsCapability::ContactForce,
-        ));
-    }
     match collider.shape {
         ColliderShape::Sphere { radius_m } => validate_positive(entity_index, "radius_m", radius_m),
         ColliderShape::Cuboid { half_extents_m } => {
@@ -604,9 +597,14 @@ fn write_geom(
     };
     let rotation = collider.local_offset.rotation * alignment;
     let indent = "  ".repeat(depth);
+    let sensor_attributes = if collider.sensor {
+        " contype=\"0\" conaffinity=\"0\""
+    } else {
+        ""
+    };
     writeln!(
         output,
-        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\" mass=\"{:.17}\" friction=\"{:.9}\"/>",
+        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\" mass=\"{:.17}\" friction=\"{:.9}\"{sensor_attributes}/>",
         vector(collider.local_offset.translation),
         quaternion(rotation),
         rigid_body.mass_kg,

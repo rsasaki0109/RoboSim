@@ -12,8 +12,8 @@ orientation, linear velocity, and angular velocity synchronize in both direction
 at an explicit fixed timestep. Model topology is immutable after compilation.
 
 `MuJoCoBackend::preflight_world` validates the topology before native model
-creation. Contact sensors, kinematic motion, invalid units, malformed joint
-graphs, and other unsupported inputs fail explicitly instead of being silently approximated.
+creation. Kinematic motion, invalid units, malformed joint graphs, and other
+unsupported inputs fail explicitly instead of being silently approximated.
 The original caller-owned one-sphere MJCF constructor remains as a compatibility
 fixture, not as the primary backend path.
 
@@ -28,7 +28,15 @@ compile into nested hinge/slide joints, scalar state synchronizes through
 velocity, and direct effort/force modes. Invalid values or a command whose units
 do not match the joint kind return `PhysicsError::InvalidActuation` before the
 step. Rapier implements the same command contract, and the shared revolute vector
-uses it directly. Contacts and raycasts are not yet advertised by MuJoCo.
+uses it directly.
+
+The backend also advertises `contact_force`. Native contact-point forces are
+integrated over the fixed step, summed across every point for the same canonical
+entity pair, and emitted with a stable A-to-B normal. Disabled-response sensor
+geometries are checked explicitly and emit zero-normal, zero-impulse overlaps.
+The shared resting-load vector uses the unit-bearing
+`mujoco_resting_impulse_n_s_v1` tolerance and records a canonical snapshot hash.
+Raycasts are not yet advertised by MuJoCo.
 
 ## Runtime and provenance
 

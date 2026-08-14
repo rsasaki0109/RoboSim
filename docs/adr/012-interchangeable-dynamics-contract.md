@@ -42,7 +42,10 @@ golden JSON shape.
 Analytic, Rapier, and feature-gated MuJoCo now run through one generic catalog
 without exposing backend-only observation APIs. Experimental backends can call
 the kit before promotion and receive an honest failing report for missing
-profiles. MuJoCo has joined with `rigid_body` and `articulation` while remaining
-default-off. Rapier and MuJoCo consume the same unit-explicit `JointActuation`
-commands and synchronize the same backend-neutral joint state; invalid command
-units or values fail before stepping.
+profiles. MuJoCo has joined with `rigid_body`, `articulation`, and
+`contact_force` while remaining default-off. Rapier and MuJoCo consume the same
+unit-explicit `JointActuation` commands and synchronize the same backend-neutral
+joint state; invalid command units or values fail before stepping. MuJoCo
+contact-point forces are integrated over the fixed step and reduced to the same
+canonical entity-pair evidence as Rapier, without exposing MuJoCo model, data,
+geometry, or contact types through `rne_physics`.

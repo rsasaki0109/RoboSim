@@ -7,7 +7,7 @@ use crate::compiler::{
 use crate::EXPECTED_MUJOCO_VERSION_PREFIX;
 use mujoco_rs::prelude::{MjData, MjModel, MjtObj};
 use rne_core::SimDuration;
-use rne_ecs::World;
+use rne_ecs::{Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
     ColliderShape, ContactEvent, JointActuation, JointMotor, JointState, PhysicsBackend,
@@ -15,7 +15,7 @@ use rne_physics::{
     RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 const FREE_FALL_BODY_NAME: &str = "rne_free_fall_body";
@@ -26,6 +26,7 @@ const EXPECTED_FREE_JOINT_QVEL_LEN: usize = 6;
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
     PhysicsCapability::Articulation,
+    PhysicsCapability::ContactForce,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -51,12 +52,6 @@ pub enum MuJoCoError {
     /// The model does not match the supported free-joint sphere fixture.
     #[error("unsupported MuJoCo fixture: {0}")]
     UnsupportedFixture(String),
-    /// The ECS world requires an undeclared backend capability.
-    #[error("MuJoCo backend lacks required capability {capability:?}")]
-    MissingCapability {
-        /// Capability required by the rejected ECS world.
-        capability: PhysicsCapability,
-    },
     /// The fixed topology changed after the native model was compiled.
     #[error("MuJoCo world topology changed after step 0")]
     TopologyChanged,
@@ -94,7 +89,8 @@ pub struct MuJoCoColliderHandle(pub(crate) u32);
 /// MuJoCo model and data types remain private implementation details. Dynamic
 /// bodies use free joints, fixed bodies are welded into the compiled world, and
 /// state crosses the backend boundary through RNE transforms and velocities.
-/// Contact reporting, raycasts, and articulation are separate capabilities.
+/// Contact reporting includes canonical pair aggregation and sensor overlaps;
+/// raycasts remain a separate capability.
 #[derive(Debug)]
 pub struct MuJoCoBackend {
     model_source: ModelSource,
@@ -116,6 +112,18 @@ struct MuJoCoWorld {
     topology: Vec<BodyTopology>,
     caller_mjcf: bool,
     timestep_s: f64,
+    geom_entities: Vec<Option<Entity>>,
+    sensor_geoms: Vec<bool>,
+    contacts: Vec<ContactEvent>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ContactAccumulator {
+    entity_a: Entity,
+    entity_b: Entity,
+    weighted_normal: Vec3,
+    fallback_normal: Vec3,
+    impulse_n_s: f64,
 }
 
 impl MuJoCoBackend {
@@ -171,7 +179,7 @@ impl MuJoCoBackend {
     /// Validates the ECS topology without creating a native MuJoCo model.
     ///
     /// This is the fail-fast capability boundary used before the first step.
-    /// It reports articulation and sensor requirements explicitly and keeps
+    /// It reports unsupported topology before native model creation and keeps
     /// backend-native model types private.
     pub fn preflight_world(&self, world: &World) -> Result<(), MuJoCoError> {
         match &self.model_source {
@@ -200,9 +208,6 @@ impl MuJoCoBackend {
 
     fn map_error(error: MuJoCoError) -> PhysicsError {
         match error {
-            MuJoCoError::MissingCapability { capability } => PhysicsError::MissingCapabilities {
-                missing: vec![capability],
-            },
             MuJoCoError::InvalidActuation {
                 entity_index,
                 reason,
@@ -217,9 +222,6 @@ impl MuJoCoBackend {
 
 fn map_compile_error(error: CompileError) -> MuJoCoError {
     match error {
-        CompileError::MissingCapability(capability) => {
-            MuJoCoError::MissingCapability { capability }
-        }
         CompileError::InvalidActuation {
             entity_index,
             reason,
@@ -368,6 +370,177 @@ fn require_compiled_model(model: &MjModel, bindings: &[BodyBinding]) -> Result<(
         }
     }
     Ok(())
+}
+
+fn geometry_bindings(
+    data: &MjData<Box<MjModel>>,
+    bindings: &[BodyBinding],
+    world: &World,
+) -> Result<(Vec<Option<Entity>>, Vec<bool>), MuJoCoError> {
+    let model = data.model();
+    let mut body_entities = HashMap::new();
+    for binding in bindings {
+        let body_id = model
+            .name_to_id(MjtObj::mjOBJ_BODY, &binding.body_name)
+            .ok_or_else(|| {
+                MuJoCoError::UnsupportedFixture(format!(
+                    "compiled model is missing body {}",
+                    binding.body_name
+                ))
+            })?;
+        let sensor = world
+            .get::<rne_physics::Collider>(binding.entity)
+            .ok_or_else(|| {
+                MuJoCoError::UnsupportedFixture(
+                    "collider disappeared while binding geometry".to_owned(),
+                )
+            })?
+            .sensor;
+        body_entities.insert(body_id, (binding.entity, sensor));
+    }
+
+    let mut geom_entities = Vec::with_capacity(model.geom_bodyid().len());
+    let mut sensor_geoms = Vec::with_capacity(model.geom_bodyid().len());
+    for body_id in model.geom_bodyid() {
+        let binding = usize::try_from(*body_id)
+            .ok()
+            .and_then(|body_id| body_entities.get(&body_id));
+        geom_entities.push(binding.map(|(entity, _)| *entity));
+        sensor_geoms.push(binding.is_some_and(|(_, sensor)| *sensor));
+    }
+    Ok((geom_entities, sensor_geoms))
+}
+
+fn collect_contact_events(
+    data: &mut MjData<Box<MjModel>>,
+    geom_entities: &[Option<Entity>],
+    sensor_geoms: &[bool],
+    timestep_s: f64,
+) -> Result<Vec<ContactEvent>, MuJoCoError> {
+    let mut pairs = BTreeMap::<(u32, u32), ContactAccumulator>::new();
+    let contact_count = data.contact().len();
+    for contact_id in 0..contact_count {
+        let contact = &data.contact()[contact_id];
+        let Some(entity_1) = usize::try_from(contact.geom1)
+            .ok()
+            .and_then(|index| geom_entities.get(index))
+            .copied()
+            .flatten()
+        else {
+            continue;
+        };
+        let Some(entity_2) = usize::try_from(contact.geom2)
+            .ok()
+            .and_then(|index| geom_entities.get(index))
+            .copied()
+            .flatten()
+        else {
+            continue;
+        };
+        if entity_1 == entity_2 {
+            continue;
+        }
+
+        let native_normal = Vec3::from_slice(&contact.frame[..3]);
+        let normal_force_n = data.contact_force(contact_id)[0];
+        if !native_normal.is_finite() || !normal_force_n.is_finite() {
+            return Err(MuJoCoError::NonFiniteState("contact evidence"));
+        }
+        let normal_length_squared = native_normal.length_squared();
+        if normal_length_squared <= 1.0e-24 {
+            return Err(MuJoCoError::UnsupportedFixture(
+                "MuJoCo produced a zero contact normal".to_owned(),
+            ));
+        }
+        let native_normal = native_normal / normal_length_squared.sqrt();
+        let impulse_n_s = normal_force_n.max(0.0) * timestep_s;
+        if !impulse_n_s.is_finite() {
+            return Err(MuJoCoError::NonFiniteState("contact impulse"));
+        }
+        let (entity_a, entity_b, normal) = if entity_1.index() <= entity_2.index() {
+            (entity_1, entity_2, native_normal)
+        } else {
+            (entity_2, entity_1, -native_normal)
+        };
+        let accumulator =
+            pairs
+                .entry((entity_a.index(), entity_b.index()))
+                .or_insert(ContactAccumulator {
+                    entity_a,
+                    entity_b,
+                    weighted_normal: Vec3::ZERO,
+                    fallback_normal: Vec3::ZERO,
+                    impulse_n_s: 0.0,
+                });
+        accumulator.weighted_normal += normal * impulse_n_s;
+        accumulator.fallback_normal += normal;
+        accumulator.impulse_n_s += impulse_n_s;
+    }
+
+    if geom_entities.len() != sensor_geoms.len() {
+        return Err(MuJoCoError::UnsupportedFixture(
+            "geometry binding lengths differ".to_owned(),
+        ));
+    }
+    for geom_a in 0..geom_entities.len() {
+        for geom_b in (geom_a + 1)..geom_entities.len() {
+            if !(sensor_geoms[geom_a] || sensor_geoms[geom_b]) {
+                continue;
+            }
+            let (Some(entity_1), Some(entity_2)) = (geom_entities[geom_a], geom_entities[geom_b])
+            else {
+                continue;
+            };
+            if entity_1 == entity_2 {
+                continue;
+            }
+            let distance_m = data.geom_distance(geom_a, geom_b, 0.0, None);
+            if !distance_m.is_finite() {
+                return Err(MuJoCoError::NonFiniteState("sensor distance"));
+            }
+            if distance_m > 0.0 {
+                continue;
+            }
+            let (entity_a, entity_b) = if entity_1.index() <= entity_2.index() {
+                (entity_1, entity_2)
+            } else {
+                (entity_2, entity_1)
+            };
+            pairs
+                .entry((entity_a.index(), entity_b.index()))
+                .or_insert(ContactAccumulator {
+                    entity_a,
+                    entity_b,
+                    weighted_normal: Vec3::ZERO,
+                    fallback_normal: Vec3::ZERO,
+                    impulse_n_s: 0.0,
+                });
+        }
+    }
+
+    pairs
+        .into_values()
+        .map(|pair| {
+            if pair.impulse_n_s > f32::MAX as f64 {
+                return Err(MuJoCoError::NonFiniteState("contact impulse"));
+            }
+            let weighted_length_squared = pair.weighted_normal.length_squared();
+            let fallback_length_squared = pair.fallback_normal.length_squared();
+            let normal = if weighted_length_squared > 1.0e-24 {
+                pair.weighted_normal / weighted_length_squared.sqrt()
+            } else if fallback_length_squared > 1.0e-24 {
+                pair.fallback_normal / fallback_length_squared.sqrt()
+            } else {
+                Vec3::ZERO
+            };
+            Ok(ContactEvent {
+                entity_a: pair.entity_a,
+                entity_b: pair.entity_b,
+                normal,
+                impulse: pair.impulse_n_s as f32,
+            })
+        })
+        .collect()
 }
 
 fn sync_from_ecs_state(
@@ -658,6 +831,9 @@ impl PhysicsBackend for MuJoCoBackend {
                 topology: Vec::new(),
                 caller_mjcf,
                 timestep_s,
+                geom_entities: Vec::new(),
+                sensor_geoms: Vec::new(),
+                contacts: Vec::new(),
             },
         );
         Ok(id)
@@ -692,6 +868,17 @@ impl PhysicsBackend for MuJoCoBackend {
         }
         world_state.bindings = compiled.bindings;
         world_state.topology = compiled.topology;
+        let (geom_entities, sensor_geoms) = geometry_bindings(
+            world_state
+                .data
+                .as_ref()
+                .ok_or(PhysicsError::InitializationFailed)?,
+            &world_state.bindings,
+            world,
+        )
+        .map_err(Self::map_error)?;
+        world_state.geom_entities = geom_entities;
+        world_state.sensor_geoms = sensor_geoms;
         sync_from_ecs_state(
             world_state
                 .data
@@ -722,16 +909,22 @@ impl PhysicsBackend for MuJoCoBackend {
             .as_mut()
             .ok_or(PhysicsError::InitializationFailed)?;
         data.step();
-        if data
+        if !data
             .qpos()
             .iter()
             .chain(data.qvel().iter())
             .all(|value| value.is_finite())
         {
-            Ok(())
-        } else {
-            Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")))
+            return Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")));
         }
+        world_state.contacts = collect_contact_events(
+            data,
+            &world_state.geom_entities,
+            &world_state.sensor_geoms,
+            world_state.timestep_s,
+        )
+        .map_err(Self::map_error)?;
+        Ok(())
     }
 
     fn sync_to_ecs(
@@ -837,10 +1030,8 @@ impl PhysicsBackend for MuJoCoBackend {
         })
     }
 
-    fn contacts(&self, _physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
-        Err(PhysicsError::MissingCapabilities {
-            missing: vec![PhysicsCapability::ContactForce],
-        })
+    fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
+        Ok(&self.world(physics_world)?.contacts)
     }
 
     fn capabilities(&self) -> &[PhysicsCapability] {

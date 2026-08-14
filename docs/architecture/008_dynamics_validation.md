@@ -29,9 +29,10 @@ The fixed-step free-fall vector checks observable pose and velocity with both
 backends. Exact repeatability compares the versioned canonical snapshot and its
 FNV-1a digest separately for each backend; analytic-vs-Rapier comparisons use
 registered SI-unit bounds instead of claiming cross-solver bit equality.
-Rapier-specific vectors cover revolute anchor/limit behavior, canonical resting
-contact impulse, and repeated ordered raycast batches. Coverage fails when an
-advertised capability has no passing evidence.
+Capability vectors cover revolute anchor/limit behavior, canonical resting
+contact impulse, and repeated ordered raycast batches. The feature-gated MuJoCo
+backend runs the same rigid-body, articulation, and contact vectors; coverage
+fails when an advertised capability has no passing evidence.
 
 The contact vector also records an important current backend convention:
 Rapier maps `RigidBody::mass_kg` to Rapier's additional body mass, while a
@@ -40,6 +41,11 @@ density. The expected resting impulse therefore uses the effective sum of both
 masses. This is measured compatibility behavior, not a backend-neutral promise;
 callers that need exact total-mass semantics must account for collider density
 until that API is versioned explicitly.
+
+MuJoCo treats `RigidBody::mass_kg` as the compiled geom's total mass. Its named
+contact profile therefore compares the summed per-point normal force integrated
+over `dt` with `mass * g * dt`. Keeping the two mass profiles explicit prevents
+solver-specific mass interpretation from becoming an accidental core contract.
 
 ## Scenarios and references
 
