@@ -1,5 +1,12 @@
 # Roadmap
 
+The canonical forward-looking product strategy is
+[PRODUCT_STRATEGY_2026_2029.md](PRODUCT_STRATEGY_2026_2029.md). It defines the
+north star, sequencing, release gates, 1.0 readiness criteria, and immediate
+12-week plan. The sections below retain detailed milestone history and
+implementation evidence; when a forward priority or version label conflicts,
+the product strategy takes precedence.
+
 ## OSS-compatible simulation workflow
 
 The next product arc closes the common workflow gap with open simulators such
