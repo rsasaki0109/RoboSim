@@ -8,6 +8,7 @@
 
 #![deny(missing_docs)]
 
+pub mod physical_evidence;
 pub mod session;
 
 use rne_ai::{

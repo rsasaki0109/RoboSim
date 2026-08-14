@@ -475,7 +475,7 @@ fn read_regular_file(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).with_context(|| format!("could not read artifact `{}`", path.display()))
 }
 
-fn verify_directory(root: &Path) -> Result<()> {
+pub(crate) fn verify_directory(root: &Path) -> Result<()> {
     let root_metadata = fs::symlink_metadata(root)
         .with_context(|| format!("could not inspect capsule directory `{}`", root.display()))?;
     anyhow::ensure!(

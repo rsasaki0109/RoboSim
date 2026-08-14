@@ -172,6 +172,16 @@ device identity to equal the Ready handshake. Mock and physical bridge
 identities are distinct. A Completed outcome additionally requires a clean,
 unlatched, disconnected gateway with no pending actuation.
 
+LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
+artifact by explicit kind/schema, a unique canonical relative path, and a
+`sha256:` digest. It binds one
+physical device and upstream revision to two-person power isolation, an
+independently observed host-loss stop within the 500 ms watchdog bound, clean
+host reproduction, shadow/HIL/live sessions, camera data, offline evaluation,
+and a Failure Capsule. Its self-excluding content digest protects the index;
+`cargo run -p xtask -- lekiwi-evidence verify MANIFEST` rehashes and
+semantically validates the entire tree.
+
 Failure Capsule tooling preserves the concrete TaskSpec, hardware-session,
 LeKiwi reference-session, wire-trace, shadow-report, and mock-conformance kinds
 instead of flattening them to generic evidence. Creation and verification

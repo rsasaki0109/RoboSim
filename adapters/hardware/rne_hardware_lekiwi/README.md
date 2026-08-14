@@ -44,3 +44,9 @@ authority procedure, required power isolation, and evidence checklist are in
 [the reference-hardware runbook](../../../docs/REFERENCE_HARDWARE_LEKIWI.md).
 The repository does not claim a real-hardware pass until the resulting
 artifacts are committed and independently verified.
+
+The final evidence set uses a versioned manifest rather than a handwritten
+checklist. `cargo run -p xtask -- lekiwi-evidence seal DRAFT OUTPUT` hashes and
+seals it; `cargo run -p xtask -- lekiwi-evidence verify MANIFEST` replays all
+nested session, dataset, comparison, and Failure Capsule contracts. See the
+runbook for the required draft fields and stage semantics.

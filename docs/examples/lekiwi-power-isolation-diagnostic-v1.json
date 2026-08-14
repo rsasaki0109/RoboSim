@@ -1,0 +1,11 @@
+{
+  "kind": "rne_lekiwi_power_isolation_diagnostic",
+  "schema_version": 1,
+  "run_id": "REPLACE_RUN_ID",
+  "device_id": "rne.lekiwi_so101.physical.v1:REPLACE_ROBOT_ID",
+  "primary_operator_id": "REPLACE_PRIMARY_OPERATOR",
+  "safety_operator_id": "REPLACE_SAFETY_OPERATOR",
+  "physical_power_removed": false,
+  "actuator_output_stopped": false,
+  "observation_method": "REPLACE_OBSERVATION_METHOD"
+}

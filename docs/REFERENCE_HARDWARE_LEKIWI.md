@@ -1,7 +1,8 @@
 # LeKiwi + SO-101 reference hardware
 
-Status: selected profile, device bridge, and profile-bound evidence runner;
-physical shadow/HIL/live evidence not yet captured.
+Status: selected profile, device bridge, profile-bound evidence runner, and
+machine-verifiable physical-evidence manifest; physical shadow/HIL/live
+evidence has not yet been captured.
 
 ## Selection
 
@@ -187,6 +188,51 @@ interface for a separately reviewed SSH transport, but this release does not
 claim one. Standard error may be retained as diagnostics but is not protocol
 evidence.
 
+## Seal and verify the physical evidence set
+
+Copy `docs/examples/lekiwi-physical-evidence-draft-v1.json` into the evidence
+directory. Also copy the two operator-diagnostic JSON examples into its
+`diagnostics` directory. Replace every `REPLACE_*` value, keep every artifact
+path relative to the manifest, and change each attestation and diagnostic
+boolean only after the physical procedure was performed. The host-termination latency plus measurement
+uncertainty must be at most the pinned 500 ms device-watchdog deadline. The
+primary and cutoff operators must be different declared operators.
+
+The Failure Capsule requires a standalone copy of the wire trace as well as
+the complete profile-bound session. Extract it without hand-editing JSON:
+
+    cargo run -p xtask -- lekiwi-evidence extract-trace \
+      artifacts/lekiwi-elevated-shadow.json artifacts/lekiwi-shadow-trace.json
+
+After every referenced file exists, `seal` hashes the exact bytes, rejects
+escaping paths and symlinks, computes the self-excluding manifest digest, and
+refuses to overwrite its output. The draft and sealed output stay in the same
+directory so relative paths cannot silently change meaning:
+
+    cargo run -p xtask -- lekiwi-evidence seal \
+      artifacts/physical-evidence-draft.json \
+      artifacts/physical-evidence.json
+
+Then run the semantic verifier:
+
+    cargo run -p xtask -- lekiwi-evidence verify \
+      artifacts/physical-evidence.json
+
+Verification rehashes every indexed file and rejects a mock identity, mixed
+physical device IDs, reused session IDs, an Actuate frame in shadow, fewer than
+1,800 shadow observations, a failing or incomplete shadow comparison, wrong
+HIL stop reasons, a reconnect without a fresh completed session, floor motion
+above 0.02 m/s per linear axis, a live success with no motion, and a live
+failure that completed normally. It also streams and hashes the complete
+camera dataset, requires calibrated non-empty front and wrist RGB streams,
+binds a passing offline depth evaluation to that dataset, and fully verifies
+the Failure Capsule directory. The typed power-isolation and host-termination
+diagnostics must agree with the manifest, the terminated request must not be
+presented as a complete session, and the reconnect ID must equal the fresh
+completed HIL session. The capsule must contain the exact indexed
+TaskSpec, shadow session and comparison bytes, a standalone wire trace, and a
+simulation failure replay from the same RNE commit.
+
 ## Required exit evidence
 
 The v0.6 reference-device claim remains open until one source commit has all of
@@ -207,6 +253,11 @@ the following:
 - device inventory, calibration digest, operator checklist, and an explicit
   statement that physical power isolation was tested;
 - reproduction from a clean host checkout.
+
+These requirements are represented by
+`rne_lekiwi_physical_evidence_manifest` schema v1. A structurally valid
+manifest is still not a pass: only the command above emits the final verified
+line after replaying every nested contract.
 
 A profile golden or mock process pass is not physical evidence. Until these
 artifacts exist, roadmap language must say that real-hardware evidence remains

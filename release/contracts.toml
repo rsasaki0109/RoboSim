@@ -61,6 +61,9 @@ mock_conformance = 1
 reference_profile = 1
 lekiwi_device_bridge = 1
 lekiwi_reference_session = 1
+lekiwi_physical_evidence = 1
+lekiwi_power_isolation_diagnostic = 1
+lekiwi_host_termination_diagnostic = 1
 
 [evidence]
 fuzz_smoke_report = 1

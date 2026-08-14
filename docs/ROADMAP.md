@@ -73,7 +73,10 @@ bridge, shadow-authority, and independent-watchdog tests. A profile-bound host
 runner now turns the actual Open/poll/actuate/zero-stop/Close exchange into one
 validated artifact, distinguishes mock from physical device identity, and
 refuses a clean completion with authority, pending output, or a safety latch.
-A real LeKiwi shadow, HIL safety matrix, and low-speed live run remain open.
+A versioned physical-evidence manifest and staged verifier now prevent mock,
+mixed-device, incomplete safety, unverified dataset, or checklist-only output
+from satisfying the exit. A real LeKiwi shadow, HIL safety matrix, and
+low-speed live run remain open.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

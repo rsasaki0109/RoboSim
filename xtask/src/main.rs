@@ -6,6 +6,7 @@ mod capability_report;
 mod dataset;
 mod evidence;
 mod failure_capsule;
+mod lekiwi_evidence;
 mod release_artifacts;
 mod release_exit;
 mod task_scale;
@@ -116,6 +117,7 @@ fn run() -> anyhow::Result<()> {
         "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
         "evidence" => evidence::evidence(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
+        "lekiwi-evidence" => lekiwi_evidence::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -1184,6 +1186,27 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "hardware",
             "lekiwi_reference_session",
             u64::from(rne_hardware_lekiwi::session::LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "lekiwi_physical_evidence",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "lekiwi_power_isolation_diagnostic",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_DIAGNOSTIC_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "lekiwi_host_termination_diagnostic",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_DIAGNOSTIC_SCHEMA_VERSION,
+            ),
         ),
         (
             "evidence",
