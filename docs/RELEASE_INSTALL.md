@@ -91,6 +91,9 @@ commands are headless and require neither ROS2 nor a renderer.
 The compatibility command reads only the retained registry and fixtures under
 the extracted bundle, verifies their canonical JSON digests, runs the current
 typed readers, and checks fail-closed future-schema and unknown-field handling.
+Its historical matrix restores complete sensor-bearing snapshot-v1 and
+snapshot-v2 artifacts as snapshot-v3 and verifies source and restored-state
+digests; Git history is required only by source `release-check`.
 
 The bundle includes the dependency-free authoring module at
 `sdk/rust/rne_plugin_sdk.rs`. To prove the installed authoring path with no

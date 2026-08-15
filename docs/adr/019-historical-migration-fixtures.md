@@ -33,3 +33,6 @@ tests do not depend on source-checkout paths.
   tolerance where applicable, and current normalized-state digest.
 - One passing migration does not imply that every historical format is covered;
   broader history and the long stability window remain separate gates.
+
+ADR 021 extends this mechanism with provenance-bound, nonzero v1 and v2 source
+artifacts while retaining the original case.

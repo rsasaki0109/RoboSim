@@ -281,13 +281,19 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
-The fifteen-fixture registry additionally freezes a complete frontend
+The seventeen-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
-v1, scenario replay v4, the controller C ABI-v3 64-bit layout, and a historical
-mobile-manipulator snapshot-v1 to snapshot-v3 migration. The migration fixture
-omits fields introduced in v2 and v3, restores it with the current physics
-path, and fixes the complete normalized v3 state at a `1e-9` floating-point
-tolerance. Binary fixtures pair semantic fields with lowercase hex bytes:
+v1, scenario replay v4, the controller C ABI-v3 64-bit layout, and three
+historical mobile-manipulator migrations. The original zero-step schema-v1
+case remains retained. Two stronger cases contain 7-tick, sensor-bearing
+schema-v1 and schema-v2 snapshots emitted by ancestor revisions `47525b1` and
+`2255cbe`. They bind the full source commit/tree, workspace version, scene,
+generation step count, source digest, and complete normalized v3 digest at a
+`1e-9` floating-point tolerance. The v2 case must preserve a populated depth
+frame; both pre-v3 cases must omit grasp-retarget state. Source release checks
+require both revisions and exact trees to remain reachable ancestors, while
+the extracted bundle verifies the content-addressed data without requiring a
+Git checkout. Binary fixtures pair semantic fields with lowercase hex bytes:
 acceptance requires exact decode/re-encode identity plus rejection of
 truncation and trailing bytes. Frontend validation also rejects corrupt magic,
 unknown message kinds, and an incompatible negotiated major version.

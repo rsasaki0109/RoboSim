@@ -583,6 +583,12 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
             "gate {} no longer starts from actions/checkout@v4",
             gate.id
         );
+        if gate.id == "release_contract" {
+            anyhow::ensure!(
+                normalized.contains("fetch-depth: 0"),
+                "release contract gate must retain full history for migration provenance"
+            );
+        }
         for command in &gate.commands {
             anyhow::ensure!(
                 normalized.contains(&normalize_workflow(command)),

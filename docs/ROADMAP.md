@@ -115,7 +115,7 @@ evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for fifteen TaskSpec, checkpoint, generic/behavior/scenario replay,
+corpus for seventeen TaskSpec, checkpoint, generic/behavior/scenario replay,
 dataset, frontend, controller C ABI, historical migration, Failure Capsule,
 hardware, and physics artifacts. `rne-compatibility` runs every current typed reader, proves
 fail-closed handling of a deterministic future schema and unknown field, and
@@ -127,8 +127,10 @@ their exact call shapes from source CI and the installed ABI3 wheel. This
 advances the freeze but does not replace external-use or six-month stability
 gates.
 
-The first historical case restores mobile-manipulator snapshot v1 as v3 and
-compares the complete normalized state within the registered tolerance.
+The historical matrix retains the original schema-v1 case and restores actual
+7-tick, sensor-bearing schema-v1 and schema-v2 artifacts as v3. It binds each
+source revision/tree and source/current digest, preserves the v2 depth frame,
+and compares complete normalized state within the registered tolerance.
 The Rust surface now has a fixed 31-crate baseline registry. CI verifies the
 recorded commit/tree, exact package paths, and pinned semver-checks version
 before applying patch-level compatibility rules; moving PR bases cannot erase

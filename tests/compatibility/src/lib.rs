@@ -46,6 +46,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 /// Stable compatibility report discriminator.
 pub const COMPATIBILITY_FIXTURE_REPORT_KIND: &str = "rne_compatibility_fixture_report";
@@ -53,6 +54,8 @@ pub const COMPATIBILITY_FIXTURE_REPORT_KIND: &str = "rne_compatibility_fixture_r
 pub const COMPATIBILITY_FIXTURE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Current registry schema.
 pub const COMPATIBILITY_FIXTURE_REGISTRY_SCHEMA_VERSION: u32 = 1;
+/// Provenance-bound historical migration fixture schema.
+pub const HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION: u32 = 2;
 
 const MAX_FIXTURE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: u64 = 256 * 1024;
@@ -66,7 +69,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 15] = [
+const FIXTURE_SPECS: [FixtureSpec; 17] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -128,6 +131,18 @@ const FIXTURE_SPECS: [FixtureSpec; 15] = [
         version_field: "schema_version",
     },
     FixtureSpec {
+        id: "mobile_manipulator_snapshot_v1_47525b1_to_v3",
+        contract: "historical_mobile_manipulator_snapshot_provenance",
+        schema_version: HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "mobile_manipulator_snapshot_v2_2255cbe_to_v3",
+        contract: "historical_mobile_manipulator_snapshot_provenance",
+        schema_version: HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
         id: "physics_conformance_v2",
         contract: "physics_conformance",
         schema_version: 2,
@@ -162,6 +177,36 @@ const FIXTURE_SPECS: [FixtureSpec; 15] = [
 const CONTROLLER_C_ABI_LAYOUT_KIND: &str = "rne_controller_c_abi_layout";
 const HISTORICAL_MIGRATION_KIND: &str = "rne_historical_migration_case";
 const HISTORICAL_MIGRATION_FLOAT_TOLERANCE: f64 = 1.0e-9;
+const HISTORICAL_SOURCE_SCENE: &str = "assets/scenes/mm_minimal.rne.scene.toml";
+const HISTORICAL_SOURCE_WORKSPACE_VERSION: &str = "0.8.0";
+const HISTORICAL_SOURCE_GENERATION_STEPS: u64 = 7;
+const HISTORICAL_V1_REVISION: &str = "47525b127a77cbffa9da27b1e0c127ee673aa641";
+const HISTORICAL_V1_TREE: &str = "bb408cec26d34bd2a9b423dbf8b2a4d44cdf7013";
+const HISTORICAL_V2_REVISION: &str = "2255cbefec9d1eb5040603fbb119a290ad855191";
+const HISTORICAL_V2_TREE: &str = "373e5453c7ba94ee4efbeceb9985db4c97f5feff";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HistoricalSourceSpec {
+    fixture_id: &'static str,
+    schema_version: u32,
+    revision: &'static str,
+    tree: &'static str,
+}
+
+const HISTORICAL_SOURCE_SPECS: [HistoricalSourceSpec; 2] = [
+    HistoricalSourceSpec {
+        fixture_id: "mobile_manipulator_snapshot_v1_47525b1_to_v3",
+        schema_version: 1,
+        revision: HISTORICAL_V1_REVISION,
+        tree: HISTORICAL_V1_TREE,
+    },
+    HistoricalSourceSpec {
+        fixture_id: "mobile_manipulator_snapshot_v2_2255cbe_to_v3",
+        schema_version: 2,
+        revision: HISTORICAL_V2_REVISION,
+        tree: HISTORICAL_V2_TREE,
+    },
+];
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -180,6 +225,26 @@ struct HistoricalMigrationFixture {
     expected_outcome: MigrationOutcome,
     float_tolerance: f64,
     source_snapshot: Value,
+    current_snapshot_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct HistoricalMigrationProvenanceFixture {
+    kind: String,
+    schema_version: u32,
+    artifact_contract: String,
+    source_schema_version: u32,
+    current_schema_version: u32,
+    source_revision: String,
+    source_tree: String,
+    source_workspace_version: String,
+    source_scene: String,
+    generation_steps: u64,
+    expected_outcome: MigrationOutcome,
+    float_tolerance: f64,
+    source_snapshot: Value,
+    source_snapshot_sha256: String,
     current_snapshot_sha256: String,
 }
 
@@ -546,6 +611,69 @@ pub fn run_compatibility(
     Ok(report)
 }
 
+/// Verifies that provenance-bound historical fixtures still reference the
+/// exact ancestor commits and Git trees that emitted their source schemas.
+///
+/// This source-checkout gate is intentionally separate from
+/// [`run_compatibility`], because an extracted native bundle contains the
+/// content-addressed fixtures but not the repository's Git object database.
+pub fn verify_historical_source_history(root: &Path) -> anyhow::Result<()> {
+    for source in HISTORICAL_SOURCE_SPECS {
+        git_text(
+            root,
+            &["cat-file", "-e", &format!("{}^{{commit}}", source.revision)],
+        )?;
+        let actual_tree = git_text(root, &["show", "-s", "--format=%T", source.revision])?;
+        ensure!(
+            actual_tree.trim() == source.tree,
+            "historical source tree mismatch for {}: expected {}, got {}",
+            source.fixture_id,
+            source.tree,
+            actual_tree.trim()
+        );
+        git_text(
+            root,
+            &["merge-base", "--is-ancestor", source.revision, "HEAD"],
+        )?;
+
+        let cargo_toml = git_text(root, &["show", &format!("{}:Cargo.toml", source.revision)])?;
+        ensure!(
+            cargo_toml.contains(&format!(
+                "version = \"{HISTORICAL_SOURCE_WORKSPACE_VERSION}\""
+            )),
+            "historical source workspace version mismatch for {}",
+            source.fixture_id
+        );
+        let sim_source = git_text(
+            root,
+            &[
+                "show",
+                &format!(
+                    "{}:crates/rne_ai/src/env/mobile_manipulator/sim.rs",
+                    source.revision
+                ),
+            ],
+        )?;
+        ensure!(
+            sim_source.contains(&format!(
+                "MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = {}",
+                source.schema_version
+            )),
+            "historical source schema declaration mismatch for {}",
+            source.fixture_id
+        );
+        git_text(
+            root,
+            &[
+                "cat-file",
+                "-e",
+                &format!("{}:{HISTORICAL_SOURCE_SCENE}", source.revision),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 /// Writes a validated compatibility report as stable pretty JSON.
 pub fn write_report(report: &CompatibilityFixtureReport, path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
@@ -611,7 +739,10 @@ fn check_fixture(
                 unknown_field_rejected,
                 passed,
                 detail: if passed {
-                    if spec.contract == "historical_mobile_manipulator_snapshot" {
+                    if spec
+                        .contract
+                        .starts_with("historical_mobile_manipulator_snapshot")
+                    {
                         "accepted within 1e-9; future schema and unknown field rejected".to_string()
                     } else {
                         "accepted; future schema and unknown field rejected".to_string()
@@ -742,6 +873,10 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
             let fixture: HistoricalMigrationFixture = serde_json::from_value(value)?;
             validate_historical_mobile_manipulator_snapshot(root, &fixture)?;
         }
+        "historical_mobile_manipulator_snapshot_provenance" => {
+            let fixture: HistoricalMigrationProvenanceFixture = serde_json::from_value(value)?;
+            validate_historical_mobile_manipulator_snapshot_provenance(root, spec.id, &fixture)?;
+        }
         "physics_conformance" => {
             let fixture: ConformanceReport = serde_json::from_value(value)?;
             ensure!(fixture.all_passed(), "physics conformance fixture failed");
@@ -853,6 +988,153 @@ fn validate_historical_mobile_manipulator_snapshot(
         .with_context(|| format!("load historical migration scene {}", scene.display()))?;
     sim.restore_snapshot(&snapshot)
         .map_err(|error| anyhow::anyhow!("restore schema-v1 snapshot: {error:?}"))?;
+    let current_snapshot = sim.snapshot();
+    ensure!(
+        current_snapshot.schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "restored snapshot did not normalize to the current schema"
+    );
+    let mut expected_snapshot = snapshot.clone();
+    expected_snapshot.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION;
+    let expected_current = serde_json::to_value(&expected_snapshot)?;
+    let current = serde_json::to_value(&current_snapshot)?;
+    let normalized_expected = canonical_state_value(&expected_current);
+    let normalized_current = canonical_state_value(&current);
+    ensure!(
+        normalized_current == normalized_expected,
+        "historical snapshot restore exceeded tolerance: {}",
+        first_json_difference(&normalized_expected, &normalized_current, "snapshot")
+    );
+    let current_digest = normalized_state_digest(&current)?;
+    ensure!(
+        current_digest == fixture.current_snapshot_sha256,
+        "historical snapshot expected-state digest changed: expected {}, got {}",
+        fixture.current_snapshot_sha256,
+        current_digest
+    );
+
+    let mut unsupported = snapshot.clone();
+    unsupported.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION + 1;
+    ensure!(
+        sim.restore_snapshot(&unsupported).is_err(),
+        "snapshot reader accepted an unsupported future schema"
+    );
+    let mut unknown_source = fixture.source_snapshot.clone();
+    unknown_source
+        .as_object_mut()
+        .context("historical source snapshot must be an object")?
+        .insert("unknown_future_state".to_string(), Value::Bool(true));
+    ensure!(
+        serde_json::from_value::<MobileManipulatorSimSnapshot>(unknown_source).is_err(),
+        "snapshot reader accepted an unknown top-level field"
+    );
+    Ok(())
+}
+
+fn validate_historical_mobile_manipulator_snapshot_provenance(
+    root: &Path,
+    fixture_id: &str,
+    fixture: &HistoricalMigrationProvenanceFixture,
+) -> anyhow::Result<()> {
+    let source = HISTORICAL_SOURCE_SPECS
+        .iter()
+        .find(|source| source.fixture_id == fixture_id)
+        .context("unknown provenance-bound historical migration fixture")?;
+    ensure!(
+        fixture.kind == HISTORICAL_MIGRATION_KIND,
+        "historical migration fixture kind mismatch"
+    );
+    ensure!(
+        fixture.schema_version == HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+        "historical migration provenance schema mismatch"
+    );
+    ensure!(
+        fixture.artifact_contract == "mobile_manipulator_sim_snapshot",
+        "historical migration artifact contract mismatch"
+    );
+    ensure!(
+        fixture.source_schema_version == source.schema_version,
+        "historical snapshot source schema mismatch"
+    );
+    ensure!(
+        fixture.current_schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "historical snapshot current schema mismatch"
+    );
+    ensure!(
+        fixture.source_revision == source.revision && fixture.source_tree == source.tree,
+        "historical snapshot source revision/tree mismatch"
+    );
+    ensure!(
+        fixture.source_workspace_version == HISTORICAL_SOURCE_WORKSPACE_VERSION,
+        "historical snapshot source workspace version mismatch"
+    );
+    ensure!(
+        fixture.source_scene == HISTORICAL_SOURCE_SCENE,
+        "historical snapshot source scene mismatch"
+    );
+    ensure!(
+        fixture.generation_steps == HISTORICAL_SOURCE_GENERATION_STEPS,
+        "historical snapshot generation step count mismatch"
+    );
+    ensure!(
+        fixture.expected_outcome == MigrationOutcome::AcceptedWithinTolerance,
+        "historical snapshot outcome mismatch"
+    );
+    ensure!(
+        fixture.float_tolerance == HISTORICAL_MIGRATION_FLOAT_TOLERANCE,
+        "historical snapshot tolerance mismatch"
+    );
+    validate_sha256(&fixture.source_snapshot_sha256)?;
+    validate_sha256(&fixture.current_snapshot_sha256)?;
+    ensure!(
+        sha256(&serde_json::to_vec(&fixture.source_snapshot)?) == fixture.source_snapshot_sha256,
+        "historical source snapshot digest mismatch"
+    );
+
+    let source_object = fixture
+        .source_snapshot
+        .as_object()
+        .context("historical source snapshot must be an object")?;
+    ensure!(
+        !source_object.contains_key("grasp_retarget"),
+        "pre-v3 source must omit grasp_retarget"
+    );
+    match source.schema_version {
+        1 => ensure!(
+            !source_object.contains_key("wrist_depth_frame"),
+            "schema-v1 source must omit wrist_depth_frame"
+        ),
+        2 => ensure!(
+            source_object
+                .get("wrist_depth_frame")
+                .is_some_and(|value| !value.is_null()),
+            "schema-v2 source must retain a populated wrist_depth_frame"
+        ),
+        other => bail!("unsupported historical source schema {other}"),
+    }
+
+    let snapshot: MobileManipulatorSimSnapshot =
+        serde_json::from_value(fixture.source_snapshot.clone())?;
+    ensure!(
+        snapshot.schema_version == source.schema_version,
+        "historical source payload schema mismatch"
+    );
+    ensure!(
+        snapshot.step_count == HISTORICAL_SOURCE_GENERATION_STEPS
+            && snapshot.sim_ticks > 0
+            && snapshot.joint_state_frame.is_some()
+            && snapshot.wrist_camera_frame.is_some(),
+        "historical source is not the expected nonzero sensor-bearing snapshot"
+    );
+
+    let scene = root.join(HISTORICAL_SOURCE_SCENE);
+    let mut sim = MobileManipulatorSim::from_scene_path(&scene)
+        .with_context(|| format!("load historical migration scene {}", scene.display()))?;
+    sim.restore_snapshot(&snapshot).map_err(|error| {
+        anyhow::anyhow!(
+            "restore schema-v{} historical snapshot: {error:?}",
+            source.schema_version
+        )
+    })?;
     let current_snapshot = sim.snapshot();
     ensure!(
         current_snapshot.schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
@@ -1508,6 +1790,22 @@ fn registry_digest(registry: &CompatibilityFixtureRegistry) -> anyhow::Result<St
     Ok(sha256(&serde_json::to_vec(registry)?))
 }
 
+fn git_text(root: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .with_context(|| format!("run git {}", args.join(" ")))?;
+    ensure!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        bounded_detail(&String::from_utf8_lossy(&output.stderr))
+    );
+    String::from_utf8(output.stdout).context("git output is not UTF-8")
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
@@ -1588,6 +1886,34 @@ mod tests {
             normalized_state_digest(&expected).unwrap(),
             normalized_state_digest(&outside_tolerance).unwrap()
         );
+    }
+
+    #[test]
+    fn historical_provenance_rejects_retargeting_and_source_tampering() {
+        let root = workspace_root();
+        let path =
+            root.join("tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json");
+        let value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let fixture: HistoricalMigrationProvenanceFixture = serde_json::from_value(value).unwrap();
+
+        let mut retargeted = fixture.clone();
+        retargeted.source_revision = "0".repeat(40);
+        assert!(validate_historical_mobile_manipulator_snapshot_provenance(
+            &root,
+            "mobile_manipulator_snapshot_v2_2255cbe_to_v3",
+            &retargeted,
+        )
+        .is_err());
+
+        let mut tampered = fixture;
+        tampered.source_snapshot["sim_ticks"] = Value::from(1_u64);
+        let error = validate_historical_mobile_manipulator_snapshot_provenance(
+            &root,
+            "mobile_manipulator_snapshot_v2_2255cbe_to_v3",
+            &tampered,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("source snapshot digest mismatch"));
     }
 
     #[test]

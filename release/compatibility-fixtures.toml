@@ -72,6 +72,20 @@ path = "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json"
 canonical_json_sha256 = "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f"
 
 [[fixture]]
+id = "mobile_manipulator_snapshot_v1_47525b1_to_v3"
+contract = "historical_mobile_manipulator_snapshot_provenance"
+schema_version = 2
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v1-47525b1-to-v3.json"
+canonical_json_sha256 = "sha256:be30a0bdc92f8fe099410f166c02abc096fab503d40a32b943f0aae7544ea2a8"
+
+[[fixture]]
+id = "mobile_manipulator_snapshot_v2_2255cbe_to_v3"
+contract = "historical_mobile_manipulator_snapshot_provenance"
+schema_version = 2
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json"
+canonical_json_sha256 = "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f"
+
+[[fixture]]
 id = "physics_conformance_v2"
 contract = "physics_conformance"
 schema_version = 2

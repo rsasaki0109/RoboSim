@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:2bd83f2c1bb53da79710e04478862abca1396abf983661fa00f62712c5a0a0c8",
+  "registry_sha256": "sha256:04498ca4d81148691fe99b9de32fe6edb11234efd3d4437af9ff0b08ecbb6335",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -118,6 +118,30 @@
       "schema_version": 1,
       "path": "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
       "canonical_json_sha256": "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted within 1e-9; future schema and unknown field rejected"
+    },
+    {
+      "id": "mobile_manipulator_snapshot_v1_47525b1_to_v3",
+      "contract": "historical_mobile_manipulator_snapshot_provenance",
+      "schema_version": 2,
+      "path": "tests/golden/migrations/mobile-manipulator-snapshot-v1-47525b1-to-v3.json",
+      "canonical_json_sha256": "sha256:be30a0bdc92f8fe099410f166c02abc096fab503d40a32b943f0aae7544ea2a8",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted within 1e-9; future schema and unknown field rejected"
+    },
+    {
+      "id": "mobile_manipulator_snapshot_v2_2255cbe_to_v3",
+      "contract": "historical_mobile_manipulator_snapshot_provenance",
+      "schema_version": 2,
+      "path": "tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json",
+      "canonical_json_sha256": "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

@@ -19,7 +19,7 @@ Run the installed form from the bundle root:
 ```
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains fifteen fixtures:
+contains seventeen fixtures:
 
 | Contract | Retained artifact |
 |---|---|
@@ -29,7 +29,7 @@ contains fifteen fixtures:
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
 | Frontend | protocol-v1 `ClientHello` frame and negotiated limits |
-| Historical migration | mobile-manipulator snapshot v1 restored as v3 |
+| Historical migration | retained zero-step snapshot v1 plus provenance-bound, sensor-bearing snapshots v1 and v2 restored as v3 |
 | Failure evidence | Failure Capsule v1 |
 | Hardware safety | process-mock conformance v1 |
 | Physics | built-in conformance v2 and external-backend conformance v1 |
@@ -55,6 +55,26 @@ registry and fixture content therefore produce identical report bytes on Linux
 and Windows. Canonical JSON hashing deliberately ignores indentation and line
 endings while preserving every parsed field and value.
 
+## Historical source provenance
+
+The two provenance-bound migration cases were serialized after seven fixed
+simulation ticks by the source code that actually declared each schema:
+
+| Source schema | Commit | Git tree | Required retained state |
+|---|---|---|---|
+| v1 | `47525b127a77cbffa9da27b1e0c127ee673aa641` | `bb408cec26d34bd2a9b423dbf8b2a4d44cdf7013` | joint-state and RGB frames; no depth or grasp-retarget field |
+| v2 | `2255cbefec9d1eb5040603fbb119a290ad855191` | `373e5453c7ba94ee4efbeceb9985db4c97f5feff` | joint-state, RGB, and populated depth frames; no grasp-retarget field |
+
+Each fixture stores the complete old snapshot, its canonical digest, source
+workspace version, scene, step count, and the complete tolerance-normalized v3
+digest. The installed runner restores both sources and checks every state value,
+not only the newly added fields. Source `release-check` additionally requires
+both commits to remain ancestors of `HEAD`, match the recorded trees, declare
+the expected schema, and contain the source scene. The release-contract CI job
+therefore uses a full-history checkout. Extracted bundles need no Git history:
+their compiled verifier contains the frozen provenance identities and verifies
+the content-addressed snapshots directly.
+
 ## Change policy
 
 Append a fixture when a candidate-stable artifact becomes release-facing or
@@ -68,6 +88,8 @@ It retains one negotiated frontend reference frame rather than every message
 kind and freezes the C layout rather than every platform's compiled library
 image. Python call shape is verified by the separate installed wheel manifest.
 The fixed 31-crate Rust API baseline establishes source-level history, and the
-snapshot v1-to-v3 case establishes the artifact migration mechanism. Broader
-historical artifact coverage still needs stronger long-window gates.
+snapshot v1/v2-to-v3 matrix establishes multi-generation state migration for
+one artifact family. Replay, dataset, protocol, TaskSpec, and Failure Capsule
+fixtures are retained independently, but equivalent multi-generation migration
+matrices for every evolving artifact family remain future work.
 Independent-use and six-month stability gates remain mandatory.

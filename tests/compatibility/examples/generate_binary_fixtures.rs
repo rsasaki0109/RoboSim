@@ -3,6 +3,7 @@ use rne_ai::{
     mm_minimal_scene_path, MobileManipulatorSim, MobileManipulatorSimSnapshot,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
 };
+use rne_compatibility_suite::HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION;
 use rne_data::transport::{
     negotiate_transport, ClientHello, NegotiationPolicy, SensorFrameMetadata,
     TransportCapabilities, TransportFrame, TransportMessageKind, TRANSPORT_PROTOCOL_MAJOR,
@@ -21,11 +22,28 @@ use std::fs;
 use std::path::Path;
 
 const HISTORICAL_MIGRATION_FLOAT_TOLERANCE: f64 = 1.0e-9;
+const HISTORICAL_SOURCE_SCENE: &str = "assets/scenes/mm_minimal.rne.scene.toml";
+const HISTORICAL_SOURCE_WORKSPACE_VERSION: &str = "0.8.0";
+const HISTORICAL_SOURCE_GENERATION_STEPS: u64 = 7;
+const HISTORICAL_V1_REVISION: &str = "47525b127a77cbffa9da27b1e0c127ee673aa641";
+const HISTORICAL_V1_TREE: &str = "bb408cec26d34bd2a9b423dbf8b2a4d44cdf7013";
+const HISTORICAL_V2_REVISION: &str = "2255cbefec9d1eb5040603fbb119a290ad855191";
+const HISTORICAL_V2_TREE: &str = "373e5453c7ba94ee4efbeceb9985db4c97f5feff";
 
 fn main() -> anyhow::Result<()> {
-    let output = env::args_os()
-        .nth(1)
-        .context("usage: generate_binary_fixtures <output-directory>")?;
+    let mut args = env::args_os().skip(1);
+    let output = args.next().context(
+        "usage: generate_binary_fixtures <output-directory> [<v1-source.json> <v2-source.json>]",
+    )?;
+    let source_args = args.collect::<Vec<_>>();
+    let (v1_source, v2_source) = match source_args.as_slice() {
+        [] => (
+            committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
+            committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
+        ),
+        [v1, v2] => (read_snapshot(Path::new(v1))?, read_snapshot(Path::new(v2))?),
+        _ => anyhow::bail!("expected either zero or two historical source JSON paths"),
+    };
     let output = Path::new(&output);
     fs::create_dir_all(output)
         .with_context(|| format!("create fixture output {}", output.display()))?;
@@ -37,7 +55,137 @@ fn main() -> anyhow::Result<()> {
     write_json(
         &output.join("mobile-manipulator-snapshot-v1-to-v3.json"),
         &mobile_manipulator_snapshot_fixture()?,
+    )?;
+    write_json(
+        &output.join("mobile-manipulator-snapshot-v1-47525b1-to-v3.json"),
+        &historical_snapshot_provenance_fixture(
+            v1_source,
+            1,
+            HISTORICAL_V1_REVISION,
+            HISTORICAL_V1_TREE,
+        )?,
+    )?;
+    write_json(
+        &output.join("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json"),
+        &historical_snapshot_provenance_fixture(
+            v2_source,
+            2,
+            HISTORICAL_V2_REVISION,
+            HISTORICAL_V2_TREE,
+        )?,
     )
+}
+
+fn historical_snapshot_provenance_fixture(
+    source: Value,
+    source_schema_version: u32,
+    source_revision: &str,
+    source_tree: &str,
+) -> anyhow::Result<Value> {
+    ensure!(
+        source.get("schema_version").and_then(Value::as_u64)
+            == Some(u64::from(source_schema_version)),
+        "historical source schema mismatch"
+    );
+    ensure!(
+        source.get("step_count").and_then(Value::as_u64)
+            == Some(HISTORICAL_SOURCE_GENERATION_STEPS),
+        "historical source step count mismatch"
+    );
+    ensure!(
+        source.get("sim_ticks").and_then(Value::as_u64).unwrap_or(0) > 0,
+        "historical source must be captured after simulation advances"
+    );
+    ensure!(
+        source
+            .get("joint_state_frame")
+            .is_some_and(|value| !value.is_null())
+            && source
+                .get("wrist_camera_frame")
+                .is_some_and(|value| !value.is_null()),
+        "historical source must retain joint-state and wrist-camera frames"
+    );
+    match source_schema_version {
+        1 => ensure!(
+            source.get("wrist_depth_frame").is_none(),
+            "schema-v1 source unexpectedly contains wrist_depth_frame"
+        ),
+        2 => ensure!(
+            source
+                .get("wrist_depth_frame")
+                .is_some_and(|value| !value.is_null()),
+            "schema-v2 source must retain a populated wrist_depth_frame"
+        ),
+        other => anyhow::bail!("unsupported historical source schema {other}"),
+    }
+    ensure!(
+        source.get("grasp_retarget").is_none(),
+        "pre-v3 source unexpectedly contains grasp_retarget"
+    );
+
+    let snapshot: MobileManipulatorSimSnapshot = serde_json::from_value(source.clone())?;
+    let scene = mm_minimal_scene_path()
+        .canonicalize()
+        .context("canonicalize historical snapshot restore scene")?;
+    let mut restored = MobileManipulatorSim::from_scene_path(&scene)
+        .context("load historical snapshot restore scene")?;
+    restored
+        .restore_snapshot(&snapshot)
+        .map_err(|error| anyhow::anyhow!("restore historical snapshot: {error:?}"))?;
+    let current = serde_json::to_value(restored.snapshot())?;
+    ensure!(
+        current.get("schema_version").and_then(Value::as_u64)
+            == Some(u64::from(MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION)),
+        "restored snapshot did not normalize to the current schema"
+    );
+    let mut expected = snapshot;
+    expected.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION;
+    ensure!(
+        canonical_state_value(&serde_json::to_value(expected)?) == canonical_state_value(&current),
+        "historical snapshot restore changed retained state"
+    );
+    let source_snapshot_sha256 = sha256(&serde_json::to_vec(&source)?);
+    let current_snapshot_sha256 = sha256(&serde_json::to_vec(&canonical_state_value(&current))?);
+
+    Ok(json!({
+        "kind": "rne_historical_migration_case",
+        "schema_version": HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+        "artifact_contract": "mobile_manipulator_sim_snapshot",
+        "source_schema_version": source_schema_version,
+        "current_schema_version": MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "source_revision": source_revision,
+        "source_tree": source_tree,
+        "source_workspace_version": HISTORICAL_SOURCE_WORKSPACE_VERSION,
+        "source_scene": HISTORICAL_SOURCE_SCENE,
+        "generation_steps": HISTORICAL_SOURCE_GENERATION_STEPS,
+        "expected_outcome": "accepted_within_tolerance",
+        "float_tolerance": HISTORICAL_MIGRATION_FLOAT_TOLERANCE,
+        "source_snapshot": source,
+        "source_snapshot_sha256": source_snapshot_sha256,
+        "current_snapshot_sha256": current_snapshot_sha256,
+    }))
+}
+
+fn read_snapshot(path: &Path) -> anyhow::Result<Value> {
+    let bytes =
+        fs::read(path).with_context(|| format!("read historical snapshot {}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("parse historical snapshot {}", path.display()))
+}
+
+fn committed_source_snapshot(file_name: &str) -> anyhow::Result<Value> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("resolve workspace root")?;
+    let fixture_path = root.join("tests/golden/migrations").join(file_name);
+    let fixture = read_snapshot(&fixture_path)?;
+    fixture.get("source_snapshot").cloned().with_context(|| {
+        format!(
+            "fixture omitted source_snapshot: {}",
+            fixture_path.display()
+        )
+    })
 }
 
 fn mobile_manipulator_snapshot_fixture() -> anyhow::Result<Value> {
@@ -251,5 +399,9 @@ fn canonical_state_value(value: &Value) -> Value {
 fn write_json(path: &Path, value: &Value) -> anyhow::Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value)?;
     bytes.push(b'\n');
-    fs::write(path, bytes).with_context(|| format!("write fixture {}", path.display()))
+    let parsed: Value = serde_json::from_slice(&bytes)?;
+    let canonical_digest = sha256(&serde_json::to_vec(&parsed)?);
+    fs::write(path, bytes).with_context(|| format!("write fixture {}", path.display()))?;
+    println!("{} {canonical_digest}", path.display());
+    Ok(())
 }

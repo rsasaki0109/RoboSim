@@ -26,9 +26,12 @@ denied; the scaffold SDK must match the bundled SDK byte-for-byte.
 The Python check compares all 24 public exports, constructors, methods,
 properties, constants, and text signatures, then writes a stable schema-v1
 report.
-The compatibility corpus includes an actual snapshot-v1 to snapshot-v3 restore,
-so the installed binary must have the bundled mobile-manipulator scene and URDF
-needed to reproduce the historical outcome without a source checkout.
+The compatibility corpus includes provenance-bound, sensor-bearing snapshot-v1
+and snapshot-v2 restores into snapshot-v3, plus the retained original v1 case.
+The installed binary must have the bundled mobile-manipulator scene and URDF
+needed to reproduce both historical outcomes without a source checkout. Source
+release CI separately checks the exact source commits, trees, schema constants,
+and ancestry using a full-history checkout.
 The bundled Rust API registry is audit evidence; source CI performs the actual
 31-crate `cargo-semver-checks` comparison because it requires both source trees.
 

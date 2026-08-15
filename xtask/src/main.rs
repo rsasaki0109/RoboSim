@@ -169,6 +169,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
         compatibility.passed,
         "one or more release compatibility fixtures failed"
     );
+    rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
 
     run_cargo_at(
@@ -1347,6 +1348,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "snapshots",
             "mobile_manipulator_current",
             u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION),
+        ),
+        (
+            "snapshots",
+            "mobile_manipulator_migration",
+            u64::from(
+                rne_compatibility_suite::HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+            ),
         ),
         (
             "accelerators",

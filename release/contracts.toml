@@ -52,6 +52,7 @@ batch_checkpoint = 2
 [snapshots]
 mobile_manipulator_minimum = 1
 mobile_manipulator_current = 3
+mobile_manipulator_migration = 2
 
 [accelerators]
 manifest = 1

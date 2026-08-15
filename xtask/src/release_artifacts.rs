@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 41] = [
+const BUNDLE_FILES: [(&str, &str); 43] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -160,6 +160,14 @@ const BUNDLE_FILES: [(&str, &str); 41] = [
     (
         "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
         "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
+    ),
+    (
+        "tests/golden/migrations/mobile-manipulator-snapshot-v1-47525b1-to-v3.json",
+        "tests/golden/migrations/mobile-manipulator-snapshot-v1-47525b1-to-v3.json",
+    ),
+    (
+        "tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json",
+        "tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json",
     ),
     (
         "tests/golden/physics/conformance-report-v2.json",

@@ -371,7 +371,7 @@ exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
-executable installed contract. A strict registry content-addresses fifteen
+executable installed contract. A strict registry content-addresses seventeen
 TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,
 controller C ABI, historical migration, Failure Capsule, hardware, and physics
 fixtures. `rne-compatibility` must accept each artifact with its current typed
@@ -386,8 +386,12 @@ The v0.9 language-boundary slice ships a standalone C/C++ controller
 header, freezes every 64-bit ABI-v3 layout and required export, and records the
 ABI3 wheel's 24 public exports with constructor, method, and property call
 shapes. Installed-rehearsal schema v4 verifies that manifest after extraction.
-The first historical migration case restores a real mobile-manipulator snapshot
-from schema v1 into v3 and fixes its tolerance-normalized current-state hash.
+The historical migration matrix retains the first synthesized schema-v1 case
+and adds actual 7-tick, sensor-bearing schema-v1 and schema-v2 snapshots emitted
+by their recorded ancestor revisions. It fixes both source Git trees and both
+source/current state digests, proves the v2 depth frame survives migration,
+and restores both into v3 in the installed bundle. This is now multi-generation
+state evidence, but it is not yet broad coverage of every public artifact family.
 The Rust candidate surface is anchored separately by a machine-readable
 baseline containing the exact commit, Git tree, tool version, and manifest path
 for all 31 publishable crates. SemVer CI always compares to that immutable

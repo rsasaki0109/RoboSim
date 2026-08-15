@@ -13,11 +13,14 @@ All notable changes to Robot Native Engine are documented in this file.
   package moves, or the registry no longer covers the complete release set.
   Once bootstrapped, same-release registry changes are rejected against the PR
   base or push parent so the fixed comparison cannot be silently retargeted.
-- **Historical snapshot migration gate**: the installed compatibility corpus
-  now restores a real mobile-manipulator simulation snapshot from schema v1,
-  where the v2 depth frame and v3 grasp-retarget state are absent. It rejects
-  unknown fields and schema v4, then compares the normalized v3 state and its
-  stable hash within the registered `1e-9` floating-point tolerance.
+- **Provenance-bound historical migration matrix**: the installed
+  compatibility corpus retains the original zero-step schema-v1 case and adds
+  nonzero, sensor-bearing schema-v1 and schema-v2 snapshots emitted by their
+  actual ancestor revisions. Each case fixes its source commit/tree, scene,
+  generation steps, source digest, and normalized schema-v3 digest. Source CI
+  verifies that both revisions remain ancestors with the recorded trees;
+  installed bundles restore both artifacts and fail closed on provenance,
+  schema, digest, or unknown-field drift.
 - **Installed Python and C authoring contracts**: release bundles now include a
   dependency-free C/C++ controller header and a content-addressed 64-bit ABI
   layout/symbol fixture. The ABI3 wheel freezes all 24 public exports plus
@@ -25,7 +28,7 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  fifteen content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  seventeen content-addressed TaskSpec, checkpoint, generic/behavior/scenario
   replay, dataset, frontend transport, controller C ABI, historical migration,
   Failure Capsule, hardware, and physics artifacts through their current typed
   readers. The frontend and dataset payload fixtures also require byte-exact
