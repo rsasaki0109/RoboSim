@@ -70,6 +70,7 @@ fuzz_smoke_report = 1
 release_report = 1
 install_rehearsal_report = 1
 final_exit_report = 1
+artifact_attestation_policy = 1
 capability_report = 1
 benchmark_report = 1
 task_scale_report = 1

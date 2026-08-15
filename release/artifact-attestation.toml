@@ -1,0 +1,13 @@
+schema_version = 1
+provider = "github_sigstore"
+action = "actions/attest@v4"
+issuer = "https://token.actions.githubusercontent.com"
+repository = "rsasaki0109/RoboSim"
+workflow = ".github/workflows/release.yml"
+predicate_type = "https://slsa.dev/provenance/v1"
+subjects = ["native_archive", "python_wheel"]
+attested_events = ["push_tag", "workflow_dispatch"]
+pull_request_attestations = false
+require_source_ref = true
+deny_self_hosted_runners = true
+verify_command = "gh attestation verify ARTIFACT -R rsasaki0109/RoboSim --signer-workflow rsasaki0109/RoboSim/.github/workflows/release.yml --source-ref refs/tags/TAG --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners"

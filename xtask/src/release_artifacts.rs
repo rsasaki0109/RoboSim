@@ -36,7 +36,7 @@ const INSTALL_CHECK_IDS: [&str; 6] = [
     "python_wheel",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 15] = [
+const BUNDLE_FILES: [(&str, &str); 16] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -45,6 +45,10 @@ const BUNDLE_FILES: [(&str, &str); 15] = [
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
     ("release/blockers.toml", "release/blockers.toml"),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
+    (
+        "release/artifact-attestation.toml",
+        "release/artifact-attestation.toml",
+    ),
     ("release/python_wheel_smoke.py", "python-wheel-smoke.py"),
     (
         "assets/runs/mesh_diff_drive.rne.run.toml",

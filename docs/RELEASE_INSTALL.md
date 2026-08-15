@@ -8,7 +8,30 @@ matches the host:
 - `rne-0.1.0-x86_64-pc-windows-msvc.zip`
 
 Extract the archive without flattening its top-level directory. Before running
-anything, verify every entry listed in `SHA256SUMS`. On Linux:
+anything, first verify that the archive itself has GitHub/Sigstore provenance
+bound to this repository, then verify every extracted entry in `SHA256SUMS`:
+
+```bash
+gh attestation verify rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
+  -R rsasaki0109/RoboSim \
+  --signer-workflow rsasaki0109/RoboSim/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --deny-self-hosted-runners
+gh attestation verify rne_py-0.1.0-cp39-abi3-manylinux_2_*.whl \
+  -R rsasaki0109/RoboSim \
+  --signer-workflow rsasaki0109/RoboSim/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --deny-self-hosted-runners
+```
+
+Use the downloaded Windows ZIP and wheel paths in the same commands on
+Windows. Verification must identify `https://token.actions.githubusercontent.com`
+as issuer, this repository as source, and `.github/workflows/release.yml` as the
+build workflow and the requested tag as source ref, and must reject self-hosted
+builders. The committed policy is
+`release/artifact-attestation.toml`; GitHub's verifier checks the signed SLSA
+provenance and subject digest. Checksums remain a separate, offline integrity
+layer after extraction. On Linux:
 
 ```bash
 cd rne-0.1.0-x86_64-unknown-linux-gnu
@@ -68,7 +91,7 @@ maturin build --locked --release --features extension-module \
   --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
 cargo run --locked -p xtask -- release-bundle \
   --target x86_64-unknown-linux-gnu \
-  --wheel artifacts/wheels/rne_py-1.0.0rc1-*.whl
+  --wheel artifacts/wheels/rne_py-0.1.0-*.whl
 ```
 
 `release-install-smoke --bundle-dir PATH --output-dir EMPTY_PATH` independently

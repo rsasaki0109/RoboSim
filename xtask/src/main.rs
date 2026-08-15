@@ -1236,6 +1236,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "artifact_attestation_policy",
+            u64::from(release_exit::ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
             "capability_report",
             u64::from(capability_report::CAPABILITY_REPORT_SCHEMA_VERSION),
         ),

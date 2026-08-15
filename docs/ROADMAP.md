@@ -90,6 +90,12 @@ and native MuJoCo 3.9, requires exact task/contract outcomes, compares nine
 named unit-bearing tolerances instead of cross-solver hashes, and uploads the
 verified comparison report from the dedicated Windows/Linux MuJoCo job.
 
+The v0.8 ecosystem track starts with signed release provenance. Tag and manual
+release rehearsals now attest each native archive and ABI3 wheel through GitHub
+OIDC/Sigstore using SLSA v1 provenance. The tag publish job verifies every
+subject before release creation, and `xtask release-check` enforces the
+machine-readable `release/artifact-attestation.toml` trust policy.
+
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or
 outcome-level promises; benchmark reports embed those promises and hash only

@@ -332,6 +332,14 @@ The final pre-1.0 program focuses on other people successfully extending RNE:
   dataset, and Failure Capsule formats;
 - provide explicit migration notes and compatibility fixtures for every break.
 
+The first v0.8 supply-chain slice is now encoded in the release workflow:
+Linux and Windows archives plus ABI3 wheels receive GitHub OIDC/Sigstore SLSA
+v1 attestations on tag and manual rehearsal runs. Publication verifies all four
+subjects before creating the prerelease, while `release-check` freezes the
+issuer, repository, workflow, action, permissions, subject classes, and event
+policy in `release/artifact-attestation.toml`. SHA-256 manifests remain the
+independent offline integrity layer inside each archive.
+
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
 

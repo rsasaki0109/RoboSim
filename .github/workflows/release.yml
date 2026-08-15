@@ -16,6 +16,11 @@ env:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,6 +73,13 @@ jobs:
             --bundle-dir "artifacts/extracted/${name}" \
             --output-dir artifacts/extracted-evidence \
             --python python
+      - name: Sign archive and wheel provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            artifacts/release/*.tar.gz
+            artifacts/wheels/*.whl
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-linux
@@ -79,6 +91,11 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -138,6 +155,13 @@ jobs:
             --bundle-dir "artifacts/extracted/$name" `
             --output-dir artifacts/extracted-evidence `
             --python python
+      - name: Sign archive and wheel provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            artifacts/release/*.zip
+            artifacts/wheels/*.whl
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-windows
@@ -175,6 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      attestations: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -194,6 +219,15 @@ jobs:
             printf 'expected 4 release assets, found %s\n' "${#assets[@]}" >&2
             exit 1
           fi
+          for asset in "${assets[@]}"; do
+            gh attestation verify "$asset" \
+              -R "$GH_REPO" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+              --source-ref "$GITHUB_REF" \
+              --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --predicate-type "https://slsa.dev/provenance/v1" \
+              --deny-self-hosted-runners
+          done
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
             --prerelease \

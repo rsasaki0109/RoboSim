@@ -2,6 +2,7 @@ schema_version = 1
 release_version = "0.1.0"
 locked_graph = "Cargo.lock"
 blocker_registry = "release/blockers.toml"
+artifact_attestation_policy = "release/artifact-attestation.toml"
 required_aggregate_checks = ["CI / workspace", "Release rehearsal / release_candidate"]
 
 [[scope]]
