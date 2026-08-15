@@ -59,6 +59,12 @@ capabilities before configuration or stepping.
 - A future ABI version is additive unless it is assigned a new major number;
   v2 support cannot be removed without an explicit migration note.
 
+`rne-asset plugin check` emits controller-plugin conformance report schema v1.
+The six check IDs and their order are compatibility fixtures: manifest identity,
+ABI symbols, capability negotiation, fixed-step schema, exact seeded reset
+replay, and shutdown. New checks require a report-schema change unless they are
+strictly diagnostic and preserve existing readers.
+
 Core crates never expose adapter or backend-specific types to make an external
 ABI fit.
 

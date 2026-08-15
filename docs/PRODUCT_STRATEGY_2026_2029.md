@@ -340,6 +340,13 @@ issuer, repository, workflow, action, permissions, subject classes, and event
 policy in `release/artifact-attestation.toml`. SHA-256 manifests remain the
 independent offline integrity layer inside each archive.
 
+The next v0.8 authoring slice is also available from the installed bundle:
+`rne-asset plugin check` produces a content-addressed schema-v1 report for an
+external controller library and manifest. It exercises the supported ABI,
+capability negotiation, typed fixed-step frames, identical seeded-reset replay,
+and shutdown; release rehearsal now uses this full kit in place of a discovery-
+only plugin smoke.
+
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
 

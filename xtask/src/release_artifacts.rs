@@ -627,18 +627,29 @@ fn run_install_rehearsal(
         &serde_json::Value::String("passed".to_string()),
     );
 
-    let plugin_passed = run_check_command_stdout_contains(
-        "controller plugin discovery",
+    let plugin_report = output_dir.join("controller-plugin-conformance.json");
+    let plugin_passed = run_check_command(
+        "controller plugin conformance",
         bundle_dir,
         &asset_cli,
         &[
             OsString::from("plugin"),
-            OsString::from("list"),
-            OsString::from("--path"),
-            bundle_dir.join("lib").into_os_string(),
+            OsString::from("check"),
+            OsString::from("--library"),
+            bundle_dir
+                .join("lib")
+                .join(native_plugin_name(target))
+                .into_os_string(),
+            OsString::from("--manifest"),
+            bundle_dir.join("lib/rne-plugin.json").into_os_string(),
+            OsString::from("--output"),
+            plugin_report.clone().into_os_string(),
         ],
         &[],
-        "discovered: velocity_servo",
+    ) && json_field_matches(
+        &plugin_report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
     );
 
     let wheel_passed = run_python_wheel_smoke(bundle_dir, output_dir, python, target);
@@ -772,33 +783,6 @@ fn run_check_command(
                 eprintln!("{label} failed with status {}", output.status);
             }
             output.status.success()
-        }
-        Err(error) => {
-            eprintln!("{label} could not start: {error:#}");
-            false
-        }
-    }
-}
-
-fn run_check_command_stdout_contains(
-    label: &str,
-    cwd: &Path,
-    program: &Path,
-    args: &[OsString],
-    envs: &[(OsString, OsString)],
-    expected_stdout: &str,
-) -> bool {
-    println!("$ {} ({label})", program.display());
-    match command_output(cwd, program, args, envs) {
-        Ok(output) => {
-            print_output(&output);
-            let found = String::from_utf8_lossy(&output.stdout).contains(expected_stdout);
-            if !output.status.success() {
-                eprintln!("{label} failed with status {}", output.status);
-            } else if !found {
-                eprintln!("{label} output omitted {expected_stdout:?}");
-            }
-            output.status.success() && found
         }
         Err(error) => {
             eprintln!("{label} could not start: {error:#}");

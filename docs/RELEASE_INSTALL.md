@@ -60,10 +60,15 @@ rehearsal. From its top-level directory:
 ./bin/rne-physics-conformance --output physics-conformance.json
 ./bin/rne-scenario-scale --output scenario-scale.json
 ./bin/rne-asset plugin list --path lib
+./bin/rne-asset plugin check \
+  --library lib/librne_plugin_example_velocity_servo.so \
+  --manifest lib/rne-plugin.json \
+  --output controller-plugin-conformance.json
 ```
 
-Use `.exe` on Windows. These commands are headless and require neither ROS2 nor
-a renderer.
+Use `.exe` on Windows and
+`lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
+commands are headless and require neither ROS2 nor a renderer.
 
 ## Python ABI3 wheel
 

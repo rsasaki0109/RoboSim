@@ -95,6 +95,10 @@ release rehearsals now attest each native archive and ABI3 wheel through GitHub
 OIDC/Sigstore using SLSA v1 provenance. The tag publish job verifies every
 subject before release creation, and `xtask release-check` enforces the
 machine-readable `release/artifact-attestation.toml` trust policy.
+The installed release CLI now also exposes `rne-asset plugin check`, a
+standalone controller-plugin conformance runner with a versioned,
+content-addressed report and deterministic reset replay. Release rehearsal runs
+the kit against the bundled reference shared library on both tier-1 platforms.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

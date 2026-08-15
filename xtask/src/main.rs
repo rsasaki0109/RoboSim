@@ -1004,6 +1004,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_plugin::CONTROLLER_SCHEMA_VERSION),
         ),
         (
+            "controller_abi",
+            "conformance_report",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
             "frontend_transport",
             "major",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MAJOR),

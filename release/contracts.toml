@@ -5,6 +5,7 @@ release_version = "0.1.0"
 minimum = 2
 current = 3
 controller_schema = 1
+conformance_report = 1
 
 [frontend_transport]
 major = 1

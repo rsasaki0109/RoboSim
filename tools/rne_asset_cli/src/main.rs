@@ -282,6 +282,37 @@ enum PluginCommand {
         #[arg(long, value_name = "DIR")]
         path: Vec<PathBuf>,
     },
+    /// Run the standalone controller-plugin conformance kit.
+    Check {
+        /// Controller shared library to load and exercise.
+        #[arg(long, value_name = "PATH")]
+        library: PathBuf,
+        /// `rne-plugin.json` manifest paired with the shared library.
+        #[arg(long, value_name = "PATH")]
+        manifest: PathBuf,
+        /// Machine-readable conformance report destination.
+        #[arg(
+            long,
+            value_name = "PATH",
+            default_value = "controller-plugin-conformance.json"
+        )]
+        output: PathBuf,
+        /// Joint name passed to the plugin constructor.
+        #[arg(long, default_value = "conformance_joint")]
+        joint: String,
+        /// Target joint angle passed to the plugin constructor, in radians.
+        #[arg(long, default_value_t = 1.0)]
+        target_rad: f64,
+        /// Controller gain passed to the plugin constructor.
+        #[arg(long, default_value_t = 2.0)]
+        gain: f64,
+        /// Maximum velocity passed to the plugin constructor, in radians per second.
+        #[arg(long, default_value_t = 5.0)]
+        max_velocity_rad_s: f64,
+        /// Explicit deterministic reset seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -2929,6 +2960,49 @@ fn plugin_command(command: PluginCommand) -> Result<()> {
             for (name, library_path) in discovered {
                 println!("discovered: {name} ({})", library_path.display());
             }
+            Ok(())
+        }
+        PluginCommand::Check {
+            library,
+            manifest,
+            output,
+            joint,
+            target_rad,
+            gain,
+            max_velocity_rad_s,
+            seed,
+        } => {
+            let report = rne_plugin::run_controller_plugin_conformance(
+                &library,
+                &manifest,
+                &rne_plugin::ControllerPluginConformanceConfig {
+                    joint,
+                    target_rad,
+                    gain,
+                    max_velocity_rad_s,
+                    seed,
+                },
+            )?;
+            if let Some(parent) = output
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("create plugin report directory {}", parent.display())
+                })?;
+            }
+            std::fs::write(&output, report.to_json_pretty()?)
+                .with_context(|| format!("write plugin conformance report {}", output.display()))?;
+            println!(
+                "plugin conformance: status={} report={}",
+                report.status,
+                output.display()
+            );
+            anyhow::ensure!(
+                report.passed(),
+                "controller plugin conformance failed; inspect {}",
+                output.display()
+            );
             Ok(())
         }
     }

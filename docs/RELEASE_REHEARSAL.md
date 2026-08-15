@@ -11,7 +11,8 @@ binaries, the reference controller shared library, compatibility and install
 documentation, locked dependency SBOM, artifact-attestation policy, replay
 fixtures, provenance report, and `SHA256SUMS`. The installed rehearsal runs six
 frozen checks: robot replay, scenario replay, physics conformance, the 100-actor
-scale case, dynamic controller discovery, and a fresh wheel installation.
+scale case, standalone controller-plugin conformance, and a fresh wheel
+installation. The controller check is the `rne-asset plugin check` runner.
 
 ## Local rehearsal
 

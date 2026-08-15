@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod cabi;
+pub mod conformance;
 pub mod control;
 pub mod lifecycle;
 pub mod scaffold;
@@ -24,6 +25,13 @@ pub use cabi::{
     RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
     RneJointVelocityV3, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
     RNE_PLUGIN_MIN_ABI_VERSION,
+};
+pub use conformance::{
+    run_controller_plugin_conformance, ControllerPluginConformanceCheck,
+    ControllerPluginConformanceConfig, ControllerPluginConformanceError,
+    ControllerPluginConformanceIdentity, ControllerPluginConformanceReport,
+    ControllerPluginConformanceSubject, CONTROLLER_PLUGIN_CONFORMANCE_REPORT_KIND,
+    CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
 };
 pub use control::{
     ControllerActionFrame, ControllerJointObservation, ControllerJointVelocityCommand,

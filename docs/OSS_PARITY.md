@@ -446,3 +446,20 @@ and loads immediately); replace `rne_controller_step_v3` with your controller.
 and any discoverable plugin libraries in the given directories. An
 end-to-end test scaffolds, builds, and loads a plugin from the generated
 source.
+
+Before distribution, run the standalone conformance kit against the built
+library and its manifest:
+
+```bash
+rne-asset plugin check \
+  --library target/debug/libmy_controller.so \
+  --manifest plugins/my_controller/rne-plugin.json \
+  --output my_controller.conformance.json
+```
+
+Use the platform's `.dll` or `.dylib` name where appropriate. Report schema v1
+content-addresses both inputs and checks manifest/binary identity, supported ABI
+symbols, capability negotiation, fixed-step observation/action validation,
+exact action replay after an identical seeded reset, and lifecycle shutdown.
+Semantic failures still produce a machine-readable failed report and a nonzero
+CLI exit.
