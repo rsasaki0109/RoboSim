@@ -24,7 +24,7 @@ pub use cabi::{
     load_controller_library, peek_plugin_name, LoadedControllerPlugin, PluginLoadError,
     RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
     RneJointVelocityV3, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
-    RNE_PLUGIN_MIN_ABI_VERSION,
+    RNE_PLUGIN_MIN_ABI_VERSION, RNE_PLUGIN_SDK_VERSION,
 };
 pub use conformance::{
     run_controller_plugin_conformance, ControllerPluginConformanceCheck,

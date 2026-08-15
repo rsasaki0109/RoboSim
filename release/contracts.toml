@@ -6,6 +6,7 @@ minimum = 2
 current = 3
 controller_schema = 1
 conformance_report = 1
+authoring_sdk = 1
 
 [frontend_transport]
 major = 1

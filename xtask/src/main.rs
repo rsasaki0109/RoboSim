@@ -53,6 +53,7 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_physics_analytic",
     "rne_physics_rapier",
     "rne_plateau",
+    "rne_plugin_sdk",
     "rne_plugin",
     "rne_py",
     "rne_render",
@@ -1007,6 +1008,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "controller_abi",
             "conformance_report",
             u64::from(rne_plugin::CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "controller_abi",
+            "authoring_sdk",
+            u64::from(rne_plugin::RNE_PLUGIN_SDK_VERSION),
         ),
         (
             "frontend_transport",

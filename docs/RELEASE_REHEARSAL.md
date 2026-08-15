@@ -7,12 +7,15 @@ extracts it into a fresh directory, and invokes `release-install-smoke` against
 installed artifacts only.
 
 The bundle contains the CLI, standalone physics conformance and scenario-scale
-binaries, the reference controller shared library, compatibility and install
-documentation, locked dependency SBOM, artifact-attestation policy, replay
-fixtures, provenance report, and `SHA256SUMS`. The installed rehearsal runs six
+binaries, the reference controller shared library, the dependency-free Rust
+plugin SDK, compatibility and install documentation, locked dependency SBOM,
+artifact-attestation policy, replay fixtures, provenance report, and
+`SHA256SUMS`. The installed rehearsal runs six
 frozen checks: robot replay, scenario replay, physics conformance, the 100-actor
 scale case, standalone controller-plugin conformance, and a fresh wheel
-installation. The controller check is the `rne-asset plugin check` runner.
+installation. The controller check runs `rne-asset plugin check` against the
+reference binary and against a fresh scaffold built offline with warnings
+denied; the scaffold SDK must match the bundled SDK byte-for-byte.
 
 ## Local rehearsal
 

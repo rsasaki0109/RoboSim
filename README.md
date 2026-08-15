@@ -209,6 +209,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Architecture overview](docs/architecture/000_overview.md)
 - [Roadmap](docs/ROADMAP.md)
 - [OSS parity baseline](docs/OSS_PARITY.md)
+- [Controller plugin SDK](docs/PLUGIN_SDK.md)
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
 - [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)

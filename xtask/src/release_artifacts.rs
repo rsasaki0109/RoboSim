@@ -36,13 +36,17 @@ const INSTALL_CHECK_IDS: [&str; 6] = [
     "python_wheel",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 16] = [
+const BUNDLE_FILES: [(&str, &str); 17] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
     ("LICENSE-APACHE", "LICENSE-APACHE"),
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
+    (
+        "crates/rne_plugin_sdk/src/abi.rs",
+        "sdk/rust/rne_plugin_sdk.rs",
+    ),
     ("release/blockers.toml", "release/blockers.toml"),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
     (
@@ -510,12 +514,16 @@ fn native_binary_name(name: &str, target: &str) -> String {
 }
 
 fn native_plugin_name(target: &str) -> String {
+    native_cdylib_name(RELEASE_PLUGIN_PACKAGE, target)
+}
+
+fn native_cdylib_name(name: &str, target: &str) -> String {
     if target.contains("windows") {
-        format!("{RELEASE_PLUGIN_PACKAGE}.dll")
+        format!("{name}.dll")
     } else if target.contains("darwin") {
-        format!("lib{RELEASE_PLUGIN_PACKAGE}.dylib")
+        format!("lib{name}.dylib")
     } else {
-        format!("lib{RELEASE_PLUGIN_PACKAGE}.so")
+        format!("lib{name}.so")
     }
 }
 
@@ -628,7 +636,7 @@ fn run_install_rehearsal(
     );
 
     let plugin_report = output_dir.join("controller-plugin-conformance.json");
-    let plugin_passed = run_check_command(
+    let reference_plugin_passed = run_check_command(
         "controller plugin conformance",
         bundle_dir,
         &asset_cli,
@@ -651,6 +659,8 @@ fn run_install_rehearsal(
         "status",
         &serde_json::Value::String("passed".to_string()),
     );
+    let scaffold_plugin_passed = run_scaffold_rehearsal(bundle_dir, output_dir, &asset_cli, target);
+    let plugin_passed = reference_plugin_passed && scaffold_plugin_passed;
 
     let wheel_passed = run_python_wheel_smoke(bundle_dir, output_dir, python, target);
     let checks = vec![
@@ -669,6 +679,96 @@ fn run_install_rehearsal(
         status: if passed { "passed" } else { "failed" }.to_string(),
         checks,
     })
+}
+
+fn run_scaffold_rehearsal(
+    bundle_dir: &Path,
+    output_dir: &Path,
+    asset_cli: &Path,
+    target: &str,
+) -> bool {
+    const NAME: &str = "release_scaffold_controller";
+    let parent = output_dir.join("controller-authoring");
+    if !run_check_command(
+        "scaffold controller plugin",
+        bundle_dir,
+        asset_cli,
+        &[
+            OsString::from("plugin"),
+            OsString::from("new"),
+            OsString::from(NAME),
+            OsString::from("--dir"),
+            parent.clone().into_os_string(),
+        ],
+        &[],
+    ) {
+        return false;
+    }
+    let crate_dir = parent.join(NAME);
+    let bundled_sdk = bundle_dir.join("sdk/rust/rne_plugin_sdk.rs");
+    let scaffold_sdk = crate_dir.join("src/rne_plugin_sdk.rs");
+    match (fs::read(&bundled_sdk), fs::read(&scaffold_sdk)) {
+        (Ok(bundled), Ok(scaffolded)) if bundled == scaffolded => {}
+        (Ok(_), Ok(_)) => {
+            eprintln!("scaffold SDK differs from bundled SDK source");
+            return false;
+        }
+        (Err(error), _) => {
+            eprintln!(
+                "could not read bundled SDK {}: {error}",
+                bundled_sdk.display()
+            );
+            return false;
+        }
+        (_, Err(error)) => {
+            eprintln!(
+                "could not read scaffold SDK {}: {error}",
+                scaffold_sdk.display()
+            );
+            return false;
+        }
+    }
+    let scaffold_target = parent.join("target");
+    if !run_check_command(
+        "build scaffolded controller offline",
+        &crate_dir,
+        Path::new("cargo"),
+        &[
+            OsString::from("build"),
+            OsString::from("--offline"),
+            OsString::from("--manifest-path"),
+            crate_dir.join("Cargo.toml").into_os_string(),
+            OsString::from("--target-dir"),
+            scaffold_target.clone().into_os_string(),
+        ],
+        &[(OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings"))],
+    ) {
+        return false;
+    }
+    let report = output_dir.join("controller-scaffold-conformance.json");
+    run_check_command(
+        "scaffolded controller conformance",
+        bundle_dir,
+        asset_cli,
+        &[
+            OsString::from("plugin"),
+            OsString::from("check"),
+            OsString::from("--library"),
+            scaffold_target
+                .join("debug")
+                .join(native_cdylib_name(NAME, target))
+                .into_os_string(),
+            OsString::from("--manifest"),
+            crate_dir.join("rne-plugin.json").into_os_string(),
+            OsString::from("--output"),
+            report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    )
 }
 
 fn run_python_wheel_smoke(
@@ -1078,6 +1178,10 @@ mod tests {
         assert_eq!(
             native_plugin_name("x86_64-unknown-linux-gnu"),
             "librne_plugin_example_velocity_servo.so"
+        );
+        assert_eq!(
+            native_cdylib_name("custom_controller", "aarch64-apple-darwin"),
+            "libcustom_controller.dylib"
         );
     }
 

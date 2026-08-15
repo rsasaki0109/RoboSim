@@ -89,6 +89,7 @@ jobs:
             artifacts/wheels/*.whl
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
+            artifacts/extracted-evidence/controller-scaffold-conformance.json
 
   windows:
     runs-on: windows-latest
@@ -172,6 +173,7 @@ jobs:
             artifacts/wheels/*.whl
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
+            artifacts/extracted-evidence/controller-scaffold-conformance.json
 
   release_candidate:
     runs-on: ubuntu-latest

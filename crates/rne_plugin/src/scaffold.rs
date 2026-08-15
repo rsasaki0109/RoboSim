@@ -2,8 +2,9 @@
 //!
 //! [`scaffold_controller_plugin`] generates a complete, compilable controller
 //! plugin crate (a `cdylib` implementing the versioned controller-plugin C ABI
-//! from [`crate::cabi`]) plus a [`crate::PluginManifest`], so third-party
-//! authors can start from a working shared library instead of a blank page.
+//! from [`crate::cabi`]), a vendored [`rne_plugin_sdk`] module, and a
+//! [`crate::PluginManifest`], so third-party authors can start from a working
+//! shared library instead of a blank page or online dependency.
 
 use crate::PluginManifest;
 use std::fs;
@@ -55,9 +56,10 @@ pub fn validate_plugin_name(name: &str) -> Result<(), ScaffoldError> {
 /// Generates a compilable controller-plugin crate under `parent_dir/<name>`.
 ///
 /// Creates `Cargo.toml`, `src/lib.rs` (a `cdylib` implementing the
-/// controller-plugin C ABI, initially a velocity-servo policy), and
-/// `rne-plugin.json` (a versioned [`crate::PluginManifest`]). Returns the
-/// created crate directory. Errors if the directory already exists.
+/// controller-plugin C ABI, initially a velocity-servo policy), a vendored
+/// `src/rne_plugin_sdk.rs`, and `rne-plugin.json` (a versioned
+/// [`crate::PluginManifest`]). Returns the created crate directory. Errors if
+/// the directory already exists.
 pub fn scaffold_controller_plugin(name: &str, parent_dir: &Path) -> Result<PathBuf, ScaffoldError> {
     validate_plugin_name(name)?;
     let crate_dir = parent_dir.join(name);
@@ -71,6 +73,10 @@ pub fn scaffold_controller_plugin(name: &str, parent_dir: &Path) -> Result<PathB
         message: error.to_string(),
     })?;
     write_scaffold_file(&crate_dir.join("Cargo.toml"), &cargo_manifest(name))?;
+    write_scaffold_file(
+        &crate_dir.join("src/rne_plugin_sdk.rs"),
+        rne_plugin_sdk::RNE_PLUGIN_SDK_RUST_SOURCE,
+    )?;
     write_scaffold_file(&crate_dir.join("src/lib.rs"), &lib_source(name))?;
     let manifest = PluginManifest::controller(name);
     let manifest_json = format!("{}\n", manifest.to_json()?);
@@ -113,67 +119,26 @@ fn lib_source(name: &str) -> String {
 //! velocity-servo policy in `rne_controller_step_v3` with your controller.
 
 use std::ffi::{{c_char, c_void, CStr, CString}};
+// The vendored SDK intentionally contains the complete ABI while this example
+// uses only one capability subset.
+#[allow(dead_code)]
+mod rne_plugin_sdk;
+use rne_plugin_sdk::{{
+    RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
+    RneJointVelocityV3, RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION,
+    RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND, RNE_CONTROLLER_CAP_MULTI_ROBOT,
+    RNE_PLUGIN_ABI_VERSION,
+}};
 
 /// ABI version implemented by this plugin.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = RNE_PLUGIN_ABI_VERSION;
 
 /// Logical plugin name reported through [`rne_plugin_name`].
 pub const PLUGIN_NAME: &str = "{name}";
 
-const CAP_JOINT_POSITION_OBSERVATION: u64 = 1 << 0;
-const CAP_JOINT_VELOCITY_COMMAND: u64 = 1 << 2;
-const CAP_MULTI_ROBOT: u64 = 1 << 3;
-const CAPABILITIES: u64 =
-    CAP_JOINT_POSITION_OBSERVATION | CAP_JOINT_VELOCITY_COMMAND | CAP_MULTI_ROBOT;
-
-/// Joint position observation.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointPosition {{
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Joint position in radians.
-    pub position_rad: f64,
-}}
-
-/// Joint velocity command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocity {{
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Commanded joint velocity in radians per second.
-    pub velocity_rad_s: f64,
-}}
-
-/// Robot-scoped ABI-v3 joint observation.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointObservationV3 {{
-    pub robot_id: *const c_char,
-    pub name: *const c_char,
-    pub position_rad: f64,
-    pub velocity_rad_s: f64,
-    pub has_velocity: u8,
-    pub reserved: [u8; 7],
-}}
-
-/// Robot-scoped ABI-v3 joint velocity command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocityV3 {{
-    pub robot_id: *const c_char,
-    pub name: *const c_char,
-    pub velocity_rad_s: f64,
-}}
-
-/// ABI-v3 fixed-step result.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RneControllerStepResultV3 {{
-    pub status: i32,
-    pub output_count: usize,
-}}
+const CAPABILITIES: u64 = RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION
+    | RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND
+    | RNE_CONTROLLER_CAP_MULTI_ROBOT;
 
 /// Controller state owned by the plugin.
 struct ControllerState {{
@@ -506,6 +471,7 @@ mod tests {
 
         assert!(crate_dir.join("Cargo.toml").exists());
         assert!(crate_dir.join("src/lib.rs").exists());
+        assert!(crate_dir.join("src/rne_plugin_sdk.rs").exists());
         let manifest_path = crate_dir.join("rne-plugin.json");
         assert!(manifest_path.exists());
         let manifest_text = fs::read_to_string(&manifest_path).expect("read manifest");
@@ -528,8 +494,13 @@ mod tests {
         ] {
             assert!(lib.contains(symbol), "lib.rs must export `{symbol}`");
         }
-        assert!(lib.contains("pub const ABI_VERSION: u32 = 3;"));
+        assert!(lib.contains("pub const ABI_VERSION: u32 = RNE_PLUGIN_ABI_VERSION;"));
+        assert!(lib.contains("mod rne_plugin_sdk;"));
         assert!(lib.contains(&format!("pub const PLUGIN_NAME: &str = \"{name}\";")));
+
+        let sdk =
+            fs::read_to_string(crate_dir.join("src/rne_plugin_sdk.rs")).expect("read vendored SDK");
+        assert_eq!(sdk, rne_plugin_sdk::RNE_PLUGIN_SDK_RUST_SOURCE);
 
         let output_dir = parent.join("rustc-output");
         fs::create_dir_all(&output_dir).expect("create rustc output directory");

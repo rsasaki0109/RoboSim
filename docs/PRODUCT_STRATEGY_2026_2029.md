@@ -347,6 +347,12 @@ capability negotiation, typed fixed-step frames, identical seeded-reset replay,
 and shutdown; release rehearsal now uses this full kit in place of a discovery-
 only plugin smoke.
 
+The third v0.8 authoring slice separates the dependency-free
+`rne_plugin_sdk` from the host loader. New scaffolds vendor the exact SDK source
+and build offline; release rehearsal regenerates one plugin from the installed
+CLI, verifies the vendored source against the bundle, compiles it with warnings
+denied, and runs the standalone conformance kit against the result.
+
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
 

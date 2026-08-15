@@ -52,6 +52,12 @@ Controller ABI v3 is the current authoring ABI. The host continues to load the
 frozen v2 compatibility fixture. Plugins must negotiate ABI version and
 capabilities before configuration or stepping.
 
+Rust authoring SDK v1 lives in the dependency-free `rne_plugin_sdk` crate. The
+legacy `rne_plugin::cabi` type paths re-export those exact definitions. New
+scaffolds vendor the same source into `src/rne_plugin_sdk.rs`, allowing an
+offline build without coupling a plugin to host implementation crates. The SDK
+version and controller ABI version are separate registered contracts.
+
 - Unknown ABI versions are rejected before a plugin function is invoked.
 - Host-owned lifecycle order remains configure, episode activation/reset,
   robot-scoped step, and shutdown.

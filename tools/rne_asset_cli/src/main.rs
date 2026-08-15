@@ -4157,6 +4157,7 @@ mod tests {
         let crate_dir = parent.join("cli_plugin");
         assert!(crate_dir.join("Cargo.toml").exists());
         assert!(crate_dir.join("src/lib.rs").exists());
+        assert!(crate_dir.join("src/rne_plugin_sdk.rs").exists());
         assert!(crate_dir.join("rne-plugin.json").exists());
         let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).expect("read lib.rs");
         assert!(lib.contains("rne_plugin_abi_version"));

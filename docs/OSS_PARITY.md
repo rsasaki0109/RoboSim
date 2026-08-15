@@ -30,7 +30,7 @@ workflow is truly complete.
 | Rendering | Native wgpu, browser replay viewer, PBR materials, glTF maps, HDR/IBL, TAA, legacy `interactive_viewer --connect`, and production `interactive_viewer --frontend-connect` | Remote diff-drive, scenario traffic, and articulated joints project locally; production binary RGB/depth frames drive PiP and full LiDAR frames drive a bounded display overlay without stepping a second physics world |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, multi-actor OpenSCENARIO 1.0 execution with per-kind routes and canonical action evidence, mixed runtime/external ownership metrics, versioned scenario replay, offline SUMO import, and recoverable live TraCI co-simulation | None for the M5 scenario-scale and TraCI recovery slice; broader OpenSCENARIO action coverage remains future scope |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, `rne-scenario-replay` XOSC/network/clock/result records, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
-| Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
+| Extension model | Dependency-free author ABI (`rne_plugin_sdk`), host-side manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading through a versioned C ABI, name-based runtime discovery with a built-in fallback, offline scaffolding (`rne-asset plugin new` vendors the exact SDK module), and standalone conformance (`rne-asset plugin check`) | None for the current controller-plugin slice |
 
 ## Delivered first slice
 
@@ -463,3 +463,10 @@ symbols, capability negotiation, fixed-step observation/action validation,
 exact action replay after an identical seeded reset, and lifecycle shutdown.
 Semantic failures still produce a machine-readable failed report and a nonzero
 CLI exit.
+
+The author-facing ABI definitions are isolated in the dependency-free
+`rne_plugin_sdk` crate. `rne-asset plugin new` vendors that exact module into
+the generated crate, so the first build works with `cargo build --offline` and
+does not depend on RNE host crates or crates.io. The reference ABI-v3 plugin
+uses the SDK directly; the frozen ABI-v2 fixture remains independent. See
+[`PLUGIN_SDK.md`](PLUGIN_SDK.md) for ownership and upgrade rules.

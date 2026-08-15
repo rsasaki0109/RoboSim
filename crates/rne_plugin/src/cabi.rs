@@ -16,165 +16,37 @@ use crate::{
     ControllerResetContext, ControllerRobotAction,
 };
 use std::collections::BTreeMap;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// Oldest controller-plugin ABI accepted by this runtime.
-pub const RNE_PLUGIN_MIN_ABI_VERSION: u32 = 2;
-/// Current controller-plugin ABI emitted by examples and scaffolds.
-pub const RNE_PLUGIN_ABI_VERSION: u32 = 3;
-/// Original flat joint controller ABI retained for compatibility fixtures.
-pub const RNE_PLUGIN_ABI_VERSION_V2: u32 = 2;
-
-const CAP_JOINT_POSITION_OBSERVATION: u64 = 1 << 0;
-const CAP_JOINT_VELOCITY_OBSERVATION: u64 = 1 << 1;
-const CAP_JOINT_VELOCITY_COMMAND: u64 = 1 << 2;
-const CAP_MULTI_ROBOT: u64 = 1 << 3;
-const KNOWN_CAPABILITY_MASK: u64 = CAP_JOINT_POSITION_OBSERVATION
-    | CAP_JOINT_VELOCITY_OBSERVATION
-    | CAP_JOINT_VELOCITY_COMMAND
-    | CAP_MULTI_ROBOT;
+pub use rne_plugin_sdk::{
+    RneControllerConfigureV3Fn, RneControllerCreateFn, RneControllerDestroyFn,
+    RneControllerResetV3Fn, RneControllerShutdownV3Fn, RneControllerStepFn,
+    RneControllerStepResultV3, RneControllerStepV3Fn, RneJointObservationV3, RneJointPosition,
+    RneJointVelocity, RneJointVelocityV3, RnePluginAbiVersionFn, RnePluginCapabilitiesFn,
+    RnePluginNameFn, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2, RNE_PLUGIN_MIN_ABI_VERSION,
+    RNE_PLUGIN_SDK_VERSION,
+};
+use rne_plugin_sdk::{
+    RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION, RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND,
+    RNE_CONTROLLER_CAP_JOINT_VELOCITY_OBSERVATION, RNE_CONTROLLER_CAP_MULTI_ROBOT,
+    RNE_CONTROLLER_KNOWN_CAPABILITY_MASK,
+};
 
 /// Converts a controller capability to its stable ABI-v3 bit.
 pub const fn controller_capability_bit(capability: ControllerCapability) -> u64 {
     match capability {
-        ControllerCapability::JointPositionObservation => CAP_JOINT_POSITION_OBSERVATION,
-        ControllerCapability::JointVelocityObservation => CAP_JOINT_VELOCITY_OBSERVATION,
-        ControllerCapability::JointVelocityCommand => CAP_JOINT_VELOCITY_COMMAND,
-        ControllerCapability::MultiRobot => CAP_MULTI_ROBOT,
+        ControllerCapability::JointPositionObservation => {
+            RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION
+        }
+        ControllerCapability::JointVelocityObservation => {
+            RNE_CONTROLLER_CAP_JOINT_VELOCITY_OBSERVATION
+        }
+        ControllerCapability::JointVelocityCommand => RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND,
+        ControllerCapability::MultiRobot => RNE_CONTROLLER_CAP_MULTI_ROBOT,
     }
 }
-
-/// A joint position observation used by the ABI-v2 callback.
-///
-/// `name` is a NUL-terminated UTF-8 string owned by the host and valid for the
-/// duration of the `rne_controller_step` call.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointPosition {
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Joint position in radians.
-    pub position_rad: f64,
-}
-
-/// A joint velocity command returned by the ABI-v2 callback.
-///
-/// `name` must stay valid until the host copies it.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocity {
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Commanded joint velocity in radians per second.
-    pub velocity_rad_s: f64,
-}
-
-/// Robot-scoped joint observation passed to an ABI-v3 controller.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointObservationV3 {
-    /// Stable robot ID as a host-owned NUL-terminated UTF-8 string.
-    pub robot_id: *const c_char,
-    /// Joint name as a host-owned NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Joint position in radians.
-    pub position_rad: f64,
-    /// Joint velocity in radians per second, or zero when unavailable.
-    pub velocity_rad_s: f64,
-    /// One when `velocity_rad_s` is present, zero otherwise.
-    pub has_velocity: u8,
-    /// Reserved zero bytes for future compatible flags.
-    pub reserved: [u8; 7],
-}
-
-/// Robot-scoped joint velocity command returned by an ABI-v3 controller.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocityV3 {
-    /// Stable robot ID that must stay valid until the host copies it.
-    pub robot_id: *const c_char,
-    /// Joint name that must stay valid until the host copies it.
-    pub name: *const c_char,
-    /// Commanded joint velocity in radians per second.
-    pub velocity_rad_s: f64,
-}
-
-/// Result returned by the ABI-v3 fixed-step callback.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RneControllerStepResultV3 {
-    /// Zero on success; non-zero when the plugin wrote an error message.
-    pub status: i32,
-    /// Number of initialized command entries in the host output buffer.
-    pub output_count: usize,
-}
-
-/// Reports the ABI version implemented by the plugin.
-pub type RnePluginAbiVersionFn = unsafe extern "C" fn() -> u32;
-/// Reports the plugin logical name as a static NUL-terminated UTF-8 string.
-pub type RnePluginNameFn = unsafe extern "C" fn() -> *const c_char;
-/// Reports the ABI-v3 capability bitmask.
-pub type RnePluginCapabilitiesFn = unsafe extern "C" fn() -> u64;
-
-/// Creates a controller instance.
-pub type RneControllerCreateFn = unsafe extern "C" fn(
-    joint: *const c_char,
-    target_rad: f64,
-    gain: f64,
-    max_velocity_rad_s: f64,
-    error: *mut c_char,
-    error_capacity: usize,
-) -> *mut c_void;
-
-/// Destroys a controller instance created by the create function.
-pub type RneControllerDestroyFn = unsafe extern "C" fn(handle: *mut c_void);
-
-/// Computes flat joint velocity commands through the ABI-v2 callback.
-pub type RneControllerStepFn = unsafe extern "C" fn(
-    handle: *const c_void,
-    observations: *const RneJointPosition,
-    observation_count: usize,
-    output: *mut RneJointVelocity,
-    output_capacity: usize,
-) -> usize;
-
-/// Configures an ABI-v3 controller after capability negotiation.
-pub type RneControllerConfigureV3Fn = unsafe extern "C" fn(
-    handle: *mut c_void,
-    required_capabilities: u64,
-    error: *mut c_char,
-    error_capacity: usize,
-) -> i32;
-
-/// Resets an ABI-v3 controller for one deterministic episode.
-pub type RneControllerResetV3Fn = unsafe extern "C" fn(
-    handle: *mut c_void,
-    episode: u64,
-    seed: u64,
-    step: u64,
-    sim_time_ticks: u64,
-    error: *mut c_char,
-    error_capacity: usize,
-) -> i32;
-
-/// Computes robot-scoped commands through the ABI-v3 callback.
-pub type RneControllerStepV3Fn = unsafe extern "C" fn(
-    handle: *mut c_void,
-    step: u64,
-    sim_time_ticks: u64,
-    observations: *const RneJointObservationV3,
-    observation_count: usize,
-    output: *mut RneJointVelocityV3,
-    output_capacity: usize,
-    error: *mut c_char,
-    error_capacity: usize,
-) -> RneControllerStepResultV3;
-
-/// Invokes the terminal ABI-v3 controller lifecycle hook.
-pub type RneControllerShutdownV3Fn =
-    unsafe extern "C" fn(handle: *mut c_void, error: *mut c_char, error_capacity: usize) -> i32;
 
 #[derive(Debug)]
 enum LoadedControllerAbi {
@@ -833,10 +705,10 @@ pub fn discover_plugin_names(
 }
 
 fn decode_capability_mask(mask: u64) -> Result<Vec<ControllerCapability>, PluginLoadError> {
-    if mask & !KNOWN_CAPABILITY_MASK != 0 {
+    if mask & !RNE_CONTROLLER_KNOWN_CAPABILITY_MASK != 0 {
         return Err(PluginLoadError::InvalidMetadata(format!(
             "unknown ABI-v3 capability bits {:#x}",
-            mask & !KNOWN_CAPABILITY_MASK
+            mask & !RNE_CONTROLLER_KNOWN_CAPABILITY_MASK
         )));
     }
     let capabilities = [

@@ -70,6 +70,23 @@ Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
 commands are headless and require neither ROS2 nor a renderer.
 
+The bundle includes the dependency-free authoring module at
+`sdk/rust/rne_plugin_sdk.rs`. To prove the installed authoring path with no
+registry dependencies (a Rust toolchain is required):
+
+```bash
+./bin/rne-asset plugin new release_controller --dir authoring
+cargo build --offline \
+  --manifest-path authoring/release_controller/Cargo.toml
+./bin/rne-asset plugin check \
+  --library authoring/release_controller/target/debug/librelease_controller.so \
+  --manifest authoring/release_controller/rne-plugin.json \
+  --output authoring/release_controller/conformance.json
+```
+
+Use the corresponding `.exe` and `.dll` names on Windows. The generated
+`src/rne_plugin_sdk.rs` is byte-identical to the module included in the bundle.
+
 ## Python ABI3 wheel
 
 The matching `rne_py` wheel is present under `wheels/` and is also attached as a

@@ -8,6 +8,7 @@ members = [
   "crates/rne_physics_rapier",
   "crates/rne_physics_analytic",
   "crates/rne_physics_mujoco",
+  "crates/rne_plugin_sdk",
   "crates/rne_plugin",
   "crates/rne_plugin_example_velocity_servo",
   "crates/rne_plugin_legacy_v2_fixture",
@@ -152,6 +153,7 @@ rne_physics_analytic = { version = "=0.1.0", path = "crates/rne_physics_analytic
 rne_physics_mujoco = { version = "=0.1.0", path = "crates/rne_physics_mujoco" }
 rne_physics_rapier = { version = "=0.1.0", path = "crates/rne_physics_rapier" }
 rne_plateau = { version = "=0.1.0", path = "crates/rne_plateau" }
+rne_plugin_sdk = { version = "=0.1.0", path = "crates/rne_plugin_sdk" }
 rne_plugin = { version = "=0.1.0", path = "crates/rne_plugin" }
 rne_py = { version = "=0.1.0", path = "crates/rne_py" }
 rne_render = { version = "=0.1.0", path = "crates/rne_render" }

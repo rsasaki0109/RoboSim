@@ -10,3 +10,6 @@ publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
+
+[dependencies]
+rne_plugin_sdk = { workspace = true }

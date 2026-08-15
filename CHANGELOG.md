@@ -4,6 +4,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Controller plugin authoring SDK**: dependency-free `rne_plugin_sdk` owns
+  the versioned C-ABI constants, frames, and callback signatures while the host
+  loader re-exports the existing paths. `rne-asset plugin new` vendors the
+  exact SDK module for an offline warning-free build, and installed release
+  rehearsal conforms both the reference binary and a freshly generated plugin.
+
 ## [0.1.0] - 2026-08-14
 
 ### Added

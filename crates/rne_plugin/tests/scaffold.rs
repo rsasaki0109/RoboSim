@@ -1,6 +1,9 @@
 //! End-to-end scaffold tests: generate, build, and load a controller plugin.
 
-use rne_plugin::{load_controller_library, scaffold_controller_plugin};
+use rne_plugin::{
+    load_controller_library, run_controller_plugin_conformance, scaffold_controller_plugin,
+    ControllerPluginConformanceConfig,
+};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -29,11 +32,13 @@ fn scaffolded_plugin_builds_loads_and_drives() {
 
     let status = Command::new("cargo")
         .arg("build")
+        .arg("--offline")
         .arg("--manifest-path")
         .arg(crate_dir.join("Cargo.toml"))
         .arg("--target-dir")
         .arg(crate_dir.join("target"))
         .env_remove("CARGO_TARGET_DIR")
+        .env("RUSTFLAGS", "-Dwarnings")
         .status()
         .expect("run cargo build");
     assert!(
@@ -55,6 +60,18 @@ fn scaffolded_plugin_builds_loads_and_drives() {
     assert_eq!(plugin.name(), name);
     let commands = plugin.joint_velocity_commands(&["shoulder_joint"], &[0.25]);
     assert_eq!(commands, vec![("shoulder_joint".to_string(), 1.5)]);
+    drop(plugin);
+
+    let report = run_controller_plugin_conformance(
+        &library,
+        &crate_dir.join("rne-plugin.json"),
+        &ControllerPluginConformanceConfig {
+            joint: "shoulder_joint".to_string(),
+            ..ControllerPluginConformanceConfig::default()
+        },
+    )
+    .expect("run conformance against scaffold");
+    assert!(report.passed(), "scaffold checks: {:#?}", report.checks);
 
     let _ = std::fs::remove_dir_all(&parent);
 }
