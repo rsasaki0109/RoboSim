@@ -271,13 +271,16 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
-The fourteen-fixture registry additionally freezes a complete frontend
+The fifteen-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
-v1, scenario replay v4, and the controller C ABI-v3 64-bit layout. Binary
-fixtures pair semantic fields with lowercase hex bytes: acceptance requires
-exact decode/re-encode identity plus rejection of truncation and trailing bytes.
-Frontend validation also rejects corrupt magic, unknown message kinds, and an
-incompatible negotiated major version.
+v1, scenario replay v4, the controller C ABI-v3 64-bit layout, and a historical
+mobile-manipulator snapshot-v1 to snapshot-v3 migration. The migration fixture
+omits fields introduced in v2 and v3, restores it with the current physics
+path, and fixes the complete normalized v3 state at a `1e-9` floating-point
+tolerance. Binary fixtures pair semantic fields with lowercase hex bytes:
+acceptance requires exact decode/re-encode identity plus rejection of
+truncation and trailing bytes. Frontend validation also rejects corrupt magic,
+unknown message kinds, and an incompatible negotiated major version.
 
 Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
 to the six schema-v1 checks. Schema-v1 reports remain historical evidence but

@@ -23,6 +23,7 @@ pub use sim::{
     MobileManipulatorPhysicsFactory, MobileManipulatorRigidBodySnapshot,
     MobileManipulatorSensorStateSnapshot, MobileManipulatorSim, MobileManipulatorSimSnapshot,
     MobileManipulatorSimSnapshotError, MobileManipulatorTransformSnapshot,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
 };
 pub use vectorized::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,

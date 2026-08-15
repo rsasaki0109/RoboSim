@@ -1146,6 +1146,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
         ),
         (
+            "snapshots",
+            "mobile_manipulator_minimum",
+            u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION),
+        ),
+        (
+            "snapshots",
+            "mobile_manipulator_current",
+            u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION),
+        ),
+        (
             "accelerators",
             "manifest",
             u64::from(accelerator::ACCELERATOR_MANIFEST_SCHEMA_VERSION),

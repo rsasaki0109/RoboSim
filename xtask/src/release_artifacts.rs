@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 36] = [
+const BUNDLE_FILES: [(&str, &str); 40] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -90,6 +90,18 @@ const BUNDLE_FILES: [(&str, &str); 36] = [
         "assets/scenes/mesh_diff_drive.rne.scene.toml",
     ),
     (
+        "assets/scenes/mm_minimal.rne.scene.toml",
+        "assets/scenes/mm_minimal.rne.scene.toml",
+    ),
+    (
+        "assets/robots/mm_minimal.rne.robot.toml",
+        "assets/robots/mm_minimal.rne.robot.toml",
+    ),
+    (
+        "assets/robots/mm_minimal/mm_minimal.urdf",
+        "assets/robots/mm_minimal/mm_minimal.urdf",
+    ),
+    (
         "assets/robots/mesh_diff_drive.rne.robot.toml",
         "assets/robots/mesh_diff_drive.rne.robot.toml",
     ),
@@ -140,6 +152,10 @@ const BUNDLE_FILES: [(&str, &str); 36] = [
     (
         "tests/golden/hardware/gateway-mock-conformance-v1.json",
         "tests/golden/hardware/gateway-mock-conformance-v1.json",
+    ),
+    (
+        "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
+        "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
     ),
     (
         "tests/golden/physics/conformance-report-v2.json",

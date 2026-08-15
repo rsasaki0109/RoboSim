@@ -38,10 +38,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const JOINT_STATE_STREAM: u32 = 300;
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 3;
+/// Current mobile-manipulator simulation snapshot schema.
+pub const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 3;
 /// Oldest supported mobile-manipulator snapshot schema (v1 had no wrist depth frame;
 /// v2 had no in-progress grasp weld-anchor retarget or finger pinch limits).
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
+pub const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
 
 /// Reusable constructor and integration hooks for a mobile-manipulator physics path.
 ///
@@ -435,6 +436,7 @@ impl<T: FramePayload> MobileManipulatorFrameSnapshot<T> {
 /// grasp welds, latest DataBus frames, world random state, simulation time, and
 /// stream sequence state. It does not capture arbitrary user-added resources.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MobileManipulatorSimSnapshot {
     /// Snapshot payload schema version.
     pub schema_version: u32,
@@ -3910,12 +3912,24 @@ mod tests {
             shoulder_velocity_rad_s: 0.5,
             ..MobileManipulatorAction::default()
         });
-        let mut snapshot = sim.snapshot();
-        snapshot.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION;
-        snapshot.wrist_depth_frame = None;
+        let mut value = serde_json::to_value(sim.snapshot()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert(
+            "schema_version".to_string(),
+            MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION.into(),
+        );
+        object.remove("wrist_depth_frame");
+        object.remove("grasp_retarget");
+        let snapshot: MobileManipulatorSimSnapshot = serde_json::from_value(value.clone()).unwrap();
         sim.restore_snapshot(&snapshot).unwrap();
         assert_eq!(sim.step_count(), snapshot.step_count);
         assert_eq!(sim.latest_wrist_depth(), None);
+
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("unknown_future_state".to_string(), true.into());
+        assert!(serde_json::from_value::<MobileManipulatorSimSnapshot>(value).is_err());
     }
 
     #[test]

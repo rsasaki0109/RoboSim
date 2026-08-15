@@ -65,6 +65,13 @@ path = "tests/golden/hardware/gateway-mock-conformance-v1.json"
 canonical_json_sha256 = "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8"
 
 [[fixture]]
+id = "mobile_manipulator_snapshot_v1_to_v3"
+contract = "historical_mobile_manipulator_snapshot"
+schema_version = 1
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json"
+canonical_json_sha256 = "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f"
+
+[[fixture]]
 id = "physics_conformance_v2"
 contract = "physics_conformance"
 schema_version = 2

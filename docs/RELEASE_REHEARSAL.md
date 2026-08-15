@@ -7,12 +7,12 @@ extracts it into a fresh directory, and invokes `release-install-smoke` against
 installed artifacts only.
 
 The bundle contains the CLI, standalone physics, hardware-adapter,
-compatibility, and
-scenario-scale conformance binaries, the fixed-binding hardware process mock,
+compatibility, and scenario-scale conformance binaries, the fixed-binding
+hardware process mock,
 the reference controller shared library, dependency-free Rust and C plugin SDKs,
 compatibility and install documentation, locked dependency SBOM,
-artifact-attestation policy, Python API manifest, replay fixtures, provenance report, and
-`SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
+artifact-attestation policy, Python API manifest, replay fixtures, provenance
+report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter
 conformance, the 100-actor scale case, standalone controller-plugin
 conformance, the installed compatibility corpus, a fresh wheel installation,
@@ -26,6 +26,9 @@ denied; the scaffold SDK must match the bundled SDK byte-for-byte.
 The Python check compares all 24 public exports, constructors, methods,
 properties, constants, and text signatures, then writes a stable schema-v1
 report.
+The compatibility corpus includes an actual snapshot-v1 to snapshot-v3 restore,
+so the installed binary must have the bundled mobile-manipulator scene and URDF
+needed to reproduce the historical outcome without a source checkout.
 
 ## Local rehearsal
 

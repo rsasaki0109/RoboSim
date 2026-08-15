@@ -115,9 +115,9 @@ evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for fourteen TaskSpec, checkpoint, generic/behavior/scenario replay,
-dataset, frontend, controller C ABI, Failure Capsule, hardware, and physics
-artifacts. `rne-compatibility` runs every current typed reader, proves
+corpus for fifteen TaskSpec, checkpoint, generic/behavior/scenario replay,
+dataset, frontend, controller C ABI, historical migration, Failure Capsule,
+hardware, and physics artifacts. `rne-compatibility` runs every current typed reader, proves
 fail-closed handling of a deterministic future schema and unknown field, and
 verifies byte-exact frontend/dataset payload round trips with malformed-input
 rejection. Release rehearsal requires the same corpus after extraction on both
@@ -126,6 +126,9 @@ tier-1 platforms. The language-boundary slice ships a C/C++ header, freezes the
 their exact call shapes from source CI and the installed ABI3 wheel. This
 advances the freeze but does not replace external-use or six-month stability
 gates.
+
+The first historical case restores mobile-manipulator snapshot v1 as v3 and
+compares the complete normalized state within the registered tolerance.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

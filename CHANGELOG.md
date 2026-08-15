@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Historical snapshot migration gate**: the installed compatibility corpus
+  now restores a real mobile-manipulator simulation snapshot from schema v1,
+  where the v2 depth frame and v3 grasp-retarget state are absent. It rejects
+  unknown fields and schema v4, then compares the normalized v3 state and its
+  stable hash within the registered `1e-9` floating-point tolerance.
 - **Installed Python and C authoring contracts**: release bundles now include a
   dependency-free C/C++ controller header and a content-addressed 64-bit ABI
   layout/symbol fixture. The ABI3 wheel freezes all 24 public exports plus
@@ -13,15 +18,15 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  fourteen content-addressed TaskSpec, checkpoint, generic/behavior/scenario
-  replay, dataset, frontend transport, controller C ABI, Failure Capsule,
-  hardware, and physics artifacts through their current typed readers. The
-  frontend and dataset payload fixtures also require byte-exact re-encoding and
-  fail-closed handling of corrupt, truncated, and trailing binary input. Each
-  check proves rejection of a future schema and unknown top-level field. Release
-  bundles retain the registry and fixtures, CI uploads a deterministic schema-v1
-  report, and installed-rehearsal keeps the corpus a required workflow on Linux
-  and Windows.
+  fifteen content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  replay, dataset, frontend transport, controller C ABI, historical migration,
+  Failure Capsule, hardware, and physics artifacts through their current typed
+  readers. The frontend and dataset payload fixtures also require byte-exact
+  re-encoding and fail-closed handling of corrupt, truncated, and trailing
+  binary input. Each check proves rejection of a future schema and unknown
+  top-level field. Release bundles retain the registry and fixtures, CI uploads
+  a deterministic schema-v1 report, and installed-rehearsal keeps the corpus a
+  required workflow on Linux and Windows.
 - **External physics-backend conformance SDK**: the publishable
   `rne_physics_conformance` crate runs a fixed, unit-bearing nine-check catalog
   against any public `PhysicsBackend` factory without engine allowlists or

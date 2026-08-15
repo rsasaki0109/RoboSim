@@ -19,7 +19,7 @@ Run the installed form from the bundle root:
 ```
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains fourteen fixtures:
+contains fifteen fixtures:
 
 | Contract | Retained artifact |
 |---|---|
@@ -29,6 +29,7 @@ contains fourteen fixtures:
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
 | Frontend | protocol-v1 `ClientHello` frame and negotiated limits |
+| Historical migration | mobile-manipulator snapshot v1 restored as v3 |
 | Failure evidence | Failure Capsule v1 |
 | Hardware safety | process-mock conformance v1 |
 | Physics | built-in conformance v2 and external-backend conformance v1 |
@@ -65,7 +66,8 @@ newer shape; keep both while the older version is supported.
 The current corpus is an expanded v0.9 slice, not a complete 1.0 declaration.
 It retains one negotiated frontend reference frame rather than every message
 kind and freezes the C layout rather than every platform's compiled library
-image. Python call shape is verified by the separate installed wheel manifest;
-Rust API history and historical artifact migration outcomes still need stronger
+image. Python call shape is verified by the separate installed wheel manifest.
+The snapshot v1-to-v3 case establishes the migration mechanism, but Rust API
+history and broader historical artifact coverage still need stronger
 long-window gates. Independent-use and six-month stability gates remain
 mandatory.

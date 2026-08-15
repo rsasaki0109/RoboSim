@@ -46,6 +46,10 @@ contract = 1
 task_spec = 1
 batch_checkpoint = 2
 
+[snapshots]
+mobile_manipulator_minimum = 1
+mobile_manipulator_current = 3
+
 [accelerators]
 manifest = 1
 protocol = 1

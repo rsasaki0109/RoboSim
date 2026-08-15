@@ -25,7 +25,8 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,
     VectorizedMobileManipulatorSnapshot, VectorizedMobileManipulatorSnapshotError,
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
-    MM_MOBILE_WHEEL_RADIUS_M,
+    MM_MOBILE_WHEEL_RADIUS_M, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
 };
 pub use urdf_scene::{
     cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,

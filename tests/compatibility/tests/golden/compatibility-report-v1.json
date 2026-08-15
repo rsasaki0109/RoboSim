@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:82039e27ca096e2cab0a0d6f8a8de00734c7b912b3d69aa318ed25e0cd2c117c",
+  "registry_sha256": "sha256:2bd83f2c1bb53da79710e04478862abca1396abf983661fa00f62712c5a0a0c8",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -111,6 +111,18 @@
       "unknown_field_rejected": true,
       "passed": true,
       "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "mobile_manipulator_snapshot_v1_to_v3",
+      "contract": "historical_mobile_manipulator_snapshot",
+      "schema_version": 1,
+      "path": "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
+      "canonical_json_sha256": "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted within 1e-9; future schema and unknown field rejected"
     },
     {
       "id": "physics_conformance_v2",

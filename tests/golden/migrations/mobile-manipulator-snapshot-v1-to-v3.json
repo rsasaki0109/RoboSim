@@ -1,0 +1,359 @@
+{
+  "artifact_contract": "mobile_manipulator_sim_snapshot",
+  "current_schema_version": 3,
+  "current_snapshot_sha256": "sha256:474bcd0652f6a777c33ce8a745ff93e290858704df25a0e5818431613f3b2b32",
+  "expected_outcome": "accepted_within_tolerance",
+  "float_tolerance": 1e-9,
+  "kind": "rne_historical_migration_case",
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "source_snapshot": {
+    "fixed_joints": [
+      {
+        "anchor_child_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "anchor_parent_m": [
+          0.4,
+          0.0,
+          0.0
+        ],
+        "entity_index": 6,
+        "parent_index": 5,
+        "relative_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    "grasped_object_index": null,
+    "joint_motors": [
+      {
+        "entity_index": 4,
+        "motor": {
+          "gain": 60.0,
+          "max_force": 200.0,
+          "stiffness": 400.0,
+          "target_position": 0.0,
+          "velocity_rad_s": 0.0
+        }
+      },
+      {
+        "entity_index": 5,
+        "motor": {
+          "gain": 60.0,
+          "max_force": 200.0,
+          "stiffness": 400.0,
+          "target_position": 0.0,
+          "velocity_rad_s": 0.0
+        }
+      },
+      {
+        "entity_index": 7,
+        "motor": {
+          "gain": 640.0,
+          "max_force": 0.0,
+          "stiffness": 100000.0,
+          "target_position": 0.0,
+          "velocity_rad_s": 0.0
+        }
+      },
+      {
+        "entity_index": 8,
+        "motor": {
+          "gain": 640.0,
+          "max_force": 0.0,
+          "stiffness": 100000.0,
+          "target_position": 0.0,
+          "velocity_rad_s": 0.0
+        }
+      }
+    ],
+    "joint_sequence": 0,
+    "joint_state_frame": null,
+    "lift_target_m": 0.0,
+    "rigid_bodies": [
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 1,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 3,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 4,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 5,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 6,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 7,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "angular_velocity_rad_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "entity_index": 8,
+        "linear_velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "schema_version": 1,
+    "sensor_states": [
+      {
+        "entity_index": 14,
+        "frame_count": 0,
+        "last_sample_ticks": 0,
+        "last_sequence": 0
+      }
+    ],
+    "sim_ticks": 0,
+    "step_count": 0,
+    "transforms": [
+      {
+        "entity_index": 1,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            -0.5,
+            0.0
+          ]
+        }
+      },
+      {
+        "entity_index": 3,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.3,
+            0.0
+          ]
+        }
+      },
+      {
+        "entity_index": 4,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.3,
+            0.0
+          ]
+        }
+      },
+      {
+        "entity_index": 5,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.5,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "entity_index": 6,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.4,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "entity_index": 7,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            -0.04
+          ]
+        }
+      },
+      {
+        "entity_index": 8,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.04
+          ]
+        }
+      },
+      {
+        "entity_index": 14,
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.9500000000000001,
+            0.6,
+            0.0
+          ]
+        }
+      }
+    ],
+    "world_random": {
+      "main_rng_state": 44,
+      "seed": 44
+    },
+    "wrist_camera_frame": null
+  }
+}

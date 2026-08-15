@@ -371,20 +371,23 @@ exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
-executable installed contract. A strict registry content-addresses fourteen
+executable installed contract. A strict registry content-addresses fifteen
 TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,
-controller C ABI, Failure Capsule, hardware, and physics fixtures. `rne-compatibility` must accept
-each artifact with its current typed reader and reject deterministic
-future-schema and unknown-field mutations. Binary frontend and dataset
-fixtures additionally require exact wire round trips and malformed-input
-rejection. CI publishes the stable report and both installed release rehearsals
-rerun it from the extracted corpus. This evidence advances the compatibility
-clock; it does not claim six months of use or independent adoption.
+controller C ABI, historical migration, Failure Capsule, hardware, and physics
+fixtures. `rne-compatibility` must accept each artifact with its current typed
+reader and reject deterministic future-schema and unknown-field mutations.
+Binary frontend and dataset fixtures additionally require exact wire round
+trips and malformed-input rejection. CI publishes the stable report and both
+installed release rehearsals rerun it from the extracted corpus. This evidence
+advances the compatibility clock; it does not claim six months of use or
+independent adoption.
 
 The v0.9 language-boundary slice ships a standalone C/C++ controller
 header, freezes every 64-bit ABI-v3 layout and required export, and records the
 ABI3 wheel's 24 public exports with constructor, method, and property call
 shapes. Installed-rehearsal schema v4 verifies that manifest after extraction.
+The first historical migration case restores a real mobile-manipulator snapshot
+from schema v1 into v3 and fixes its tolerance-normalized current-state hash.
 
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.

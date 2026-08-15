@@ -8,7 +8,11 @@
 #![deny(missing_docs)]
 
 use anyhow::{bail, ensure, Context};
-use rne_ai::{BehaviorReplayArtifact, PortableBatchCheckpoint, PortableBatchOperation, TaskSpec};
+use rne_ai::{
+    BehaviorReplayArtifact, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    PortableBatchCheckpoint, PortableBatchOperation, TaskSpec,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+};
 use rne_data::transport::{
     negotiate_transport, ClientHello, NegotiationPolicy, NegotiationRejectCode,
     SensorFrameMetadata, TransportCapabilities, TransportFrame, TransportMessageKind,
@@ -62,7 +66,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 14] = [
+const FIXTURE_SPECS: [FixtureSpec; 15] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -118,6 +122,12 @@ const FIXTURE_SPECS: [FixtureSpec; 14] = [
         version_field: "schema_version",
     },
     FixtureSpec {
+        id: "mobile_manipulator_snapshot_v1_to_v3",
+        contract: "historical_mobile_manipulator_snapshot",
+        schema_version: 1,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
         id: "physics_conformance_v2",
         contract: "physics_conformance",
         schema_version: 2,
@@ -150,6 +160,28 @@ const FIXTURE_SPECS: [FixtureSpec; 14] = [
 ];
 
 const CONTROLLER_C_ABI_LAYOUT_KIND: &str = "rne_controller_c_abi_layout";
+const HISTORICAL_MIGRATION_KIND: &str = "rne_historical_migration_case";
+const HISTORICAL_MIGRATION_FLOAT_TOLERANCE: f64 = 1.0e-9;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MigrationOutcome {
+    AcceptedWithinTolerance,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct HistoricalMigrationFixture {
+    kind: String,
+    schema_version: u32,
+    artifact_contract: String,
+    source_schema_version: u32,
+    current_schema_version: u32,
+    expected_outcome: MigrationOutcome,
+    float_tolerance: f64,
+    source_snapshot: Value,
+    current_snapshot_sha256: String,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -579,7 +611,11 @@ fn check_fixture(
                 unknown_field_rejected,
                 passed,
                 detail: if passed {
-                    "accepted; future schema and unknown field rejected".to_string()
+                    if spec.contract == "historical_mobile_manipulator_snapshot" {
+                        "accepted within 1e-9; future schema and unknown field rejected".to_string()
+                    } else {
+                        "accepted; future schema and unknown field rejected".to_string()
+                    }
                 } else {
                     "typed reader did not satisfy every compatibility expectation".to_string()
                 },
@@ -629,7 +665,7 @@ fn try_check_fixture(
         digest
     );
 
-    validate_typed(spec, value.clone()).context("accepted fixture was rejected")?;
+    validate_typed(root, spec, value.clone()).context("accepted fixture was rejected")?;
 
     let mut future = value.clone();
     let future_object = future
@@ -639,7 +675,7 @@ fn try_check_fixture(
         spec.version_field.to_string(),
         Value::from(u64::from(spec.schema_version) + 10_000),
     );
-    let future_schema_rejected = validate_typed(spec, future).is_err();
+    let future_schema_rejected = validate_typed(root, spec, future).is_err();
 
     let mut unknown = value;
     let unknown_object = unknown
@@ -649,11 +685,11 @@ fn try_check_fixture(
         "rne_unknown_compatibility_field".to_string(),
         Value::Bool(true),
     );
-    let unknown_field_rejected = validate_typed(spec, unknown).is_err();
+    let unknown_field_rejected = validate_typed(root, spec, unknown).is_err();
     Ok((true, future_schema_rejected, unknown_field_rejected))
 }
 
-fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
+fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
     let actual_schema = value
         .get(spec.version_field)
         .and_then(Value::as_u64)
@@ -701,6 +737,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
         "hardware_mock_conformance" => {
             let fixture: MockConformanceReport = serde_json::from_value(value)?;
             fixture.validate()?;
+        }
+        "historical_mobile_manipulator_snapshot" => {
+            let fixture: HistoricalMigrationFixture = serde_json::from_value(value)?;
+            validate_historical_mobile_manipulator_snapshot(root, &fixture)?;
         }
         "physics_conformance" => {
             let fixture: ConformanceReport = serde_json::from_value(value)?;
@@ -755,6 +795,103 @@ fn validate_controller_c_abi(fixture: &ControllerCAbiFixture) -> anyhow::Result<
             layout.name
         );
     }
+    Ok(())
+}
+
+fn validate_historical_mobile_manipulator_snapshot(
+    root: &Path,
+    fixture: &HistoricalMigrationFixture,
+) -> anyhow::Result<()> {
+    ensure!(
+        fixture.kind == HISTORICAL_MIGRATION_KIND,
+        "historical migration fixture kind mismatch"
+    );
+    ensure!(
+        fixture.schema_version == 1,
+        "historical migration case schema mismatch"
+    );
+    ensure!(
+        fixture.artifact_contract == "mobile_manipulator_sim_snapshot",
+        "historical migration artifact contract mismatch"
+    );
+    ensure!(
+        fixture.source_schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
+        "historical snapshot source schema mismatch"
+    );
+    ensure!(
+        fixture.current_schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "historical snapshot current schema mismatch"
+    );
+    ensure!(
+        fixture.expected_outcome == MigrationOutcome::AcceptedWithinTolerance,
+        "historical snapshot outcome mismatch"
+    );
+    ensure!(
+        fixture.float_tolerance == HISTORICAL_MIGRATION_FLOAT_TOLERANCE,
+        "historical snapshot tolerance mismatch"
+    );
+    validate_sha256(&fixture.current_snapshot_sha256)?;
+
+    let source_object = fixture
+        .source_snapshot
+        .as_object()
+        .context("historical source snapshot must be an object")?;
+    ensure!(
+        !source_object.contains_key("wrist_depth_frame")
+            && !source_object.contains_key("grasp_retarget"),
+        "schema-v1 source must omit fields introduced in v2 and v3"
+    );
+    let snapshot: MobileManipulatorSimSnapshot =
+        serde_json::from_value(fixture.source_snapshot.clone())?;
+    ensure!(
+        snapshot.schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
+        "historical source payload schema mismatch"
+    );
+
+    let scene = root.join("assets/scenes/mm_minimal.rne.scene.toml");
+    let mut sim = MobileManipulatorSim::from_scene_path(&scene)
+        .with_context(|| format!("load historical migration scene {}", scene.display()))?;
+    sim.restore_snapshot(&snapshot)
+        .map_err(|error| anyhow::anyhow!("restore schema-v1 snapshot: {error:?}"))?;
+    let current_snapshot = sim.snapshot();
+    ensure!(
+        current_snapshot.schema_version == MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "restored snapshot did not normalize to the current schema"
+    );
+    let mut expected_snapshot = snapshot.clone();
+    expected_snapshot.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION;
+    let expected_current = serde_json::to_value(&expected_snapshot)?;
+    let current = serde_json::to_value(&current_snapshot)?;
+    let normalized_expected = canonical_state_value(&expected_current);
+    let normalized_current = canonical_state_value(&current);
+    ensure!(
+        normalized_current == normalized_expected,
+        "historical snapshot restore exceeded tolerance: {}",
+        first_json_difference(&normalized_expected, &normalized_current, "snapshot")
+    );
+    let current_digest = normalized_state_digest(&current)?;
+    ensure!(
+        current_digest == fixture.current_snapshot_sha256,
+        "historical snapshot expected-state digest changed: expected {}, got {}",
+        fixture.current_snapshot_sha256,
+        current_digest
+    );
+
+    let mut unsupported = snapshot.clone();
+    unsupported.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION + 1;
+    ensure!(
+        sim.restore_snapshot(&unsupported).is_err(),
+        "snapshot reader accepted an unsupported future schema"
+    );
+    let mut unknown_source = fixture.source_snapshot.clone();
+    unknown_source
+        .as_object_mut()
+        .context("historical source snapshot must be an object")?
+        .insert("unknown_future_state".to_string(), Value::Bool(true));
+    ensure!(
+        serde_json::from_value::<MobileManipulatorSimSnapshot>(unknown_source).is_err(),
+        "snapshot reader accepted an unknown top-level field"
+    );
     Ok(())
 }
 
@@ -1299,6 +1436,74 @@ fn canonical_json_digest(value: &Value) -> anyhow::Result<String> {
     Ok(sha256(&serde_json::to_vec(value)?))
 }
 
+fn normalized_state_digest(value: &Value) -> anyhow::Result<String> {
+    let normalized = canonical_state_value(value);
+    canonical_json_digest(&normalized)
+}
+
+fn canonical_state_value(value: &Value) -> Value {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            let value = number.as_f64().expect("JSON float");
+            let rounded = (value * 1_000_000_000.0).round() / 1_000_000_000.0;
+            Value::from(if rounded == 0.0 { 0.0 } else { rounded })
+        }
+        Value::Array(values) => Value::Array(values.iter().map(canonical_state_value).collect()),
+        Value::Object(values) => {
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key.clone(), canonical_state_value(value)))
+                    .collect(),
+            )
+        }
+        _ => value.clone(),
+    }
+}
+
+fn first_json_difference(expected: &Value, actual: &Value, path: &str) -> String {
+    match (expected, actual) {
+        (Value::Object(expected), Value::Object(actual)) => {
+            if expected.keys().collect::<Vec<_>>() != actual.keys().collect::<Vec<_>>() {
+                return format!("{path} keys differ");
+            }
+            for (key, expected_value) in expected {
+                let actual_value = &actual[key];
+                if expected_value != actual_value {
+                    return first_json_difference(
+                        expected_value,
+                        actual_value,
+                        &format!("{path}.{key}"),
+                    );
+                }
+            }
+            format!("{path} differs")
+        }
+        (Value::Array(expected), Value::Array(actual)) => {
+            if expected.len() != actual.len() {
+                return format!(
+                    "{path} length differs: expected {}, got {}",
+                    expected.len(),
+                    actual.len()
+                );
+            }
+            for (index, (expected_value, actual_value)) in expected.iter().zip(actual).enumerate() {
+                if expected_value != actual_value {
+                    return first_json_difference(
+                        expected_value,
+                        actual_value,
+                        &format!("{path}[{index}]"),
+                    );
+                }
+            }
+            format!("{path} differs")
+        }
+        _ => format!("{path} differs: expected {expected}, got {actual}"),
+    }
+}
+
 fn registry_digest(registry: &CompatibilityFixtureRegistry) -> anyhow::Result<String> {
     Ok(sha256(&serde_json::to_vec(registry)?))
 }
@@ -1359,6 +1564,30 @@ mod tests {
         let mut registry: CompatibilityFixtureRegistry = toml::from_str(&text).unwrap();
         registry.fixtures[0].path = "../escape.json".to_string();
         assert!(validate_registry(&registry).is_err());
+    }
+
+    #[test]
+    fn migration_state_hash_normalizes_signed_zero_and_sub_tolerance_drift() {
+        let expected = serde_json::json!({
+            "position_m": [0.95, 0.0, -0.04],
+            "schema_version": 3,
+        });
+        let reconstructed = serde_json::json!({
+            "schema_version": 3,
+            "position_m": [0.9500000000000001, -0.0, -0.04000000000000001],
+        });
+        assert_eq!(
+            normalized_state_digest(&expected).unwrap(),
+            normalized_state_digest(&reconstructed).unwrap()
+        );
+        let outside_tolerance = serde_json::json!({
+            "position_m": [0.950000002, 0.0, -0.04],
+            "schema_version": 3,
+        });
+        assert_ne!(
+            normalized_state_digest(&expected).unwrap(),
+            normalized_state_digest(&outside_tolerance).unwrap()
+        );
     }
 
     #[test]

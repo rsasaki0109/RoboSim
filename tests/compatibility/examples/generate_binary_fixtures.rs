@@ -1,4 +1,8 @@
 use anyhow::{ensure, Context};
+use rne_ai::{
+    mm_minimal_scene_path, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+};
 use rne_data::transport::{
     negotiate_transport, ClientHello, NegotiationPolicy, SensorFrameMetadata,
     TransportCapabilities, TransportFrame, TransportMessageKind, TRANSPORT_PROTOCOL_MAJOR,
@@ -11,9 +15,12 @@ use rne_data::{
 };
 use rne_math::Vec3;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::path::Path;
+
+const HISTORICAL_MIGRATION_FLOAT_TOLERANCE: f64 = 1.0e-9;
 
 fn main() -> anyhow::Result<()> {
     let output = env::args_os()
@@ -26,7 +33,62 @@ fn main() -> anyhow::Result<()> {
         &output.join("frontend-transport-v1.json"),
         &frontend_fixture()?,
     )?;
-    write_json(&output.join("dataset-payload-v1.json"), &dataset_fixture()?)
+    write_json(&output.join("dataset-payload-v1.json"), &dataset_fixture()?)?;
+    write_json(
+        &output.join("mobile-manipulator-snapshot-v1-to-v3.json"),
+        &mobile_manipulator_snapshot_fixture()?,
+    )
+}
+
+fn mobile_manipulator_snapshot_fixture() -> anyhow::Result<Value> {
+    let scene = mm_minimal_scene_path()
+        .canonicalize()
+        .context("canonicalize historical snapshot scene")?;
+    let source_sim = MobileManipulatorSim::from_scene_path(&scene)
+        .context("load historical snapshot source scene")?;
+    let mut source = serde_json::to_value(source_sim.snapshot())?;
+    let source_object = source
+        .as_object_mut()
+        .context("mobile-manipulator snapshot must serialize as an object")?;
+    source_object.insert(
+        "schema_version".to_string(),
+        MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION.into(),
+    );
+    ensure!(
+        source_object.remove("wrist_depth_frame").is_some(),
+        "current snapshot omitted wrist_depth_frame"
+    );
+    ensure!(
+        source_object.remove("grasp_retarget").is_some(),
+        "current snapshot omitted grasp_retarget"
+    );
+    drop(source_sim);
+
+    let historical: MobileManipulatorSimSnapshot = serde_json::from_value(source.clone())?;
+    let mut restored = MobileManipulatorSim::from_scene_path(&scene)
+        .context("load historical snapshot restore scene")?;
+    restored
+        .restore_snapshot(&historical)
+        .map_err(|error| anyhow::anyhow!("restore historical snapshot: {error:?}"))?;
+    let current = serde_json::to_value(restored.snapshot())?;
+    ensure!(
+        current.get("schema_version").and_then(Value::as_u64)
+            == Some(u64::from(MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION)),
+        "restored snapshot did not normalize to the current schema"
+    );
+    let current = canonical_state_value(&current);
+
+    Ok(json!({
+        "kind": "rne_historical_migration_case",
+        "schema_version": 1,
+        "artifact_contract": "mobile_manipulator_sim_snapshot",
+        "source_schema_version": MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
+        "current_schema_version": MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+        "expected_outcome": "accepted_within_tolerance",
+        "float_tolerance": HISTORICAL_MIGRATION_FLOAT_TOLERANCE,
+        "source_snapshot": source,
+        "current_snapshot_sha256": sha256(&serde_json::to_vec(&current)?),
+    }))
 }
 
 fn frontend_fixture() -> anyhow::Result<Value> {
@@ -158,6 +220,32 @@ fn dataset_fixture() -> anyhow::Result<Value> {
 
 fn lower_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn canonical_state_value(value: &Value) -> Value {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            let value = number.as_f64().expect("JSON float");
+            let rounded = (value * 1_000_000_000.0).round() / 1_000_000_000.0;
+            Value::from(if rounded == 0.0 { 0.0 } else { rounded })
+        }
+        Value::Array(values) => Value::Array(values.iter().map(canonical_state_value).collect()),
+        Value::Object(values) => {
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key.clone(), canonical_state_value(value)))
+                    .collect(),
+            )
+        }
+        _ => value.clone(),
+    }
 }
 
 fn write_json(path: &Path, value: &Value) -> anyhow::Result<()> {
