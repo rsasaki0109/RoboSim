@@ -2,8 +2,20 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:4e52387ecfca8069bede255576e1c5db36464cbbb108b48e82b1c49dc44360de",
+  "registry_sha256": "sha256:28d4655d1655030dfe91697253d06ba3627c3aec35424421490463af8a5cd5bb",
   "checks": [
+    {
+      "id": "behavior_replay_v1",
+      "contract": "behavior_replay",
+      "schema_version": 1,
+      "path": "tests/golden/replays/behavior-replay-v1.json",
+      "canonical_json_sha256": "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
     {
       "id": "dataset_bundle_v1",
       "contract": "dataset_bundle",
@@ -29,6 +41,18 @@
       "detail": "accepted; future schema and unknown field rejected"
     },
     {
+      "id": "dataset_payload_v1",
+      "contract": "dataset_payload",
+      "schema_version": 1,
+      "path": "tests/golden/datasets/native-payload-v1.json",
+      "canonical_json_sha256": "sha256:df6888b4313d564841fa83ab775691e09cb14ba7bbd94018ca3bc36efeb94245",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
       "id": "failure_capsule_v1",
       "contract": "failure_capsule",
       "schema_version": 1,
@@ -46,6 +70,18 @@
       "schema_version": 1,
       "path": "tests/golden/replays/generic-replay-v1.json",
       "canonical_json_sha256": "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "frontend_transport_v1",
+      "contract": "frontend_transport",
+      "schema_version": 1,
+      "path": "tests/golden/protocol/frontend-transport-v1.json",
+      "canonical_json_sha256": "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,
@@ -94,6 +130,18 @@
       "schema_version": 2,
       "path": "tests/golden/tasks/vectorized-checkpoint-v2.json",
       "canonical_json_sha256": "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "scenario_replay_v4",
+      "contract": "scenario_replay",
+      "schema_version": 4,
+      "path": "tests/golden/replays/scenario-replay-v4.json",
+      "canonical_json_sha256": "sha256:6e659e42ae0cd7970a10dcf21064d0a5d2f3531f18ff7a336e4a64c313f3647a",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

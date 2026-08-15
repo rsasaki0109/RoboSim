@@ -20,6 +20,8 @@ rne_ai = { workspace = true }
 rne_data = { workspace = true }
 rne_hardware_gateway = { workspace = true }
 rne_log = { workspace = true }
+rne_math = { workspace = true }
+rne_openscenario = { workspace = true }
 rne_physics_conformance = { workspace = true }
 rne_physics_conformance_suite = { version = "=0.1.0", path = "../physics_conformance" }
 serde = { workspace = true }

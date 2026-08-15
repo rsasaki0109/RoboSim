@@ -267,6 +267,13 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
+The thirteen-fixture registry additionally freezes a complete frontend
+`ClientHello` frame, all five dataset-native payload families, behavior replay
+v1, and scenario replay v4. Binary fixtures pair semantic fields with lowercase
+hex bytes: acceptance requires exact decode/re-encode identity plus rejection
+of truncation and trailing bytes. Frontend validation also rejects corrupt
+magic, unknown message kinds, and an incompatible negotiated major version.
+
 Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
 to the six schema-v1 checks. Schema-v1 reports remain historical evidence but
 cannot be relabelled as v2 because they do not prove the installed external

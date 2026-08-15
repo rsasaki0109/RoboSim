@@ -21,6 +21,9 @@ Each JSON fixture is hashed after canonical parsing so evidence is independent
 of indentation and platform line endings. The current typed reader must accept
 the original value and reject deterministic future-schema and unknown-field
 mutations. Reports contain stable relative paths and no host or timing data.
+Binary contracts are retained as strict JSON wrappers containing lowercase hex
+bytes and their semantic expectations. Their validators must prove exact
+decode/re-encode identity and fail closed on representative malformed bytes.
 
 No core, simulation, adapter, or public authoring crate may depend on the
 compatibility suite. It is allowed to aggregate those crates because it sits at

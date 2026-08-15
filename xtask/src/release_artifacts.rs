@@ -41,7 +41,7 @@ const INSTALL_CHECK_IDS: [&str; 8] = [
     "python_wheel",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 28] = [
+const BUNDLE_FILES: [(&str, &str); 32] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -92,6 +92,10 @@ const BUNDLE_FILES: [(&str, &str); 28] = [
         "assets/runs/scenario_speed.rne.run.toml",
     ),
     (
+        "tests/golden/replays/behavior-replay-v1.json",
+        "tests/golden/replays/behavior-replay-v1.json",
+    ),
+    (
         "tests/golden/datasets/bundle-manifest-v1.json",
         "tests/golden/datasets/bundle-manifest-v1.json",
     ),
@@ -100,12 +104,20 @@ const BUNDLE_FILES: [(&str, &str); 28] = [
         "tests/golden/datasets/depth-pair-evaluation-v1.json",
     ),
     (
+        "tests/golden/datasets/native-payload-v1.json",
+        "tests/golden/datasets/native-payload-v1.json",
+    ),
+    (
         "tests/golden/evidence/failure-capsule-v1.json",
         "tests/golden/evidence/failure-capsule-v1.json",
     ),
     (
         "tests/golden/replays/generic-replay-v1.json",
         "tests/golden/replays/generic-replay-v1.json",
+    ),
+    (
+        "tests/golden/protocol/frontend-transport-v1.json",
+        "tests/golden/protocol/frontend-transport-v1.json",
     ),
     (
         "tests/golden/hardware/gateway-mock-conformance-v1.json",
@@ -122,6 +134,10 @@ const BUNDLE_FILES: [(&str, &str); 28] = [
     (
         "tests/golden/tasks/vectorized-checkpoint-v2.json",
         "tests/golden/tasks/vectorized-checkpoint-v2.json",
+    ),
+    (
+        "tests/golden/replays/scenario-replay-v4.json",
+        "tests/golden/replays/scenario-replay-v4.json",
     ),
     (
         "tests/golden/tasks/task-spec-v1.json",

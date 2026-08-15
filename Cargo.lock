@@ -3461,6 +3461,8 @@ dependencies = [
  "rne_data",
  "rne_hardware_gateway",
  "rne_log",
+ "rne_math",
+ "rne_openscenario",
  "rne_physics_conformance",
  "rne_physics_conformance_suite",
  "serde",

@@ -8,10 +8,24 @@
 #![deny(missing_docs)]
 
 use anyhow::{bail, ensure, Context};
-use rne_ai::{PortableBatchCheckpoint, PortableBatchOperation, TaskSpec};
-use rne_data::{DatasetManifest, DepthPairEvaluationReport};
+use rne_ai::{BehaviorReplayArtifact, PortableBatchCheckpoint, PortableBatchOperation, TaskSpec};
+use rne_data::transport::{
+    negotiate_transport, ClientHello, NegotiationPolicy, NegotiationRejectCode,
+    SensorFrameMetadata, TransportCapabilities, TransportFrame, TransportMessageKind,
+    TRANSPORT_MAX_PAYLOAD_BYTES,
+};
+use rne_data::{
+    decode_dataset_action, decode_dataset_annotation, decode_dataset_imu,
+    decode_dataset_task_outcome, decode_dataset_transform, encode_dataset_action,
+    encode_dataset_annotation, encode_dataset_imu, encode_dataset_task_outcome,
+    encode_dataset_transform, DatasetActionSample, DatasetGroundTruthAnnotation, DatasetManifest,
+    DatasetTaskOutcomeSample, DepthPairEvaluationReport, ImuSample, PoseSample,
+    DATASET_PAYLOAD_SCHEMA_VERSION,
+};
 use rne_hardware_gateway::mock::MockConformanceReport;
 use rne_log::{FailureCapsule, ReplayArtifact};
+use rne_math::Vec3;
+use rne_openscenario::ScenarioReplayArtifact;
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
 use rne_physics_conformance_suite::ConformanceReport;
 use serde::{Deserialize, Serialize};
@@ -40,7 +54,13 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 9] = [
+const FIXTURE_SPECS: [FixtureSpec; 13] = [
+    FixtureSpec {
+        id: "behavior_replay_v1",
+        contract: "behavior_replay",
+        schema_version: 1,
+        version_field: "schema_version",
+    },
     FixtureSpec {
         id: "dataset_bundle_v1",
         contract: "dataset_bundle",
@@ -50,6 +70,12 @@ const FIXTURE_SPECS: [FixtureSpec; 9] = [
     FixtureSpec {
         id: "dataset_depth_evaluation_v1",
         contract: "dataset_offline_evaluation",
+        schema_version: 1,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "dataset_payload_v1",
+        contract: "dataset_payload",
         schema_version: 1,
         version_field: "schema_version",
     },
@@ -64,6 +90,12 @@ const FIXTURE_SPECS: [FixtureSpec; 9] = [
         contract: "generic_replay",
         schema_version: 1,
         version_field: "version",
+    },
+    FixtureSpec {
+        id: "frontend_transport_v1",
+        contract: "frontend_transport",
+        schema_version: 1,
+        version_field: "schema_version",
     },
     FixtureSpec {
         id: "hardware_mock_conformance_v1",
@@ -90,12 +122,152 @@ const FIXTURE_SPECS: [FixtureSpec; 9] = [
         version_field: "schema_version",
     },
     FixtureSpec {
+        id: "scenario_replay_v4",
+        contract: "scenario_replay",
+        schema_version: 4,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
         id: "task_spec_v1",
         contract: "task_spec",
         schema_version: 1,
         version_field: "schema_version",
     },
 ];
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendHelloFixture {
+    min_protocol_major: u16,
+    max_protocol_major: u16,
+    capabilities_bits: u64,
+    required_capabilities_bits: u64,
+    max_payload_bytes: u32,
+    queue_frame_limit: u32,
+    queue_byte_limit: u32,
+    resume_after_sequence: Option<u64>,
+}
+
+impl FrontendHelloFixture {
+    fn as_client_hello(self) -> ClientHello {
+        ClientHello {
+            min_protocol_major: self.min_protocol_major,
+            max_protocol_major: self.max_protocol_major,
+            capabilities: TransportCapabilities::from_bits(self.capabilities_bits),
+            required_capabilities: TransportCapabilities::from_bits(
+                self.required_capabilities_bits,
+            ),
+            max_payload_bytes: self.max_payload_bytes,
+            queue_frame_limit: self.queue_frame_limit,
+            queue_byte_limit: self.queue_byte_limit,
+            resume_after_sequence: self.resume_after_sequence,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NegotiatedTransportFixture {
+    protocol_major: u16,
+    protocol_minor: u16,
+    capabilities_bits: u64,
+    max_payload_bytes: u32,
+    queue_frame_limit: u32,
+    queue_byte_limit: u32,
+    resume_after_sequence: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendTransportFixture {
+    schema_version: u32,
+    message_kind: String,
+    protocol_major: u16,
+    protocol_minor: u16,
+    flags: u16,
+    sequence: u64,
+    session_id: u64,
+    frame_hex: String,
+    hello: FrontendHelloFixture,
+    negotiated: NegotiatedTransportFixture,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct DatasetMetadataFixture {
+    stream_id: u64,
+    sensor_sequence: u64,
+    capture_ticks: u64,
+    available_ticks: u64,
+}
+
+impl DatasetMetadataFixture {
+    fn as_metadata(self) -> SensorFrameMetadata {
+        SensorFrameMetadata {
+            stream_id: self.stream_id,
+            sensor_sequence: self.sensor_sequence,
+            capture_ticks: self.capture_ticks,
+            available_ticks: self.available_ticks,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetImuFixture {
+    angular_velocity_rad_s: [f64; 3],
+    linear_acceleration_m_s2: [f64; 3],
+    payload_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetTransformFixture {
+    position_m: [f64; 3],
+    yaw_rad: f64,
+    payload_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetActionFixture {
+    values: Vec<f64>,
+    payload_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetOutcomeFixture {
+    episode_index: u64,
+    step_in_episode: u64,
+    reward: f64,
+    cumulative_reward: f64,
+    terminated: bool,
+    truncated: bool,
+    success: Option<bool>,
+    payload_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetAnnotationFixture {
+    class_id: u32,
+    instance_id: u64,
+    values: Vec<f64>,
+    payload_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatasetPayloadFixture {
+    schema_version: u32,
+    metadata: DatasetMetadataFixture,
+    imu: DatasetImuFixture,
+    transform: DatasetTransformFixture,
+    action: DatasetActionFixture,
+    outcome: DatasetOutcomeFixture,
+    annotation: DatasetAnnotationFixture,
+}
 
 /// Strict registry of compatibility fixtures shipped with a release.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -431,6 +603,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
         actual_schema
     );
     match spec.contract {
+        "behavior_replay" => {
+            let fixture: BehaviorReplayArtifact = serde_json::from_value(value)?;
+            fixture.validate_compatibility()?;
+        }
         "dataset_bundle" => {
             let fixture: DatasetManifest = serde_json::from_value(value)?;
             fixture.validate()?;
@@ -439,6 +615,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
             let fixture: DepthPairEvaluationReport = serde_json::from_value(value)?;
             fixture.validate()?;
         }
+        "dataset_payload" => {
+            let fixture: DatasetPayloadFixture = serde_json::from_value(value)?;
+            validate_dataset_payload(&fixture)?;
+        }
         "failure_capsule" => {
             let fixture: FailureCapsule = serde_json::from_value(value)?;
             fixture.validate()?;
@@ -446,6 +626,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
         "generic_replay" => {
             let fixture: ReplayArtifact = serde_json::from_value(value)?;
             fixture.validate()?;
+        }
+        "frontend_transport" => {
+            let fixture: FrontendTransportFixture = serde_json::from_value(value)?;
+            validate_frontend_transport(&fixture)?;
         }
         "hardware_mock_conformance" => {
             let fixture: MockConformanceReport = serde_json::from_value(value)?;
@@ -464,6 +648,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
             let fixture: PortableBatchCheckpoint<u64> = serde_json::from_value(value)?;
             validate_checkpoint(&fixture)?;
         }
+        "scenario_replay" => {
+            let fixture: ScenarioReplayArtifact = serde_json::from_value(value)?;
+            fixture.validate()?;
+        }
         "task_spec" => {
             let fixture: TaskSpec = serde_json::from_value(value)?;
             fixture.validate()?;
@@ -471,6 +659,228 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
         other => bail!("unsupported compatibility contract {other}"),
     }
     Ok(())
+}
+
+fn validate_frontend_transport(fixture: &FrontendTransportFixture) -> anyhow::Result<()> {
+    ensure!(
+        fixture.schema_version == 1,
+        "frontend transport fixture schema mismatch"
+    );
+    ensure!(
+        fixture.message_kind == "client_hello",
+        "frontend fixture message kind mismatch"
+    );
+    let bytes = decode_lower_hex(&fixture.frame_hex)?;
+    let frame = TransportFrame::decode(&bytes, TRANSPORT_MAX_PAYLOAD_BYTES)?;
+    ensure!(
+        frame.protocol_major == fixture.protocol_major
+            && frame.protocol_minor == fixture.protocol_minor
+            && frame.kind == TransportMessageKind::ClientHello
+            && frame.flags == fixture.flags
+            && frame.sequence == fixture.sequence
+            && frame.session_id == fixture.session_id,
+        "frontend frame header mismatch"
+    );
+    ensure!(
+        frame.encode()? == bytes,
+        "frontend frame did not re-encode exactly"
+    );
+
+    let expected_hello = fixture.hello.as_client_hello();
+    let hello = ClientHello::decode_payload(&frame.payload)?;
+    ensure!(hello == expected_hello, "frontend hello payload mismatch");
+    ensure!(
+        hello.encode_payload() == frame.payload,
+        "frontend hello did not re-encode exactly"
+    );
+
+    let negotiated = negotiate_transport(hello, NegotiationPolicy::default())
+        .map_err(|reject| anyhow::anyhow!("frontend negotiation rejected: {:?}", reject.code))?;
+    let expected = fixture.negotiated;
+    ensure!(
+        negotiated.protocol_major == expected.protocol_major
+            && negotiated.protocol_minor == expected.protocol_minor
+            && negotiated.capabilities.bits() == expected.capabilities_bits
+            && negotiated.max_payload_bytes == expected.max_payload_bytes
+            && negotiated.queue_frame_limit == expected.queue_frame_limit
+            && negotiated.queue_byte_limit == expected.queue_byte_limit
+            && negotiated.resume_after_sequence == expected.resume_after_sequence,
+        "frontend negotiated limits mismatch"
+    );
+
+    let mut bad_magic = bytes.clone();
+    bad_magic[0] ^= 1;
+    ensure!(
+        TransportFrame::decode(&bad_magic, TRANSPORT_MAX_PAYLOAD_BYTES).is_err(),
+        "frontend transport accepted corrupt magic"
+    );
+    let mut unknown_kind = bytes.clone();
+    unknown_kind[8..10].copy_from_slice(&u16::MAX.to_le_bytes());
+    ensure!(
+        TransportFrame::decode(&unknown_kind, TRANSPORT_MAX_PAYLOAD_BYTES).is_err(),
+        "frontend transport accepted an unknown message kind"
+    );
+    ensure_rejects_edge_mutations(&bytes, |candidate| {
+        TransportFrame::decode(candidate, TRANSPORT_MAX_PAYLOAD_BYTES).map(|_| ())
+    })?;
+    ensure_rejects_edge_mutations(&frame.payload, |candidate| {
+        ClientHello::decode_payload(candidate).map(|_| ())
+    })?;
+
+    let incompatible = ClientHello {
+        min_protocol_major: fixture.protocol_major.saturating_add(1),
+        max_protocol_major: fixture.protocol_major.saturating_add(1),
+        ..hello
+    };
+    let rejection = negotiate_transport(incompatible, NegotiationPolicy::default())
+        .expect_err("incompatible frontend protocol must fail closed");
+    ensure!(
+        rejection.code == NegotiationRejectCode::UnsupportedVersion,
+        "frontend version mismatch used the wrong rejection code"
+    );
+    Ok(())
+}
+
+fn validate_dataset_payload(fixture: &DatasetPayloadFixture) -> anyhow::Result<()> {
+    ensure!(
+        fixture.schema_version == DATASET_PAYLOAD_SCHEMA_VERSION,
+        "dataset payload schema mismatch"
+    );
+    let metadata = fixture.metadata.as_metadata();
+
+    let imu = ImuSample {
+        angular_velocity_rad_s: vec3(fixture.imu.angular_velocity_rad_s),
+        linear_acceleration_m_s2: vec3(fixture.imu.linear_acceleration_m_s2),
+    };
+    let imu_bytes = decode_lower_hex(&fixture.imu.payload_hex)?;
+    ensure!(
+        decode_dataset_imu(&imu_bytes)? == (metadata, imu),
+        "dataset IMU payload mismatch"
+    );
+    ensure!(
+        encode_dataset_imu(metadata, &imu)? == imu_bytes,
+        "dataset IMU payload did not re-encode exactly"
+    );
+    ensure_rejects_edge_mutations(&imu_bytes, |bytes| decode_dataset_imu(bytes).map(|_| ()))?;
+
+    let transform = PoseSample {
+        position_m: vec3(fixture.transform.position_m),
+        yaw_rad: fixture.transform.yaw_rad,
+    };
+    let transform_bytes = decode_lower_hex(&fixture.transform.payload_hex)?;
+    ensure!(
+        decode_dataset_transform(&transform_bytes)? == (metadata, transform),
+        "dataset transform payload mismatch"
+    );
+    ensure!(
+        encode_dataset_transform(metadata, &transform)? == transform_bytes,
+        "dataset transform payload did not re-encode exactly"
+    );
+    ensure_rejects_edge_mutations(&transform_bytes, |bytes| {
+        decode_dataset_transform(bytes).map(|_| ())
+    })?;
+
+    let action = DatasetActionSample {
+        values: fixture.action.values.clone(),
+    };
+    let action_bytes = decode_lower_hex(&fixture.action.payload_hex)?;
+    ensure!(
+        decode_dataset_action(&action_bytes)? == (metadata, action.clone()),
+        "dataset action payload mismatch"
+    );
+    ensure!(
+        encode_dataset_action(metadata, &action)? == action_bytes,
+        "dataset action payload did not re-encode exactly"
+    );
+    ensure_rejects_edge_mutations(&action_bytes, |bytes| {
+        decode_dataset_action(bytes).map(|_| ())
+    })?;
+
+    let outcome = DatasetTaskOutcomeSample {
+        episode_index: fixture.outcome.episode_index,
+        step_in_episode: fixture.outcome.step_in_episode,
+        reward: fixture.outcome.reward,
+        cumulative_reward: fixture.outcome.cumulative_reward,
+        terminated: fixture.outcome.terminated,
+        truncated: fixture.outcome.truncated,
+        success: fixture.outcome.success,
+    };
+    let outcome_bytes = decode_lower_hex(&fixture.outcome.payload_hex)?;
+    ensure!(
+        decode_dataset_task_outcome(&outcome_bytes)? == (metadata, outcome),
+        "dataset outcome payload mismatch"
+    );
+    ensure!(
+        encode_dataset_task_outcome(metadata, &outcome)? == outcome_bytes,
+        "dataset outcome payload did not re-encode exactly"
+    );
+    ensure_rejects_edge_mutations(&outcome_bytes, |bytes| {
+        decode_dataset_task_outcome(bytes).map(|_| ())
+    })?;
+
+    let annotation = DatasetGroundTruthAnnotation {
+        class_id: fixture.annotation.class_id,
+        instance_id: fixture.annotation.instance_id,
+        values: fixture.annotation.values.clone(),
+    };
+    let annotation_bytes = decode_lower_hex(&fixture.annotation.payload_hex)?;
+    ensure!(
+        decode_dataset_annotation(&annotation_bytes)? == (metadata, annotation.clone()),
+        "dataset annotation payload mismatch"
+    );
+    ensure!(
+        encode_dataset_annotation(metadata, &annotation)? == annotation_bytes,
+        "dataset annotation payload did not re-encode exactly"
+    );
+    ensure_rejects_edge_mutations(&annotation_bytes, |bytes| {
+        decode_dataset_annotation(bytes).map(|_| ())
+    })?;
+    Ok(())
+}
+
+fn vec3(values: [f64; 3]) -> Vec3 {
+    Vec3::new(values[0], values[1], values[2])
+}
+
+fn ensure_rejects_edge_mutations<E>(
+    bytes: &[u8],
+    mut decode: impl FnMut(&[u8]) -> Result<(), E>,
+) -> anyhow::Result<()> {
+    ensure!(!bytes.is_empty(), "binary compatibility payload is empty");
+    ensure!(
+        decode(&bytes[..bytes.len() - 1]).is_err(),
+        "binary reader accepted a truncated payload"
+    );
+    let mut trailing = bytes.to_vec();
+    trailing.push(0);
+    ensure!(
+        decode(&trailing).is_err(),
+        "binary reader accepted trailing bytes"
+    );
+    Ok(())
+}
+
+fn decode_lower_hex(text: &str) -> anyhow::Result<Vec<u8>> {
+    ensure!(
+        text.len().is_multiple_of(2) && !text.is_empty(),
+        "binary fixture hex must contain complete bytes"
+    );
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = lower_hex_nibble(pair[0])?;
+            let low = lower_hex_nibble(pair[1])?;
+            Ok((high << 4) | low)
+        })
+        .collect()
+}
+
+fn lower_hex_nibble(byte: u8) -> anyhow::Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        _ => bail!("binary fixture hex must use lowercase ASCII"),
+    }
 }
 
 fn validate_checkpoint(checkpoint: &PortableBatchCheckpoint<u64>) -> anyhow::Result<()> {

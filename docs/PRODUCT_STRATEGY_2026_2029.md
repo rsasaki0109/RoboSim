@@ -370,14 +370,16 @@ claims fail closed until portable vectors exist. Failure Capsules require the
 exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
-The first v0.9 compatibility slice turns retained artifacts into an executable
-installed contract. A strict registry content-addresses nine TaskSpec,
-checkpoint, generic replay, dataset, Failure Capsule, hardware, and physics
-fixtures. `rne-compatibility` must accept each artifact with its current typed
-reader and reject deterministic future-schema and unknown-field mutations. CI
-publishes the stable report and both installed release rehearsals rerun it from
-the extracted corpus. This evidence starts the compatibility clock; it does not
-claim six months of use or independent adoption.
+The expanded v0.9 compatibility slice turns retained artifacts into an
+executable installed contract. A strict registry content-addresses thirteen
+TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,
+Failure Capsule, hardware, and physics fixtures. `rne-compatibility` must accept
+each artifact with its current typed reader and reject deterministic
+future-schema and unknown-field mutations. Binary frontend and dataset
+fixtures additionally require exact wire round trips and malformed-input
+rejection. CI publishes the stable report and both installed release rehearsals
+rerun it from the extracted corpus. This evidence advances the compatibility
+clock; it does not claim six months of use or independent adoption.
 
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
