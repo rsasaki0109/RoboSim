@@ -114,6 +114,13 @@ tolerances in the kit, rejects capability overclaims, and binds Failure Capsule
 evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
+The first v0.9 compatibility slice adds an installed, content-addressed corpus
+for nine TaskSpec, checkpoint, replay, dataset, Failure Capsule, hardware, and
+physics artifacts. `rne-compatibility` runs every current typed reader and
+proves fail-closed handling of a deterministic future schema and unknown field;
+release rehearsal schema v3 requires the same corpus after extraction on both
+tier-1 platforms. This begins the freeze but does not replace external-use or
+six-month stability gates.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

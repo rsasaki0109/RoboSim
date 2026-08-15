@@ -16,10 +16,11 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 3;
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 5] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 6] = [
     ("rne_asset_cli", "rne-asset"),
+    ("rne_compatibility_suite", "rne-compatibility"),
     ("rne_physics_conformance_suite", "rne-physics-conformance"),
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
@@ -29,17 +30,18 @@ const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
 const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
-const INSTALL_CHECK_IDS: [&str; 7] = [
+const INSTALL_CHECK_IDS: [&str; 8] = [
     "robot_replay",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
     "hardware_adapter",
     "controller_plugin",
+    "compatibility_corpus",
     "python_wheel",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 18] = [
+const BUNDLE_FILES: [(&str, &str); 28] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -52,6 +54,10 @@ const BUNDLE_FILES: [(&str, &str); 18] = [
     ),
     ("release/blockers.toml", "release/blockers.toml"),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
+    (
+        "release/compatibility-fixtures.toml",
+        "release/compatibility-fixtures.toml",
+    ),
     (
         "release/artifact-attestation.toml",
         "release/artifact-attestation.toml",
@@ -84,6 +90,42 @@ const BUNDLE_FILES: [(&str, &str); 18] = [
     (
         "assets/runs/scenario_speed.rne.run.toml",
         "assets/runs/scenario_speed.rne.run.toml",
+    ),
+    (
+        "tests/golden/datasets/bundle-manifest-v1.json",
+        "tests/golden/datasets/bundle-manifest-v1.json",
+    ),
+    (
+        "tests/golden/datasets/depth-pair-evaluation-v1.json",
+        "tests/golden/datasets/depth-pair-evaluation-v1.json",
+    ),
+    (
+        "tests/golden/evidence/failure-capsule-v1.json",
+        "tests/golden/evidence/failure-capsule-v1.json",
+    ),
+    (
+        "tests/golden/replays/generic-replay-v1.json",
+        "tests/golden/replays/generic-replay-v1.json",
+    ),
+    (
+        "tests/golden/hardware/gateway-mock-conformance-v1.json",
+        "tests/golden/hardware/gateway-mock-conformance-v1.json",
+    ),
+    (
+        "tests/golden/physics/conformance-report-v2.json",
+        "tests/golden/physics/conformance-report-v2.json",
+    ),
+    (
+        "crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json",
+        "crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json",
+    ),
+    (
+        "tests/golden/tasks/vectorized-checkpoint-v2.json",
+        "tests/golden/tasks/vectorized-checkpoint-v2.json",
+    ),
+    (
+        "tests/golden/tasks/task-spec-v1.json",
+        "tests/golden/tasks/task-spec-v1.json",
     ),
 ];
 const SCENARIO_FILES: [(&str, &str); 2] = [
@@ -560,6 +602,7 @@ fn run_install_rehearsal(
     fs::create_dir_all(output_dir)?;
     let bin_dir = bundle_dir.join("bin");
     let asset_cli = bin_dir.join(native_binary_name("rne-asset", target));
+    let compatibility = bin_dir.join(native_binary_name("rne-compatibility", target));
     let physics = bin_dir.join(native_binary_name("rne-physics-conformance", target));
     let scale = bin_dir.join(native_binary_name("rne-scenario-scale", target));
     let hardware_conformance = bin_dir.join(native_binary_name("rne-hardware-conformance", target));
@@ -714,6 +757,24 @@ fn run_install_rehearsal(
     let scaffold_plugin_passed = run_scaffold_rehearsal(bundle_dir, output_dir, &asset_cli, target);
     let plugin_passed = reference_plugin_passed && scaffold_plugin_passed;
 
+    let compatibility_report = output_dir.join("compatibility-fixture-report.json");
+    let compatibility_passed = run_check_command(
+        "installed compatibility corpus",
+        bundle_dir,
+        &compatibility,
+        &[
+            OsString::from("--root"),
+            bundle_dir.to_path_buf().into_os_string(),
+            OsString::from("--output"),
+            compatibility_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &compatibility_report,
+        "passed",
+        &serde_json::Value::Bool(true),
+    );
+
     let wheel_passed = run_python_wheel_smoke(bundle_dir, output_dir, python, target);
     let checks = vec![
         check("robot_replay", robot_verify),
@@ -722,6 +783,7 @@ fn run_install_rehearsal(
         check("scenario_scale_100", scale_passed),
         check("hardware_adapter", hardware_passed),
         check("controller_plugin", plugin_passed),
+        check("compatibility_corpus", compatibility_passed),
         check("python_wheel", wheel_passed),
     ];
     let passed = checks.iter().all(|check| check.status == "passed");
@@ -1281,22 +1343,12 @@ mod tests {
             release_version: RELEASE_VERSION.to_string(),
             target: "x86_64-unknown-linux-gnu".to_string(),
             status: "passed".to_string(),
-            checks: [
-                "robot_replay",
-                "scenario_replay",
-                "physics_conformance",
-                "scenario_scale_100",
-                "hardware_adapter",
-                "controller_plugin",
-                "python_wheel",
-            ]
-            .map(|id| check(id, true))
-            .to_vec(),
+            checks: INSTALL_CHECK_IDS.map(|id| check(id, true)).to_vec(),
         };
         assert!(report.all_passed());
 
         let mut duplicated = report;
-        duplicated.checks[6].id = "robot_replay".to_string();
+        duplicated.checks[7].id = "robot_replay".to_string();
         assert!(!duplicated.all_passed());
     }
 }

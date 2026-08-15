@@ -212,6 +212,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Controller plugin SDK](docs/PLUGIN_SDK.md)
 - [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
 - [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
+- [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
 - [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)

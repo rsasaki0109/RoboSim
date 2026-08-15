@@ -1,0 +1,117 @@
+{
+  "kind": "rne_compatibility_fixture_report",
+  "schema_version": 1,
+  "release_version": "0.1.0",
+  "registry_sha256": "sha256:4e52387ecfca8069bede255576e1c5db36464cbbb108b48e82b1c49dc44360de",
+  "checks": [
+    {
+      "id": "dataset_bundle_v1",
+      "contract": "dataset_bundle",
+      "schema_version": 1,
+      "path": "tests/golden/datasets/bundle-manifest-v1.json",
+      "canonical_json_sha256": "sha256:e995a3a56a44577cc6b848355f29367a88167570829661b32e32e76eb06f6832",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "dataset_depth_evaluation_v1",
+      "contract": "dataset_offline_evaluation",
+      "schema_version": 1,
+      "path": "tests/golden/datasets/depth-pair-evaluation-v1.json",
+      "canonical_json_sha256": "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "failure_capsule_v1",
+      "contract": "failure_capsule",
+      "schema_version": 1,
+      "path": "tests/golden/evidence/failure-capsule-v1.json",
+      "canonical_json_sha256": "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "generic_replay_v1",
+      "contract": "generic_replay",
+      "schema_version": 1,
+      "path": "tests/golden/replays/generic-replay-v1.json",
+      "canonical_json_sha256": "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "hardware_mock_conformance_v1",
+      "contract": "hardware_mock_conformance",
+      "schema_version": 1,
+      "path": "tests/golden/hardware/gateway-mock-conformance-v1.json",
+      "canonical_json_sha256": "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "physics_conformance_v2",
+      "contract": "physics_conformance",
+      "schema_version": 2,
+      "path": "tests/golden/physics/conformance-report-v2.json",
+      "canonical_json_sha256": "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "physics_external_conformance_v1",
+      "contract": "external_physics_conformance",
+      "schema_version": 1,
+      "path": "crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json",
+      "canonical_json_sha256": "sha256:ca5868832023438150c9f9d73e44ea88437e98a7ab147cb5bdb776a848426647",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "portable_batch_checkpoint_v2",
+      "contract": "portable_batch_checkpoint",
+      "schema_version": 2,
+      "path": "tests/golden/tasks/vectorized-checkpoint-v2.json",
+      "canonical_json_sha256": "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "task_spec_v1",
+      "contract": "task_spec",
+      "schema_version": 1,
+      "path": "tests/golden/tasks/task-spec-v1.json",
+      "canonical_json_sha256": "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    }
+  ],
+  "passed": true
+}

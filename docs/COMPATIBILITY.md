@@ -256,11 +256,26 @@ transport, asset, replay, physics, determinism, task, accelerator-selection,
 accelerator-protocol, dataset, hardware, and evidence constants; changing one
 side alone fails.
 
+The installed compatibility corpus is indexed by
+`release/compatibility-fixtures.toml`. Each entry fixes a reader identity,
+schema, canonical forward-slash path, and SHA-256 of canonical compact JSON.
+The schema-v1 `rne_compatibility_fixture_report` requires every retained
+artifact to pass its current typed reader and requires deterministic mutations
+of its version field and top-level object to be rejected. Canonical JSON hashing
+keeps evidence independent of checkout line endings and indentation. Removing
+a retained fixture or changing its meaning requires a documented compatibility
+decision; adding another retained artifact changes the registry digest but not
+the report shape.
+
 Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
 to the six schema-v1 checks. Schema-v1 reports remain historical evidence but
 cannot be relabelled as v2 because they do not prove the installed external
 adapter runner, fixed-binding process mock, or bundled TaskSpec. Re-run the
 matching release bundle to produce v2 evidence; do not edit an old report.
+Installed-rehearsal report schema v3 adds the required
+`compatibility_corpus` check and bundled `rne-compatibility` binary. A v1 or v2
+report remains historical evidence for the workflows it actually ran and must
+not be promoted to v3 without rerunning the matching extracted bundle.
 
 ## Replay migration
 

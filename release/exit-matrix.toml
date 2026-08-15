@@ -102,7 +102,10 @@ workflow = ".github/workflows/ci.yml"
 job = "release_contract"
 runner = "ubuntu-latest"
 clean_checkout = true
-commands = ["cargo run --locked -p xtask -- release-check"]
+commands = [
+  "cargo run --locked -p xtask -- release-check",
+  "cargo run --locked -p rne_compatibility_suite -- --output artifacts/compatibility/report.json",
+]
 
 [[gate]]
 id = "semver"

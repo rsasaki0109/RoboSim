@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "scene": "assets/scenes/example.rne.scene.toml",
+  "seed": 42,
+  "clock": {
+    "steps": 2,
+    "hz": 60.0
+  },
+  "controller": "differential_drive",
+  "sensor_payload_streams": [],
+  "frames": [
+    {
+      "step": 0,
+      "sim_ticks": 16666666,
+      "action": {
+        "kind": "differential_drive",
+        "wheel_velocity_rad_s": 6.0
+      },
+      "observation": {
+        "base_translation_m": [0.1, 0.0, 0.0],
+        "joint_state": null,
+        "sensor_streams": [],
+        "sensor_payloads": [],
+        "contact": null
+      },
+      "physics_hash": 17
+    },
+    {
+      "step": 1,
+      "sim_ticks": 33333332,
+      "action": {
+        "kind": "differential_drive",
+        "wheel_velocity_rad_s": 6.0
+      },
+      "observation": {
+        "base_translation_m": [0.2, 0.0, 0.0],
+        "joint_state": null,
+        "sensor_streams": [],
+        "sensor_payloads": [],
+        "contact": null
+      },
+      "physics_hash": 34
+    }
+  ],
+  "final_report": {
+    "steps": 2,
+    "sim_time_s": 0.03333333333333333,
+    "seed": 42,
+    "robot_count": 1,
+    "differential_drive_count": 1,
+    "physics_hash": 34,
+    "first_base_translation_m": [0.2, 0.0, 0.0],
+    "contact_pairs_max": 1,
+    "contact_impulse_max_ns": 0.1635,
+    "min_base_height_m": 0.2,
+    "failure": null
+  }
+}

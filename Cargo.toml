@@ -111,6 +111,7 @@ members = [
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
+  "tests/compatibility",
   "tests/physics_conformance",
   "tests/scenario_scale",
   "tools/rne_asset_cli",

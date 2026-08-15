@@ -77,6 +77,7 @@ rehearsal. From its top-level directory:
   --library lib/librne_plugin_example_velocity_servo.so \
   --manifest lib/rne-plugin.json \
   --output controller-plugin-conformance.json
+./bin/rne-compatibility --root . --output compatibility-fixture-report.json
 ```
 
 The conformance command's `--allow-hil` is safe here because the target is the
@@ -84,6 +85,9 @@ bundled deterministic process mock; do not reuse it with an unisolated physical
 robot. Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
 commands are headless and require neither ROS2 nor a renderer.
+The compatibility command reads only the retained registry and fixtures under
+the extracted bundle, verifies their canonical JSON digests, runs the current
+typed readers, and checks fail-closed future-schema and unknown-field handling.
 
 The bundle includes the dependency-free authoring module at
 `sdk/rust/rne_plugin_sdk.rs`. To prove the installed authoring path with no

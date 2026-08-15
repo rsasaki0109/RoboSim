@@ -133,6 +133,14 @@ jobs:
           shared-key: release-contract
       - name: Validate version, schemas, blockers, rustdoc, and crate archives
         run: cargo run --locked -p xtask -- release-check
+      - name: Verify the retained compatibility corpus
+        run: cargo run --locked -p rne_compatibility_suite -- --output artifacts/compatibility/report.json
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-fixture-report
+          path: artifacts/compatibility/report.json
 
   semver:
     runs-on: ubuntu-latest

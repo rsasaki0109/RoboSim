@@ -6,15 +6,18 @@ Python wheel, invokes `xtask release-bundle`, creates a deterministic archive,
 extracts it into a fresh directory, and invokes `release-install-smoke` against
 installed artifacts only.
 
-The bundle contains the CLI, standalone physics, hardware-adapter, and
+The bundle contains the CLI, standalone physics, hardware-adapter,
+compatibility, and
 scenario-scale conformance binaries, the fixed-binding hardware process mock,
 the reference controller shared library, the dependency-free Rust plugin SDK,
 compatibility and install documentation, locked dependency SBOM,
 artifact-attestation policy, replay fixtures, provenance report, and
-`SHA256SUMS`. Installed-rehearsal schema v2 runs seven frozen checks: robot
+`SHA256SUMS`. Installed-rehearsal schema v3 runs eight frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter
 conformance, the 100-actor scale case, standalone controller-plugin
-conformance, and a fresh wheel installation. The hardware check executes nine
+conformance, the installed compatibility corpus, and a fresh wheel installation.
+Schema v2 remains historical evidence for the same set without the corpus; it
+cannot be relabelled as v3. The hardware check executes nine
 TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings

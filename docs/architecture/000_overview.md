@@ -20,6 +20,7 @@ rne_math → rne_core → rne_ecs → rne_world
 rne_plugin_sdk (dependency-free author ABI) → rne_plugin ↔ runner
 runner ↔ rne_data::transport ↔ native frontend (versioned framed sensor boundary)
 adapters/ros2/* (optional)
+tests/compatibility (release-facing typed readers; never a core dependency)
 ```
 
 `rne_plugin_sdk` owns only dependency-free C-ABI constants, frames, and callback
@@ -35,6 +36,12 @@ and ECS component contracts. It may construct canonical test worlds, but it
 does not add behavior or vendor types to `rne_physics`, and no core crate
 depends on it. Independently maintained backend crates use it as authoring and
 certification tooling.
+
+`rne_compatibility_suite` is a downstream release/test aggregator. It may
+depend on public artifact owners and non-publishable conformance runners, but
+no runtime or core crate may depend on it. Its installed binary verifies the
+retained release corpus without changing artifact semantics or migrating
+evidence in place.
 
 `rne_data::transport` owns production frontend framing, capability negotiation,
 typed RGB-D/LiDAR payload codecs, and frame+byte bounded latest-only queues.

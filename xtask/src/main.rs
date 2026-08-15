@@ -155,6 +155,14 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     let contract_text = fs::read_to_string(root.join("release/contracts.toml"))?;
     let contract_registry = contract_text.parse::<toml::Value>()?;
     validate_contract_registry(&contract_registry)?;
+    let compatibility = rne_compatibility_suite::run_compatibility(
+        &root,
+        &root.join("release/compatibility-fixtures.toml"),
+    )?;
+    anyhow::ensure!(
+        compatibility.passed,
+        "one or more release compatibility fixtures failed"
+    );
     release_exit::validate_exit_matrix(&root)?;
 
     run_cargo_at(
@@ -1259,6 +1267,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "final_exit_report",
             u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "compatibility_fixture_report",
+            u64::from(
+                rne_compatibility_suite::COMPATIBILITY_FIXTURE_REPORT_SCHEMA_VERSION,
+            ),
         ),
         (
             "evidence",

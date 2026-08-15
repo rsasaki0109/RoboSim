@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Installed compatibility fixture corpus**: the new `rne-compatibility`
+  runner verifies nine content-addressed TaskSpec, checkpoint, replay, dataset,
+  Failure Capsule, hardware, and physics artifacts through their current typed
+  readers. Each check also proves rejection of a future schema and unknown
+  top-level field. Release bundles retain the registry and fixtures, CI uploads
+  a deterministic schema-v1 report, and installed-rehearsal schema v3 makes the
+  corpus a required eighth workflow on Linux and Windows.
 - **External physics-backend conformance SDK**: the publishable
   `rne_physics_conformance` crate runs a fixed, unit-bearing nine-check catalog
   against any public `PhysicsBackend` factory without engine allowlists or
