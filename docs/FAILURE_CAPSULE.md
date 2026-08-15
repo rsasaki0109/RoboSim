@@ -42,14 +42,18 @@ cargo run -p xtask -- failure-capsule create \
   --backend-version wire-v1
 ```
 
-Known hardware session, wire, shadow, and mock-conformance evidence retains its
-concrete kind and schema in artifact references. Creation and verification both
-require every session, wire trace, and shadow report to have a matching
-TaskSpec evidence file. Session evidence is reconstructed from its wire trace
-and gateway events; normalized hardware/simulation vectors replay through the
-shadow comparator to recompute first divergence, aggregates, and verdict.
-Missing TaskSpec evidence, inconsistent top-level session metadata, or a
-tampered shadow summary fails before a capsule is accepted.
+Known hardware session, wire, shadow, mock-conformance, and external adapter-
+conformance evidence retains its concrete kind and schema in artifact
+references. Creation and verification both require every session, wire trace,
+and shadow report to have a matching TaskSpec evidence file. Session evidence
+is reconstructed from its wire trace and gateway events; normalized
+hardware/simulation vectors replay through the shadow comparator to recompute
+first divergence, aggregates, and verdict. An external adapter report is
+accepted only when the capsule also contains bytes matching both its TaskSpec
+SHA-256 and adapter-subject SHA-256; a successful handshake additionally
+requires the negotiated TaskSpec identity. Missing subject evidence,
+inconsistent top-level session metadata, or a tampered summary fails before a
+capsule is accepted.
 
 For the LeKiwi reference path, pass the complete
 `rne_lekiwi_reference_session` output from `rne-lekiwi-session` in place of a

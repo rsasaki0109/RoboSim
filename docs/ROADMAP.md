@@ -102,6 +102,11 @@ the kit against the bundled reference shared library on both tier-1 platforms.
 The host-independent `rne_plugin_sdk` now owns the C-ABI definitions, while the
 offline scaffold vendors the exact SDK module. Installed rehearsal generates,
 builds with warnings denied, loads, and conforms a fresh controller plugin.
+The installed bundle now also ships `rne-hardware-conformance` and a fixed-
+binding process mock. The content-addressed schema-v1 report executes nine
+TaskSpec, protocol, authority, and fail-closed cases against any external
+adapter executable; the same catalog passes the Rust mock and Python LeKiwi
+bridge, and both tier-1 release rehearsals rerun it from installed artifacts.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

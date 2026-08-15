@@ -59,6 +59,19 @@ rehearsal. From its top-level directory:
 ./bin/rne-asset replay scenario.rne-replay
 ./bin/rne-physics-conformance --output physics-conformance.json
 ./bin/rne-scenario-scale --output scenario-scale.json
+./bin/rne-hardware-conformance \
+  --adapter ./bin/rne-hardware-mock-device \
+  --adapter-arg --device-id \
+  --adapter-arg installed-mock-v1 \
+  --adapter-arg --expected-task-id \
+  --adapter-arg rne.diff_drive.goal.v1 \
+  --adapter-arg --observation-width \
+  --adapter-arg 9 \
+  --adapter-arg --action-width \
+  --adapter-arg 2 \
+  --task assets/tasks/diff_drive_goal.task.json \
+  --allow-hil \
+  --output hardware-adapter-conformance.json
 ./bin/rne-asset plugin list --path lib
 ./bin/rne-asset plugin check \
   --library lib/librne_plugin_example_velocity_servo.so \
@@ -66,7 +79,9 @@ rehearsal. From its top-level directory:
   --output controller-plugin-conformance.json
 ```
 
-Use `.exe` on Windows and
+The conformance command's `--allow-hil` is safe here because the target is the
+bundled deterministic process mock; do not reuse it with an unisolated physical
+robot. Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
 commands are headless and require neither ROS2 nor a renderer.
 
@@ -117,5 +132,5 @@ cargo run --locked -p xtask -- release-bundle \
 ```
 
 `release-install-smoke --bundle-dir PATH --output-dir EMPTY_PATH` independently
-checks `SHA256SUMS`, installs the bundled wheel, and reruns all six frozen
+checks `SHA256SUMS`, installs the bundled wheel, and reruns all seven schema-v2
 installed-artifact checks.

@@ -87,6 +87,16 @@ emergency stop. A terminal response is valid only when it confirms the device
 watchdog applied a safe stop. The mock is conformance infrastructure, not a
 robot dynamics model or a vendor transport.
 
+`rne-hardware-conformance` is the separately versioned third-party-facing
+runner. It launches any supplied adapter executable through the same wire
+contract and emits a content-addressed nine-check report. Open identity,
+TaskSpec binding, observation dtype/sequence, bounded HIL actuation, safe stop,
+shadow authority, request ordering, session isolation, and action width are
+tested without linking adapter code into RNE. Full execution requires explicit
+`--allow-hil` authorization and is intended for a sandbox, process mock, or
+isolated rig. See
+[HARDWARE_ADAPTER_CONFORMANCE.md](HARDWARE_ADAPTER_CONFORMANCE.md).
+
 ## Shadow comparison
 
 `ShadowComparator` binds hardware observations and deterministic simulation
@@ -120,6 +130,12 @@ registered in `release/contracts.toml`. Canonical evidence includes:
 - `tests/golden/hardware/gateway-mock-conformance-v1.json`: six actual child
   process cases covering command deadline, disconnect, explicit reconnect,
   stale command, actuator limit, and device emergency stop.
+
+The external adapter report is intentionally content-addressed rather than a
+fixed binary golden: native executable bytes differ by target. The integration
+test requires two fresh runs against the fixed-binding Rust mock to be exactly
+equal, rejects a mock without a fixed TaskSpec binding, and applies the same
+catalog to the Python LeKiwi bridge.
 
 Run the focused gate with:
 

@@ -11,6 +11,11 @@ All notable changes to Robot Native Engine are documented in this file.
   loader re-exports the existing paths. `rne-asset plugin new` vendors the
   exact SDK module for an offline warning-free build, and installed release
   rehearsal conforms both the reference binary and a freshly generated plugin.
+- **External hardware-adapter conformance**: `rne-hardware-conformance` runs a
+  content-addressed nine-case TaskSpec/wire/safety catalog against any child
+  process with explicit sandboxed HIL authorization. The Rust process mock and
+  Python LeKiwi bridge pass the same runner, and installed-rehearsal schema v2
+  adds the required hardware-adapter check on Linux and Windows.
 
 ## [0.1.0] - 2026-08-14
 

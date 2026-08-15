@@ -60,6 +60,7 @@ wire_trace = 1
 session_evidence = 1
 shadow_comparison = 1
 mock_conformance = 1
+adapter_conformance = 1
 reference_profile = 1
 lekiwi_device_bridge = 1
 lekiwi_reference_session = 1
@@ -70,7 +71,7 @@ lekiwi_host_termination_diagnostic = 1
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1
-install_rehearsal_report = 1
+install_rehearsal_report = 2
 final_exit_report = 1
 artifact_attestation_policy = 1
 capability_report = 1

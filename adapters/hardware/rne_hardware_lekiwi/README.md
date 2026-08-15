@@ -23,6 +23,13 @@ Run the dependency-free child-process conformance suite:
 
     cargo test -p rne_hardware_lekiwi
 
+That gate includes the public external-adapter catalog. It starts the Python
+bridge in `--mock` mode nine times and verifies TaskSpec binding, observations,
+bounded HIL action, safe stop, shadow authority, sequence/session isolation,
+and wrong-width rejection through `rne-hardware-conformance`. A mock pass is
+not physical-device evidence; do not redirect this automated HIL catalog to a
+powered robot.
+
 Run the complete profile-bound host path against the Python mock and write a
 non-overwriting evidence artifact:
 

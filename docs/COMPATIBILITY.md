@@ -176,6 +176,17 @@ confirmation and gateway zero-stop delivery; reconnect additionally proves an
 explicit rearm. The canonical all-pass report is
 `tests/golden/hardware/gateway-mock-conformance-v1.json`.
 
+External hardware-adapter conformance report schema v1 is a distinct contract.
+It freezes nine ordered process cases, the negotiated protocol-v1 identity,
+bounded diagnostics, and SHA-256 identities for the adapter subject, normalized
+arguments, and TaskSpec. It never converts a process-mock pass into physical
+hardware evidence. An adapter must reject incorrect task dimensions, shadow
+actuation, duplicate sequences, cross-session requests, and wrong-width
+actions while preserving explicit safe-stop and clean-close behavior.
+Failure Capsule validation accepts the report only beside evidence bytes
+matching both embedded subject hashes and, after a successful handshake, a
+TaskSpec with the negotiated identity.
+
 LeKiwi reference-session schema v1 binds the exact reference profile and
 device-bridge schema to a promoted device identity plus the complete nested
 hardware session evidence. Its validator reconstructs the nested session,
@@ -233,6 +244,12 @@ The machine-readable values frozen by this policy live in
 transport, asset, replay, physics, determinism, task, accelerator-selection,
 accelerator-protocol, dataset, hardware, and evidence constants; changing one
 side alone fails.
+
+Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
+to the six schema-v1 checks. Schema-v1 reports remain historical evidence but
+cannot be relabelled as v2 because they do not prove the installed external
+adapter runner, fixed-binding process mock, or bundled TaskSpec. Re-run the
+matching release bundle to produce v2 evidence; do not edit an old report.
 
 ## Replay migration
 

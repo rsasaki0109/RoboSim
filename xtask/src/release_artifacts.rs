@@ -7,7 +7,7 @@ use super::{
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -16,27 +16,30 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 3] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 5] = [
     ("rne_asset_cli", "rne-asset"),
     ("rne_physics_conformance", "rne-physics-conformance"),
     ("rne_scenario_scale", "rne-scenario-scale"),
+    ("rne_hardware_gateway", "rne-hardware-conformance"),
+    ("rne_hardware_gateway", "rne-hardware-mock-device"),
 ];
 const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
 const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
-const INSTALL_CHECK_IDS: [&str; 6] = [
+const INSTALL_CHECK_IDS: [&str; 7] = [
     "robot_replay",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
+    "hardware_adapter",
     "controller_plugin",
     "python_wheel",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 17] = [
+const BUNDLE_FILES: [(&str, &str); 18] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -57,6 +60,10 @@ const BUNDLE_FILES: [(&str, &str); 17] = [
     (
         "assets/runs/mesh_diff_drive.rne.run.toml",
         "assets/runs/mesh_diff_drive.rne.run.toml",
+    ),
+    (
+        "assets/tasks/diff_drive_goal.task.json",
+        "assets/tasks/diff_drive_goal.task.json",
     ),
     (
         "assets/scenes/mesh_diff_drive.rne.scene.toml",
@@ -459,7 +466,11 @@ fn build_native_artifacts(root: &Path, _target: &str) -> anyhow::Result<()> {
         OsString::from("--locked"),
         OsString::from("--release"),
     ];
-    for (package, _) in RELEASE_BINARY_PACKAGES {
+    for package in RELEASE_BINARY_PACKAGES
+        .iter()
+        .map(|(package, _)| *package)
+        .collect::<BTreeSet<_>>()
+    {
         args.push(OsString::from("-p"));
         args.push(OsString::from(package));
     }
@@ -551,6 +562,8 @@ fn run_install_rehearsal(
     let asset_cli = bin_dir.join(native_binary_name("rne-asset", target));
     let physics = bin_dir.join(native_binary_name("rne-physics-conformance", target));
     let scale = bin_dir.join(native_binary_name("rne-scenario-scale", target));
+    let hardware_conformance = bin_dir.join(native_binary_name("rne-hardware-conformance", target));
+    let hardware_mock = bin_dir.join(native_binary_name("rne-hardware-mock-device", target));
 
     let robot_replay = output_dir.join("robot.rne-replay");
     let robot_run = run_check_command(
@@ -635,6 +648,45 @@ fn run_install_rehearsal(
         &serde_json::Value::String("passed".to_string()),
     );
 
+    let hardware_report = output_dir.join("hardware-adapter-conformance.json");
+    let hardware_passed = run_check_command(
+        "external hardware adapter conformance",
+        bundle_dir,
+        &hardware_conformance,
+        &[
+            OsString::from("--adapter"),
+            hardware_mock.clone().into_os_string(),
+            OsString::from("--adapter-arg"),
+            OsString::from("--device-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("rne-release-hardware-mock-v1"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--expected-task-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("rne.diff_drive.goal.v1"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--observation-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("9"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--action-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("2"),
+            OsString::from("--task"),
+            bundle_dir
+                .join("assets/tasks/diff_drive_goal.task.json")
+                .into_os_string(),
+            OsString::from("--allow-hil"),
+            OsString::from("--output"),
+            hardware_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &hardware_report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    );
+
     let plugin_report = output_dir.join("controller-plugin-conformance.json");
     let reference_plugin_passed = run_check_command(
         "controller plugin conformance",
@@ -668,6 +720,7 @@ fn run_install_rehearsal(
         check("scenario_replay", scenario_verify),
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
+        check("hardware_adapter", hardware_passed),
         check("controller_plugin", plugin_passed),
         check("python_wheel", wheel_passed),
     ];
@@ -1233,6 +1286,7 @@ mod tests {
                 "scenario_replay",
                 "physics_conformance",
                 "scenario_scale_100",
+                "hardware_adapter",
                 "controller_plugin",
                 "python_wheel",
             ]
@@ -1242,7 +1296,7 @@ mod tests {
         assert!(report.all_passed());
 
         let mut duplicated = report;
-        duplicated.checks[5].id = "robot_replay".to_string();
+        duplicated.checks[6].id = "robot_replay".to_string();
         assert!(!duplicated.all_passed());
     }
 }

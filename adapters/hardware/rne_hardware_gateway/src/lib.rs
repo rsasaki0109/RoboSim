@@ -7,6 +7,7 @@
 
 #![deny(missing_docs)]
 
+pub mod conformance;
 pub mod mock;
 pub mod shadow;
 pub mod wire;

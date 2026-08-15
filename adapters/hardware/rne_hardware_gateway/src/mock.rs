@@ -9,7 +9,7 @@ use crate::wire::{
     DeviceWireFrame, DeviceWirePayload, HardwareWireError, HostWireFrame, HostWirePayload,
     WireDisconnectReason, WireRejectionCode,
 };
-use crate::SafetyReason;
+use crate::{HardwareMode, SafetyReason};
 use serde::{Deserialize, Serialize};
 
 /// Schema version for deterministic process-mock conformance reports.
@@ -218,6 +218,19 @@ pub struct MockDeviceConfig {
     pub device_id: String,
     /// Optional exact-count terminal fault.
     pub fault: Option<MockDeviceFault>,
+    /// Optional fixed TaskSpec binding enforced during open.
+    pub binding: Option<MockDeviceBinding>,
+}
+
+/// Fixed TaskSpec identity and flattened widths enforced by a mock process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MockDeviceBinding {
+    /// Portable task identity accepted by the mock.
+    pub task_id: String,
+    /// Required flattened observation width.
+    pub observation_width: usize,
+    /// Required flattened action width.
+    pub action_width: usize,
 }
 
 impl MockDeviceConfig {
@@ -229,6 +242,13 @@ impl MockDeviceConfig {
         if self.fault.is_some_and(|fault| fault.count() == 0) {
             return Err(MockDeviceError::ZeroFaultCount);
         }
+        if self.binding.as_ref().is_some_and(|binding| {
+            binding.task_id.trim().is_empty()
+                || binding.observation_width == 0
+                || binding.action_width == 0
+        }) {
+            return Err(MockDeviceError::InvalidBinding);
+        }
         Ok(())
     }
 }
@@ -238,6 +258,7 @@ impl Default for MockDeviceConfig {
         Self {
             device_id: "rne-mock-device-v1".to_string(),
             fault: None,
+            binding: None,
         }
     }
 }
@@ -245,6 +266,7 @@ impl Default for MockDeviceConfig {
 #[derive(Debug)]
 struct MockSession {
     session_id: String,
+    mode: HardwareMode,
     observation_width: usize,
     action_width: usize,
 }
@@ -297,15 +319,23 @@ impl MockHardwareDevice {
         match &frame.payload {
             HostWirePayload::Open {
                 task_id,
+                mode,
                 observation_width,
                 action_width,
-                ..
             } => {
                 if self.session.is_some() {
                     return Ok(rejection(&frame, WireRejectionCode::AlreadyOpen));
                 }
+                if self.config.binding.as_ref().is_some_and(|binding| {
+                    binding.task_id != *task_id
+                        || binding.observation_width != *observation_width
+                        || binding.action_width != *action_width
+                }) {
+                    return Ok(rejection(&frame, WireRejectionCode::WidthMismatch));
+                }
                 self.session = Some(MockSession {
                     session_id: frame.session_id.clone(),
+                    mode: *mode,
                     observation_width: *observation_width,
                     action_width: *action_width,
                 });
@@ -330,6 +360,11 @@ impl MockHardwareDevice {
                 }
                 if actuation.values.iter().any(|value| !value.is_finite()) {
                     return Ok(rejection(&frame, WireRejectionCode::NonFiniteValue));
+                }
+                if !actuation.safety_stop
+                    && matches!(session.mode, HardwareMode::Playback | HardwareMode::Shadow)
+                {
+                    return Ok(rejection(&frame, WireRejectionCode::AuthorityDenied));
                 }
                 self.actuation_count = self.actuation_count.saturating_add(1);
                 if self.config.fault
@@ -413,6 +448,9 @@ pub enum MockDeviceError {
     /// A one-based injected fault count is zero.
     #[error("mock fault count must be greater than zero")]
     ZeroFaultCount,
+    /// A fixed TaskSpec binding is empty or zero-width.
+    #[error("mock TaskSpec binding must have a task id and non-zero widths")]
+    InvalidBinding,
     /// The host frame is not valid protocol v1.
     #[error(transparent)]
     InvalidFrame(#[from] HardwareWireError),
@@ -494,6 +532,7 @@ mod tests {
         let mut device = MockHardwareDevice::new(MockDeviceConfig {
             device_id: "mock-fault".into(),
             fault: Some(MockDeviceFault::DisconnectAfterActuations { count: 1 }),
+            binding: None,
         })
         .unwrap();
         device.handle(open(1)).unwrap();
@@ -527,8 +566,71 @@ mod tests {
             MockHardwareDevice::new(MockDeviceConfig {
                 device_id: "mock".into(),
                 fault: Some(MockDeviceFault::EmergencyStopAfterObservations { count: 0 }),
+                binding: None,
             }),
             Err(MockDeviceError::ZeroFaultCount)
         ));
+    }
+
+    #[test]
+    fn fixed_binding_and_shadow_authority_fail_closed() {
+        let mut device = MockHardwareDevice::new(MockDeviceConfig {
+            device_id: "bound-mock".into(),
+            fault: None,
+            binding: Some(MockDeviceBinding {
+                task_id: "rne.test.task.v1".into(),
+                observation_width: 3,
+                action_width: 2,
+            }),
+        })
+        .unwrap();
+        let wrong = device
+            .handle(HostWireFrame::new(
+                "session-1",
+                1,
+                HostWirePayload::Open {
+                    task_id: "rne.test.task.v1".into(),
+                    mode: HardwareMode::Shadow,
+                    observation_width: 3,
+                    action_width: 3,
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            wrong.payload,
+            DeviceWirePayload::Rejected {
+                code: WireRejectionCode::WidthMismatch,
+            }
+        );
+        let mut shadow = open(2);
+        let HostWirePayload::Open { mode, .. } = &mut shadow.payload else {
+            unreachable!();
+        };
+        *mode = HardwareMode::Shadow;
+        assert!(matches!(
+            device.handle(shadow).unwrap().payload,
+            DeviceWirePayload::Ready { .. }
+        ));
+        let denied = device
+            .handle(HostWireFrame::new(
+                "session-1",
+                3,
+                HostWirePayload::Actuate {
+                    frame: ActuationFrame {
+                        action_sequence: Some(0),
+                        queued_at_ms: 0,
+                        values: vec![0.0; 2],
+                        safety_stop: false,
+                        reason: None,
+                    },
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            denied.payload,
+            DeviceWirePayload::Rejected {
+                code: WireRejectionCode::AuthorityDenied,
+            }
+        );
     }
 }

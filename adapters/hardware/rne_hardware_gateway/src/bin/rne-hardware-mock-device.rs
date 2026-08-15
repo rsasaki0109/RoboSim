@@ -1,6 +1,8 @@
 //! Process-isolated deterministic implementation of the hardware wire protocol.
 
-use rne_hardware_gateway::mock::{MockDeviceConfig, MockDeviceFault, MockHardwareDevice};
+use rne_hardware_gateway::mock::{
+    MockDeviceBinding, MockDeviceConfig, MockDeviceFault, MockHardwareDevice,
+};
 use rne_hardware_gateway::wire::{DeviceWirePayload, HardwareWireCodec};
 use std::env;
 use std::io::{self, BufReader, BufWriter, Write};
@@ -42,6 +44,9 @@ fn parse_args(
     mut args: impl Iterator<Item = String>,
 ) -> Result<MockDeviceConfig, Box<dyn std::error::Error>> {
     let mut config = MockDeviceConfig::default();
+    let mut task_id = None;
+    let mut observation_width = None;
+    let mut action_width = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--device-id" => {
@@ -69,17 +74,44 @@ fn parse_args(
                     },
                 )?;
             }
+            "--expected-task-id" => {
+                task_id = Some(required_value(&mut args, "--expected-task-id")?);
+            }
+            "--observation-width" => {
+                observation_width = Some(parse_width(&required_value(
+                    &mut args,
+                    "--observation-width",
+                )?)?);
+            }
+            "--action-width" => {
+                action_width = Some(parse_width(&required_value(&mut args, "--action-width")?)?);
+            }
             "--help" | "-h" => {
                 eprintln!(
                     "rne-hardware-mock-device [--device-id ID] \
                      [--disconnect-after-actuations COUNT | \
-                     --emergency-stop-after-observations COUNT]"
+                     --emergency-stop-after-observations COUNT] \
+                     [--expected-task-id ID --observation-width N --action-width N]"
                 );
                 std::process::exit(0);
             }
             other => return Err(format!("unknown option {other:?}").into()),
         }
     }
+    config.binding = match (task_id, observation_width, action_width) {
+        (None, None, None) => None,
+        (Some(task_id), Some(observation_width), Some(action_width)) => Some(MockDeviceBinding {
+            task_id,
+            observation_width,
+            action_width,
+        }),
+        _ => {
+            return Err(
+                "fixed binding requires --expected-task-id, --observation-width, and --action-width"
+                    .into(),
+            );
+        }
+    };
     config.validate()?;
     Ok(config)
 }
@@ -97,6 +129,12 @@ fn parse_count(value: &str) -> Result<u64, Box<dyn std::error::Error>> {
     value
         .parse::<u64>()
         .map_err(|error| format!("invalid fault count {value:?}: {error}").into())
+}
+
+fn parse_width(value: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid width {value:?}: {error}").into())
 }
 
 fn set_fault(

@@ -90,6 +90,7 @@ jobs:
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
             artifacts/extracted-evidence/controller-scaffold-conformance.json
+            artifacts/extracted-evidence/hardware-adapter-conformance.json
 
   windows:
     runs-on: windows-latest
@@ -174,6 +175,7 @@ jobs:
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
             artifacts/extracted-evidence/controller-scaffold-conformance.json
+            artifacts/extracted-evidence/hardware-adapter-conformance.json
 
   release_candidate:
     runs-on: ubuntu-latest

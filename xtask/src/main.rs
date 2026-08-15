@@ -1191,6 +1191,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "hardware",
+            "adapter_conformance",
+            u64::from(
+                rne_hardware_gateway::conformance::HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
             "reference_profile",
             u64::from(rne_hardware_lekiwi::LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION),
         ),

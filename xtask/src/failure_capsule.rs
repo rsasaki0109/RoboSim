@@ -6,6 +6,15 @@
 use anyhow::{bail, Context, Result};
 use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact, TaskSpec, TASK_SPEC_KIND};
 use rne_core::{DeterminismContract, DeterminismScope};
+#[cfg(test)]
+use rne_hardware_gateway::conformance::{
+    HardwareAdapterConformanceCheck, HardwareAdapterConformanceIdentity,
+    HardwareAdapterConformanceSubject,
+};
+use rne_hardware_gateway::conformance::{
+    HardwareAdapterConformanceReport, HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND,
+    HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+};
 use rne_hardware_gateway::mock::{
     MockConformanceReport, MOCK_CONFORMANCE_REPORT_KIND, MOCK_CONFORMANCE_SCHEMA_VERSION,
 };
@@ -25,7 +34,7 @@ use rne_log::{
     RunMetadata, FAILURE_CAPSULE_KIND as CAPSULE_KIND,
 };
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -251,6 +260,7 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
             | HARDWARE_WIRE_TRACE_KIND
             | SHADOW_COMPARISON_REPORT_KIND
             | MOCK_CONFORMANCE_REPORT_KIND
+            | HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND
             | LEKIWI_REFERENCE_SESSION_KIND
             | super::FLAGSHIP_WORKFLOW_REPORT_KIND
     );
@@ -270,6 +280,10 @@ fn validate_hardware_evidence<'a>(
     evidence: impl Iterator<Item = (&'a str, &'a [u8])>,
 ) -> Result<()> {
     let evidence = evidence.collect::<Vec<_>>();
+    let evidence_digests = evidence
+        .iter()
+        .map(|(_, bytes)| sha256_hex(bytes))
+        .collect::<BTreeSet<_>>();
     let mut tasks = BTreeMap::<String, TaskSpec>::new();
     for (kind, bytes) in &evidence {
         if *kind != TASK_SPEC_KIND {
@@ -373,6 +387,35 @@ fn validate_hardware_evidence<'a>(
                 report.validate().map_err(|error| {
                     anyhow::anyhow!("invalid hardware mock conformance evidence: {error}")
                 })?;
+            }
+            HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND => {
+                let report: HardwareAdapterConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid external hardware adapter conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+                    "unsupported external hardware adapter conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid external hardware adapter conformance evidence: {error}"
+                    )
+                })?;
+                anyhow::ensure!(
+                    evidence_digests.contains(&report.subject.task_sha256),
+                    "external hardware adapter conformance requires its exact hashed TaskSpec evidence"
+                );
+                anyhow::ensure!(
+                    evidence_digests.contains(&report.subject.adapter_sha256),
+                    "external hardware adapter conformance requires its exact hashed adapter subject evidence"
+                );
+                if let Some(adapter) = &report.adapter {
+                    anyhow::ensure!(
+                        tasks.contains_key(&adapter.task_id),
+                        "external hardware adapter conformance requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        adapter.task_id
+                    );
+                }
             }
             super::FLAGSHIP_WORKFLOW_REPORT_KIND => {
                 let report: serde_json::Value = serde_json::from_slice(bytes)
@@ -1250,11 +1293,57 @@ mod tests {
             .write_json(&replay_path)
             .expect("write behavior replay");
         let task_path = temp.path().join("diff-drive-task.json");
+        let task_bytes = include_bytes!("../../assets/tasks/diff_drive_goal.task.json");
+        fs::write(&task_path, task_bytes).expect("write TaskSpec evidence");
+        let adapter_subject_path = temp.path().join("external-adapter.bin");
+        let adapter_subject = b"external-adapter-subject-v1";
+        fs::write(&adapter_subject_path, adapter_subject).expect("write adapter subject evidence");
+        let adapter_report_path = temp.path().join("adapter-conformance.json");
+        let adapter_report = HardwareAdapterConformanceReport {
+            schema_version: HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            kind: HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND.to_string(),
+            status: "passed".to_string(),
+            subject: HardwareAdapterConformanceSubject {
+                adapter_file: "external-adapter.bin".to_string(),
+                adapter_sha256: sha256_hex(adapter_subject),
+                adapter_size_bytes: adapter_subject.len() as u64,
+                launcher_file: "external-adapter.bin".to_string(),
+                arguments_sha256: sha256_hex(b"[]"),
+                argument_count: 0,
+                task_file: "diff-drive-task.json".to_string(),
+                task_sha256: sha256_hex(task_bytes),
+            },
+            adapter: Some(HardwareAdapterConformanceIdentity {
+                device_id: "external-adapter-v1".to_string(),
+                task_id: "rne.diff_drive.goal.v1".to_string(),
+                wire_schema_version: HARDWARE_WIRE_SCHEMA_VERSION,
+                observation_width: 9,
+                action_width: 2,
+            }),
+            checks: [
+                "open_identity",
+                "task_binding",
+                "observation_stream",
+                "bounded_actuation",
+                "safe_stop",
+                "shadow_authority",
+                "sequence_rejection",
+                "session_isolation",
+                "width_rejection",
+            ]
+            .map(|id| HardwareAdapterConformanceCheck {
+                id: id.to_string(),
+                status: "passed".to_string(),
+                detail: String::new(),
+            })
+            .to_vec(),
+        };
+        adapter_report.validate().expect("valid adapter report");
         fs::write(
-            &task_path,
-            include_bytes!("../../assets/tasks/diff_drive_goal.task.json"),
+            &adapter_report_path,
+            adapter_report.to_json_pretty().unwrap(),
         )
-        .expect("write TaskSpec evidence");
+        .expect("write adapter conformance evidence");
         let session_path = temp.path().join("hardware-session.json");
         fs::write(
             &session_path,
@@ -1297,12 +1386,25 @@ mod tests {
                 &session_path,
                 &shadow_path,
                 &conformance_path,
+                &adapter_subject_path,
+                &adapter_report_path,
                 &lekiwi_task_path,
                 &lekiwi_session_path,
             ],
         )
         .expect("create hardware evidence capsule");
         invoke_verify(&output).expect("verify hardware evidence capsule");
+        let missing_adapter_output = temp.path().join("missing-adapter-subject-capsule");
+        let error = invoke_create(
+            &replay_path,
+            &missing_adapter_output,
+            &[&task_path, &adapter_report_path],
+        )
+        .expect_err("adapter report without its hashed subject must reject");
+        assert!(error
+            .to_string()
+            .contains("requires its exact hashed adapter subject evidence"));
+        assert!(!missing_adapter_output.exists());
         let capsule: FailureCapsule =
             serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
                 .expect("capsule json");
@@ -1311,6 +1413,7 @@ mod tests {
             HARDWARE_SESSION_EVIDENCE_KIND,
             SHADOW_COMPARISON_REPORT_KIND,
             MOCK_CONFORMANCE_REPORT_KIND,
+            HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND,
             LEKIWI_REFERENCE_SESSION_KIND,
         ] {
             assert!(capsule

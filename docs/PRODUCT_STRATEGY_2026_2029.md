@@ -353,6 +353,15 @@ and build offline; release rehearsal regenerates one plugin from the installed
 CLI, verifies the vendored source against the bundle, compiles it with warnings
 denied, and runs the standalone conformance kit against the result.
 
+The fourth v0.8 certification slice publishes a standalone external hardware-
+adapter runner. It hashes the adapter subject, normalized launch contract, and
+TaskSpec, then executes nine bounded child-process cases covering identity,
+task binding, observation shape/dtype/sequence, bounded HIL actuation, explicit
+safe stop, shadow authority, sequence/session isolation, and width rejection.
+The Rust mock and independently implemented Python LeKiwi bridge pass the same
+public API; installed Linux and Windows bundles rerun it without source files.
+This is reference evidence, not the still-required third-party certification.
+
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
 
