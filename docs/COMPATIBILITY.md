@@ -234,6 +234,17 @@ Manifest schema v2 adds `kinematic_body` as a refinement of `rigid_body`.
 Analytic and Rapier prove it with the shared external-pose vector; MuJoCo
 rejects it at preflight with `MissingCapabilities` before native compilation.
 
+External physics-backend conformance report schema v1 is a separate public
+authoring contract owned by the publishable `rne_physics_conformance` crate.
+Its fixed nine-check order covers manifest identity and all eight capability
+IDs. Unadvertised capabilities remain explicit `not_advertised` entries;
+advertised GPU rigid-body or soft-body support fails until a later catalog
+version defines portable vectors. Authors cannot override the catalog's named
+SI-unit tolerances. The canonical schema is
+`crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json`.
+Failure Capsule verification requires the exact implementation bytes whose
+SHA-256 appears in the report subject.
+
 `JointActuation` is a tagged, backend-neutral ECS command with distinct
 revolute/prismatic position, velocity, and effort variants. Field names carry
 their SI units. A backend rejects unknown variants, non-finite values, negative

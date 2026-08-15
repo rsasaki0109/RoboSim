@@ -69,7 +69,7 @@ generates a replay through the existing Behavior replay schema, then packages
 and verifies both artifacts:
 
 ```text
-cargo run -p rne_physics_conformance --features mujoco \
+cargo run -p rne_physics_conformance_suite --features mujoco \
   --bin rne-physics-divergence -- \
   --report artifacts/physics-divergence-source/conformance-report.json \
   --replay artifacts/physics-divergence-source/divergence.rne-replay
@@ -91,6 +91,13 @@ both backend observations through the first violating step, and marks only that
 fault-injection case as failed. This keeps an expected solver difference
 distinct from a production conformance regression.
 
+External backend reports retain the separate
+`rne_external_physics_backend_conformance_report` kind. Creation and
+verification run the schema-v1 reader and require a second evidence file whose
+exact bytes match the report's implementation-subject SHA-256. A report cannot
+therefore be copied onto a different backend build or source bundle. See
+[External physics backend conformance](EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md).
+
 Generic replays must carry `final_report.failure`; successful generic replays
 are not converted into failure capsules. Their fixed timestep is derived from
 the recorded frame timestamps and every frame must match the same fixed-step
@@ -102,8 +109,9 @@ inventing counts.
 `verify` validates `capsule.json`, requires a replay reference, rejects
 absolute/parent-traversal paths, rejects symlink escapes, checks that every
 referenced file exists and matches its digest, and invokes the known replay
-reader/schema validator for generic and behavior replay kinds. Known physics
-conformance evidence is also checked for matching kind and schema metadata. The
+reader/schema validator for generic and behavior replay kinds. Built-in physics
+evidence is checked for kind/schema metadata; external physics reports receive
+full report and content-subject validation. The
 verifier invokes the known TaskSpec, hardware-session, LeKiwi
 reference-session, wire-trace, and shadow-report validators. It does not trust
 host paths recorded in the capsule.

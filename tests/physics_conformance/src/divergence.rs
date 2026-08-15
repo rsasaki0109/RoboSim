@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use rne_physics_conformance::run_divergence_diagnostic;
+use rne_physics_conformance_suite::run_divergence_diagnostic;
 use std::path::{Path, PathBuf};
 
 fn main() -> anyhow::Result<()> {

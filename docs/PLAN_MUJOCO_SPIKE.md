@@ -20,7 +20,7 @@ error from both preflight and ECS sync before a native model is created.
 The original caller-owned one-sphere MJCF constructor remains as a compatibility
 fixture, not as the primary backend path.
 
-With the `mujoco` feature enabled, `rne_physics_conformance` runs MuJoCo through
+With the `mujoco` feature enabled, `rne_physics_conformance_suite` runs MuJoCo through
 the same Harness v2 rigid-body vector used for Analytic and Rapier. Its named
 position tolerance is `mujoco_free_fall_position_m_v1`. The Windows/Linux MuJoCo
 workflow runs both the backend integration tests and this shared conformance gate.

@@ -147,6 +147,7 @@ jobs:
           - "-p rne_data -p rne_log -p rne_plugin -p rne_openscenario -p rne_traffic -p rne_traci -p rne_sumo"
           - "-p rne_core -p rne_ecs -p rne_world -p rne_robot -p rne_physics -p rne_physics_analytic -p rne_deformable"
           - "-p rne_math -p rne_render -p rne_mjcf -p rne_sdf -p rne_adapter_ros2"
+          - "-p rne_plugin_sdk -p rne_physics_conformance -p rne_hardware_gateway -p rne_hardware_lekiwi"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -166,7 +167,28 @@ jobs:
           else
             baseline="HEAD^"
           fi
-          cargo semver-checks check-release ${{ matrix.packages }} --baseline-rev "$baseline" --release-type patch
+          requested=( ${{ matrix.packages }} )
+          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+          packages=()
+          for ((index = 0; index < ${#requested[@]}; index += 2)); do
+            package="${requested[index + 1]}"
+            manifest="$(jq -r --arg package "$package" '.packages[] | select(.name == $package) | .manifest_path' <<<"$metadata")"
+            if [[ -z "$manifest" ]]; then
+              echo "unknown current package: $package" >&2
+              exit 1
+            fi
+            relative="${manifest#"$GITHUB_WORKSPACE/"}"
+            if git cat-file -e "$baseline:$relative" 2>/dev/null; then
+              packages+=("-p" "$package")
+            else
+              echo "bootstrap: $package has no same-path baseline yet"
+            fi
+          done
+          if (( ${#packages[@]} == 0 )); then
+            echo "all packages in this shard are new; SemVer begins after the baseline lands"
+            exit 0
+          fi
+          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type patch
 
   behavior_ci:
     runs-on: ubuntu-latest

@@ -3652,6 +3652,22 @@ dependencies = [
 name = "rne_physics_conformance"
 version = "0.1.0"
 dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_physics_analytic",
+ "rne_world",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_physics_conformance_suite"
+version = "0.1.0"
+dependencies = [
  "anyhow",
  "rne_ai",
  "rne_core",
@@ -5402,6 +5418,8 @@ dependencies = [
  "rne_log",
  "rne_openscenario",
  "rne_physics",
+ "rne_physics_analytic",
+ "rne_physics_conformance",
  "rne_plugin",
  "rne_traffic",
  "serde",

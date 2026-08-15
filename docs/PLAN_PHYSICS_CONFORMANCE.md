@@ -160,7 +160,7 @@ error.
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
-`rne_physics_conformance/mujoco` feature. It also advertises `articulation` after
+`rne_physics_conformance_suite/mujoco` feature. It also advertises `articulation` after
 passing the shared revolute vector with unit-explicit `JointActuation` and
 backend-neutral `JointState`; backend integration tests cover revolute and
 prismatic position/velocity/effort behavior. MuJoCo now also passes the shared

@@ -19,6 +19,7 @@ rne_hardware_lekiwi = { workspace = true }
 rne_log = { workspace = true }
 rne_openscenario = { workspace = true }
 rne_physics = { workspace = true }
+rne_physics_conformance = { workspace = true }
 rne_plugin = { workspace = true }
 rne_traffic = { workspace = true }
 serde = { workspace = true }
@@ -27,4 +28,5 @@ sha2 = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+rne_physics_analytic = { workspace = true }
 tempfile = "3"

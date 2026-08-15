@@ -20,7 +20,7 @@ pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 
 const RELEASE_BINARY_PACKAGES: [(&str, &str); 5] = [
     ("rne_asset_cli", "rne-asset"),
-    ("rne_physics_conformance", "rne-physics-conformance"),
+    ("rne_physics_conformance_suite", "rne-physics-conformance"),
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
     ("rne_hardware_gateway", "rne-hardware-mock-device"),

@@ -33,6 +33,15 @@ use rne_log::{
     ArtifactRef, BackendMetadata, BuildMetadata, FailureCapsule, FailureMetadata, ReplayArtifact,
     RunMetadata, FAILURE_CAPSULE_KIND as CAPSULE_KIND,
 };
+#[cfg(test)]
+use rne_physics_conformance::{
+    run_external_backend_conformance, ExternalPhysicsBackendConformanceConfig,
+    ExternalPhysicsBackendSubject,
+};
+use rne_physics_conformance::{
+    ExternalPhysicsBackendConformanceReport, EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND,
+    EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -261,6 +270,7 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
             | SHADOW_COMPARISON_REPORT_KIND
             | MOCK_CONFORMANCE_REPORT_KIND
             | HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND
+            | EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND
             | LEKIWI_REFERENCE_SESSION_KIND
             | super::FLAGSHIP_WORKFLOW_REPORT_KIND
     );
@@ -416,6 +426,30 @@ fn validate_hardware_evidence<'a>(
                         adapter.task_id
                     );
                 }
+            }
+            EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND => {
+                let report: ExternalPhysicsBackendConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid external physics backend conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version
+                        == EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+                    "unsupported external physics backend conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid external physics backend conformance evidence: {error}"
+                    )
+                })?;
+                let subject_digest = report
+                    .subject
+                    .sha256
+                    .strip_prefix("sha256:")
+                    .expect("validated report subject has the prefix");
+                anyhow::ensure!(
+                    evidence_digests.contains(subject_digest),
+                    "external physics backend conformance requires its exact hashed implementation subject evidence"
+                );
             }
             super::FLAGSHIP_WORKFLOW_REPORT_KIND => {
                 let report: serde_json::Value = serde_json::from_slice(bytes)
@@ -970,6 +1004,8 @@ mod tests {
         ReplayAction, ReplayClock, ReplayContact, ReplayControllerKind, ReplayFailureKind,
         ReplayFinalReport, ReplayFrame, ReplayObservation,
     };
+    use rne_physics::{PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability};
+    use rne_physics_analytic::AnalyticBackend;
 
     #[derive(Debug, Default)]
     struct FixtureClock(u64);
@@ -1224,6 +1260,71 @@ mod tests {
             .expect("evidence reference");
         assert_eq!(report.kind, PHYSICS_CONFORMANCE_REPORT_KIND);
         assert_eq!(report.schema_version, 2);
+    }
+
+    #[test]
+    fn external_physics_conformance_requires_its_hashed_subject() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("external-physics-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let subject_bytes = b"independently maintained physics backend v1";
+        let subject_path = temp.path().join("external-backend-source.tar.zst");
+        fs::write(&subject_path, subject_bytes).expect("write backend subject");
+        let manifest = PhysicsBackendManifest::new(
+            "external_capsule_fixture",
+            "1.0.0",
+            "independent_ballistic_engine",
+            "1.0.0",
+            [
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::DeterministicStep,
+                PhysicsCapability::KinematicBody,
+            ],
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect("manifest");
+        let report = run_external_backend_conformance::<AnalyticBackend, _>(
+            ExternalPhysicsBackendConformanceConfig::new(
+                ExternalPhysicsBackendSubject::from_bytes(
+                    "external-backend-source.tar.zst",
+                    subject_bytes,
+                )
+                .expect("subject"),
+                manifest,
+            ),
+            AnalyticBackend::new,
+        )
+        .expect("external conformance report");
+        assert!(report.passed());
+        let report_path = temp.path().join("external-backend-conformance.json");
+        fs::write(&report_path, report.to_json_pretty().unwrap()).expect("write report");
+
+        let output = temp.path().join("external-physics-capsule");
+        invoke_create(&replay_path, &output, &[&subject_path, &report_path])
+            .expect("create subject-bound capsule");
+        invoke_verify(&output).expect("verify subject-bound capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule JSON");
+        let evidence = capsule
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND)
+            .expect("typed external physics evidence");
+        assert_eq!(
+            evidence.schema_version,
+            u32::from(EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION)
+        );
+
+        let missing_subject = temp.path().join("missing-external-subject-capsule");
+        let error = invoke_create(&replay_path, &missing_subject, &[&report_path])
+            .expect_err("report without exact implementation subject must reject");
+        assert!(error
+            .to_string()
+            .contains("requires its exact hashed implementation subject evidence"));
+        assert!(!missing_subject.exists());
     }
 
     #[test]

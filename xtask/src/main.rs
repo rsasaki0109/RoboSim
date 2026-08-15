@@ -50,6 +50,7 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_mjcf",
     "rne_openscenario",
     "rne_physics",
+    "rne_physics_conformance",
     "rne_physics_analytic",
     "rne_physics_rapier",
     "rne_plateau",
@@ -1096,6 +1097,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "physics",
+            "external_conformance_report",
+            u64::from(
+                rne_physics_conformance::EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "physics",
             "tolerance_registry",
             u64::from(rne_physics::PHYSICS_TOLERANCE_REGISTRY_VERSION),
         ),
@@ -1352,7 +1360,7 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let checks = [
         (
             "physics_backend_conformance",
-            "cargo run --locked -q -p rne_physics_conformance --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
+            "cargo run --locked -q -p rne_physics_conformance_suite --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
         ),
         (
             "scenario_traffic_scale",
@@ -1502,7 +1510,7 @@ fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Resul
             "--locked",
             "-q",
             "-p",
-            "rne_physics_conformance",
+            "rne_physics_conformance_suite",
             "--bin",
             "rne-physics-conformance",
             "--",

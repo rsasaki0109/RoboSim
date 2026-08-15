@@ -362,6 +362,14 @@ The Rust mock and independently implemented Python LeKiwi bridge pass the same
 public API; installed Linux and Windows bundles rerun it without source files.
 This is reference evidence, not the still-required third-party certification.
 
+The fifth v0.8 authoring slice makes physics conformance consumable outside the
+workspace. The publishable `rne_physics_conformance` crate accepts any
+backend-neutral `PhysicsBackend` factory and emits a content-addressed schema-v1
+report with fixed catalog order and unit-bearing tolerances. GPU and soft-body
+claims fail closed until portable vectors exist. Failure Capsules require the
+exact hashed implementation subject. The in-repository reference is authoring
+evidence, not the independent backend certification required for 1.0.
+
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
 

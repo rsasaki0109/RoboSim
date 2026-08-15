@@ -107,6 +107,13 @@ binding process mock. The content-addressed schema-v1 report executes nine
 TaskSpec, protocol, authority, and fail-closed cases against any external
 adapter executable; the same catalog passes the Rust mock and Python LeKiwi
 bridge, and both tier-1 release rehearsals rerun it from installed artifacts.
+The publishable `rne_physics_conformance` authoring crate now gives external
+Rust backends a distinct content-addressed schema-v1 report. Its immutable
+nine-check catalog accepts arbitrary backend identities, fixes unit-bearing
+tolerances in the kit, rejects capability overclaims, and binds Failure Capsule
+evidence to the exact implementation subject. The existing built-in comparison
+runner is retained as `rne_physics_conformance_suite`; independent third-party
+certification remains a v0.9 exit gate.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

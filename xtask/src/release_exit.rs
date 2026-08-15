@@ -591,6 +591,9 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
                 command
             );
         }
+        if gate.id == "semver" {
+            validate_semver_packages(block)?;
+        }
     }
 
     let aggregate = normalize_workflow(workflow_job_block(&workflow, &scope.aggregate_job)?);
@@ -621,6 +624,46 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
         anyhow::ensure!(
             publish.contains("needs: [release_candidate]"),
             "release publishing must depend on the aggregate release_candidate job"
+        );
+    }
+    Ok(())
+}
+
+fn validate_semver_packages(block: &str) -> anyhow::Result<()> {
+    let mut declared = Vec::new();
+    for (index, _) in block.match_indices("-p ") {
+        let package = block[index + 3..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect::<String>();
+        if package.starts_with("rne_") {
+            declared.push(package);
+        }
+    }
+    let unique = declared.iter().cloned().collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique.len() == declared.len(),
+        "SemVer matrix contains duplicate public packages"
+    );
+    let expected = super::PUBLIC_RELEASE_PACKAGES
+        .iter()
+        .map(|package| (*package).to_string())
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique == expected,
+        "SemVer matrix public packages changed: missing={:?} extra={:?}",
+        expected.difference(&unique).collect::<Vec<_>>(),
+        unique.difference(&expected).collect::<Vec<_>>()
+    );
+    let normalized = normalize_workflow(block);
+    for bootstrap in [
+        "cargo metadata --locked --no-deps --format-version 1",
+        "git cat-file -e \"$baseline:$relative\"",
+        "packages+=(\"-p\" \"$package\")",
+    ] {
+        anyhow::ensure!(
+            normalized.contains(&normalize_workflow(bootstrap)),
+            "SemVer matrix omitted same-path baseline bootstrap: {bootstrap}"
         );
     }
     Ok(())

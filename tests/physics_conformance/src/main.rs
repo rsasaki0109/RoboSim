@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use rne_physics_conformance::run_conformance;
+use rne_physics_conformance_suite::run_conformance;
 use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {

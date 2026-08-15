@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **External physics-backend conformance SDK**: the publishable
+  `rne_physics_conformance` crate runs a fixed, unit-bearing nine-check catalog
+  against any public `PhysicsBackend` factory without engine allowlists or
+  vendor dependencies. Reports bind the implementation and manifest by
+  SHA-256, reject capability overclaims, replay byte-identically, and require
+  the exact implementation subject when packaged in a Failure Capsule.
 - **Controller plugin authoring SDK**: dependency-free `rne_plugin_sdk` owns
   the versioned C-ABI constants, frames, and callback signatures while the host
   loader re-exports the existing paths. `rne-asset plugin new` vendors the
