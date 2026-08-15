@@ -176,10 +176,65 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            baseline="origin/${{ github.base_ref }}"
+            registry_guard_ref="origin/${{ github.base_ref }}"
           else
-            baseline="HEAD^"
+            registry_guard_ref="HEAD^"
           fi
+          if git cat-file -e "$registry_guard_ref:release/rust-api-baseline.toml" 2>/dev/null; then
+            if ! git diff --quiet "$registry_guard_ref" -- release/rust-api-baseline.toml; then
+              echo "Rust API baseline registry is immutable within release 0.1.0" >&2
+              exit 1
+            fi
+          else
+            echo "bootstrap: no Rust API baseline registry exists at $registry_guard_ref"
+          fi
+
+          mapfile -t baseline_metadata < <(python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          for field in ("baseline_revision", "baseline_tree", "cargo_semver_checks_version"):
+              print(baseline[field])
+          PY
+          )
+          if [[ "${#baseline_metadata[@]}" -ne 3 ]]; then
+            echo "Rust API baseline metadata is incomplete" >&2
+            exit 1
+          fi
+          baseline="${baseline_metadata[0]}"
+          expected_tree="${baseline_metadata[1]}"
+          expected_tool="cargo-semver-checks ${baseline_metadata[2]}"
+          git cat-file -e "$baseline^{commit}"
+          actual_tree="$(git show -s --format=%T "$baseline")"
+          if [[ "$actual_tree" != "$expected_tree" ]]; then
+            echo "Rust API baseline tree mismatch: expected $expected_tree, got $actual_tree" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$baseline" HEAD
+          actual_tool="$(cargo semver-checks --version)"
+          if [[ "$actual_tool" != "$expected_tool" ]]; then
+            echo "cargo-semver-checks mismatch: expected $expected_tool, got $actual_tool" >&2
+            exit 1
+          fi
+
+          declare -A frozen_manifests=()
+          while IFS=$'\t' read -r package manifest; do
+            if [[ -z "$package" || -z "$manifest" || -n "${frozen_manifests[$package]+present}" ]]; then
+              echo "invalid or duplicate Rust API baseline package: $package" >&2
+              exit 1
+            fi
+            frozen_manifests["$package"]="$manifest"
+          done < <(python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          for package in baseline["package"]:
+              print(f'{package["name"]}\t{package["manifest_path"]}')
+          PY
+          )
+
           requested=( ${{ matrix.packages }} )
           metadata="$(cargo metadata --locked --no-deps --format-version 1)"
           packages=()
@@ -191,23 +246,19 @@ jobs:
               exit 1
             fi
             relative="${manifest#"$GITHUB_WORKSPACE/"}"
-            if git cat-file -e "$baseline:$relative" 2>/dev/null; then
-              packages+=("-p" "$package")
-            else
-              echo "bootstrap: $package has no same-path baseline yet"
+            frozen_manifest="${frozen_manifests[$package]-}"
+            if [[ -z "$frozen_manifest" ]]; then
+              echo "package is absent from the Rust API baseline: $package" >&2
+              exit 1
             fi
+            if [[ "$relative" != "$frozen_manifest" ]]; then
+              echo "manifest path changed for $package: expected $frozen_manifest, got $relative" >&2
+              exit 1
+            fi
+            git cat-file -e "$baseline:$frozen_manifest"
+            packages+=("-p" "$package")
           done
-          if (( ${#packages[@]} == 0 )); then
-            echo "all packages in this shard are new; SemVer begins after the baseline lands"
-            exit 0
-          fi
-          # rne_plugin moved its C-ABI types into rne_plugin_sdk and re-exports
-          # them with `pub use`.  cargo-semver-checks 0.49.0 does not track
-          # re-export chains, so it reports the structs as missing when the
-          # defining file moves.  The actual ABI is identical; this is a minor
-          # re-organisation, not a breaking change.  Use --release-type minor so
-          # that only true breaking (major-bump) violations fail the check.
-          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type minor
+          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type patch
 
   behavior_ci:
     runs-on: ubuntu-latest

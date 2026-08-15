@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Immutable Rust public-API baseline**: `release/rust-api-baseline.toml`
+  freezes the exact commit, Git tree, `cargo-semver-checks` version, and
+  manifest path for all 31 publishable crates. CI now compares every shard to
+  that fixed revision and fails if the commit disappears, its tree differs, a
+  package moves, or the registry no longer covers the complete release set.
+  Once bootstrapped, same-release registry changes are rejected against the PR
+  base or push parent so the fixed comparison cannot be silently retargeted.
 - **Historical snapshot migration gate**: the installed compatibility corpus
   now restores a real mobile-manipulator simulation snapshot from schema v1,
   where the v2 depth frame and v3 grasp-retarget state are absent. It rejects

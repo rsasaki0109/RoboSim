@@ -20,7 +20,7 @@ use std::io::BufReader;
 use std::process::{Command, ExitCode, Stdio};
 use std::{
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -31,6 +31,8 @@ const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
 const CARGO_AUDIT_VERSION: &str = "0.22.2";
+const RUST_API_BASELINE_SCHEMA_VERSION: u32 = 1;
+const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
@@ -148,6 +150,10 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     let metadata = cargo_metadata(&root)?;
     validate_release_metadata(&metadata)?;
     validate_public_docs(&metadata)?;
+    let rust_api_baseline: RustApiBaselineRegistry = toml::from_str(&fs::read_to_string(
+        root.join("release/rust-api-baseline.toml"),
+    )?)?;
+    validate_rust_api_baseline(&root, &metadata, &rust_api_baseline)?;
 
     let blocker_text = fs::read_to_string(root.join("release/blockers.toml"))?;
     let blocker_registry = blocker_text.parse::<toml::Value>()?;
@@ -186,10 +192,192 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     run_cargo_owned_at(&root, &package_args, &[])?;
 
     println!(
-        "release metadata ok: version={RELEASE_VERSION} msrv={RELEASE_MSRV} public_packages={}",
-        PUBLIC_RELEASE_PACKAGES.len()
+        "release metadata ok: version={RELEASE_VERSION} msrv={RELEASE_MSRV} public_packages={} rust_api_baseline={}",
+        PUBLIC_RELEASE_PACKAGES.len(),
+        rust_api_baseline.baseline_revision
     );
     Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RustApiBaselineRegistry {
+    schema_version: u32,
+    release_version: String,
+    baseline_revision: String,
+    baseline_tree: String,
+    cargo_semver_checks_version: String,
+    package: Vec<RustApiBaselinePackage>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RustApiBaselinePackage {
+    name: String,
+    manifest_path: String,
+}
+
+fn validate_rust_api_baseline(
+    root: &Path,
+    metadata: &serde_json::Value,
+    registry: &RustApiBaselineRegistry,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        registry.schema_version == RUST_API_BASELINE_SCHEMA_VERSION,
+        "Rust API baseline schema must be {RUST_API_BASELINE_SCHEMA_VERSION}"
+    );
+    anyhow::ensure!(
+        registry.release_version == RELEASE_VERSION,
+        "Rust API baseline release must be {RELEASE_VERSION}"
+    );
+    anyhow::ensure!(
+        registry.cargo_semver_checks_version == CARGO_SEMVER_CHECKS_VERSION,
+        "Rust API baseline must pin cargo-semver-checks {CARGO_SEMVER_CHECKS_VERSION}"
+    );
+    for (field, value) in [
+        ("baseline_revision", registry.baseline_revision.as_str()),
+        ("baseline_tree", registry.baseline_tree.as_str()),
+    ] {
+        anyhow::ensure!(
+            is_lower_git_object_id(value),
+            "Rust API baseline {field} must be a 40-character lowercase Git object ID"
+        );
+    }
+    anyhow::ensure!(
+        registry.package.len() == PUBLIC_RELEASE_PACKAGES.len(),
+        "Rust API baseline package count changed: expected {}, got {}",
+        PUBLIC_RELEASE_PACKAGES.len(),
+        registry.package.len()
+    );
+
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted packages"))?;
+    let mut names = BTreeSet::new();
+    let mut manifest_paths = BTreeSet::new();
+    for (entry, expected_name) in registry.package.iter().zip(PUBLIC_RELEASE_PACKAGES) {
+        anyhow::ensure!(
+            entry.name == *expected_name,
+            "Rust API baseline package order changed: expected {expected_name}, got {}",
+            entry.name
+        );
+        anyhow::ensure!(
+            names.insert(entry.name.as_str()),
+            "Rust API baseline duplicates package {}",
+            entry.name
+        );
+        anyhow::ensure!(
+            manifest_paths.insert(entry.manifest_path.as_str()),
+            "Rust API baseline duplicates manifest {}",
+            entry.manifest_path
+        );
+        validate_baseline_manifest_path(&entry.manifest_path)?;
+
+        let package = packages
+            .iter()
+            .find(|package| package["name"].as_str() == Some(entry.name.as_str()))
+            .with_context(|| format!("cargo metadata omitted baseline package {}", entry.name))?;
+        let current_manifest = package["manifest_path"]
+            .as_str()
+            .with_context(|| format!("package {} omitted manifest_path", entry.name))?;
+        let current_relative = Path::new(current_manifest)
+            .strip_prefix(root)
+            .with_context(|| format!("package {} manifest escaped workspace", entry.name))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        anyhow::ensure!(
+            current_relative == entry.manifest_path,
+            "Rust API baseline manifest moved for {}: expected {}, got {}",
+            entry.name,
+            entry.manifest_path,
+            current_relative
+        );
+    }
+
+    let commit_object = format!("{}^{{commit}}", registry.baseline_revision);
+    ensure_git_success(
+        root,
+        &["cat-file", "-e", &commit_object],
+        "Rust API baseline commit is unavailable",
+    )?;
+    let actual_tree = git_stdout(
+        root,
+        &["show", "-s", "--format=%T", &registry.baseline_revision],
+    )?;
+    anyhow::ensure!(
+        actual_tree == registry.baseline_tree,
+        "Rust API baseline tree changed: expected {}, got {}",
+        registry.baseline_tree,
+        actual_tree
+    );
+    ensure_git_success(
+        root,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &registry.baseline_revision,
+            "HEAD",
+        ],
+        "Rust API baseline must remain an ancestor of HEAD",
+    )?;
+    for entry in &registry.package {
+        let object = format!("{}:{}", registry.baseline_revision, entry.manifest_path);
+        ensure_git_success(
+            root,
+            &["cat-file", "-e", &object],
+            &format!("Rust API baseline omitted {}", entry.manifest_path),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_baseline_manifest_path(path: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(!path.is_empty(), "Rust API baseline manifest path is empty");
+    anyhow::ensure!(
+        !path.contains('\\'),
+        "Rust API baseline manifest path must use forward slashes: {path}"
+    );
+    let parsed = Path::new(path);
+    anyhow::ensure!(
+        !parsed.is_absolute()
+            && parsed
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
+        "Rust API baseline manifest path is not canonical: {path}"
+    );
+    anyhow::ensure!(
+        path.ends_with("/Cargo.toml"),
+        "Rust API baseline manifest path must end in /Cargo.toml: {path}"
+    );
+    Ok(())
+}
+
+fn is_lower_git_object_id(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn ensure_git_success(root: &Path, args: &[&str], context: &str) -> anyhow::Result<()> {
+    let output = Command::new("git").current_dir(root).args(args).output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{context}: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = Command::new("git").current_dir(root).args(args).output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1047,6 +1235,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "python",
             "api_report",
             u64::from(release_artifacts::PYTHON_API_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "rust",
+            "public_api_baseline",
+            u64::from(RUST_API_BASELINE_SCHEMA_VERSION),
         ),
         (
             "assets",
@@ -3252,8 +3445,9 @@ mod tests {
     use super::{
         build_cargo_sbom, default_behavior_seeds, extract_hero_digest, frame_delta_ratio,
         hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition, parse_utc_date_days,
-        validate_blocker_registry, validate_contract_registry, validate_supply_chain_registry,
-        SmokePartition, SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
+        validate_blocker_registry, validate_contract_registry, validate_rust_api_baseline,
+        validate_supply_chain_registry, RustApiBaselineRegistry, SmokePartition,
+        SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
     };
 
     #[test]
@@ -3334,6 +3528,25 @@ mod tests {
             .parse::<toml::Value>()
             .expect("release contract TOML");
         validate_contract_registry(&registry).expect("release contract must match constants");
+    }
+
+    #[test]
+    fn committed_rust_api_baseline_is_immutable_and_complete() {
+        let root = super::workspace_root().expect("workspace root");
+        let metadata = super::cargo_metadata(&root).expect("cargo metadata");
+        let registry: RustApiBaselineRegistry =
+            toml::from_str(include_str!("../../release/rust-api-baseline.toml"))
+                .expect("Rust API baseline TOML");
+        validate_rust_api_baseline(&root, &metadata, &registry)
+            .expect("committed Rust API baseline");
+
+        let mut incomplete = registry.clone();
+        incomplete.package.pop();
+        assert!(validate_rust_api_baseline(&root, &metadata, &incomplete).is_err());
+
+        let mut retargeted = registry;
+        retargeted.baseline_tree = "0000000000000000000000000000000000000000".to_string();
+        assert!(validate_rust_api_baseline(&root, &metadata, &retargeted).is_err());
     }
 
     #[test]

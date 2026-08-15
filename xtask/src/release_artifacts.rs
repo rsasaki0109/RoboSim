@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 40] = [
+const BUNDLE_FILES: [(&str, &str); 41] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -66,6 +66,10 @@ const BUNDLE_FILES: [(&str, &str); 40] = [
     (
         "release/compatibility-fixtures.toml",
         "release/compatibility-fixtures.toml",
+    ),
+    (
+        "release/rust-api-baseline.toml",
+        "release/rust-api-baseline.toml",
     ),
     (
         "release/artifact-attestation.toml",

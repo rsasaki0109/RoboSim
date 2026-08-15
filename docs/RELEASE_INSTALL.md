@@ -44,6 +44,9 @@ On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, and every
 bundle-member digest. `reproducible` is true only for a clean build whose exact
 `v0.1.0` tag points to the tested commit.
+The extracted `release/rust-api-baseline.toml` records the immutable source
+commit/tree and complete 31-crate manifest set used by SemVer CI; it is audit
+metadata and does not require shipping either source tree in the native bundle.
 
 ## Installed workflows
 

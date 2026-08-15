@@ -67,7 +67,7 @@ The current corpus is an expanded v0.9 slice, not a complete 1.0 declaration.
 It retains one negotiated frontend reference frame rather than every message
 kind and freezes the C layout rather than every platform's compiled library
 image. Python call shape is verified by the separate installed wheel manifest.
-The snapshot v1-to-v3 case establishes the migration mechanism, but Rust API
-history and broader historical artifact coverage still need stronger
-long-window gates. Independent-use and six-month stability gates remain
-mandatory.
+The fixed 31-crate Rust API baseline establishes source-level history, and the
+snapshot v1-to-v3 case establishes the artifact migration mechanism. Broader
+historical artifact coverage still needs stronger long-window gates.
+Independent-use and six-month stability gates remain mandatory.

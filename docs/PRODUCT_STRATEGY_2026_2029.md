@@ -388,6 +388,10 @@ ABI3 wheel's 24 public exports with constructor, method, and property call
 shapes. Installed-rehearsal schema v4 verifies that manifest after extraction.
 The first historical migration case restores a real mobile-manipulator snapshot
 from schema v1 into v3 and fixes its tolerance-normalized current-state hash.
+The Rust candidate surface is anchored separately by a machine-readable
+baseline containing the exact commit, Git tree, tool version, and manifest path
+for all 31 publishable crates. SemVer CI always compares to that immutable
+revision rather than a moving branch parent.
 
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.

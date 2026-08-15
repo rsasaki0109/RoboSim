@@ -129,6 +129,10 @@ gates.
 
 The first historical case restores mobile-manipulator snapshot v1 as v3 and
 compares the complete normalized state within the registered tolerance.
+The Rust surface now has a fixed 31-crate baseline registry. CI verifies the
+recorded commit/tree, exact package paths, and pinned semver-checks version
+before applying patch-level compatibility rules; moving PR bases cannot erase
+an accepted API from history.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

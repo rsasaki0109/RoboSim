@@ -11,8 +11,8 @@ compatibility, and scenario-scale conformance binaries, the fixed-binding
 hardware process mock,
 the reference controller shared library, dependency-free Rust and C plugin SDKs,
 compatibility and install documentation, locked dependency SBOM,
-artifact-attestation policy, Python API manifest, replay fixtures, provenance
-report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
+artifact-attestation policy, Rust API baseline, Python API manifest, replay
+fixtures, provenance report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter
 conformance, the 100-actor scale case, standalone controller-plugin
 conformance, the installed compatibility corpus, a fresh wheel installation,
@@ -29,6 +29,8 @@ report.
 The compatibility corpus includes an actual snapshot-v1 to snapshot-v3 restore,
 so the installed binary must have the bundled mobile-manipulator scene and URDF
 needed to reproduce the historical outcome without a source checkout.
+The bundled Rust API registry is audit evidence; source CI performs the actual
+31-crate `cargo-semver-checks` comparison because it requires both source trees.
 
 ## Local rehearsal
 

@@ -34,9 +34,19 @@ documented migration notes.
 - APIs explicitly documented as experimental are exempt until promoted, but
   must remain memory-safe and must produce actionable errors.
 
-`cargo-semver-checks` compares release-candidate changes with the frozen
-baseline. Workspace rustdoc runs with warnings denied, and public libraries
-deny missing documentation.
+`release/rust-api-baseline.toml` freezes the baseline commit and tree,
+`cargo-semver-checks` 0.49.0, and the exact manifest path of all 31 publishable
+crates. Every CI shard compares against that revision with patch rules; it does
+not retarget to the pull-request base or `HEAD^`. A missing baseline commit,
+tree mismatch, package omission, or manifest move fails closed. The baseline
+commit must remain reachable in repository history.
+
+Patch releases must not retarget the baseline. A deliberate pre-1.0 baseline
+change requires a minor version, migration notes, an ADR, and a final passing
+comparison against the prior baseline before the registry changes. Workspace
+CI rejects changes to an already-present registry relative to the pull-request
+base or push parent while the release remains 0.1.0. Rustdoc runs with warnings
+denied, and public libraries deny missing documentation.
 
 The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive
 `PhysicsCapability` and `PhysicsError` enums with `KinematicBody` and

@@ -1,0 +1,129 @@
+schema_version = 1
+release_version = "0.1.0"
+baseline_revision = "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc"
+baseline_tree = "1fa3646facf095431b014bc394e8a6934a549f20"
+cargo_semver_checks_version = "0.49.0"
+
+[[package]]
+name = "rne_adapter_ros2"
+manifest_path = "adapters/ros2/rne_adapter_ros2/Cargo.toml"
+
+[[package]]
+name = "rne_ai"
+manifest_path = "crates/rne_ai/Cargo.toml"
+
+[[package]]
+name = "rne_assets"
+manifest_path = "crates/rne_assets/Cargo.toml"
+
+[[package]]
+name = "rne_core"
+manifest_path = "crates/rne_core/Cargo.toml"
+
+[[package]]
+name = "rne_data"
+manifest_path = "crates/rne_data/Cargo.toml"
+
+[[package]]
+name = "rne_deformable"
+manifest_path = "crates/rne_deformable/Cargo.toml"
+
+[[package]]
+name = "rne_ecs"
+manifest_path = "crates/rne_ecs/Cargo.toml"
+
+[[package]]
+name = "rne_hardware_gateway"
+manifest_path = "adapters/hardware/rne_hardware_gateway/Cargo.toml"
+
+[[package]]
+name = "rne_hardware_lekiwi"
+manifest_path = "adapters/hardware/rne_hardware_lekiwi/Cargo.toml"
+
+[[package]]
+name = "rne_log"
+manifest_path = "crates/rne_log/Cargo.toml"
+
+[[package]]
+name = "rne_math"
+manifest_path = "crates/rne_math/Cargo.toml"
+
+[[package]]
+name = "rne_mjcf"
+manifest_path = "crates/rne_mjcf/Cargo.toml"
+
+[[package]]
+name = "rne_openscenario"
+manifest_path = "crates/rne_openscenario/Cargo.toml"
+
+[[package]]
+name = "rne_physics"
+manifest_path = "crates/rne_physics/Cargo.toml"
+
+[[package]]
+name = "rne_physics_conformance"
+manifest_path = "crates/rne_physics_conformance/Cargo.toml"
+
+[[package]]
+name = "rne_physics_analytic"
+manifest_path = "crates/rne_physics_analytic/Cargo.toml"
+
+[[package]]
+name = "rne_physics_rapier"
+manifest_path = "crates/rne_physics_rapier/Cargo.toml"
+
+[[package]]
+name = "rne_plateau"
+manifest_path = "crates/rne_plateau/Cargo.toml"
+
+[[package]]
+name = "rne_plugin_sdk"
+manifest_path = "crates/rne_plugin_sdk/Cargo.toml"
+
+[[package]]
+name = "rne_plugin"
+manifest_path = "crates/rne_plugin/Cargo.toml"
+
+[[package]]
+name = "rne_py"
+manifest_path = "crates/rne_py/Cargo.toml"
+
+[[package]]
+name = "rne_render"
+manifest_path = "crates/rne_render/Cargo.toml"
+
+[[package]]
+name = "rne_render_wgpu"
+manifest_path = "crates/rne_render_wgpu/Cargo.toml"
+
+[[package]]
+name = "rne_robot"
+manifest_path = "crates/rne_robot/Cargo.toml"
+
+[[package]]
+name = "rne_sdf"
+manifest_path = "crates/rne_sdf/Cargo.toml"
+
+[[package]]
+name = "rne_sensor"
+manifest_path = "crates/rne_sensor/Cargo.toml"
+
+[[package]]
+name = "rne_sumo"
+manifest_path = "crates/rne_sumo/Cargo.toml"
+
+[[package]]
+name = "rne_traci"
+manifest_path = "crates/rne_traci/Cargo.toml"
+
+[[package]]
+name = "rne_traffic"
+manifest_path = "crates/rne_traffic/Cargo.toml"
+
+[[package]]
+name = "rne_urdf_import"
+manifest_path = "crates/rne_urdf_import/Cargo.toml"
+
+[[package]]
+name = "rne_world"
+manifest_path = "crates/rne_world/Cargo.toml"

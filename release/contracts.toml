@@ -17,6 +17,9 @@ minor = 0
 api_contract = 1
 api_report = 1
 
+[rust]
+public_api_baseline = 1
+
 [assets]
 run_manifest = 1
 traffic = 1

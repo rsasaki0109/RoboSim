@@ -656,14 +656,28 @@ fn validate_semver_packages(block: &str) -> anyhow::Result<()> {
         unique.difference(&expected).collect::<Vec<_>>()
     );
     let normalized = normalize_workflow(block);
-    for bootstrap in [
+    for fixed_baseline_check in [
+        "release/rust-api-baseline.toml",
         "cargo metadata --locked --no-deps --format-version 1",
-        "git cat-file -e \"$baseline:$relative\"",
+        "git diff --quiet \"$registry_guard_ref\" -- release/rust-api-baseline.toml",
+        "git cat-file -e \"$baseline^{commit}\"",
+        "git merge-base --is-ancestor \"$baseline\" HEAD",
+        "git cat-file -e \"$baseline:$frozen_manifest\"",
+        "cargo semver-checks --version",
         "packages+=(\"-p\" \"$package\")",
     ] {
         anyhow::ensure!(
-            normalized.contains(&normalize_workflow(bootstrap)),
-            "SemVer matrix omitted same-path baseline bootstrap: {bootstrap}"
+            normalized.contains(&normalize_workflow(fixed_baseline_check)),
+            "SemVer matrix omitted fixed baseline check: {fixed_baseline_check}"
+        );
+    }
+    for moving_baseline in [
+        "baseline=\"origin/${{ github.base_ref }}\"",
+        "baseline=\"HEAD^\"",
+    ] {
+        anyhow::ensure!(
+            !normalized.contains(&normalize_workflow(moving_baseline)),
+            "SemVer matrix still uses moving baseline: {moving_baseline}"
         );
     }
     Ok(())
