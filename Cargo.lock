@@ -3465,6 +3465,7 @@ dependencies = [
  "rne_openscenario",
  "rne_physics_conformance",
  "rne_physics_conformance_suite",
+ "rne_plugin_sdk",
  "serde",
  "serde_json",
  "sha2",

@@ -16,7 +16,11 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 3;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 4;
+/// Installed Python public-API contract schema.
+pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
+/// Installed Python public-API verification report schema.
+pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
 
 const RELEASE_BINARY_PACKAGES: [(&str, &str); 6] = [
     ("rne_asset_cli", "rne-asset"),
@@ -30,7 +34,7 @@ const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
 const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
-const INSTALL_CHECK_IDS: [&str; 8] = [
+const INSTALL_CHECK_IDS: [&str; 9] = [
     "robot_replay",
     "scenario_replay",
     "physics_conformance",
@@ -39,9 +43,10 @@ const INSTALL_CHECK_IDS: [&str; 8] = [
     "controller_plugin",
     "compatibility_corpus",
     "python_wheel",
+    "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 32] = [
+const BUNDLE_FILES: [(&str, &str); 36] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -51,6 +56,10 @@ const BUNDLE_FILES: [(&str, &str); 32] = [
     (
         "crates/rne_plugin_sdk/src/abi.rs",
         "sdk/rust/rne_plugin_sdk.rs",
+    ),
+    (
+        "crates/rne_plugin_sdk/include/rne_plugin_sdk.h",
+        "sdk/c/rne_plugin_sdk.h",
     ),
     ("release/blockers.toml", "release/blockers.toml"),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
@@ -63,6 +72,11 @@ const BUNDLE_FILES: [(&str, &str); 32] = [
         "release/artifact-attestation.toml",
     ),
     ("release/python_wheel_smoke.py", "python-wheel-smoke.py"),
+    ("release/python_api_compat.py", "python-api-compat.py"),
+    (
+        "release/python-api-v1.json",
+        "sdk/python/rne_py-api-v1.json",
+    ),
     (
         "assets/runs/mesh_diff_drive.rne.run.toml",
         "assets/runs/mesh_diff_drive.rne.run.toml",
@@ -94,6 +108,10 @@ const BUNDLE_FILES: [(&str, &str); 32] = [
     (
         "tests/golden/replays/behavior-replay-v1.json",
         "tests/golden/replays/behavior-replay-v1.json",
+    ),
+    (
+        "tests/golden/plugins/controller-c-abi-layout-v3.json",
+        "tests/golden/plugins/controller-c-abi-layout-v3.json",
     ),
     (
         "tests/golden/datasets/bundle-manifest-v1.json",
@@ -791,7 +809,8 @@ fn run_install_rehearsal(
         &serde_json::Value::Bool(true),
     );
 
-    let wheel_passed = run_python_wheel_smoke(bundle_dir, output_dir, python, target);
+    let (wheel_passed, python_api_passed) =
+        run_python_wheel_smoke(bundle_dir, output_dir, python, target);
     let checks = vec![
         check("robot_replay", robot_verify),
         check("scenario_replay", scenario_verify),
@@ -801,6 +820,7 @@ fn run_install_rehearsal(
         check("controller_plugin", plugin_passed),
         check("compatibility_corpus", compatibility_passed),
         check("python_wheel", wheel_passed),
+        check("python_api", python_api_passed),
     ];
     let passed = checks.iter().all(|check| check.status == "passed");
     Ok(InstallRehearsalReport {
@@ -907,23 +927,23 @@ fn run_python_wheel_smoke(
     output_dir: &Path,
     python: &Path,
     target: &str,
-) -> bool {
+) -> (bool, bool) {
     let wheels = match files_with_extension(&bundle_dir.join("wheels"), "whl") {
         Ok(wheels) if wheels.len() == 1 => wheels,
         Ok(wheels) => {
             eprintln!("expected exactly one wheel, found {}", wheels.len());
-            return false;
+            return (false, false);
         }
         Err(error) => {
             eprintln!("could not enumerate bundled wheel: {error:#}");
-            return false;
+            return (false, false);
         }
     };
     let venv = output_dir.join("wheel-venv");
     if venv.exists() {
         if let Err(error) = fs::remove_dir_all(&venv) {
             eprintln!("could not reset wheel venv {}: {error}", venv.display());
-            return false;
+            return (false, false);
         }
     }
     if !run_check_command(
@@ -937,7 +957,7 @@ fn run_python_wheel_smoke(
         ],
         &[],
     ) {
-        return false;
+        return (false, false);
     }
     let installed_python = if target.contains("windows") {
         venv.join("Scripts/python.exe")
@@ -960,15 +980,32 @@ fn run_python_wheel_smoke(
         ],
         &[],
     ) {
-        return false;
+        return (false, false);
     }
-    run_check_command(
+    let wheel_passed = run_check_command(
         "execute ABI3 wheel smoke",
         output_dir,
         &installed_python,
         &[bundle_dir.join("python-wheel-smoke.py").into_os_string()],
         &[],
-    )
+    );
+    let api_report = output_dir.join("python-api-report.json");
+    let api_passed = run_check_command(
+        "verify installed Python API contract",
+        output_dir,
+        &installed_python,
+        &[
+            bundle_dir.join("python-api-compat.py").into_os_string(),
+            OsString::from("--fixture"),
+            bundle_dir
+                .join("sdk/python/rne_py-api-v1.json")
+                .into_os_string(),
+            OsString::from("--output"),
+            api_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(&api_report, "passed", &serde_json::Value::Bool(true));
+    (wheel_passed, api_passed)
 }
 
 fn check(id: &str, passed: bool) -> InstallCheck {

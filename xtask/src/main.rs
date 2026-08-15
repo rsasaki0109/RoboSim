@@ -1024,6 +1024,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_plugin::RNE_PLUGIN_SDK_VERSION),
         ),
         (
+            "controller_abi",
+            "c_layout",
+            u64::from(rne_plugin::RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION),
+        ),
+        (
             "frontend_transport",
             "major",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MAJOR),
@@ -1032,6 +1037,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "frontend_transport",
             "minor",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MINOR),
+        ),
+        (
+            "python",
+            "api_contract",
+            u64::from(release_artifacts::PYTHON_API_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "python",
+            "api_report",
+            u64::from(release_artifacts::PYTHON_API_REPORT_SCHEMA_VERSION),
         ),
         (
             "assets",
@@ -2908,6 +2923,7 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     if !venv_py.exists() {
         run_step(&format!("{host_python} -m venv .venv"))?;
     }
+    run_program(&venv_py, &["release/test_python_api_compat.py"])?;
     run_program(
         &venv_py,
         &["-m", "pip", "install", "-q", "--upgrade", "pip", "maturin"],
@@ -2932,6 +2948,16 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
             "-m",
             "crates/rne_py/Cargo.toml",
             "--release",
+        ],
+    )?;
+    run_program(
+        &venv_py,
+        &[
+            "release/python_api_compat.py",
+            "--fixture",
+            "release/python-api-v1.json",
+            "--output",
+            "artifacts/python-api/report.json",
         ],
     )?;
     for script in [

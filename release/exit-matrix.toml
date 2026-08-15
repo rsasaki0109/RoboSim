@@ -103,6 +103,8 @@ job = "release_contract"
 runner = "ubuntu-latest"
 clean_checkout = true
 commands = [
+  "cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c",
+  "c++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only -x c++ -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c",
   "cargo run --locked -p xtask -- release-check",
   "cargo run --locked -p rne_compatibility_suite -- --output artifacts/compatibility/report.json",
 ]

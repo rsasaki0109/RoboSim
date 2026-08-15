@@ -105,6 +105,9 @@ cargo build --offline \
 
 Use the corresponding `.exe` and `.dll` names on Windows. The generated
 `src/rne_plugin_sdk.rs` is byte-identical to the module included in the bundle.
+C and C++ controller authors can instead include `sdk/c/rne_plugin_sdk.h`; the
+installed compatibility corpus verifies its registered 64-bit ABI-v3 layout
+and required symbols.
 
 ## Python ABI3 wheel
 
@@ -116,6 +119,9 @@ environment, then run the bundled smoke:
 python3 -m venv .venv
 .venv/bin/python -m pip install --no-index --no-deps wheels/rne_py-*.whl
 .venv/bin/python python-wheel-smoke.py
+.venv/bin/python python-api-compat.py \
+  --fixture sdk/python/rne_py-api-v1.json \
+  --output python-api-report.json
 ```
 
 On Windows the interpreter is `.venv\Scripts\python.exe`. The wheel is built
@@ -136,5 +142,6 @@ cargo run --locked -p xtask -- release-bundle \
 ```
 
 `release-install-smoke --bundle-dir PATH --output-dir EMPTY_PATH` independently
-checks `SHA256SUMS`, installs the bundled wheel, and reruns all seven schema-v2
-installed-artifact checks.
+checks `SHA256SUMS`, installs the bundled wheel, and reruns all nine schema-v4
+installed-artifact checks, including the compatibility corpus and exact Python
+API manifest.

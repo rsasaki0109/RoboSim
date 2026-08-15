@@ -28,6 +28,14 @@ use rne_math::Vec3;
 use rne_openscenario::ScenarioReplayArtifact;
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
 use rne_physics_conformance_suite::ConformanceReport;
+use rne_plugin_sdk::{
+    RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
+    RneJointVelocityV3, RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION,
+    RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND, RNE_CONTROLLER_CAP_JOINT_VELOCITY_OBSERVATION,
+    RNE_CONTROLLER_CAP_MULTI_ROBOT, RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION,
+    RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_MIN_ABI_VERSION, RNE_PLUGIN_SDK_C_HEADER,
+    RNE_PLUGIN_SDK_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -54,10 +62,16 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 13] = [
+const FIXTURE_SPECS: [FixtureSpec; 14] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
+        schema_version: 1,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "controller_c_abi_v3",
+        contract: "controller_c_abi",
         schema_version: 1,
         version_field: "schema_version",
     },
@@ -134,6 +148,55 @@ const FIXTURE_SPECS: [FixtureSpec; 13] = [
         version_field: "schema_version",
     },
 ];
+
+const CONTROLLER_C_ABI_LAYOUT_KIND: &str = "rne_controller_c_abi_layout";
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CAbiNamedValue {
+    name: String,
+    value: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CAbiFieldLayout {
+    name: String,
+    c_type: String,
+    offset_bytes: usize,
+    size_bytes: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CAbiStructLayout {
+    name: String,
+    size_bytes: usize,
+    align_bytes: usize,
+    fields: Vec<CAbiFieldLayout>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CAbiSymbol {
+    name: String,
+    since_abi: u32,
+    c_signature: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ControllerCAbiFixture {
+    kind: String,
+    schema_version: u32,
+    sdk_version: u32,
+    minimum_abi_version: u32,
+    current_abi_version: u32,
+    pointer_width_bits: u32,
+    capability_bits: Vec<CAbiNamedValue>,
+    structs: Vec<CAbiStructLayout>,
+    symbols: Vec<CAbiSymbol>,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -607,6 +670,10 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
             let fixture: BehaviorReplayArtifact = serde_json::from_value(value)?;
             fixture.validate_compatibility()?;
         }
+        "controller_c_abi" => {
+            let fixture: ControllerCAbiFixture = serde_json::from_value(value)?;
+            validate_controller_c_abi(&fixture)?;
+        }
         "dataset_bundle" => {
             let fixture: DatasetManifest = serde_json::from_value(value)?;
             fixture.validate()?;
@@ -659,6 +726,255 @@ fn validate_typed(spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
         other => bail!("unsupported compatibility contract {other}"),
     }
     Ok(())
+}
+
+fn validate_controller_c_abi(fixture: &ControllerCAbiFixture) -> anyhow::Result<()> {
+    ensure!(
+        fixture.kind == CONTROLLER_C_ABI_LAYOUT_KIND,
+        "controller C ABI fixture kind mismatch"
+    );
+    ensure!(
+        fixture.schema_version == RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION,
+        "controller C ABI schema mismatch"
+    );
+    ensure!(
+        fixture == &current_controller_c_abi(),
+        "controller C ABI constants, layout, or symbols changed"
+    );
+    for symbol in &fixture.symbols {
+        ensure!(
+            RNE_PLUGIN_SDK_C_HEADER.contains(&symbol.name),
+            "controller C header omitted symbol {}",
+            symbol.name
+        );
+    }
+    for layout in &fixture.structs {
+        ensure!(
+            RNE_PLUGIN_SDK_C_HEADER.contains(&layout.name),
+            "controller C header omitted structure {}",
+            layout.name
+        );
+    }
+    Ok(())
+}
+
+fn current_controller_c_abi() -> ControllerCAbiFixture {
+    let pointer_size = std::mem::size_of::<*const std::ffi::c_char>();
+    ControllerCAbiFixture {
+        kind: CONTROLLER_C_ABI_LAYOUT_KIND.to_string(),
+        schema_version: RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION,
+        sdk_version: RNE_PLUGIN_SDK_VERSION,
+        minimum_abi_version: RNE_PLUGIN_MIN_ABI_VERSION,
+        current_abi_version: RNE_PLUGIN_ABI_VERSION,
+        pointer_width_bits: usize::BITS,
+        capability_bits: vec![
+            c_abi_value(
+                "joint_position_observation",
+                RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION,
+            ),
+            c_abi_value(
+                "joint_velocity_observation",
+                RNE_CONTROLLER_CAP_JOINT_VELOCITY_OBSERVATION,
+            ),
+            c_abi_value(
+                "joint_velocity_command",
+                RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND,
+            ),
+            c_abi_value("multi_robot", RNE_CONTROLLER_CAP_MULTI_ROBOT),
+        ],
+        structs: vec![
+            CAbiStructLayout {
+                name: "RneJointPosition".to_string(),
+                size_bytes: std::mem::size_of::<RneJointPosition>(),
+                align_bytes: std::mem::align_of::<RneJointPosition>(),
+                fields: vec![
+                    c_abi_field(
+                        "name",
+                        "const char *",
+                        std::mem::offset_of!(RneJointPosition, name),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "position_rad",
+                        "double",
+                        std::mem::offset_of!(RneJointPosition, position_rad),
+                        std::mem::size_of::<f64>(),
+                    ),
+                ],
+            },
+            CAbiStructLayout {
+                name: "RneJointVelocity".to_string(),
+                size_bytes: std::mem::size_of::<RneJointVelocity>(),
+                align_bytes: std::mem::align_of::<RneJointVelocity>(),
+                fields: vec![
+                    c_abi_field(
+                        "name",
+                        "const char *",
+                        std::mem::offset_of!(RneJointVelocity, name),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "velocity_rad_s",
+                        "double",
+                        std::mem::offset_of!(RneJointVelocity, velocity_rad_s),
+                        std::mem::size_of::<f64>(),
+                    ),
+                ],
+            },
+            CAbiStructLayout {
+                name: "RneJointObservationV3".to_string(),
+                size_bytes: std::mem::size_of::<RneJointObservationV3>(),
+                align_bytes: std::mem::align_of::<RneJointObservationV3>(),
+                fields: vec![
+                    c_abi_field(
+                        "robot_id",
+                        "const char *",
+                        std::mem::offset_of!(RneJointObservationV3, robot_id),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "name",
+                        "const char *",
+                        std::mem::offset_of!(RneJointObservationV3, name),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "position_rad",
+                        "double",
+                        std::mem::offset_of!(RneJointObservationV3, position_rad),
+                        std::mem::size_of::<f64>(),
+                    ),
+                    c_abi_field(
+                        "velocity_rad_s",
+                        "double",
+                        std::mem::offset_of!(RneJointObservationV3, velocity_rad_s),
+                        std::mem::size_of::<f64>(),
+                    ),
+                    c_abi_field(
+                        "has_velocity",
+                        "uint8_t",
+                        std::mem::offset_of!(RneJointObservationV3, has_velocity),
+                        std::mem::size_of::<u8>(),
+                    ),
+                    c_abi_field(
+                        "reserved",
+                        "uint8_t[7]",
+                        std::mem::offset_of!(RneJointObservationV3, reserved),
+                        std::mem::size_of::<[u8; 7]>(),
+                    ),
+                ],
+            },
+            CAbiStructLayout {
+                name: "RneJointVelocityV3".to_string(),
+                size_bytes: std::mem::size_of::<RneJointVelocityV3>(),
+                align_bytes: std::mem::align_of::<RneJointVelocityV3>(),
+                fields: vec![
+                    c_abi_field(
+                        "robot_id",
+                        "const char *",
+                        std::mem::offset_of!(RneJointVelocityV3, robot_id),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "name",
+                        "const char *",
+                        std::mem::offset_of!(RneJointVelocityV3, name),
+                        pointer_size,
+                    ),
+                    c_abi_field(
+                        "velocity_rad_s",
+                        "double",
+                        std::mem::offset_of!(RneJointVelocityV3, velocity_rad_s),
+                        std::mem::size_of::<f64>(),
+                    ),
+                ],
+            },
+            CAbiStructLayout {
+                name: "RneControllerStepResultV3".to_string(),
+                size_bytes: std::mem::size_of::<RneControllerStepResultV3>(),
+                align_bytes: std::mem::align_of::<RneControllerStepResultV3>(),
+                fields: vec![
+                    c_abi_field(
+                        "status",
+                        "int32_t",
+                        std::mem::offset_of!(RneControllerStepResultV3, status),
+                        std::mem::size_of::<i32>(),
+                    ),
+                    c_abi_field(
+                        "output_count",
+                        "size_t",
+                        std::mem::offset_of!(RneControllerStepResultV3, output_count),
+                        std::mem::size_of::<usize>(),
+                    ),
+                ],
+            },
+        ],
+        symbols: vec![
+            c_abi_symbol("rne_plugin_abi_version", 2, "uint32_t(void)"),
+            c_abi_symbol("rne_plugin_name", 2, "const char *(void)"),
+            c_abi_symbol(
+                "rne_controller_create",
+                2,
+                "void *(const char *, double, double, double, char *, size_t)",
+            ),
+            c_abi_symbol("rne_controller_destroy", 2, "void(void *)"),
+            c_abi_symbol(
+                "rne_controller_step",
+                2,
+                "size_t(const void *, const RneJointPosition *, size_t, RneJointVelocity *, size_t)",
+            ),
+            c_abi_symbol("rne_plugin_capabilities", 3, "uint64_t(void)"),
+            c_abi_symbol(
+                "rne_controller_configure_v3",
+                3,
+                "int32_t(void *, uint64_t, char *, size_t)",
+            ),
+            c_abi_symbol(
+                "rne_controller_reset_v3",
+                3,
+                "int32_t(void *, uint64_t, uint64_t, uint64_t, uint64_t, char *, size_t)",
+            ),
+            c_abi_symbol(
+                "rne_controller_step_v3",
+                3,
+                "RneControllerStepResultV3(void *, uint64_t, uint64_t, const RneJointObservationV3 *, size_t, RneJointVelocityV3 *, size_t, char *, size_t)",
+            ),
+            c_abi_symbol(
+                "rne_controller_shutdown_v3",
+                3,
+                "int32_t(void *, char *, size_t)",
+            ),
+        ],
+    }
+}
+
+fn c_abi_value(name: &str, value: u64) -> CAbiNamedValue {
+    CAbiNamedValue {
+        name: name.to_string(),
+        value,
+    }
+}
+
+fn c_abi_field(
+    name: &str,
+    c_type: &str,
+    offset_bytes: usize,
+    size_bytes: usize,
+) -> CAbiFieldLayout {
+    CAbiFieldLayout {
+        name: name.to_string(),
+        c_type: c_type.to_string(),
+        offset_bytes,
+        size_bytes,
+    }
+}
+
+fn c_abi_symbol(name: &str, since_abi: u32, c_signature: &str) -> CAbiSymbol {
+    CAbiSymbol {
+        name: name.to_string(),
+        since_abi,
+        c_signature: c_signature.to_string(),
+    }
 }
 
 fn validate_frontend_transport(fixture: &FrontendTransportFixture) -> anyhow::Result<()> {

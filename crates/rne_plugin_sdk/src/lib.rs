@@ -13,6 +13,8 @@ pub use abi::*;
 
 /// Exact standalone SDK module source vendored by the offline plugin scaffold.
 pub const RNE_PLUGIN_SDK_RUST_SOURCE: &str = include_str!("abi.rs");
+/// Exact C header shipped to native controller-plugin authors.
+pub const RNE_PLUGIN_SDK_C_HEADER: &str = include_str!("../include/rne_plugin_sdk.h");
 
 #[cfg(test)]
 mod tests {
@@ -40,5 +42,71 @@ mod tests {
         assert!(RNE_PLUGIN_SDK_RUST_SOURCE.contains("pub struct RneJointObservationV3"));
         assert!(RNE_PLUGIN_SDK_RUST_SOURCE.contains("pub type RneControllerStepV3Fn"));
         assert!(!RNE_PLUGIN_SDK_RUST_SOURCE.contains("include_str!"));
+    }
+
+    #[test]
+    fn c_header_tracks_constants_structures_and_every_required_symbol() {
+        for expected in [
+            "#define RNE_PLUGIN_SDK_VERSION UINT32_C(1)",
+            "#define RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION UINT32_C(1)",
+            "#define RNE_PLUGIN_MIN_ABI_VERSION UINT32_C(2)",
+            "#define RNE_PLUGIN_ABI_VERSION UINT32_C(3)",
+            "typedef struct RneJointObservationV3",
+            "typedef struct RneControllerStepResultV3",
+            "rne_plugin_abi_version(void)",
+            "rne_plugin_name(void)",
+            "rne_plugin_capabilities(void)",
+            "rne_controller_create(",
+            "rne_controller_destroy(",
+            "rne_controller_step(",
+            "rne_controller_configure_v3(",
+            "rne_controller_reset_v3(",
+            "rne_controller_step_v3(",
+            "rne_controller_shutdown_v3(",
+        ] {
+            assert!(
+                RNE_PLUGIN_SDK_C_HEADER.contains(expected),
+                "C header omitted {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn sixty_four_bit_c_layout_is_explicit_and_stable() {
+        if usize::BITS != 64 {
+            return;
+        }
+        assert_eq!(std::mem::size_of::<RneJointPosition>(), 16);
+        assert_eq!(std::mem::align_of::<RneJointPosition>(), 8);
+        assert_eq!(std::mem::offset_of!(RneJointPosition, name), 0);
+        assert_eq!(std::mem::offset_of!(RneJointPosition, position_rad), 8);
+        assert_eq!(std::mem::size_of::<RneJointVelocity>(), 16);
+        assert_eq!(std::mem::offset_of!(RneJointVelocity, velocity_rad_s), 8);
+        assert_eq!(std::mem::size_of::<RneJointObservationV3>(), 40);
+        assert_eq!(std::mem::align_of::<RneJointObservationV3>(), 8);
+        assert_eq!(std::mem::offset_of!(RneJointObservationV3, robot_id), 0);
+        assert_eq!(std::mem::offset_of!(RneJointObservationV3, name), 8);
+        assert_eq!(
+            std::mem::offset_of!(RneJointObservationV3, position_rad),
+            16
+        );
+        assert_eq!(
+            std::mem::offset_of!(RneJointObservationV3, velocity_rad_s),
+            24
+        );
+        assert_eq!(
+            std::mem::offset_of!(RneJointObservationV3, has_velocity),
+            32
+        );
+        assert_eq!(std::mem::offset_of!(RneJointObservationV3, reserved), 33);
+        assert_eq!(std::mem::size_of::<RneJointVelocityV3>(), 24);
+        assert_eq!(std::mem::offset_of!(RneJointVelocityV3, velocity_rad_s), 16);
+        assert_eq!(std::mem::size_of::<RneControllerStepResultV3>(), 16);
+        assert_eq!(std::mem::align_of::<RneControllerStepResultV3>(), 8);
+        assert_eq!(std::mem::offset_of!(RneControllerStepResultV3, status), 0);
+        assert_eq!(
+            std::mem::offset_of!(RneControllerStepResultV3, output_count),
+            8
+        );
     }
 }

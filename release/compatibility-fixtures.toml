@@ -9,6 +9,13 @@ path = "tests/golden/replays/behavior-replay-v1.json"
 canonical_json_sha256 = "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c"
 
 [[fixture]]
+id = "controller_c_abi_v3"
+contract = "controller_c_abi"
+schema_version = 1
+path = "tests/golden/plugins/controller-c-abi-layout-v3.json"
+canonical_json_sha256 = "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036"
+
+[[fixture]]
 id = "dataset_bundle_v1"
 contract = "dataset_bundle"
 schema_version = 1

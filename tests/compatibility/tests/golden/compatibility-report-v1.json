@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:28d4655d1655030dfe91697253d06ba3627c3aec35424421490463af8a5cd5bb",
+  "registry_sha256": "sha256:82039e27ca096e2cab0a0d6f8a8de00734c7b912b3d69aa318ed25e0cd2c117c",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -10,6 +10,18 @@
       "schema_version": 1,
       "path": "tests/golden/replays/behavior-replay-v1.json",
       "canonical_json_sha256": "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "controller_c_abi_v3",
+      "contract": "controller_c_abi",
+      "schema_version": 1,
+      "path": "tests/golden/plugins/controller-c-abi-layout-v3.json",
+      "canonical_json_sha256": "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

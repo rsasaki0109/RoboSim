@@ -57,6 +57,10 @@ legacy `rne_plugin::cabi` type paths re-export those exact definitions. New
 scaffolds vendor the same source into `src/rne_plugin_sdk.rs`, allowing an
 offline build without coupling a plugin to host implementation crates. The SDK
 version and controller ABI version are separate registered contracts.
+Native C/C++ authors receive the matching `sdk/c/rne_plugin_sdk.h` header. The
+schema-v1 64-bit layout fixture freezes all public structure sizes, alignments,
+field offsets, capability values, required symbols, and normalized signatures
+on Linux x86-64 and Windows x86-64.
 
 - Unknown ABI versions are rejected before a plugin function is invoked.
 - Host-owned lifecycle order remains configure, episode activation/reset,
@@ -267,12 +271,13 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
-The thirteen-fixture registry additionally freezes a complete frontend
+The fourteen-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
-v1, and scenario replay v4. Binary fixtures pair semantic fields with lowercase
-hex bytes: acceptance requires exact decode/re-encode identity plus rejection
-of truncation and trailing bytes. Frontend validation also rejects corrupt
-magic, unknown message kinds, and an incompatible negotiated major version.
+v1, scenario replay v4, and the controller C ABI-v3 64-bit layout. Binary
+fixtures pair semantic fields with lowercase hex bytes: acceptance requires
+exact decode/re-encode identity plus rejection of truncation and trailing bytes.
+Frontend validation also rejects corrupt magic, unknown message kinds, and an
+incompatible negotiated major version.
 
 Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
 to the six schema-v1 checks. Schema-v1 reports remain historical evidence but
@@ -283,6 +288,10 @@ Installed-rehearsal report schema v3 adds the required
 `compatibility_corpus` check and bundled `rne-compatibility` binary. A v1 or v2
 report remains historical evidence for the workflows it actually ran and must
 not be promoted to v3 without rerunning the matching extracted bundle.
+Installed-rehearsal report schema v4 appends the required `python_api` check.
+It verifies the installed ABI3 wheel against the bundled strict API manifest
+and emits a content-addressed schema-v1 Python API report. Older rehearsal
+reports cannot be relabelled as v4 because they do not prove this call shape.
 
 ## Replay migration
 
@@ -303,8 +312,13 @@ lossless migration command in a future minor release.
 ## Python API
 
 The wheel uses `abi3-py39`. Python class, method, task, and keyword names follow
-the same documented 0.x compatibility rules as public Rust APIs. Pickled Python objects are
-not a stable artifact format; use versioned RNE JSON/replay/checkpoint formats.
+the same documented 0.x compatibility rules as public Rust APIs. The strict
+`release/python-api-v1.json` contract freezes all public module exports,
+constants, class constructors, methods, raw text signatures, and properties.
+Source Python CI and installed release rehearsal compare the live extension
+module exactly, reject unknown fixture fields and noncanonical ordering, and
+emit `rne_python_api_report` schema v1. Pickled Python objects are not a stable
+artifact format; use versioned RNE JSON/replay/checkpoint formats.
 
 ## Determinism compatibility
 

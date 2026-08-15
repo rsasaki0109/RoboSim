@@ -131,6 +131,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-contract
+      - name: Compile the C and C++ controller SDK header
+        shell: bash
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c
+          c++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only -x c++ -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c
       - name: Validate version, schemas, blockers, rustdoc, and crate archives
         run: cargo run --locked -p xtask -- release-check
       - name: Verify the retained compatibility corpus

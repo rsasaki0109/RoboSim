@@ -32,7 +32,15 @@ regenerating the scaffold is the simplest upgrade path.
 Authors who manage dependencies directly may instead use the exact matching
 `rne_plugin_sdk` crate version and import the same ABI items. The release bundle
 also carries the canonical module at `sdk/rust/rne_plugin_sdk.rs` for auditing
-and non-Cargo build systems.
+and non-Cargo build systems. C and C++ authors use the dependency-free canonical
+header at `sdk/c/rne_plugin_sdk.h`; it declares all ABI-v2/v3 structures,
+callback typedefs, capability bits, calling convention, and required exports.
+
+The installed compatibility corpus retains
+`controller-c-abi-layout-v3.json` for the two tier-1 64-bit targets. It freezes
+pointer width, structure size/alignment/field offsets, capability values, ten
+required symbol names, their first ABI version, and normalized C signatures.
+Both the Rust layout tests and installed corpus must pass before release.
 
 ## ABI ownership rules
 
@@ -53,6 +61,7 @@ that it created. `rne-asset plugin check` exercises those observable contracts.
 ## Compatibility
 
 - `RNE_PLUGIN_SDK_VERSION` versions the Rust authoring surface.
+- `RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION` versions the layout fixture.
 - `RNE_PLUGIN_ABI_VERSION` selects the exported C ABI.
 - Capability bits are additive within one ABI version; unknown bits fail
   closed in the host.

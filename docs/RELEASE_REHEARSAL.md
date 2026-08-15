@@ -9,19 +9,23 @@ installed artifacts only.
 The bundle contains the CLI, standalone physics, hardware-adapter,
 compatibility, and
 scenario-scale conformance binaries, the fixed-binding hardware process mock,
-the reference controller shared library, the dependency-free Rust plugin SDK,
+the reference controller shared library, dependency-free Rust and C plugin SDKs,
 compatibility and install documentation, locked dependency SBOM,
-artifact-attestation policy, replay fixtures, provenance report, and
-`SHA256SUMS`. Installed-rehearsal schema v3 runs eight frozen checks: robot
+artifact-attestation policy, Python API manifest, replay fixtures, provenance report, and
+`SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter
 conformance, the 100-actor scale case, standalone controller-plugin
-conformance, the installed compatibility corpus, and a fresh wheel installation.
-Schema v2 remains historical evidence for the same set without the corpus; it
-cannot be relabelled as v3. The hardware check executes nine
+conformance, the installed compatibility corpus, a fresh wheel installation,
+and exact Python public-API verification. Schema v3 remains historical evidence
+for the same set without the Python API manifest; it cannot be relabelled as
+v4. The hardware check executes nine
 TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
 denied; the scaffold SDK must match the bundled SDK byte-for-byte.
+The Python check compares all 24 public exports, constructors, methods,
+properties, constants, and text signatures, then writes a stable schema-v1
+report.
 
 ## Local rehearsal
 

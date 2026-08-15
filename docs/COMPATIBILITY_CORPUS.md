@@ -19,12 +19,13 @@ Run the installed form from the bundle root:
 ```
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains thirteen fixtures:
+contains fourteen fixtures:
 
 | Contract | Retained artifact |
 |---|---|
 | Task contract | TaskSpec v1 |
 | Batch execution | portable batch checkpoint v2 |
+| Controller ABI | ABI-v3 64-bit C layout, capabilities, and required symbols |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
 | Frontend | protocol-v1 `ClientHello` frame and negotiated limits |
@@ -63,7 +64,8 @@ newer shape; keep both while the older version is supported.
 
 The current corpus is an expanded v0.9 slice, not a complete 1.0 declaration.
 It retains one negotiated frontend reference frame rather than every message
-kind, and it does not yet cover the C ABI binary, Python call shape, Rust API
-surface, or historical migration outcomes. Those surfaces must gain gates
-before their candidate freeze, and the independent-use and six-month stability
-gates remain mandatory.
+kind and freezes the C layout rather than every platform's compiled library
+image. Python call shape is verified by the separate installed wheel manifest;
+Rust API history and historical artifact migration outcomes still need stronger
+long-window gates. Independent-use and six-month stability gates remain
+mandatory.

@@ -35,5 +35,7 @@ the release/test boundary.
   exact contract that changed.
 - Extracted bundles can prove compatibility without the source checkout.
 - Retaining a supported old schema consumes explicit fixture and test cost.
+- The corpus includes the supported 64-bit controller C ABI layout; Python
+  runtime call shape remains a separate installed-wheel gate (ADR 018).
 - The corpus proves only its listed artifacts; external adoption and the full
   candidate-surface inventory remain separate 1.0 gates.
