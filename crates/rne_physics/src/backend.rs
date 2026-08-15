@@ -258,6 +258,14 @@ pub enum PhysicsError {
     /// Backend failed to initialize.
     #[error("physics backend initialization failed")]
     InitializationFailed,
+    /// A named backend rejected initialization and preserved its diagnostic.
+    #[error("physics backend {backend_id} initialization failed: {message}")]
+    BackendInitializationFailed {
+        /// Stable backend identifier from its manifest.
+        backend_id: &'static str,
+        /// Backend-neutral diagnostic text suitable for reports and logs.
+        message: String,
+    },
     /// The backend does not satisfy every required capability.
     #[error("physics backend lacks required capabilities: {missing:?}")]
     MissingCapabilities {

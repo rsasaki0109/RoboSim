@@ -84,8 +84,11 @@ signal-controlled traffic, navigation, and friction pick/place in one fixed-step
 runner. It emits a passing seven-contract report, minimizes a seeded
 perception blackout from three active dimensions to one, verifies the replay
 and Failure Capsule, and writes a self-contained browser inspector. Windows and
-Linux run the same command in CI. A second production physics execution path
-for this exact workflow remains open.
+Linux run the same command in CI. The runtime-gated `xtask flagship
+--cross-backend` path now executes the identical TaskSpec and policy on Rapier
+and native MuJoCo 3.9, requires exact task/contract outcomes, compares nine
+named unit-bearing tolerances instead of cross-solver hashes, and uploads the
+verified comparison report from the dedicated Windows/Linux MuJoCo job.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or

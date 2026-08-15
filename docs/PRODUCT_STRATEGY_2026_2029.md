@@ -310,8 +310,14 @@ RGB-D inspection and aisle clearance, evaluates seven typed behavior
 contracts, and produces both a successful pick/place and a seeded fail-closed
 perception blackout. The failure minimizes from three active dimensions to one,
 replays identically, is sealed into a verified Failure Capsule, and ships with
-a self-contained browser inspector. The native path is complete; the same
-workflow on a second production physics path remains the next v0.7 exit gap.
+a self-contained browser inspector. `cargo run --locked -p xtask -- flagship
+--cross-backend` additionally executes the unchanged TaskSpec and policy on
+Rapier and native MuJoCo 3.9. It requires the optional MuJoCo runtime and emits
+`cross-backend-report.json`: semantic outcomes are exact, solver state hashes
+remain backend-specific, and completion step, base/payload pose, arm/lift/gripper
+state, RGB-D depth, and reward use named unit-bearing tolerances. The dedicated
+Windows/Linux MuJoCo job verifies the report and includes it in the Failure
+Capsule, closing the second-production-physics-path v0.7 gap.
 
 ### v0.8-v0.9: ecosystem and compatibility
 

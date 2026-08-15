@@ -11,6 +11,7 @@ mod release_artifacts;
 mod release_exit;
 mod task_scale;
 
+use anyhow::Context;
 use image::AnimationDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +33,8 @@ const CARGO_DENY_VERSION: &str = "0.20.2";
 const CARGO_AUDIT_VERSION: &str = "0.22.2";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_adapter_ros2",
     "rne_ai",
@@ -1261,6 +1264,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "flagship_workflow_report",
             u64::from(FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION),
         ),
+        (
+            "evidence",
+            "flagship_cross_backend_report",
+            u64::from(FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION),
+        ),
     ];
     for (section, key, actual) in expected {
         let declared = registry
@@ -1749,10 +1757,13 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
 
 /// Reproduces the v0.7 shared-aisle flagship success, minimized failure, and capsule.
 fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        args.next().is_none(),
-        "flagship does not accept arguments; output is artifacts/flagship-validation"
-    );
+    let mut cross_backend = false;
+    for argument in args {
+        match argument.as_str() {
+            "--cross-backend" => cross_backend = true,
+            other => anyhow::bail!("unknown flagship argument: {other}"),
+        }
+    }
     let root = workspace_root()?;
     let artifacts = root.join("artifacts");
     fs::create_dir_all(&artifacts)?;
@@ -1779,15 +1790,20 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         fs::remove_dir_all(&resolved)?;
     }
 
-    run_step(
-        "cargo run --locked -p flagship_validation_workflow --example 74_flagship_validation_workflow -- artifacts/flagship-validation",
-    )?;
+    let workflow_command = if cross_backend {
+        "cargo run --locked -p flagship_validation_workflow --features mujoco --example 74_flagship_validation_workflow -- artifacts/flagship-validation --cross-backend"
+    } else {
+        "cargo run --locked -p flagship_validation_workflow --example 74_flagship_validation_workflow -- artifacts/flagship-validation"
+    };
+    run_step(workflow_command)?;
     let replay = output.join("failure-minimized.rne-replay");
     let report = output.join("workflow-report.json");
     let success = output.join("success.behavior-report.json");
     let failure = output.join("failure.behavior-report.json");
     let inspector = output.join("replay-inspector.html");
     let task_spec = output.join("flagship.task.json");
+    let cross_backend_report = output.join("cross-backend-report.json");
+    let mujoco_success = output.join("mujoco-success.behavior-report.json");
     let capsule = output.join("failure-capsule");
     let mut create_args = vec![
         "create".to_string(),
@@ -1803,14 +1819,24 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         inspector.display().to_string(),
         "--evidence".to_string(),
         task_spec.display().to_string(),
+    ];
+    if cross_backend {
+        create_args.extend([
+            "--evidence".to_string(),
+            cross_backend_report.display().to_string(),
+            "--evidence".to_string(),
+            mujoco_success.display().to_string(),
+        ]);
+    }
+    create_args.extend([
         "--output".to_string(),
         capsule.display().to_string(),
         "--backend".to_string(),
         "rapier-native".to_string(),
         "--backend-version".to_string(),
         "0.22".to_string(),
-    ]
-    .into_iter();
+    ]);
+    let mut create_args = create_args.into_iter();
     failure_capsule::run(&mut create_args)?;
     let mut verify_args = vec!["verify".to_string(), capsule.display().to_string()].into_iter();
     failure_capsule::run(&mut verify_args)?;
@@ -1847,13 +1873,85 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                 == Some(1),
         "flagship failure was not minimized from three dimensions to the blackout"
     );
+    if cross_backend {
+        anyhow::ensure!(
+            report
+                .get("physics_execution_paths")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|paths| {
+                    paths
+                        == &[
+                            serde_json::Value::String("rapier_native".to_string()),
+                            serde_json::Value::String("mujoco_native".to_string()),
+                        ]
+                })
+                && report
+                    .get("cross_backend_report")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("cross-backend-report.json"),
+            "flagship workflow report does not register both production physics paths"
+        );
+        let cross_report: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cross_backend_report)?)?;
+        anyhow::ensure!(
+            cross_report.get("kind").and_then(serde_json::Value::as_str)
+                == Some(FLAGSHIP_CROSS_BACKEND_REPORT_KIND)
+                && cross_report
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(u64::from(FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION))
+                && cross_report
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("passed")
+                && cross_report
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rne.flagship.mobile_lift_shared_aisle.v1"),
+            "flagship cross-backend report kind/schema/task/status mismatch"
+        );
+        let backends = cross_report
+            .get("backends")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted backends")?;
+        anyhow::ensure!(
+            backends.len() == 2
+                && backends.iter().all(|backend| {
+                    backend.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                }),
+            "flagship cross-backend report did not pass both backends"
+        );
+        let tolerance_checks = cross_report
+            .get("tolerance_checks")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted tolerance checks")?;
+        anyhow::ensure!(
+            !tolerance_checks.is_empty()
+                && tolerance_checks.iter().all(|check| {
+                    check.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                        && check
+                            .get("unit")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some()
+                        && check
+                            .get("maximum_delta")
+                            .and_then(serde_json::Value::as_f64)
+                            .is_some_and(|value| value > 0.0)
+                }),
+            "flagship cross-backend tolerance registry is incomplete or failed"
+        );
+    }
     let inspector_text = fs::read_to_string(&inspector)?;
     anyhow::ensure!(
         inspector_text.contains("id=\"replay-data\"")
             && inspector_text.contains("minimized failure"),
         "flagship browser inspector is incomplete"
     );
-    println!("v0.7 flagship evidence verified: {}", output.display());
+    println!(
+        "v0.7 flagship evidence verified (cross_backend={}): {}",
+        cross_backend,
+        output.display()
+    );
     Ok(())
 }
 

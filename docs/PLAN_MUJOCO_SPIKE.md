@@ -27,6 +27,29 @@ workflow runs both the backend integration tests and this shared conformance gat
 It also generates and verifies the Rapier-vs-MuJoCo diagnostic Failure Capsule,
 then uploads the portable capsule directory as a short-lived CI artifact.
 
+The same adapter now executes the v0.7 mobile-lift shared-aisle flagship without
+changing its TaskSpec, policy, behavior contracts, or scene assets. Run
+`cargo run --locked -p xtask -- flagship --cross-backend` after configuring the
+3.9 runtime. The command writes both backend behavior reports plus
+`artifacts/flagship-validation/cross-backend-report.json`, requires the exact
+inspection/traffic/grasp/place outcome on both engines, and evaluates nine named
+SI-unit tolerances. Final state digests are retained for backend-local diagnosis
+but are deliberately not compared across unlike solvers.
+
+The publishable `rne_ai` crate accepts a typed backend factory and has no direct
+dependency on this `publish = false` adapter. The non-published flagship example
+owns the optional MuJoCo dependency and injects its constructor and preflight
+hook at the application boundary. This keeps `cargo package -p rne_ai`
+resolvable from crates.io while preserving the real native execution path.
+
+Legacy `JointMotor` controllers are translated into a MuJoCo-native passive
+damping term plus motor feed-forward, with bounded backend-private gains. This
+preserves the PD law while allowing `implicitfast` to solve damping on lightweight
+links without explicit-force instability. If a runtime controller changes the
+bounded damping coefficient, the adapter deterministically recompiles only the
+native model dynamics and restores current ECS state; body topology remains under
+the existing post-step-0 immutability check.
+
 The backend also advertises `articulation`. Revolute and prismatic descriptions
 compile into nested hinge/slide joints, scalar state synchronizes through
 `JointState`, and the unit-explicit `JointActuation` contract supports position,

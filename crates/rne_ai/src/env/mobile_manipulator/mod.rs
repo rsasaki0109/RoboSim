@@ -20,9 +20,9 @@ pub use sim::{
     mm_mobile_clutter_scene_path, mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path,
     mm_mobile_scene_path, GraspMode, MobileManipulatorFixedJointSnapshot,
     MobileManipulatorFrameSnapshot, MobileManipulatorJointMotorSnapshot,
-    MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
-    MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
-    MobileManipulatorTransformSnapshot,
+    MobileManipulatorPhysicsFactory, MobileManipulatorRigidBodySnapshot,
+    MobileManipulatorSensorStateSnapshot, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    MobileManipulatorSimSnapshotError, MobileManipulatorTransformSnapshot,
 };
 pub use vectorized::{
     VectorizedMobileManipulatorConfig, VectorizedMobileManipulatorEnv,

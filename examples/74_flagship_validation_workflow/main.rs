@@ -6,10 +6,12 @@
 
 use anyhow::{bail, Context, Result};
 use bevy_ecs::prelude::{Entity, World};
+#[cfg(feature = "mujoco")]
+use rne_ai::MobileManipulatorPhysicsFactory;
 use rne_ai::{
     minimize_behavior_failure, run_behavior_scenarios_with_replays, stable_behavior_digest,
     verify_behavior_replay, ActionSpec, BehaviorContract, BehaviorContractError, BehaviorDimension,
-    BehaviorDimensionValue, BehaviorFailureCase, BehaviorReport, BehaviorScenario,
+    BehaviorDimensionValue, BehaviorFailureCase, BehaviorReport, BehaviorRun, BehaviorScenario,
     BehaviorScenarioStep, Episode, GraspMode, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass,
     MobileLiftPickPlacePhase, MobileManipulatorAction, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorObservation, ObservationSpec, Policy,
@@ -21,6 +23,8 @@ use rne_assets::{load_scene_bundle, scene_dependency_paths};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::EntityUuid;
 use rne_physics::hash_physics_state;
+#[cfg(feature = "mujoco")]
+use rne_physics_mujoco::MuJoCoBackend;
 use rne_traffic::{
     advance_controlled_kinematic_traffic, KinematicTrafficConfig, SignalAspect, TrafficActor,
     TrafficDeparture, TrafficId, TrafficPose, TrafficRoute, TrafficRouteCatalog,
@@ -36,6 +40,10 @@ use uuid::Uuid;
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
 const REPORT_KIND: &str = "rne_flagship_workflow_report";
 const REPORT_SCHEMA_VERSION: u32 = 1;
+#[cfg(feature = "mujoco")]
+const CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
+#[cfg(feature = "mujoco")]
+const CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
 const TASK_ID: &str = "rne.flagship.mobile_lift_shared_aisle.v1";
 const SEED: u64 = 7;
 const SIGNAL_RELEASE_STEP: u64 = 60;
@@ -49,6 +57,54 @@ const ROBOT_NAME: &str = "mm_mobile_lift";
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
 const TRAFFIC_NAME: &str = "aisle_vehicle_1";
 const SIGNAL_NAME: &str = "aisle_signal";
+#[cfg(feature = "mujoco")]
+const COMPLETION_STEP_DELTA_MAX: f64 = 400.0;
+#[cfg(feature = "mujoco")]
+const BASE_PLANAR_DELTA_MAX_M: f64 = 0.30;
+#[cfg(feature = "mujoco")]
+const PAYLOAD_POSITION_DELTA_MAX_M: f64 = 0.05;
+#[cfg(feature = "mujoco")]
+const PAYLOAD_APEX_DELTA_MAX_M: f64 = 0.05;
+#[cfg(feature = "mujoco")]
+const ARM_JOINT_DELTA_MAX_RAD: f64 = 0.15;
+#[cfg(feature = "mujoco")]
+const LIFT_DELTA_MAX_M: f64 = 0.02;
+#[cfg(feature = "mujoco")]
+const GRIPPER_DELTA_MAX_M: f64 = 0.02;
+#[cfg(feature = "mujoco")]
+const WRIST_DEPTH_DELTA_MAX_M: f64 = 0.01;
+#[cfg(feature = "mujoco")]
+const REWARD_DELTA_MAX: f64 = 0.5;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FlagshipPhysicsBackend {
+    #[default]
+    Rapier,
+    #[cfg(feature = "mujoco")]
+    Mujoco,
+}
+
+impl FlagshipPhysicsBackend {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rapier => "rapier_native",
+            #[cfg(feature = "mujoco")]
+            Self::Mujoco => "mujoco_native",
+        }
+    }
+}
+
+#[cfg(feature = "mujoco")]
+fn mujoco_physics_factory() -> MobileManipulatorPhysicsFactory<MuJoCoBackend> {
+    MobileManipulatorPhysicsFactory::new("mujoco_native", |fixed_delta| {
+        MuJoCoBackend::new(fixed_delta).map_err(|error| error.to_string())
+    })
+    .with_preflight(|backend, world| {
+        backend
+            .preflight_world(world)
+            .map_err(|error| error.to_string())
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -100,6 +156,7 @@ struct ScenarioOverrides {
 
 struct FlagshipScenario {
     episode: MobileManipulatorEpisode,
+    physics_backend: FlagshipPhysicsBackend,
     policy: IkMobileLiftPickPlacePolicy,
     robot_observation: MobileManipulatorObservation,
     robot_terminated: bool,
@@ -133,8 +190,8 @@ struct FlagshipScenario {
 }
 
 impl FlagshipScenario {
-    fn clean(seed: u64) -> Result<Self> {
-        Self::from_dimensions(seed, &seeded_dimensions(seed, false)?)
+    fn clean_with_physics(seed: u64, physics_backend: FlagshipPhysicsBackend) -> Result<Self> {
+        Self::from_dimensions_with_physics(seed, &seeded_dimensions(seed, false)?, physics_backend)
     }
 
     fn fault_fixture(seed: u64) -> Result<Self> {
@@ -142,12 +199,27 @@ impl FlagshipScenario {
     }
 
     fn from_dimensions(seed: u64, dimensions: &[BehaviorDimension]) -> Result<Self> {
+        Self::from_dimensions_with_physics(seed, dimensions, FlagshipPhysicsBackend::Rapier)
+    }
+
+    fn from_dimensions_with_physics(
+        seed: u64,
+        dimensions: &[BehaviorDimension],
+        physics_backend: FlagshipPhysicsBackend,
+    ) -> Result<Self> {
         let overrides = decode_dimensions(dimensions)?;
         let mut episode_config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
         episode_config.max_steps = MAX_WORKFLOW_STEPS;
         episode_config.rng_seed = seed;
         let scene_input_digest = digest_scene_inputs(&episode_config.scene_path)?.0;
-        let mut episode = MobileManipulatorEpisode::new(episode_config);
+        let mut episode = match physics_backend {
+            FlagshipPhysicsBackend::Rapier => MobileManipulatorEpisode::try_new(episode_config)?,
+            #[cfg(feature = "mujoco")]
+            FlagshipPhysicsBackend::Mujoco => MobileManipulatorEpisode::try_new_with_physics(
+                episode_config,
+                mujoco_physics_factory(),
+            )?,
+        };
         let initial = episode.reset();
         episode.set_grasp_mode(GraspMode::Friction);
         let payload_resting_y_m = episode
@@ -160,6 +232,7 @@ impl FlagshipScenario {
             build_traffic(overrides)?;
         Ok(Self {
             episode,
+            physics_backend,
             policy: IkMobileLiftPickPlacePolicy::new(),
             robot_observation: initial.observation,
             robot_terminated: initial.terminated,
@@ -317,6 +390,7 @@ impl BehaviorScenario for FlagshipScenario {
         bytes.extend_from_slice(&self.fixed_delta.ticks().to_le_bytes());
         bytes.extend_from_slice(&SIGNAL_RELEASE_STEP.to_le_bytes());
         bytes.extend_from_slice(&self.fault_step.to_le_bytes());
+        bytes.extend_from_slice(self.physics_backend.as_str().as_bytes());
         bytes.extend_from_slice(
             &serde_json::to_vec(&flagship_task_spec(self.fixed_delta.ticks()))
                 .expect("flagship TaskSpec serializes"),
@@ -492,6 +566,56 @@ struct FlagshipWorkflowReport {
     intentional_failure: WorkflowFailureSummary,
     browser_inspector: String,
     failure_capsule: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cross_backend_report: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CrossBackendOutcome {
+    backend_id: &'static str,
+    status: &'static str,
+    steps: u64,
+    sim_time_ticks: u64,
+    final_state_digest: u64,
+    behavior_report: String,
+    final_observation: FlagshipObservation,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CrossBackendCheck {
+    id: &'static str,
+    quantity: &'static str,
+    unit: &'static str,
+    observed_delta: f64,
+    maximum_delta: f64,
+    status: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CrossBackendReport {
+    schema_version: u32,
+    kind: &'static str,
+    status: &'static str,
+    scenario: &'static str,
+    seed: u64,
+    task_id: &'static str,
+    task_spec: &'static str,
+    task_spec_digest: u64,
+    fixed_delta_ticks: u64,
+    comparison_contract: &'static str,
+    exact_outcomes: Vec<&'static str>,
+    state_digest_contract: &'static str,
+    backends: Vec<CrossBackendOutcome>,
+    tolerance_checks: Vec<CrossBackendCheck>,
+}
+
+#[derive(Clone, Debug)]
+struct Cli {
+    output: PathBuf,
+    cross_backend: bool,
 }
 
 fn main() {
@@ -502,28 +626,32 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let output = parse_output_path()?;
+    let cli = parse_cli()?;
+    let output = cli.output;
     fs::create_dir_all(&output)
         .with_context(|| format!("could not create {}", output.display()))?;
 
-    let trace = Arc::new(Mutex::new(Vec::new()));
-    let clean_trace = Arc::clone(&trace);
-    let clean_run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
-        FlagshipScenario::clean(seed).map(|scenario| scenario.with_trace(Arc::clone(&clean_trace)))
-    })?;
-    if !clean_run.report.passed() || !clean_run.failure_replays.is_empty() {
-        bail!("clean flagship run did not satisfy every behavior contract");
-    }
-    let success_trace = trace
-        .lock()
-        .expect("flagship trace mutex is not poisoned")
-        .clone();
-    if !success_trace
-        .last()
-        .is_some_and(|frame| frame.task_completed)
-    {
-        bail!("clean flagship trace did not end in task completion");
-    }
+    let (clean_run, success_trace) = run_clean_flagship(FlagshipPhysicsBackend::Rapier)?;
+
+    #[cfg(feature = "mujoco")]
+    let cross_backend_evidence = if cli.cross_backend {
+        let (mujoco_run, mujoco_trace) = run_clean_flagship(FlagshipPhysicsBackend::Mujoco)?;
+        Some(build_cross_backend_report(
+            &clean_run.report,
+            &success_trace,
+            &mujoco_run.report,
+            &mujoco_trace,
+        )?)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "mujoco"))]
+    let cross_backend_evidence: Option<(CrossBackendReport, BehaviorReport)> = {
+        if cli.cross_backend {
+            bail!("--cross-backend requires --features mujoco and a MuJoCo 3.9 runtime");
+        }
+        None
+    };
 
     let mut failure_run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
         FlagshipScenario::fault_fixture(seed)
@@ -566,6 +694,8 @@ fn run() -> Result<()> {
     let browser_path = output.join("replay-inspector.html");
     let task_spec_path = output.join("flagship.task.json");
     let summary_path = output.join("workflow-report.json");
+    let cross_backend_path = output.join("cross-backend-report.json");
+    let mujoco_success_path = output.join("mujoco-success.behavior-report.json");
 
     original.write_json(&original_replay_path)?;
     minimized.artifact.write_json(&minimized_replay_path)?;
@@ -578,6 +708,10 @@ fn run() -> Result<()> {
     );
     write_pretty_json(&success_report_path, &clean_run.report)?;
     write_pretty_json(&failure_report_path, &failure_run.report)?;
+    if let Some((cross_backend_report, mujoco_report)) = &cross_backend_evidence {
+        write_pretty_json(&cross_backend_path, cross_backend_report)?;
+        write_pretty_json(&mujoco_success_path, mujoco_report)?;
+    }
     write_browser_inspector(&browser_path, &success_trace, &minimized.artifact)?;
     let task_spec = flagship_task_spec(minimized.artifact.fixed_delta_ticks);
     task_spec
@@ -588,6 +722,10 @@ fn run() -> Result<()> {
     let (imported_asset_digest, imported_assets) =
         digest_scene_inputs(&rne_ai::mm_mobile_lift_pick_place_scene_path())?;
     let success_seed = only_seed(&clean_run.report)?;
+    let mut physics_execution_paths = vec!["rapier_native"];
+    if cross_backend_evidence.is_some() {
+        physics_execution_paths.push("mujoco_native");
+    }
     let report = FlagshipWorkflowReport {
         schema_version: REPORT_SCHEMA_VERSION,
         kind: REPORT_KIND,
@@ -598,7 +736,7 @@ fn run() -> Result<()> {
         imported_asset_digest,
         imported_assets,
         task_spec: "flagship.task.json".to_string(),
-        physics_execution_paths: vec!["rapier_native"],
+        physics_execution_paths,
         deterministic_events: vec!["traffic_signal_green", "seeded_perception_blackout"],
         success: WorkflowRunSummary {
             status: "passed",
@@ -621,8 +759,18 @@ fn run() -> Result<()> {
         },
         browser_inspector: "replay-inspector.html".to_string(),
         failure_capsule: "failure-capsule/capsule.json".to_string(),
+        cross_backend_report: cross_backend_evidence
+            .as_ref()
+            .map(|_| "cross-backend-report.json".to_string()),
     };
     write_pretty_json(&summary_path, &report)?;
+
+    if cross_backend_evidence
+        .as_ref()
+        .is_some_and(|(report, _)| report.status != "passed")
+    {
+        bail!("Rapier/MuJoCo flagship comparison exceeded its registered contract");
+    }
 
     println!(
         "flagship workflow passed: success_steps={} failure_step={} minimized_dimensions={}/{}\nartifacts: {}",
@@ -635,16 +783,253 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_output_path() -> Result<PathBuf> {
-    let mut args = std::env::args().skip(1);
-    let output = args
-        .next()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("artifacts/flagship-validation"));
-    if args.next().is_some() {
-        bail!("expected at most one output-directory argument");
+fn parse_cli() -> Result<Cli> {
+    let mut output = None;
+    let mut cross_backend = false;
+    for argument in std::env::args().skip(1) {
+        if argument == "--cross-backend" {
+            cross_backend = true;
+        } else if argument.starts_with('-') {
+            bail!("unknown flagship argument `{argument}`");
+        } else if output.replace(PathBuf::from(argument)).is_some() {
+            bail!("expected at most one output-directory argument");
+        }
     }
-    Ok(output)
+    Ok(Cli {
+        output: output.unwrap_or_else(|| PathBuf::from("artifacts/flagship-validation")),
+        cross_backend,
+    })
+}
+
+fn run_clean_flagship(
+    physics_backend: FlagshipPhysicsBackend,
+) -> Result<(BehaviorRun, Vec<FlagshipObservation>)> {
+    let trace = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&trace);
+    let run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+        FlagshipScenario::clean_with_physics(seed, physics_backend)
+            .map(|scenario| scenario.with_trace(Arc::clone(&captured)))
+    })?;
+    if !run.report.passed() || !run.failure_replays.is_empty() {
+        bail!(
+            "{} clean flagship run did not satisfy every behavior contract",
+            physics_backend.as_str()
+        );
+    }
+    let trace = trace
+        .lock()
+        .expect("flagship trace mutex is not poisoned")
+        .clone();
+    if !trace.last().is_some_and(semantic_outcome_passed) {
+        bail!(
+            "{} clean flagship trace did not end in the required semantic outcome",
+            physics_backend.as_str()
+        );
+    }
+    Ok((run, trace))
+}
+
+#[cfg(feature = "mujoco")]
+fn build_cross_backend_report(
+    rapier_report: &BehaviorReport,
+    rapier_trace: &[FlagshipObservation],
+    mujoco_report: &BehaviorReport,
+    mujoco_trace: &[FlagshipObservation],
+) -> Result<(CrossBackendReport, BehaviorReport)> {
+    let rapier_seed = only_seed(rapier_report)?;
+    let mujoco_seed = only_seed(mujoco_report)?;
+    let rapier_final = rapier_trace
+        .last()
+        .context("Rapier flagship trace is empty")?;
+    let mujoco_final = mujoco_trace
+        .last()
+        .context("MuJoCo flagship trace is empty")?;
+    let fixed_delta_ticks = rapier_seed
+        .sim_time_ticks
+        .checked_div(rapier_seed.steps)
+        .context("Rapier flagship completed in zero steps")?;
+    let mujoco_fixed_delta_ticks = mujoco_seed
+        .sim_time_ticks
+        .checked_div(mujoco_seed.steps)
+        .context("MuJoCo flagship completed in zero steps")?;
+    if fixed_delta_ticks != mujoco_fixed_delta_ticks {
+        bail!(
+            "cross-backend fixed step differs: Rapier={fixed_delta_ticks}, MuJoCo={mujoco_fixed_delta_ticks}"
+        );
+    }
+
+    let checks = vec![
+        comparison_check(
+            "completion_step_delta",
+            "completion step",
+            "step",
+            rapier_seed.steps.abs_diff(mujoco_seed.steps) as f64,
+            COMPLETION_STEP_DELTA_MAX,
+        ),
+        comparison_check(
+            "base_planar_position_delta",
+            "base planar position",
+            "m",
+            ((rapier_final.base_x_m - mujoco_final.base_x_m).powi(2)
+                + (rapier_final.base_z_m - mujoco_final.base_z_m).powi(2))
+            .sqrt(),
+            BASE_PLANAR_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "payload_position_delta",
+            "payload position",
+            "m",
+            ((rapier_final.payload_x_m - mujoco_final.payload_x_m).powi(2)
+                + (rapier_final.payload_y_m - mujoco_final.payload_y_m).powi(2)
+                + (rapier_final.payload_z_m - mujoco_final.payload_z_m).powi(2))
+            .sqrt(),
+            PAYLOAD_POSITION_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "payload_apex_delta",
+            "maximum payload height",
+            "m",
+            (rapier_final.maximum_payload_y_m - mujoco_final.maximum_payload_y_m).abs(),
+            PAYLOAD_APEX_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "arm_joint_position_delta",
+            "maximum arm joint position",
+            "rad",
+            [
+                (rapier_final.shoulder_position_rad - mujoco_final.shoulder_position_rad).abs(),
+                (rapier_final.elbow_position_rad - mujoco_final.elbow_position_rad).abs(),
+                (rapier_final.wrist_yaw_position_rad - mujoco_final.wrist_yaw_position_rad).abs(),
+            ]
+            .into_iter()
+            .fold(0.0_f64, f64::max),
+            ARM_JOINT_DELTA_MAX_RAD,
+        ),
+        comparison_check(
+            "lift_position_delta",
+            "lift position",
+            "m",
+            (rapier_final.lift_position_m - mujoco_final.lift_position_m).abs(),
+            LIFT_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "gripper_position_delta",
+            "gripper position",
+            "m",
+            (rapier_final.gripper_position_m - mujoco_final.gripper_position_m).abs(),
+            GRIPPER_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "wrist_depth_delta",
+            "wrist minimum depth",
+            "m",
+            (rapier_final.wrist_depth_min_m - mujoco_final.wrist_depth_min_m).abs(),
+            WRIST_DEPTH_DELTA_MAX_M,
+        ),
+        comparison_check(
+            "total_reward_delta",
+            "episode total reward",
+            "reward",
+            (rapier_final.total_reward - mujoco_final.total_reward).abs(),
+            REWARD_DELTA_MAX,
+        ),
+    ];
+    let outcomes = vec![
+        CrossBackendOutcome {
+            backend_id: "rapier_native",
+            status: if rapier_report.passed() && semantic_outcome_passed(rapier_final) {
+                "passed"
+            } else {
+                "failed"
+            },
+            steps: rapier_seed.steps,
+            sim_time_ticks: rapier_seed.sim_time_ticks,
+            final_state_digest: rapier_seed.final_state_digest,
+            behavior_report: "success.behavior-report.json".to_string(),
+            final_observation: rapier_final.clone(),
+        },
+        CrossBackendOutcome {
+            backend_id: "mujoco_native",
+            status: if mujoco_report.passed() && semantic_outcome_passed(mujoco_final) {
+                "passed"
+            } else {
+                "failed"
+            },
+            steps: mujoco_seed.steps,
+            sim_time_ticks: mujoco_seed.sim_time_ticks,
+            final_state_digest: mujoco_seed.final_state_digest,
+            behavior_report: "mujoco-success.behavior-report.json".to_string(),
+            final_observation: mujoco_final.clone(),
+        },
+    ];
+    let passed = outcomes.iter().all(|outcome| outcome.status == "passed")
+        && checks.iter().all(|check| check.status == "passed");
+    let task_spec = flagship_task_spec(fixed_delta_ticks);
+    let task_spec_digest = stable_behavior_digest(&serde_json::to_vec(&task_spec)?);
+    Ok((
+        CrossBackendReport {
+            schema_version: CROSS_BACKEND_REPORT_SCHEMA_VERSION,
+            kind: CROSS_BACKEND_REPORT_KIND,
+            status: if passed { "passed" } else { "failed" },
+            scenario: SCENARIO,
+            seed: SEED,
+            task_id: TASK_ID,
+            task_spec: "flagship.task.json",
+            task_spec_digest,
+            fixed_delta_ticks,
+            comparison_contract: "semantic_outcome_and_named_si_tolerances",
+            exact_outcomes: vec![
+                "all_behavior_contracts_passed",
+                "inspection_completed",
+                "traffic_cleared_without_collision_or_signal_violation",
+                "payload_grasped_once",
+                "pick_place_completed",
+                "terminated_without_truncation_or_fail_closed_abort",
+            ],
+            state_digest_contract: "backend_specific_not_compared",
+            backends: outcomes,
+            tolerance_checks: checks,
+        },
+        mujoco_report.clone(),
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn comparison_check(
+    id: &'static str,
+    quantity: &'static str,
+    unit: &'static str,
+    observed_delta: f64,
+    maximum_delta: f64,
+) -> CrossBackendCheck {
+    CrossBackendCheck {
+        id,
+        quantity,
+        unit,
+        observed_delta,
+        maximum_delta,
+        status: if observed_delta <= maximum_delta {
+            "passed"
+        } else {
+            "failed"
+        },
+    }
+}
+
+fn semantic_outcome_passed(observation: &FlagshipObservation) -> bool {
+    observation.inspection_complete
+        && observation.perception_valid
+        && observation.traffic_clear
+        && observation.traffic_collision_count == 0
+        && observation.traffic_signal_violation_count == 0
+        && observation.grasped_once
+        && observation.task_completed
+        && observation.robot_terminated
+        && !observation.robot_truncated
+        && observation.policy_phase == "release"
+        && observation.policy_failure == "none"
+        && !observation.fault_injected
+        && !observation.fail_closed_abort
 }
 
 fn seeded_dimensions(seed: u64, perception_blackout: bool) -> Result<Vec<BehaviorDimension>> {
@@ -1013,6 +1398,26 @@ mod tests {
         assert_eq!(task.observation.tensors.len(), 12);
         assert_eq!(task.action.tensors.len(), 4);
         assert_eq!(task.termination.conditions.len(), 2);
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn mujoco_executes_the_clean_flagship_contracts() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&trace);
+        let run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+            FlagshipScenario::clean_with_physics(seed, FlagshipPhysicsBackend::Mujoco)
+                .map(|scenario| scenario.with_trace(Arc::clone(&captured)))
+        })
+        .expect("MuJoCo flagship run");
+        let trace = trace.lock().expect("MuJoCo trace mutex");
+        let last = trace.last().cloned();
+        assert!(
+            run.report.passed(),
+            "MuJoCo final observation: {last:#?}\nreport: {:#?}",
+            run.report,
+        );
+        assert!(run.failure_replays.is_empty());
     }
 
     #[test]
