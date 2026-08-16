@@ -115,7 +115,7 @@ evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for seventeen TaskSpec, checkpoint, generic/behavior/scenario replay,
+corpus for twenty TaskSpec, checkpoint, generic/behavior/scenario replay,
 dataset, frontend, controller C ABI, historical migration, Failure Capsule,
 hardware, and physics artifacts. `rne-compatibility` runs every current typed reader, proves
 fail-closed handling of a deterministic future schema and unknown field, and

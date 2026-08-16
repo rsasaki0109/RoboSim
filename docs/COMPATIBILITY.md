@@ -124,7 +124,11 @@ curriculum, and randomization before execution. Ordered arrays are semantic.
 Portable batch checkpoint schema v2 embeds its TaskSpec and chronological
 step/partial-reset operations. The legacy `VectorizedEpisode` API and its
 checkpoint remain unchanged for patch compatibility; new portable execution
-uses the separately additive `PortableBatchRunner` API.
+uses the separately additive `PortableBatchRunner` API. The legacy action-replay
+checkpoint is independently versioned by
+`VECTORIZED_EPISODE_CHECKPOINT_VERSION = 1`, rejects unknown fields, and has a
+provenance-bound restore fixture; it must not be relabelled as portable batch
+checkpoint v2 because it does not contain TaskSpec or lane state.
 
 Accelerator protocol v1 and accelerator capability-report v1 are frozen
 contracts. Adapters reject unknown envelope fields and unsupported TaskSpecs
@@ -281,10 +285,11 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
-The seventeen-fixture registry additionally freezes a complete frontend
+The twenty-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
-v1, scenario replay v4, the controller C ABI-v3 64-bit layout, and three
-historical mobile-manipulator migrations. The original zero-step schema-v1
+v1, scenario replay v4, the controller C ABI-v3 64-bit layout, three historical
+mobile-manipulator migrations, one exact legacy checkpoint restore, and two
+explicit old-scenario required-rerun decisions. The original zero-step schema-v1
 case remains retained. Two stronger cases contain 7-tick, sensor-bearing
 schema-v1 and schema-v2 snapshots emitted by ancestor revisions `47525b1` and
 `2255cbe`. They bind the full source commit/tree, workspace version, scene,
@@ -327,6 +332,15 @@ and input digests. When an older artifact is rejected:
 There is deliberately no byte-rewriting migration that claims an old run was
 produced by a new engine. Declarative scene/robot/run assets may gain a separate
 lossless migration command in a future minor release.
+
+The installed historical decision matrix makes this concrete for scenario
+replay v2 and v3. Both are real 300-step artifacts emitted by their registered
+ancestor serializers. V2 lacks input digests and engine identity; both versions
+lack the canonical actor/action/ownership/result-digest evidence required by
+v4. The current reader must return `UnsupportedVersion` with expected/actual
+schema values, and merely changing their `schema_version` to 4 must still fail.
+The supported operation is to preserve the old bytes, verify with the old
+engine if needed, then rerun the source manifest with the current engine.
 
 ## Python API
 

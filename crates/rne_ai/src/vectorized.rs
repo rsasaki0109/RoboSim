@@ -4,7 +4,12 @@ use crate::episode::Episode;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-const VECTORIZED_EPISODE_CHECKPOINT_VERSION: u32 = 1;
+/// Current schema version for generic vectorized episode replay checkpoints.
+///
+/// This is a distinct contract from [`crate::PORTABLE_BATCH_CHECKPOINT_VERSION`].
+/// Generic vectorized checkpoints retain the original action-replay format,
+/// while portable batch checkpoints additionally bind lane state and TaskSpec.
+pub const VECTORIZED_EPISODE_CHECKPOINT_VERSION: u32 = 1;
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 
@@ -102,6 +107,7 @@ pub enum VectorizedEpisodeCheckpointError {
 /// episodes and URDF articulations. This is intentionally a replay checkpoint,
 /// not a claim that every physics backend has a portable binary snapshot.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VectorizedEpisodeCheckpoint<A> {
     /// Checkpoint schema version.
     pub schema_version: u32,

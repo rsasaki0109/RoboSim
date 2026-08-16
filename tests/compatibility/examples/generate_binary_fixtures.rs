@@ -2,8 +2,12 @@ use anyhow::{ensure, Context};
 use rne_ai::{
     mm_minimal_scene_path, MobileManipulatorSim, MobileManipulatorSimSnapshot,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+    VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };
-use rne_compatibility_suite::HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION;
+use rne_compatibility_suite::{
+    HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+    HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+};
 use rne_data::transport::{
     negotiate_transport, ClientHello, NegotiationPolicy, SensorFrameMetadata,
     TransportCapabilities, TransportFrame, TransportMessageKind, TRANSPORT_PROTOCOL_MAJOR,
@@ -29,21 +33,65 @@ const HISTORICAL_V1_REVISION: &str = "47525b127a77cbffa9da27b1e0c127ee673aa641";
 const HISTORICAL_V1_TREE: &str = "bb408cec26d34bd2a9b423dbf8b2a4d44cdf7013";
 const HISTORICAL_V2_REVISION: &str = "2255cbefec9d1eb5040603fbb119a290ad855191";
 const HISTORICAL_V2_TREE: &str = "373e5453c7ba94ee4efbeceb9985db4c97f5feff";
+const HISTORICAL_VECTORIZED_V1_REVISION: &str = "bd4d44f5bd781fc41fd8305938001f0a858993a5";
+const HISTORICAL_VECTORIZED_V1_TREE: &str = "23482add2c5d1de2978897d894d1ba745787bd06";
+const HISTORICAL_SCENARIO_V2_REVISION: &str = "533729ddc78e53284eaa11d823afae18dcd110ab";
+const HISTORICAL_SCENARIO_V2_TREE: &str = "b016841b2aed16bafc131f6a4698ee3b30cec34d";
+const HISTORICAL_SCENARIO_V3_REVISION: &str = "e959e3ffe8426de3a8320d2d4c95e4e1438a50ad";
+const HISTORICAL_SCENARIO_V3_TREE: &str = "17c6045624ccf2ed1271d19ea50926cb568ab337";
+const HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST: u64 = 17_972_057_113_911_492_359;
+const HISTORICAL_SCENARIO_STABLE_HASH: u64 = 8_877_782_128_690_619_681;
+const SCENARIO_V2_MISSING_REQUIRED_FIELDS: &[&str] = &[
+    "scenario_digest",
+    "network_digest",
+    "engine_version",
+    "result.result_digest",
+    "result.final_actors",
+    "result.action_evidence",
+    "result.unapplied_action_count",
+    "result.minimum_observed_gap_m",
+    "result.ownership",
+];
+const SCENARIO_V3_MISSING_REQUIRED_FIELDS: &[&str] = &[
+    "result.result_digest",
+    "result.final_actors",
+    "result.action_evidence",
+    "result.unapplied_action_count",
+    "result.minimum_observed_gap_m",
+    "result.ownership",
+];
 
 fn main() -> anyhow::Result<()> {
     let mut args = env::args_os().skip(1);
     let output = args.next().context(
-        "usage: generate_binary_fixtures <output-directory> [<v1-source.json> <v2-source.json>]",
+        "usage: generate_binary_fixtures <output-directory> [<snapshot-v1.json> <snapshot-v2.json> [<vectorized-v1.json> <scenario-v2.json> <scenario-v3.json>]]",
     )?;
     let source_args = args.collect::<Vec<_>>();
-    let (v1_source, v2_source) = match source_args.as_slice() {
-        [] => (
-            committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
-            committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
-        ),
-        [v1, v2] => (read_snapshot(Path::new(v1))?, read_snapshot(Path::new(v2))?),
-        _ => anyhow::bail!("expected either zero or two historical source JSON paths"),
-    };
+    let (v1_source, v2_source, vectorized_v1, scenario_v2, scenario_v3) =
+        match source_args.as_slice() {
+            [] => (
+                committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
+                committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
+                committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
+                committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
+                committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
+            ),
+            [v1, v2] => (
+                read_json(Path::new(v1))?,
+                read_json(Path::new(v2))?,
+                committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
+                committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
+                committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
+            ),
+            [v1, v2, vectorized, scenario2, scenario3] => (
+                read_json(Path::new(v1))?,
+                read_json(Path::new(v2))?,
+                read_json(Path::new(vectorized))?,
+                read_json(Path::new(scenario2))?,
+                read_json(Path::new(scenario3))?,
+            ),
+            _ => anyhow::bail!("expected zero, two, or five historical source JSON paths"),
+        };
     let output = Path::new(&output);
     fs::create_dir_all(output)
         .with_context(|| format!("create fixture output {}", output.display()))?;
@@ -73,7 +121,154 @@ fn main() -> anyhow::Result<()> {
             HISTORICAL_V2_REVISION,
             HISTORICAL_V2_TREE,
         )?,
+    )?;
+    write_json(
+        &output.join("vectorized-episode-checkpoint-v1-bd4d44f.json"),
+        &historical_compatibility_decision_fixture(
+            vectorized_v1,
+            HistoricalDecisionSpec {
+                artifact_contract: "vectorized_episode_checkpoint",
+                source_schema_version: 1,
+                current_schema_version: VECTORIZED_EPISODE_CHECKPOINT_VERSION,
+                source_revision: HISTORICAL_VECTORIZED_V1_REVISION,
+                source_tree: HISTORICAL_VECTORIZED_V1_TREE,
+                source_workspace_version: "0.1.0",
+                expected_outcome: "accepted_and_restored",
+                reason_code: "same_schema_replay_checkpoint",
+                missing_required_fields: &[],
+                expected_replay_digest: Some(HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST),
+                expected_error: None,
+            },
+        )?,
+    )?;
+    write_json(
+        &output.join("scenario-replay-v2-533729d-requires-rerun.json"),
+        &historical_compatibility_decision_fixture(
+            scenario_v2,
+            HistoricalDecisionSpec {
+                artifact_contract: "scenario_replay",
+                source_schema_version: 2,
+                current_schema_version: rne_openscenario::SCENARIO_REPLAY_SCHEMA_VERSION,
+                source_revision: HISTORICAL_SCENARIO_V2_REVISION,
+                source_tree: HISTORICAL_SCENARIO_V2_TREE,
+                source_workspace_version: "0.13.0",
+                expected_outcome: "rejected_requires_rerun",
+                reason_code: "missing_required_replay_evidence",
+                missing_required_fields: SCENARIO_V2_MISSING_REQUIRED_FIELDS,
+                expected_replay_digest: None,
+                expected_error: Some(
+                    "unsupported scenario replay schema version: expected 4, got 2",
+                ),
+            },
+        )?,
+    )?;
+    write_json(
+        &output.join("scenario-replay-v3-e959e3f-requires-rerun.json"),
+        &historical_compatibility_decision_fixture(
+            scenario_v3,
+            HistoricalDecisionSpec {
+                artifact_contract: "scenario_replay",
+                source_schema_version: 3,
+                current_schema_version: rne_openscenario::SCENARIO_REPLAY_SCHEMA_VERSION,
+                source_revision: HISTORICAL_SCENARIO_V3_REVISION,
+                source_tree: HISTORICAL_SCENARIO_V3_TREE,
+                source_workspace_version: "0.13.0",
+                expected_outcome: "rejected_requires_rerun",
+                reason_code: "missing_required_replay_evidence",
+                missing_required_fields: SCENARIO_V3_MISSING_REQUIRED_FIELDS,
+                expected_replay_digest: None,
+                expected_error: Some(
+                    "unsupported scenario replay schema version: expected 4, got 3",
+                ),
+            },
+        )?,
     )
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HistoricalDecisionSpec<'a> {
+    artifact_contract: &'a str,
+    source_schema_version: u32,
+    current_schema_version: u32,
+    source_revision: &'a str,
+    source_tree: &'a str,
+    source_workspace_version: &'a str,
+    expected_outcome: &'a str,
+    reason_code: &'a str,
+    missing_required_fields: &'a [&'a str],
+    expected_replay_digest: Option<u64>,
+    expected_error: Option<&'a str>,
+}
+
+fn historical_compatibility_decision_fixture(
+    source: Value,
+    spec: HistoricalDecisionSpec<'_>,
+) -> anyhow::Result<Value> {
+    ensure!(
+        source.get("schema_version").and_then(Value::as_u64)
+            == Some(u64::from(spec.source_schema_version)),
+        "historical decision source schema mismatch"
+    );
+    match spec.artifact_contract {
+        "vectorized_episode_checkpoint" => {
+            ensure!(
+                source.get("replay_digest").and_then(Value::as_u64) == spec.expected_replay_digest,
+                "historical vectorized checkpoint digest mismatch"
+            );
+            ensure!(
+                spec.source_schema_version == VECTORIZED_EPISODE_CHECKPOINT_VERSION
+                    && spec.expected_error.is_none()
+                    && spec.missing_required_fields.is_empty(),
+                "historical vectorized checkpoint decision mismatch"
+            );
+        }
+        "scenario_replay" => {
+            ensure!(
+                json_path(&source, "result.stable_hash").and_then(Value::as_u64)
+                    == Some(HISTORICAL_SCENARIO_STABLE_HASH),
+                "historical scenario replay stable hash mismatch"
+            );
+            for field in spec.missing_required_fields {
+                ensure!(
+                    json_path(&source, field).is_none(),
+                    "historical scenario replay unexpectedly contains {field}"
+                );
+            }
+            let error = rne_openscenario::ScenarioReplayArtifact::from_json(
+                &serde_json::to_string(&source)?,
+            )
+            .expect_err("historical scenario replay must be rejected");
+            let error_text = error.to_string();
+            ensure!(
+                spec.expected_error == Some(error_text.as_str()),
+                "historical scenario replay rejection changed"
+            );
+        }
+        other => anyhow::bail!("unsupported historical decision contract {other}"),
+    }
+    let source_artifact_sha256 = sha256(&serde_json::to_vec(&source)?);
+    Ok(json!({
+        "kind": "rne_historical_compatibility_decision",
+        "schema_version": HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+        "artifact_contract": spec.artifact_contract,
+        "source_schema_version": spec.source_schema_version,
+        "current_schema_version": spec.current_schema_version,
+        "source_revision": spec.source_revision,
+        "source_tree": spec.source_tree,
+        "source_workspace_version": spec.source_workspace_version,
+        "expected_outcome": spec.expected_outcome,
+        "reason_code": spec.reason_code,
+        "missing_required_fields": spec.missing_required_fields,
+        "source_artifact": source,
+        "source_artifact_sha256": source_artifact_sha256,
+        "expected_replay_digest": spec.expected_replay_digest,
+        "expected_error": spec.expected_error,
+    }))
+}
+
+fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.')
+        .try_fold(value, |current, key| current.get(key))
 }
 
 fn historical_snapshot_provenance_fixture(
@@ -166,7 +361,7 @@ fn historical_snapshot_provenance_fixture(
     }))
 }
 
-fn read_snapshot(path: &Path) -> anyhow::Result<Value> {
+fn read_json(path: &Path) -> anyhow::Result<Value> {
     let bytes =
         fs::read(path).with_context(|| format!("read historical snapshot {}", path.display()))?;
     serde_json::from_slice(&bytes)
@@ -179,10 +374,25 @@ fn committed_source_snapshot(file_name: &str) -> anyhow::Result<Value> {
         .and_then(Path::parent)
         .context("resolve workspace root")?;
     let fixture_path = root.join("tests/golden/migrations").join(file_name);
-    let fixture = read_snapshot(&fixture_path)?;
+    let fixture = read_json(&fixture_path)?;
     fixture.get("source_snapshot").cloned().with_context(|| {
         format!(
             "fixture omitted source_snapshot: {}",
+            fixture_path.display()
+        )
+    })
+}
+
+fn committed_decision_source(file_name: &str) -> anyhow::Result<Value> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("resolve workspace root")?;
+    let fixture_path = root.join("tests/golden/compatibility").join(file_name);
+    let fixture = read_json(&fixture_path)?;
+    fixture.get("source_artifact").cloned().with_context(|| {
+        format!(
+            "fixture omitted source_artifact: {}",
             fixture_path.display()
         )
     })

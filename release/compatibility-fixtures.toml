@@ -107,6 +107,20 @@ path = "tests/golden/tasks/vectorized-checkpoint-v2.json"
 canonical_json_sha256 = "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5"
 
 [[fixture]]
+id = "scenario_replay_v2_533729d_requires_rerun"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json"
+canonical_json_sha256 = "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396"
+
+[[fixture]]
+id = "scenario_replay_v3_e959e3f_requires_rerun"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json"
+canonical_json_sha256 = "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235"
+
+[[fixture]]
 id = "scenario_replay_v4"
 contract = "scenario_replay"
 schema_version = 4
@@ -119,3 +133,10 @@ contract = "task_spec"
 schema_version = 1
 path = "tests/golden/tasks/task-spec-v1.json"
 canonical_json_sha256 = "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c"
+
+[[fixture]]
+id = "vectorized_episode_checkpoint_v1_bd4d44f"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json"
+canonical_json_sha256 = "sha256:c4cffa03ee47dfc92fe748cda9d7f84d5b0283ad20d44a6da1f4bbbe865d4264"

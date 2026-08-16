@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:04498ca4d81148691fe99b9de32fe6edb11234efd3d4437af9ff0b08ecbb6335",
+  "registry_sha256": "sha256:fe0dd8ed74110a17a5c838b549b0d9f5ebba8388662b47e1aa0e3833bcb73e88",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -185,6 +185,30 @@
       "detail": "accepted; future schema and unknown field rejected"
     },
     {
+      "id": "scenario_replay_v2_533729d_requires_rerun",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json",
+      "canonical_json_sha256": "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
+    },
+    {
+      "id": "scenario_replay_v3_e959e3f_requires_rerun",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json",
+      "canonical_json_sha256": "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
+    },
+    {
       "id": "scenario_replay_v4",
       "contract": "scenario_replay",
       "schema_version": 4,
@@ -207,6 +231,18 @@
       "unknown_field_rejected": true,
       "passed": true,
       "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "vectorized_episode_checkpoint_v1_bd4d44f",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json",
+      "canonical_json_sha256": "sha256:c4cffa03ee47dfc92fe748cda9d7f84d5b0283ad20d44a6da1f4bbbe865d4264",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
     }
   ],
   "passed": true

@@ -9,9 +9,11 @@
 
 use anyhow::{bail, ensure, Context};
 use rne_ai::{
-    BehaviorReplayArtifact, MobileManipulatorSim, MobileManipulatorSimSnapshot,
-    PortableBatchCheckpoint, PortableBatchOperation, TaskSpec,
-    MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+    BehaviorReplayArtifact, Episode, EpisodeStep, MobileManipulatorSim,
+    MobileManipulatorSimSnapshot, PortableBatchCheckpoint, PortableBatchOperation, TaskSpec,
+    VectorizedEpisode, VectorizedEpisodeCheckpoint, VectorizedEpisodeCheckpointError,
+    VectorizedEpisodeConfig, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };
 use rne_data::transport::{
     negotiate_transport, ClientHello, NegotiationPolicy, NegotiationRejectCode,
@@ -29,7 +31,9 @@ use rne_data::{
 use rne_hardware_gateway::mock::MockConformanceReport;
 use rne_log::{FailureCapsule, ReplayArtifact};
 use rne_math::Vec3;
-use rne_openscenario::ScenarioReplayArtifact;
+use rne_openscenario::{
+    ScenarioReplayArtifact, ScenarioReplayArtifactError, SCENARIO_REPLAY_SCHEMA_VERSION,
+};
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
 use rne_physics_conformance_suite::ConformanceReport;
 use rne_plugin_sdk::{
@@ -56,6 +60,8 @@ pub const COMPATIBILITY_FIXTURE_REPORT_SCHEMA_VERSION: u32 = 1;
 pub const COMPATIBILITY_FIXTURE_REGISTRY_SCHEMA_VERSION: u32 = 1;
 /// Provenance-bound historical migration fixture schema.
 pub const HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION: u32 = 2;
+/// Historical compatibility decision fixture schema.
+pub const HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION: u32 = 1;
 
 const MAX_FIXTURE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: u64 = 256 * 1024;
@@ -69,7 +75,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 17] = [
+const FIXTURE_SPECS: [FixtureSpec; 20] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -161,6 +167,18 @@ const FIXTURE_SPECS: [FixtureSpec; 17] = [
         version_field: "schema_version",
     },
     FixtureSpec {
+        id: "scenario_replay_v2_533729d_requires_rerun",
+        contract: "historical_artifact_decision",
+        schema_version: HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "scenario_replay_v3_e959e3f_requires_rerun",
+        contract: "historical_artifact_decision",
+        schema_version: HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
         id: "scenario_replay_v4",
         contract: "scenario_replay",
         schema_version: 4,
@@ -172,10 +190,17 @@ const FIXTURE_SPECS: [FixtureSpec; 17] = [
         schema_version: 1,
         version_field: "schema_version",
     },
+    FixtureSpec {
+        id: "vectorized_episode_checkpoint_v1_bd4d44f",
+        contract: "historical_artifact_decision",
+        schema_version: HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
 ];
 
 const CONTROLLER_C_ABI_LAYOUT_KIND: &str = "rne_controller_c_abi_layout";
 const HISTORICAL_MIGRATION_KIND: &str = "rne_historical_migration_case";
+const HISTORICAL_COMPATIBILITY_DECISION_KIND: &str = "rne_historical_compatibility_decision";
 const HISTORICAL_MIGRATION_FLOAT_TOLERANCE: f64 = 1.0e-9;
 const HISTORICAL_SOURCE_SCENE: &str = "assets/scenes/mm_minimal.rne.scene.toml";
 const HISTORICAL_SOURCE_WORKSPACE_VERSION: &str = "0.8.0";
@@ -184,6 +209,16 @@ const HISTORICAL_V1_REVISION: &str = "47525b127a77cbffa9da27b1e0c127ee673aa641";
 const HISTORICAL_V1_TREE: &str = "bb408cec26d34bd2a9b423dbf8b2a4d44cdf7013";
 const HISTORICAL_V2_REVISION: &str = "2255cbefec9d1eb5040603fbb119a290ad855191";
 const HISTORICAL_V2_TREE: &str = "373e5453c7ba94ee4efbeceb9985db4c97f5feff";
+const HISTORICAL_VECTORIZED_V1_REVISION: &str = "bd4d44f5bd781fc41fd8305938001f0a858993a5";
+const HISTORICAL_VECTORIZED_V1_TREE: &str = "23482add2c5d1de2978897d894d1ba745787bd06";
+const HISTORICAL_SCENARIO_V2_REVISION: &str = "533729ddc78e53284eaa11d823afae18dcd110ab";
+const HISTORICAL_SCENARIO_V2_TREE: &str = "b016841b2aed16bafc131f6a4698ee3b30cec34d";
+const HISTORICAL_SCENARIO_V3_REVISION: &str = "e959e3ffe8426de3a8320d2d4c95e4e1438a50ad";
+const HISTORICAL_SCENARIO_V3_TREE: &str = "17c6045624ccf2ed1271d19ea50926cb568ab337";
+const HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST: u64 = 17_972_057_113_911_492_359;
+const HISTORICAL_SCENARIO_STABLE_HASH: u64 = 8_877_782_128_690_619_681;
+const HISTORICAL_SCENARIO_INPUT_DIGEST: u64 = 7_797_312_748_051_183_840;
+const HISTORICAL_SCENARIO_NETWORK_DIGEST: u64 = 11_356_543_501_090_577_429;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HistoricalSourceSpec {
@@ -205,6 +240,109 @@ const HISTORICAL_SOURCE_SPECS: [HistoricalSourceSpec; 2] = [
         schema_version: 2,
         revision: HISTORICAL_V2_REVISION,
         tree: HISTORICAL_V2_TREE,
+    },
+];
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum HistoricalCompatibilityOutcome {
+    AcceptedAndRestored,
+    RejectedRequiresRerun,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum HistoricalCompatibilityReason {
+    SameSchemaReplayCheckpoint,
+    MissingRequiredReplayEvidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HistoricalCompatibilitySourceSpec {
+    fixture_id: &'static str,
+    artifact_contract: &'static str,
+    source_schema_version: u32,
+    current_schema_version: u32,
+    revision: &'static str,
+    tree: &'static str,
+    workspace_version: &'static str,
+    source_path: &'static str,
+    schema_declaration: &'static str,
+    expected_outcome: HistoricalCompatibilityOutcome,
+    reason_code: HistoricalCompatibilityReason,
+    expected_replay_digest: Option<u64>,
+    expected_error: Option<&'static str>,
+    missing_required_fields: &'static [&'static str],
+}
+
+const SCENARIO_V2_MISSING_REQUIRED_FIELDS: &[&str] = &[
+    "scenario_digest",
+    "network_digest",
+    "engine_version",
+    "result.result_digest",
+    "result.final_actors",
+    "result.action_evidence",
+    "result.unapplied_action_count",
+    "result.minimum_observed_gap_m",
+    "result.ownership",
+];
+const SCENARIO_V3_MISSING_REQUIRED_FIELDS: &[&str] = &[
+    "result.result_digest",
+    "result.final_actors",
+    "result.action_evidence",
+    "result.unapplied_action_count",
+    "result.minimum_observed_gap_m",
+    "result.ownership",
+];
+
+const HISTORICAL_COMPATIBILITY_SOURCE_SPECS: [HistoricalCompatibilitySourceSpec; 3] = [
+    HistoricalCompatibilitySourceSpec {
+        fixture_id: "scenario_replay_v2_533729d_requires_rerun",
+        artifact_contract: "scenario_replay",
+        source_schema_version: 2,
+        current_schema_version: SCENARIO_REPLAY_SCHEMA_VERSION,
+        revision: HISTORICAL_SCENARIO_V2_REVISION,
+        tree: HISTORICAL_SCENARIO_V2_TREE,
+        workspace_version: "0.13.0",
+        source_path: "crates/rne_openscenario/src/replay.rs",
+        schema_declaration: "SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 2",
+        expected_outcome: HistoricalCompatibilityOutcome::RejectedRequiresRerun,
+        reason_code: HistoricalCompatibilityReason::MissingRequiredReplayEvidence,
+        expected_replay_digest: None,
+        expected_error: Some("unsupported scenario replay schema version: expected 4, got 2"),
+        missing_required_fields: SCENARIO_V2_MISSING_REQUIRED_FIELDS,
+    },
+    HistoricalCompatibilitySourceSpec {
+        fixture_id: "scenario_replay_v3_e959e3f_requires_rerun",
+        artifact_contract: "scenario_replay",
+        source_schema_version: 3,
+        current_schema_version: SCENARIO_REPLAY_SCHEMA_VERSION,
+        revision: HISTORICAL_SCENARIO_V3_REVISION,
+        tree: HISTORICAL_SCENARIO_V3_TREE,
+        workspace_version: "0.13.0",
+        source_path: "crates/rne_openscenario/src/replay.rs",
+        schema_declaration: "SCENARIO_REPLAY_SCHEMA_VERSION: u32 = 3",
+        expected_outcome: HistoricalCompatibilityOutcome::RejectedRequiresRerun,
+        reason_code: HistoricalCompatibilityReason::MissingRequiredReplayEvidence,
+        expected_replay_digest: None,
+        expected_error: Some("unsupported scenario replay schema version: expected 4, got 3"),
+        missing_required_fields: SCENARIO_V3_MISSING_REQUIRED_FIELDS,
+    },
+    HistoricalCompatibilitySourceSpec {
+        fixture_id: "vectorized_episode_checkpoint_v1_bd4d44f",
+        artifact_contract: "vectorized_episode_checkpoint",
+        source_schema_version: 1,
+        current_schema_version: VECTORIZED_EPISODE_CHECKPOINT_VERSION,
+        revision: HISTORICAL_VECTORIZED_V1_REVISION,
+        tree: HISTORICAL_VECTORIZED_V1_TREE,
+        workspace_version: "0.1.0",
+        source_path: "crates/rne_ai/src/vectorized.rs",
+        schema_declaration: "VECTORIZED_EPISODE_CHECKPOINT_VERSION: u32 = 1",
+        expected_outcome: HistoricalCompatibilityOutcome::AcceptedAndRestored,
+        reason_code: HistoricalCompatibilityReason::SameSchemaReplayCheckpoint,
+        expected_replay_digest: Some(HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST),
+        expected_error: None,
+        missing_required_fields: &[],
     },
 ];
 
@@ -246,6 +384,26 @@ struct HistoricalMigrationProvenanceFixture {
     source_snapshot: Value,
     source_snapshot_sha256: String,
     current_snapshot_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct HistoricalCompatibilityDecisionFixture {
+    kind: String,
+    schema_version: u32,
+    artifact_contract: String,
+    source_schema_version: u32,
+    current_schema_version: u32,
+    source_revision: String,
+    source_tree: String,
+    source_workspace_version: String,
+    expected_outcome: HistoricalCompatibilityOutcome,
+    reason_code: HistoricalCompatibilityReason,
+    missing_required_fields: Vec<String>,
+    source_artifact: Value,
+    source_artifact_sha256: String,
+    expected_replay_digest: Option<u64>,
+    expected_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -671,6 +829,53 @@ pub fn verify_historical_source_history(root: &Path) -> anyhow::Result<()> {
             ],
         )?;
     }
+    for source in HISTORICAL_COMPATIBILITY_SOURCE_SPECS {
+        git_text(
+            root,
+            &["cat-file", "-e", &format!("{}^{{commit}}", source.revision)],
+        )?;
+        let actual_tree = git_text(root, &["show", "-s", "--format=%T", source.revision])?;
+        ensure!(
+            actual_tree.trim() == source.tree,
+            "historical compatibility source tree mismatch for {}: expected {}, got {}",
+            source.fixture_id,
+            source.tree,
+            actual_tree.trim()
+        );
+        git_text(
+            root,
+            &["merge-base", "--is-ancestor", source.revision, "HEAD"],
+        )?;
+        let cargo_toml = git_text(root, &["show", &format!("{}:Cargo.toml", source.revision)])?;
+        ensure!(
+            cargo_toml.contains(&format!("version = \"{}\"", source.workspace_version)),
+            "historical compatibility workspace version mismatch for {}",
+            source.fixture_id
+        );
+        let source_text = git_text(
+            root,
+            &[
+                "show",
+                &format!("{}:{}", source.revision, source.source_path),
+            ],
+        )?;
+        ensure!(
+            source_text.contains(source.schema_declaration),
+            "historical compatibility schema declaration mismatch for {}",
+            source.fixture_id
+        );
+        if source.artifact_contract == "scenario_replay" {
+            for path in [
+                "assets/scenarios/speed.xosc",
+                "assets/traffic/corridor.rne.traffic.json",
+            ] {
+                git_text(
+                    root,
+                    &["cat-file", "-e", &format!("{}:{path}", source.revision)],
+                )?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -744,6 +949,9 @@ fn check_fixture(
                         .starts_with("historical_mobile_manipulator_snapshot")
                     {
                         "accepted within 1e-9; future schema and unknown field rejected".to_string()
+                    } else if spec.contract == "historical_artifact_decision" {
+                        "historical decision verified; future schema and unknown field rejected"
+                            .to_string()
                     } else {
                         "accepted; future schema and unknown field rejected".to_string()
                     }
@@ -876,6 +1084,10 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         "historical_mobile_manipulator_snapshot_provenance" => {
             let fixture: HistoricalMigrationProvenanceFixture = serde_json::from_value(value)?;
             validate_historical_mobile_manipulator_snapshot_provenance(root, spec.id, &fixture)?;
+        }
+        "historical_artifact_decision" => {
+            let fixture: HistoricalCompatibilityDecisionFixture = serde_json::from_value(value)?;
+            validate_historical_compatibility_decision(spec.id, &fixture)?;
         }
         "physics_conformance" => {
             let fixture: ConformanceReport = serde_json::from_value(value)?;
@@ -1175,6 +1387,299 @@ fn validate_historical_mobile_manipulator_snapshot_provenance(
         "snapshot reader accepted an unknown top-level field"
     );
     Ok(())
+}
+
+fn validate_historical_compatibility_decision(
+    fixture_id: &str,
+    fixture: &HistoricalCompatibilityDecisionFixture,
+) -> anyhow::Result<()> {
+    let source = HISTORICAL_COMPATIBILITY_SOURCE_SPECS
+        .iter()
+        .find(|source| source.fixture_id == fixture_id)
+        .context("unknown historical compatibility decision fixture")?;
+    ensure!(
+        fixture.kind == HISTORICAL_COMPATIBILITY_DECISION_KIND,
+        "historical compatibility decision kind mismatch"
+    );
+    ensure!(
+        fixture.schema_version == HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+        "historical compatibility decision schema mismatch"
+    );
+    ensure!(
+        fixture.artifact_contract == source.artifact_contract
+            && fixture.source_schema_version == source.source_schema_version
+            && fixture.current_schema_version == source.current_schema_version,
+        "historical compatibility contract/schema mismatch"
+    );
+    ensure!(
+        fixture.source_revision == source.revision
+            && fixture.source_tree == source.tree
+            && fixture.source_workspace_version == source.workspace_version,
+        "historical compatibility source provenance mismatch"
+    );
+    ensure!(
+        fixture.expected_outcome == source.expected_outcome
+            && fixture.reason_code == source.reason_code,
+        "historical compatibility decision outcome/reason mismatch"
+    );
+    ensure!(
+        fixture.expected_replay_digest == source.expected_replay_digest
+            && fixture.expected_error.as_deref() == source.expected_error,
+        "historical compatibility expected result mismatch"
+    );
+    let expected_missing = source
+        .missing_required_fields
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect::<Vec<_>>();
+    ensure!(
+        fixture.missing_required_fields == expected_missing,
+        "historical compatibility missing-field decision mismatch"
+    );
+    validate_sha256(&fixture.source_artifact_sha256)?;
+    let source_digest = canonical_json_digest(&fixture.source_artifact)?;
+    ensure!(
+        source_digest == fixture.source_artifact_sha256,
+        "historical compatibility source artifact digest mismatch: expected {}, got {}",
+        fixture.source_artifact_sha256,
+        source_digest
+    );
+    ensure!(
+        fixture
+            .source_artifact
+            .get("schema_version")
+            .and_then(Value::as_u64)
+            == Some(u64::from(source.source_schema_version)),
+        "historical compatibility source payload schema mismatch"
+    );
+
+    match source.artifact_contract {
+        "vectorized_episode_checkpoint" => {
+            validate_historical_vectorized_checkpoint(fixture, source)
+        }
+        "scenario_replay" => validate_historical_scenario_replay(fixture, source),
+        other => bail!("unsupported historical compatibility contract {other}"),
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CompatibilityToyEpisode {
+    value: i32,
+    step: u32,
+}
+
+impl Episode for CompatibilityToyEpisode {
+    type Observation = i32;
+    type Action = i32;
+
+    fn reset(&mut self) -> EpisodeStep<Self::Observation> {
+        self.value = 0;
+        self.step = 0;
+        EpisodeStep {
+            observation: self.value,
+            reward: 0.0,
+            terminated: false,
+            truncated: false,
+        }
+    }
+
+    fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
+        self.value += action;
+        self.step += 1;
+        EpisodeStep {
+            observation: self.value,
+            reward: f64::from(self.value),
+            terminated: false,
+            truncated: self.step >= 4,
+        }
+    }
+
+    fn episode_index(&self) -> u32 {
+        0
+    }
+
+    fn step_in_episode(&self) -> u64 {
+        u64::from(self.step)
+    }
+}
+
+fn validate_historical_vectorized_checkpoint(
+    fixture: &HistoricalCompatibilityDecisionFixture,
+    source: &HistoricalCompatibilitySourceSpec,
+) -> anyhow::Result<()> {
+    ensure!(
+        source.expected_outcome == HistoricalCompatibilityOutcome::AcceptedAndRestored
+            && source.reason_code == HistoricalCompatibilityReason::SameSchemaReplayCheckpoint,
+        "vectorized checkpoint decision must retain same-schema restore"
+    );
+    let checkpoint: VectorizedEpisodeCheckpoint<i32> =
+        serde_json::from_value(fixture.source_artifact.clone())?;
+    ensure!(
+        checkpoint.schema_version == VECTORIZED_EPISODE_CHECKPOINT_VERSION
+            && checkpoint.seed == 7
+            && checkpoint.num_envs == 2
+            && checkpoint.auto_reset
+            && checkpoint.has_reset
+            && checkpoint.actions == vec![vec![1, 2]]
+            && checkpoint.replay_digest == HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST,
+        "historical vectorized checkpoint generation recipe changed"
+    );
+    let mut batch = VectorizedEpisode::from_seeded(
+        VectorizedEpisodeConfig {
+            num_envs: 2,
+            seed: 7,
+            auto_reset: true,
+        },
+        |_seed| CompatibilityToyEpisode { value: 0, step: 0 },
+    );
+    batch
+        .restore_checkpoint(&checkpoint)
+        .map_err(|error| anyhow::anyhow!("restore historical vectorized checkpoint: {error:?}"))?;
+    ensure!(
+        batch.replay_digest() == HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST,
+        "historical vectorized checkpoint replay digest changed"
+    );
+    let restored = batch
+        .checkpoint()
+        .map_err(|error| anyhow::anyhow!("capture restored vectorized checkpoint: {error:?}"))?;
+    ensure!(
+        restored == checkpoint,
+        "historical vectorized checkpoint did not roundtrip exactly"
+    );
+
+    let mut future = checkpoint.clone();
+    future.schema_version = VECTORIZED_EPISODE_CHECKPOINT_VERSION + 1;
+    ensure!(
+        matches!(
+            batch.restore_checkpoint(&future),
+            Err(VectorizedEpisodeCheckpointError::UnsupportedSchemaVersion {
+                expected: VECTORIZED_EPISODE_CHECKPOINT_VERSION,
+                actual
+            }) if actual == VECTORIZED_EPISODE_CHECKPOINT_VERSION + 1
+        ),
+        "vectorized checkpoint reader accepted an unsupported future schema"
+    );
+    let mut unknown = fixture.source_artifact.clone();
+    unknown
+        .as_object_mut()
+        .context("historical vectorized checkpoint must be an object")?
+        .insert("unknown_future_state".to_string(), Value::Bool(true));
+    ensure!(
+        serde_json::from_value::<VectorizedEpisodeCheckpoint<i32>>(unknown).is_err(),
+        "vectorized checkpoint reader accepted an unknown top-level field"
+    );
+    Ok(())
+}
+
+fn validate_historical_scenario_replay(
+    fixture: &HistoricalCompatibilityDecisionFixture,
+    source: &HistoricalCompatibilitySourceSpec,
+) -> anyhow::Result<()> {
+    ensure!(
+        source.expected_outcome == HistoricalCompatibilityOutcome::RejectedRequiresRerun
+            && source.reason_code == HistoricalCompatibilityReason::MissingRequiredReplayEvidence,
+        "scenario replay decision must require rerun for missing evidence"
+    );
+    let artifact = &fixture.source_artifact;
+    ensure!(
+        artifact.get("kind").and_then(Value::as_str) == Some("rne-scenario-replay")
+            && artifact.get("scenario_path").and_then(Value::as_str)
+                == Some("assets/scenarios/speed.xosc")
+            && artifact.get("network_path").and_then(Value::as_str)
+                == Some("assets/traffic/corridor.rne.traffic.json")
+            && artifact.get("executed_steps").and_then(Value::as_u64) == Some(300)
+            && artifact.get("replayable").and_then(Value::as_bool) == Some(true)
+            && artifact
+                .get("control_commands")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            && json_path(artifact, "options.steps").and_then(Value::as_u64) == Some(300)
+            && json_path(artifact, "options.hz").and_then(Value::as_f64) == Some(60.0)
+            && json_path(artifact, "result.steps").and_then(Value::as_u64) == Some(300)
+            && json_path(artifact, "result.stable_hash").and_then(Value::as_u64)
+                == Some(HISTORICAL_SCENARIO_STABLE_HASH),
+        "historical scenario replay generation recipe changed"
+    );
+    for field in source.missing_required_fields {
+        ensure!(
+            json_path(artifact, field).is_none(),
+            "historical scenario replay unexpectedly contains required v4 field {field}"
+        );
+    }
+    match source.source_schema_version {
+        2 => ensure!(
+            artifact.get("scenario_digest").is_none()
+                && artifact.get("network_digest").is_none()
+                && artifact.get("engine_version").is_none(),
+            "scenario replay v2 unexpectedly contains v3 input provenance"
+        ),
+        3 => ensure!(
+            artifact.get("scenario_digest").and_then(Value::as_u64)
+                == Some(HISTORICAL_SCENARIO_INPUT_DIGEST)
+                && artifact.get("network_digest").and_then(Value::as_u64)
+                    == Some(HISTORICAL_SCENARIO_NETWORK_DIGEST)
+                && artifact.get("engine_version").and_then(Value::as_str)
+                    == Some(source.workspace_version),
+            "scenario replay v3 input provenance changed"
+        ),
+        other => bail!("unsupported historical scenario replay schema {other}"),
+    }
+
+    let text = serde_json::to_string(artifact)?;
+    let error = ScenarioReplayArtifact::from_json(&text)
+        .expect_err("historical scenario replay must require rerun");
+    ensure!(
+        matches!(
+            &error,
+            ScenarioReplayArtifactError::UnsupportedVersion {
+                expected: SCENARIO_REPLAY_SCHEMA_VERSION,
+                actual
+            } if *actual == source.source_schema_version
+        ),
+        "historical scenario replay used the wrong rejection class: {error}"
+    );
+    let error_text = error.to_string();
+    ensure!(
+        Some(error_text.as_str()) == fixture.expected_error.as_deref(),
+        "historical scenario replay rejection text changed"
+    );
+
+    let mut relabeled = artifact.clone();
+    relabeled
+        .as_object_mut()
+        .context("historical scenario replay must be an object")?
+        .insert(
+            "schema_version".to_string(),
+            Value::from(SCENARIO_REPLAY_SCHEMA_VERSION),
+        );
+    ensure!(
+        ScenarioReplayArtifact::from_json(&serde_json::to_string(&relabeled)?).is_err(),
+        "historical scenario replay was accepted after unsafe schema relabeling"
+    );
+    let mut future = artifact.clone();
+    future
+        .as_object_mut()
+        .context("historical scenario replay must be an object")?
+        .insert(
+            "schema_version".to_string(),
+            Value::from(SCENARIO_REPLAY_SCHEMA_VERSION + 1),
+        );
+    ensure!(
+        matches!(
+            ScenarioReplayArtifact::from_json(&serde_json::to_string(&future)?),
+            Err(ScenarioReplayArtifactError::UnsupportedVersion {
+                expected: SCENARIO_REPLAY_SCHEMA_VERSION,
+                actual
+            }) if actual == SCENARIO_REPLAY_SCHEMA_VERSION + 1
+        ),
+        "scenario replay reader accepted an unsupported future schema"
+    );
+    Ok(())
+}
+
+fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.')
+        .try_fold(value, |current, key| current.get(key))
 }
 
 fn current_controller_c_abi() -> ControllerCAbiFixture {
@@ -1914,6 +2419,45 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("source snapshot digest mismatch"));
+    }
+
+    #[test]
+    fn historical_decisions_reject_retargeting_and_unsafe_relabeling() {
+        let root = workspace_root();
+        let scenario_path =
+            root.join("tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json");
+        let value: Value = serde_json::from_slice(&fs::read(scenario_path).unwrap()).unwrap();
+        let fixture: HistoricalCompatibilityDecisionFixture =
+            serde_json::from_value(value).unwrap();
+        validate_historical_compatibility_decision(
+            "scenario_replay_v3_e959e3f_requires_rerun",
+            &fixture,
+        )
+        .unwrap();
+
+        let mut retargeted = fixture.clone();
+        retargeted.source_tree = "0".repeat(40);
+        assert!(validate_historical_compatibility_decision(
+            "scenario_replay_v3_e959e3f_requires_rerun",
+            &retargeted,
+        )
+        .is_err());
+
+        let mut relabeled = fixture;
+        relabeled.source_artifact["schema_version"] = Value::from(SCENARIO_REPLAY_SCHEMA_VERSION);
+        assert!(validate_historical_compatibility_decision(
+            "scenario_replay_v3_e959e3f_requires_rerun",
+            &relabeled,
+        )
+        .is_err());
+
+        let checkpoint_path =
+            root.join("tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json");
+        let checkpoint: Value =
+            serde_json::from_slice(&fs::read(checkpoint_path).unwrap()).unwrap();
+        let mut unknown = checkpoint["source_artifact"].clone();
+        unknown["unexpected"] = Value::Bool(true);
+        assert!(serde_json::from_value::<VectorizedEpisodeCheckpoint<i32>>(unknown).is_err());
     }
 
     #[test]

@@ -181,5 +181,5 @@ pub use transport::{
 };
 pub use vectorized::{
     VectorizedEpisode, VectorizedEpisodeCheckpoint, VectorizedEpisodeCheckpointError,
-    VectorizedEpisodeConfig, VectorizedEpisodeStep,
+    VectorizedEpisodeConfig, VectorizedEpisodeStep, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };

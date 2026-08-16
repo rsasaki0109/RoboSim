@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 43] = [
+const BUNDLE_FILES: [(&str, &str); 46] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -182,12 +182,24 @@ const BUNDLE_FILES: [(&str, &str); 43] = [
         "tests/golden/tasks/vectorized-checkpoint-v2.json",
     ),
     (
+        "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json",
+        "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json",
+    ),
+    (
+        "tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json",
+        "tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json",
+    ),
+    (
         "tests/golden/replays/scenario-replay-v4.json",
         "tests/golden/replays/scenario-replay-v4.json",
     ),
     (
         "tests/golden/tasks/task-spec-v1.json",
         "tests/golden/tasks/task-spec-v1.json",
+    ),
+    (
+        "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json",
+        "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json",
     ),
 ];
 const SCENARIO_FILES: [(&str, &str); 2] = [

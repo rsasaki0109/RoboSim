@@ -1340,6 +1340,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
         ),
         (
+            "tasks",
+            "vectorized_episode_checkpoint",
+            u64::from(rne_ai::VECTORIZED_EPISODE_CHECKPOINT_VERSION),
+        ),
+        (
             "snapshots",
             "mobile_manipulator_minimum",
             u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION),
@@ -1499,6 +1504,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "compatibility_fixture_report",
             u64::from(
                 rne_compatibility_suite::COMPATIBILITY_FIXTURE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
+            "historical_compatibility_decision",
+            u64::from(
+                rne_compatibility_suite::HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
             ),
         ),
         (
