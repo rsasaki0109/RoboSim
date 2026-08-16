@@ -371,7 +371,7 @@ exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
-executable installed contract. A strict registry content-addresses twenty-three
+executable installed contract. A strict registry content-addresses twenty-four
 TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,
 controller C ABI, historical migration, Failure Capsule, hardware, and physics
 fixtures. `rne-compatibility` must accept each artifact with its current typed
@@ -401,6 +401,10 @@ Failure Capsule v1 serializers. It retains exact ancestor JSON for all three
 and the dataset's original binary shard, then reruns dataset verification and
 offline evaluation from the installed bundle. These families have no v2 yet;
 the evidence proves same-schema retention without inventing a migration.
+The frontend history slice binds protocol v1's introducing commit and first
+committed full `ClientHello` golden. Exact ancestor bytes must still round trip
+and negotiate through the installed current reader, while malformed and future
+inputs fail closed.
 The Rust candidate surface is anchored separately by a machine-readable
 baseline containing the exact commit, Git tree, tool version, and manifest path
 for all 31 publishable crates. SemVer CI always compares to that immutable

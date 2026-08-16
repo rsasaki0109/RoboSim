@@ -1,0 +1,45 @@
+{
+  "artifact_contract": "frontend_transport",
+  "current_schema_version": 1,
+  "expected_error": null,
+  "expected_outcome": "accepted_and_restored",
+  "expected_replay_digest": null,
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [],
+  "reason_code": "same_schema_frontend_transport",
+  "schema_version": 1,
+  "source_artifact": {
+    "flags": 0,
+    "frame_hex": "524e45460100000001000000280000002a000000000000008877665544332211010001003f0000000000000003000000000000000000100010000000000020002900000000000000",
+    "hello": {
+      "capabilities_bits": 63,
+      "max_payload_bytes": 1048576,
+      "max_protocol_major": 1,
+      "min_protocol_major": 1,
+      "queue_byte_limit": 2097152,
+      "queue_frame_limit": 16,
+      "required_capabilities_bits": 3,
+      "resume_after_sequence": 41
+    },
+    "message_kind": "client_hello",
+    "negotiated": {
+      "capabilities_bits": 63,
+      "max_payload_bytes": 1048576,
+      "protocol_major": 1,
+      "protocol_minor": 0,
+      "queue_byte_limit": 2097152,
+      "queue_frame_limit": 16,
+      "resume_after_sequence": 41
+    },
+    "protocol_major": 1,
+    "protocol_minor": 0,
+    "schema_version": 1,
+    "sequence": 42,
+    "session_id": 1234605616436508552
+  },
+  "source_artifact_sha256": "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
+  "source_revision": "be53f16347beb7df822850748d0e01ce41d227a0",
+  "source_schema_version": 1,
+  "source_tree": "78a68abd73fb4564793559d8e75e021ad5090129",
+  "source_workspace_version": "0.1.0"
+}

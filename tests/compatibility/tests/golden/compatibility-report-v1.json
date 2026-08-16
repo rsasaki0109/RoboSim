@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:cd854ce4aba11e565a116599f347b63baf0a3ba0cbba938d23539512e59e0001",
+  "registry_sha256": "sha256:873aa20a1d7fda1509ae3698b686f45fe5e500591ee04f0a31d28c5035646ca9",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -123,6 +123,18 @@
       "unknown_field_rejected": true,
       "passed": true,
       "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "frontend_transport_v1_be53f16",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/frontend-transport-v1-be53f16.json",
+      "canonical_json_sha256": "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
     },
     {
       "id": "hardware_mock_conformance_v1",

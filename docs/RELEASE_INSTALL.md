@@ -98,6 +98,9 @@ requires typed rerun decisions for scenario replay v2/v3 rather than fabricating
 v4 evidence. It additionally retains ancestor TaskSpec and Failure Capsule v1
 artifacts exactly and reconstructs the ancestor dataset bundle from its embedded
 binary shard before rerunning stream, gap, digest, and offline-evaluation checks.
+The first committed protocol-v1 `ClientHello` golden is also retained with its
+source commit/tree and must decode, re-encode, and negotiate exactly through the
+installed current transport reader.
 Git history is required only by source `release-check`.
 
 The bundle includes the dependency-free authoring module at

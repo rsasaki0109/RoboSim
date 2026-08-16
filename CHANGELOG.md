@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Frontend transport history retention**: protocol v1's introducing commit
+  and first committed full `ClientHello` golden are now bound to exact Git
+  trees and the original blob. The installed compatibility runner decodes and
+  re-encodes those ancestor bytes exactly, reproduces negotiation, and rejects
+  corruption, unsupported versions, unknown kinds, truncation, trailing bytes,
+  future fixture schemas, and unknown fields.
 - **Immutable Rust public-API baseline**: `release/rust-api-baseline.toml`
   freezes the exact commit, Git tree, `cargo-semver-checks` version, and
   manifest path for all 31 publishable crates. CI now compares every shard to
@@ -28,7 +34,7 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  twenty-three content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  twenty-four content-addressed TaskSpec, checkpoint, generic/behavior/scenario
   replay, dataset, frontend transport, controller C ABI, historical migration,
   Failure Capsule, hardware, and physics artifacts through their current typed
   readers. The frontend and dataset payload fixtures also require byte-exact

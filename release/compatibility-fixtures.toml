@@ -72,6 +72,13 @@ path = "tests/golden/protocol/frontend-transport-v1.json"
 canonical_json_sha256 = "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71"
 
 [[fixture]]
+id = "frontend_transport_v1_be53f16"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/frontend-transport-v1-be53f16.json"
+canonical_json_sha256 = "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf"
+
+[[fixture]]
 id = "hardware_mock_conformance_v1"
 contract = "hardware_mock_conformance"
 schema_version = 1

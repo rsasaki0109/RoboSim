@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 49] = [
+const BUNDLE_FILES: [(&str, &str); 50] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -160,6 +160,10 @@ const BUNDLE_FILES: [(&str, &str); 49] = [
     (
         "tests/golden/protocol/frontend-transport-v1.json",
         "tests/golden/protocol/frontend-transport-v1.json",
+    ),
+    (
+        "tests/golden/compatibility/frontend-transport-v1-be53f16.json",
+        "tests/golden/compatibility/frontend-transport-v1-be53f16.json",
     ),
     (
         "tests/golden/hardware/gateway-mock-conformance-v1.json",

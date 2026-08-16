@@ -115,7 +115,7 @@ evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for twenty-three TaskSpec, checkpoint, generic/behavior/scenario replay,
+corpus for twenty-four TaskSpec, checkpoint, generic/behavior/scenario replay,
 dataset, frontend, controller C ABI, historical migration, Failure Capsule,
 hardware, and physics artifacts. `rne-compatibility` runs every current typed reader, proves
 fail-closed handling of a deterministic future schema and unknown field, and
@@ -132,6 +132,11 @@ and Failure Capsule v1 revisions. The installed dataset case reconstructs its
 original binary shard and reruns stream/gap/digest/offline-evaluation checks;
 TaskSpec and Failure Capsule require exact typed round trips. Future public
 schema transitions still require a migration or explicit required-rerun case.
+
+Frontend protocol v1 history is bound separately to its introducing commit and
+the first committed full `ClientHello` golden. The source/current golden blob
+must remain identical, while installed validation repeats exact wire round
+trips, negotiation, and malformed-input rejection.
 
 The historical matrix retains the original schema-v1 case and restores actual
 7-tick, sensor-bearing schema-v1 and schema-v2 artifacts as v3. It binds each

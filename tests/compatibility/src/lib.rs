@@ -81,7 +81,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 23] = [
+const FIXTURE_SPECS: [FixtureSpec; 24] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -140,6 +140,12 @@ const FIXTURE_SPECS: [FixtureSpec; 23] = [
         id: "frontend_transport_v1",
         contract: "frontend_transport",
         schema_version: 1,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "frontend_transport_v1_be53f16",
+        contract: "historical_artifact_decision",
+        schema_version: HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -245,6 +251,10 @@ const HISTORICAL_DATASET_V1_REVISION: &str = "aecafb62c99f432b2a76956575f4562c60
 const HISTORICAL_DATASET_V1_TREE: &str = "0bc9d2d48185282da31dc80eb8857d84012a5928";
 const HISTORICAL_FAILURE_CAPSULE_V1_REVISION: &str = "61d6c813e79d7eac6a8ab212776d620069f98905";
 const HISTORICAL_FAILURE_CAPSULE_V1_TREE: &str = "5dac12166fe39da5a1207426f3e7520851e415d2";
+const HISTORICAL_FRONTEND_V1_INTRO_REVISION: &str = "1a38391362ece24cc73c0e1470a51bd7f933e6fc";
+const HISTORICAL_FRONTEND_V1_INTRO_TREE: &str = "3117bd4949f19c36a1fba66524b97bd4bd1af3d4";
+const HISTORICAL_FRONTEND_V1_REVISION: &str = "be53f16347beb7df822850748d0e01ce41d227a0";
+const HISTORICAL_FRONTEND_V1_TREE: &str = "78a68abd73fb4564793559d8e75e021ad5090129";
 const HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST: u64 = 17_972_057_113_911_492_359;
 const HISTORICAL_SCENARIO_STABLE_HASH: u64 = 8_877_782_128_690_619_681;
 const HISTORICAL_SCENARIO_INPUT_DIGEST: u64 = 7_797_312_748_051_183_840;
@@ -287,6 +297,7 @@ enum HistoricalCompatibilityOutcome {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum HistoricalCompatibilityReason {
+    SameSchemaFrontendTransport,
     SameSchemaReplayCheckpoint,
     SameSchemaValidatedArtifact,
     SameSchemaStreamingDatasetBundle,
@@ -349,7 +360,7 @@ const HISTORICAL_DATASET_FILES: &[HistoricalCompatibilityFileSpec] =
         size_bytes: 736,
     }];
 
-const HISTORICAL_COMPATIBILITY_SOURCE_SPECS: [HistoricalCompatibilitySourceSpec; 6] = [
+const HISTORICAL_COMPATIBILITY_SOURCE_SPECS: [HistoricalCompatibilitySourceSpec; 7] = [
     HistoricalCompatibilitySourceSpec {
         fixture_id: "dataset_bundle_v1_aecafb6",
         artifact_contract: "dataset_bundle",
@@ -389,6 +400,28 @@ const HISTORICAL_COMPATIBILITY_SOURCE_SPECS: [HistoricalCompatibilitySourceSpec;
         source_files: &[],
         expected_outcome: HistoricalCompatibilityOutcome::AcceptedAndRestored,
         reason_code: HistoricalCompatibilityReason::SameSchemaValidatedArtifact,
+        expected_replay_digest: None,
+        expected_error: None,
+        expected_result_sha256: None,
+        missing_required_fields: &[],
+    },
+    HistoricalCompatibilitySourceSpec {
+        fixture_id: "frontend_transport_v1_be53f16",
+        artifact_contract: "frontend_transport",
+        source_schema_version: 1,
+        current_schema_version: 1,
+        revision: HISTORICAL_FRONTEND_V1_REVISION,
+        tree: HISTORICAL_FRONTEND_V1_TREE,
+        workspace_version: "0.1.0",
+        source_path: "crates/rne_data/src/transport.rs",
+        schema_declaration: "TRANSPORT_PROTOCOL_MAJOR: u16 = 1",
+        source_golden_path: Some("tests/golden/protocol/frontend-transport-v1.json"),
+        source_golden_blob: Some("2eecf4edc03fa10c78dc950453f7adcde70bdb6a"),
+        source_artifact_sha256:
+            "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
+        source_files: &[],
+        expected_outcome: HistoricalCompatibilityOutcome::AcceptedAndRestored,
+        reason_code: HistoricalCompatibilityReason::SameSchemaFrontendTransport,
         expected_replay_digest: None,
         expected_error: None,
         expected_result_sha256: None,
@@ -980,6 +1013,66 @@ pub fn verify_historical_source_history(root: &Path) -> anyhow::Result<()> {
             ],
         )?;
     }
+
+    git_text(
+        root,
+        &[
+            "cat-file",
+            "-e",
+            &format!("{HISTORICAL_FRONTEND_V1_INTRO_REVISION}^{{commit}}"),
+        ],
+    )?;
+    let frontend_intro_tree = git_text(
+        root,
+        &[
+            "show",
+            "-s",
+            "--format=%T",
+            HISTORICAL_FRONTEND_V1_INTRO_REVISION,
+        ],
+    )?;
+    ensure!(
+        frontend_intro_tree.trim() == HISTORICAL_FRONTEND_V1_INTRO_TREE,
+        "historical frontend transport introduction tree mismatch"
+    );
+    git_text(
+        root,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            HISTORICAL_FRONTEND_V1_INTRO_REVISION,
+            "HEAD",
+        ],
+    )?;
+    let frontend_intro_manifest = git_text(
+        root,
+        &[
+            "show",
+            &format!("{HISTORICAL_FRONTEND_V1_INTRO_REVISION}:Cargo.toml"),
+        ],
+    )?;
+    ensure!(
+        frontend_intro_manifest.contains("version = \"0.14.0-rc.1\""),
+        "historical frontend transport introduction workspace version mismatch"
+    );
+    let frontend_intro_source = git_text(
+        root,
+        &[
+            "show",
+            &format!("{HISTORICAL_FRONTEND_V1_INTRO_REVISION}:crates/rne_data/src/transport.rs"),
+        ],
+    )?;
+    for marker in [
+        "TRANSPORT_PROTOCOL_MAJOR: u16 = 1",
+        "TRANSPORT_PROTOCOL_MINOR: u16 = 0",
+        "frame_header_has_platform_independent_golden_bytes",
+    ] {
+        ensure!(
+            frontend_intro_source.contains(marker),
+            "historical frontend transport introduction omitted marker {marker}"
+        );
+    }
+
     for source in HISTORICAL_COMPATIBILITY_SOURCE_SPECS {
         git_text(
             root,
@@ -1671,6 +1764,7 @@ fn validate_historical_compatibility_decision(
     match source.artifact_contract {
         "dataset_bundle" => validate_historical_dataset_bundle(fixture, source),
         "failure_capsule" => validate_historical_failure_capsule(fixture, source),
+        "frontend_transport" => validate_historical_frontend_transport(fixture, source),
         "task_spec" => validate_historical_task_spec(fixture, source),
         "vectorized_episode_checkpoint" => {
             validate_historical_vectorized_checkpoint(fixture, source)
@@ -1678,6 +1772,39 @@ fn validate_historical_compatibility_decision(
         "scenario_replay" => validate_historical_scenario_replay(fixture, source),
         other => bail!("unsupported historical compatibility contract {other}"),
     }
+}
+
+fn validate_historical_frontend_transport(
+    fixture: &HistoricalCompatibilityDecisionFixture,
+    source: &HistoricalCompatibilitySourceSpec,
+) -> anyhow::Result<()> {
+    ensure!(
+        source.expected_outcome == HistoricalCompatibilityOutcome::AcceptedAndRestored
+            && source.reason_code == HistoricalCompatibilityReason::SameSchemaFrontendTransport
+            && fixture.source_files.is_empty(),
+        "frontend transport decision must retain the exact same-schema wire artifact"
+    );
+    let transport: FrontendTransportFixture =
+        serde_json::from_value(fixture.source_artifact.clone())?;
+    validate_frontend_transport(&transport)?;
+
+    let mut future = fixture.source_artifact.clone();
+    future["schema_version"] = Value::from(2_u32);
+    let future: FrontendTransportFixture = serde_json::from_value(future)?;
+    ensure!(
+        validate_frontend_transport(&future).is_err(),
+        "frontend transport reader accepted an unsupported fixture schema"
+    );
+    let mut unknown = fixture.source_artifact.clone();
+    unknown
+        .as_object_mut()
+        .context("historical frontend transport fixture must be an object")?
+        .insert("unknown_future_frame".to_string(), Value::Bool(true));
+    ensure!(
+        serde_json::from_value::<FrontendTransportFixture>(unknown).is_err(),
+        "frontend transport reader accepted an unknown top-level field"
+    );
+    Ok(())
 }
 
 fn validate_historical_task_spec(
@@ -2941,6 +3068,10 @@ mod tests {
                 "failure_capsule_v1_61d6c81",
                 "failure-capsule-v1-61d6c81.json",
             ),
+            (
+                "frontend_transport_v1_be53f16",
+                "frontend-transport-v1-be53f16.json",
+            ),
         ] {
             let value: Value =
                 serde_json::from_slice(&fs::read(fixture_root.join(file_name)).unwrap()).unwrap();
@@ -2951,6 +3082,19 @@ mod tests {
             retargeted.source_revision = "0".repeat(40);
             assert!(validate_historical_compatibility_decision(fixture_id, &retargeted).is_err());
         }
+
+        let frontend: Value = serde_json::from_slice(
+            &fs::read(fixture_root.join("frontend-transport-v1-be53f16.json")).unwrap(),
+        )
+        .unwrap();
+        let mut frontend: HistoricalCompatibilityDecisionFixture =
+            serde_json::from_value(frontend).unwrap();
+        frontend.source_artifact["frame_hex"] = Value::String("00".repeat(72));
+        assert!(validate_historical_compatibility_decision(
+            "frontend_transport_v1_be53f16",
+            &frontend,
+        )
+        .is_err());
     }
 
     #[test]

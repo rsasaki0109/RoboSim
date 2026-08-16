@@ -33,6 +33,9 @@ scenario replay v2/v3 required-rerun decisions.
 The TaskSpec, streaming dataset bundle, and Failure Capsule v1 cases bind their
 introducing revisions. Dataset verification materializes the embedded original
 shard and must reject a one-bit mutation.
+The frontend case binds protocol v1's introducing revision and first committed
+full `ClientHello` golden; installed rehearsal repeats byte-exact decode,
+re-encode, negotiation, and malformed-input rejection.
 The installed binary must have the bundled mobile-manipulator scene and URDF
 needed to reproduce both historical outcomes without a source checkout. Source
 release CI separately checks the exact source commits, trees, schema constants,

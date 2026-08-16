@@ -19,7 +19,7 @@ Run the installed form from the bundle root:
 ```
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains twenty-three fixtures:
+contains twenty-four fixtures:
 
 | Contract | Retained artifact |
 |---|---|
@@ -27,9 +27,9 @@ contains twenty-three fixtures:
 | Batch execution | portable batch checkpoint v2 |
 | Controller ABI | ABI-v3 64-bit C layout, capabilities, and required symbols |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
-| Historical decisions | TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
+| Historical decisions | Frontend transport v1, TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
-| Frontend | protocol-v1 `ClientHello` frame and negotiated limits |
+| Frontend | current and first committed protocol-v1 `ClientHello` frame bytes and negotiated limits |
 | Historical migration | retained zero-step snapshot v1 plus provenance-bound, sensor-bearing snapshots v1 and v2 restored as v3 |
 | Failure evidence | Failure Capsule v1 |
 | Hardware safety | process-mock conformance v1 |
@@ -107,6 +107,7 @@ schema transition yet:
 | TaskSpec v1 | `70a9ff35afbf0215803dd288103bdda79fa46891` | `94459bcb0c5090921bf6edbcf6f63246ebdd6a40` | Exact typed validation and semantic JSON round trip |
 | Dataset bundle v1 | `aecafb62c99f432b2a76956575f4562c6047a6bc` | `0bc9d2d48185282da31dc80eb8857d84012a5928` | Original manifest plus 736-byte shard; two streams, six records, four samples, two drops, and exact offline-evaluation digest |
 | Failure Capsule v1 | `61d6c813e79d7eac6a8ab212776d620069f98905` | `5dac12166fe39da5a1207426f3e7520851e415d2` | Exact typed validation and semantic JSON round trip |
+| Frontend transport v1 | `be53f16347beb7df822850748d0e01ce41d227a0` | `78a68abd73fb4564793559d8e75e021ad5090129` | Original `ClientHello` frame blob; exact frame/payload round trip and negotiation with fail-closed mutations |
 
 Their original golden blobs are byte-identical to the retained current
 goldens. Source `release-check` verifies those blobs at the recorded revisions,
@@ -114,6 +115,13 @@ the serializer declarations, ancestry, and the dataset generation recipe. The
 installed verifier additionally reconstructs the dataset directory from the
 embedded binary shard and rejects one-bit corruption before accepting the
 historical decision.
+
+Frontend protocol v1 was introduced earlier by commit
+`1a38391362ece24cc73c0e1470a51bd7f933e6fc`, tree
+`3117bd4949f19c36a1fba66524b97bd4bd1af3d4`. Source checks bind that
+introduction's protocol declarations and header vector as well as the first
+full golden above. The golden's Git blob is unchanged at `HEAD`, so later
+payload-limit, negotiation, and queue hardening is proven wire-compatible.
 
 ## Change policy
 
@@ -130,8 +138,9 @@ image. Python call shape is verified by the separate installed wheel manifest.
 The fixed 31-crate Rust API baseline establishes source-level history. The
 snapshot v1/v2-to-v3 matrix proves multi-generation state migration, while the
 checkpoint/replay decision matrix proves both exact retention and an explicit
-non-migratable boundary. Dataset bundle, TaskSpec, and Failure Capsule now have
-exact ancestor retention, but none has a second public schema to exercise a
-transition. Broader frontend protocol history and any future v1-to-v2
+non-migratable boundary. Dataset bundle, TaskSpec, Failure Capsule, and frontend
+transport now have exact ancestor retention, but none has a second public
+schema to exercise a transition. Broader frontend message-family coverage and
+any future v1-to-v2
 migrations or required-rerun decisions remain future work.
 Independent-use and six-month stability gates remain mandatory.

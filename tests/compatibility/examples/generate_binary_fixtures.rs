@@ -46,6 +46,8 @@ const HISTORICAL_DATASET_V1_REVISION: &str = "aecafb62c99f432b2a76956575f4562c60
 const HISTORICAL_DATASET_V1_TREE: &str = "0bc9d2d48185282da31dc80eb8857d84012a5928";
 const HISTORICAL_FAILURE_CAPSULE_V1_REVISION: &str = "61d6c813e79d7eac6a8ab212776d620069f98905";
 const HISTORICAL_FAILURE_CAPSULE_V1_TREE: &str = "5dac12166fe39da5a1207426f3e7520851e415d2";
+const HISTORICAL_FRONTEND_V1_REVISION: &str = "be53f16347beb7df822850748d0e01ce41d227a0";
+const HISTORICAL_FRONTEND_V1_TREE: &str = "78a68abd73fb4564793559d8e75e021ad5090129";
 const HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST: u64 = 17_972_057_113_911_492_359;
 const HISTORICAL_SCENARIO_STABLE_HASH: u64 = 8_877_782_128_690_619_681;
 const HISTORICAL_DATASET_EVALUATION_SHA256: &str =
@@ -73,7 +75,7 @@ const SCENARIO_V3_MISSING_REQUIRED_FIELDS: &[&str] = &[
 fn main() -> anyhow::Result<()> {
     let mut args = env::args_os().skip(1);
     let output = args.next().context(
-        "usage: generate_binary_fixtures <output-directory> [<snapshot-v1.json> <snapshot-v2.json> [<vectorized-v1.json> <scenario-v2.json> <scenario-v3.json> [<task-spec-v1.json> <dataset-manifest-v1.json> <dataset-shard-v1.rnedata> <failure-capsule-v1.json>]]]",
+        "usage: generate_binary_fixtures <output-directory> [<frontend-transport-v1.json> | <snapshot-v1.json> <snapshot-v2.json> [<vectorized-v1.json> <scenario-v2.json> <scenario-v3.json> [<task-spec-v1.json> <dataset-manifest-v1.json> <dataset-shard-v1.rnedata> <failure-capsule-v1.json> [<frontend-transport-v1.json>]]]]",
     )?;
     let source_args = args.collect::<Vec<_>>();
     let (
@@ -86,6 +88,7 @@ fn main() -> anyhow::Result<()> {
         dataset_manifest_v1,
         dataset_shard_v1,
         failure_capsule_v1,
+        frontend_transport_v1,
     ) = match source_args.as_slice() {
         [] => (
             committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
@@ -97,6 +100,19 @@ fn main() -> anyhow::Result<()> {
             committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
             committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
             committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+            committed_protocol_source("frontend-transport-v1.json")?,
+        ),
+        [frontend] => (
+            committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
+            committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
+            committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
+            committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
+            committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
+            committed_decision_source("task-spec-v1-70a9ff3.json")?,
+            committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
+            committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
+            committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+            read_json(Path::new(frontend))?,
         ),
         [v1, v2] => (
             read_json(Path::new(v1))?,
@@ -108,6 +124,7 @@ fn main() -> anyhow::Result<()> {
             committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
             committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
             committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+            committed_protocol_source("frontend-transport-v1.json")?,
         ),
         [v1, v2, vectorized, scenario2, scenario3] => (
             read_json(Path::new(v1))?,
@@ -119,6 +136,7 @@ fn main() -> anyhow::Result<()> {
             committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
             committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
             committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+            committed_protocol_source("frontend-transport-v1.json")?,
         ),
         [v1, v2, vectorized, scenario2, scenario3, task, dataset, shard, capsule] => (
             read_json(Path::new(v1))?,
@@ -135,8 +153,28 @@ fn main() -> anyhow::Result<()> {
                 )
             })?,
             read_json(Path::new(capsule))?,
+            committed_protocol_source("frontend-transport-v1.json")?,
         ),
-        _ => anyhow::bail!("expected zero, two, five, or nine historical source paths"),
+        [v1, v2, vectorized, scenario2, scenario3, task, dataset, shard, capsule, frontend] => (
+            read_json(Path::new(v1))?,
+            read_json(Path::new(v2))?,
+            read_json(Path::new(vectorized))?,
+            read_json(Path::new(scenario2))?,
+            read_json(Path::new(scenario3))?,
+            read_json(Path::new(task))?,
+            read_json(Path::new(dataset))?,
+            fs::read(shard).with_context(|| {
+                format!(
+                    "read historical dataset shard {}",
+                    Path::new(shard).display()
+                )
+            })?,
+            read_json(Path::new(capsule))?,
+            read_json(Path::new(frontend))?,
+        ),
+        _ => anyhow::bail!(
+            "expected zero, one (frontend), two, five, nine, or ten historical source paths"
+        ),
     };
     let output = Path::new(&output);
     fs::create_dir_all(output)
@@ -148,6 +186,27 @@ fn main() -> anyhow::Result<()> {
     write_json(
         &output.join("frontend-transport-v1.json"),
         &frontend_fixture()?,
+    )?;
+    write_json(
+        &output.join("frontend-transport-v1-be53f16.json"),
+        &historical_compatibility_decision_fixture(
+            frontend_transport_v1,
+            HistoricalDecisionSpec {
+                artifact_contract: "frontend_transport",
+                source_schema_version: 1,
+                current_schema_version: 1,
+                source_revision: HISTORICAL_FRONTEND_V1_REVISION,
+                source_tree: HISTORICAL_FRONTEND_V1_TREE,
+                source_workspace_version: "0.1.0",
+                source_files: &[],
+                expected_outcome: "accepted_and_restored",
+                reason_code: "same_schema_frontend_transport",
+                missing_required_fields: &[],
+                expected_replay_digest: None,
+                expected_error: None,
+                expected_result_sha256: None,
+            },
+        )?,
     )?;
     write_json(&output.join("dataset-payload-v1.json"), &dataset_fixture()?)?;
     write_json(
@@ -399,6 +458,19 @@ fn historical_compatibility_decision_fixture(
                 "historical Failure Capsule decision mismatch"
             );
         }
+        "frontend_transport" => {
+            ensure!(
+                source == frontend_fixture()?
+                    && spec.source_schema_version == 1
+                    && spec.current_schema_version == 1
+                    && spec.source_files.is_empty()
+                    && spec.expected_result_sha256.is_none()
+                    && spec.expected_replay_digest.is_none()
+                    && spec.expected_error.is_none()
+                    && spec.missing_required_fields.is_empty(),
+                "historical frontend transport decision mismatch"
+            );
+        }
         "dataset_bundle" => {
             let manifest: DatasetManifest = serde_json::from_value(source.clone())?;
             manifest.validate()?;
@@ -594,6 +666,14 @@ fn committed_decision_source(file_name: &str) -> anyhow::Result<Value> {
             fixture_path.display()
         )
     })
+}
+
+fn committed_protocol_source(file_name: &str) -> anyhow::Result<Value> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("resolve workspace root")?;
+    read_json(&root.join("tests/golden/protocol").join(file_name))
 }
 
 fn committed_decision_file(file_name: &str, path: &str) -> anyhow::Result<Vec<u8>> {
