@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 55] = [
+const BUNDLE_FILES: [(&str, &str); 56] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -80,6 +80,10 @@ const BUNDLE_FILES: [(&str, &str); 55] = [
     (
         "release/one-zero-readiness.toml",
         "release/one-zero-readiness.toml",
+    ),
+    (
+        "release/evidence/compatibility-report-v1.json",
+        "release/evidence/compatibility-report-v1.json",
     ),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
     (
@@ -1898,6 +1902,15 @@ mod tests {
         assert_eq!(
             fs::read(output.path().join("release/one-zero-readiness.toml")).unwrap(),
             fs::read(root.join("release/one-zero-readiness.toml")).unwrap()
+        );
+        assert_eq!(
+            fs::read(
+                output
+                    .path()
+                    .join("release/evidence/compatibility-report-v1.json")
+            )
+            .unwrap(),
+            fs::read(root.join("release/evidence/compatibility-report-v1.json")).unwrap()
         );
         assert_eq!(
             fs::read(output.path().join("ONE_ZERO_READINESS.md")).unwrap(),

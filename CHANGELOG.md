@@ -12,8 +12,9 @@ All notable changes to Robot Native Engine are documented in this file.
   TaskSpec/Failure Capsule use, third-party plugin and backend/adapter reports,
   LeKiwi physical evidence, same-tag Linux/Windows release rehearsals, the exact
   compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
-  The committed tracker and golden remain honestly ineligible at 1/9; no tag or
-  1.0 claim is created.
+  The committed tracker retains and freshly replays the complete 24-check
+  historical compatibility report, so the honest baseline is now 2/9 and
+  remains ineligible; no tag or 1.0 claim is created.
 - **Fail-closed 1.x promotion interlock**: `release-check`, platform
   `release-bundle`, and aggregate `release-exit` now require the complete
   external evidence pack plus an explicit assessment date for any 1.x or later

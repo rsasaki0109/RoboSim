@@ -450,8 +450,9 @@ If the external-use gates are not met, the project remains at 0.x.
 These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
 explicit assessment date, and emits nine fixed checks. The committed
-`release/one-zero-readiness.toml` remains intentionally incomplete; as of
-2026-08-16 it reports 1/9 and `eligible=false`. See
+`release/one-zero-readiness.toml` remains intentionally incomplete; its
+retained 24-check historical compatibility replay and clean blocker registry
+report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.
 The source metadata check, both platform bundle builders, and the aggregate

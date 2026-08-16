@@ -2127,7 +2127,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
                 .filter(|check| check.status == "passed")
                 .map(|check| check.id.as_str())
                 .collect::<Vec<_>>(),
-            ["p0_p1_blockers"]
+            ["historical_compatibility", "p0_p1_blockers"]
         );
     }
 

@@ -59,9 +59,12 @@ The archive-bound install result is separately registered as
 `evidence.archive_install_rehearsal_report = 1`.
 The report check order is fixed and a committed golden captures the current
 honest baseline. `manifest_sha256` binds the complete normalized input,
-including external identities and support fields. On 2026-08-16, only the
-blocker check is passing: the project is `eligible=false` with 1 of 9 checks
-satisfied.
+including external identities and support fields. The retained 24-check
+compatibility report is byte-for-byte equal to a fresh typed-reader replay and
+the blocker registry is clean, so the committed 2026-08-16 baseline is
+`eligible=false` with 2 of 9 checks satisfied. The remaining seven checks still
+require real external, physical, signed-release, elapsed-time, or maintainer
+evidence.
 
 ## Evidence-pack shape
 
@@ -122,6 +125,16 @@ rehashes the report, validates its registry identity, replays the complete
 corpus from the current checkout, rechecks historical source provenance, and
 requires field-for-field equality with the retained report. Editing a report
 to say `passed` cannot replace this replay.
+
+The committed report lives at
+`release/evidence/compatibility-report-v1.json`. It is deliberately retained
+separately from the compatibility golden even though their current bytes are
+identical: the golden detects output drift, while the readiness reference and
+SHA-256 identify the evidence admitted to the promotion audit. Any reader,
+fixture, registry, or historical-provenance change must regenerate and review
+both roles explicitly. Native release bundles stage the manifest and this
+retained report together; the full promotion replay still runs from a source
+checkout with the registered Git history.
 
 Manifest v3 retains v2's rejection of report-only external certification.
 Plugin verification

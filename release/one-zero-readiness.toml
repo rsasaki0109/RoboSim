@@ -11,6 +11,7 @@ minimum_compatibility_checks = 24
 unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:471c3fde6f6119dde4b6c6de0799e078e61a13dfa3a01e2f023731a92eb93e31" }
 
 [candidate]
 revision = "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc"

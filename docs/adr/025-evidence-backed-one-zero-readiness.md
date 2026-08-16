@@ -75,6 +75,9 @@ checksum member graph instead of trusting either report's aggregate status.
   adapter bytes inside the readiness pack.
 - A compatibility JSON cannot substitute for executing the registered corpus;
   promotion replays all readers and requires an exact report match.
+- The committed tracker may count historical compatibility because its
+  retained report is rehashed, source-provenance checked, and reproduced by a
+  fresh 24-reader replay; this does not imply any external adoption claim.
 - A release or install report from another build cannot be paired with a
   signed archive; the signed wrapper and checksum graph bind all three.
 - Changes to the readiness report require a registered schema transition and
