@@ -4,7 +4,7 @@
 bundle on Linux x86-64 and Windows x86-64. Each job builds the pinned ABI3
 Python wheel, invokes `xtask release-bundle`, creates a deterministic archive,
 extracts it into a fresh directory, and invokes `release-install-smoke` against
-installed artifacts only.
+installed artifacts only while naming the exact source archive.
 
 The bundle contains the CLI, standalone physics, hardware-adapter,
 compatibility, and scenario-scale conformance binaries, the fixed-binding
@@ -27,6 +27,12 @@ denied; the scaffold SDK must match the bundled SDK byte-for-byte.
 The Python check compares all 24 public exports, constructors, methods,
 properties, constants, and text signatures, then writes a stable schema-v1
 report.
+The independent run additionally emits
+`rne_archive_install_rehearsal` schema v1. This outer report binds the archive
+file name, byte length, and SHA-256 to the extracted bundle root,
+`release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v4
+rehearsal. Validation reconstructs the checksum graph and requires the staged
+and independently extracted verdict maps to be identical.
 The compatibility corpus includes provenance-bound, sensor-bearing snapshot-v1
 and snapshot-v2 restores into snapshot-v3, plus the retained original v1 case.
 It also includes a provenance-bound vectorized checkpoint-v1 restore and real
@@ -67,6 +73,7 @@ After creating and extracting the deterministic archive, rerun:
 
 ```bash
 cargo run --locked -p xtask -- release-install-smoke \
+  --archive artifacts/release/rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
   --bundle-dir artifacts/extracted/rne-0.1.0-x86_64-unknown-linux-gnu \
   --output-dir artifacts/extracted-evidence \
   --python python
@@ -75,13 +82,14 @@ cargo run --locked -p xtask -- release-install-smoke \
 ## Signed provenance
 
 Tag pushes and manual release rehearsals use `actions/attest@v4` to create a
-signed SLSA v1 provenance attestation for both the native archive and Python
-wheel. Each platform job copies the action's exact `bundle-path` into its
+signed SLSA v1 provenance attestation for the native archive, Python wheel, and
+archive-bound install report. Each platform job copies the action's exact `bundle-path` into its
 retained workflow artifact. Pull-request jobs deliberately do not mint
 attestations. The publish job must successfully run `gh attestation verify`
-against those local bundles for all four cross-platform assets before
-`gh release create`; an unsigned, digest-mismatched, cross-tag, cross-commit, or
-wrong-workflow asset cannot be published by the workflow.
+against those local bundles for all four cross-platform release assets and both
+archive-install reports before `gh release create`; an unsigned,
+digest-mismatched, cross-tag, cross-commit, or wrong-workflow subject cannot be
+accepted by the workflow.
 
 The trust policy is machine-readable in
 `release/artifact-attestation.toml`. `xtask release-check` rejects drift in the

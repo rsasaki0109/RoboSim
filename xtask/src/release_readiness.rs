@@ -28,7 +28,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 3;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -45,6 +45,7 @@ const MINIMUM_COMPATIBILITY_CHECKS: usize = 24;
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ADAPTER_ARGUMENTS: usize = 128;
 const MAX_ADAPTER_ARGUMENT_BYTES: usize = 4_096;
+const PLATFORM_RELEASE_EVIDENCE_FILES: usize = 7;
 const CHECK_IDS: [&str; 9] = [
     "stability_window",
     "external_projects",
@@ -182,9 +183,11 @@ struct PlatformReleaseEvidence {
     tag: String,
     archive: EvidenceRef,
     attestation: EvidenceRef,
-    attestation_verification: EvidenceRef,
+    archive_attestation_verification: EvidenceRef,
     release_report: EvidenceRef,
+    checksum_manifest: EvidenceRef,
     install_report: EvidenceRef,
+    install_attestation_verification: EvidenceRef,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -748,10 +751,11 @@ fn evaluate(
         ),
         ReadinessCheck::new(
             CHECK_IDS[5],
-            release_digests.len() == manifest.required_platforms.len() * 5,
+            release_digests.len()
+                == manifest.required_platforms.len() * PLATFORM_RELEASE_EVIDENCE_FILES,
             format!(
                 "verified_platform_releases={}/{}",
-                release_digests.len() / 5,
+                release_digests.len() / PLATFORM_RELEASE_EVIDENCE_FILES,
                 manifest.required_platforms.len()
             ),
             release_digests,
@@ -1222,32 +1226,64 @@ fn verify_platform_releases(
         release_identities.insert((entry.revision.as_str(), entry.tag.as_str()));
         let archive = verify_evidence(evidence_root, &entry.archive)?;
         let attestation = verify_evidence(evidence_root, &entry.attestation)?;
-        let attestation_verification =
-            verify_evidence(evidence_root, &entry.attestation_verification)?;
-        let expected_receipt = verify_github_attestation(&AttestationVerificationRequest {
-            artifact_path: &archive.path,
-            artifact_sha256: &archive.sha256,
-            bundle_path: &attestation.path,
-            bundle_sha256: &attestation.sha256,
-            revision: &entry.revision,
-            tag: &entry.tag,
-        })?;
-        verify_attestation_receipt(&attestation_verification.bytes, &expected_receipt)?;
+        let archive_attestation_verification =
+            verify_evidence(evidence_root, &entry.archive_attestation_verification)?;
+        let expected_archive_receipt =
+            verify_github_attestation(&AttestationVerificationRequest {
+                artifact_path: &archive.path,
+                artifact_sha256: &archive.sha256,
+                bundle_path: &attestation.path,
+                bundle_sha256: &attestation.sha256,
+                revision: &entry.revision,
+                tag: &entry.tag,
+            })?;
+        verify_attestation_receipt(
+            &archive_attestation_verification.bytes,
+            &expected_archive_receipt,
+        )?;
         let release = verify_evidence(evidence_root, &entry.release_report)?;
+        let checksum = verify_evidence(evidence_root, &entry.checksum_manifest)?;
         let install = verify_evidence(evidence_root, &entry.install_report)?;
+        let install_attestation_verification =
+            verify_evidence(evidence_root, &entry.install_attestation_verification)?;
+        let expected_install_receipt =
+            verify_github_attestation(&AttestationVerificationRequest {
+                artifact_path: &install.path,
+                artifact_sha256: &install.sha256,
+                bundle_path: &attestation.path,
+                bundle_sha256: &attestation.sha256,
+                revision: &entry.revision,
+                tag: &entry.tag,
+            })?;
+        verify_attestation_receipt(
+            &install_attestation_verification.bytes,
+            &expected_install_receipt,
+        )?;
         release_artifacts::validate_readiness_release_reports(
-            &release.path,
-            &install.path,
-            entry.platform.target(),
-            &entry.revision,
-            &entry.tag,
+            release_artifacts::ReadinessReleaseEvidence {
+                archive_path: &archive.path,
+                archive_sha256: &archive.sha256,
+                release_report_path: &release.path,
+                release_report_sha256: &release.sha256,
+                checksum_manifest_path: &checksum.path,
+                checksum_manifest_sha256: &checksum.sha256,
+                install_report_path: &install.path,
+                install_report_sha256: &install.sha256,
+            },
+            release_artifacts::ReadinessReleaseIdentity {
+                target: entry.platform.target(),
+                commit: &entry.revision,
+                tag: &entry.tag,
+            },
         )?;
         digests.extend([
             archive.sha256,
             attestation.sha256,
-            attestation_verification.sha256,
+            archive_attestation_verification.sha256,
             release.sha256,
+            checksum.sha256,
             install.sha256,
+            install_attestation_verification.sha256,
         ]);
     }
     anyhow::ensure!(
@@ -1851,7 +1887,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 2
+schema_version = 3
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2118,7 +2154,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 2
+schema_version = 3
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2144,9 +2180,60 @@ policy_url = ""
     }
 
     #[test]
-    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v2() {
+    fn platform_release_manifest_v3_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 2
+schema_version = 3
+release_version = "0.1.0"
+project_owner = "owner"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 24
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+
+[candidate]
+revision = "0000000000000000000000000000000000000000"
+tree = "0000000000000000000000000000000000000000"
+since = "2026-08-15"
+
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""
+
+[[platform_release]]
+platform = "windows_x86_64"
+revision = "1111111111111111111111111111111111111111"
+tag = "v1.0.0"
+archive = { path = "release/archive.zip", sha256 = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+attestation = { path = "release/bundle.json", sha256 = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+archive_attestation_verification = { path = "release/archive-receipt.json", sha256 = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+release_report = { path = "release/release-report.json", sha256 = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }
+checksum_manifest = { path = "release/SHA256SUMS", sha256 = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+install_report = { path = "release/archive-install-report.json", sha256 = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+install_attestation_verification = { path = "release/install-receipt.json", sha256 = "sha256:9999999999999999999999999999999999999999999999999999999999999999" }
+"#;
+        let parsed: ReadinessManifest = toml::from_str(manifest).unwrap();
+        assert_eq!(parsed.platform_release.len(), 1);
+
+        let missing_checksum = manifest.replace(
+            "checksum_manifest = { path = \"release/SHA256SUMS\", sha256 = \"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\" }\n",
+            "",
+        );
+        assert!(toml::from_str::<ReadinessManifest>(&missing_checksum).is_err());
+        let legacy_name = manifest.replace(
+            "archive_attestation_verification",
+            "attestation_verification",
+        );
+        assert!(toml::from_str::<ReadinessManifest>(&legacy_name).is_err());
+    }
+
+    #[test]
+    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v3() {
+        let manifest = r#"
+schema_version = 3
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

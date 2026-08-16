@@ -54,6 +54,14 @@ are rebound to the adapter, TaskSpec, normalized launch arguments, negotiated
 task identity, and flattened widths. These checks reuse the report's own
 content-addressed subject fields instead of trusting its aggregate verdict.
 
+Tracker schema v3 closes the platform-package side of the same substitution
+problem. Every platform retains the archive, extracted release report,
+SHA256SUMS, and a separate archive-install wrapper. The wrapper fixes their
+byte identities and the independent nine-check result. Both the archive and
+wrapper are `actions/attest@v4` subjects and each receives a fresh strict
+verification receipt during readiness evaluation. The gate reconstructs the
+checksum member graph instead of trusting either report's aggregate status.
+
 ## Consequences
 
 - RNE can report incremental progress without claiming 1.0 readiness.
@@ -67,5 +75,7 @@ content-addressed subject fields instead of trusting its aggregate verdict.
   adapter bytes inside the readiness pack.
 - A compatibility JSON cannot substitute for executing the registered corpus;
   promotion replays all readers and requires an exact report match.
+- A release or install report from another build cannot be paired with a
+  signed archive; the signed wrapper and checksum graph bind all three.
 - Changes to the readiness report require a registered schema transition and
   golden update.

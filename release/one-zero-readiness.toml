@@ -1,6 +1,8 @@
-schema_version = 2
+schema_version = 3
 # External conformance entries must retain their exact tested subjects; a
-# report-only entry is intentionally not representable in schema v2.
+# report-only entry is intentionally not representable. Platform releases also
+# require separate archive/install-report attestations and the extracted
+# release report plus SHA256SUMS chain; schema v2 evidence cannot be relabelled.
 release_version = "0.1.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183

@@ -1500,6 +1500,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "archive_install_rehearsal_report",
+            u64::from(
+                release_artifacts::ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
             "final_exit_report",
             u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
         ),

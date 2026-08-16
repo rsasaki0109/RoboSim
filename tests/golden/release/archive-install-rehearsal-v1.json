@@ -1,0 +1,64 @@
+{
+  "kind": "rne_archive_install_rehearsal",
+  "schema_version": 1,
+  "archive": {
+    "file": "rne-0.1.0-x86_64-pc-windows-msvc.zip",
+    "size_bytes": 27,
+    "sha256": "sha256:a584daf42486d7c87e4513fdcca9c58d2e2ec897774bafdbd43e6c0696c29979"
+  },
+  "bundle_root": "rne-0.1.0-x86_64-pc-windows-msvc",
+  "release_report": {
+    "path": "release-report.json",
+    "size_bytes": 1345,
+    "sha256": "0210c1c7ab82c05dbe6af62d9cb898767ced7f4de8e47890933e78de3a8efed6"
+  },
+  "checksum_manifest": {
+    "path": "SHA256SUMS",
+    "size_bytes": 258,
+    "sha256": "c849af2223986bb0f12cb63698c3f4286236fc0ec6173ad4565418157b248341"
+  },
+  "rehearsal": {
+    "schema_version": 4,
+    "release_version": "0.1.0",
+    "target": "x86_64-pc-windows-msvc",
+    "status": "passed",
+    "checks": [
+      {
+        "id": "robot_replay",
+        "status": "passed"
+      },
+      {
+        "id": "scenario_replay",
+        "status": "passed"
+      },
+      {
+        "id": "physics_conformance",
+        "status": "passed"
+      },
+      {
+        "id": "scenario_scale_100",
+        "status": "passed"
+      },
+      {
+        "id": "hardware_adapter",
+        "status": "passed"
+      },
+      {
+        "id": "controller_plugin",
+        "status": "passed"
+      },
+      {
+        "id": "compatibility_corpus",
+        "status": "passed"
+      },
+      {
+        "id": "python_wheel",
+        "status": "passed"
+      },
+      {
+        "id": "python_api",
+        "status": "passed"
+      }
+    ]
+  }
+}

@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -17,6 +18,8 @@ use std::process::{Command, Output};
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Machine-readable installed-bundle rehearsal report schema.
 pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 4;
+/// Archive-bound independently extracted rehearsal report schema.
+pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API contract schema.
 pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
@@ -34,6 +37,8 @@ const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
 const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
+const ARCHIVE_INSTALL_REPORT: &str = "archive-install-rehearsal-report.json";
+const ARCHIVE_INSTALL_REPORT_KIND: &str = "rne_archive_install_rehearsal";
 const INSTALL_CHECK_IDS: [&str; 9] = [
     "robot_replay",
     "scenario_replay",
@@ -252,6 +257,7 @@ struct BundleOptions {
 
 #[derive(Debug)]
 struct InstallOptions {
+    archive: PathBuf,
     bundle_dir: PathBuf,
     output_dir: PathBuf,
     python: PathBuf,
@@ -289,6 +295,26 @@ struct InstallRehearsalReport {
     target: String,
     status: String,
     checks: Vec<InstallCheck>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ArchiveSubject {
+    file: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ArchiveInstallRehearsalReport {
+    kind: String,
+    schema_version: u32,
+    archive: ArchiveSubject,
+    bundle_root: String,
+    release_report: MemberDigest,
+    checksum_manifest: MemberDigest,
+    rehearsal: InstallRehearsalReport,
 }
 
 impl InstallRehearsalReport {
@@ -331,19 +357,182 @@ struct ReleaseReport {
     members: Vec<MemberDigest>,
 }
 
+pub(crate) struct ReadinessReleaseEvidence<'a> {
+    pub(crate) archive_path: &'a Path,
+    pub(crate) archive_sha256: &'a str,
+    pub(crate) release_report_path: &'a Path,
+    pub(crate) release_report_sha256: &'a str,
+    pub(crate) checksum_manifest_path: &'a Path,
+    pub(crate) checksum_manifest_sha256: &'a str,
+    pub(crate) install_report_path: &'a Path,
+    pub(crate) install_report_sha256: &'a str,
+}
+
+pub(crate) struct ReadinessReleaseIdentity<'a> {
+    pub(crate) target: &'a str,
+    pub(crate) commit: &'a str,
+    pub(crate) tag: &'a str,
+}
+
+fn validate_archive_subject(
+    subject: &ArchiveSubject,
+    archive_path: &Path,
+    expected_sha256: &str,
+    target: &str,
+) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(archive_path)
+        .with_context(|| format!("inspect release archive {}", archive_path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file(),
+        "release archive must be a regular file"
+    );
+    let actual_file = archive_path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .context("release archive file name is not valid Unicode")?;
+    let expected_file = if target.contains("windows") {
+        format!("{}.zip", bundle_name(target))
+    } else {
+        format!("{}.tar.gz", bundle_name(target))
+    };
+    anyhow::ensure!(
+        actual_file == expected_file && subject.file == expected_file,
+        "archive-install report names the wrong release archive"
+    );
+    validate_prefixed_sha256("archive-install archive", &subject.sha256)?;
+    let actual_sha256 = format!("sha256:{}", sha256_file_hex(archive_path)?);
+    anyhow::ensure!(
+        subject.size_bytes == metadata.len()
+            && subject.sha256 == expected_sha256
+            && subject.sha256 == actual_sha256,
+        "archive-install report does not bind the exact release archive bytes"
+    );
+    Ok(())
+}
+
+fn read_bound_file(path: &Path, expected_sha256: &str, label: &str) -> anyhow::Result<Vec<u8>> {
+    validate_prefixed_sha256(label, expected_sha256)?;
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file(),
+        "{label} must be a regular file"
+    );
+    let bytes = fs::read(path).with_context(|| format!("read {label} {}", path.display()))?;
+    anyhow::ensure!(
+        format!("sha256:{}", sha256_hex(&bytes)) == expected_sha256,
+        "{label} changed after evidence verification"
+    );
+    Ok(bytes)
+}
+
+fn validate_member_identity(
+    identity: &MemberDigest,
+    expected_path: &str,
+    bytes: &[u8],
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        identity.path == expected_path,
+        "archive-install subject path mismatch: expected {expected_path}, got {}",
+        identity.path
+    );
+    validate_sha256_hex("archive-install subject", &identity.sha256)?;
+    anyhow::ensure!(
+        identity.size_bytes == u64::try_from(bytes.len()).unwrap_or(u64::MAX)
+            && identity.sha256 == sha256_hex(bytes),
+        "archive-install subject {expected_path} does not match its retained bytes"
+    );
+    Ok(())
+}
+
+fn validate_release_members(members: &[MemberDigest]) -> anyhow::Result<()> {
+    let mut previous = None;
+    for member in members {
+        anyhow::ensure!(
+            !member.path.contains('\\'),
+            "release member path must use forward slashes: {}",
+            member.path
+        );
+        validate_relative_member(Path::new(&member.path))?;
+        validate_sha256_hex("release member", &member.sha256)?;
+        if let Some(previous) = previous {
+            anyhow::ensure!(
+                previous < member.path.as_str(),
+                "release members must be unique and sorted"
+            );
+        }
+        anyhow::ensure!(
+            member.path != RELEASE_REPORT && member.path != SHA256_MANIFEST,
+            "release member list contains a self-referential report or checksum manifest"
+        );
+        previous = Some(member.path.as_str());
+    }
+    Ok(())
+}
+
+fn validate_release_checksum_chain(
+    release: &ReleaseReport,
+    release_bytes: &[u8],
+    checksum_bytes: &[u8],
+    rehearsal: &InstallRehearsalReport,
+) -> anyhow::Result<()> {
+    let declared = parse_sha256_manifest(checksum_bytes)?;
+    let mut expected = release
+        .members
+        .iter()
+        .map(|member| (member.path.clone(), member.sha256.clone()))
+        .collect::<BTreeMap<_, _>>();
+    anyhow::ensure!(
+        expected
+            .insert(RELEASE_REPORT.to_string(), sha256_hex(release_bytes))
+            .is_none(),
+        "release report unexpectedly listed itself as a payload member"
+    );
+    anyhow::ensure!(
+        declared == expected,
+        "retained SHA256SUMS does not match the release report member graph"
+    );
+
+    let inner_bytes = pretty_json_bytes(rehearsal)?;
+    let inner = release
+        .members
+        .iter()
+        .find(|member| member.path == INSTALL_REPORT)
+        .context("release members omitted the staged install rehearsal")?;
+    validate_member_identity(inner, INSTALL_REPORT, &inner_bytes)?;
+    Ok(())
+}
+
+fn validate_sha256_hex(label: &str, digest: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "{label} SHA-256 must be 64 lowercase hexadecimal characters"
+    );
+    Ok(())
+}
+
+fn validate_prefixed_sha256(label: &str, digest: &str) -> anyhow::Result<()> {
+    let hex = digest
+        .strip_prefix("sha256:")
+        .with_context(|| format!("{label} SHA-256 must use the sha256: prefix"))?;
+    validate_sha256_hex(label, hex)
+}
+
 /// Validates the two reports retained for one independently reproduced release artifact.
 pub(crate) fn validate_readiness_release_reports(
-    release_report_path: &Path,
-    install_report_path: &Path,
-    expected_target: &str,
-    expected_commit: &str,
-    expected_tag: &str,
+    evidence: ReadinessReleaseEvidence<'_>,
+    expected: ReadinessReleaseIdentity<'_>,
 ) -> anyhow::Result<()> {
-    let release: ReleaseReport = serde_json::from_slice(
-        &fs::read(release_report_path)
-            .with_context(|| format!("read {}", release_report_path.display()))?,
-    )
-    .with_context(|| format!("parse {}", release_report_path.display()))?;
+    let release_bytes = read_bound_file(
+        evidence.release_report_path,
+        evidence.release_report_sha256,
+        "release report",
+    )?;
+    let release: ReleaseReport = serde_json::from_slice(&release_bytes)
+        .with_context(|| format!("parse {}", evidence.release_report_path.display()))?;
     anyhow::ensure!(
         release.schema_version == RELEASE_REPORT_SCHEMA_VERSION,
         "readiness release report schema must be {RELEASE_REPORT_SCHEMA_VERSION}"
@@ -353,18 +542,20 @@ pub(crate) fn validate_readiness_release_reports(
         "readiness release report version must be {RELEASE_VERSION}"
     );
     anyhow::ensure!(
-        release.target == expected_target,
-        "readiness release target mismatch: expected {expected_target}, got {}",
+        release.target == expected.target,
+        "readiness release target mismatch: expected {}, got {}",
+        expected.target,
         release.target
     );
     anyhow::ensure!(
-        release.git_commit == expected_commit,
-        "readiness release commit mismatch: expected {expected_commit}, got {}",
+        release.git_commit == expected.commit,
+        "readiness release commit mismatch: expected {}, got {}",
+        expected.commit,
         release.git_commit
     );
     anyhow::ensure!(
         release.clean_worktree
-            && release.expected_tag.as_deref() == Some(expected_tag)
+            && release.expected_tag.as_deref() == Some(expected.tag)
             && release.tag_matches_commit
             && release.reproducible,
         "readiness release report must come from a clean, matching tag and be reproducible"
@@ -394,24 +585,63 @@ pub(crate) fn validate_readiness_release_reports(
         !release.members.is_empty(),
         "readiness release report must bind bundle members"
     );
+    validate_release_members(&release.members)?;
 
-    let install: InstallRehearsalReport = serde_json::from_slice(
-        &fs::read(install_report_path)
-            .with_context(|| format!("read {}", install_report_path.display()))?,
-    )
-    .with_context(|| format!("parse {}", install_report_path.display()))?;
+    let install_bytes = read_bound_file(
+        evidence.install_report_path,
+        evidence.install_report_sha256,
+        "archive-install report",
+    )?;
+    let archive_install: ArchiveInstallRehearsalReport = serde_json::from_slice(&install_bytes)
+        .with_context(|| format!("parse {}", evidence.install_report_path.display()))?;
+    anyhow::ensure!(
+        archive_install.kind == ARCHIVE_INSTALL_REPORT_KIND
+            && archive_install.schema_version == ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+        "readiness archive-install report identity mismatch"
+    );
+    anyhow::ensure!(
+        archive_install.bundle_root == bundle_name(expected.target),
+        "readiness archive-install bundle root mismatch"
+    );
+    validate_archive_subject(
+        &archive_install.archive,
+        evidence.archive_path,
+        evidence.archive_sha256,
+        expected.target,
+    )?;
+    validate_member_identity(
+        &archive_install.release_report,
+        RELEASE_REPORT,
+        &release_bytes,
+    )?;
+    let checksum_bytes = read_bound_file(
+        evidence.checksum_manifest_path,
+        evidence.checksum_manifest_sha256,
+        "checksum manifest",
+    )?;
+    validate_member_identity(
+        &archive_install.checksum_manifest,
+        SHA256_MANIFEST,
+        &checksum_bytes,
+    )?;
+    let install = &archive_install.rehearsal;
     anyhow::ensure!(
         install.schema_version == INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
         "readiness install report schema must be {INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION}"
     );
     anyhow::ensure!(
-        install.release_version == RELEASE_VERSION && install.target == expected_target,
+        install.release_version == RELEASE_VERSION && install.target == expected.target,
         "readiness install report version or target mismatch"
     );
     anyhow::ensure!(
         install.all_passed(),
         "readiness install report must pass all nine canonical checks"
     );
+    anyhow::ensure!(
+        release.flagship_workflows == install.verdicts(),
+        "readiness release and independently extracted workflow verdicts differ"
+    );
+    validate_release_checksum_chain(&release, &release_bytes, &checksum_bytes, install)?;
     Ok(())
 }
 
@@ -557,6 +787,7 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
 pub(crate) fn release_install_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
     let options = parse_install_options(args)?;
+    let archive = absolute_from(&root, &options.archive);
     let bundle_dir = absolute_from(&root, &options.bundle_dir);
     let output_dir = absolute_from(&root, &options.output_dir);
     anyhow::ensure!(
@@ -574,6 +805,10 @@ pub(crate) fn release_install_smoke(args: &mut impl Iterator<Item = String>) -> 
             && release.release_version == RELEASE_VERSION,
         "bundle release report is incompatible"
     );
+    anyhow::ensure!(
+        bundle_dir.file_name() == Some(OsStr::new(&bundle_name(&release.target))),
+        "extracted bundle root does not match its release target"
+    );
     let payload_members = collect_member_digests(&bundle_dir, &[RELEASE_REPORT, SHA256_MANIFEST])?;
     anyhow::ensure!(
         release.members == payload_members,
@@ -587,18 +822,72 @@ pub(crate) fn release_install_smoke(args: &mut impl Iterator<Item = String>) -> 
         &release.target,
         true,
     )?;
-    write_pretty_json(&output_dir.join(INSTALL_REPORT), &report)?;
+    let archive_report = build_archive_install_report(&archive, &bundle_dir, &release, &report)?;
+    write_pretty_json(&output_dir.join(ARCHIVE_INSTALL_REPORT), &archive_report)?;
     anyhow::ensure!(
         report.all_passed(),
         "installed-bundle rehearsal failed; inspect {}",
-        output_dir.join(INSTALL_REPORT).display()
+        output_dir.join(ARCHIVE_INSTALL_REPORT).display()
     );
     println!(
         "installed release bundle passed: target={} report={}",
         release.target,
-        output_dir.join(INSTALL_REPORT).display()
+        output_dir.join(ARCHIVE_INSTALL_REPORT).display()
     );
     Ok(())
+}
+
+fn build_archive_install_report(
+    archive_path: &Path,
+    bundle_dir: &Path,
+    release: &ReleaseReport,
+    rehearsal: &InstallRehearsalReport,
+) -> anyhow::Result<ArchiveInstallRehearsalReport> {
+    let archive_metadata = fs::symlink_metadata(archive_path)
+        .with_context(|| format!("inspect release archive {}", archive_path.display()))?;
+    anyhow::ensure!(
+        archive_metadata.file_type().is_file(),
+        "release-install-smoke requires a regular --archive file"
+    );
+    let archive_file = archive_path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .context("release archive file name is not valid Unicode")?
+        .to_string();
+    let archive_sha256 = format!("sha256:{}", sha256_file_hex(archive_path)?);
+    let archive = ArchiveSubject {
+        file: archive_file,
+        size_bytes: archive_metadata.len(),
+        sha256: archive_sha256.clone(),
+    };
+    validate_archive_subject(&archive, archive_path, &archive_sha256, &release.target)?;
+    let release_bytes = fs::read(bundle_dir.join(RELEASE_REPORT))?;
+    let checksum_bytes = fs::read(bundle_dir.join(SHA256_MANIFEST))?;
+    validate_release_members(&release.members)?;
+    validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, rehearsal)?;
+    anyhow::ensure!(
+        release.flagship_workflows == rehearsal.verdicts(),
+        "independent rehearsal verdicts differ from the staged release report"
+    );
+    let release_report = MemberDigest {
+        path: RELEASE_REPORT.to_string(),
+        size_bytes: u64::try_from(release_bytes.len()).unwrap_or(u64::MAX),
+        sha256: sha256_hex(&release_bytes),
+    };
+    let checksum_manifest = MemberDigest {
+        path: SHA256_MANIFEST.to_string(),
+        size_bytes: u64::try_from(checksum_bytes.len()).unwrap_or(u64::MAX),
+        sha256: sha256_hex(&checksum_bytes),
+    };
+    Ok(ArchiveInstallRehearsalReport {
+        kind: ARCHIVE_INSTALL_REPORT_KIND.to_string(),
+        schema_version: ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+        archive,
+        bundle_root: bundle_name(&release.target),
+        release_report,
+        checksum_manifest,
+        rehearsal: rehearsal.clone(),
+    })
 }
 
 fn parse_bundle_options(args: &mut impl Iterator<Item = String>) -> anyhow::Result<BundleOptions> {
@@ -632,11 +921,15 @@ fn parse_bundle_options(args: &mut impl Iterator<Item = String>) -> anyhow::Resu
 fn parse_install_options(
     args: &mut impl Iterator<Item = String>,
 ) -> anyhow::Result<InstallOptions> {
+    let mut archive = None;
     let mut bundle_dir = None;
     let mut output_dir = PathBuf::from("artifacts/release-install-smoke");
     let mut python = default_python();
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--archive" => {
+                archive = Some(PathBuf::from(required_arg(args, "--archive")?));
+            }
             "--bundle-dir" => {
                 bundle_dir = Some(PathBuf::from(required_arg(args, "--bundle-dir")?));
             }
@@ -646,6 +939,7 @@ fn parse_install_options(
         }
     }
     Ok(InstallOptions {
+        archive: archive.context("release-install-smoke requires --archive PATH")?,
         bundle_dir: bundle_dir.context("release-install-smoke requires --bundle-dir PATH")?,
         output_dir,
         python,
@@ -1436,26 +1730,9 @@ fn write_sha256_manifest(root: &Path) -> anyhow::Result<()> {
 }
 
 fn verify_sha256_manifest(root: &Path) -> anyhow::Result<()> {
-    let text = fs::read_to_string(root.join(SHA256_MANIFEST))
+    let bytes = fs::read(root.join(SHA256_MANIFEST))
         .with_context(|| format!("read {SHA256_MANIFEST} from {}", root.display()))?;
-    let mut declared = BTreeMap::new();
-    for line in text.lines() {
-        let (digest, path) = line
-            .split_once("  ")
-            .context("SHA256SUMS entries must use `<digest>  <path>`")?;
-        anyhow::ensure!(
-            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
-            "invalid SHA-256 digest for {path}"
-        );
-        let path_buf = PathBuf::from(path);
-        validate_relative_member(&path_buf)?;
-        anyhow::ensure!(
-            declared
-                .insert(path.to_string(), digest.to_ascii_lowercase())
-                .is_none(),
-            "duplicate SHA256SUMS member {path}"
-        );
-    }
+    let declared = parse_sha256_manifest(&bytes)?;
     let actual = collect_member_digests(root, &[SHA256_MANIFEST])?
         .into_iter()
         .map(|member| (member.path, member.sha256))
@@ -1467,17 +1744,65 @@ fn verify_sha256_manifest(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn parse_sha256_manifest(bytes: &[u8]) -> anyhow::Result<BTreeMap<String, String>> {
+    let text = std::str::from_utf8(bytes).context("SHA256SUMS is not UTF-8")?;
+    anyhow::ensure!(
+        !text.is_empty() && text.ends_with('\n') && !text.contains('\r'),
+        "SHA256SUMS must be non-empty canonical LF-terminated text"
+    );
+    let mut declared = BTreeMap::new();
+    for line in text.lines() {
+        let (digest, path) = line
+            .split_once("  ")
+            .context("SHA256SUMS entries must use `<digest>  <path>`")?;
+        validate_sha256_hex(&format!("SHA256SUMS member {path}"), digest)?;
+        anyhow::ensure!(
+            !path.contains('\\'),
+            "SHA256SUMS paths must use forward slashes"
+        );
+        let path_buf = PathBuf::from(path);
+        validate_relative_member(&path_buf)?;
+        anyhow::ensure!(
+            declared
+                .insert(path.to_string(), digest.to_string())
+                .is_none(),
+            "duplicate SHA256SUMS member {path}"
+        );
+    }
+    Ok(declared)
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn sha256_file_hex(path: &Path) -> anyhow::Result<String> {
+    let mut file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .with_context(|| format!("hash {}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn pretty_json_bytes(value: &impl Serialize) -> anyhow::Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
 fn write_pretty_json(path: &Path, value: &impl Serialize) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut bytes = serde_json::to_vec_pretty(value)?;
-    bytes.push(b'\n');
-    fs::write(path, bytes)?;
+    fs::write(path, pretty_json_bytes(value)?)?;
     Ok(())
 }
 
@@ -1591,21 +1916,38 @@ mod tests {
     }
 
     #[test]
-    fn readiness_release_reports_require_the_exact_tag_and_workflows() {
+    fn readiness_release_reports_bind_the_archive_checksum_chain_and_workflows() {
         let directory = tempfile::tempdir().expect("temporary reports");
-        let release_path = directory.path().join("release.json");
-        let install_path = directory.path().join("install.json");
+        let target = "x86_64-pc-windows-msvc";
+        let bundle_dir = directory.path().join(bundle_name(target));
+        fs::create_dir(&bundle_dir).unwrap();
+        fs::write(bundle_dir.join("README.md"), b"x").unwrap();
+        let archive_path = directory
+            .path()
+            .join(format!("{}.zip", bundle_name(target)));
+        fs::write(&archive_path, b"deterministic archive bytes").unwrap();
+        let release_path = bundle_dir.join(RELEASE_REPORT);
+        let checksum_path = bundle_dir.join(SHA256_MANIFEST);
+        let install_path = directory.path().join(ARCHIVE_INSTALL_REPORT);
         let revision = "1".repeat(40);
         let tag = "v0.1.0-rc.1";
         let workflows = INSTALL_CHECK_IDS
             .into_iter()
             .map(|id| (id.to_string(), "passed".to_string()))
             .collect();
-        let release = ReleaseReport {
+        let install = InstallRehearsalReport {
+            schema_version: INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+            release_version: RELEASE_VERSION.to_string(),
+            target: target.to_string(),
+            status: "passed".to_string(),
+            checks: INSTALL_CHECK_IDS.map(|id| check(id, true)).to_vec(),
+        };
+        write_pretty_json(&bundle_dir.join(INSTALL_REPORT), &install).unwrap();
+        let mut release = ReleaseReport {
             schema_version: RELEASE_REPORT_SCHEMA_VERSION,
             release_version: RELEASE_VERSION.to_string(),
             git_commit: revision.clone(),
-            target: "x86_64-pc-windows-msvc".to_string(),
+            target: target.to_string(),
             rustc_version: "rustc-test".to_string(),
             cargo_version: "cargo-test".to_string(),
             cargo_lock_sha256: "0".repeat(64),
@@ -1622,36 +1964,66 @@ mod tests {
             fuzz_campaign_digest_sha256: "0".repeat(64),
             contracts: serde_json::json!({}),
             flagship_workflows: workflows,
-            members: vec![MemberDigest {
-                path: "README.md".to_string(),
-                size_bytes: 1,
-                sha256: "0".repeat(64),
-            }],
+            members: Vec::new(),
         };
-        let install = InstallRehearsalReport {
-            schema_version: INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
-            release_version: RELEASE_VERSION.to_string(),
-            target: "x86_64-pc-windows-msvc".to_string(),
-            status: "passed".to_string(),
-            checks: INSTALL_CHECK_IDS.map(|id| check(id, true)).to_vec(),
-        };
+        release.members =
+            collect_member_digests(&bundle_dir, &[RELEASE_REPORT, SHA256_MANIFEST]).unwrap();
         write_pretty_json(&release_path, &release).unwrap();
-        write_pretty_json(&install_path, &install).unwrap();
-        validate_readiness_release_reports(
-            &release_path,
+        write_sha256_manifest(&bundle_dir).unwrap();
+        let archive_install =
+            build_archive_install_report(&archive_path, &bundle_dir, &release, &install).unwrap();
+        assert_eq!(
+            pretty_json_bytes(&archive_install).unwrap(),
+            include_bytes!("../../tests/golden/release/archive-install-rehearsal-v1.json")
+        );
+        let mut unknown = serde_json::to_value(&archive_install).unwrap();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_string(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<ArchiveInstallRehearsalReport>(unknown).is_err());
+        write_pretty_json(&install_path, &archive_install).unwrap();
+        let archive_sha256 = format!("sha256:{}", sha256_file_hex(&archive_path).unwrap());
+        let validate = |expected_tag| {
+            let release_sha256 = format!("sha256:{}", sha256_file_hex(&release_path).unwrap());
+            let checksum_sha256 = format!("sha256:{}", sha256_file_hex(&checksum_path).unwrap());
+            let install_sha256 = format!("sha256:{}", sha256_file_hex(&install_path).unwrap());
+            validate_readiness_release_reports(
+                ReadinessReleaseEvidence {
+                    archive_path: &archive_path,
+                    archive_sha256: &archive_sha256,
+                    release_report_path: &release_path,
+                    release_report_sha256: &release_sha256,
+                    checksum_manifest_path: &checksum_path,
+                    checksum_manifest_sha256: &checksum_sha256,
+                    install_report_path: &install_path,
+                    install_report_sha256: &install_sha256,
+                },
+                ReadinessReleaseIdentity {
+                    target,
+                    commit: &revision,
+                    tag: expected_tag,
+                },
+            )
+        };
+        validate(tag).unwrap();
+
+        assert!(validate("v0.1.0-rc.2").is_err());
+
+        let original_install_sha256 = format!("sha256:{}", sha256_file_hex(&install_path).unwrap());
+        let mut swapped_archive = archive_install.clone();
+        swapped_archive.archive.sha256 = format!("sha256:{}", "0".repeat(64));
+        write_pretty_json(&install_path, &swapped_archive).unwrap();
+        assert!(read_bound_file(
             &install_path,
-            "x86_64-pc-windows-msvc",
-            &revision,
-            tag,
-        )
-        .unwrap();
-        assert!(validate_readiness_release_reports(
-            &release_path,
-            &install_path,
-            "x86_64-pc-windows-msvc",
-            &revision,
-            "v0.1.0-rc.2",
+            &original_install_sha256,
+            "archive-install report"
         )
         .is_err());
+        assert!(validate(tag).is_err());
+
+        write_pretty_json(&install_path, &archive_install).unwrap();
+        fs::write(&checksum_path, b"0").unwrap();
+        assert!(validate(tag).is_err());
     }
 }

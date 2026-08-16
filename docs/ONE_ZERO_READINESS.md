@@ -46,15 +46,17 @@ stars.
 | `third_party_plugin` | At least one externally owned controller plugin whose passing typed report is rebound to the exact retained library and manifest bytes |
 | `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
-| `release_artifacts` | Linux x86-64 and Windows x86-64 archives, retained Sigstore bundles, freshly reproduced strict verification receipts, release reports, and nine-check installed rehearsals from the same clean tagged revision |
+| `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound nine-check install reports, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
 | `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 24 registered typed-reader checks, including fail-closed future/unknown-field mutations and verified historical Git revision/tree/blob provenance |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, support period, and HTTPS policy are explicitly committed |
 
 The manifest, report, and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_manifest = 2`,
+`evidence.one_zero_readiness_manifest = 3`,
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
+The archive-bound install result is separately registered as
+`evidence.archive_install_rehearsal_report = 1`.
 The report check order is fixed and a committed golden captures the current
 honest baseline. `manifest_sha256` binds the complete normalized input,
 including external identities and support fields. On 2026-08-16, only the
@@ -121,7 +123,8 @@ corpus from the current checkout, rechecks historical source provenance, and
 requires field-for-field equality with the retained report. Editing a report
 to say `passed` cannot replace this replay.
 
-Manifest v2 rejects report-only external certification. Plugin verification
+Manifest v3 retains v2's rejection of report-only external certification.
+Plugin verification
 rehashes the retained library and manifest, compares their file names and the
 library size, validates the plugin manifest, and requires its name to equal the
 negotiated controller identity. Physics verification rehashes the exact
@@ -134,26 +137,33 @@ the social fact of independence still require human review; exact subject
 binding cannot turn an in-repository reference into third-party adoption.
 
 Each `platform_release` also declares `platform`, `revision`, and `tag`, then
-references `archive`, `attestation`, `attestation_verification`,
-`release_report`, and `install_report`. Both platforms must resolve to the same
+references `archive`, `attestation`, `archive_attestation_verification`,
+`release_report`, `checksum_manifest`, `install_report`, and
+`install_attestation_verification`. Both platforms must resolve to the same
 retained tag and commit. The release report must say the checkout was clean,
 tag-matched, reproducible, supply-chain clean, and passing all nine installed
-workflows. `attestation` is the exact JSON Sigstore bundle emitted by
-`actions/attest@v4`; `attestation_verification` is an
-`rne_github_attestation_verification` schema-v1 receipt, not raw CLI output.
+workflows. `install_report` is the strict
+`rne_archive_install_rehearsal` schema-v1 wrapper: it fixes the archive file,
+size, digest, extracted bundle root, release report, checksum manifest, and
+schema-v4 nine-check rehearsal. `attestation` is the exact JSON Sigstore bundle
+emitted by `actions/attest@v4`; both verification fields are strict
+`rne_github_attestation_verification` schema-v1 receipts, not raw CLI output.
 
-The audit does not trust that receipt by itself. For every platform it reruns
-`gh attestation verify --bundle` over the referenced archive and pins the
+The audit does not trust either receipt by itself. For every platform it reruns
+`gh attestation verify --bundle` over both the referenced archive and the
+archive-install report and pins the
 repository, exact workflow certificate identity, tag ref, source commit,
 signer commit, GitHub OIDC issuer, SLSA v1 predicate, and self-hosted-runner
-rejection. It also confirms that the verified in-toto subject contains the
-archive SHA-256, requires exactly one verified attestation in the retained
-bundle, regenerates the stable receipt, and compares every field. Missing
-`gh`, failed signature or transparency verification, a bundle/archive swap,
-unknown receipt fields, or any policy drift fails closed. Store the archive,
-bundle, receipt, and reports together in the external evidence pack; the
-committed release workflow retains the action's exact `bundle-path` for this
-purpose.
+rejection. Each verification must return exactly one in-toto subject with the
+expected SHA-256. The gate regenerates both stable receipts, compares every
+field, rehashes the extracted reports, and proves that `SHA256SUMS` equals the
+release report's complete member graph plus the report itself. It also requires
+the staged and independently extracted nine-check verdicts to agree. Missing
+`gh`, failed signature or transparency verification, a bundle/archive/report
+swap, unknown fields, or any policy drift fails closed. Store all seven files
+per platform together in the external evidence pack; the committed release
+workflow retains the action's exact `bundle-path` for this purpose. Manifest v2
+lacks these distinct subjects and receipts and cannot be relabelled as v3.
 
 External evidence should be reviewed for real independence before its digest
 is accepted. A structurally valid self-authored report is not a substitute for

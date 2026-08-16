@@ -167,7 +167,9 @@ cargo run --locked -p xtask -- release-bundle \
   --wheel artifacts/wheels/rne_py-0.1.0-*.whl
 ```
 
-`release-install-smoke --bundle-dir PATH --output-dir EMPTY_PATH` independently
-checks `SHA256SUMS`, installs the bundled wheel, and reruns all nine schema-v4
-installed-artifact checks, including the compatibility corpus and exact Python
-API manifest.
+`release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
+EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
+reruns all nine schema-v4 installed-artifact checks, including the compatibility
+corpus and exact Python API manifest. Its schema-v1 outer report records the
+exact archive and extracted release/checksum identities; tagged release CI
+attests that report as a separate subject.

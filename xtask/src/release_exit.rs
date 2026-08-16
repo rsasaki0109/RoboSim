@@ -434,8 +434,8 @@ fn validate_attestation_policy(policy: &ArtifactAttestationPolicy) -> anyhow::Re
         "artifact attestation predicate must be {EXPECTED_ATTESTATION_PREDICATE}"
     );
     anyhow::ensure!(
-        policy.subjects == ["native_archive", "python_wheel"],
-        "artifact attestation subjects must be native_archive and python_wheel"
+        policy.subjects == ["native_archive", "python_wheel", "archive_install_report"],
+        "artifact attestation subjects must be native_archive, python_wheel, and archive_install_report"
     );
     anyhow::ensure!(
         policy.attested_events == ["push_tag", "workflow_dispatch"],
@@ -515,6 +515,12 @@ fn validate_release_attestation_workflow(
             block.contains(archive_glob) && block.contains("artifacts/wheels/*.whl"),
             "release job {job} must attest its archive and Python wheel"
         );
+        let install_report =
+            "artifacts/extracted-evidence/archive-install-rehearsal-report.json";
+        anyhow::ensure!(
+            block.matches(install_report).count() >= 2,
+            "release job {job} must attest and retain its archive-bound install report"
+        );
     }
 
     let publish = normalize_workflow(workflow_job_block(&workflow, "publish")?);
@@ -526,6 +532,9 @@ fn validate_release_attestation_workflow(
     let verify_index = publish
         .find(verify)
         .context("release publish job must verify every artifact attestation")?;
+    let report_verify_index = publish
+        .find("gh attestation verify $report")
+        .context("release publish job must verify each archive-install report attestation")?;
     for requirement in [
         "-R $GH_REPO",
         "--bundle $bundle",
@@ -546,8 +555,8 @@ fn validate_release_attestation_workflow(
         .find("gh release create")
         .context("release publish job omitted gh release create")?;
     anyhow::ensure!(
-        verify_index < publish_index,
-        "release assets must be attestation-verified before publication"
+        verify_index < publish_index && report_verify_index < publish_index,
+        "release assets and archive-install reports must be attestation-verified before publication"
     );
     Ok(())
 }

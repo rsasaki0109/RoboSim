@@ -26,6 +26,13 @@ All notable changes to Robot Native Engine are documented in this file.
   `gh attestation verify` with the repository, workflow certificate identity,
   tag, source and signer commit, issuer, SLSA predicate, runner policy, and
   archive digest pinned, then requires an exact strict schema-v1 receipt.
+- **Attested archive-install chain**: release jobs now emit and sign a strict
+  schema-v1 archive-install rehearsal report that binds the exact archive
+  name, size, and SHA-256 to the extracted `release-report.json`,
+  `SHA256SUMS`, and all nine installed checks. Readiness manifest v3 requires
+  separate fresh Sigstore receipts for the archive and this report, then
+  reconstructs the complete checksum graph so reports from another archive
+  cannot be substituted.
 - **Subject-bound external certification evidence**: readiness manifest v2
   requires immutable external revisions and retains the exact controller
   library/manifest, physics implementation bundle, or hardware adapter,
