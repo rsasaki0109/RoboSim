@@ -28,8 +28,11 @@ tree. Stability requires both 183 calendar days and a 183-day aggregate span
 across at least two independently owned external projects, with no unplanned
 break declared. Linux and Windows release evidence must reproduce one retained
 tagged revision. The compatibility report must validate against the exact
-current fixture registry. Physical evidence is delegated to the full LeKiwi
-verifier rather than a checklist-shaped surrogate.
+current fixture registry, equal a fresh execution of every current typed
+reader, and retain source revisions, trees, declarations, and golden blobs
+that still verify through Git history. A report whose passing fields were only
+edited into place is therefore insufficient. Physical evidence is delegated
+to the full LeKiwi verifier rather than a checklist-shaped surrogate.
 
 `release-check` validates the committed tracker and contract registration, but
 normal 0.x development does not require unavailable external evidence. The
@@ -62,5 +65,7 @@ content-addressed subject fields instead of trusting its aggregate verdict.
   review; the tool verifies identities, structure, provenance, and bytes.
 - A passing conformance JSON cannot be moved onto different plugin, backend, or
   adapter bytes inside the readiness pack.
+- A compatibility JSON cannot substitute for executing the registered corpus;
+  promotion replays all readers and requires an exact report match.
 - Changes to the readiness report require a registered schema transition and
   golden update.

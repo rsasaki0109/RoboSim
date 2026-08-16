@@ -285,6 +285,12 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
+For 1.0 promotion, a retained report is not accepted as an assertion by itself.
+`xtask release-readiness` revalidates the registered historical Git commits,
+trees, schema declarations, and golden blobs, executes the complete corpus with
+the current readers, and requires the supplied report to equal the fresh report
+exactly. The audit records the report, registry, and every fixture digest.
+
 The twenty-four-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
 v1, scenario replay v4, the controller C ABI-v3 64-bit layout, three historical

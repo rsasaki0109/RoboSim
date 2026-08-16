@@ -34,6 +34,11 @@ All notable changes to Robot Native Engine are documented in this file.
   observation/action widths, so a passing report cannot be relabelled onto a
   different implementation. Installed bundles now carry all three external
   conformance authoring guides beside the SDKs and runners.
+- **Replayed historical-compatibility evidence**: the 1.0 readiness gate no
+  longer accepts a registry-shaped compatibility report on its pass flags
+  alone. It revalidates ancestor revisions, trees, schema declarations, and
+  golden blobs, executes all 24 fixtures through the current typed readers,
+  and requires the retained report to match that fresh result exactly.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
   trees and the original blob. The installed compatibility runner decodes and

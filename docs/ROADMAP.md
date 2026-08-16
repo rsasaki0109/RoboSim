@@ -130,7 +130,10 @@ hardware, and physics artifacts. `rne-compatibility` runs every current typed re
 fail-closed handling of a deterministic future schema and unknown field, and
 verifies byte-exact frontend/dataset payload round trips with malformed-input
 rejection. Release rehearsal requires the same corpus after extraction on both
-tier-1 platforms. The language-boundary slice ships a C/C++ header, freezes the
+tier-1 platforms. The 1.0 readiness audit also replays the source corpus,
+rechecks every historical Git revision/tree/blob, and requires the retained
+report to equal that fresh execution rather than trusting its pass flags. The
+language-boundary slice ships a C/C++ header, freezes the
 64-bit ABI layout and ten required symbols, and verifies 24 Python exports and
 their exact call shapes from source CI and the installed ABI3 wheel. This
 advances the freeze but does not replace external-use or six-month stability

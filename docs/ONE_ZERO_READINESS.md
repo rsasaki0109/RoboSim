@@ -47,7 +47,7 @@ stars.
 | `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives, retained Sigstore bundles, freshly reproduced strict verification receipts, release reports, and nine-check installed rehearsals from the same clean tagged revision |
-| `historical_compatibility` | A passing report for the exact committed compatibility registry with at least 24 distinct checks and fail-closed future/unknown-field cases |
+| `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 24 registered typed-reader checks, including fail-closed future/unknown-field mutations and verified historical Git revision/tree/blob provenance |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, support period, and HTTPS policy are explicitly committed |
 
@@ -113,6 +113,13 @@ task_spec = { path = "systems/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 adapter_arguments = ["<adapter-subject>", "--sandbox", "isolated-v1"]
 report = { path = "systems/hardware-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 ```
+
+Compatibility evidence must be assessed from a complete source checkout whose
+Git object database contains the registered historical commits. The gate
+rehashes the report, validates its registry identity, replays the complete
+corpus from the current checkout, rechecks historical source provenance, and
+requires field-for-field equality with the retained report. Editing a report
+to say `passed` cannot replace this replay.
 
 Manifest v2 rejects report-only external certification. Plugin verification
 rehashes the retained library and manifest, compares their file names and the

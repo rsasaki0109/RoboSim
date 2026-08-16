@@ -1425,7 +1425,28 @@ fn verify_compatibility(
             && report.passed,
         "historical compatibility report did not pass the required corpus"
     );
-    Ok(vec![evidence.sha256])
+    rne_compatibility_suite::verify_historical_source_history(root)
+        .context("reverify historical compatibility source provenance")?;
+    let replayed = rne_compatibility_suite::run_compatibility(
+        root,
+        &root.join("release/compatibility-fixtures.toml"),
+    )
+    .context("replay historical compatibility corpus with current typed readers")?;
+    anyhow::ensure!(
+        report == replayed,
+        "retained historical compatibility report does not match a fresh typed-reader replay"
+    );
+
+    let mut digests = Vec::with_capacity(report.checks.len() + 2);
+    digests.push(evidence.sha256);
+    digests.push(report.registry_sha256);
+    digests.extend(
+        report
+            .checks
+            .into_iter()
+            .map(|check| check.canonical_json_sha256),
+    );
+    Ok(digests)
 }
 
 fn verify_evidence(root: &Path, reference: &EvidenceRef) -> anyhow::Result<VerifiedEvidence> {
@@ -1684,6 +1705,42 @@ mod tests {
             sha256: format!("sha256:{}", "0".repeat(64)),
         };
         assert!(verify_evidence(temp.path(), &escape).is_err());
+    }
+
+    #[test]
+    fn compatibility_evidence_must_match_a_fresh_typed_reader_replay() {
+        let root = workspace_root().unwrap();
+        let registry_path = root.join("release/compatibility-fixtures.toml");
+        let report = rne_compatibility_suite::run_compatibility(&root, &registry_path).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("compatibility-report.json");
+        let report_bytes = serde_json::to_vec_pretty(&report).unwrap();
+        fs::write(&report_path, &report_bytes).unwrap();
+
+        let mut manifest = read_manifest(&root.join(DEFAULT_MANIFEST)).unwrap();
+        manifest.compatibility_report = Some(EvidenceRef {
+            path: "compatibility-report.json".to_string(),
+            sha256: sha256_prefixed(&report_bytes),
+        });
+        let digests = verify_compatibility(&root, temp.path(), &manifest).unwrap();
+        assert_eq!(digests.len(), report.checks.len() + 2);
+        assert_eq!(digests[1], report.registry_sha256);
+
+        let mut fabricated = report;
+        fabricated.checks[0].detail = "fabricated passing result".to_string();
+        fabricated
+            .validate(&rne_compatibility_suite::read_registry(&registry_path).unwrap())
+            .unwrap();
+        let fabricated_bytes = serde_json::to_vec_pretty(&fabricated).unwrap();
+        fs::write(&report_path, &fabricated_bytes).unwrap();
+        manifest.compatibility_report.as_mut().unwrap().sha256 = sha256_prefixed(&fabricated_bytes);
+        let error = verify_compatibility(&root, temp.path(), &manifest).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not match a fresh typed-reader replay"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

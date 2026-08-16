@@ -18,6 +18,11 @@ Run the installed form from the bundle root:
   --output compatibility-fixture-report.json
 ```
 
+When this report is used as 1.0 readiness evidence, the source-side promotion
+gate does not trust its aggregate verdict. It verifies the registered ancestor
+history, reruns the same corpus with current typed readers, and requires the
+retained report to match the newly computed report exactly.
+
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
 contains twenty-four fixtures:
 
