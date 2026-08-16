@@ -19,7 +19,7 @@ Run the installed form from the bundle root:
 ```
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains twenty fixtures:
+contains twenty-three fixtures:
 
 | Contract | Retained artifact |
 |---|---|
@@ -27,7 +27,7 @@ contains twenty fixtures:
 | Batch execution | portable batch checkpoint v2 |
 | Controller ABI | ABI-v3 64-bit C layout, capabilities, and required symbols |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
-| Historical decisions | vectorized checkpoint v1 restored exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
+| Historical decisions | TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
 | Frontend | protocol-v1 `ClientHello` frame and negotiated limits |
 | Historical migration | retained zero-step snapshot v1 plus provenance-bound, sensor-bearing snapshots v1 and v2 restored as v3 |
@@ -99,6 +99,22 @@ versions, schema declarations, and ancestry. The installed runner verifies the
 embedded source digest, exact decision, unsafe-relabel rejection, future-schema
 rejection, and wrapper unknown-field rejection without Git.
 
+The same matrix binds three introducing v1 serializers that have no later
+schema transition yet:
+
+| Artifact | Commit | Git tree | Installed proof |
+|---|---|---|---|
+| TaskSpec v1 | `70a9ff35afbf0215803dd288103bdda79fa46891` | `94459bcb0c5090921bf6edbcf6f63246ebdd6a40` | Exact typed validation and semantic JSON round trip |
+| Dataset bundle v1 | `aecafb62c99f432b2a76956575f4562c6047a6bc` | `0bc9d2d48185282da31dc80eb8857d84012a5928` | Original manifest plus 736-byte shard; two streams, six records, four samples, two drops, and exact offline-evaluation digest |
+| Failure Capsule v1 | `61d6c813e79d7eac6a8ab212776d620069f98905` | `5dac12166fe39da5a1207426f3e7520851e415d2` | Exact typed validation and semantic JSON round trip |
+
+Their original golden blobs are byte-identical to the retained current
+goldens. Source `release-check` verifies those blobs at the recorded revisions,
+the serializer declarations, ancestry, and the dataset generation recipe. The
+installed verifier additionally reconstructs the dataset directory from the
+embedded binary shard and rejects one-bit corruption before accepting the
+historical decision.
+
 ## Change policy
 
 Append a fixture when a candidate-stable artifact becomes release-facing or
@@ -114,7 +130,8 @@ image. Python call shape is verified by the separate installed wheel manifest.
 The fixed 31-crate Rust API baseline establishes source-level history. The
 snapshot v1/v2-to-v3 matrix proves multi-generation state migration, while the
 checkpoint/replay decision matrix proves both exact retention and an explicit
-non-migratable boundary. Dataset, protocol, TaskSpec, and Failure Capsule
-fixtures are retained independently, but equivalent multi-generation decision
-matrices for those evolving families remain future work.
+non-migratable boundary. Dataset bundle, TaskSpec, and Failure Capsule now have
+exact ancestor retention, but none has a second public schema to exercise a
+transition. Broader frontend protocol history and any future v1-to-v2
+migrations or required-rerun decisions remain future work.
 Independent-use and six-month stability gates remain mandatory.

@@ -23,6 +23,13 @@ path = "tests/golden/datasets/bundle-manifest-v1.json"
 canonical_json_sha256 = "sha256:e995a3a56a44577cc6b848355f29367a88167570829661b32e32e76eb06f6832"
 
 [[fixture]]
+id = "dataset_bundle_v1_aecafb6"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/dataset-bundle-v1-aecafb6.json"
+canonical_json_sha256 = "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1"
+
+[[fixture]]
 id = "dataset_depth_evaluation_v1"
 contract = "dataset_offline_evaluation"
 schema_version = 1
@@ -42,6 +49,13 @@ contract = "failure_capsule"
 schema_version = 1
 path = "tests/golden/evidence/failure-capsule-v1.json"
 canonical_json_sha256 = "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa"
+
+[[fixture]]
+id = "failure_capsule_v1_61d6c81"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/failure-capsule-v1-61d6c81.json"
+canonical_json_sha256 = "sha256:d6e954b5baf91fadae0809dabd54ec67f8ff2a0b3ea05fe4fef73e4dd1d58246"
 
 [[fixture]]
 id = "generic_replay_v1"
@@ -133,6 +147,13 @@ contract = "task_spec"
 schema_version = 1
 path = "tests/golden/tasks/task-spec-v1.json"
 canonical_json_sha256 = "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c"
+
+[[fixture]]
+id = "task_spec_v1_70a9ff3"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/task-spec-v1-70a9ff3.json"
+canonical_json_sha256 = "sha256:a17643456136ebb956a1d8f1a0ccb969e7636a98ace5e94c13a00fe1f80ee6fe"
 
 [[fixture]]
 id = "vectorized_episode_checkpoint_v1_bd4d44f"

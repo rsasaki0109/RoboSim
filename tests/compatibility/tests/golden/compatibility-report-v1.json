@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:fe0dd8ed74110a17a5c838b549b0d9f5ebba8388662b47e1aa0e3833bcb73e88",
+  "registry_sha256": "sha256:cd854ce4aba11e565a116599f347b63baf0a3ba0cbba938d23539512e59e0001",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -41,6 +41,18 @@
       "detail": "accepted; future schema and unknown field rejected"
     },
     {
+      "id": "dataset_bundle_v1_aecafb6",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/dataset-bundle-v1-aecafb6.json",
+      "canonical_json_sha256": "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
+    },
+    {
       "id": "dataset_depth_evaluation_v1",
       "contract": "dataset_offline_evaluation",
       "schema_version": 1,
@@ -75,6 +87,18 @@
       "unknown_field_rejected": true,
       "passed": true,
       "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "failure_capsule_v1_61d6c81",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/failure-capsule-v1-61d6c81.json",
+      "canonical_json_sha256": "sha256:d6e954b5baf91fadae0809dabd54ec67f8ff2a0b3ea05fe4fef73e4dd1d58246",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
     },
     {
       "id": "generic_replay_v1",
@@ -231,6 +255,18 @@
       "unknown_field_rejected": true,
       "passed": true,
       "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "task_spec_v1_70a9ff3",
+      "contract": "historical_artifact_decision",
+      "schema_version": 1,
+      "path": "tests/golden/compatibility/task-spec-v1-70a9ff3.json",
+      "canonical_json_sha256": "sha256:a17643456136ebb956a1d8f1a0ccb969e7636a98ace5e94c13a00fe1f80ee6fe",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "historical decision verified; future schema and unknown field rejected"
     },
     {
       "id": "vectorized_episode_checkpoint_v1_bd4d44f",

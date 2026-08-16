@@ -95,7 +95,10 @@ Its historical matrix restores complete sensor-bearing snapshot-v1 and
 snapshot-v2 artifacts as snapshot-v3 and verifies source and restored-state
 digests. It also restores the legacy vectorized checkpoint v1 exactly and
 requires typed rerun decisions for scenario replay v2/v3 rather than fabricating
-v4 evidence. Git history is required only by source `release-check`.
+v4 evidence. It additionally retains ancestor TaskSpec and Failure Capsule v1
+artifacts exactly and reconstructs the ancestor dataset bundle from its embedded
+binary shard before rerunning stream, gap, digest, and offline-evaluation checks.
+Git history is required only by source `release-check`.
 
 The bundle includes the dependency-free authoring module at
 `sdk/rust/rne_plugin_sdk.rs`. To prove the installed authoring path with no

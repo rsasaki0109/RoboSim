@@ -30,6 +30,9 @@ The compatibility corpus includes provenance-bound, sensor-bearing snapshot-v1
 and snapshot-v2 restores into snapshot-v3, plus the retained original v1 case.
 It also includes a provenance-bound vectorized checkpoint-v1 restore and real
 scenario replay v2/v3 required-rerun decisions.
+The TaskSpec, streaming dataset bundle, and Failure Capsule v1 cases bind their
+introducing revisions. Dataset verification materializes the embedded original
+shard and must reject a one-bit mutation.
 The installed binary must have the bundled mobile-manipulator scene and URDF
 needed to reproduce both historical outcomes without a source checkout. Source
 release CI separately checks the exact source commits, trees, schema constants,

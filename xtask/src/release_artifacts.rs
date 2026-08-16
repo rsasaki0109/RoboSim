@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 46] = [
+const BUNDLE_FILES: [(&str, &str); 49] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -134,6 +134,10 @@ const BUNDLE_FILES: [(&str, &str); 46] = [
         "tests/golden/datasets/bundle-manifest-v1.json",
     ),
     (
+        "tests/golden/compatibility/dataset-bundle-v1-aecafb6.json",
+        "tests/golden/compatibility/dataset-bundle-v1-aecafb6.json",
+    ),
+    (
         "tests/golden/datasets/depth-pair-evaluation-v1.json",
         "tests/golden/datasets/depth-pair-evaluation-v1.json",
     ),
@@ -144,6 +148,10 @@ const BUNDLE_FILES: [(&str, &str); 46] = [
     (
         "tests/golden/evidence/failure-capsule-v1.json",
         "tests/golden/evidence/failure-capsule-v1.json",
+    ),
+    (
+        "tests/golden/compatibility/failure-capsule-v1-61d6c81.json",
+        "tests/golden/compatibility/failure-capsule-v1-61d6c81.json",
     ),
     (
         "tests/golden/replays/generic-replay-v1.json",
@@ -196,6 +204,10 @@ const BUNDLE_FILES: [(&str, &str); 46] = [
     (
         "tests/golden/tasks/task-spec-v1.json",
         "tests/golden/tasks/task-spec-v1.json",
+    ),
+    (
+        "tests/golden/compatibility/task-spec-v1-70a9ff3.json",
+        "tests/golden/compatibility/task-spec-v1-70a9ff3.json",
     ),
     (
         "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json",

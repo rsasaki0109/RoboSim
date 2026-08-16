@@ -28,7 +28,7 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  twenty content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  twenty-three content-addressed TaskSpec, checkpoint, generic/behavior/scenario
   replay, dataset, frontend transport, controller C ABI, historical migration,
   Failure Capsule, hardware, and physics artifacts through their current typed
   readers. The frontend and dataset payload fixtures also require byte-exact
@@ -43,6 +43,13 @@ All notable changes to Robot Native Engine are documented in this file.
   The scenario cases freeze their missing v4 evidence, exact errors, source
   commits/trees, unsafe-relabel rejection, and 300-step historical result; no
   migration fabricates actor, action, ownership, input, or result-digest data.
+- **Historical portable-artifact retention**: TaskSpec v1, Failure Capsule v1,
+  and a complete streaming dataset bundle v1 are now retained from their
+  introducing ancestor revisions. The installed verifier reconstructs the
+  dataset from its exact 736-byte shard, rechecks records, explicit gaps,
+  hashes, and headless depth evaluation, and rejects binary corruption. Source
+  CI binds all three artifacts to their exact commits, trees, schema sources,
+  and original golden blobs.
 - **External physics-backend conformance SDK**: the publishable
   `rne_physics_conformance` crate runs a fixed, unit-bearing nine-check catalog
   against any public `PhysicsBackend` factory without engine allowlists or

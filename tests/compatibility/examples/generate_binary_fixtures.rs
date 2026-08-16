@@ -1,8 +1,8 @@
 use anyhow::{ensure, Context};
 use rne_ai::{
-    mm_minimal_scene_path, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    mm_minimal_scene_path, MobileManipulatorSim, MobileManipulatorSimSnapshot, TaskSpec,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
-    VECTORIZED_EPISODE_CHECKPOINT_VERSION,
+    TASK_SPEC_SCHEMA_VERSION, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };
 use rne_compatibility_suite::{
     HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
@@ -15,9 +15,10 @@ use rne_data::transport::{
 use rne_data::{
     encode_dataset_action, encode_dataset_annotation, encode_dataset_imu,
     encode_dataset_task_outcome, encode_dataset_transform, DatasetActionSample,
-    DatasetGroundTruthAnnotation, DatasetTaskOutcomeSample, ImuSample, PoseSample,
-    DATASET_PAYLOAD_SCHEMA_VERSION,
+    DatasetGroundTruthAnnotation, DatasetManifest, DatasetTaskOutcomeSample, ImuSample, PoseSample,
+    DATASET_BUNDLE_SCHEMA_VERSION, DATASET_PAYLOAD_SCHEMA_VERSION,
 };
+use rne_log::{FailureCapsule, FAILURE_CAPSULE_SCHEMA_VERSION};
 use rne_math::Vec3;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -39,8 +40,16 @@ const HISTORICAL_SCENARIO_V2_REVISION: &str = "533729ddc78e53284eaa11d823afae18d
 const HISTORICAL_SCENARIO_V2_TREE: &str = "b016841b2aed16bafc131f6a4698ee3b30cec34d";
 const HISTORICAL_SCENARIO_V3_REVISION: &str = "e959e3ffe8426de3a8320d2d4c95e4e1438a50ad";
 const HISTORICAL_SCENARIO_V3_TREE: &str = "17c6045624ccf2ed1271d19ea50926cb568ab337";
+const HISTORICAL_TASK_SPEC_V1_REVISION: &str = "70a9ff35afbf0215803dd288103bdda79fa46891";
+const HISTORICAL_TASK_SPEC_V1_TREE: &str = "94459bcb0c5090921bf6edbcf6f63246ebdd6a40";
+const HISTORICAL_DATASET_V1_REVISION: &str = "aecafb62c99f432b2a76956575f4562c6047a6bc";
+const HISTORICAL_DATASET_V1_TREE: &str = "0bc9d2d48185282da31dc80eb8857d84012a5928";
+const HISTORICAL_FAILURE_CAPSULE_V1_REVISION: &str = "61d6c813e79d7eac6a8ab212776d620069f98905";
+const HISTORICAL_FAILURE_CAPSULE_V1_TREE: &str = "5dac12166fe39da5a1207426f3e7520851e415d2";
 const HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST: u64 = 17_972_057_113_911_492_359;
 const HISTORICAL_SCENARIO_STABLE_HASH: u64 = 8_877_782_128_690_619_681;
+const HISTORICAL_DATASET_EVALUATION_SHA256: &str =
+    "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16";
 const SCENARIO_V2_MISSING_REQUIRED_FIELDS: &[&str] = &[
     "scenario_digest",
     "network_digest",
@@ -64,37 +73,78 @@ const SCENARIO_V3_MISSING_REQUIRED_FIELDS: &[&str] = &[
 fn main() -> anyhow::Result<()> {
     let mut args = env::args_os().skip(1);
     let output = args.next().context(
-        "usage: generate_binary_fixtures <output-directory> [<snapshot-v1.json> <snapshot-v2.json> [<vectorized-v1.json> <scenario-v2.json> <scenario-v3.json>]]",
+        "usage: generate_binary_fixtures <output-directory> [<snapshot-v1.json> <snapshot-v2.json> [<vectorized-v1.json> <scenario-v2.json> <scenario-v3.json> [<task-spec-v1.json> <dataset-manifest-v1.json> <dataset-shard-v1.rnedata> <failure-capsule-v1.json>]]]",
     )?;
     let source_args = args.collect::<Vec<_>>();
-    let (v1_source, v2_source, vectorized_v1, scenario_v2, scenario_v3) =
-        match source_args.as_slice() {
-            [] => (
-                committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
-                committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
-                committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
-                committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
-                committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
-            ),
-            [v1, v2] => (
-                read_json(Path::new(v1))?,
-                read_json(Path::new(v2))?,
-                committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
-                committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
-                committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
-            ),
-            [v1, v2, vectorized, scenario2, scenario3] => (
-                read_json(Path::new(v1))?,
-                read_json(Path::new(v2))?,
-                read_json(Path::new(vectorized))?,
-                read_json(Path::new(scenario2))?,
-                read_json(Path::new(scenario3))?,
-            ),
-            _ => anyhow::bail!("expected zero, two, or five historical source JSON paths"),
-        };
+    let (
+        v1_source,
+        v2_source,
+        vectorized_v1,
+        scenario_v2,
+        scenario_v3,
+        task_spec_v1,
+        dataset_manifest_v1,
+        dataset_shard_v1,
+        failure_capsule_v1,
+    ) = match source_args.as_slice() {
+        [] => (
+            committed_source_snapshot("mobile-manipulator-snapshot-v1-47525b1-to-v3.json")?,
+            committed_source_snapshot("mobile-manipulator-snapshot-v2-2255cbe-to-v3.json")?,
+            committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
+            committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
+            committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
+            committed_decision_source("task-spec-v1-70a9ff3.json")?,
+            committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
+            committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
+            committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+        ),
+        [v1, v2] => (
+            read_json(Path::new(v1))?,
+            read_json(Path::new(v2))?,
+            committed_decision_source("vectorized-episode-checkpoint-v1-bd4d44f.json")?,
+            committed_decision_source("scenario-replay-v2-533729d-requires-rerun.json")?,
+            committed_decision_source("scenario-replay-v3-e959e3f-requires-rerun.json")?,
+            committed_decision_source("task-spec-v1-70a9ff3.json")?,
+            committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
+            committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
+            committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+        ),
+        [v1, v2, vectorized, scenario2, scenario3] => (
+            read_json(Path::new(v1))?,
+            read_json(Path::new(v2))?,
+            read_json(Path::new(vectorized))?,
+            read_json(Path::new(scenario2))?,
+            read_json(Path::new(scenario3))?,
+            committed_decision_source("task-spec-v1-70a9ff3.json")?,
+            committed_decision_source("dataset-bundle-v1-aecafb6.json")?,
+            committed_decision_file("dataset-bundle-v1-aecafb6.json", "records.rnedata")?,
+            committed_decision_source("failure-capsule-v1-61d6c81.json")?,
+        ),
+        [v1, v2, vectorized, scenario2, scenario3, task, dataset, shard, capsule] => (
+            read_json(Path::new(v1))?,
+            read_json(Path::new(v2))?,
+            read_json(Path::new(vectorized))?,
+            read_json(Path::new(scenario2))?,
+            read_json(Path::new(scenario3))?,
+            read_json(Path::new(task))?,
+            read_json(Path::new(dataset))?,
+            fs::read(shard).with_context(|| {
+                format!(
+                    "read historical dataset shard {}",
+                    Path::new(shard).display()
+                )
+            })?,
+            read_json(Path::new(capsule))?,
+        ),
+        _ => anyhow::bail!("expected zero, two, five, or nine historical source paths"),
+    };
     let output = Path::new(&output);
     fs::create_dir_all(output)
         .with_context(|| format!("create fixture output {}", output.display()))?;
+    let dataset_source_files = [HistoricalDecisionFileSource {
+        path: "records.rnedata",
+        contents: &dataset_shard_v1,
+    }];
     write_json(
         &output.join("frontend-transport-v1.json"),
         &frontend_fixture()?,
@@ -133,11 +183,13 @@ fn main() -> anyhow::Result<()> {
                 source_revision: HISTORICAL_VECTORIZED_V1_REVISION,
                 source_tree: HISTORICAL_VECTORIZED_V1_TREE,
                 source_workspace_version: "0.1.0",
+                source_files: &[],
                 expected_outcome: "accepted_and_restored",
                 reason_code: "same_schema_replay_checkpoint",
                 missing_required_fields: &[],
                 expected_replay_digest: Some(HISTORICAL_VECTORIZED_V1_REPLAY_DIGEST),
                 expected_error: None,
+                expected_result_sha256: None,
             },
         )?,
     )?;
@@ -152,6 +204,7 @@ fn main() -> anyhow::Result<()> {
                 source_revision: HISTORICAL_SCENARIO_V2_REVISION,
                 source_tree: HISTORICAL_SCENARIO_V2_TREE,
                 source_workspace_version: "0.13.0",
+                source_files: &[],
                 expected_outcome: "rejected_requires_rerun",
                 reason_code: "missing_required_replay_evidence",
                 missing_required_fields: SCENARIO_V2_MISSING_REQUIRED_FIELDS,
@@ -159,6 +212,7 @@ fn main() -> anyhow::Result<()> {
                 expected_error: Some(
                     "unsupported scenario replay schema version: expected 4, got 2",
                 ),
+                expected_result_sha256: None,
             },
         )?,
     )?;
@@ -173,6 +227,7 @@ fn main() -> anyhow::Result<()> {
                 source_revision: HISTORICAL_SCENARIO_V3_REVISION,
                 source_tree: HISTORICAL_SCENARIO_V3_TREE,
                 source_workspace_version: "0.13.0",
+                source_files: &[],
                 expected_outcome: "rejected_requires_rerun",
                 reason_code: "missing_required_replay_evidence",
                 missing_required_fields: SCENARIO_V3_MISSING_REQUIRED_FIELDS,
@@ -180,6 +235,70 @@ fn main() -> anyhow::Result<()> {
                 expected_error: Some(
                     "unsupported scenario replay schema version: expected 4, got 3",
                 ),
+                expected_result_sha256: None,
+            },
+        )?,
+    )?;
+    write_json(
+        &output.join("task-spec-v1-70a9ff3.json"),
+        &historical_compatibility_decision_fixture(
+            task_spec_v1,
+            HistoricalDecisionSpec {
+                artifact_contract: "task_spec",
+                source_schema_version: 1,
+                current_schema_version: TASK_SPEC_SCHEMA_VERSION,
+                source_revision: HISTORICAL_TASK_SPEC_V1_REVISION,
+                source_tree: HISTORICAL_TASK_SPEC_V1_TREE,
+                source_workspace_version: "0.1.0",
+                source_files: &[],
+                expected_outcome: "accepted_and_restored",
+                reason_code: "same_schema_validated_artifact",
+                missing_required_fields: &[],
+                expected_replay_digest: None,
+                expected_error: None,
+                expected_result_sha256: None,
+            },
+        )?,
+    )?;
+    write_json(
+        &output.join("dataset-bundle-v1-aecafb6.json"),
+        &historical_compatibility_decision_fixture(
+            dataset_manifest_v1,
+            HistoricalDecisionSpec {
+                artifact_contract: "dataset_bundle",
+                source_schema_version: 1,
+                current_schema_version: DATASET_BUNDLE_SCHEMA_VERSION,
+                source_revision: HISTORICAL_DATASET_V1_REVISION,
+                source_tree: HISTORICAL_DATASET_V1_TREE,
+                source_workspace_version: "0.1.0",
+                source_files: &dataset_source_files,
+                expected_outcome: "accepted_and_restored",
+                reason_code: "same_schema_streaming_dataset_bundle",
+                missing_required_fields: &[],
+                expected_replay_digest: None,
+                expected_error: None,
+                expected_result_sha256: Some(HISTORICAL_DATASET_EVALUATION_SHA256),
+            },
+        )?,
+    )?;
+    write_json(
+        &output.join("failure-capsule-v1-61d6c81.json"),
+        &historical_compatibility_decision_fixture(
+            failure_capsule_v1,
+            HistoricalDecisionSpec {
+                artifact_contract: "failure_capsule",
+                source_schema_version: 1,
+                current_schema_version: FAILURE_CAPSULE_SCHEMA_VERSION,
+                source_revision: HISTORICAL_FAILURE_CAPSULE_V1_REVISION,
+                source_tree: HISTORICAL_FAILURE_CAPSULE_V1_TREE,
+                source_workspace_version: "0.1.0",
+                source_files: &[],
+                expected_outcome: "accepted_and_restored",
+                reason_code: "same_schema_validated_artifact",
+                missing_required_fields: &[],
+                expected_replay_digest: None,
+                expected_error: None,
+                expected_result_sha256: None,
             },
         )?,
     )
@@ -193,11 +312,19 @@ struct HistoricalDecisionSpec<'a> {
     source_revision: &'a str,
     source_tree: &'a str,
     source_workspace_version: &'a str,
+    source_files: &'a [HistoricalDecisionFileSource<'a>],
     expected_outcome: &'a str,
     reason_code: &'a str,
     missing_required_fields: &'a [&'a str],
     expected_replay_digest: Option<u64>,
     expected_error: Option<&'a str>,
+    expected_result_sha256: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HistoricalDecisionFileSource<'a> {
+    path: &'a str,
+    contents: &'a [u8],
 }
 
 fn historical_compatibility_decision_fixture(
@@ -218,6 +345,8 @@ fn historical_compatibility_decision_fixture(
             ensure!(
                 spec.source_schema_version == VECTORIZED_EPISODE_CHECKPOINT_VERSION
                     && spec.expected_error.is_none()
+                    && spec.expected_result_sha256.is_none()
+                    && spec.source_files.is_empty()
                     && spec.missing_required_fields.is_empty(),
                 "historical vectorized checkpoint decision mismatch"
             );
@@ -243,11 +372,52 @@ fn historical_compatibility_decision_fixture(
                 spec.expected_error == Some(error_text.as_str()),
                 "historical scenario replay rejection changed"
             );
+            ensure!(
+                spec.source_files.is_empty() && spec.expected_result_sha256.is_none(),
+                "historical scenario replay decision unexpectedly embeds source files"
+            );
+        }
+        "task_spec" => {
+            let task: TaskSpec = serde_json::from_value(source.clone())?;
+            task.validate()?;
+            ensure!(
+                task.schema_version == TASK_SPEC_SCHEMA_VERSION
+                    && serde_json::to_value(&task)? == source
+                    && spec.source_files.is_empty()
+                    && spec.expected_result_sha256.is_none(),
+                "historical TaskSpec decision mismatch"
+            );
+        }
+        "failure_capsule" => {
+            let capsule: FailureCapsule = serde_json::from_value(source.clone())?;
+            capsule.validate()?;
+            ensure!(
+                capsule.schema_version == FAILURE_CAPSULE_SCHEMA_VERSION
+                    && serde_json::to_value(&capsule)? == source
+                    && spec.source_files.is_empty()
+                    && spec.expected_result_sha256.is_none(),
+                "historical Failure Capsule decision mismatch"
+            );
+        }
+        "dataset_bundle" => {
+            let manifest: DatasetManifest = serde_json::from_value(source.clone())?;
+            manifest.validate()?;
+            ensure!(
+                manifest.schema_version == DATASET_BUNDLE_SCHEMA_VERSION
+                    && serde_json::to_value(&manifest)? == source
+                    && spec.source_files.len() == 1
+                    && spec.source_files[0].path == "records.rnedata"
+                    && manifest.shards.len() == 1
+                    && manifest.shards[0].sha256 == sha256(spec.source_files[0].contents)
+                    && manifest.shards[0].byte_len as usize == spec.source_files[0].contents.len()
+                    && spec.expected_result_sha256 == Some(HISTORICAL_DATASET_EVALUATION_SHA256),
+                "historical dataset bundle decision mismatch"
+            );
         }
         other => anyhow::bail!("unsupported historical decision contract {other}"),
     }
     let source_artifact_sha256 = sha256(&serde_json::to_vec(&source)?);
-    Ok(json!({
+    let mut fixture = json!({
         "kind": "rne_historical_compatibility_decision",
         "schema_version": HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
         "artifact_contract": spec.artifact_contract,
@@ -263,7 +433,35 @@ fn historical_compatibility_decision_fixture(
         "source_artifact_sha256": source_artifact_sha256,
         "expected_replay_digest": spec.expected_replay_digest,
         "expected_error": spec.expected_error,
-    }))
+    });
+    let fixture_object = fixture
+        .as_object_mut()
+        .context("historical compatibility fixture must be an object")?;
+    if !spec.source_files.is_empty() {
+        fixture_object.insert(
+            "source_files".to_string(),
+            Value::Array(
+                spec.source_files
+                    .iter()
+                    .map(|file| {
+                        json!({
+                            "path": file.path,
+                            "size_bytes": file.contents.len(),
+                            "sha256": sha256(file.contents),
+                            "contents_hex": lower_hex(file.contents),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(expected_result_sha256) = spec.expected_result_sha256 {
+        fixture_object.insert(
+            "expected_result_sha256".to_string(),
+            Value::String(expected_result_sha256.to_string()),
+        );
+    }
+    Ok(fixture)
 }
 
 fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
@@ -396,6 +594,56 @@ fn committed_decision_source(file_name: &str) -> anyhow::Result<Value> {
             fixture_path.display()
         )
     })
+}
+
+fn committed_decision_file(file_name: &str, path: &str) -> anyhow::Result<Vec<u8>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("resolve workspace root")?;
+    let fixture_path = root.join("tests/golden/compatibility").join(file_name);
+    let fixture = read_json(&fixture_path)?;
+    let files = fixture
+        .get("source_files")
+        .and_then(Value::as_array)
+        .with_context(|| format!("fixture omitted source_files: {}", fixture_path.display()))?;
+    let file = files
+        .iter()
+        .find(|file| file.get("path").and_then(Value::as_str) == Some(path))
+        .with_context(|| {
+            format!(
+                "fixture omitted source file {path}: {}",
+                fixture_path.display()
+            )
+        })?;
+    let contents = file
+        .get("contents_hex")
+        .and_then(Value::as_str)
+        .with_context(|| {
+            format!(
+                "source file omitted contents_hex: {}",
+                fixture_path.display()
+            )
+        })?;
+    decode_lower_hex(contents)
+}
+
+fn decode_lower_hex(text: &str) -> anyhow::Result<Vec<u8>> {
+    ensure!(
+        text.len().is_multiple_of(2) && !text.is_empty(),
+        "historical source file hex must contain complete bytes"
+    );
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let nibble = |byte| match byte {
+                b'0'..=b'9' => Ok(byte - b'0'),
+                b'a'..=b'f' => Ok(byte - b'a' + 10),
+                _ => anyhow::bail!("historical source file hex must use lowercase ASCII"),
+            };
+            Ok((nibble(pair[0])? << 4) | nibble(pair[1])?)
+        })
+        .collect()
 }
 
 fn mobile_manipulator_snapshot_fixture() -> anyhow::Result<Value> {

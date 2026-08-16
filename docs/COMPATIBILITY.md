@@ -285,7 +285,7 @@ a retained fixture or changing its meaning requires a documented compatibility
 decision; adding another retained artifact changes the registry digest but not
 the report shape.
 
-The twenty-fixture registry additionally freezes a complete frontend
+The twenty-three-fixture registry additionally freezes a complete frontend
 `ClientHello` frame, all five dataset-native payload families, behavior replay
 v1, scenario replay v4, the controller C ABI-v3 64-bit layout, three historical
 mobile-manipulator migrations, one exact legacy checkpoint restore, and two
@@ -302,6 +302,16 @@ Git checkout. Binary fixtures pair semantic fields with lowercase hex bytes:
 acceptance requires exact decode/re-encode identity plus rejection of
 truncation and trailing bytes. Frontend validation also rejects corrupt magic,
 unknown message kinds, and an incompatible negotiated major version.
+
+Three additional historical decisions bind the introducing TaskSpec v1,
+dataset bundle v1, and Failure Capsule v1 revisions. TaskSpec and Failure
+Capsule must deserialize, validate, and serialize to the exact same semantic
+JSON. Dataset retention embeds the original manifest and exact 736-byte shard;
+the installed reader must reproduce two streams, six records, four samples,
+two explicit drops, and the retained headless depth-evaluation digest. A
+single-bit shard mutation must fail verification. These are same-schema
+retention contracts: no v2 exists to migrate to, so changing their v1 number
+would be a new compatibility decision rather than evidence of an old migration.
 
 Installed-rehearsal report schema v2 adds the required `hardware_adapter` check
 to the six schema-v1 checks. Schema-v1 reports remain historical evidence but
