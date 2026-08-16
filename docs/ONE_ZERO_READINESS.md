@@ -55,8 +55,8 @@ The report schema is registered as `evidence.one_zero_readiness_report = 1` in
 `release/contracts.toml`. Its check order is fixed and a committed golden
 captures the current honest baseline. `manifest_sha256` binds the complete
 normalized input, including external identities and support fields. On
-2026-08-16, only the blocker check is
-passing: the project is `eligible=false` with 1 of 9 checks satisfied.
+2026-08-16, only the blocker check is passing: the project is `eligible=false`
+with 1 of 9 checks satisfied.
 
 ## Evidence-pack shape
 
@@ -102,3 +102,25 @@ workflows.
 External evidence should be reviewed for real independence before its digest
 is accepted. A structurally valid self-authored report is not a substitute for
 third-party adoption.
+
+## 1.x promotion interlock
+
+Every `release-check`, `release-bundle`, and `release-exit` invocation is wired
+to the same guard. For 0.x it performs no external-evidence read. For any 1.x
+or later version it requires these environment variables before release work
+can proceed:
+
+```text
+RNE_ONE_ZERO_READINESS_MANIFEST=/absolute/path/to/one-zero-readiness.toml
+RNE_ONE_ZERO_READINESS_AS_OF=YYYY-MM-DD
+RNE_ONE_ZERO_READINESS_OUTPUT=/absolute/path/to/promotion-report.json # optional
+```
+
+The output defaults to `artifacts/release-readiness/promotion-report.json`.
+The guard reruns the full typed audit; a prewritten JSON report alone is not an
+input and cannot unlock a release. Missing variables, malformed dates,
+ineligible evidence, or tampered referenced files stop all three release
+paths. A future 1.0 workflow must securely provision the complete evidence pack
+to its clean Linux, Windows, and aggregate jobs and retain the generated report.
+The current 0.1 release workflow intentionally has no such variables and cannot
+silently become a 1.x publisher by changing package metadata alone.

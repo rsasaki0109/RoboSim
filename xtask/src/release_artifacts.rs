@@ -1,7 +1,7 @@
 //! Cross-platform 1.0 RC bundle assembly and installed-artifact rehearsal.
 
 use super::{
-    cargo_metadata, fuzz_smoke, supply_chain, validate_blocker_registry,
+    cargo_metadata, fuzz_smoke, release_readiness, supply_chain, validate_blocker_registry,
     validate_contract_registry, validate_release_metadata, workspace_root, RELEASE_VERSION,
 };
 use anyhow::{bail, Context};
@@ -410,6 +410,7 @@ pub(crate) fn validate_readiness_release_reports(
 pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
     let options = parse_bundle_options(args)?;
+    release_readiness::enforce_release_promotion(&root)?;
     validate_release_target(&options.target)?;
     ensure_native_target(&root, &options.target)?;
 

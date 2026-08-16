@@ -26,6 +26,10 @@ pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
 const DEFAULT_OUTPUT: &str = "artifacts/release-readiness/report.json";
+const DEFAULT_PROMOTION_OUTPUT: &str = "artifacts/release-readiness/promotion-report.json";
+const PROMOTION_MANIFEST_ENV: &str = "RNE_ONE_ZERO_READINESS_MANIFEST";
+const PROMOTION_AS_OF_ENV: &str = "RNE_ONE_ZERO_READINESS_AS_OF";
+const PROMOTION_OUTPUT_ENV: &str = "RNE_ONE_ZERO_READINESS_OUTPUT";
 const MINIMUM_STABILITY_DAYS: u32 = 183;
 const MINIMUM_EXTERNAL_PROJECTS: usize = 2;
 const MINIMUM_COMPATIBILITY_CHECKS: usize = 24;
@@ -215,6 +219,13 @@ struct Options {
     require_eligible: bool,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct PromotionInputs {
+    manifest: PathBuf,
+    output: PathBuf,
+    as_of: CivilDate,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct CivilDate {
     year: i32,
@@ -312,6 +323,91 @@ pub(crate) fn validate_committed_manifest(root: &Path) -> anyhow::Result<()> {
     let path = root.join(DEFAULT_MANIFEST);
     let manifest = read_manifest(&path)?;
     validate_manifest_identity(root, &manifest)
+}
+
+/// Enforces the external-evidence gate before any 1.x release command proceeds.
+pub(crate) fn enforce_release_promotion(root: &Path) -> anyhow::Result<()> {
+    if !version_requires_one_zero_promotion(RELEASE_VERSION)? {
+        return Ok(());
+    }
+    let inputs = promotion_inputs(
+        root,
+        RELEASE_VERSION,
+        environment_value(PROMOTION_MANIFEST_ENV)?,
+        environment_value(PROMOTION_AS_OF_ENV)?,
+        environment_value(PROMOTION_OUTPUT_ENV)?,
+    )?
+    .expect("1.x releases always require promotion inputs");
+    let manifest = read_manifest(&inputs.manifest)?;
+    validate_manifest_identity(root, &manifest)?;
+    let report = evaluate(root, &inputs.manifest, &manifest, inputs.as_of)?;
+    write_report(&inputs.output, &report)?;
+    anyhow::ensure!(
+        report.eligible,
+        "release {RELEASE_VERSION} is blocked by the RNE 1.0 readiness gate; inspect {}",
+        inputs.output.display()
+    );
+    println!(
+        "RNE 1.0 promotion gate passed: version={RELEASE_VERSION} report={}",
+        inputs.output.display()
+    );
+    Ok(())
+}
+
+fn promotion_inputs(
+    root: &Path,
+    release_version: &str,
+    manifest: Option<String>,
+    as_of: Option<String>,
+    output: Option<String>,
+) -> anyhow::Result<Option<PromotionInputs>> {
+    if !version_requires_one_zero_promotion(release_version)? {
+        return Ok(None);
+    }
+    let manifest = manifest.with_context(|| {
+        format!(
+            "release {release_version} requires {PROMOTION_MANIFEST_ENV}=PATH to a complete external evidence pack"
+        )
+    })?;
+    let as_of = as_of.with_context(|| {
+        format!(
+            "release {release_version} requires {PROMOTION_AS_OF_ENV}=YYYY-MM-DD for deterministic readiness evaluation"
+        )
+    })?;
+    let output = output.unwrap_or_else(|| DEFAULT_PROMOTION_OUTPUT.to_string());
+    Ok(Some(PromotionInputs {
+        manifest: absolute_from(root, manifest),
+        output: absolute_from(root, output),
+        as_of: CivilDate::parse(&as_of)?,
+    }))
+}
+
+fn version_requires_one_zero_promotion(version: &str) -> anyhow::Result<bool> {
+    let core = version
+        .split(['-', '+'])
+        .next()
+        .context("release version is empty")?;
+    let components = core.split('.').collect::<Vec<_>>();
+    anyhow::ensure!(
+        components.len() == 3
+            && components.iter().all(|component| !component.is_empty()
+                && component.bytes().all(|byte| byte.is_ascii_digit())),
+        "release version must start with numeric MAJOR.MINOR.PATCH, got {version:?}"
+    );
+    let major = components[0]
+        .parse::<u64>()
+        .context("release major version is out of range")?;
+    Ok(major >= 1)
+}
+
+fn environment_value(name: &str) -> anyhow::Result<Option<String>> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("environment variable {name} is not valid Unicode")
+        }
+    }
 }
 
 fn parse_options(args: &mut impl Iterator<Item = String>, root: &Path) -> anyhow::Result<Options> {
@@ -1143,6 +1239,55 @@ mod tests {
             normalized_text_sha256("first\r\nsecond\r\n").unwrap()
         );
         assert!(normalized_text_sha256("first\rsecond\n").is_err());
+    }
+
+    #[test]
+    fn one_x_promotion_inputs_are_mandatory_and_deterministic() {
+        let root = Path::new("workspace");
+        assert!(promotion_inputs(root, "0.99.0", None, None, None)
+            .unwrap()
+            .is_none());
+        assert!(promotion_inputs(root, "1.0.0", None, None, None).is_err());
+        assert!(promotion_inputs(
+            root,
+            "1.0.0",
+            Some("evidence/readiness.toml".to_string()),
+            None,
+            None,
+        )
+        .is_err());
+        assert!(promotion_inputs(
+            root,
+            "1.0.0",
+            Some("evidence/readiness.toml".to_string()),
+            Some("2027-02-30".to_string()),
+            None,
+        )
+        .is_err());
+
+        let inputs = promotion_inputs(
+            root,
+            "1.0.0-rc.1",
+            Some("evidence/readiness.toml".to_string()),
+            Some("2027-02-15".to_string()),
+            Some("evidence/promotion.json".to_string()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(inputs.manifest, root.join("evidence/readiness.toml"));
+        assert_eq!(inputs.output, root.join("evidence/promotion.json"));
+        assert_eq!(inputs.as_of.to_string(), "2027-02-15");
+
+        assert!(version_requires_one_zero_promotion("1.0.0").unwrap());
+        assert!(version_requires_one_zero_promotion("2.0.0").unwrap());
+        assert!(!version_requires_one_zero_promotion("0.1.0").unwrap());
+        assert!(version_requires_one_zero_promotion("v1.0.0").is_err());
+    }
+
+    #[test]
+    fn current_zero_x_release_does_not_require_promotion_environment() {
+        let root = workspace_root().unwrap();
+        enforce_release_promotion(&root).unwrap();
     }
 
     #[test]

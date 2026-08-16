@@ -441,6 +441,9 @@ explicit assessment date, and emits nine fixed checks. The committed
 2026-08-16 it reports 1/9 and `eligible=false`. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.
+The source metadata check, both platform bundle builders, and the aggregate
+release verdict also rerun that audit automatically for any 1.x or later
+version, so changing version metadata alone cannot bypass the external gates.
 
 ## The next 12 weeks
 

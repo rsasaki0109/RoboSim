@@ -36,12 +36,20 @@ normal 0.x development does not require unavailable external evidence. The
 explicit `--require-eligible` mode is reserved for promotion and fails unless
 all nine checks pass.
 
+Release commands also contain a version-triggered interlock. Any 1.x or later
+`release-check`, `release-bundle`, or `release-exit` requires an external
+manifest path and explicit assessment date from the environment, reruns the
+typed audit, writes a promotion report, and stops unless it is eligible. This
+guards the source, platform-package, and aggregate-publication paths instead of
+assuming one of them called another.
+
 ## Consequences
 
 - RNE can report incremental progress without claiming 1.0 readiness.
 - External evidence can be kept as a content-addressed pack outside the source
   checkout, including on removable storage.
 - No tag, release, support promise, or adoption claim is created by the tool.
+- Changing package metadata to 1.x cannot bypass the external-evidence audit.
 - Evidence authenticity and organizational independence still require human
   review; the tool verifies identities, structure, provenance, and bytes.
 - Changes to the readiness report require a registered schema transition and

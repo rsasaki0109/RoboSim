@@ -14,6 +14,12 @@ All notable changes to Robot Native Engine are documented in this file.
   compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
   The committed tracker and golden remain honestly ineligible at 1/9; no tag or
   1.0 claim is created.
+- **Fail-closed 1.x promotion interlock**: `release-check`, platform
+  `release-bundle`, and aggregate `release-exit` now require the complete
+  external evidence pack plus an explicit assessment date for any 1.x or later
+  version. Each path reruns the typed audit and writes a promotion report;
+  missing, malformed, tampered, or ineligible evidence stops the release before
+  packaging or publication. Normal 0.x development remains unchanged.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
   trees and the original blob. The installed compatibility runner decodes and

@@ -97,3 +97,12 @@ The Linux and Windows jobs feed the `release_candidate` aggregate. It runs
 the tested commit, Cargo.lock digest, clean-checkout status, required job
 results, and P0/P1 blocker decision. Tagged publication depends on this
 aggregate, so both native rehearsals and their attestation steps must pass.
+
+For any 1.x release, `release-check`, both platform `release-bundle` commands,
+and the aggregate `release-exit` additionally rerun the evidence-backed 1.0
+gate. `RNE_ONE_ZERO_READINESS_MANIFEST` points to the complete evidence pack
+and `RNE_ONE_ZERO_READINESS_AS_OF` supplies its explicit assessment date. The
+workflow must make that pack available to every release job and retain
+`artifacts/release-readiness/promotion-report.json`. Missing or ineligible
+evidence fails before packaging or the aggregate verdict. See
+[ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md).

@@ -1,6 +1,6 @@
 //! Machine-readable final exit matrix for the 1.0 RC.
 
-use super::{validate_blocker_registry, workspace_root, RELEASE_VERSION};
+use super::{release_readiness, validate_blocker_registry, workspace_root, RELEASE_VERSION};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -136,6 +136,7 @@ struct ExitGateEvidence {
 pub(crate) fn release_exit(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
     let options = parse_options(args)?;
+    release_readiness::enforce_release_promotion(&root)?;
     let matrix = read_and_validate_matrix(&root)?;
     let scope = matrix
         .scope
