@@ -18,7 +18,7 @@ change.
 
 ## Decision
 
-Add `xtask release-readiness` and a strict schema-v1 TOML tracker. The command
+Add `xtask release-readiness` and a strict versioned TOML tracker. The command
 requires an explicit `--as-of YYYY-MM-DD`, verifies typed source reports and
 their exact SHA-256 digests, and emits a fixed-order schema-v1 JSON report.
 Unmet facts are `not_met`; malformed or tampered supplied evidence is an error.
@@ -43,6 +43,14 @@ typed audit, writes a promotion report, and stops unless it is eligible. This
 guards the source, platform-package, and aggregate-publication paths instead of
 assuming one of them called another.
 
+Tracker schema v2 makes every external identity immutable by requiring its
+40-character source revision and rejects report-only certification. Controller
+reports are rebound to retained library and manifest bytes. Physics reports are
+rebound to the exact implementation artifact or source bundle. Hardware reports
+are rebound to the adapter, TaskSpec, normalized launch arguments, negotiated
+task identity, and flattened widths. These checks reuse the report's own
+content-addressed subject fields instead of trusting its aggregate verdict.
+
 ## Consequences
 
 - RNE can report incremental progress without claiming 1.0 readiness.
@@ -52,5 +60,7 @@ assuming one of them called another.
 - Changing package metadata to 1.x cannot bypass the external-evidence audit.
 - Evidence authenticity and organizational independence still require human
   review; the tool verifies identities, structure, provenance, and bytes.
+- A passing conformance JSON cannot be moved onto different plugin, backend, or
+  adapter bytes inside the readiness pack.
 - Changes to the readiness report require a registered schema transition and
   golden update.

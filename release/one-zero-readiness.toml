@@ -1,4 +1,6 @@
-schema_version = 1
+schema_version = 2
+# External conformance entries must retain their exact tested subjects; a
+# report-only entry is intentionally not representable in schema v2.
 release_version = "0.1.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183

@@ -118,6 +118,11 @@ tolerances in the kit, rejects capability overclaims, and binds Failure Capsule
 evidence to the exact implementation subject. The existing built-in comparison
 runner is retained as `rne_physics_conformance_suite`; independent third-party
 certification remains a v0.9 exit gate.
+Readiness manifest v2 now requires that future independent certification retain
+the exact tested subjects rather than only a passing JSON report. It binds
+controller libraries and manifests, physics implementation/source bundles, and
+hardware adapter bytes plus TaskSpec and normalized launch contract back to the
+report's content identity and external source revision.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
 corpus for twenty-four TaskSpec, checkpoint, generic/behavior/scenario replay,
 dataset, frontend, controller C ABI, historical migration, Failure Capsule,

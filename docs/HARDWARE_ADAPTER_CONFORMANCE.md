@@ -84,3 +84,10 @@ pass is reference evidence, not that external adoption claim.
 Failure Capsules recognize this report kind only when those exact adapter and
 TaskSpec bytes are included as evidence. The capsule verifier checks both
 subject hashes and the negotiated TaskSpec identity before accepting the set.
+
+Readiness manifest v2 also requires the exact adapter subject, TaskSpec,
+external repository URL, lowercase 40-character tested commit, and the
+normalized argument list hashed by the report. Use `"<adapter-subject>"` where
+the runner replaced an argument equal to the original subject path. The gate
+rechecks subject and task file names, byte sizes and hashes, argument order,
+task identity, and flattened observation/action widths.

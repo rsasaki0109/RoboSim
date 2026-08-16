@@ -10,10 +10,16 @@ use super::{
 use anyhow::{bail, Context};
 use rne_ai::TaskSpec;
 use rne_compatibility_suite::CompatibilityFixtureReport;
-use rne_hardware_gateway::conformance::HardwareAdapterConformanceReport;
+use rne_hardware_gateway::{
+    conformance::{
+        HardwareAdapterConformanceIdentity, HardwareAdapterConformanceReport,
+        HardwareAdapterConformanceSubject,
+    },
+    GatewayConfig, HardwareGateway,
+};
 use rne_log::FailureCapsule;
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
-use rne_plugin::ControllerPluginConformanceReport;
+use rne_plugin::{ControllerPluginConformanceReport, PluginKind, PluginManifest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -22,7 +28,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -37,6 +43,8 @@ const MINIMUM_STABILITY_DAYS: u32 = 183;
 const MINIMUM_EXTERNAL_PROJECTS: usize = 2;
 const MINIMUM_COMPATIBILITY_CHECKS: usize = 24;
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_ADAPTER_ARGUMENTS: usize = 128;
+const MAX_ADAPTER_ARGUMENT_BYTES: usize = 4_096;
 const CHECK_IDS: [&str; 9] = [
     "stability_window",
     "external_projects",
@@ -107,6 +115,7 @@ struct ExternalProjectEvidence {
     id: String,
     owner: String,
     repository: String,
+    revision: String,
     first_used_on: String,
     last_verified_on: String,
     author_assistance: bool,
@@ -120,6 +129,9 @@ struct ThirdPartyPluginEvidence {
     id: String,
     owner: String,
     repository: String,
+    revision: String,
+    library: EvidenceRef,
+    manifest: EvidenceRef,
     report: EvidenceRef,
 }
 
@@ -136,7 +148,13 @@ struct ExternalSystemEvidence {
     id: String,
     owner: String,
     repository: String,
+    revision: String,
     kind: ExternalSystemKind,
+    subject: EvidenceRef,
+    #[serde(default)]
+    task_spec: Option<EvidenceRef>,
+    #[serde(default)]
+    adapter_arguments: Vec<String>,
     report: EvidenceRef,
 }
 
@@ -706,14 +724,20 @@ fn evaluate(
         ),
         ReadinessCheck::new(
             CHECK_IDS[2],
-            !plugin_digests.is_empty(),
-            format!("verified_third_party_plugins={}", plugin_digests.len()),
+            !manifest.third_party_plugin.is_empty(),
+            format!(
+                "verified_third_party_plugins={}",
+                manifest.third_party_plugin.len()
+            ),
             plugin_digests,
         ),
         ReadinessCheck::new(
             CHECK_IDS[3],
-            !system_digests.is_empty(),
-            format!("verified_external_systems={}", system_digests.len()),
+            !manifest.external_system.is_empty(),
+            format!(
+                "verified_external_systems={}",
+                manifest.external_system.len()
+            ),
             system_digests,
         ),
         ReadinessCheck::new(
@@ -793,12 +817,14 @@ fn verify_external_projects(
     let mut capsules = BTreeSet::new();
     let mut projects = Vec::new();
     for entry in &manifest.external_project {
+        validate_identifier("external project id", &entry.id)?;
         validate_external_owner(
             &manifest.project_owner,
             &entry.owner,
             &entry.repository,
             "external project",
         )?;
+        validate_external_revision("external project", &entry.id, &entry.revision)?;
         anyhow::ensure!(
             !entry.author_assistance,
             "external project {} required repository-author assistance",
@@ -858,17 +884,45 @@ fn verify_third_party_plugins(
     evidence_root: &Path,
     manifest: &ReadinessManifest,
 ) -> anyhow::Result<Vec<String>> {
+    let mut ids = BTreeSet::new();
+    let mut repositories = BTreeSet::new();
+    let mut subjects = BTreeSet::<String>::new();
     let mut digests = Vec::new();
     for entry in &manifest.third_party_plugin {
+        validate_identifier("third-party plugin id", &entry.id)?;
+        anyhow::ensure!(
+            ids.insert(entry.id.as_str()),
+            "third-party plugin id is duplicated: {}",
+            entry.id
+        );
         validate_external_owner(
             &manifest.project_owner,
             &entry.owner,
             &entry.repository,
             "third-party plugin",
         )?;
-        let evidence = verify_evidence(evidence_root, &entry.report)?;
-        let report: ControllerPluginConformanceReport = serde_json::from_slice(&evidence.bytes)
-            .with_context(|| format!("parse third-party plugin {} report", entry.id))?;
+        validate_external_revision("third-party plugin", &entry.id, &entry.revision)?;
+        anyhow::ensure!(
+            repositories.insert(entry.repository.as_str()),
+            "third-party plugin repository is duplicated: {}",
+            entry.repository
+        );
+        let library = verify_evidence(evidence_root, &entry.library)?;
+        let manifest_evidence = verify_evidence(evidence_root, &entry.manifest)?;
+        let report_evidence = verify_evidence(evidence_root, &entry.report)?;
+        let plugin_manifest: PluginManifest = serde_json::from_slice(&manifest_evidence.bytes)
+            .with_context(|| format!("parse third-party plugin {} manifest", entry.id))?;
+        plugin_manifest
+            .validate()
+            .with_context(|| format!("validate third-party plugin {} manifest", entry.id))?;
+        anyhow::ensure!(
+            plugin_manifest.kind == PluginKind::Controller,
+            "third-party plugin {} is not a controller plugin",
+            entry.id
+        );
+        let report: ControllerPluginConformanceReport =
+            serde_json::from_slice(&report_evidence.bytes)
+                .with_context(|| format!("parse third-party plugin {} report", entry.id))?;
         report
             .validate()
             .with_context(|| format!("validate third-party plugin {} report", entry.id))?;
@@ -877,7 +931,39 @@ fn verify_third_party_plugins(
             "third-party plugin {} did not pass conformance",
             entry.id
         );
-        digests.push(evidence.sha256);
+        verify_unprefixed_subject(
+            "controller plugin library",
+            &library,
+            &report.subject.library_file,
+            &report.subject.library_sha256,
+            Some(report.subject.library_size_bytes),
+        )?;
+        verify_unprefixed_subject(
+            "controller plugin manifest",
+            &manifest_evidence,
+            &report.subject.manifest_file,
+            &report.subject.manifest_sha256,
+            None,
+        )?;
+        let controller = report
+            .controller
+            .as_ref()
+            .context("passing controller plugin report omitted its identity")?;
+        anyhow::ensure!(
+            controller.name == plugin_manifest.name,
+            "third-party plugin {} manifest and negotiated names differ",
+            entry.id
+        );
+        anyhow::ensure!(
+            subjects.insert(library.sha256.clone()),
+            "third-party plugin subject is duplicated: {}",
+            entry.library.path
+        );
+        digests.extend([
+            library.sha256,
+            manifest_evidence.sha256,
+            report_evidence.sha256,
+        ]);
     }
     Ok(digests)
 }
@@ -886,19 +972,40 @@ fn verify_external_systems(
     evidence_root: &Path,
     manifest: &ReadinessManifest,
 ) -> anyhow::Result<Vec<String>> {
+    let mut ids = BTreeSet::new();
+    let mut repositories = BTreeSet::new();
+    let mut subjects = BTreeSet::<String>::new();
     let mut digests = Vec::new();
     for entry in &manifest.external_system {
+        validate_identifier("external system id", &entry.id)?;
+        anyhow::ensure!(
+            ids.insert(entry.id.as_str()),
+            "external system id is duplicated: {}",
+            entry.id
+        );
         validate_external_owner(
             &manifest.project_owner,
             &entry.owner,
             &entry.repository,
             "external system",
         )?;
-        let evidence = verify_evidence(evidence_root, &entry.report)?;
+        validate_external_revision("external system", &entry.id, &entry.revision)?;
+        anyhow::ensure!(
+            repositories.insert(entry.repository.as_str()),
+            "external system repository is duplicated: {}",
+            entry.repository
+        );
+        let subject = verify_evidence(evidence_root, &entry.subject)?;
+        let report_evidence = verify_evidence(evidence_root, &entry.report)?;
         match entry.kind {
             ExternalSystemKind::PhysicsBackend => {
+                anyhow::ensure!(
+                    entry.task_spec.is_none() && entry.adapter_arguments.is_empty(),
+                    "external physics backend {} must not declare adapter-only evidence",
+                    entry.id
+                );
                 let report: ExternalPhysicsBackendConformanceReport =
-                    serde_json::from_slice(&evidence.bytes).with_context(|| {
+                    serde_json::from_slice(&report_evidence.bytes).with_context(|| {
                         format!("parse external physics backend {} report", entry.id)
                     })?;
                 report.validate().with_context(|| {
@@ -909,10 +1016,31 @@ fn verify_external_systems(
                     "external physics backend {} did not pass conformance",
                     entry.id
                 );
+                verify_prefixed_subject(
+                    "external physics backend subject",
+                    &subject,
+                    &report.subject.label,
+                    &report.subject.sha256,
+                )?;
+                digests.extend([subject.sha256.clone(), report_evidence.sha256.clone()]);
             }
             ExternalSystemKind::HardwareAdapter => {
+                let task_reference = entry.task_spec.as_ref().with_context(|| {
+                    format!(
+                        "external hardware adapter {} omitted its exact TaskSpec",
+                        entry.id
+                    )
+                })?;
+                let task = verify_evidence(evidence_root, task_reference)?;
+                let task_spec: TaskSpec =
+                    serde_json::from_slice(&task.bytes).with_context(|| {
+                        format!("parse external hardware adapter {} TaskSpec", entry.id)
+                    })?;
+                task_spec.validate().with_context(|| {
+                    format!("validate external hardware adapter {} TaskSpec", entry.id)
+                })?;
                 let report: HardwareAdapterConformanceReport =
-                    serde_json::from_slice(&evidence.bytes).with_context(|| {
+                    serde_json::from_slice(&report_evidence.bytes).with_context(|| {
                         format!("parse external hardware adapter {} report", entry.id)
                     })?;
                 report.validate().with_context(|| {
@@ -923,11 +1051,139 @@ fn verify_external_systems(
                     "external hardware adapter {} did not pass conformance",
                     entry.id
                 );
+                verify_unprefixed_subject(
+                    "external hardware adapter subject",
+                    &subject,
+                    &report.subject.adapter_file,
+                    &report.subject.adapter_sha256,
+                    Some(report.subject.adapter_size_bytes),
+                )?;
+                verify_unprefixed_subject(
+                    "external hardware adapter TaskSpec",
+                    &task,
+                    &report.subject.task_file,
+                    &report.subject.task_sha256,
+                    None,
+                )?;
+                verify_adapter_arguments(&entry.adapter_arguments, &report.subject)?;
+                let identity = report
+                    .adapter
+                    .as_ref()
+                    .context("passing hardware adapter report omitted its identity")?;
+                verify_hardware_task_identity(&entry.id, &task_spec, identity)?;
+                digests.extend([
+                    subject.sha256.clone(),
+                    task.sha256,
+                    report_evidence.sha256.clone(),
+                ]);
             }
         }
-        digests.push(evidence.sha256);
+        anyhow::ensure!(
+            subjects.insert(subject.sha256.clone()),
+            "external system subject is duplicated: {}",
+            entry.subject.path
+        );
     }
     Ok(digests)
+}
+
+fn verify_unprefixed_subject(
+    label: &str,
+    evidence: &VerifiedEvidence,
+    expected_file: &str,
+    expected_sha256: &str,
+    expected_size_bytes: Option<u64>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        expected_sha256 == evidence_sha256_hex(evidence)?,
+        "{label} SHA-256 does not match the conformance report"
+    );
+    anyhow::ensure!(
+        expected_file == evidence_file_name(evidence)?,
+        "{label} file name does not match the conformance report"
+    );
+    if let Some(expected_size_bytes) = expected_size_bytes {
+        anyhow::ensure!(
+            expected_size_bytes == u64::try_from(evidence.bytes.len())?,
+            "{label} size does not match the conformance report"
+        );
+    }
+    Ok(())
+}
+
+fn verify_prefixed_subject(
+    label: &str,
+    evidence: &VerifiedEvidence,
+    expected_file: &str,
+    expected_sha256: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        expected_sha256 == evidence.sha256,
+        "{label} SHA-256 does not match the conformance report"
+    );
+    anyhow::ensure!(
+        expected_file == evidence_file_name(evidence)?,
+        "{label} file name does not match the conformance report"
+    );
+    Ok(())
+}
+
+fn verify_adapter_arguments(
+    arguments: &[String],
+    subject: &HardwareAdapterConformanceSubject,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        arguments.len() <= MAX_ADAPTER_ARGUMENTS,
+        "external hardware adapter launch contract exceeds {MAX_ADAPTER_ARGUMENTS} arguments"
+    );
+    for (index, argument) in arguments.iter().enumerate() {
+        anyhow::ensure!(
+            argument.len() <= MAX_ADAPTER_ARGUMENT_BYTES && !argument.chars().any(char::is_control),
+            "external hardware adapter argument {index} is not bounded printable text"
+        );
+    }
+    let bytes = serde_json::to_vec(arguments).context("serialize adapter launch arguments")?;
+    let digest = sha256_prefixed(&bytes);
+    anyhow::ensure!(
+        subject.argument_count == arguments.len()
+            && subject.arguments_sha256 == digest["sha256:".len()..],
+        "external hardware adapter launch arguments do not match the conformance report"
+    );
+    Ok(())
+}
+
+fn verify_hardware_task_identity(
+    id: &str,
+    task_spec: &TaskSpec,
+    identity: &HardwareAdapterConformanceIdentity,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        identity.task_id == task_spec.task_id,
+        "external hardware adapter {id} negotiated the wrong TaskSpec identity"
+    );
+    let gateway = HardwareGateway::new(task_spec.clone(), GatewayConfig::default())
+        .with_context(|| format!("construct external hardware adapter {id} TaskSpec"))?;
+    anyhow::ensure!(
+        identity.observation_width == gateway.observation_width()
+            && identity.action_width == gateway.action_width(),
+        "external hardware adapter {id} negotiated TaskSpec widths that do not match the retained TaskSpec"
+    );
+    Ok(())
+}
+
+fn evidence_sha256_hex(evidence: &VerifiedEvidence) -> anyhow::Result<&str> {
+    evidence
+        .sha256
+        .strip_prefix("sha256:")
+        .context("verified evidence SHA-256 is not canonical")
+}
+
+fn evidence_file_name(evidence: &VerifiedEvidence) -> anyhow::Result<&str> {
+    evidence
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("verified evidence file name is not valid Unicode")
 }
 
 fn verify_reference_hardware(
@@ -1256,6 +1512,14 @@ fn validate_external_owner(
     Ok(())
 }
 
+fn validate_external_revision(label: &str, id: &str, revision: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        is_git_object_id(revision),
+        "{label} {id} revision must be a lowercase 40-character Git ID"
+    );
+    Ok(())
+}
+
 fn validate_identifier(field: &str, value: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         !value.trim().is_empty() && value.len() <= 128 && !value.chars().any(char::is_control),
@@ -1420,6 +1684,162 @@ mod tests {
             sha256: format!("sha256:{}", "0".repeat(64)),
         };
         assert!(verify_evidence(temp.path(), &escape).is_err());
+    }
+
+    #[test]
+    fn external_conformance_subjects_bind_exact_retained_bytes() {
+        let bytes = b"independently built subject v1".to_vec();
+        let sha256 = sha256_prefixed(&bytes);
+        let evidence = VerifiedEvidence {
+            path: PathBuf::from("external-controller.dll"),
+            sha256: sha256.clone(),
+            bytes,
+        };
+        verify_unprefixed_subject(
+            "plugin",
+            &evidence,
+            "external-controller.dll",
+            &sha256["sha256:".len()..],
+            Some(evidence.bytes.len() as u64),
+        )
+        .unwrap();
+        verify_prefixed_subject("backend", &evidence, "external-controller.dll", &sha256).unwrap();
+
+        assert!(verify_unprefixed_subject(
+            "plugin",
+            &evidence,
+            "swapped-controller.dll",
+            &sha256["sha256:".len()..],
+            Some(evidence.bytes.len() as u64),
+        )
+        .is_err());
+        assert!(verify_unprefixed_subject(
+            "plugin",
+            &evidence,
+            "external-controller.dll",
+            &"0".repeat(64),
+            Some(evidence.bytes.len() as u64),
+        )
+        .is_err());
+        assert!(verify_unprefixed_subject(
+            "plugin",
+            &evidence,
+            "external-controller.dll",
+            &sha256["sha256:".len()..],
+            Some(evidence.bytes.len() as u64 + 1),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn external_adapter_launch_contract_is_canonical_and_bounded() {
+        let arguments = vec![
+            "<adapter-subject>".to_string(),
+            "--device-id".to_string(),
+            "third-party-v1".to_string(),
+        ];
+        let digest = sha256_prefixed(&serde_json::to_vec(&arguments).unwrap());
+        let subject = HardwareAdapterConformanceSubject {
+            adapter_file: "adapter.py".to_string(),
+            adapter_sha256: "a".repeat(64),
+            adapter_size_bytes: 42,
+            launcher_file: "python".to_string(),
+            arguments_sha256: digest["sha256:".len()..].to_string(),
+            argument_count: arguments.len(),
+            task_file: "task.json".to_string(),
+            task_sha256: "b".repeat(64),
+        };
+        verify_adapter_arguments(&arguments, &subject).unwrap();
+
+        let mut reordered = arguments.clone();
+        reordered.swap(1, 2);
+        assert!(verify_adapter_arguments(&reordered, &subject).is_err());
+        assert!(verify_adapter_arguments(&arguments[..2], &subject).is_err());
+        let control = vec!["bad\nargument".to_string()];
+        assert!(verify_adapter_arguments(&control, &subject).is_err());
+        let oversized = vec!["x".repeat(MAX_ADAPTER_ARGUMENT_BYTES + 1)];
+        assert!(verify_adapter_arguments(&oversized, &subject).is_err());
+
+        let task: TaskSpec =
+            serde_json::from_str(include_str!("../../tests/golden/tasks/task-spec-v1.json"))
+                .unwrap();
+        let gateway = HardwareGateway::new(task.clone(), GatewayConfig::default()).unwrap();
+        let identity = HardwareAdapterConformanceIdentity {
+            device_id: "third-party-v1".to_string(),
+            task_id: task.task_id.clone(),
+            wire_schema_version: 1,
+            observation_width: gateway.observation_width(),
+            action_width: gateway.action_width(),
+        };
+        verify_hardware_task_identity("adapter", &task, &identity).unwrap();
+        let mut wrong_task = identity.clone();
+        wrong_task.task_id = "wrong.task".to_string();
+        assert!(verify_hardware_task_identity("adapter", &task, &wrong_task).is_err());
+        let mut wrong_width = identity;
+        wrong_width.action_width += 1;
+        assert!(verify_hardware_task_identity("adapter", &task, &wrong_width).is_err());
+    }
+
+    #[test]
+    fn external_physics_report_is_rebound_to_its_retained_subject() {
+        let temp = tempfile::tempdir().unwrap();
+        let subject_name = "reference-external-backend-source.tar.zst";
+        let report_name = "external-physics-report.json";
+        let subject_bytes = b"reference external backend source bundle v1";
+        let report_bytes = include_bytes!(
+            "../../crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json"
+        );
+        fs::write(temp.path().join(subject_name), subject_bytes).unwrap();
+        fs::write(temp.path().join(report_name), report_bytes).unwrap();
+
+        let manifest_text = format!(
+            r#"
+schema_version = 2
+release_version = "0.1.0"
+project_owner = "project-owner"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 24
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+
+[candidate]
+revision = "0000000000000000000000000000000000000000"
+tree = "0000000000000000000000000000000000000000"
+since = "2026-08-15"
+
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""
+
+[[external_system]]
+id = "external-physics"
+owner = "external-owner"
+repository = "https://example.invalid/physics"
+revision = "1111111111111111111111111111111111111111"
+kind = "physics_backend"
+subject = {{ path = "{subject_name}", sha256 = "{}" }}
+report = {{ path = "{report_name}", sha256 = "{}" }}
+"#,
+            sha256_prefixed(subject_bytes),
+            sha256_prefixed(report_bytes),
+        );
+        let mut manifest: ReadinessManifest = toml::from_str(&manifest_text).unwrap();
+        assert_eq!(
+            verify_external_systems(temp.path(), &manifest).unwrap(),
+            vec![
+                sha256_prefixed(subject_bytes),
+                sha256_prefixed(report_bytes)
+            ]
+        );
+
+        let swapped = b"different backend implementation";
+        fs::write(temp.path().join(subject_name), swapped).unwrap();
+        manifest.external_system[0].subject.sha256 = sha256_prefixed(swapped);
+        assert!(verify_external_systems(temp.path(), &manifest).is_err());
     }
 
     #[test]
@@ -1641,7 +2061,7 @@ mod tests {
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 1
+schema_version = 2
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -1662,6 +2082,39 @@ committed = false
 maintainer = ""
 support_period = ""
 policy_url = ""
+"#;
+        assert!(toml::from_str::<ReadinessManifest>(manifest).is_err());
+    }
+
+    #[test]
+    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v2() {
+        let manifest = r#"
+schema_version = 2
+release_version = "0.1.0"
+project_owner = "project-owner"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 24
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+
+[candidate]
+revision = "0000000000000000000000000000000000000000"
+tree = "0000000000000000000000000000000000000000"
+since = "2026-08-15"
+
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""
+
+[[third_party_plugin]]
+id = "unbound-plugin"
+owner = "external-owner"
+repository = "https://example.invalid/plugin"
+report = { path = "plugin/report.json", sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
 "#;
         assert!(toml::from_str::<ReadinessManifest>(manifest).is_err());
     }

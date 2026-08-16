@@ -43,16 +43,17 @@ stars.
 |---|---|
 | `stability_window` | At least 183 calendar days since the immutable Rust API baseline, at least 183 days of observed external-project use, and zero declared unplanned breaks |
 | `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with a valid TaskSpec and fully verifiable Failure Capsule produced without repository-author assistance |
-| `third_party_plugin` | At least one externally owned controller plugin with a passing typed conformance report |
-| `external_system` | At least one externally owned physics backend or hardware adapter with a passing typed conformance report |
+| `third_party_plugin` | At least one externally owned controller plugin whose passing typed report is rebound to the exact retained library and manifest bytes |
+| `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives, retained Sigstore bundles, freshly reproduced strict verification receipts, release reports, and nine-check installed rehearsals from the same clean tagged revision |
 | `historical_compatibility` | A passing report for the exact committed compatibility registry with at least 24 distinct checks and fail-closed future/unknown-field cases |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, support period, and HTTPS policy are explicitly committed |
 
-The report and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_report = 1` and
+The manifest, report, and attestation receipt schemas are registered as
+`evidence.one_zero_readiness_manifest = 2`,
+`evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The report check order is fixed and a committed golden captures the current
 honest baseline. `manifest_sha256` binds the complete normalized input,
@@ -74,6 +75,7 @@ compatibility_report = { path = "compatibility/report.json", sha256 = "sha256:<6
 id = "independent-project-a"
 owner = "external-owner"
 repository = "https://example.invalid/project-a"
+revision = "<40-lowercase-hex-commit>"
 first_used_on = "2026-08-16"
 last_verified_on = "2027-02-15"
 author_assistance = false
@@ -84,15 +86,45 @@ failure_capsule = { path = "projects/a/capsule/capsule.json", sha256 = "sha256:<
 id = "external-controller"
 owner = "external-owner"
 repository = "https://example.invalid/controller"
+revision = "<40-lowercase-hex-commit>"
+library = { path = "plugins/external-controller.dll", sha256 = "sha256:<64-lowercase-hex>" }
+manifest = { path = "plugins/rne-plugin.json", sha256 = "sha256:<64-lowercase-hex>" }
 report = { path = "plugins/controller-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[external_system]]
 id = "external-physics"
 owner = "external-owner"
 repository = "https://example.invalid/physics"
-kind = "physics_backend" # or "hardware_adapter"
+revision = "<40-lowercase-hex-commit>"
+kind = "physics_backend"
+subject = { path = "systems/physics-source.tar.zst", sha256 = "sha256:<64-lowercase-hex>" }
 report = { path = "systems/physics-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
+[[external_system]]
+id = "external-hardware"
+owner = "external-owner"
+repository = "https://example.invalid/hardware"
+revision = "<40-lowercase-hex-commit>"
+kind = "hardware_adapter"
+subject = { path = "systems/adapter.py", sha256 = "sha256:<64-lowercase-hex>" }
+task_spec = { path = "systems/task.json", sha256 = "sha256:<64-lowercase-hex>" }
+# Exact normalized list hashed by the report. An argument equal to the adapter
+# subject path is represented by the runner as "<adapter-subject>".
+adapter_arguments = ["<adapter-subject>", "--sandbox", "isolated-v1"]
+report = { path = "systems/hardware-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 ```
+
+Manifest v2 rejects report-only external certification. Plugin verification
+rehashes the retained library and manifest, compares their file names and the
+library size, validates the plugin manifest, and requires its name to equal the
+negotiated controller identity. Physics verification rehashes the exact
+implementation artifact or deterministic source bundle named by the report.
+Hardware verification additionally rehashes and validates the TaskSpec,
+recomputes the normalized argument-list digest, and checks the negotiated task
+identity and flattened observation/action widths. External repository commits
+are fixed as lowercase 40-character revisions. Remote repository ownership and
+the social fact of independence still require human review; exact subject
+binding cannot turn an in-repository reference into third-party adoption.
 
 Each `platform_release` also declares `platform`, `revision`, and `tag`, then
 references `archive`, `attestation`, `attestation_verification`,

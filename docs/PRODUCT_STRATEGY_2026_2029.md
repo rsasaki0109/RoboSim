@@ -374,6 +374,15 @@ claims fail closed until portable vectors exist. Failure Capsules require the
 exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
+The readiness tracker's v2 external-certification contract closes the final
+report-substitution gap before real outreach: each independent source revision
+must retain the exact controller library and manifest, physics implementation
+or source bundle, or hardware adapter plus TaskSpec and normalized launch
+arguments. The gate rehashes those subjects and compares file identity, size,
+task identity, and dimensions to the passing report. Human review still proves
+ownership and independence; the machine gate proves the accepted report belongs
+to the preserved implementation bytes.
+
 The expanded v0.9 compatibility slice turns retained artifacts into an
 executable installed contract. A strict registry content-addresses twenty-four
 TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,

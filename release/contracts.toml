@@ -89,6 +89,7 @@ release_report = 1
 install_rehearsal_report = 4
 final_exit_report = 1
 one_zero_readiness_report = 1
+one_zero_readiness_manifest = 2
 github_attestation_verification = 1
 compatibility_fixture_report = 1
 historical_compatibility_decision = 1

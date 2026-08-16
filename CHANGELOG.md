@@ -26,6 +26,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `gh attestation verify` with the repository, workflow certificate identity,
   tag, source and signer commit, issuer, SLSA predicate, runner policy, and
   archive digest pinned, then requires an exact strict schema-v1 receipt.
+- **Subject-bound external certification evidence**: readiness manifest v2
+  requires immutable external revisions and retains the exact controller
+  library/manifest, physics implementation bundle, or hardware adapter,
+  TaskSpec, and normalized launch arguments. The gate rehashes those bytes and
+  matches report file names, sizes, digests, negotiated task identity, and
+  observation/action widths, so a passing report cannot be relabelled onto a
+  different implementation. Installed bundles now carry all three external
+  conformance authoring guides beside the SDKs and runners.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
   trees and the original blob. The installed compatibility runner decodes and

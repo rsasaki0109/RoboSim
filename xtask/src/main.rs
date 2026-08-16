@@ -1510,6 +1510,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "one_zero_readiness_manifest",
+            u64::from(release_readiness::MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
             "github_attestation_verification",
             u64::from(release_readiness::ATTESTATION_RECEIPT_SCHEMA_VERSION),
         ),

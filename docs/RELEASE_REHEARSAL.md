@@ -10,7 +10,8 @@ The bundle contains the CLI, standalone physics, hardware-adapter,
 compatibility, and scenario-scale conformance binaries, the fixed-binding
 hardware process mock,
 the reference controller shared library, dependency-free Rust and C plugin SDKs,
-compatibility and install documentation, locked dependency SBOM,
+plugin/physics/hardware external-conformance guides, compatibility and install
+documentation, locked dependency SBOM,
 artifact-attestation policy, Rust API baseline, Python API manifest, replay
 fixtures, provenance report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter

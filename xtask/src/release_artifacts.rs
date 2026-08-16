@@ -46,7 +46,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 52] = [
+const BUNDLE_FILES: [(&str, &str); 55] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -54,6 +54,15 @@ const BUNDLE_FILES: [(&str, &str); 52] = [
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
     ("docs/ONE_ZERO_READINESS.md", "ONE_ZERO_READINESS.md"),
+    ("docs/PLUGIN_SDK.md", "docs/PLUGIN_SDK.md"),
+    (
+        "docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
+        "docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
+    ),
+    (
+        "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
+        "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
+    ),
     (
         "crates/rne_plugin_sdk/src/abi.rs",
         "sdk/rust/rne_plugin_sdk.rs",
@@ -1569,6 +1578,16 @@ mod tests {
             fs::read(output.path().join("ONE_ZERO_READINESS.md")).unwrap(),
             fs::read(root.join("docs/ONE_ZERO_READINESS.md")).unwrap()
         );
+        for guide in [
+            "PLUGIN_SDK.md",
+            "EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
+            "HARDWARE_ADAPTER_CONFORMANCE.md",
+        ] {
+            assert_eq!(
+                fs::read(output.path().join("docs").join(guide)).unwrap(),
+                fs::read(root.join("docs").join(guide)).unwrap()
+            );
+        }
     }
 
     #[test]

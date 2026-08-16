@@ -101,3 +101,9 @@ The committed golden shape is
 `crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json`.
 The in-repository reference proves the public author workflow; it is not the
 independent third-party certification required for RNE 1.0.
+
+The eventual readiness pack must retain the exact subject bytes named by the
+report—normally the independently built implementation artifact or deterministic
+source bundle—plus the external repository URL and lowercase 40-character
+tested commit. Manifest v2 rehashes the subject and requires its file label to
+match; a copied passing report without those bytes fails closed.

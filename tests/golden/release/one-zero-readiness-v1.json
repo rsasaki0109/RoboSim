@@ -1,7 +1,7 @@
 {
   "kind": "rne_one_zero_readiness_report",
   "schema_version": 1,
-  "manifest_sha256": "sha256:61f134d48e0789ac036395dc670e5897134b7925385188c721696dd57bf9dbdf",
+  "manifest_sha256": "sha256:41edd02c9a1e52e6290f56a98ac3f92ef254a0ab328be58ca503416e094aebdd",
   "release_version": "0.1.0",
   "as_of": "2026-08-16",
   "candidate_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
