@@ -46,13 +46,14 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 50] = [
+const BUNDLE_FILES: [(&str, &str); 52] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
     ("LICENSE-APACHE", "LICENSE-APACHE"),
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
+    ("docs/ONE_ZERO_READINESS.md", "ONE_ZERO_READINESS.md"),
     (
         "crates/rne_plugin_sdk/src/abi.rs",
         "sdk/rust/rne_plugin_sdk.rs",
@@ -62,6 +63,10 @@ const BUNDLE_FILES: [(&str, &str); 50] = [
         "sdk/c/rne_plugin_sdk.h",
     ),
     ("release/blockers.toml", "release/blockers.toml"),
+    (
+        "release/one-zero-readiness.toml",
+        "release/one-zero-readiness.toml",
+    ),
     ("release/exit-matrix.toml", "release/exit-matrix.toml"),
     (
         "release/compatibility-fixtures.toml",
@@ -244,6 +249,7 @@ struct InstallOptions {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct MemberDigest {
     path: String,
     size_bytes: u64,
@@ -251,6 +257,7 @@ struct MemberDigest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct AuditVerdicts {
     cargo_deny: String,
     cargo_audit: String,
@@ -259,12 +266,14 @@ struct AuditVerdicts {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct InstallCheck {
     id: String,
     status: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct InstallRehearsalReport {
     schema_version: u32,
     release_version: String,
@@ -293,6 +302,7 @@ impl InstallRehearsalReport {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ReleaseReport {
     schema_version: u32,
     release_version: String,
@@ -310,6 +320,90 @@ struct ReleaseReport {
     contracts: serde_json::Value,
     flagship_workflows: BTreeMap<String, String>,
     members: Vec<MemberDigest>,
+}
+
+/// Validates the two reports retained for one independently reproduced release artifact.
+pub(crate) fn validate_readiness_release_reports(
+    release_report_path: &Path,
+    install_report_path: &Path,
+    expected_target: &str,
+    expected_commit: &str,
+    expected_tag: &str,
+) -> anyhow::Result<()> {
+    let release: ReleaseReport = serde_json::from_slice(
+        &fs::read(release_report_path)
+            .with_context(|| format!("read {}", release_report_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", release_report_path.display()))?;
+    anyhow::ensure!(
+        release.schema_version == RELEASE_REPORT_SCHEMA_VERSION,
+        "readiness release report schema must be {RELEASE_REPORT_SCHEMA_VERSION}"
+    );
+    anyhow::ensure!(
+        release.release_version == RELEASE_VERSION,
+        "readiness release report version must be {RELEASE_VERSION}"
+    );
+    anyhow::ensure!(
+        release.target == expected_target,
+        "readiness release target mismatch: expected {expected_target}, got {}",
+        release.target
+    );
+    anyhow::ensure!(
+        release.git_commit == expected_commit,
+        "readiness release commit mismatch: expected {expected_commit}, got {}",
+        release.git_commit
+    );
+    anyhow::ensure!(
+        release.clean_worktree
+            && release.expected_tag.as_deref() == Some(expected_tag)
+            && release.tag_matches_commit
+            && release.reproducible,
+        "readiness release report must come from a clean, matching tag and be reproducible"
+    );
+    anyhow::ensure!(
+        [
+            release.audit.cargo_deny.as_str(),
+            release.audit.cargo_audit.as_str(),
+            release.audit.source_policy.as_str(),
+            release.audit.license_policy.as_str(),
+        ]
+        .into_iter()
+        .all(|status| status == "passed"),
+        "readiness release report supply-chain verdicts must all pass"
+    );
+    anyhow::ensure!(
+        release.flagship_workflows.len() == INSTALL_CHECK_IDS.len()
+            && INSTALL_CHECK_IDS.iter().all(|id| {
+                release
+                    .flagship_workflows
+                    .get(*id)
+                    .is_some_and(|status| status == "passed")
+            }),
+        "readiness release report must retain all nine passing installed workflows"
+    );
+    anyhow::ensure!(
+        !release.members.is_empty(),
+        "readiness release report must bind bundle members"
+    );
+
+    let install: InstallRehearsalReport = serde_json::from_slice(
+        &fs::read(install_report_path)
+            .with_context(|| format!("read {}", install_report_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", install_report_path.display()))?;
+    anyhow::ensure!(
+        install.schema_version == INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+        "readiness install report schema must be {INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION}"
+    );
+    anyhow::ensure!(
+        install.release_version == RELEASE_VERSION && install.target == expected_target,
+        "readiness install report version or target mismatch"
+    );
+    anyhow::ensure!(
+        install.all_passed(),
+        "readiness install report must pass all nine canonical checks"
+    );
+    Ok(())
 }
 
 /// Builds and stages one native release bundle, including wheel and provenance evidence.
@@ -1459,5 +1553,85 @@ mod tests {
         let mut duplicated = report;
         duplicated.checks[7].id = "robot_replay".to_string();
         assert!(!duplicated.all_passed());
+    }
+
+    #[test]
+    fn readiness_static_contract_is_staged_in_release_bundles() {
+        let root = workspace_root().expect("workspace root");
+        let output = tempfile::tempdir().expect("temporary bundle");
+        stage_static_files(&root, output.path()).expect("stage bundle files");
+        assert_eq!(
+            fs::read(output.path().join("release/one-zero-readiness.toml")).unwrap(),
+            fs::read(root.join("release/one-zero-readiness.toml")).unwrap()
+        );
+        assert_eq!(
+            fs::read(output.path().join("ONE_ZERO_READINESS.md")).unwrap(),
+            fs::read(root.join("docs/ONE_ZERO_READINESS.md")).unwrap()
+        );
+    }
+
+    #[test]
+    fn readiness_release_reports_require_the_exact_tag_and_workflows() {
+        let directory = tempfile::tempdir().expect("temporary reports");
+        let release_path = directory.path().join("release.json");
+        let install_path = directory.path().join("install.json");
+        let revision = "1".repeat(40);
+        let tag = "v0.1.0-rc.1";
+        let workflows = INSTALL_CHECK_IDS
+            .into_iter()
+            .map(|id| (id.to_string(), "passed".to_string()))
+            .collect();
+        let release = ReleaseReport {
+            schema_version: RELEASE_REPORT_SCHEMA_VERSION,
+            release_version: RELEASE_VERSION.to_string(),
+            git_commit: revision.clone(),
+            target: "x86_64-pc-windows-msvc".to_string(),
+            rustc_version: "rustc-test".to_string(),
+            cargo_version: "cargo-test".to_string(),
+            cargo_lock_sha256: "0".repeat(64),
+            clean_worktree: true,
+            expected_tag: Some(tag.to_string()),
+            tag_matches_commit: true,
+            reproducible: true,
+            audit: AuditVerdicts {
+                cargo_deny: "passed".to_string(),
+                cargo_audit: "passed".to_string(),
+                source_policy: "passed".to_string(),
+                license_policy: "passed".to_string(),
+            },
+            fuzz_campaign_digest_sha256: "0".repeat(64),
+            contracts: serde_json::json!({}),
+            flagship_workflows: workflows,
+            members: vec![MemberDigest {
+                path: "README.md".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            }],
+        };
+        let install = InstallRehearsalReport {
+            schema_version: INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+            release_version: RELEASE_VERSION.to_string(),
+            target: "x86_64-pc-windows-msvc".to_string(),
+            status: "passed".to_string(),
+            checks: INSTALL_CHECK_IDS.map(|id| check(id, true)).to_vec(),
+        };
+        write_pretty_json(&release_path, &release).unwrap();
+        write_pretty_json(&install_path, &install).unwrap();
+        validate_readiness_release_reports(
+            &release_path,
+            &install_path,
+            "x86_64-pc-windows-msvc",
+            &revision,
+            tag,
+        )
+        .unwrap();
+        assert!(validate_readiness_release_reports(
+            &release_path,
+            &install_path,
+            "x86_64-pc-windows-msvc",
+            &revision,
+            "v0.1.0-rc.2",
+        )
+        .is_err());
     }
 }

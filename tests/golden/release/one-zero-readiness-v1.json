@@ -1,0 +1,71 @@
+{
+  "kind": "rne_one_zero_readiness_report",
+  "schema_version": 1,
+  "manifest_sha256": "sha256:61f134d48e0789ac036395dc670e5897134b7925385188c721696dd57bf9dbdf",
+  "release_version": "0.1.0",
+  "as_of": "2026-08-16",
+  "candidate_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+  "candidate_tree": "1fa3646facf095431b014bc394e8a6934a549f20",
+  "candidate_since": "2026-08-15",
+  "calendar_stability_days": 1,
+  "observed_external_use_days": 0,
+  "eligible": false,
+  "checks": [
+    {
+      "id": "stability_window",
+      "status": "not_met",
+      "detail": "calendar=1/183, observed_external_use=0/183, unplanned_breaking_changes=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "external_projects",
+      "status": "not_met",
+      "detail": "verified_external_projects=0/2",
+      "evidence_sha256": []
+    },
+    {
+      "id": "third_party_plugin",
+      "status": "not_met",
+      "detail": "verified_third_party_plugins=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "external_system",
+      "status": "not_met",
+      "detail": "verified_external_systems=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "reference_hardware",
+      "status": "not_met",
+      "detail": "verified_reference_hardware_runs=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "release_artifacts",
+      "status": "not_met",
+      "detail": "verified_platform_releases=0/2",
+      "evidence_sha256": []
+    },
+    {
+      "id": "historical_compatibility",
+      "status": "not_met",
+      "detail": "minimum_compatibility_checks=24",
+      "evidence_sha256": []
+    },
+    {
+      "id": "p0_p1_blockers",
+      "status": "passed",
+      "detail": "release blocker registry has zero open P0/P1 entries",
+      "evidence_sha256": [
+        "sha256:abb056299b68221fe201c27b82139fad553d853426128a706911130dee163a34"
+      ]
+    },
+    {
+      "id": "support_commitment",
+      "status": "not_met",
+      "detail": "committed=false maintainer=<missing> support_period=<missing>",
+      "evidence_sha256": []
+    }
+  ]
+}

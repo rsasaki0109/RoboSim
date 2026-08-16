@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Evidence-backed 1.0 readiness gate**: `xtask release-readiness` now audits
+  nine fixed promotion conditions from a strict, SHA-256-bound evidence pack
+  using an explicit date instead of wall-clock time. It verifies independent
+  TaskSpec/Failure Capsule use, third-party plugin and backend/adapter reports,
+  LeKiwi physical evidence, same-tag Linux/Windows release rehearsals, the exact
+  compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
+  The committed tracker and golden remain honestly ineligible at 1/9; no tag or
+  1.0 claim is created.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
   trees and the original blob. The installed compatibility runner decodes and

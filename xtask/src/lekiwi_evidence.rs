@@ -63,7 +63,7 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
         "verify" => {
             let manifest = required_arg(args, "verify requires MANIFEST")?;
             no_more_args(args, "verify")?;
-            verify(Path::new(&manifest))
+            verify_manifest(Path::new(&manifest))
         }
         "--help" | "-h" => {
             println!(
@@ -159,7 +159,8 @@ fn seal(draft_path: &Path, output_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify(manifest_path: &Path) -> Result<()> {
+/// Verifies one complete physical evidence directory through its manifest.
+pub(crate) fn verify_manifest(manifest_path: &Path) -> Result<()> {
     let bytes = read_regular_file(manifest_path, "physical evidence manifest")?;
     let manifest: LeKiwiPhysicalEvidenceManifest =
         serde_json::from_slice(&bytes).context("physical evidence manifest is not valid JSON")?;

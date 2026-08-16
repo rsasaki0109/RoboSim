@@ -9,6 +9,7 @@ mod failure_capsule;
 mod lekiwi_evidence;
 mod release_artifacts;
 mod release_exit;
+mod release_readiness;
 mod task_scale;
 
 use anyhow::Context;
@@ -117,6 +118,7 @@ fn run() -> anyhow::Result<()> {
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
+        "release-readiness" => release_readiness::release_readiness(&mut args),
         "capability-report" => capability_report::capability_report(&mut args),
         "benchmark" => benchmark::benchmark(&mut args),
         "task-scale" => task_scale::task_scale(&mut args),
@@ -171,6 +173,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     );
     rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
+    release_readiness::validate_committed_manifest(&root)?;
 
     run_cargo_at(
         &root,
@@ -1498,6 +1501,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "final_exit_report",
             u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "one_zero_readiness_report",
+            u64::from(release_readiness::REPORT_SCHEMA_VERSION),
         ),
         (
             "evidence",

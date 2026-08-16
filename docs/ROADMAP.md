@@ -125,7 +125,11 @@ tier-1 platforms. The language-boundary slice ships a C/C++ header, freezes the
 64-bit ABI layout and ten required symbols, and verifies 24 Python exports and
 their exact call shapes from source CI and the installed ABI3 wheel. This
 advances the freeze but does not replace external-use or six-month stability
-gates.
+gates. The final conditions are tracked by `release/one-zero-readiness.toml`
+and audited with `cargo run --locked -p xtask -- release-readiness --as-of
+YYYY-MM-DD`. Its nine-check schema-v1 report currently remains ineligible;
+[ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md) defines the evidence pack and
+promotion mode.
 
 The history matrix also binds the introducing TaskSpec v1, dataset bundle v1,
 and Failure Capsule v1 revisions. The installed dataset case reconstructs its
