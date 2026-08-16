@@ -338,7 +338,11 @@ v1 attestations on tag and manual rehearsal runs. Publication verifies all four
 subjects before creating the prerelease, while `release-check` freezes the
 issuer, repository, workflow, action, permissions, subject classes, and event
 policy in `release/artifact-attestation.toml`. SHA-256 manifests remain the
-independent offline integrity layer inside each archive.
+independent offline integrity layer inside each archive. The workflow now also
+retains the exact generated Sigstore bundle, while the 1.0 readiness gate
+replays cryptographic verification and regenerates a strict receipt bound to
+the archive digest, repository, workflow certificate identity, tag, source and
+signer revision, issuer, predicate, and runner policy.
 
 The next v0.8 authoring slice is also available from the installed bundle:
 `rne-asset plugin check` produces a content-addressed schema-v1 report for an

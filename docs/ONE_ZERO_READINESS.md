@@ -46,17 +46,19 @@ stars.
 | `third_party_plugin` | At least one externally owned controller plugin with a passing typed conformance report |
 | `external_system` | At least one externally owned physics backend or hardware adapter with a passing typed conformance report |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
-| `release_artifacts` | Linux x86-64 and Windows x86-64 archives, attestations, verification output, release reports, and nine-check installed rehearsals from the same clean tagged revision |
+| `release_artifacts` | Linux x86-64 and Windows x86-64 archives, retained Sigstore bundles, freshly reproduced strict verification receipts, release reports, and nine-check installed rehearsals from the same clean tagged revision |
 | `historical_compatibility` | A passing report for the exact committed compatibility registry with at least 24 distinct checks and fail-closed future/unknown-field cases |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, support period, and HTTPS policy are explicitly committed |
 
-The report schema is registered as `evidence.one_zero_readiness_report = 1` in
-`release/contracts.toml`. Its check order is fixed and a committed golden
-captures the current honest baseline. `manifest_sha256` binds the complete
-normalized input, including external identities and support fields. On
-2026-08-16, only the blocker check is passing: the project is `eligible=false`
-with 1 of 9 checks satisfied.
+The report and attestation receipt schemas are registered as
+`evidence.one_zero_readiness_report = 1` and
+`evidence.github_attestation_verification = 1` in `release/contracts.toml`.
+The report check order is fixed and a committed golden captures the current
+honest baseline. `manifest_sha256` binds the complete normalized input,
+including external identities and support fields. On 2026-08-16, only the
+blocker check is passing: the project is `eligible=false` with 1 of 9 checks
+satisfied.
 
 ## Evidence-pack shape
 
@@ -97,7 +99,22 @@ references `archive`, `attestation`, `attestation_verification`,
 `release_report`, and `install_report`. Both platforms must resolve to the same
 retained tag and commit. The release report must say the checkout was clean,
 tag-matched, reproducible, supply-chain clean, and passing all nine installed
-workflows.
+workflows. `attestation` is the exact JSON Sigstore bundle emitted by
+`actions/attest@v4`; `attestation_verification` is an
+`rne_github_attestation_verification` schema-v1 receipt, not raw CLI output.
+
+The audit does not trust that receipt by itself. For every platform it reruns
+`gh attestation verify --bundle` over the referenced archive and pins the
+repository, exact workflow certificate identity, tag ref, source commit,
+signer commit, GitHub OIDC issuer, SLSA v1 predicate, and self-hosted-runner
+rejection. It also confirms that the verified in-toto subject contains the
+archive SHA-256, requires exactly one verified attestation in the retained
+bundle, regenerates the stable receipt, and compares every field. Missing
+`gh`, failed signature or transparency verification, a bundle/archive swap,
+unknown receipt fields, or any policy drift fails closed. Store the archive,
+bundle, receipt, and reports together in the external evidence pack; the
+committed release workflow retains the action's exact `bundle-path` for this
+purpose.
 
 External evidence should be reviewed for real independence before its digest
 is accepted. A structurally valid self-authored report is not a substitute for

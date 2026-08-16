@@ -12,15 +12,24 @@ anything, first verify that the archive itself has GitHub/Sigstore provenance
 bound to this repository, then verify every extracted entry in `SHA256SUMS`:
 
 ```bash
+REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.1.0 --jq .sha)"
 gh attestation verify rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
   -R rsasaki0109/RoboSim \
-  --signer-workflow rsasaki0109/RoboSim/.github/workflows/release.yml \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.1.0 \
   --source-ref refs/tags/v0.1.0 \
+  --source-digest "$REVISION" \
+  --signer-digest "$REVISION" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 \
   --deny-self-hosted-runners
 gh attestation verify rne_py-0.1.0-cp39-abi3-manylinux_2_*.whl \
   -R rsasaki0109/RoboSim \
-  --signer-workflow rsasaki0109/RoboSim/.github/workflows/release.yml \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.1.0 \
   --source-ref refs/tags/v0.1.0 \
+  --source-digest "$REVISION" \
+  --signer-digest "$REVISION" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 \
   --deny-self-hosted-runners
 ```
 
@@ -28,7 +37,10 @@ Use the downloaded Windows ZIP and wheel paths in the same commands on
 Windows. Verification must identify `https://token.actions.githubusercontent.com`
 as issuer, this repository as source, and `.github/workflows/release.yml` as the
 build workflow and the requested tag as source ref, and must reject self-hosted
-builders. The committed policy is
+builders. Replace `REVISION` with the exact 40-character commit resolved by the
+verified tag. Maintainer readiness audits additionally pass the retained action
+bundle through `--bundle` so the evidence pack remains independently replayable.
+The committed policy is
 `release/artifact-attestation.toml`; GitHub's verifier checks the signed SLSA
 provenance and subject digest. Checksums remain a separate, offline integrity
 layer after extraction. On Linux:

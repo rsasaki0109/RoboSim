@@ -20,6 +20,12 @@ All notable changes to Robot Native Engine are documented in this file.
   version. Each path reruns the typed audit and writes a promotion report;
   missing, malformed, tampered, or ineligible evidence stops the release before
   packaging or publication. Normal 0.x development remains unchanged.
+- **Replayable signed-provenance gate**: release jobs now retain the exact
+  Sigstore bundle emitted by `actions/attest@v4`, and publication verifies each
+  platform's archive and wheel from that bundle. The 1.0 readiness audit reruns
+  `gh attestation verify` with the repository, workflow certificate identity,
+  tag, source and signer commit, issuer, SLSA predicate, runner policy, and
+  archive digest pinned, then requires an exact strict schema-v1 receipt.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
   trees and the original blob. The installed compatibility runner decodes and

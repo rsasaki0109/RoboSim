@@ -15,11 +15,12 @@ pub(crate) const FINAL_EXIT_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION: u32 = 1;
 
 const EXIT_MATRIX_PATH: &str = "release/exit-matrix.toml";
-const EXPECTED_ATTESTATION_PROVIDER: &str = "github_sigstore";
+pub(crate) const EXPECTED_ATTESTATION_PROVIDER: &str = "github_sigstore";
 const EXPECTED_ATTESTATION_ACTION: &str = "actions/attest@v4";
-const EXPECTED_ATTESTATION_ISSUER: &str = "https://token.actions.githubusercontent.com";
-const EXPECTED_ATTESTATION_REPOSITORY: &str = "rsasaki0109/RoboSim";
-const EXPECTED_ATTESTATION_PREDICATE: &str = "https://slsa.dev/provenance/v1";
+pub(crate) const EXPECTED_ATTESTATION_ISSUER: &str = "https://token.actions.githubusercontent.com";
+pub(crate) const EXPECTED_ATTESTATION_REPOSITORY: &str = "rsasaki0109/RoboSim";
+pub(crate) const EXPECTED_ATTESTATION_WORKFLOW: &str = ".github/workflows/release.yml";
+pub(crate) const EXPECTED_ATTESTATION_PREDICATE: &str = "https://slsa.dev/provenance/v1";
 const EXPECTED_SCOPES: [&str; 2] = ["ci", "release"];
 const EXPECTED_AGGREGATE_CHECKS: [&str; 2] =
     ["CI / workspace", "Release rehearsal / release_candidate"];
@@ -455,8 +456,9 @@ fn validate_attestation_policy(policy: &ArtifactAttestationPolicy) -> anyhow::Re
     anyhow::ensure!(
         policy.verify_command
             == format!(
-                "gh attestation verify ARTIFACT -R {repository} --signer-workflow {repository}/.github/workflows/release.yml --source-ref refs/tags/TAG --cert-oidc-issuer {issuer} --predicate-type {predicate} --deny-self-hosted-runners",
+                "gh attestation verify ARTIFACT -R {repository} --bundle ATTESTATION_BUNDLE --cert-identity https://github.com/{repository}/{workflow}@refs/tags/TAG --source-ref refs/tags/TAG --source-digest REVISION --signer-digest REVISION --cert-oidc-issuer {issuer} --predicate-type {predicate} --deny-self-hosted-runners --format json",
                 repository = EXPECTED_ATTESTATION_REPOSITORY,
+                workflow = EXPECTED_ATTESTATION_WORKFLOW,
                 issuer = EXPECTED_ATTESTATION_ISSUER,
                 predicate = EXPECTED_ATTESTATION_PREDICATE,
             ),
@@ -472,9 +474,17 @@ fn validate_release_attestation_workflow(
 ) -> anyhow::Result<()> {
     let workflow_path = safe_repo_path(root, &scope.workflow)?;
     let workflow = fs::read_to_string(&workflow_path)?;
-    for (job, archive_glob) in [
-        ("linux", "artifacts/release/*.tar.gz"),
-        ("windows", "artifacts/release/*.zip"),
+    for (job, archive_glob, retain_bundle) in [
+        (
+            "linux",
+            "artifacts/release/*.tar.gz",
+            "cp ${{ steps.attest.outputs.bundle-path }} artifacts/attestations/release-bundle.json",
+        ),
+        (
+            "windows",
+            "artifacts/release/*.zip",
+            "Copy-Item -LiteralPath ${{ steps.attest.outputs.bundle-path }} -Destination artifacts/attestations/release-bundle.json",
+        ),
     ] {
         let block = normalize_workflow(workflow_job_block(&workflow, job)?);
         for permission in [
@@ -492,6 +502,10 @@ fn validate_release_attestation_workflow(
             block.contains(&format!("uses: {}", policy.action)),
             "release job {job} must use {}",
             policy.action
+        );
+        anyhow::ensure!(
+            block.contains("id: attest") && block.contains(retain_bundle),
+            "release job {job} must retain the exact generated attestation bundle"
         );
         anyhow::ensure!(
             block.contains("if: github.event_name != pull_request"),
@@ -514,8 +528,11 @@ fn validate_release_attestation_workflow(
         .context("release publish job must verify every artifact attestation")?;
     for requirement in [
         "-R $GH_REPO",
-        "--signer-workflow $GH_REPO/.github/workflows/release.yml",
+        "--bundle $bundle",
+        "--cert-identity https://github.com/$GH_REPO/.github/workflows/release.yml@$GITHUB_REF",
         "--source-ref $GITHUB_REF",
+        "--source-digest $GITHUB_SHA",
+        "--signer-digest $GITHUB_SHA",
         "--cert-oidc-issuer https://token.actions.githubusercontent.com",
         "--predicate-type https://slsa.dev/provenance/v1",
         "--deny-self-hosted-runners",

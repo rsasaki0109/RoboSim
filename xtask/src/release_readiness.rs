@@ -4,8 +4,8 @@
 //! evidence and emits a deterministic report for an explicitly supplied date.
 
 use super::{
-    failure_capsule, lekiwi_evidence, release_artifacts, validate_blocker_registry, workspace_root,
-    RELEASE_VERSION,
+    failure_capsule, lekiwi_evidence, release_artifacts, release_exit, validate_blocker_registry,
+    workspace_root, RELEASE_VERSION,
 };
 use anyhow::{bail, Context};
 use rne_ai::TaskSpec;
@@ -17,6 +17,7 @@ use rne_plugin::ControllerPluginConformanceReport;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -30,6 +31,8 @@ const DEFAULT_PROMOTION_OUTPUT: &str = "artifacts/release-readiness/promotion-re
 const PROMOTION_MANIFEST_ENV: &str = "RNE_ONE_ZERO_READINESS_MANIFEST";
 const PROMOTION_AS_OF_ENV: &str = "RNE_ONE_ZERO_READINESS_AS_OF";
 const PROMOTION_OUTPUT_ENV: &str = "RNE_ONE_ZERO_READINESS_OUTPUT";
+const ATTESTATION_RECEIPT_KIND: &str = "rne_github_attestation_verification";
+pub(crate) const ATTESTATION_RECEIPT_SCHEMA_VERSION: u32 = 1;
 const MINIMUM_STABILITY_DAYS: u32 = 183;
 const MINIMUM_EXTERNAL_PROJECTS: usize = 2;
 const MINIMUM_COMPATIBILITY_CHECKS: usize = 24;
@@ -166,6 +169,25 @@ struct PlatformReleaseEvidence {
     install_report: EvidenceRef,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttestationVerificationReceipt {
+    kind: String,
+    schema_version: u32,
+    provider: String,
+    repository: String,
+    certificate_identity: String,
+    source_ref: String,
+    source_revision: String,
+    signer_revision: String,
+    issuer: String,
+    predicate_type: String,
+    deny_self_hosted_runners: bool,
+    artifact_sha256: String,
+    attestation_bundle_sha256: String,
+    verified_attestations: u32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ReadinessReport {
@@ -282,6 +304,44 @@ struct VerifiedEvidence {
     path: PathBuf,
     sha256: String,
     bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct AttestationVerificationRequest<'a> {
+    artifact_path: &'a Path,
+    artifact_sha256: &'a str,
+    bundle_path: &'a Path,
+    bundle_sha256: &'a str,
+    revision: &'a str,
+    tag: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhAttestationVerification {
+    #[serde(rename = "verificationResult")]
+    verification_result: GhVerificationResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhVerificationResult {
+    statement: GhStatement,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhStatement {
+    #[serde(rename = "predicateType")]
+    predicate_type: String,
+    subject: Vec<GhSubject>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhSubject {
+    digest: GhDigest,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhDigest {
+    sha256: Option<String>,
 }
 
 #[derive(Debug)]
@@ -908,18 +968,15 @@ fn verify_platform_releases(
         let attestation = verify_evidence(evidence_root, &entry.attestation)?;
         let attestation_verification =
             verify_evidence(evidence_root, &entry.attestation_verification)?;
-        let verification_json: serde_json::Value =
-            serde_json::from_slice(&attestation_verification.bytes)
-                .context("attestation verification output is not JSON")?;
-        anyhow::ensure!(
-            verification_json
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-                || verification_json
-                    .as_object()
-                    .is_some_and(|items| !items.is_empty()),
-            "attestation verification output must be a non-empty JSON object or array"
-        );
+        let expected_receipt = verify_github_attestation(&AttestationVerificationRequest {
+            artifact_path: &archive.path,
+            artifact_sha256: &archive.sha256,
+            bundle_path: &attestation.path,
+            bundle_sha256: &attestation.sha256,
+            revision: &entry.revision,
+            tag: &entry.tag,
+        })?;
+        verify_attestation_receipt(&attestation_verification.bytes, &expected_receipt)?;
         let release = verify_evidence(evidence_root, &entry.release_report)?;
         let install = verify_evidence(evidence_root, &entry.install_report)?;
         release_artifacts::validate_readiness_release_reports(
@@ -950,6 +1007,139 @@ fn verify_platform_releases(
         "release evidence platforms must exactly match the required platform registry"
     );
     Ok(digests)
+}
+
+fn verify_github_attestation(
+    request: &AttestationVerificationRequest<'_>,
+) -> anyhow::Result<AttestationVerificationReceipt> {
+    let args = github_attestation_verify_args(request);
+    let output = Command::new("gh")
+        .args(&args)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("NO_COLOR", "1")
+        .output()
+        .context("run GitHub CLI attestation verifier")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "GitHub attestation verification failed for {}: {}",
+        request.artifact_path.display(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let verified_attestations = validate_github_attestation_output(&output.stdout, request)?;
+    anyhow::ensure!(
+        verified_attestations == 1,
+        "the retained bundle must contain exactly one verified attestation, found {verified_attestations}"
+    );
+    Ok(attestation_receipt(request, verified_attestations))
+}
+
+fn github_attestation_verify_args(request: &AttestationVerificationRequest<'_>) -> Vec<OsString> {
+    let source_ref = format!("refs/tags/{}", request.tag);
+    let certificate_identity = format!(
+        "https://github.com/{}/{}@{}",
+        release_exit::EXPECTED_ATTESTATION_REPOSITORY,
+        release_exit::EXPECTED_ATTESTATION_WORKFLOW,
+        source_ref
+    );
+    [
+        OsString::from("attestation"),
+        OsString::from("verify"),
+        request.artifact_path.as_os_str().to_owned(),
+        OsString::from("-R"),
+        OsString::from(release_exit::EXPECTED_ATTESTATION_REPOSITORY),
+        OsString::from("--bundle"),
+        request.bundle_path.as_os_str().to_owned(),
+        OsString::from("--cert-identity"),
+        OsString::from(certificate_identity),
+        OsString::from("--source-ref"),
+        OsString::from(source_ref),
+        OsString::from("--source-digest"),
+        OsString::from(request.revision),
+        OsString::from("--signer-digest"),
+        OsString::from(request.revision),
+        OsString::from("--cert-oidc-issuer"),
+        OsString::from(release_exit::EXPECTED_ATTESTATION_ISSUER),
+        OsString::from("--predicate-type"),
+        OsString::from(release_exit::EXPECTED_ATTESTATION_PREDICATE),
+        OsString::from("--deny-self-hosted-runners"),
+        OsString::from("--format"),
+        OsString::from("json"),
+    ]
+    .into()
+}
+
+fn validate_github_attestation_output(
+    bytes: &[u8],
+    request: &AttestationVerificationRequest<'_>,
+) -> anyhow::Result<u32> {
+    let results: Vec<GhAttestationVerification> = serde_json::from_slice(bytes)
+        .context("GitHub attestation verifier did not return its JSON array")?;
+    anyhow::ensure!(
+        !results.is_empty(),
+        "GitHub attestation verifier returned no verified attestations"
+    );
+    let expected_digest = request
+        .artifact_sha256
+        .strip_prefix("sha256:")
+        .context("verified artifact digest is not canonical SHA-256")?;
+    for result in &results {
+        anyhow::ensure!(
+            result.verification_result.statement.predicate_type
+                == release_exit::EXPECTED_ATTESTATION_PREDICATE,
+            "verified attestation predicate drifted"
+        );
+        anyhow::ensure!(
+            result
+                .verification_result
+                .statement
+                .subject
+                .iter()
+                .any(|subject| subject.digest.sha256.as_deref() == Some(expected_digest)),
+            "verified attestation did not bind the exact archive SHA-256"
+        );
+    }
+    u32::try_from(results.len()).context("too many verified attestations")
+}
+
+fn attestation_receipt(
+    request: &AttestationVerificationRequest<'_>,
+    verified_attestations: u32,
+) -> AttestationVerificationReceipt {
+    let source_ref = format!("refs/tags/{}", request.tag);
+    AttestationVerificationReceipt {
+        kind: ATTESTATION_RECEIPT_KIND.to_string(),
+        schema_version: ATTESTATION_RECEIPT_SCHEMA_VERSION,
+        provider: release_exit::EXPECTED_ATTESTATION_PROVIDER.to_string(),
+        repository: release_exit::EXPECTED_ATTESTATION_REPOSITORY.to_string(),
+        certificate_identity: format!(
+            "https://github.com/{}/{}@{}",
+            release_exit::EXPECTED_ATTESTATION_REPOSITORY,
+            release_exit::EXPECTED_ATTESTATION_WORKFLOW,
+            source_ref
+        ),
+        source_ref,
+        source_revision: request.revision.to_string(),
+        signer_revision: request.revision.to_string(),
+        issuer: release_exit::EXPECTED_ATTESTATION_ISSUER.to_string(),
+        predicate_type: release_exit::EXPECTED_ATTESTATION_PREDICATE.to_string(),
+        deny_self_hosted_runners: true,
+        artifact_sha256: request.artifact_sha256.to_string(),
+        attestation_bundle_sha256: request.bundle_sha256.to_string(),
+        verified_attestations,
+    }
+}
+
+fn verify_attestation_receipt(
+    bytes: &[u8],
+    expected: &AttestationVerificationReceipt,
+) -> anyhow::Result<()> {
+    let actual: AttestationVerificationReceipt =
+        serde_json::from_slice(bytes).context("parse strict attestation verification receipt")?;
+    anyhow::ensure!(
+        actual == *expected,
+        "attestation verification receipt does not match fresh cryptographic verification"
+    );
+    Ok(())
 }
 
 fn verify_compatibility(
@@ -1239,6 +1429,111 @@ mod tests {
             normalized_text_sha256("first\r\nsecond\r\n").unwrap()
         );
         assert!(normalized_text_sha256("first\rsecond\n").is_err());
+    }
+
+    #[test]
+    fn attestation_verifier_pins_bundle_identity_tag_and_revision() {
+        let artifact_sha256 = format!("sha256:{}", "a".repeat(64));
+        let bundle_sha256 = format!("sha256:{}", "b".repeat(64));
+        let request = AttestationVerificationRequest {
+            artifact_path: Path::new("evidence/archive with spaces.zip"),
+            artifact_sha256: &artifact_sha256,
+            bundle_path: Path::new("evidence/bundle with spaces.json"),
+            bundle_sha256: &bundle_sha256,
+            revision: "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+            tag: "v1.0.0",
+        };
+        let args = github_attestation_verify_args(&request)
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "attestation",
+                "verify",
+                "evidence/archive with spaces.zip",
+                "-R",
+                "rsasaki0109/RoboSim",
+                "--bundle",
+                "evidence/bundle with spaces.json",
+                "--cert-identity",
+                "https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v1.0.0",
+                "--source-ref",
+                "refs/tags/v1.0.0",
+                "--source-digest",
+                "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+                "--signer-digest",
+                "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+                "--cert-oidc-issuer",
+                "https://token.actions.githubusercontent.com",
+                "--predicate-type",
+                "https://slsa.dev/provenance/v1",
+                "--deny-self-hosted-runners",
+                "--format",
+                "json",
+            ]
+        );
+    }
+
+    #[test]
+    fn attestation_output_and_receipt_fail_closed_on_tampering() {
+        let artifact_sha256 = format!("sha256:{}", "a".repeat(64));
+        let bundle_sha256 = format!("sha256:{}", "b".repeat(64));
+        let request = AttestationVerificationRequest {
+            artifact_path: Path::new("evidence/archive.zip"),
+            artifact_sha256: &artifact_sha256,
+            bundle_path: Path::new("evidence/bundle.json"),
+            bundle_sha256: &bundle_sha256,
+            revision: "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+            tag: "v1.0.0",
+        };
+        let output = serde_json::to_vec(&serde_json::json!([{
+            "attestation": {"mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json"},
+            "verificationResult": {
+                "statement": {
+                    "predicateType": "https://slsa.dev/provenance/v1",
+                    "subject": [{"name": "archive.zip", "digest": {"sha256": "a".repeat(64)}}]
+                }
+            }
+        }]))
+        .unwrap();
+        assert_eq!(
+            validate_github_attestation_output(&output, &request).unwrap(),
+            1
+        );
+
+        let wrong_subject = String::from_utf8(output.clone())
+            .unwrap()
+            .replace(&"a".repeat(64), &"c".repeat(64));
+        assert!(validate_github_attestation_output(wrong_subject.as_bytes(), &request).is_err());
+
+        let expected = attestation_receipt(&request, 1);
+        let receipt = serde_json::to_vec(&expected).unwrap();
+        verify_attestation_receipt(&receipt, &expected).unwrap();
+        let mut golden = serde_json::to_string_pretty(&expected).unwrap();
+        golden.push('\n');
+        assert_eq!(
+            golden,
+            include_str!("../../tests/golden/release/github-attestation-verification-v1.json")
+        );
+
+        let mut unknown_field = serde_json::to_value(&expected).unwrap();
+        unknown_field
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_string(), serde_json::Value::Bool(true));
+        assert!(verify_attestation_receipt(
+            &serde_json::to_vec(&unknown_field).unwrap(),
+            &expected
+        )
+        .is_err());
+
+        let mut tampered = expected.clone();
+        tampered.source_revision = "c".repeat(40);
+        assert!(
+            verify_attestation_receipt(&serde_json::to_vec(&tampered).unwrap(), &expected).is_err()
+        );
     }
 
     #[test]

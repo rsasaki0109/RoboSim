@@ -75,15 +75,19 @@ cargo run --locked -p xtask -- release-install-smoke \
 
 Tag pushes and manual release rehearsals use `actions/attest@v4` to create a
 signed SLSA v1 provenance attestation for both the native archive and Python
-wheel. Pull-request jobs deliberately do not mint attestations. The publish job
-must successfully run `gh attestation verify` for all four cross-platform
-assets before `gh release create`; an unsigned or digest-mismatched asset cannot
-be published by the workflow.
+wheel. Each platform job copies the action's exact `bundle-path` into its
+retained workflow artifact. Pull-request jobs deliberately do not mint
+attestations. The publish job must successfully run `gh attestation verify`
+against those local bundles for all four cross-platform assets before
+`gh release create`; an unsigned, digest-mismatched, cross-tag, cross-commit, or
+wrong-workflow asset cannot be published by the workflow.
 
 The trust policy is machine-readable in
 `release/artifact-attestation.toml`. `xtask release-check` rejects drift in the
 provider, issuer, repository, workflow, predicate type, subjects, Action
-version, OIDC permissions, event condition, or publish-before-verify ordering.
+version, OIDC permissions, event condition, local-bundle retention, exact
+workflow certificate identity, source and signer revisions, or
+publish-before-verify ordering.
 Consumers should follow [RELEASE_INSTALL.md](RELEASE_INSTALL.md) and verify the
 downloaded asset against `rsasaki0109/RoboSim` before extraction. GitHub's
 [artifact attestation documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)

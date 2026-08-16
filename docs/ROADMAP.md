@@ -94,7 +94,11 @@ The v0.8 ecosystem track starts with signed release provenance. Tag and manual
 release rehearsals now attest each native archive and ABI3 wheel through GitHub
 OIDC/Sigstore using SLSA v1 provenance. The tag publish job verifies every
 subject before release creation, and `xtask release-check` enforces the
-machine-readable `release/artifact-attestation.toml` trust policy.
+machine-readable `release/artifact-attestation.toml` trust policy. Platform
+jobs retain the exact signed bundles, and the 1.0 readiness audit replays their
+cryptographic verification against the exact repository, workflow identity,
+tag, source and signer commit, predicate, issuer, runner class, and archive
+digest before accepting a strict schema-v1 receipt.
 The installed release CLI now also exposes `rne-asset plugin check`, a
 standalone controller-plugin conformance runner with a versioned,
 content-addressed report and deterministic reset replay. Release rehearsal runs

@@ -74,12 +74,20 @@ jobs:
             --output-dir artifacts/extracted-evidence \
             --python python
       - name: Sign archive and wheel provenance
+        id: attest
         if: github.event_name != 'pull_request'
         uses: actions/attest@v4
         with:
           subject-path: |
             artifacts/release/*.tar.gz
             artifacts/wheels/*.whl
+      - name: Retain the signed attestation bundle
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          mkdir -p artifacts/attestations
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            artifacts/attestations/release-bundle.json
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-linux
@@ -87,6 +95,7 @@ jobs:
           path: |
             artifacts/release/*.tar.gz
             artifacts/wheels/*.whl
+            artifacts/attestations/release-bundle.json
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
             artifacts/extracted-evidence/controller-scaffold-conformance.json
@@ -159,12 +168,20 @@ jobs:
             --output-dir artifacts/extracted-evidence `
             --python python
       - name: Sign archive and wheel provenance
+        id: attest
         if: github.event_name != 'pull_request'
         uses: actions/attest@v4
         with:
           subject-path: |
             artifacts/release/*.zip
             artifacts/wheels/*.whl
+      - name: Retain the signed attestation bundle
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/attestations | Out-Null
+          Copy-Item -LiteralPath "${{ steps.attest.outputs.bundle-path }}" `
+            -Destination artifacts/attestations/release-bundle.json
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-windows
@@ -172,6 +189,7 @@ jobs:
           path: |
             artifacts/release/*.zip
             artifacts/wheels/*.whl
+            artifacts/attestations/release-bundle.json
             artifacts/extracted-evidence/install-rehearsal-report.json
             artifacts/extracted-evidence/controller-plugin-conformance.json
             artifacts/extracted-evidence/controller-scaffold-conformance.json
@@ -225,14 +243,25 @@ jobs:
             printf 'expected 4 release assets, found %s\n' "${#assets[@]}" >&2
             exit 1
           fi
-          for asset in "${assets[@]}"; do
-            gh attestation verify "$asset" \
-              -R "$GH_REPO" \
-              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
-              --source-ref "$GITHUB_REF" \
-              --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-              --predicate-type "https://slsa.dev/provenance/v1" \
-              --deny-self-hosted-runners
+          for platform_dir in dist/rne-release-linux dist/rne-release-windows; do
+            bundle="$platform_dir/attestations/release-bundle.json"
+            test -f "$bundle"
+            while IFS= read -r -d '' asset; do
+              gh attestation verify "$asset" \
+                -R "$GH_REPO" \
+                --bundle "$bundle" \
+                --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@$GITHUB_REF" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --signer-digest "$GITHUB_SHA" \
+                --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+                --predicate-type "https://slsa.dev/provenance/v1" \
+                --deny-self-hosted-runners
+            done < <(
+              find "$platform_dir" -type f \
+                \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) \
+                -print0 | sort -z
+            )
           done
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
