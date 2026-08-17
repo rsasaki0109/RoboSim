@@ -42,7 +42,7 @@ pub(crate) const ATTESTATION_RECEIPT_SCHEMA_VERSION: u32 = 1;
 const MINIMUM_STABILITY_DAYS: u32 = 183;
 const MINIMUM_EXTERNAL_PROJECTS: usize = 2;
 const MINIMUM_COMPATIBILITY_CHECKS: usize = 24;
-const MAX_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ADAPTER_ARGUMENTS: usize = 128;
 const MAX_ADAPTER_ARGUMENT_BYTES: usize = 4_096;
 const PLATFORM_RELEASE_EVIDENCE_FILES: usize = 7;
@@ -402,7 +402,12 @@ pub(crate) fn release_readiness(args: &mut impl Iterator<Item = String>) -> anyh
 /// Validates the committed tracker without claiming that external gates passed.
 pub(crate) fn validate_committed_manifest(root: &Path) -> anyhow::Result<()> {
     let path = root.join(DEFAULT_MANIFEST);
-    let manifest = read_manifest(&path)?;
+    validate_manifest_path(root, &path)
+}
+
+/// Validates a readiness manifest's fixed identity without evaluating evidence.
+pub(crate) fn validate_manifest_path(root: &Path, path: &Path) -> anyhow::Result<()> {
+    let manifest = read_manifest(path)?;
     validate_manifest_identity(root, &manifest)
 }
 

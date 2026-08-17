@@ -20,6 +20,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **External readiness-pack authoring**: `xtask readiness-pack init` creates a
+  non-overwriting external-disk copy of the honest 2/9 readiness baseline and
+  its retained compatibility evidence. `readiness-pack stage` then copies one
+  regular file through a temporary name, enforces the audit's 64 MiB limit and
+  forward-slash containment rules, refuses symlinks and overwrites, and emits
+  the canonical SHA-256 TOML reference. It does not certify ownership,
+  independence, or a passing 1.0 gate.
+
 - **README vehicle-dynamics showcase**: the deterministic kinematic-versus-dynamic
   comparison now renders oriented procedural cars, steerable wheels, continuous road
   geometry, saturation-colored trails, and live slip/yaw/grip telemetry into a

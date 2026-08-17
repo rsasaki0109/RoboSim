@@ -383,6 +383,14 @@ task identity, and dimensions to the passing report. Human review still proves
 ownership and independence; the machine gate proves the accepted report belongs
 to the preserved implementation bytes.
 
+The external-intake slice makes that contract practical without weakening it.
+`xtask readiness-pack init` creates a non-overwriting external-disk pack from
+the honest 2/9 baseline and its retained compatibility report.
+`readiness-pack stage` enforces the gate's size, path-containment, non-symlink,
+and no-overwrite rules while copying and hashing one file, then emits its
+canonical TOML reference. It cannot add manifest claims, determine ownership,
+or turn staged bytes into a passing check.
+
 The expanded v0.9 compatibility slice turns retained artifacts into an
 executable installed contract. A strict registry content-addresses twenty-four
 TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, frontend,

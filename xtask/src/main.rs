@@ -7,6 +7,7 @@ mod dataset;
 mod evidence;
 mod failure_capsule;
 mod lekiwi_evidence;
+mod readiness_pack;
 mod release_artifacts;
 mod release_exit;
 mod release_readiness;
@@ -120,6 +121,7 @@ fn run() -> anyhow::Result<()> {
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
         "release-readiness" => release_readiness::release_readiness(&mut args),
+        "readiness-pack" => readiness_pack::run(&mut args),
         "capability-report" => capability_report::capability_report(&mut args),
         "benchmark" => benchmark::benchmark(&mut args),
         "task-scale" => task_scale::task_scale(&mut args),

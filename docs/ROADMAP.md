@@ -144,7 +144,10 @@ gates. The final conditions are tracked by `release/one-zero-readiness.toml`
 and audited with `cargo run --locked -p xtask -- release-readiness --as-of
 YYYY-MM-DD`. Its nine-check schema-v1 report currently remains ineligible;
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md) defines the evidence pack and
-promotion mode.
+promotion mode. `xtask readiness-pack init` safely creates that pack on an
+external disk from the honest baseline, while `readiness-pack stage` stores
+individual files and emits their canonical SHA-256 TOML references without
+claiming third-party independence or promotion eligibility.
 
 The history matrix also binds the introducing TaskSpec v1, dataset bundle v1,
 and Failure Capsule v1 revisions. The installed dataset case reconstructs its

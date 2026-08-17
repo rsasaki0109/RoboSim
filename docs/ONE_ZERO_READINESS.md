@@ -31,6 +31,47 @@ cargo run --locked -p xtask -- release-readiness `
   --require-eligible
 ```
 
+## Initialize an external evidence pack
+
+Start from the committed, deliberately ineligible baseline instead of copying
+paths and digests by hand:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack init `
+  --output E:/RoboSim-readiness
+```
+
+The command validates the immutable candidate identity, then atomically
+publishes `one-zero-readiness.toml` and the retained compatibility report. It
+refuses an existing output directory. The new pack therefore begins at the same
+honest `2/9`, `eligible=false` state as the source tracker.
+
+Stage each independently produced file before referencing it in the manifest:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack stage `
+  --pack E:/RoboSim-readiness `
+  --source D:/external-controller/controller-report.json `
+  --path plugins/external-controller/controller-report.json
+```
+
+The successful command prints a paste-ready reference:
+
+```toml
+{ path = "plugins/external-controller/controller-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+```
+
+`stage` accepts only a regular non-symlink file at or below the audit's 64 MiB
+limit. Its destination must be a contained forward-slash relative path; parent
+symlinks, the readiness manifest itself, temporary-name collisions, and any
+existing destination fail closed. Bytes are copied through a private temporary
+name and hashed before the final name is published.
+
+This helper establishes file identity only. A human must still review external
+ownership and independence, add the appropriate typed entry shown below, and
+run `release-readiness`. Staging a file cannot change a readiness check by
+itself.
+
 Evidence paths use forward slashes and are relative to the selected manifest.
 Each reference contains an exact lowercase `sha256:` digest. The audit reads
 regular files no larger than 64 MiB and rejects symlinks or paths outside the
