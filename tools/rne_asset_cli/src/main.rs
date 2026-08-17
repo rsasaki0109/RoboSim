@@ -1,5 +1,6 @@
 //! Command-line tools for RNE scene and robot assets.
 
+mod failure_capsule;
 mod frontend_transport;
 
 use anyhow::{Context as _, Result};
@@ -72,6 +73,8 @@ const LIVE_CAMERA_TRANSPORT_MAX_WIDTH: u32 = 1920;
 const LIVE_CAMERA_TRANSPORT_MAX_HEIGHT: u32 = 1080;
 const LIVE_LIDAR_MAX_POINTS: usize = 256;
 const RUNNER_DATA_BUS_RETAINED_FRAMES_PER_STREAM: usize = 2;
+const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
+const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LiveSnapshotOptions {
@@ -242,6 +245,11 @@ enum Commands {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Create or verify a portable, content-addressed Failure Capsule.
+    FailureCapsule {
+        #[command(subcommand)]
+        command: FailureCapsuleCommand,
+    },
     /// Run a headless SUMO co-simulation and report the mirrored vehicles.
     CoSim {
         /// SUMO `.net.xml` path.
@@ -315,6 +323,33 @@ enum PluginCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum FailureCapsuleCommand {
+    /// Create a new capsule from a failed generic or behavior replay.
+    Create {
+        /// Failed replay copied into the capsule.
+        #[arg(long, short)]
+        replay: PathBuf,
+        /// Evidence file copied into the capsule (repeatable).
+        #[arg(long, short)]
+        evidence: Vec<PathBuf>,
+        /// New destination directory; existing paths are never overwritten.
+        #[arg(long, short)]
+        output: PathBuf,
+        /// Backend identity recorded in capsule provenance.
+        #[arg(long, default_value = "unknown")]
+        backend: String,
+        /// Backend version recorded in capsule provenance.
+        #[arg(long, default_value = "unknown")]
+        backend_version: String,
+    },
+    /// Verify metadata, schemas, paths, and every retained digest.
+    Verify {
+        /// Capsule directory containing `capsule.json`.
+        path: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Validate { path, spawn } => validate_command(&path, spawn),
@@ -382,6 +417,7 @@ fn main() -> Result<()> {
             network_id,
         } => sumo_net_command(&path, &out, &network_id),
         Commands::Plugin { command } => plugin_command(command),
+        Commands::FailureCapsule { command } => failure_capsule_command(command),
         Commands::CoSim {
             path,
             routes,
@@ -390,6 +426,39 @@ fn main() -> Result<()> {
         } => co_sim_command(&path, &routes, steps, determinism_check),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
+}
+
+fn failure_capsule_command(command: FailureCapsuleCommand) -> Result<()> {
+    let arguments = match command {
+        FailureCapsuleCommand::Create {
+            replay,
+            evidence,
+            output,
+            backend,
+            backend_version,
+        } => {
+            let mut arguments = vec![
+                "create".to_string(),
+                "--replay".to_string(),
+                replay.to_string_lossy().into_owned(),
+                "--output".to_string(),
+                output.to_string_lossy().into_owned(),
+                "--backend".to_string(),
+                backend,
+                "--backend-version".to_string(),
+                backend_version,
+            ];
+            for path in evidence {
+                arguments.push("--evidence".to_string());
+                arguments.push(path.to_string_lossy().into_owned());
+            }
+            arguments
+        }
+        FailureCapsuleCommand::Verify { path } => {
+            vec!["verify".to_string(), path.to_string_lossy().into_owned()]
+        }
+    };
+    failure_capsule::run(&mut arguments.into_iter())
 }
 
 fn validate_command(path: &Path, spawn: bool) -> Result<()> {

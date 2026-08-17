@@ -46,6 +46,14 @@ rationale = "Bevy's ahash graph requires getrandom 0.2 while newer UUID and temp
 expires = "2027-02-12"
 
 [[duplicate]]
+package = "getrandom"
+version = "0.4.3"
+reachability = "rne_ai (dev) -> tempfile 3.27.0 -> getrandom 0.4.3"
+owner = "RNE release engineering"
+rationale = "Installed Failure Capsule authoring reaches the rne_ai typed TaskSpec reader while workspace tests retain tempfile 3.27; Bevy's ahash graph still requires getrandom 0.3."
+expires = "2027-02-12"
+
+[[duplicate]]
 package = "hashbrown"
 version = "0.14.5"
 reachability = "rne_ecs -> bevy_ecs 0.15.4 -> bevy_utils 0.15.3 -> hashbrown 0.14.5"

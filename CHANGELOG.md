@@ -20,6 +20,17 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **Installed external-project evidence authoring**: `rne-asset
+  failure-capsule create|verify` now exposes the same strict, non-overwriting
+  Failure Capsule implementation previously available only through source-tree
+  `xtask`. Native bundles retain `Cargo.lock`, the authoring guides, and a
+  failed replay fixture, and their installed `robot_replay` rehearsal now
+  creates and verifies a content-addressed capsule. Independent projects can
+  therefore produce required task evidence from an extracted release or their
+  own locked Rust checkout without cloning RNE source. The expanded typed-reader
+  reachability is covered by a time-bounded `getrandom 0.4.3` duplicate review;
+  no new registry package is introduced.
+
 - **External evidence intake contract**: a machine-readable three-route
   registry, public contributor guide, and required GitHub issue forms now cover
   independent task reproduction, third-party controller plugins, and external

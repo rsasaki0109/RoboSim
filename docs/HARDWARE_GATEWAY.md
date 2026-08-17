@@ -150,7 +150,8 @@ shadow suppression, armed HIL/live delivery, limit stop, missed deadline,
 stale queued command, disconnect/reconnect, emergency stop, bounded
 observations, clock regression, and missing action limits.
 
-`xtask failure-capsule create|verify` now preserves and validates TaskSpec,
+`rne-asset failure-capsule create|verify` (and the source-tree `xtask` alias)
+preserves and validates TaskSpec,
 session, wire-trace, shadow-report, and mock-conformance kinds. It keeps a
 corresponding simulation or behavior replay as the capsule replay instead of
 pretending host time is simulation time.

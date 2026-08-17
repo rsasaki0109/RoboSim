@@ -3411,15 +3411,19 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "rne_ai",
  "rne_assets",
  "rne_core",
  "rne_data",
  "rne_ecs",
+ "rne_hardware_gateway",
+ "rne_hardware_lekiwi",
  "rne_log",
  "rne_math",
  "rne_openscenario",
  "rne_physics",
  "rne_physics_analytic",
+ "rne_physics_conformance",
  "rne_physics_rapier",
  "rne_plugin",
  "rne_robot",
@@ -3430,6 +3434,7 @@ dependencies = [
  "rne_world",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

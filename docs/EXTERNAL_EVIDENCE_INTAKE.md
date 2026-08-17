@@ -66,15 +66,20 @@ demo from being relabelled as external adoption.
 Failure Capsule creation and verification use:
 
 ```bash
-cargo run --locked -p xtask -- failure-capsule create \
+rne-asset failure-capsule create \
   --replay path/to/failure.rne-replay \
   --evidence path/to/task.json \
   --output artifacts/failure-capsule \
   --backend backend-name \
   --backend-version backend-version
-cargo run --locked -p xtask -- failure-capsule verify \
+rne-asset failure-capsule verify \
   artifacts/failure-capsule
 ```
+
+The command is shipped in each native release bundle. Run it from the extracted
+release root (which retains the release lockfile), or from a locked Rust
+project root. It does not require the RNE source tree. The external project's
+immutable repository revision remains a separate mandatory submission field.
 
 See [Trust evidence quickstart](EVIDENCE_QUICKSTART.md),
 [TaskSpec v1](task-spec-v1.md), and [Failure Capsule](FAILURE_CAPSULE.md).

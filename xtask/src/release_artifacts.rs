@@ -51,14 +51,17 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 58] = [
+const BUNDLE_FILES: [(&str, &str); 61] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
     ("LICENSE-APACHE", "LICENSE-APACHE"),
+    ("Cargo.lock", "Cargo.lock"),
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
     ("docs/ONE_ZERO_READINESS.md", "ONE_ZERO_READINESS.md"),
+    ("docs/EVIDENCE_QUICKSTART.md", "docs/EVIDENCE_QUICKSTART.md"),
+    ("docs/FAILURE_CAPSULE.md", "docs/FAILURE_CAPSULE.md"),
     (
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
@@ -1128,7 +1131,48 @@ fn run_install_rehearsal(
             "robot replay verification",
             bundle_dir,
             &asset_cli,
-            &[OsString::from("replay"), robot_replay.into_os_string()],
+            &[
+                OsString::from("replay"),
+                robot_replay.clone().into_os_string(),
+            ],
+            &[],
+        );
+    let capsule_dir = output_dir.join("failure-capsule");
+    let capsule_create = robot_verify
+        && run_check_command(
+            "installed Failure Capsule creation",
+            bundle_dir,
+            &asset_cli,
+            &[
+                OsString::from("failure-capsule"),
+                OsString::from("create"),
+                OsString::from("--replay"),
+                bundle_dir
+                    .join("tests/golden/replays/behavior-replay-v1.json")
+                    .into_os_string(),
+                OsString::from("--evidence"),
+                bundle_dir
+                    .join("assets/tasks/diff_drive_goal.task.json")
+                    .into_os_string(),
+                OsString::from("--output"),
+                capsule_dir.clone().into_os_string(),
+                OsString::from("--backend"),
+                OsString::from("installed-reference"),
+                OsString::from("--backend-version"),
+                OsString::from(RELEASE_VERSION),
+            ],
+            &[],
+        );
+    let capsule_verify = capsule_create
+        && run_check_command(
+            "installed Failure Capsule verification",
+            bundle_dir,
+            &asset_cli,
+            &[
+                OsString::from("failure-capsule"),
+                OsString::from("verify"),
+                capsule_dir.into_os_string(),
+            ],
             &[],
         );
 
@@ -1278,7 +1322,7 @@ fn run_install_rehearsal(
     let (wheel_passed, python_api_passed) =
         run_python_wheel_smoke(bundle_dir, output_dir, python, target);
     let checks = vec![
-        check("robot_replay", robot_verify),
+        check("robot_replay", robot_verify && capsule_verify),
         check("scenario_replay", scenario_verify),
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
@@ -1930,6 +1974,8 @@ mod tests {
         );
         for guide in [
             "EXTERNAL_EVIDENCE_INTAKE.md",
+            "EVIDENCE_QUICKSTART.md",
+            "FAILURE_CAPSULE.md",
             "PLUGIN_SDK.md",
             "EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
             "HARDWARE_ADAPTER_CONFORMANCE.md",
@@ -1939,6 +1985,10 @@ mod tests {
                 fs::read(root.join("docs").join(guide)).unwrap()
             );
         }
+        assert_eq!(
+            fs::read(output.path().join("Cargo.lock")).unwrap(),
+            fs::read(root.join("Cargo.lock")).unwrap()
+        );
     }
 
     #[test]

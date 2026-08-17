@@ -6,6 +6,7 @@ mod capability_report;
 mod dataset;
 mod evidence;
 mod external_intake;
+#[path = "../../tools/rne_asset_cli/src/failure_capsule.rs"]
 mod failure_capsule;
 mod lekiwi_evidence;
 mod readiness_pack;

@@ -1,7 +1,7 @@
 //! Create and verify portable Failure Capsule directories.
 //!
-//! The top-level `xtask` dispatcher exposes this module as
-//! `failure-capsule create|verify`.
+//! The source-tree `xtask` dispatcher and installed `rne-asset` CLI share this
+//! implementation as `failure-capsule create|verify`.
 
 use anyhow::{bail, Context, Result};
 use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact, TaskSpec, TASK_SPEC_KIND};
@@ -1080,7 +1080,45 @@ mod tests {
         runner.close().expect("close reference runner")
     }
     use serde_json::Value;
-    use tempfile::TempDir;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> std::io::Result<Self> {
+            let base = env::temp_dir();
+            for _ in 0..100 {
+                let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+                let path = base.join(format!(
+                    "rne-failure-capsule-unit-{}-{id}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Ok(Self(path)),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate a unique Failure Capsule test directory",
+            ))
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            if self.0.starts_with(env::temp_dir()) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
 
     fn generic_fixture() -> ReplayArtifact {
         ReplayArtifact::new(
@@ -1336,7 +1374,7 @@ mod tests {
             .expect("write behavior replay");
         let task_id = "rne.flagship.mobile_lift_shared_aisle.v1";
         let mut task: TaskSpec = serde_json::from_slice(include_bytes!(
-            "../../assets/tasks/diff_drive_goal.task.json"
+            "../../../assets/tasks/diff_drive_goal.task.json"
         ))
         .expect("fixture TaskSpec");
         task.task_id = task_id.to_string();
@@ -1394,7 +1432,7 @@ mod tests {
             .write_json(&replay_path)
             .expect("write behavior replay");
         let task_path = temp.path().join("diff-drive-task.json");
-        let task_bytes = include_bytes!("../../assets/tasks/diff_drive_goal.task.json");
+        let task_bytes = include_bytes!("../../../assets/tasks/diff_drive_goal.task.json");
         fs::write(&task_path, task_bytes).expect("write TaskSpec evidence");
         let adapter_subject_path = temp.path().join("external-adapter.bin");
         let adapter_subject = b"external-adapter-subject-v1";
@@ -1449,20 +1487,20 @@ mod tests {
         fs::write(
             &session_path,
             include_bytes!(
-                "../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+                "../../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
             ),
         )
         .expect("write session evidence");
         let shadow_path = temp.path().join("shadow-comparison.json");
         fs::write(
             &shadow_path,
-            include_bytes!("../../tests/golden/hardware/gateway-shadow-comparison-v1.json"),
+            include_bytes!("../../../tests/golden/hardware/gateway-shadow-comparison-v1.json"),
         )
         .expect("write shadow evidence");
         let conformance_path = temp.path().join("mock-conformance.json");
         fs::write(
             &conformance_path,
-            include_bytes!("../../tests/golden/hardware/gateway-mock-conformance-v1.json"),
+            include_bytes!("../../../tests/golden/hardware/gateway-mock-conformance-v1.json"),
         )
         .expect("write mock conformance evidence");
         let lekiwi_task_path = temp.path().join("lekiwi-task.json");
@@ -1535,7 +1573,7 @@ mod tests {
         fs::write(
             &session_path,
             include_bytes!(
-                "../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+                "../../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
             ),
         )
         .expect("write session evidence");
@@ -1550,11 +1588,11 @@ mod tests {
         let task_path = temp.path().join("diff-drive-task.json");
         fs::write(
             &task_path,
-            include_bytes!("../../assets/tasks/diff_drive_goal.task.json"),
+            include_bytes!("../../../assets/tasks/diff_drive_goal.task.json"),
         )
         .expect("write TaskSpec evidence");
         let mut shadow: Value = serde_json::from_slice(include_bytes!(
-            "../../tests/golden/hardware/gateway-shadow-comparison-v1.json"
+            "../../../tests/golden/hardware/gateway-shadow-comparison-v1.json"
         ))
         .expect("shadow json");
         shadow["summary"]["passed"] = Value::Bool(true);

@@ -132,7 +132,10 @@ Third-party controller plugins, physics backends, hardware adapters, and real
 external task reproductions can be submitted through the fixed
 [external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
 validates all required issue-form fields with `xtask external-intake-check`;
-submission never implies acceptance or 1.0 readiness.
+submission never implies acceptance or 1.0 readiness. Native bundles expose
+`rne-asset failure-capsule create|verify`, so an independent project can retain
+its required replay evidence from the extracted release without cloning the
+RNE source tree.
 
 ## Selected demos
 

@@ -56,6 +56,9 @@ On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, and every
 bundle-member digest. `reproducible` is true only for a clean build whose exact
 `v0.1.0` tag points to the tested commit.
+The retained `Cargo.lock` also lets the installed Failure Capsule author record
+the exact release graph during bundle rehearsal; when run from an external
+project, the same CLI records that project's own lockfile and Git revision.
 The extracted `release/rust-api-baseline.toml` records the immutable source
 commit/tree and complete 31-crate manifest set used by SemVer CI; it is audit
 metadata and does not require shipping either source tree in the native bundle.
@@ -69,6 +72,13 @@ rehearsal. From its top-level directory:
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
+./bin/rne-asset failure-capsule create \
+  --replay tests/golden/replays/behavior-replay-v1.json \
+  --evidence assets/tasks/diff_drive_goal.task.json \
+  --output failure-capsule \
+  --backend external-project \
+  --backend-version 0.1.0
+./bin/rne-asset failure-capsule verify failure-capsule
 ./bin/rne-asset run assets/runs/scenario_speed.rne.run.toml \
   --replay-out scenario.rne-replay
 ./bin/rne-asset replay scenario.rne-replay
@@ -99,7 +109,9 @@ The conformance command's `--allow-hil` is safe here because the target is the
 bundled deterministic process mock; do not reuse it with an unisolated physical
 robot. Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
-commands are headless and require neither ROS2 nor a renderer.
+commands are headless and require neither ROS2 nor a renderer. Capsule creation
+refuses successful replays, existing destinations, symlinks, path escapes,
+malformed known evidence, and digest mismatches.
 The compatibility command reads only the retained registry and fixtures under
 the extracted bundle, verifies their canonical JSON digests, runs the current
 typed readers, and checks fail-closed future-schema and unknown-field handling.

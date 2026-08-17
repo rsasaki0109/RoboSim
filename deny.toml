@@ -45,6 +45,7 @@ skip = [
     { crate = "fixedbitset@0.4.2", reason = "documented in release/supply-chain-exceptions.toml" },
     { crate = "foldhash@0.1.5", reason = "documented in release/supply-chain-exceptions.toml" },
     { crate = "getrandom@0.2.17", reason = "documented in release/supply-chain-exceptions.toml" },
+    { crate = "getrandom@0.4.3", reason = "documented in release/supply-chain-exceptions.toml" },
     { crate = "hashbrown@0.14.5", reason = "documented in release/supply-chain-exceptions.toml" },
     { crate = "hashbrown@0.15.5", reason = "documented in release/supply-chain-exceptions.toml" },
     { crate = "hashbrown@0.16.1", reason = "documented in release/supply-chain-exceptions.toml" },

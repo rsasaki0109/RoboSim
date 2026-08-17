@@ -75,6 +75,6 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the support window and
 
 For eventual independent 1.0 certification, retain the exact shared library,
 `rne-plugin.json`, conformance report, external repository URL, and lowercase
-40-character tested commit. Readiness manifest v2 rehashes both files and
+40-character tested commit. Readiness manifest v3 rehashes both files and
 requires their names, the library size, and the negotiated controller identity
 to match the report; a report alone is not certification evidence.

@@ -12,8 +12,9 @@ hardware process mock,
 the reference controller shared library, dependency-free Rust and C plugin SDKs,
 plugin/physics/hardware external-conformance guides, compatibility and install
 documentation, locked dependency SBOM,
-artifact-attestation policy, Rust API baseline, Python API manifest, replay
-fixtures, provenance report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
+artifact-attestation policy, Rust API baseline, Python API manifest, locked
+dependency graph, Failure Capsule authoring guides, replay fixtures, provenance
+report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
 replay, scenario replay, physics conformance, external hardware-adapter
 conformance, the 100-actor scale case, standalone controller-plugin
 conformance, the installed compatibility corpus, a fresh wheel installation,
@@ -24,6 +25,10 @@ TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
 denied; the scaffold SDK must match the bundled SDK byte-for-byte.
+The robot-replay check also uses the installed `rne-asset` binary to create and
+verify a content-addressed Failure Capsule from a retained failed behavior
+replay and TaskSpec. This proves the external-project evidence authoring path
+without relying on source-only `xtask`.
 The Python check compares all 24 public exports, constructors, methods,
 properties, constants, and text signatures, then writes a stable schema-v1
 report.

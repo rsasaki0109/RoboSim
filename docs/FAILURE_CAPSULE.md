@@ -6,19 +6,27 @@ to replay/evidence files. It does not duplicate replay actions and does not
 embed archive bytes, so the same `capsule.json` can later be transported as a
 directory, archive, or remote bundle.
 
-The `xtask` module is wired by the top-level dispatcher as:
+The installed `rne-asset` CLI creates and verifies capsules without an RNE
+source checkout. Run it from the extracted release root, which retains the
+release `Cargo.lock`; a locked Rust project may instead run it from its own
+root. The creator records the nearest lockfile and records a Git revision only
+when that root is a Git checkout—it never invents source-control provenance:
 
 ```text
-cargo run -p xtask -- failure-capsule create \
+rne-asset failure-capsule create \
   --replay artifacts/behavior-ci/replays/failure.rne-replay \
   --evidence artifacts/behavior-ci/report.json \
   --output artifacts/failure-capsules/failure-1 \
   --backend rapier \
   --backend-version 0.22
 
-cargo run -p xtask -- failure-capsule verify \
+rne-asset failure-capsule verify \
   artifacts/failure-capsules/failure-1
 ```
+
+RNE source developers can run the identical implementation through
+`cargo run --locked -p xtask -- failure-capsule ...`. Both entry points reject
+overwrites, symlinks, path escapes, malformed typed evidence, and digest drift.
 
 `create` accepts either the generic `rne_log::ReplayArtifact` JSON schema or
 the `rne_ai::BehaviorReplayArtifact` JSON schema. The source replay is copied
@@ -32,7 +40,7 @@ corresponding simulation/behavior failure replay and add the portable TaskSpec,
 hardware session evidence, and shadow comparison as evidence:
 
 ```text
-cargo run -p xtask -- failure-capsule create \
+rne-asset failure-capsule create \
   --replay artifacts/shadow-run/failure.rne-replay \
   --evidence assets/tasks/diff_drive_goal.task.json \
   --evidence artifacts/shadow-run/hardware-session.json \
@@ -74,14 +82,14 @@ cargo run -p rne_physics_conformance_suite --features mujoco \
   --report artifacts/physics-divergence-source/conformance-report.json \
   --replay artifacts/physics-divergence-source/divergence.rne-replay
 
-cargo run -p xtask -- failure-capsule create \
+rne-asset failure-capsule create \
   --replay artifacts/physics-divergence-source/divergence.rne-replay \
   --evidence artifacts/physics-divergence-source/conformance-report.json \
   --output artifacts/physics-divergence-capsule \
   --backend rapier-vs-mujoco \
   --backend-version rapier-0.22+mujoco-3.9.0
 
-cargo run -p xtask -- failure-capsule verify \
+rne-asset failure-capsule verify \
   artifacts/physics-divergence-capsule
 ```
 
