@@ -72,6 +72,11 @@ ownership and independence, add the appropriate typed entry shown below, and
 run `release-readiness`. Staging a file cannot change a readiness check by
 itself.
 
+Independent projects and extension authors submit the complete metadata and
+artifact checklist through the fixed
+[external evidence intake](EXTERNAL_EVIDENCE_INTAKE.md). Its issue forms are a
+review queue only; accepted bytes still pass this audit from an external pack.
+
 Evidence paths use forward slashes and are relative to the selected manifest.
 Each reference contains an exact lowercase `sha256:` digest. The audit reads
 regular files no larger than 64 MiB and rejects symlinks or paths outside the

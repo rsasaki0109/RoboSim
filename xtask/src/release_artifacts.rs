@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 56] = [
+const BUNDLE_FILES: [(&str, &str); 58] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -59,6 +59,10 @@ const BUNDLE_FILES: [(&str, &str); 56] = [
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
     ("docs/ONE_ZERO_READINESS.md", "ONE_ZERO_READINESS.md"),
+    (
+        "docs/EXTERNAL_EVIDENCE_INTAKE.md",
+        "docs/EXTERNAL_EVIDENCE_INTAKE.md",
+    ),
     ("docs/PLUGIN_SDK.md", "docs/PLUGIN_SDK.md"),
     (
         "docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
@@ -80,6 +84,10 @@ const BUNDLE_FILES: [(&str, &str); 56] = [
     (
         "release/one-zero-readiness.toml",
         "release/one-zero-readiness.toml",
+    ),
+    (
+        "release/external-evidence-intake.toml",
+        "release/external-evidence-intake.toml",
     ),
     (
         "release/evidence/compatibility-report-v1.json",
@@ -1916,7 +1924,12 @@ mod tests {
             fs::read(output.path().join("ONE_ZERO_READINESS.md")).unwrap(),
             fs::read(root.join("docs/ONE_ZERO_READINESS.md")).unwrap()
         );
+        assert_eq!(
+            fs::read(output.path().join("release/external-evidence-intake.toml")).unwrap(),
+            fs::read(root.join("release/external-evidence-intake.toml")).unwrap()
+        );
         for guide in [
+            "EXTERNAL_EVIDENCE_INTAKE.md",
             "PLUGIN_SDK.md",
             "EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
             "HARDWARE_ADAPTER_CONFORMANCE.md",

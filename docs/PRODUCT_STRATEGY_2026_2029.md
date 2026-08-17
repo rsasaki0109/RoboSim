@@ -390,6 +390,12 @@ the honest 2/9 baseline and its retained compatibility report.
 and no-overwrite rules while copying and hashing one file, then emits its
 canonical TOML reference. It cannot add manifest claims, determine ownership,
 or turn staged bytes into a passing check.
+The companion external-intake registry fixes three public submission routes
+for task reproductions, controller plugins, and backend/hardware systems.
+Required GitHub forms collect immutable revisions, subject bytes, typed
+reports, commands, dates, and safety/independence declarations; CI validates
+that the forms cannot silently drop a readiness requirement. Issues remain a
+review queue and never substitute for the typed audit.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
 executable installed contract. A strict registry content-addresses twenty-four

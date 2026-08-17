@@ -147,7 +147,10 @@ YYYY-MM-DD`. Its nine-check schema-v1 report currently remains ineligible;
 promotion mode. `xtask readiness-pack init` safely creates that pack on an
 external disk from the honest baseline, while `readiness-pack stage` stores
 individual files and emits their canonical SHA-256 TOML references without
-claiming third-party independence or promotion eligibility.
+claiming third-party independence or promotion eligibility. The fixed
+external-intake registry and required issue forms expose the three real
+third-party evidence routes while keeping human independence review and the
+typed readiness audit authoritative.
 
 The history matrix also binds the introducing TaskSpec v1, dataset bundle v1,
 and Failure Capsule v1 revisions. The installed dataset case reconstructs its

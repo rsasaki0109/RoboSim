@@ -20,6 +20,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **External evidence intake contract**: a machine-readable three-route
+  registry, public contributor guide, and required GitHub issue forms now cover
+  independent task reproduction, third-party controller plugins, and external
+  physics backends or hardware adapters. `xtask external-intake-check` binds
+  the route thresholds, ownership and author-assistance policy, artifact
+  checklist, form fields, and repository-contained files; lint and release
+  checks fail on drift. Submission remains a review queue and cannot satisfy
+  the typed readiness gate by itself.
+
 - **External readiness-pack authoring**: `xtask readiness-pack init` creates a
   non-overwriting external-disk copy of the honest 2/9 readiness baseline and
   its retained compatibility evidence. `readiness-pack stage` then copies one

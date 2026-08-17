@@ -5,6 +5,7 @@ mod benchmark;
 mod capability_report;
 mod dataset;
 mod evidence;
+mod external_intake;
 mod failure_capsule;
 mod lekiwi_evidence;
 mod readiness_pack;
@@ -131,6 +132,7 @@ fn run() -> anyhow::Result<()> {
         "dataset-check" => dataset::dataset_check(&mut args),
         "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
         "evidence" => evidence::evidence(&mut args),
+        "external-intake-check" => external_intake::run(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "lekiwi-evidence" => lekiwi_evidence::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
@@ -176,6 +178,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     );
     rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
+    external_intake::validate_committed(&root)?;
     release_readiness::validate_committed_manifest(&root)?;
     release_readiness::enforce_release_promotion(&root)?;
 
@@ -3355,6 +3358,7 @@ fn ros_setup_available() -> bool {
 
 fn lint_boundaries() -> anyhow::Result<()> {
     let workspace_root = workspace_root()?;
+    external_intake::validate_committed(&workspace_root)?;
     let forbidden = ["rcl", "rclrs", "rclcpp", "ros2", "adapters/", "../adapters"];
 
     for manifest in find_cargo_tomls(&workspace_root.join("crates"))? {

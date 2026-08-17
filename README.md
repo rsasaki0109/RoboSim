@@ -126,6 +126,14 @@ The long example smoke gate is split for CI into `manipulator`, `locomotion`,
 
 See [examples/README.md](examples/README.md) for the complete example index.
 
+## Independent integrations
+
+Third-party controller plugins, physics backends, hardware adapters, and real
+external task reproductions can be submitted through the fixed
+[external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
+validates all required issue-form fields with `xtask external-intake-check`;
+submission never implies acceptance or 1.0 readiness.
+
 ## Selected demos
 
 ### PLATEAU city and sensors
