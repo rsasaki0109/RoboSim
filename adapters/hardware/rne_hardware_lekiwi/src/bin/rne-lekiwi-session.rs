@@ -23,7 +23,9 @@ const USAGE: &str = "usage: rne-lekiwi-session --output PATH [--mock | --physica
     [--action-vx-m-s V] [--action-vy-m-s V] [--action-wz-rad-s V] \
     [--sample-period-ms N] [--controller-delay-ms N] \
     [--emergency-stop-after-samples N] [--response-timeout-ms N] [--python PATH] \
-    [--bridge PATH] [--robot-id ID] [--port PATH] [--allow-actuation]";
+    [--bridge PATH] [--robot-id ID] [--port PATH] [--allow-actuation] \
+    [--confirm-cutoff-operator] [--confirm-wheels-elevated] \
+    [--confirm-clear-work-area]";
 
 fn main() {
     if std::env::args()
@@ -155,6 +157,9 @@ impl CliArgs {
         let mut mock_device = false;
         let mut physical_session = false;
         let mut allow_actuation = false;
+        let mut confirm_cutoff_operator = false;
+        let mut confirm_wheels_elevated = false;
+        let mut confirm_clear_work_area = false;
         let mut session_id = None;
         let mut mode = HardwareMode::Shadow;
         let mut samples = 3_usize;
@@ -179,6 +184,9 @@ impl CliArgs {
                 "--mock" => mock_device = true,
                 "--physical-session" => physical_session = true,
                 "--allow-actuation" => allow_actuation = true,
+                "--confirm-cutoff-operator" => confirm_cutoff_operator = true,
+                "--confirm-wheels-elevated" => confirm_wheels_elevated = true,
+                "--confirm-clear-work-area" => confirm_clear_work_area = true,
                 "--session-id" => session_id = Some(take_string(&arguments, &mut index, flag)?),
                 "--mode" => {
                     mode = match take_string(&arguments, &mut index, flag)?.as_str() {
@@ -215,11 +223,42 @@ impl CliArgs {
         if mock_device == physical_session {
             return Err("select exactly one of --mock or --physical-session".to_string());
         }
-        if !mock_device
-            && matches!(mode, HardwareMode::Hil | HardwareMode::Live)
-            && !allow_actuation
+        let physical_actuation =
+            physical_session && matches!(mode, HardwareMode::Hil | HardwareMode::Live);
+        if !physical_actuation
+            && (allow_actuation
+                || confirm_cutoff_operator
+                || confirm_wheels_elevated
+                || confirm_clear_work_area)
         {
+            return Err(
+                "actuation and physical-safety confirmations are valid only for physical HIL/live"
+                    .to_string(),
+            );
+        }
+        if physical_actuation && !allow_actuation {
             return Err("physical HIL/live requires --allow-actuation".to_string());
+        }
+        if physical_actuation && !confirm_cutoff_operator {
+            return Err("physical HIL/live requires --confirm-cutoff-operator".to_string());
+        }
+        if physical_session && mode == HardwareMode::Hil && !confirm_wheels_elevated {
+            return Err("physical HIL requires --confirm-wheels-elevated".to_string());
+        }
+        if physical_session && mode == HardwareMode::Hil && confirm_clear_work_area {
+            return Err(
+                "physical HIL uses --confirm-wheels-elevated, not --confirm-clear-work-area"
+                    .to_string(),
+            );
+        }
+        if physical_session && mode == HardwareMode::Live && !confirm_clear_work_area {
+            return Err("physical live requires --confirm-clear-work-area".to_string());
+        }
+        if physical_session && mode == HardwareMode::Live && confirm_wheels_elevated {
+            return Err(
+                "physical live uses --confirm-clear-work-area, not --confirm-wheels-elevated"
+                    .to_string(),
+            );
         }
         if samples == 0 {
             return Err("--samples must be greater than zero".to_string());
@@ -278,6 +317,107 @@ impl CliArgs {
             robot_id,
             port,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(arguments: &[&str]) -> Result<CliArgs, String> {
+        CliArgs::parse(arguments.iter().map(OsString::from))
+    }
+
+    fn physical(mode: &str) -> Vec<&str> {
+        vec![
+            "--physical-session",
+            "--mode",
+            mode,
+            "--session-id",
+            "rne.lekiwi.physical.test",
+            "--robot-id",
+            "calibration-a",
+            "--output",
+            "lekiwi-test-evidence.json",
+        ]
+    }
+
+    #[test]
+    fn physical_hil_requires_cutoff_operator_and_elevated_wheels() {
+        let mut arguments = physical("hil");
+        arguments.push("--allow-actuation");
+        assert_eq!(
+            parse(&arguments).unwrap_err(),
+            "physical HIL/live requires --confirm-cutoff-operator"
+        );
+        arguments.push("--confirm-cutoff-operator");
+        assert_eq!(
+            parse(&arguments).unwrap_err(),
+            "physical HIL requires --confirm-wheels-elevated"
+        );
+        arguments.push("--confirm-wheels-elevated");
+        assert!(parse(&arguments).is_ok());
+    }
+
+    #[test]
+    fn physical_live_requires_cutoff_operator_and_clear_work_area() {
+        let mut arguments = physical("live");
+        arguments.extend(["--allow-actuation", "--confirm-cutoff-operator"]);
+        assert_eq!(
+            parse(&arguments).unwrap_err(),
+            "physical live requires --confirm-clear-work-area"
+        );
+        arguments.push("--confirm-clear-work-area");
+        assert!(parse(&arguments).is_ok());
+    }
+
+    #[test]
+    fn safety_confirmations_fail_closed_outside_their_physical_stage() {
+        for arguments in [
+            vec![
+                "--mock",
+                "--mode",
+                "live",
+                "--confirm-clear-work-area",
+                "--output",
+                "lekiwi-test-evidence.json",
+            ],
+            vec![
+                "--physical-session",
+                "--mode",
+                "shadow",
+                "--confirm-cutoff-operator",
+                "--session-id",
+                "rne.lekiwi.physical.shadow.test",
+                "--robot-id",
+                "calibration-a",
+                "--output",
+                "lekiwi-test-evidence.json",
+            ],
+        ] {
+            assert_eq!(
+                parse(&arguments).unwrap_err(),
+                "actuation and physical-safety confirmations are valid only for physical HIL/live"
+            );
+        }
+
+        let mut hil = physical("hil");
+        hil.extend([
+            "--allow-actuation",
+            "--confirm-cutoff-operator",
+            "--confirm-wheels-elevated",
+            "--confirm-clear-work-area",
+        ]);
+        assert!(parse(&hil).is_err());
+
+        let mut live = physical("live");
+        live.extend([
+            "--allow-actuation",
+            "--confirm-cutoff-operator",
+            "--confirm-clear-work-area",
+            "--confirm-wheels-elevated",
+        ]);
+        assert!(parse(&live).is_err());
     }
 }
 

@@ -151,28 +151,45 @@ Raspberry Pi, capture elevated shadow evidence with:
       --bridge ./rne_hardware_lekiwi_device.py \
       --output artifacts/lekiwi-elevated-shadow.json
 
-HIL/live additionally require the explicit `--allow-actuation` switch. Begin
-with zero commands, then use the bounded `--action-vx-m-s`,
-`--action-vy-m-s`, and `--action-wz-rad-s` flags only after the staged safety
-checks above.
+HIL/live additionally require the explicit `--allow-actuation` switch and a
+separate `--confirm-cutoff-operator` acknowledgement that the second operator
+is present at the reachable physical cutoff. Elevated HIL also requires
+`--confirm-wheels-elevated`; floor live instead requires
+`--confirm-clear-work-area`. The CLI rejects these acknowledgements in mock,
+shadow, or the wrong physical stage. They are a fail-closed launch preflight,
+not evidence that the procedure happened: the final manifest still requires
+the distinct operators and typed power-isolation diagnostic. Begin with zero
+commands, then use the bounded `--action-vx-m-s`, `--action-vy-m-s`, and
+`--action-wz-rad-s` flags only after the staged safety checks above.
 
 The bundled CLI makes four safety paths repeatable without changing the bridge:
 
     # Observation accepted, then controller exceeds the 75 ms deadline.
     rne-lekiwi-session ... --mode hil --allow-actuation \
+      --confirm-cutoff-operator --confirm-wheels-elevated \
       --samples 1 --controller-delay-ms 80 --output deadline.json
 
     # Host does not refresh before both gateway and device watchdog bounds.
     rne-lekiwi-session ... --mode hil --allow-actuation \
+      --confirm-cutoff-operator --confirm-wheels-elevated \
       --samples 2 --sample-period-ms 600 --output watchdog.json
 
     # Gateway rejects the over-limit action and sends only a zero stop.
     rne-lekiwi-session ... --mode hil --allow-actuation \
+      --confirm-cutoff-operator --confirm-wheels-elevated \
       --samples 1 --action-vx-m-s 0.100001 --output limit.json
 
     # Operator emergency stop after one acknowledged zero command.
     rne-lekiwi-session ... --mode hil --allow-actuation \
+      --confirm-cutoff-operator --confirm-wheels-elevated \
       --samples 1 --emergency-stop-after-samples 1 --output emergency.json
+
+The first floor-live command replaces `--confirm-wheels-elevated` with
+`--confirm-clear-work-area` and must retain `--confirm-cutoff-operator`:
+
+    rne-lekiwi-session ... --mode live --allow-actuation \
+      --confirm-cutoff-operator --confirm-clear-work-area \
+      --samples 1 --action-vx-m-s 0.02 --output live-first-motion.json
 
 Replace `...` with the physical-session, session-id, robot-id, port, and bridge
 arguments from the shadow command. Each safety terminal writes validated

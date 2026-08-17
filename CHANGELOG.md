@@ -12,6 +12,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Fail-closed LeKiwi physical actuation preflight**: physical HIL now
+  requires explicit cutoff-operator and elevated-wheel confirmations, while
+  physical live requires cutoff-operator and clear-work-area confirmations.
+  Mock, shadow, and cross-stage confirmation misuse is rejected; the flags do
+  not replace the typed two-operator physical-evidence attestation.
+
 - **Relocatable built-in scene lookup**: `rne_ai` built-in mobile-manipulator
   and URDF scene helpers now locate the staged `assets/` tree from the runtime
   working directory or executable location. Shared Cargo targets can no longer
