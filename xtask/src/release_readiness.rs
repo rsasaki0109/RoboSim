@@ -626,6 +626,33 @@ fn validate_support_shape(support: &SupportCommitment) -> anyhow::Result<()> {
             "{field} contains control characters"
         );
     }
+
+    if !support.committed {
+        anyhow::ensure!(
+            support.maintainer.is_empty()
+                && support.support_period.is_empty()
+                && support.policy_url.is_empty(),
+            "uncommitted support must not contain maintainer, period, or policy claims"
+        );
+        return Ok(());
+    }
+
+    anyhow::ensure!(
+        !support.maintainer.trim().is_empty()
+            && support.maintainer == support.maintainer.trim()
+            && support.maintainer.len() <= 128,
+        "committed support maintainer must be a canonical non-empty value of at most 128 bytes"
+    );
+    anyhow::ensure!(
+        !support.support_period.trim().is_empty()
+            && support.support_period == support.support_period.trim()
+            && support.support_period.len() <= 256,
+        "committed support period must be a canonical non-empty value of at most 256 bytes"
+    );
+    anyhow::ensure!(
+        support.policy_url.len() <= 2_048 && is_https_url(&support.policy_url),
+        "committed support policy must be a bounded HTTPS URL"
+    );
     Ok(())
 }
 
@@ -1724,6 +1751,56 @@ mod tests {
         assert_eq!(leap_start.days_until(march).unwrap(), 2);
         assert!(CivilDate::parse("2026-02-29").is_err());
         assert!(CivilDate::parse("2026/08/16").is_err());
+    }
+
+    #[test]
+    fn support_commitment_shape_fails_closed() {
+        let empty = SupportCommitment {
+            committed: false,
+            maintainer: String::new(),
+            support_period: String::new(),
+            policy_url: String::new(),
+        };
+        validate_support_shape(&empty).unwrap();
+
+        for mut ambiguous in [
+            SupportCommitment {
+                maintainer: "maintainer".to_string(),
+                ..empty.clone()
+            },
+            SupportCommitment {
+                support_period: "12 months".to_string(),
+                ..empty.clone()
+            },
+            SupportCommitment {
+                policy_url: "https://example.invalid/support".to_string(),
+                ..empty.clone()
+            },
+        ] {
+            ambiguous.committed = false;
+            assert!(validate_support_shape(&ambiguous).is_err());
+        }
+
+        let committed = SupportCommitment {
+            committed: true,
+            maintainer: "RNE maintainer".to_string(),
+            support_period: "12 months after each stable minor release".to_string(),
+            policy_url: "https://example.invalid/support".to_string(),
+        };
+        validate_support_shape(&committed).unwrap();
+
+        let mut missing_maintainer = committed.clone();
+        missing_maintainer.maintainer.clear();
+        assert!(validate_support_shape(&missing_maintainer).is_err());
+        let mut padded_period = committed.clone();
+        padded_period.support_period.push(' ');
+        assert!(validate_support_shape(&padded_period).is_err());
+        let mut insecure_policy = committed.clone();
+        insecure_policy.policy_url = "http://example.invalid/support".to_string();
+        assert!(validate_support_shape(&insecure_policy).is_err());
+        let mut oversized_maintainer = committed;
+        oversized_maintainer.maintainer = "m".repeat(129);
+        assert!(validate_support_shape(&oversized_maintainer).is_err());
     }
 
     #[test]

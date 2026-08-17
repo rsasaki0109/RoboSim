@@ -397,3 +397,8 @@ Malformed external input is supported only to the point of safe rejection.
 Security reports should use GitHub's private vulnerability reporting for the
 repository. P0/P1 release blockers are tracked in `release/blockers.toml`; a
 release rehearsal fails while either severity is open.
+
+The current 0.x support status and the explicit commitment required before a
+1.0 promotion are defined in [the support policy](SUPPORT.md). The committed
+1.0 readiness tracker must remain empty rather than imply a maintainer, period,
+or published policy that has not been authorized.

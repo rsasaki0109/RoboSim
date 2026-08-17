@@ -6,11 +6,19 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Document the current best-effort 0.x support status and the exact published
+  policy decision required before 1.0, without presenting draft intent as a
+  maintainer commitment.
+
 - Surface the three independent RNE 1.0 validation routes near the top of the
   README so external task, controller-plugin, and backend/hardware authors can
   reach the fixed evidence forms without weakening the typed acceptance gate.
 
 ### Fixed
+
+- Make the 1.0 readiness manifest reject partially populated uncommitted
+  support claims and incomplete, noncanonical, oversized, or non-HTTPS
+  committed support fields.
 
 - **Fail-closed LeKiwi physical actuation preflight**: physical HIL now
   requires explicit cutoff-operator and elevated-wheel confirmations, while

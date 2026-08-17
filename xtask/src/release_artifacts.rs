@@ -51,13 +51,14 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 61] = [
+const BUNDLE_FILES: [(&str, &str); 62] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
     ("LICENSE-APACHE", "LICENSE-APACHE"),
     ("Cargo.lock", "Cargo.lock"),
     ("docs/COMPATIBILITY.md", "COMPATIBILITY.md"),
+    ("docs/SUPPORT.md", "SUPPORT.md"),
     ("docs/RELEASE_INSTALL.md", "INSTALL.md"),
     ("docs/ONE_ZERO_READINESS.md", "ONE_ZERO_READINESS.md"),
     ("docs/EVIDENCE_QUICKSTART.md", "docs/EVIDENCE_QUICKSTART.md"),
@@ -2070,6 +2071,10 @@ mod tests {
         assert_eq!(
             fs::read(output.path().join("ONE_ZERO_READINESS.md")).unwrap(),
             fs::read(root.join("docs/ONE_ZERO_READINESS.md")).unwrap()
+        );
+        assert_eq!(
+            fs::read(output.path().join("SUPPORT.md")).unwrap(),
+            fs::read(root.join("docs/SUPPORT.md")).unwrap()
         );
         assert_eq!(
             fs::read(output.path().join("release/external-evidence-intake.toml")).unwrap(),

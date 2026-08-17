@@ -95,7 +95,7 @@ stars.
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound nine-check install reports, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
 | `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 24 registered typed-reader checks, including fail-closed future/unknown-field mutations and verified historical Git revision/tree/blob provenance |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
-| `support_commitment` | A named maintainer, support period, and HTTPS policy are explicitly committed |
+| `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
 The manifest, report, and attestation receipt schemas are registered as
 `evidence.one_zero_readiness_manifest = 3`,
@@ -111,6 +111,11 @@ the blocker registry is clean, so the committed 2026-08-16 baseline is
 `eligible=false` with 2 of 9 checks satisfied. The remaining seven checks still
 require real external, physical, signed-release, elapsed-time, or maintainer
 evidence.
+
+The pre-1.0 status and required contents of the final maintainer commitment are
+documented in [the support policy](SUPPORT.md). The tracker remains
+`committed = false` with all other support fields empty until an authorized
+maintainer publishes that policy; draft language cannot make the check pass.
 
 ## Evidence-pack shape
 
