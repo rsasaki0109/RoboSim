@@ -7,7 +7,7 @@ All notable changes to Robot Native Engine are documented in this file.
 ### Fixed
 
 - **Portable WGPU TAA depth reprojection**: temporal anti-aliasing now samples
-  pixel-center depth from a dedicated `R32Float` scene attachment instead of a
+  pixel-center depth from a dedicated `Rgba16Float` scene attachment instead of
   depth `textureLoad` that the OpenGL/GLSL backend cannot lower. The extra
   attachment and matching scene pipelines are enabled only for TAA, keeping the
   default scene path unchanged while making TAA portable across WGPU backends.

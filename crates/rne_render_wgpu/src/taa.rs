@@ -3,6 +3,9 @@
 use bytemuck::{Pod, Zeroable};
 use rne_math::Mat4;
 
+pub(crate) const TAA_REPROJECTION_DEPTH_FORMAT: wgpu::TextureFormat =
+    wgpu::TextureFormat::Rgba16Float;
+
 pub(crate) const TAA_SHADER: &str = r#"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -598,7 +601,7 @@ impl TemporalAntiAliasing {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
+            format: TAA_REPROJECTION_DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });

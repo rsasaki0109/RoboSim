@@ -1,5 +1,5 @@
 use crate::environment_filter::{prefilter_environment, SPECULAR_MIP_LEVELS};
-use crate::taa::{TaaSettings, TemporalAntiAliasing};
+use crate::taa::{TaaSettings, TemporalAntiAliasing, TAA_REPROJECTION_DEPTH_FORMAT};
 
 const SHADER: &str = r#"
 struct CameraUniform {
@@ -369,7 +369,7 @@ fn shade_fragment(input: VertexOutput) -> vec4<f32> {
 
 struct TaaFragmentOutput {
     @location(0) color: vec4<f32>,
-    @location(1) depth: f32,
+    @location(1) depth: vec4<f32>,
 }
 
 @fragment
@@ -381,7 +381,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 fn fs_main_taa(input: VertexOutput) -> TaaFragmentOutput {
     var output: TaaFragmentOutput;
     output.color = shade_fragment(input);
-    output.depth = input.clip_position.z;
+    output.depth = vec4<f32>(input.clip_position.z, 0.0, 0.0, 0.0);
     return output;
 }
 "#;
@@ -476,7 +476,7 @@ fn shade_sky(input: SkyVertexOutput) -> vec4<f32> {
 
 struct SkyTaaFragmentOutput {
     @location(0) color: vec4<f32>,
-    @location(1) depth: f32,
+    @location(1) depth: vec4<f32>,
 }
 
 @fragment
@@ -488,7 +488,7 @@ fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
 fn fs_sky_taa(input: SkyVertexOutput) -> SkyTaaFragmentOutput {
     var output: SkyTaaFragmentOutput;
     output.color = shade_sky(input);
-    output.depth = input.clip_position.z;
+    output.depth = vec4<f32>(input.clip_position.z, 0.0, 0.0, 0.0);
     return output;
 }
 "#;
@@ -1117,7 +1117,7 @@ impl PrimitiveRenderer {
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R32Float,
+                        format: TAA_REPROJECTION_DEPTH_FORMAT,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
@@ -1203,7 +1203,7 @@ impl PrimitiveRenderer {
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R32Float,
+                        format: TAA_REPROJECTION_DEPTH_FORMAT,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),

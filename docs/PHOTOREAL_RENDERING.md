@@ -56,7 +56,7 @@ reprojected through the previous view-projection matrix; static scenes gain
 the strongest edge-quality improvement. The G1 capture exposes the same path
 with `RNE_TAA=1` and optional `RNE_TAA_FEEDBACK` / `RNE_TAA_JITTER_PX`.
 When TAA is enabled, the scene pass also writes fragment depth to a dedicated
-`R32Float` attachment. Reprojection reads the exact pixel from that ordinary
+`Rgba16Float` attachment. Reprojection reads the exact pixel from that ordinary
 float texture, which avoids backend-specific depth `textureLoad` support and
 keeps the shader portable across Vulkan, Direct3D 12, Metal, and OpenGL/GLSL.
 
