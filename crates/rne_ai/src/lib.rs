@@ -2,6 +2,8 @@
 
 #![deny(missing_docs)]
 
+mod asset_path;
+
 pub mod action;
 pub mod agent;
 pub mod behavior;

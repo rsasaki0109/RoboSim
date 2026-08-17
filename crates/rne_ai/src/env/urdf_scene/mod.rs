@@ -1651,9 +1651,7 @@ fn find_entity_by_name(world: &World, name: &str) -> Option<Entity> {
 }
 
 fn assets_scene_path(file_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes")
-        .join(file_name)
+    crate::asset_path::bundled_asset_path(Path::new("scenes").join(file_name))
 }
 
 /// Built-in SO-101 scene path.

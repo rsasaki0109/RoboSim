@@ -476,60 +476,53 @@ pub struct MobileManipulatorSimSnapshot {
 
 /// Default scene asset for the fixed-base `mm_minimal` robot.
 pub fn mm_minimal_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_minimal.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal.rne.scene.toml")
 }
 
 /// Default scene asset for the diff-drive `mm_mobile` robot.
 pub fn mm_mobile_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_mobile.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile.rne.scene.toml")
 }
 
 /// Default scene asset for the lift-capable `mm_mobile_lift` robot.
 pub fn mm_mobile_lift_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_lift.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_lift.rne.scene.toml")
 }
 
 /// Lift-capable mobile scene with a friction-grasp cube on a low pickup table.
 pub fn mm_mobile_lift_pick_place_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_lift_pick_place.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_lift_pick_place.rne.scene.toml")
 }
 
 /// Default scene asset for the lift-equipped `mm_lift` robot.
 pub fn mm_lift_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_lift.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_lift.rne.scene.toml")
 }
 
 /// Scene asset with a cube on the ground under the lift robot's top-down gripper,
 /// for vertical pick-and-lift tests.
 pub fn mm_lift_pick_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_lift_pick.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_lift_pick.rne.scene.toml")
 }
 
 /// Scene asset with a tabletop cube for gripper contact smoke tests.
 pub fn mm_minimal_grasp_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_grasp.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_grasp.rne.scene.toml")
 }
 
 /// Scene asset with a dynamic cube for grasp-and-transport smoke tests.
 pub fn mm_minimal_transport_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_transport.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_transport.rne.scene.toml")
 }
 
 /// Scene asset with three tabletop cubes for clutter pick episodes.
 pub fn mm_minimal_clutter_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_clutter.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_clutter.rne.scene.toml")
 }
 
 /// Scene asset with a diff-drive base and three cubes spread along X.
 pub fn mm_mobile_clutter_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_clutter.rne.scene.toml")
 }
 
 /// How an actuated joint's position is read back and how its command maps to a motor.

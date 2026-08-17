@@ -192,3 +192,10 @@ removes its tool-owned wheel virtual environment and generated controller
 scaffold. A failed check retains those transient directories for debugging.
 Cleanup is bounded to the exact expected child directories and refuses
 symlinks, regular files, or paths outside the selected output directory.
+
+Built-in `rne_ai` scene helpers locate the release `assets/` directory at run
+time by walking upward from the process working directory and executable. They
+do not embed the checkout used to compile the library, so a shared Cargo target
+or relocated extracted bundle cannot retain a deleted build-machine path. Run
+packaged Python examples from the extracted release root (or pass an explicit
+scene path when embedding RNE in another layout).

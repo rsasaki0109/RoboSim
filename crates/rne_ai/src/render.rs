@@ -321,8 +321,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn mesh_scene_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/scenes/mesh_diff_drive.rne.scene.toml")
+        crate::asset_path::bundled_asset_path("scenes/mesh_diff_drive.rne.scene.toml")
     }
 
     #[test]

@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Relocatable built-in scene lookup**: `rne_ai` built-in mobile-manipulator
+  and URDF scene helpers now locate the staged `assets/` tree from the runtime
+  working directory or executable location. Shared Cargo targets can no longer
+  reuse a deleted checkout path that was embedded at compile time; unresolved
+  assets remain relative instead of pointing at a stale build machine path.
+
 - **Bounded release-rehearsal cleanup**: successful native-bundle and
   independently extracted rehearsals now remove only their validated,
   tool-owned wheel virtual environment, controller scaffold, internal
