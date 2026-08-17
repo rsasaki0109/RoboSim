@@ -4,6 +4,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Surface the three independent RNE 1.0 validation routes near the top of the
+  README so external task, controller-plugin, and backend/hardware authors can
+  reach the fixed evidence forms without weakening the typed acceptance gate.
+
 ### Fixed
 
 - **Relocatable built-in scene lookup**: `rne_ai` built-in mobile-manipulator

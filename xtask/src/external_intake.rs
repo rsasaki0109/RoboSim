@@ -187,6 +187,8 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
         guide.starts_with("# External evidence intake\n"),
         "external evidence intake guide title drifted"
     );
+    let readme = read_repository_file(root, "README.md")?;
+    validate_readme_discovery(&readme, &registry)?;
 
     let mut ids = BTreeSet::new();
     for (route, expected) in registry.route.iter().zip(&EXPECTED_ROUTES) {
@@ -209,6 +211,43 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
             route.issue_template
         );
     }
+    Ok(())
+}
+
+fn validate_readme_discovery(readme: &str, registry: &IntakeRegistry) -> Result<()> {
+    let heading = readme
+        .find("## Independent validation wanted\n")
+        .context("README is missing the independent-validation heading")?;
+    let quickstart = readme
+        .find("## Quickstart\n")
+        .context("README is missing the quickstart heading")?;
+    anyhow::ensure!(
+        heading < quickstart,
+        "README independent-validation routes must appear before Quickstart"
+    );
+    anyhow::ensure!(
+        readme.contains("docs/EXTERNAL_EVIDENCE_INTAKE.md"),
+        "README independent-validation section must link the intake guide"
+    );
+    for route in &registry.route {
+        let template = route
+            .issue_template
+            .rsplit('/')
+            .next()
+            .context("external intake issue template is missing its file name")?;
+        let issue_url =
+            format!("https://github.com/rsasaki0109/RoboSim/issues/new?template={template}");
+        anyhow::ensure!(
+            readme.contains(&issue_url),
+            "README does not expose the public issue URL for {}",
+            route.id
+        );
+    }
+    anyhow::ensure!(
+        readme.contains("Opening an issue is only the start of review:")
+            && readme.contains("does not imply acceptance"),
+        "README must not present an issue submission as accepted evidence"
+    );
     Ok(())
 }
 
@@ -398,6 +437,26 @@ mod tests {
     #[test]
     fn committed_external_intake_contract_is_complete() {
         validate_committed(&workspace_root().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn readme_discovery_cannot_drop_a_route_or_acceptance_warning() {
+        let root = workspace_root().unwrap();
+        let registry: IntakeRegistry =
+            toml::from_str(&fs::read_to_string(root.join(DEFAULT_REGISTRY)).unwrap()).unwrap();
+        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        validate_readme_discovery(&readme, &registry).unwrap();
+
+        assert!(validate_readme_discovery(
+            &readme.replace("external-project-evidence.yml", "missing.yml"),
+            &registry
+        )
+        .is_err());
+        assert!(validate_readme_discovery(
+            &readme.replace("does not imply acceptance", "is accepted evidence"),
+            &registry
+        )
+        .is_err());
     }
 
     #[test]

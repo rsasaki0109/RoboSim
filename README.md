@@ -31,6 +31,22 @@ dependency.
 | Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
+## Independent validation wanted
+
+RNE remains below 1.0 until real projects outside this repository reproduce
+tasks and independently maintained extensions pass the shipped conformance
+kits. Native release bundles include the required tools; cloning the RNE
+source tree is not required to submit evidence.
+
+- [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
+- [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
+- [Conform an external physics backend or hardware adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+
+Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
+before running a qualifying test. Opening an issue is only the start of review:
+it does not imply acceptance, and in-repository reference implementations do
+not count as independent evidence.
+
 ## Vehicle dynamics at the grip limit
 
 <p align="center">
