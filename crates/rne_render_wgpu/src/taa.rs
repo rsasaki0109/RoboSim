@@ -36,7 +36,7 @@ struct TaaUniform {
 
 @group(0) @binding(0) var current_color: texture_2d<f32>;
 @group(0) @binding(1) var history_color: texture_2d<f32>;
-@group(0) @binding(2) var current_depth: texture_depth_2d;
+@group(0) @binding(2) var current_depth: texture_2d<f32>;
 @group(0) @binding(3) var color_sampler: sampler;
 @group(0) @binding(4) var<uniform> taa: TaaUniform;
 
@@ -70,7 +70,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         i32(clamp(floor(input.position.x), 0.0, taa.resolution.x - 1.0)),
         i32(clamp(floor(input.position.y), 0.0, taa.resolution.y - 1.0)),
     );
-    let depth = textureLoad(current_depth, pixel, 0);
+    let depth = textureLoad(current_depth, pixel, 0).r;
     let history_uv = reproject_uv(input.uv, depth);
     if any(history_uv < vec2<f32>(0.0)) || any(history_uv > vec2<f32>(1.0)) {
         return current;
@@ -216,6 +216,8 @@ pub(crate) struct TemporalAntiAliasing {
     size: Option<(u32, u32)>,
     _scene_texture: Option<wgpu::Texture>,
     scene_view: Option<wgpu::TextureView>,
+    _reprojection_depth_texture: Option<wgpu::Texture>,
+    reprojection_depth_view: Option<wgpu::TextureView>,
     resolved_texture: Option<wgpu::Texture>,
     resolved_view: Option<wgpu::TextureView>,
     history_texture: Option<wgpu::Texture>,
@@ -246,7 +248,7 @@ impl TemporalAntiAliasing {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -339,6 +341,8 @@ impl TemporalAntiAliasing {
             size: None,
             _scene_texture: None,
             scene_view: None,
+            _reprojection_depth_texture: None,
+            reprojection_depth_view: None,
             resolved_texture: None,
             resolved_view: None,
             history_texture: None,
@@ -422,11 +426,17 @@ impl TemporalAntiAliasing {
             .expect("TAA targets must be initialized before scene_view")
     }
 
+    pub(crate) fn reprojection_depth_view(&self) -> &wgpu::TextureView {
+        self.reprojection_depth_view
+            .as_ref()
+            .expect("TAA targets must be initialized before reprojection_depth_view")
+    }
+
     pub(crate) fn encode(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        depth_view: &wgpu::TextureView,
+        reprojection_depth_view: &wgpu::TextureView,
         target_view: &wgpu::TextureView,
     ) {
         let scene_view = self
@@ -464,7 +474,7 @@ impl TemporalAntiAliasing {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(depth_view),
+                    resource: wgpu::BindingResource::TextureView(reprojection_depth_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -578,6 +588,20 @@ impl TemporalAntiAliasing {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
+        let reprojection_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_taa_reprojection_depth_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
         let resolved_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("rne_taa_resolved_texture"),
             size: wgpu::Extent3d {
@@ -610,11 +634,14 @@ impl TemporalAntiAliasing {
         });
 
         self.scene_view = Some(scene_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.reprojection_depth_view =
+            Some(reprojection_depth_texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.resolved_view =
             Some(resolved_texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.history_view =
             Some(history_texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self._scene_texture = Some(scene_texture);
+        self._reprojection_depth_texture = Some(reprojection_depth_texture);
         self.resolved_texture = Some(resolved_texture);
         self.history_texture = Some(history_texture);
         self.size = Some((width, height));
@@ -727,6 +754,13 @@ mod tests {
         .sanitized();
         assert_eq!(settings.feedback, 0.9);
         assert_eq!(settings.jitter_scale_px, 0.75);
+    }
+
+    #[test]
+    fn taa_depth_reprojection_reads_a_portable_float_attachment() {
+        assert!(TAA_SHADER.contains("var current_depth: texture_2d<f32>"));
+        assert!(TAA_SHADER.contains("textureLoad(current_depth, pixel, 0).r"));
+        assert!(!TAA_SHADER.contains("texture_depth_2d"));
     }
 
     #[test]

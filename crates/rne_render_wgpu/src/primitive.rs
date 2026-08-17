@@ -290,8 +290,7 @@ fn tangent_frame(normal: vec3<f32>, world_position: vec3<f32>, uv: vec2<f32>) ->
     return mat3x3<f32>(tangent, bitangent, normal);
 }
 
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn shade_fragment(input: VertexOutput) -> vec4<f32> {
     let light_dir = normalize(camera.light_ambient.xyz);
     let geometric_normal = normalize(input.world_normal);
     let geometric_ndotl = max(dot(geometric_normal, light_dir), 0.0);
@@ -366,6 +365,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         reinhard_tonemap(hdr_color),
         input.color.a * draw.base_color.a * texture_color.a,
     );
+}
+
+struct TaaFragmentOutput {
+    @location(0) color: vec4<f32>,
+    @location(1) depth: f32,
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return shade_fragment(input);
+}
+
+@fragment
+fn fs_main_taa(input: VertexOutput) -> TaaFragmentOutput {
+    var output: TaaFragmentOutput;
+    output.color = shade_fragment(input);
+    output.depth = input.clip_position.z;
+    return output;
 }
 "#;
 
@@ -445,8 +462,7 @@ fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
     return color / (vec3<f32>(1.0) + color);
 }
 
-@fragment
-fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
+fn shade_sky(input: SkyVertexOutput) -> vec4<f32> {
     let near_clip = vec4<f32>(input.ndc_position, 0.0, 1.0);
     let far_clip = vec4<f32>(input.ndc_position, 1.0, 1.0);
     let near_world = camera.inv_view_proj * near_clip;
@@ -456,6 +472,24 @@ fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
     let direction = normalize(far_position - near_position);
     let color = sample_environment(direction) * camera.environment.w;
     return vec4<f32>(reinhard_tonemap(color), 1.0);
+}
+
+struct SkyTaaFragmentOutput {
+    @location(0) color: vec4<f32>,
+    @location(1) depth: f32,
+}
+
+@fragment
+fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
+    return shade_sky(input);
+}
+
+@fragment
+fn fs_sky_taa(input: SkyVertexOutput) -> SkyTaaFragmentOutput {
+    var output: SkyTaaFragmentOutput;
+    output.color = shade_sky(input);
+    output.depth = input.clip_position.z;
+    return output;
 }
 "#;
 
@@ -628,7 +662,9 @@ struct BuiltPrimitiveMesh {
 
 pub struct PrimitiveRenderer {
     pipeline: wgpu::RenderPipeline,
+    taa_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
+    taa_sky_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     camera_layout: wgpu::BindGroupLayout,
     environment_layout: wgpu::BindGroupLayout,
@@ -1032,6 +1068,80 @@ impl PrimitiveRenderer {
             multiview: None,
             cache: None,
         });
+        let taa_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rne_primitive_taa_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Uint16x4,
+                            offset: 32,
+                            shader_location: 3,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 40,
+                            shader_location: 4,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main_taa"),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
         let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rne_environment_sky_pipeline_layout"),
             bind_group_layouts: &[&camera_layout, &environment_layout],
@@ -1054,6 +1164,50 @@ impl PrimitiveRenderer {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let taa_sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rne_environment_sky_taa_pipeline"),
+            layout: Some(&sky_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sky_shader,
+                entry_point: Some("vs_sky"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sky_shader,
+                entry_point: Some("fs_sky_taa"),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -1276,7 +1430,9 @@ impl PrimitiveRenderer {
 
         Self {
             pipeline,
+            taa_pipeline,
             sky_pipeline,
+            taa_sky_pipeline,
             shadow_pipeline,
             camera_layout,
             environment_layout,
@@ -1583,6 +1739,11 @@ impl PrimitiveRenderer {
             None
         };
         let scene_color_view = taa_scene_view.unwrap_or(targets.color_view);
+        let taa_depth_view = if taa_frame.enabled {
+            Some(self.taa.reprojection_depth_view())
+        } else {
+            None
+        };
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1645,21 +1806,37 @@ impl PrimitiveRenderer {
         }
 
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("rne_scene_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: scene_color_view,
+            let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
+                view: scene_color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: f64::from(clear_color[0]),
+                        g: f64::from(clear_color[1]),
+                        b: f64::from(clear_color[2]),
+                        a: f64::from(clear_color[3]),
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })];
+            if let Some(view) = taa_depth_view {
+                color_attachments.push(Some(wgpu::RenderPassColorAttachment {
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(clear_color[0]),
-                            g: f64::from(clear_color[1]),
-                            b: f64::from(clear_color[2]),
-                            a: f64::from(clear_color[3]),
+                            r: 1.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
-                })],
+                }));
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("rne_scene_pass"),
+                color_attachments: &color_attachments,
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
@@ -1673,12 +1850,20 @@ impl PrimitiveRenderer {
             });
 
             if environment.is_enabled() {
-                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_pipeline(if taa_frame.enabled {
+                    &self.taa_sky_pipeline
+                } else {
+                    &self.sky_pipeline
+                });
                 pass.set_bind_group(0, &camera_bind_group, &[]);
                 pass.set_bind_group(1, &environment_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(if taa_frame.enabled {
+                &self.taa_pipeline
+            } else {
+                &self.pipeline
+            });
             pass.set_bind_group(0, &camera_bind_group, &[]);
 
             for (index, item) in scene.items.iter().enumerate() {
@@ -1798,8 +1983,12 @@ impl PrimitiveRenderer {
         }
 
         if taa_frame.enabled {
-            self.taa
-                .encode(device, &mut encoder, targets.depth_view, targets.color_view);
+            self.taa.encode(
+                device,
+                &mut encoder,
+                self.taa.reprojection_depth_view(),
+                targets.color_view,
+            );
         }
 
         queue.submit(Some(encoder.finish()));
