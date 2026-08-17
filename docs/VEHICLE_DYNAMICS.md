@@ -65,10 +65,24 @@ controller, the same 14 m/s cruise command, and the same physically derived brak
 point. At that speed the friction-limited turn radius (`v^2 / (mu g)` ≈ 22 m) exceeds
 the course radius, so the corner is beyond the dynamic car's grip but recoverably so.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="media/vehicle-dynamics.png">
+    <img src="media/vehicle-dynamics.gif" alt="Kinematic and dynamic RNE vehicle models diverging through a tire-saturated corner" width="800">
+  </picture>
+</p>
+
 ```bash
 cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
 RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
 ```
+
+The first command reruns the headless comparison, renders procedural cars with their
+recorded body headings and front-wheel steering, overlays live speed, slip-angle,
+yaw-rate, and grip-state telemetry, and replaces both committed media files. The
+second command exercises the exact simulation and assertions without requiring a
+renderer. Temporary full-resolution frames live under `target/vehicle-dynamics` and
+are removed after a successful encode; the committed GIF has a 4 MiB size budget.
 
 Committed results:
 

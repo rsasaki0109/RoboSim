@@ -35,6 +35,7 @@ const SIM_HZ: usize = 240;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const _: () = assert!(SIM_HZ.is_multiple_of(RENDER_HZ));
 const CLEAR_COLOR: [f32; 4] = [0.06, 0.07, 0.10, 1.0];
+const GIF_MAX_BYTE_SIZE: u64 = 4 * 1024 * 1024;
 
 /// Course speed on the straights and through the fast corner, in meters per second.
 ///
@@ -48,8 +49,13 @@ const LOOKAHEAD_M: f64 = 6.0;
 /// One recorded pose of both vehicles.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ComparisonSample {
-    kinematic_position_m: Vec3,
-    dynamic_position_m: Vec3,
+    kinematic_transform: Transform3,
+    dynamic_transform: Transform3,
+    kinematic_speed_m_s: f64,
+    dynamic_speed_m_s: f64,
+    dynamic_steering_rad: f64,
+    dynamic_front_slip_rad: f64,
+    dynamic_yaw_rate_rad_s: f64,
     front_saturated: bool,
 }
 
@@ -122,9 +128,16 @@ fn main() {
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render vehicle dynamics frame");
+        let mut annotated_rgba8 = output.color.rgba8;
+        annotate_frame(
+            &mut annotated_rgba8,
+            output.color.width,
+            output.color.height,
+            &run.samples[frame + 1],
+        );
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
-            &output.color.rgba8,
+            &annotated_rgba8,
             output.color.width,
             output.color.height,
         )
@@ -233,18 +246,23 @@ fn run_comparison(course: &[Vec3]) -> ComparisonRun {
 
     let record = |world: &World, saturated: &mut usize| -> ComparisonSample {
         let dynamics = world.get::<VehicleDynamics>(dynamic).expect("dynamics");
+        let kinematic_drive = world
+            .get::<AckermannDrive>(kinematic)
+            .expect("kinematic drive");
+        let dynamic_drive = world.get::<AckermannDrive>(dynamic).expect("dynamic drive");
         if dynamics.front_saturated {
             *saturated += 1;
         }
         ComparisonSample {
-            kinematic_position_m: world
+            kinematic_transform: *world
                 .get::<Transform3>(kinematic)
-                .expect("kinematic transform")
-                .translation,
-            dynamic_position_m: world
-                .get::<Transform3>(dynamic)
-                .expect("dynamic transform")
-                .translation,
+                .expect("kinematic transform"),
+            dynamic_transform: *world.get::<Transform3>(dynamic).expect("dynamic transform"),
+            kinematic_speed_m_s: kinematic_drive.speed_m_s,
+            dynamic_speed_m_s: dynamic_drive.speed_m_s,
+            dynamic_steering_rad: dynamic_drive.steering_rad,
+            dynamic_front_slip_rad: dynamics.front_slip_rad,
+            dynamic_yaw_rate_rad_s: dynamics.yaw_rate_rad_s,
             front_saturated: dynamics.front_saturated,
         }
     };
@@ -294,20 +312,26 @@ fn run_comparison(course: &[Vec3]) -> ComparisonRun {
         if std::env::var("RNE_DEBUG_TRACE").is_ok() {
             println!(
                 "frame={_frame:03} kin=({:6.1},{:6.1}) dyn=({:6.1},{:6.1}) kin_err={:5.2} sat={}",
-                sample.kinematic_position_m.x,
-                sample.kinematic_position_m.z,
-                sample.dynamic_position_m.x,
-                sample.dynamic_position_m.z,
-                course_distance_m(course, sample.kinematic_position_m),
+                sample.kinematic_transform.translation.x,
+                sample.kinematic_transform.translation.z,
+                sample.dynamic_transform.translation.x,
+                sample.dynamic_transform.translation.z,
+                course_distance_m(course, sample.kinematic_transform.translation),
                 sample.front_saturated,
             );
         }
-        maximum_gap_m =
-            maximum_gap_m.max((sample.dynamic_position_m - sample.kinematic_position_m).length());
-        kinematic_course_error_m =
-            kinematic_course_error_m.max(course_distance_m(course, sample.kinematic_position_m));
-        dynamic_course_error_m =
-            dynamic_course_error_m.max(course_distance_m(course, sample.dynamic_position_m));
+        maximum_gap_m = maximum_gap_m.max(
+            (sample.dynamic_transform.translation - sample.kinematic_transform.translation)
+                .length(),
+        );
+        kinematic_course_error_m = kinematic_course_error_m.max(course_distance_m(
+            course,
+            sample.kinematic_transform.translation,
+        ));
+        dynamic_course_error_m = dynamic_course_error_m.max(course_distance_m(
+            course,
+            sample.dynamic_transform.translation,
+        ));
         samples.push(sample);
     }
 
@@ -324,18 +348,19 @@ fn overview_camera() -> CameraOrbit {
     CameraOrbit {
         focus: Vec3::new(34.0, 0.0, -24.0),
         yaw_rad: 0.25,
-        pitch_rad: 0.45,
-        distance_m: 80.0,
+        pitch_rad: 0.58,
+        distance_m: 72.0,
     }
 }
 
 /// Builds the scene for one frame: course line, both trails, and current poses.
 fn comparison_scene(course: &[Vec3], run: &ComparisonRun, frame: usize) -> RenderScene {
-    const COURSE_COLOR: [f32; 4] = [0.45, 0.48, 0.55, 1.0];
+    const ROAD_COLOR: [f32; 4] = [0.20, 0.22, 0.27, 1.0];
+    const LANE_COLOR: [f32; 4] = [0.72, 0.74, 0.76, 1.0];
     const KINEMATIC_COLOR: [f32; 4] = [0.10, 0.85, 0.55, 1.0];
     const DYNAMIC_COLOR: [f32; 4] = [1.0, 0.55, 0.10, 1.0];
     const SATURATED_COLOR: [f32; 4] = [0.95, 0.20, 0.30, 1.0];
-    const GROUND_COLOR: [f32; 4] = [0.13, 0.15, 0.19, 1.0];
+    const GROUND_COLOR: [f32; 4] = [0.09, 0.11, 0.14, 1.0];
 
     let mut scene = RenderScene::new();
     scene.items.push(box_item(
@@ -343,19 +368,30 @@ fn comparison_scene(course: &[Vec3], run: &ComparisonRun, frame: usize) -> Rende
         Vec3::new(420.0, 0.2, 420.0),
         GROUND_COLOR,
     ));
-    for waypoint in course {
+    for segment in course.windows(2) {
+        let delta = segment[1] - segment[0];
+        let center = (segment[0] + segment[1]) * 0.5 + Vec3::new(0.0, 0.01, 0.0);
+        let rotation = Quat::from_rotation_y((-delta.z).atan2(delta.x));
+        scene.items.push(oriented_box_item(
+            center,
+            rotation,
+            Vec3::new(delta.length() + 0.5, 0.10, 6.0),
+            ROAD_COLOR,
+        ));
+    }
+    for waypoint in course.iter().step_by(2) {
         scene.items.push(box_item(
-            *waypoint + Vec3::new(0.0, 0.02, 0.0),
-            Vec3::new(0.9, 0.08, 0.9),
-            COURSE_COLOR,
+            *waypoint + Vec3::new(0.0, 0.08, 0.0),
+            Vec3::new(1.5, 0.035, 0.10),
+            LANE_COLOR,
         ));
     }
 
     let visible = frame.min(run.samples.len().saturating_sub(1));
-    for sample in &run.samples[..=visible] {
+    for sample in run.samples[..=visible].iter().step_by(2) {
         scene.items.push(box_item(
-            sample.kinematic_position_m + Vec3::new(0.0, 0.15, 0.0),
-            Vec3::splat(0.5),
+            sample.kinematic_transform.translation + Vec3::new(0.0, 0.16, 0.0),
+            Vec3::splat(0.34),
             KINEMATIC_COLOR,
         ));
         // The dynamic trail turns red wherever the front axle is beyond its grip.
@@ -365,39 +401,327 @@ fn comparison_scene(course: &[Vec3], run: &ComparisonRun, frame: usize) -> Rende
             DYNAMIC_COLOR
         };
         scene.items.push(box_item(
-            sample.dynamic_position_m + Vec3::new(0.0, 0.15, 0.0),
-            Vec3::splat(0.5),
+            sample.dynamic_transform.translation + Vec3::new(0.0, 0.16, 0.0),
+            Vec3::splat(0.34),
             trail_color,
         ));
     }
 
     if let Some(current) = run.samples.get(visible) {
-        scene.items.push(box_item(
-            current.kinematic_position_m + Vec3::new(0.0, 0.9, 0.0),
-            Vec3::new(1.6, 1.4, 1.0),
+        append_car(
+            &mut scene,
+            current.kinematic_transform,
+            0.0,
             KINEMATIC_COLOR,
-        ));
-        scene.items.push(box_item(
-            current.dynamic_position_m + Vec3::new(0.0, 0.9, 0.0),
-            Vec3::new(1.6, 1.4, 1.0),
+        );
+        append_car(
+            &mut scene,
+            current.dynamic_transform,
+            current.dynamic_steering_rad,
             if current.front_saturated {
                 SATURATED_COLOR
             } else {
                 DYNAMIC_COLOR
             },
-        ));
+        );
     }
 
     scene
 }
 
+fn append_car(
+    scene: &mut RenderScene,
+    transform: Transform3,
+    front_steering_rad: f64,
+    color: [f32; 4],
+) {
+    const TIRE_COLOR: [f32; 4] = [0.025, 0.03, 0.04, 1.0];
+    const GLASS_COLOR: [f32; 4] = [0.10, 0.18, 0.24, 1.0];
+    const LIGHT_COLOR: [f32; 4] = [1.0, 0.92, 0.55, 1.0];
+    let rotation = transform.rotation;
+    let position = transform.translation;
+
+    scene.items.push(oriented_box_item(
+        position + rotation * Vec3::new(0.0, 0.62, 0.0),
+        rotation,
+        Vec3::new(4.5, 0.62, 1.9),
+        color,
+    ));
+    scene.items.push(oriented_box_item(
+        position + rotation * Vec3::new(-0.35, 1.15, 0.0),
+        rotation,
+        Vec3::new(2.05, 0.72, 1.55),
+        GLASS_COLOR,
+    ));
+    scene.items.push(oriented_box_item(
+        position + rotation * Vec3::new(2.27, 0.64, 0.0),
+        rotation,
+        Vec3::new(0.10, 0.22, 1.25),
+        LIGHT_COLOR,
+    ));
+
+    for (x_m, z_m, steerable) in [
+        (-1.35, -1.00, false),
+        (-1.35, 1.00, false),
+        (1.35, -1.00, true),
+        (1.35, 1.00, true),
+    ] {
+        let steering = if steerable { front_steering_rad } else { 0.0 };
+        let wheel_transform = Transform3::from_translation_rotation(
+            position + rotation * Vec3::new(x_m, 0.42, z_m),
+            rotation * Quat::from_rotation_y(steering),
+        );
+        scene.items.push(RenderScene::item_from_visual(
+            wheel_transform,
+            VisualShape::Cylinder {
+                radius_m: 0.43,
+                length_m: 0.28,
+            },
+            TIRE_COLOR,
+            Transform3::IDENTITY,
+        ));
+    }
+}
+
 fn box_item(center_m: Vec3, size_m: Vec3, color: [f32; 4]) -> RenderSceneItem {
+    oriented_box_item(center_m, Quat::IDENTITY, size_m, color)
+}
+
+fn oriented_box_item(
+    center_m: Vec3,
+    rotation: Quat,
+    size_m: Vec3,
+    color: [f32; 4],
+) -> RenderSceneItem {
     RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(center_m, Quat::IDENTITY),
+        Transform3::from_translation_rotation(center_m, rotation),
         VisualShape::Box { size_m },
         color,
         Transform3::IDENTITY,
     )
+}
+
+fn annotate_frame(rgba8: &mut [u8], width: u32, height: u32, sample: &ComparisonSample) {
+    assert_eq!(rgba8.len(), width as usize * height as usize * 4);
+    let white = [238, 243, 248, 255];
+    let muted = [171, 181, 194, 255];
+    let green = [35, 222, 148, 255];
+    let orange = [255, 142, 32, 255];
+    let red = [244, 51, 76, 255];
+
+    blend_rect(rgba8, width, height, (0, 0, width, 112), [9, 13, 20, 218]);
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (32, 24),
+        3,
+        "SAME CONTROLLER / TWO VEHICLE MODELS",
+        white,
+    );
+    fill_rect(rgba8, width, height, (34, 70, 16, 16), green);
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (62, 70),
+        2,
+        &format!("KINEMATIC  {:4.1} M/S  NO-SLIP", sample.kinematic_speed_m_s),
+        muted,
+    );
+    fill_rect(rgba8, width, height, (478, 70, 16, 16), orange);
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (506, 70),
+        2,
+        &format!(
+            "DYNAMIC  {:4.1} M/S  TIRE-LIMITED",
+            sample.dynamic_speed_m_s
+        ),
+        muted,
+    );
+
+    let panel_x = width.saturating_sub(372);
+    let panel_y = height.saturating_sub(148);
+    blend_rect(
+        rgba8,
+        width,
+        height,
+        (panel_x, panel_y, 340, 116),
+        [9, 13, 20, 224],
+    );
+    let status_color = if sample.front_saturated { red } else { green };
+    fill_rect(
+        rgba8,
+        width,
+        height,
+        (panel_x, panel_y, 6, 116),
+        status_color,
+    );
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (panel_x + 22, panel_y + 16),
+        2,
+        "DYNAMIC TELEMETRY",
+        white,
+    );
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (panel_x + 22, panel_y + 42),
+        2,
+        &format!(
+            "FRONT SLIP  {:4.1} DEG",
+            sample.dynamic_front_slip_rad.to_degrees().abs()
+        ),
+        muted,
+    );
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (panel_x + 22, panel_y + 66),
+        2,
+        &format!("YAW RATE    {:4.2} RAD/S", sample.dynamic_yaw_rate_rad_s),
+        muted,
+    );
+    draw_text(
+        rgba8,
+        width,
+        height,
+        (panel_x + 22, panel_y + 90),
+        2,
+        if sample.front_saturated {
+            "FRONT AXLE SATURATED"
+        } else {
+            "FRONT GRIP OK"
+        },
+        status_color,
+    );
+}
+
+fn blend_rect(
+    rgba8: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: (u32, u32, u32, u32),
+    color: [u8; 4],
+) {
+    let (x, y, rect_width, rect_height) = rect;
+    let max_x = x.saturating_add(rect_width).min(width);
+    let max_y = y.saturating_add(rect_height).min(height);
+    let alpha = u16::from(color[3]);
+    for pixel_y in y.min(height)..max_y {
+        for pixel_x in x.min(width)..max_x {
+            let index = ((pixel_y * width + pixel_x) * 4) as usize;
+            for channel in 0..3 {
+                let source = u16::from(color[channel]);
+                let destination = u16::from(rgba8[index + channel]);
+                rgba8[index + channel] =
+                    ((source * alpha + destination * (255 - alpha)) / 255) as u8;
+            }
+            rgba8[index + 3] = 255;
+        }
+    }
+}
+
+fn fill_rect(
+    rgba8: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: (u32, u32, u32, u32),
+    color: [u8; 4],
+) {
+    blend_rect(rgba8, width, height, rect, color);
+}
+
+fn draw_text(
+    rgba8: &mut [u8],
+    width: u32,
+    height: u32,
+    origin: (u32, u32),
+    scale: u32,
+    text: &str,
+    color: [u8; 4],
+) {
+    let (x, y) = origin;
+    let mut cursor_x = x;
+    for character in text.chars() {
+        let glyph = glyph_5x7(character);
+        for (row, bits) in glyph.iter().copied().enumerate() {
+            for column in 0..5 {
+                if bits & (1 << (4 - column)) != 0 {
+                    fill_rect(
+                        rgba8,
+                        width,
+                        height,
+                        (
+                            cursor_x + column * scale,
+                            y + row as u32 * scale,
+                            scale,
+                            scale,
+                        ),
+                        color,
+                    );
+                }
+            }
+        }
+        cursor_x = cursor_x.saturating_add(6 * scale);
+        if cursor_x >= width {
+            break;
+        }
+    }
+}
+
+fn glyph_5x7(character: char) -> [u8; 7] {
+    match character.to_ascii_uppercase() {
+        'A' => [14, 17, 17, 31, 17, 17, 17],
+        'B' => [30, 17, 17, 30, 17, 17, 30],
+        'C' => [14, 17, 16, 16, 16, 17, 14],
+        'D' => [30, 17, 17, 17, 17, 17, 30],
+        'E' => [31, 16, 16, 30, 16, 16, 31],
+        'F' => [31, 16, 16, 30, 16, 16, 16],
+        'G' => [14, 17, 16, 23, 17, 17, 15],
+        'H' => [17, 17, 17, 31, 17, 17, 17],
+        'I' => [31, 4, 4, 4, 4, 4, 31],
+        'J' => [7, 2, 2, 2, 18, 18, 12],
+        'K' => [17, 18, 20, 24, 20, 18, 17],
+        'L' => [16, 16, 16, 16, 16, 16, 31],
+        'M' => [17, 27, 21, 21, 17, 17, 17],
+        'N' => [17, 25, 21, 19, 17, 17, 17],
+        'O' => [14, 17, 17, 17, 17, 17, 14],
+        'P' => [30, 17, 17, 30, 16, 16, 16],
+        'Q' => [14, 17, 17, 17, 21, 18, 13],
+        'R' => [30, 17, 17, 30, 20, 18, 17],
+        'S' => [15, 16, 16, 14, 1, 1, 30],
+        'T' => [31, 4, 4, 4, 4, 4, 4],
+        'U' => [17, 17, 17, 17, 17, 17, 14],
+        'V' => [17, 17, 17, 17, 17, 10, 4],
+        'W' => [17, 17, 17, 21, 21, 21, 10],
+        'X' => [17, 17, 10, 4, 10, 17, 17],
+        'Y' => [17, 17, 10, 4, 4, 4, 4],
+        'Z' => [31, 1, 2, 4, 8, 16, 31],
+        '0' => [14, 17, 19, 21, 25, 17, 14],
+        '1' => [4, 12, 4, 4, 4, 4, 14],
+        '2' => [14, 17, 1, 2, 4, 8, 31],
+        '3' => [30, 1, 1, 14, 1, 1, 30],
+        '4' => [2, 6, 10, 18, 31, 2, 2],
+        '5' => [31, 16, 16, 30, 1, 1, 30],
+        '6' => [14, 16, 16, 30, 17, 17, 14],
+        '7' => [31, 1, 2, 4, 8, 8, 8],
+        '8' => [14, 17, 17, 14, 17, 17, 14],
+        '9' => [14, 17, 17, 15, 1, 1, 14],
+        '-' => [0, 0, 0, 31, 0, 0, 0],
+        '/' => [1, 1, 2, 4, 8, 16, 16],
+        '.' => [0, 0, 0, 0, 0, 12, 12],
+        ':' => [0, 12, 12, 0, 12, 12, 0],
+        _ => [0; 7],
+    }
 }
 
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
@@ -425,7 +749,14 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
     status
         .success()
         .then_some(())
-        .ok_or_else(|| std::io::Error::other("ffmpeg vehicle dynamics GIF encode failed"))
+        .ok_or_else(|| std::io::Error::other("ffmpeg vehicle dynamics GIF encode failed"))?;
+    let byte_size = fs::metadata(gif_path)?.len();
+    if byte_size > GIF_MAX_BYTE_SIZE {
+        return Err(std::io::Error::other(format!(
+            "vehicle dynamics GIF exceeds size budget: {byte_size} bytes > {GIF_MAX_BYTE_SIZE} bytes"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -471,5 +802,47 @@ mod tests {
         assert!(run.samples.iter().any(|sample| sample.front_saturated));
         let scene = comparison_scene(&course, &run, FRAME_COUNT);
         assert!(scene.items.len() > course.len() + 2);
+        assert_eq!(
+            scene
+                .items
+                .iter()
+                .filter(|item| matches!(item.shape, VisualShape::Cylinder { .. }))
+                .count(),
+            8,
+            "both procedural cars must expose four visible wheels"
+        );
+    }
+
+    #[test]
+    fn comparison_records_pose_and_dynamic_telemetry() {
+        let run = run_comparison(&course_waypoints());
+        assert!(run
+            .samples
+            .iter()
+            .any(|sample| sample.kinematic_transform.rotation != Quat::IDENTITY));
+        assert!(run
+            .samples
+            .iter()
+            .any(|sample| sample.dynamic_front_slip_rad.abs() > 0.01));
+        assert!(run
+            .samples
+            .iter()
+            .any(|sample| sample.dynamic_yaw_rate_rad_s.abs() > 0.01));
+    }
+
+    #[test]
+    fn telemetry_overlay_changes_the_frame_without_a_gpu() {
+        let run = run_comparison(&course_waypoints());
+        let sample = run
+            .samples
+            .iter()
+            .find(|sample| sample.front_saturated)
+            .expect("scenario reaches front-axle saturation");
+        let mut rgba8 = vec![0; 640 * 360 * 4];
+        annotate_frame(&mut rgba8, 640, 360, sample);
+        assert!(rgba8.iter().any(|channel| *channel != 0));
+        assert!(rgba8
+            .chunks_exact(4)
+            .any(|pixel| pixel[0] > 200 && pixel[1] < 100));
     }
 }

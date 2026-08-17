@@ -20,6 +20,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- **README vehicle-dynamics showcase**: the deterministic kinematic-versus-dynamic
+  comparison now renders oriented procedural cars, steerable wheels, continuous road
+  geometry, saturation-colored trails, and live slip/yaw/grip telemetry into a
+  size-gated GIF with a reduced-motion poster, published directly in the README.
+
 - **Evidence-backed 1.0 readiness gate**: `xtask release-readiness` now audits
   nine fixed promotion conditions from a strict, SHA-256-bound evidence pack
   using an explicit date instead of wall-clock time. It verifies independent

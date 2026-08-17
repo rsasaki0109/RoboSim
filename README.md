@@ -31,6 +31,30 @@ dependency.
 | Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
+## Vehicle dynamics at the grip limit
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/vehicle-dynamics.png">
+    <img src="docs/media/vehicle-dynamics.gif" alt="The same pure-pursuit controller driving RNE kinematic and tire-limited dynamic vehicle models through a fast corner" width="800">
+  </picture>
+  <br>
+  <sub>One controller, two plants: the dynamic car's trail turns red when the front axle saturates.</sub>
+</p>
+
+Example 49 runs both cars from the same commands at 240 Hz, records their pose and
+tire telemetry deterministically, then renders the 12-second comparison and a
+reduced-motion poster. The no-slip car follows the requested line; the dynamic car
+runs wide once the 18 m corner asks for more lateral force than its tires can supply.
+
+```bash
+cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+```
+
+Model equations, measured errors, and acceptance tests are in
+[Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
+
 ## G1 locomotion
 
 <p align="center">
