@@ -738,7 +738,8 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
         &bundle_dir.join("evidence/fuzz-smoke-report.json"),
     )?;
 
-    let rehearsal_dir = output_root.join(format!(".rehearsal-{}", options.target));
+    let rehearsal_name = format!(".rehearsal-{}", options.target);
+    let rehearsal_dir = output_root.join(&rehearsal_name);
     reset_generated_directory(&rehearsal_dir)?;
     let rehearsal = run_install_rehearsal(
         &bundle_dir,
@@ -788,6 +789,12 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
     write_pretty_json(&bundle_dir.join(RELEASE_REPORT), &report)?;
     write_sha256_manifest(&bundle_dir)?;
     verify_sha256_manifest(&bundle_dir)?;
+
+    remove_generated_child(&output_root, &rehearsal_dir, &rehearsal_name)?;
+    let evidence_parent = evidence_dir
+        .parent()
+        .context("release evidence directory has no parent")?;
+    remove_generated_child(evidence_parent, &evidence_dir, &options.target)?;
 
     println!(
         "release bundle ready: target={} reproducible={} path={}",
@@ -1333,13 +1340,17 @@ fn run_install_rehearsal(
         check("python_api", python_api_passed),
     ];
     let passed = checks.iter().all(|check| check.status == "passed");
-    Ok(InstallRehearsalReport {
+    let report = InstallRehearsalReport {
         schema_version: INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
         release_version: RELEASE_VERSION.to_string(),
         target: target.to_string(),
         status: if passed { "passed" } else { "failed" }.to_string(),
         checks,
-    })
+    };
+    if report.all_passed() {
+        cleanup_install_rehearsal_transients(output_dir)?;
+    }
+    Ok(report)
 }
 
 fn run_scaffold_rehearsal(
@@ -1656,6 +1667,36 @@ fn reset_generated_child(parent: &Path, path: &Path, expected_name: &str) -> any
     reset_generated_directory(path)
 }
 
+fn remove_generated_child(parent: &Path, path: &Path, expected_name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        path.parent() == Some(parent) && path.file_name() == Some(OsStr::new(expected_name)),
+        "refusing to remove unexpected generated path {}",
+        path.display()
+    );
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("inspect generated directory {}", path.display()));
+        }
+    };
+    anyhow::ensure!(
+        metadata.file_type().is_dir() && !metadata.file_type().is_symlink(),
+        "refusing to remove non-directory generated path {}",
+        path.display()
+    );
+    fs::remove_dir_all(path)
+        .with_context(|| format!("remove generated directory {}", path.display()))
+}
+
+fn cleanup_install_rehearsal_transients(output_dir: &Path) -> anyhow::Result<()> {
+    for name in ["wheel-venv", "controller-authoring"] {
+        remove_generated_child(output_dir, &output_dir.join(name), name)?;
+    }
+    Ok(())
+}
+
 fn reset_generated_directory(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         fs::remove_dir_all(path)
@@ -1892,6 +1933,68 @@ mod tests {
             native_cdylib_name("custom_controller", "aarch64-apple-darwin"),
             "libcustom_controller.dylib"
         );
+    }
+
+    #[test]
+    fn successful_rehearsal_cleanup_is_bounded_and_preserves_reports() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let output = root.path().join("evidence");
+        fs::create_dir_all(output.join("wheel-venv/lib")).expect("wheel venv");
+        fs::create_dir_all(output.join("controller-authoring/scaffold/target"))
+            .expect("controller authoring");
+        fs::write(output.join("wheel-venv/lib/module.py"), b"temporary").expect("venv file");
+        fs::write(
+            output.join("controller-authoring/scaffold/target/plugin"),
+            b"temporary",
+        )
+        .expect("controller build");
+        fs::write(
+            output.join("archive-install-rehearsal-report.json"),
+            b"retained",
+        )
+        .expect("retained report");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).expect("outside directory");
+        fs::write(outside.join("keep.txt"), b"keep").expect("outside file");
+
+        cleanup_install_rehearsal_transients(&output).expect("cleanup transients");
+
+        assert!(!output.join("wheel-venv").exists());
+        assert!(!output.join("controller-authoring").exists());
+        assert_eq!(
+            fs::read(output.join("archive-install-rehearsal-report.json")).unwrap(),
+            b"retained"
+        );
+        assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"keep");
+        assert!(remove_generated_child(&output, &outside, "outside").is_err());
+
+        fs::write(output.join("wheel-venv"), b"not a directory").expect("regular file");
+        assert!(cleanup_install_rehearsal_transients(&output).is_err());
+        assert_eq!(
+            fs::read(output.join("wheel-venv")).unwrap(),
+            b"not a directory"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_rehearsal_cleanup_refuses_symlinked_transients() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("temporary root");
+        let output = root.path().join("evidence");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&output).expect("evidence directory");
+        fs::create_dir_all(&outside).expect("outside directory");
+        fs::write(outside.join("keep.txt"), b"keep").expect("outside file");
+        symlink(&outside, output.join("wheel-venv")).expect("transient symlink");
+
+        assert!(cleanup_install_rehearsal_transients(&output).is_err());
+        assert!(fs::symlink_metadata(output.join("wheel-venv"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"keep");
     }
 
     #[test]

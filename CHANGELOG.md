@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **Bounded release-rehearsal cleanup**: successful native-bundle and
+  independently extracted rehearsals now remove only their validated,
+  tool-owned wheel virtual environment, controller scaffold, internal
+  rehearsal directory, and target-local copied evidence after the retained
+  reports and checksum chain are complete. Failed rehearsals keep all of those
+  diagnostics. Cleanup rejects path escapes, symlinks, and regular files so a
+  user-selected release output cannot widen the deletion boundary.
+
 - **External CI artifact storage**: xtask CI evidence producers accept an
   absolute `RNE_ARTIFACTS_DIR`, preserving the existing real-directory and
   bounded-deletion checks while keeping large generated reports, replays, and

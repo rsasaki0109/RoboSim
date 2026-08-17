@@ -38,6 +38,14 @@ file name, byte length, and SHA-256 to the extracted bundle root,
 `release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v4
 rehearsal. Validation reconstructs the checksum graph and requires the staged
 and independently extracted verdict maps to be identical.
+After all nine checks pass, xtask deletes the tool-owned wheel virtual
+environment and controller scaffold. `release-bundle` additionally deletes its
+internal `.rehearsal-<target>` directory and target-local copied supply-chain
+evidence only after `release-report.json` and `SHA256SUMS` verify. The bundle,
+archive-bound reports, replays, conformance reports, and Failure Capsule remain.
+Any failed rehearsal keeps all transient directories for diagnosis. Every
+cleanup target must be the expected real directory directly beneath its owned
+parent; path escapes, symlinks, and regular files are rejected.
 The compatibility corpus includes provenance-bound, sensor-bearing snapshot-v1
 and snapshot-v2 restores into snapshot-v3, plus the retained original v1 case.
 It also includes a provenance-bound vectorized checkpoint-v1 restore and real

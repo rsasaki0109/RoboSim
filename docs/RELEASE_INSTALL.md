@@ -185,3 +185,10 @@ reruns all nine schema-v4 installed-artifact checks, including the compatibility
 corpus and exact Python API manifest. Its schema-v1 outer report records the
 exact archive and extracted release/checksum identities; tagged release CI
 attests that report as a separate subject.
+
+On success, the command retains the archive-bound report, replays,
+conformance reports, compatibility/Python API reports, and Failure Capsule, but
+removes its tool-owned wheel virtual environment and generated controller
+scaffold. A failed check retains those transient directories for debugging.
+Cleanup is bounded to the exact expected child directories and refuses
+symlinks, regular files, or paths outside the selected output directory.
