@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- **External CI artifact storage**: xtask CI evidence producers accept an
+  absolute `RNE_ARTIFACTS_DIR`, preserving the existing real-directory and
+  bounded-deletion checks while keeping large generated reports, replays, and
+  Failure Capsules off the source disk.
+
 - **Portable WGPU TAA depth reprojection**: temporal anti-aliasing now samples
   pixel-center depth from a losslessly packed `Rgba8Unorm` scene attachment
   instead of a depth `textureLoad` that the OpenGL/GLSL backend cannot lower.

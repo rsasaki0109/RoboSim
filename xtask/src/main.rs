@@ -34,6 +34,7 @@ const CARGO_DENY_VERSION: &str = "0.20.2";
 const CARGO_AUDIT_VERSION: &str = "0.22.2";
 const RUST_API_BASELINE_SCHEMA_VERSION: u32 = 1;
 const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
+const ARTIFACTS_DIR_ENV: &str = "RNE_ARTIFACTS_DIR";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
@@ -452,7 +453,8 @@ struct SbomPackage {
 
 /// Checks the pinned dependency policy and emits deterministic supply-chain evidence.
 fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
-    let mut output_dir = PathBuf::from("artifacts/supply-chain");
+    let root = workspace_root()?;
+    let mut output_dir = artifacts_dir(&root)?.join("supply-chain");
     let mut check_tools = true;
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -467,7 +469,6 @@ fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         }
     }
 
-    let root = workspace_root()?;
     let registry_text = fs::read_to_string(root.join("release/supply-chain-exceptions.toml"))?;
     let registry: SupplyChainExceptionRegistry = toml::from_str(&registry_text)?;
     let lock_bytes = fs::read(root.join("Cargo.lock"))?;
@@ -519,7 +520,8 @@ fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 
 /// Runs deterministic parser campaigns and emits panic-free fuzz evidence.
 fn fuzz_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
-    let mut output_dir = PathBuf::from("artifacts/fuzz-smoke");
+    let root = workspace_root()?;
+    let mut output_dir = artifacts_dir(&root)?.join("fuzz-smoke");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--output-dir" => {
@@ -534,7 +536,6 @@ fn fuzz_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 
     let report = rne_fuzz_smoke::run_fuzz_smoke_campaign();
     report.validate().map_err(anyhow::Error::msg)?;
-    let root = workspace_root()?;
     let output_dir = if output_dir.is_absolute() {
         output_dir
     } else {
@@ -1623,7 +1624,7 @@ fn run_cargo_owned_at(root: &Path, args: &[String], envs: &[(&str, &str)]) -> an
 /// same public command or integration test a contributor would use manually.
 fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut json_path = root.join("artifacts/oss-parity/report.json");
+    let mut json_path = artifacts_dir(&root)?.join("oss-parity/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1639,11 +1640,11 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let checks = [
         (
             "physics_backend_conformance",
-            "cargo run --locked -q -p rne_physics_conformance_suite --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
+            "cargo run --locked -q -p xtask -- physics-conformance",
         ),
         (
             "scenario_traffic_scale",
-            "cargo run --locked --release -q -p rne_scenario_scale --bin rne-scenario-scale -- --output artifacts/scenario-scale/report.json",
+            "cargo run --locked -q -p xtask -- scenario-scale",
         ),
         (
             "robot_control_replay",
@@ -1769,7 +1770,7 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 /// Runs the backend-neutral physics capability catalog and writes its JSON report.
 fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut output = root.join("artifacts/physics-conformance/report.json");
+    let mut output = artifacts_dir(&root)?.join("physics-conformance/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1802,7 +1803,7 @@ fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Resul
 /// Runs the release-mode 100-actor scenario scale gate and writes its JSON report.
 fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut output = root.join("artifacts/scenario-scale/report.json");
+    let mut output = artifacts_dir(&root)?.join("scenario-scale/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1835,10 +1836,11 @@ fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()>
 
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
+    let behavior_artifacts = artifacts_dir(&root)?.join("behavior-ci");
     let mut seeds = default_behavior_seeds();
-    let mut json_path = root.join("artifacts/behavior-ci/report.json");
-    let mut junit_path = root.join("artifacts/behavior-ci/junit.xml");
-    let mut artifact_dir = root.join("artifacts/behavior-ci/replays");
+    let mut json_path = behavior_artifacts.join("report.json");
+    let mut junit_path = behavior_artifacts.join("junit.xml");
+    let mut artifact_dir = behavior_artifacts.join("replays");
     let mut failure_case_path = None;
     let mut seeds_explicit = false;
     while let Some(argument) = args.next() {
@@ -2075,12 +2077,12 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         }
     }
     let root = workspace_root()?;
-    let artifacts = root.join("artifacts");
+    let artifacts = artifacts_dir(&root)?;
     fs::create_dir_all(&artifacts)?;
     let artifacts_metadata = fs::symlink_metadata(&artifacts)?;
     anyhow::ensure!(
         artifacts_metadata.is_dir() && !artifacts_metadata.file_type().is_symlink(),
-        "workspace artifacts path must be a real directory"
+        "artifacts path must be a real directory"
     );
     let artifacts = artifacts.canonicalize()?;
     let output = artifacts.join("flagship-validation");
@@ -2100,12 +2102,7 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         fs::remove_dir_all(&resolved)?;
     }
 
-    let workflow_command = if cross_backend {
-        "cargo run --locked -p flagship_validation_workflow --features mujoco --example 74_flagship_validation_workflow -- artifacts/flagship-validation --cross-backend"
-    } else {
-        "cargo run --locked -p flagship_validation_workflow --example 74_flagship_validation_workflow -- artifacts/flagship-validation"
-    };
-    run_step(workflow_command)?;
+    run_flagship_workflow(&root, &output, cross_backend)?;
     let replay = output.join("failure-minimized.rne-replay");
     let report = output.join("workflow-report.json");
     let success = output.join("success.behavior-report.json");
@@ -2262,6 +2259,58 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         cross_backend,
         output.display()
     );
+    Ok(())
+}
+
+fn configured_artifacts_dir(
+    workspace_root: &Path,
+    configured: Option<std::ffi::OsString>,
+) -> anyhow::Result<PathBuf> {
+    let Some(configured) = configured else {
+        return Ok(workspace_root.join("artifacts"));
+    };
+    let path = PathBuf::from(configured);
+    anyhow::ensure!(
+        !path.as_os_str().is_empty() && path.is_absolute(),
+        "{ARTIFACTS_DIR_ENV} must be a non-empty absolute path"
+    );
+    Ok(path)
+}
+
+pub(crate) fn artifacts_dir(workspace_root: &Path) -> anyhow::Result<PathBuf> {
+    configured_artifacts_dir(workspace_root, env::var_os(ARTIFACTS_DIR_ENV))
+}
+
+fn run_flagship_workflow(
+    workspace_root: &Path,
+    output: &Path,
+    cross_backend: bool,
+) -> anyhow::Result<()> {
+    let mut command = Command::new("cargo");
+    command.current_dir(workspace_root).args([
+        "run",
+        "--locked",
+        "-p",
+        "flagship_validation_workflow",
+    ]);
+    if cross_backend {
+        command.args(["--features", "mujoco"]);
+    }
+    command
+        .args(["--example", "74_flagship_validation_workflow", "--"])
+        .arg(output);
+    if cross_backend {
+        command.arg("--cross-backend");
+    }
+
+    println!(
+        "$ cargo run --locked -p flagship_validation_workflow{} --example 74_flagship_validation_workflow -- {}{}",
+        if cross_backend { " --features mujoco" } else { "" },
+        output.display(),
+        if cross_backend { " --cross-backend" } else { "" }
+    );
+    let status = command.status()?;
+    anyhow::ensure!(status.success(), "command failed with status {status}");
     Ok(())
 }
 
@@ -3167,6 +3216,8 @@ fn venv_python(root: &Path) -> PathBuf {
 
 fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     let root = workspace_root()?;
+    let python_api_report = artifacts_dir(&root)?.join("python-api/report.json");
+    let python_api_report = python_api_report.to_string_lossy().into_owned();
     let host_python = python_command()?;
     let venv_py = venv_python(&root);
     if !venv_py.exists() {
@@ -3206,7 +3257,7 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
             "--fixture",
             "release/python-api-v1.json",
             "--output",
-            "artifacts/python-api/report.json",
+            &python_api_report,
         ],
     )?;
     for script in [
@@ -3489,11 +3540,11 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cargo_sbom, default_behavior_seeds, extract_hero_digest, frame_delta_ratio,
-        hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition, parse_utc_date_days,
-        validate_blocker_registry, validate_contract_registry, validate_rust_api_baseline,
-        validate_supply_chain_registry, RustApiBaselineRegistry, SmokePartition,
-        SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
+        build_cargo_sbom, configured_artifacts_dir, default_behavior_seeds, extract_hero_digest,
+        frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
+        parse_utc_date_days, validate_blocker_registry, validate_contract_registry,
+        validate_rust_api_baseline, validate_supply_chain_registry, RustApiBaselineRegistry,
+        SmokePartition, SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
     };
 
     #[test]
@@ -3566,6 +3617,29 @@ mod tests {
             SmokePartition::Media
         );
         assert!(parse_smoke_partition(Some("unknown")).is_err());
+    }
+
+    #[test]
+    fn flagship_artifacts_can_use_an_explicit_absolute_root() {
+        let workspace = std::env::current_dir().expect("current directory");
+        let external = workspace
+            .parent()
+            .expect("workspace parent")
+            .join("rne external artifacts");
+
+        assert_eq!(
+            configured_artifacts_dir(&workspace, None).unwrap(),
+            workspace.join("artifacts")
+        );
+        assert_eq!(
+            configured_artifacts_dir(&workspace, Some(external.clone().into_os_string())).unwrap(),
+            external
+        );
+        assert!(configured_artifacts_dir(
+            &workspace,
+            Some(std::ffi::OsString::from("relative/artifacts"))
+        )
+        .is_err());
     }
 
     #[test]

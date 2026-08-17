@@ -19,6 +19,21 @@ dimensions to the one required blackout dimension, creates a Failure Capsule
 from the minimized replay, and verifies every capsule digest and replay
 invariant.
 
+Large generated evidence can live outside the source checkout. Set
+`RNE_ARTIFACTS_DIR` to an absolute path; `flagship`, `ci-headless`, and `ci`
+then write flagship, parity, fuzz, behavior, Python API, physics-conformance,
+and scenario-scale evidence under that real directory. Flagship replacement
+retains the same symlink and bounded-deletion checks:
+
+```powershell
+$env:RNE_ARTIFACTS_DIR = "E:\RoboSim-artifacts"
+cargo run --locked -p xtask -- ci
+```
+
+The configured directory itself must be a real directory, not a symlink or
+junction. Paths containing spaces are passed directly to Cargo without shell
+interpolation.
+
 ## One coordinated simulation
 
 Example 74 advances the robot episode and backend-neutral traffic runtime with
