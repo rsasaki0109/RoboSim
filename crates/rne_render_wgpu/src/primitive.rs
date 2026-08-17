@@ -1,5 +1,5 @@
 use crate::environment_filter::{prefilter_environment, SPECULAR_MIP_LEVELS};
-use crate::taa::{TaaSettings, TemporalAntiAliasing, TAA_REPROJECTION_DEPTH_FORMAT};
+use crate::taa::{TaaSettings, TemporalAntiAliasing, PACKED_DEPTH_CLEAR, PACKED_DEPTH_FORMAT};
 
 const SHADER: &str = r#"
 struct CameraUniform {
@@ -372,6 +372,17 @@ struct TaaFragmentOutput {
     @location(1) depth: vec4<f32>,
 }
 
+fn pack_depth(depth: f32) -> vec4<f32> {
+    let bits = bitcast<u32>(depth);
+    let bytes = vec4<u32>(
+        bits & 255u,
+        (bits >> 8u) & 255u,
+        (bits >> 16u) & 255u,
+        (bits >> 24u) & 255u,
+    );
+    return vec4<f32>(bytes) / 255.0;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     return shade_fragment(input);
@@ -381,7 +392,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 fn fs_main_taa(input: VertexOutput) -> TaaFragmentOutput {
     var output: TaaFragmentOutput;
     output.color = shade_fragment(input);
-    output.depth = vec4<f32>(input.clip_position.z, 0.0, 0.0, 0.0);
+    output.depth = pack_depth(input.clip_position.z);
     return output;
 }
 "#;
@@ -479,6 +490,17 @@ struct SkyTaaFragmentOutput {
     @location(1) depth: vec4<f32>,
 }
 
+fn pack_depth(depth: f32) -> vec4<f32> {
+    let bits = bitcast<u32>(depth);
+    let bytes = vec4<u32>(
+        bits & 255u,
+        (bits >> 8u) & 255u,
+        (bits >> 16u) & 255u,
+        (bits >> 24u) & 255u,
+    );
+    return vec4<f32>(bytes) / 255.0;
+}
+
 @fragment
 fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
     return shade_sky(input);
@@ -488,7 +510,7 @@ fn fs_sky(input: SkyVertexOutput) -> @location(0) vec4<f32> {
 fn fs_sky_taa(input: SkyVertexOutput) -> SkyTaaFragmentOutput {
     var output: SkyTaaFragmentOutput;
     output.color = shade_sky(input);
-    output.depth = vec4<f32>(input.clip_position.z, 0.0, 0.0, 0.0);
+    output.depth = pack_depth(input.clip_position.z);
     return output;
 }
 "#;
@@ -1117,7 +1139,7 @@ impl PrimitiveRenderer {
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
-                        format: TAA_REPROJECTION_DEPTH_FORMAT,
+                        format: PACKED_DEPTH_FORMAT,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
@@ -1203,7 +1225,7 @@ impl PrimitiveRenderer {
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
-                        format: TAA_REPROJECTION_DEPTH_FORMAT,
+                        format: PACKED_DEPTH_FORMAT,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
@@ -1494,7 +1516,16 @@ impl PrimitiveRenderer {
     }
 
     /// Renders a scene into existing color and depth views without CPU readback.
+    #[cfg(feature = "viewer")]
     pub fn render_to_views(&mut self, pass: PrimitiveSurfacePass<'_>) -> Result<(), RenderError> {
+        self.render_to_views_inner(pass, None)
+    }
+
+    fn render_to_views_inner(
+        &mut self,
+        pass: PrimitiveSurfacePass<'_>,
+        packed_depth_view: Option<&wgpu::TextureView>,
+    ) -> Result<(), RenderError> {
         let device = pass.device;
         let queue = pass.queue;
         let camera = pass.camera;
@@ -1739,11 +1770,12 @@ impl PrimitiveRenderer {
             None
         };
         let scene_color_view = taa_scene_view.unwrap_or(targets.color_view);
-        let taa_depth_view = if taa_frame.enabled {
+        let taa_depth_view = if taa_frame.enabled && packed_depth_view.is_none() {
             Some(self.taa.reprojection_depth_view())
         } else {
             None
         };
+        let packed_depth_view = packed_depth_view.or(taa_depth_view);
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1819,17 +1851,12 @@ impl PrimitiveRenderer {
                     store: wgpu::StoreOp::Store,
                 },
             })];
-            if let Some(view) = taa_depth_view {
+            if let Some(view) = packed_depth_view {
                 color_attachments.push(Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 1.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(PACKED_DEPTH_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }));
@@ -1850,7 +1877,7 @@ impl PrimitiveRenderer {
             });
 
             if environment.is_enabled() {
-                pass.set_pipeline(if taa_frame.enabled {
+                pass.set_pipeline(if packed_depth_view.is_some() {
                     &self.taa_sky_pipeline
                 } else {
                     &self.sky_pipeline
@@ -1859,7 +1886,7 @@ impl PrimitiveRenderer {
                 pass.set_bind_group(1, &environment_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
-            pass.set_pipeline(if taa_frame.enabled {
+            pass.set_pipeline(if packed_depth_view.is_some() {
                 &self.taa_pipeline
             } else {
                 &self.pipeline
@@ -1986,7 +2013,7 @@ impl PrimitiveRenderer {
             self.taa.encode(
                 device,
                 &mut encoder,
-                self.taa.reprojection_depth_view(),
+                packed_depth_view.expect("TAA scene pass must output packed depth"),
                 targets.color_view,
             );
         }
@@ -2037,28 +2064,48 @@ impl PrimitiveRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let packed_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_packed_depth_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: PACKED_DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let packed_depth_view =
+            packed_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.render_to_views(PrimitiveSurfacePass {
-            device,
-            queue,
-            camera,
-            view,
-            scene,
-            environment,
-            clear_color,
-            targets: &PrimitiveRenderViews {
-                width: target.width,
-                height: target.height,
-                color_view: &color_view,
-                depth_view: &depth_view,
+        self.render_to_views_inner(
+            PrimitiveSurfacePass {
+                device,
+                queue,
+                camera,
+                view,
+                scene,
+                environment,
+                clear_color,
+                targets: &PrimitiveRenderViews {
+                    width: target.width,
+                    height: target.height,
+                    color_view: &color_view,
+                    depth_view: &depth_view,
+                },
             },
-        })?;
+            Some(&packed_depth_view),
+        )?;
 
         let color_buffer;
         let depth_buffer;
@@ -2104,10 +2151,10 @@ impl PrimitiveRenderer {
             );
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &depth_texture,
+                    texture: &packed_depth_texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::DepthOnly,
+                    aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::TexelCopyBufferInfo {
                     buffer: &depth_buffer,

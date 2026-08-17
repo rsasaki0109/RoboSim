@@ -3,8 +3,13 @@
 use bytemuck::{Pod, Zeroable};
 use rne_math::Mat4;
 
-pub(crate) const TAA_REPROJECTION_DEPTH_FORMAT: wgpu::TextureFormat =
-    wgpu::TextureFormat::Rgba16Float;
+pub(crate) const PACKED_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const PACKED_DEPTH_CLEAR: wgpu::Color = wgpu::Color {
+    r: 0.0,
+    g: 0.0,
+    b: 128.0 / 255.0,
+    a: 63.0 / 255.0,
+};
 
 pub(crate) const TAA_SHADER: &str = r#"
 struct VertexOutput {
@@ -62,6 +67,12 @@ fn reproject_uv(uv: vec2<f32>, depth: f32) -> vec2<f32> {
     return vec2<f32>(previous_ndc.x * 0.5 + 0.5, 0.5 - previous_ndc.y * 0.5);
 }
 
+fn unpack_depth(packed: vec4<f32>) -> f32 {
+    let bytes = vec4<u32>(round(clamp(packed, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0));
+    let bits = bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u);
+    return bitcast<f32>(bits);
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let current = sample_current(input.uv);
@@ -73,7 +84,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         i32(clamp(floor(input.position.x), 0.0, taa.resolution.x - 1.0)),
         i32(clamp(floor(input.position.y), 0.0, taa.resolution.y - 1.0)),
     );
-    let depth = textureLoad(current_depth, pixel, 0).r;
+    let depth = unpack_depth(textureLoad(current_depth, pixel, 0));
     let history_uv = reproject_uv(input.uv, depth);
     if any(history_uv < vec2<f32>(0.0)) || any(history_uv > vec2<f32>(1.0)) {
         return current;
@@ -601,7 +612,7 @@ impl TemporalAntiAliasing {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TAA_REPROJECTION_DEPTH_FORMAT,
+            format: PACKED_DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -760,9 +771,9 @@ mod tests {
     }
 
     #[test]
-    fn taa_depth_reprojection_reads_a_portable_float_attachment() {
+    fn taa_depth_reprojection_unpacks_a_portable_color_attachment() {
         assert!(TAA_SHADER.contains("var current_depth: texture_2d<f32>"));
-        assert!(TAA_SHADER.contains("textureLoad(current_depth, pixel, 0).r"));
+        assert!(TAA_SHADER.contains("unpack_depth(textureLoad(current_depth, pixel, 0))"));
         assert!(!TAA_SHADER.contains("texture_depth_2d"));
     }
 
