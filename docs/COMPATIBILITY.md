@@ -369,11 +369,18 @@ It verifies the installed ABI3 wheel against the bundled strict API manifest
 and emits a content-addressed schema-v1 Python API report. Older rehearsal
 reports cannot be relabelled as v4 because they do not prove this call shape.
 
-The schema-v4 report remains inside the archive as the staged rehearsal. A
+Installed-rehearsal report schema v5 appends the required
+`accelerator_protocol` check. It launches the bundled dependency-free mock
+through the standalone accelerator conformance binary and requires the complete
+nine-exchange lifecycle, timeout boundary, checkpoint restore, and Rust
+transcript binding. Older reports cannot be relabelled as v5 because they did
+not execute or content-address this process boundary.
+
+The schema-v5 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v1
 wrapper. It binds the exact archive digest, extracted release report and
-checksum manifest, and a second schema-v4 result. The wrapper is a distinct
-signed subject; an older standalone schema-v4 report cannot be presented as
+checksum manifest, and a second schema-v5 result. The wrapper is a distinct
+signed subject; an older standalone schema-v5 report cannot be presented as
 archive-bound evidence.
 
 ## Replay migration

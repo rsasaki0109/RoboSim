@@ -17,7 +17,7 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 4;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 5;
 /// Archive-bound independently extracted rehearsal report schema.
 pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API contract schema.
@@ -25,9 +25,11 @@ pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
 pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 6] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 8] = [
     ("rne_asset_cli", "rne-asset"),
     ("rne_compatibility_suite", "rne-compatibility"),
+    ("rne_accelerator_contract", "rne-accelerator-conformance"),
+    ("rne_accelerator_contract", "rne-accelerator-protocol-mock"),
     ("rne_physics_conformance_suite", "rne-physics-conformance"),
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
@@ -39,19 +41,20 @@ const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT: &str = "archive-install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT_KIND: &str = "rne_archive_install_rehearsal";
-const INSTALL_CHECK_IDS: [&str; 9] = [
+const INSTALL_CHECK_IDS: [&str; 10] = [
     "robot_replay",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
     "hardware_adapter",
+    "accelerator_protocol",
     "controller_plugin",
     "compatibility_corpus",
     "python_wheel",
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 74] = [
+const BUNDLE_FILES: [(&str, &str); 76] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -75,6 +78,10 @@ const BUNDLE_FILES: [(&str, &str); 74] = [
     (
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
+    ),
+    (
+        "docs/ACCELERATOR_PROTOCOL.md",
+        "docs/ACCELERATOR_PROTOCOL.md",
     ),
     (
         "crates/rne_plugin_sdk/src/abi.rs",
@@ -144,6 +151,10 @@ const BUNDLE_FILES: [(&str, &str); 74] = [
     (
         "tests/golden/accelerators/conformance-report-v1.json",
         "tests/golden/accelerators/conformance-report-v1.json",
+    ),
+    (
+        "tests/golden/accelerators/process-conformance-report-v1.json",
+        "tests/golden/accelerators/process-conformance-report-v1.json",
     ),
     (
         "tests/golden/accelerators/protocol-transcript-v1.json",
@@ -640,7 +651,7 @@ pub(crate) fn validate_readiness_release_reports(
                     .get(*id)
                     .is_some_and(|status| status == "passed")
             }),
-        "readiness release report must retain all nine passing installed workflows"
+        "readiness release report must retain all ten passing installed workflows"
     );
     anyhow::ensure!(
         !release.members.is_empty(),
@@ -696,7 +707,7 @@ pub(crate) fn validate_readiness_release_reports(
     );
     anyhow::ensure!(
         install.all_passed(),
-        "readiness install report must pass all nine canonical checks"
+        "readiness install report must pass all ten canonical checks"
     );
     anyhow::ensure!(
         release.flagship_workflows == install.verdicts(),
@@ -1163,6 +1174,10 @@ fn run_install_rehearsal(
     let scale = bin_dir.join(native_binary_name("rne-scenario-scale", target));
     let hardware_conformance = bin_dir.join(native_binary_name("rne-hardware-conformance", target));
     let hardware_mock = bin_dir.join(native_binary_name("rne-hardware-mock-device", target));
+    let accelerator_conformance =
+        bin_dir.join(native_binary_name("rne-accelerator-conformance", target));
+    let accelerator_mock =
+        bin_dir.join(native_binary_name("rne-accelerator-protocol-mock", target));
 
     let robot_replay = output_dir.join("robot.rne-replay");
     let robot_run = run_check_command(
@@ -1327,6 +1342,44 @@ fn run_install_rehearsal(
         &serde_json::Value::String("passed".to_string()),
     );
 
+    let accelerator_report = output_dir.join("accelerator-protocol-conformance.json");
+    let accelerator_passed = run_check_command(
+        "external accelerator protocol conformance",
+        bundle_dir,
+        &accelerator_conformance,
+        &[
+            OsString::from("--adapter"),
+            accelerator_mock.clone().into_os_string(),
+            OsString::from("--adapter-arg"),
+            OsString::from("--transcript"),
+            OsString::from("--adapter-arg"),
+            bundle_dir
+                .join("tests/golden/accelerators/protocol-transcript-v1.json")
+                .into_os_string(),
+            OsString::from("--subject"),
+            accelerator_mock.into_os_string(),
+            OsString::from("--manifest"),
+            bundle_dir
+                .join("adapters/mjx/accelerator.toml")
+                .into_os_string(),
+            OsString::from("--runtime"),
+            bundle_dir
+                .join("adapters/mjx/runtime.toml")
+                .into_os_string(),
+            OsString::from("--task"),
+            bundle_dir
+                .join("adapters/mjx/fixtures/free-fall-task-spec-v1.json")
+                .into_os_string(),
+            OsString::from("--output"),
+            accelerator_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &accelerator_report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    );
+
     let plugin_report = output_dir.join("controller-plugin-conformance.json");
     let reference_plugin_passed = run_check_command(
         "controller plugin conformance",
@@ -1380,6 +1433,7 @@ fn run_install_rehearsal(
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
         check("hardware_adapter", hardware_passed),
+        check("accelerator_protocol", accelerator_passed),
         check("controller_plugin", plugin_passed),
         check("compatibility_corpus", compatibility_passed),
         check("python_wheel", wheel_passed),
@@ -2132,6 +2186,7 @@ mod tests {
             "PLUGIN_SDK.md",
             "EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
             "HARDWARE_ADAPTER_CONFORMANCE.md",
+            "ACCELERATOR_PROTOCOL.md",
         ] {
             assert_eq!(
                 fs::read(output.path().join("docs").join(guide)).unwrap(),

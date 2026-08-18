@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 mod conformance;
+mod process_conformance;
 mod protocol;
 mod scale;
 
@@ -19,6 +20,13 @@ pub use conformance::{
     AcceleratorConformanceActual, AcceleratorConformanceFaultInjection,
     AcceleratorConformanceMetrics, AcceleratorConformanceReference, AcceleratorConformanceReport,
     AcceleratorConformanceTolerances, ACCELERATOR_CONFORMANCE_REPORT_KIND,
+};
+pub use process_conformance::{
+    run_accelerator_process_conformance, AcceleratorProcessConformanceCheck,
+    AcceleratorProcessConformanceConfig, AcceleratorProcessConformanceError,
+    AcceleratorProcessConformanceReport, AcceleratorProcessConformanceSubject,
+    ACCELERATOR_PROCESS_CONFORMANCE_REPORT_KIND,
+    ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION,
 };
 pub use protocol::{
     AcceleratorProtocolFrame, AcceleratorProtocolTranscript, ACCELERATOR_PROTOCOL_TRANSCRIPT_KIND,

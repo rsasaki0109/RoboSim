@@ -24,11 +24,11 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains thirty-three fixtures:
+contains thirty-four fixtures:
 
 | Contract | Retained artifact |
 |---|---|
-| Accelerator boundary | capability, complete nine-exchange protocol lifecycle, CPU parity/conformance, and scale reports, all bound to the selected manifest, runtime pins, and TaskSpec |
+| Accelerator boundary | capability, complete nine-exchange protocol lifecycle, content-addressed process conformance, CPU parity/conformance, and scale reports, all bound to the selected manifest, runtime pins, and TaskSpec |
 | Task contract | retained original TaskSpec v1 and current sensor-goal TaskSpec v1 under distinct identities |
 | Batch execution | portable batch checkpoint v2 |
 | Controller ABI and conformance | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1 |

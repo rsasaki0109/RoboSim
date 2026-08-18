@@ -1394,6 +1394,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "accelerators",
+            "process_conformance_report",
+            u64::from(accelerator::ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
             "runtime_contract",
             u64::from(accelerator::ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION),
         ),

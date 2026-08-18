@@ -97,6 +97,15 @@ rehearsal. From its top-level directory:
   --task assets/tasks/diff_drive_goal.task.json \
   --allow-hil \
   --output hardware-adapter-conformance.json
+./bin/rne-accelerator-conformance \
+  --adapter ./bin/rne-accelerator-protocol-mock \
+  --adapter-arg --transcript \
+  --adapter-arg tests/golden/accelerators/protocol-transcript-v1.json \
+  --subject ./bin/rne-accelerator-protocol-mock \
+  --manifest adapters/mjx/accelerator.toml \
+  --runtime adapters/mjx/runtime.toml \
+  --task adapters/mjx/fixtures/free-fall-task-spec-v1.json \
+  --output accelerator-protocol-conformance.json
 ./bin/rne-asset plugin list --path lib
 ./bin/rne-asset plugin check \
   --library lib/librne_plugin_example_velocity_servo.so \
@@ -105,9 +114,10 @@ rehearsal. From its top-level directory:
 ./bin/rne-compatibility --root . --output compatibility-fixture-report.json
 ```
 
-The conformance command's `--allow-hil` is safe here because the target is the
+The hardware command's `--allow-hil` is safe here because the target is the
 bundled deterministic process mock; do not reuse it with an unisolated physical
-robot. Use `.exe` on Windows and
+robot. The accelerator mock is dependency-free and exercises protocol behavior,
+not GPU availability or promotion performance. Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
 commands are headless and require neither ROS2 nor a renderer. Capsule creation
 refuses successful replays, existing destinations, symlinks, path escapes,
@@ -181,8 +191,9 @@ cargo run --locked -p xtask -- release-bundle \
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
-reruns all nine schema-v4 installed-artifact checks, including the compatibility
-corpus and exact Python API manifest. Its schema-v1 outer report records the
+reruns all ten schema-v5 installed-artifact checks, including accelerator
+process conformance, the compatibility corpus, and the exact Python API
+manifest. Its schema-v1 outer report records the
 exact archive and extracted release/checksum identities; tagged release CI
 attests that report as a separate subject.
 

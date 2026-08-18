@@ -37,6 +37,10 @@ from scale import (  # noqa: E402
     validate_scale_report,
 )
 from protocol_fixture import build_transcript, validate_transcript  # noqa: E402
+from process_conformance_fixture import (  # noqa: E402
+    build_process_conformance_fixture,
+    validate_process_conformance_fixture,
+)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -341,6 +345,20 @@ class ProtocolTests(unittest.TestCase):
             golden = json.load(source)
         self.assertEqual(transcript, golden)
         validate_transcript(golden)
+
+    def test_process_conformance_report_matches_golden(self) -> None:
+        report = build_process_conformance_fixture(ADAPTER_ROOT)
+        golden_path = (
+            REPOSITORY_ROOT
+            / "tests"
+            / "golden"
+            / "accelerators"
+            / "process-conformance-report-v1.json"
+        )
+        with golden_path.open("r", encoding="utf-8") as source:
+            golden = json.load(source)
+        self.assertEqual(report, golden)
+        validate_process_conformance_fixture(golden)
 
 
 if __name__ == "__main__":

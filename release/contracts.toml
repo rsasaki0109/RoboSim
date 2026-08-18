@@ -60,6 +60,7 @@ manifest = 1
 protocol = 1
 capability_report = 1
 conformance_report = 1
+process_conformance_report = 1
 runtime_contract = 1
 scale_report = 1
 
@@ -87,7 +88,7 @@ lekiwi_host_termination_diagnostic = 1
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1
-install_rehearsal_report = 4
+install_rehearsal_report = 5
 archive_install_rehearsal_report = 1
 final_exit_report = 1
 one_zero_readiness_report = 1

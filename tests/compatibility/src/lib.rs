@@ -10,8 +10,10 @@
 use anyhow::{bail, ensure, Context};
 use rne_accelerator_contract::{
     AcceleratorCapabilityReport, AcceleratorConformanceReport, AcceleratorManifest,
-    AcceleratorProtocolTranscript, AcceleratorRuntimeContract, AcceleratorScaleReport,
-    ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION, ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    AcceleratorProcessConformanceReport, AcceleratorProtocolTranscript, AcceleratorRuntimeContract,
+    AcceleratorScaleReport, ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION,
     ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION, ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
 };
 use rne_ai::{
@@ -110,7 +112,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 33] = [
+const FIXTURE_SPECS: [FixtureSpec; 34] = [
     FixtureSpec {
         id: "accelerator_capability_v1",
         contract: "accelerator_capability",
@@ -121,6 +123,12 @@ const FIXTURE_SPECS: [FixtureSpec; 33] = [
         id: "accelerator_conformance_v1",
         contract: "accelerator_conformance",
         schema_version: ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "accelerator_process_conformance_v1",
+        contract: "accelerator_process_conformance",
+        schema_version: ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1480,6 +1488,18 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
     match spec.contract {
         "accelerator_capability" => {
             let fixture: AcceleratorCapabilityReport = serde_json::from_value(value)?;
+            let manifest: AcceleratorManifest = toml::from_str(&fs::read_to_string(
+                root.join("adapters/mjx/accelerator.toml"),
+            )?)?;
+            let runtime: AcceleratorRuntimeContract =
+                toml::from_str(&fs::read_to_string(root.join("adapters/mjx/runtime.toml"))?)?;
+            let task: TaskSpec = serde_json::from_slice(&fs::read(
+                root.join("adapters/mjx/fixtures/free-fall-task-spec-v1.json"),
+            )?)?;
+            fixture.validate_against(&manifest, &runtime, &task)?;
+        }
+        "accelerator_process_conformance" => {
+            let fixture: AcceleratorProcessConformanceReport = serde_json::from_value(value)?;
             let manifest: AcceleratorManifest = toml::from_str(&fs::read_to_string(
                 root.join("adapters/mjx/accelerator.toml"),
             )?)?;

@@ -9,16 +9,16 @@
   "bundle_root": "rne-0.1.0-x86_64-pc-windows-msvc",
   "release_report": {
     "path": "release-report.json",
-    "size_bytes": 1345,
-    "sha256": "0210c1c7ab82c05dbe6af62d9cb898767ced7f4de8e47890933e78de3a8efed6"
+    "size_bytes": 1383,
+    "sha256": "341029e3061ee574eb897f47770c9aaf2459b872dd9112115ef14cb680914698"
   },
   "checksum_manifest": {
     "path": "SHA256SUMS",
     "size_bytes": 258,
-    "sha256": "c849af2223986bb0f12cb63698c3f4286236fc0ec6173ad4565418157b248341"
+    "sha256": "e1a03bbec5ac6adae36881737e175661310ebd4cd91666d31285162eb4dd83fb"
   },
   "rehearsal": {
-    "schema_version": 4,
+    "schema_version": 5,
     "release_version": "0.1.0",
     "target": "x86_64-pc-windows-msvc",
     "status": "passed",
@@ -41,6 +41,10 @@
       },
       {
         "id": "hardware_adapter",
+        "status": "passed"
+      },
+      {
+        "id": "accelerator_protocol",
         "status": "passed"
       },
       {

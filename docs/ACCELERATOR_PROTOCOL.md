@@ -49,6 +49,38 @@ checkpoint and reproduce its state. The transcript is the 33rd installed
 compatibility fixture, so future schemas and unknown fields are also exercised
 without Python or accelerator dependencies.
 
+## Standalone process conformance
+
+Native release bundles include `rne-accelerator-conformance` and the
+dependency-free `rne-accelerator-protocol-mock`. The conformance CLI launches
+exactly one caller-selected program without a shell, applies a bounded timeout
+to every response and clean shutdown, and kills only that child after a timeout
+or protocol failure. It content-addresses the implementation subject,
+normalized argument array, selected manifest, runtime contract, and TaskSpec.
+
+Run the installed deterministic lifecycle from a bundle root:
+
+```powershell
+./bin/rne-accelerator-conformance `
+  --adapter ./bin/rne-accelerator-protocol-mock `
+  --adapter-arg --transcript `
+  --adapter-arg tests/golden/accelerators/protocol-transcript-v1.json `
+  --subject ./bin/rne-accelerator-protocol-mock `
+  --manifest adapters/mjx/accelerator.toml `
+  --runtime adapters/mjx/runtime.toml `
+  --task adapters/mjx/fixtures/free-fall-task-spec-v1.json `
+  --output accelerator-protocol-conformance.json
+```
+
+For an interpreted third-party adapter, pass its interpreter as `--adapter`,
+repeat `--adapter-arg` for each argument, and pass the adapter implementation
+file as `--subject`. Spawn, timeout, malformed JSON, envelope, correlation, and
+semantic failures produce a valid failed report with later checks marked
+`not_run`. Passing requires all eleven ordered checks, all nine exchanges, an
+exact checkpoint restore, clean shutdown, and a final Rust transcript binding.
+The timeout uses host time only in this external audit tool; it never enters
+simulation state or replay hashes.
+
 The process permits at most eight sessions, each with at most 100,000 replay
 operations. It accepts only the evidence widths 1, 16, 256, and 4096. A terminal
 observation is returned before auto-reset; the reset occurs immediately before

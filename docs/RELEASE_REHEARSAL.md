@@ -6,25 +6,28 @@ Python wheel, invokes `xtask release-bundle`, creates a deterministic archive,
 extracts it into a fresh directory, and invokes `release-install-smoke` against
 installed artifacts only while naming the exact source archive.
 
-The bundle contains the CLI, standalone physics, hardware-adapter,
+The bundle contains the CLI, standalone physics, hardware-adapter, accelerator,
 compatibility, and scenario-scale conformance binaries, the fixed-binding
-hardware process mock,
+hardware and accelerator process mocks,
 the reference controller shared library, dependency-free Rust and C plugin SDKs,
-plugin/physics/hardware external-conformance guides, compatibility and install
+plugin/physics/hardware/accelerator external-conformance guides, compatibility and install
 documentation, locked dependency SBOM,
 artifact-attestation policy, Rust API baseline, Python API manifest, locked
 dependency graph, Failure Capsule authoring guides, replay fixtures, provenance
-report, and `SHA256SUMS`. Installed-rehearsal schema v4 runs nine frozen checks: robot
-replay, scenario replay, physics conformance, external hardware-adapter
-conformance, the 100-actor scale case, standalone controller-plugin
+report, and `SHA256SUMS`. Installed-rehearsal schema v5 runs ten frozen checks:
+robot replay, scenario replay, physics conformance, external hardware-adapter
+conformance, accelerator protocol conformance, the 100-actor scale case, standalone controller-plugin
 conformance, the installed compatibility corpus, a fresh wheel installation,
-and exact Python public-API verification. Schema v3 remains historical evidence
-for the same set without the Python API manifest; it cannot be relabelled as
-v4. The hardware check executes nine
+and exact Python public-API verification. Schema v4 remains historical evidence
+for the same set without accelerator process conformance; it cannot be
+relabelled as v5. The hardware check executes nine
 TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
 denied; the scaffold SDK must match the bundled SDK byte-for-byte.
+The accelerator check executes all nine JSONL exchanges against the bundled
+mock, then requires the eleven-check content-addressed report to bind the exact
+manifest, runtime contract, TaskSpec, checkpoint, and clean shutdown.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path
@@ -35,10 +38,10 @@ report.
 The independent run additionally emits
 `rne_archive_install_rehearsal` schema v1. This outer report binds the archive
 file name, byte length, and SHA-256 to the extracted bundle root,
-`release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v4
+`release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v5
 rehearsal. Validation reconstructs the checksum graph and requires the staged
 and independently extracted verdict maps to be identical.
-After all nine checks pass, xtask deletes the tool-owned wheel virtual
+After all ten checks pass, xtask deletes the tool-owned wheel virtual
 environment and controller scaffold. `release-bundle` additionally deletes its
 internal `.rehearsal-<target>` directory and target-local copied supply-chain
 evidence only after `release-report.json` and `SHA256SUMS` verify. The bundle,

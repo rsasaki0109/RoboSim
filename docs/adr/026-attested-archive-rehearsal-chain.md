@@ -23,7 +23,7 @@ report binds:
 - the canonical platform archive file name, size, and SHA-256;
 - the extracted bundle root;
 - exact `release-report.json` and `SHA256SUMS` identities; and
-- the independently rerun ordered nine-check schema-v4 result.
+- the independently rerun ordered ten-check schema-v5 result.
 
 The verifier reconstructs `SHA256SUMS` from the release report's sorted member
 list plus `release-report.json`, requires the inner and outer rehearsal bytes
@@ -36,7 +36,7 @@ both the archive and outer report against the same workflow, tag, and commit.
 
 - An archive/report swap changes either a signed subject digest or the bound
   checksum graph and fails closed.
-- The cycle-free inner schema-v4 report remains compatible; archive identity
+- The cycle-free inner schema-v5 report remains compatible; archive identity
   lives only in the post-archive wrapper.
 - Each platform readiness entry retains seven files rather than five.
 - The wrapper attests successful execution by the trusted release workflow; it

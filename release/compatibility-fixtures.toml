@@ -16,6 +16,13 @@ path = "tests/golden/accelerators/conformance-report-v1.json"
 canonical_json_sha256 = "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5"
 
 [[fixture]]
+id = "accelerator_process_conformance_v1"
+contract = "accelerator_process_conformance"
+schema_version = 1
+path = "tests/golden/accelerators/process-conformance-report-v1.json"
+canonical_json_sha256 = "sha256:e8ed4422d85492da4638d1b31d65e297a3dfa12dd3cae0001739c18022b6f68c"
+
+[[fixture]]
 id = "accelerator_protocol_v1"
 contract = "accelerator_protocol"
 schema_version = 1

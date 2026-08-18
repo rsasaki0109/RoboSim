@@ -1,0 +1,768 @@
+{
+  "adapter_id": "mjx_warp",
+  "batch_width": 1,
+  "checks": [
+    {
+      "detail": "fresh adapter process launched without a shell",
+      "id": "spawn",
+      "status": "passed"
+    },
+    {
+      "detail": "capability report is bound to selected contracts",
+      "id": "probe",
+      "status": "passed"
+    },
+    {
+      "detail": "session created with exact TaskSpec, seed, width, and reset mode",
+      "id": "create",
+      "status": "passed"
+    },
+    {
+      "detail": "lane zero reset through its next deterministic episode seed",
+      "id": "reset_lanes",
+      "status": "passed"
+    },
+    {
+      "detail": "one exact action produced a finite correlated step",
+      "id": "step",
+      "status": "passed"
+    },
+    {
+      "detail": "portable checkpoint returned after reset and step",
+      "id": "checkpoint",
+      "status": "passed"
+    },
+    {
+      "detail": "exact checkpoint restored the checkpointed lane state",
+      "id": "restore",
+      "status": "passed"
+    },
+    {
+      "detail": "session closed explicitly",
+      "id": "close",
+      "status": "passed"
+    },
+    {
+      "detail": "unsupported operation failed with a stable protocol error",
+      "id": "unsupported_operation",
+      "status": "passed"
+    },
+    {
+      "detail": "adapter acknowledged shutdown and exited successfully",
+      "id": "shutdown",
+      "status": "passed"
+    },
+    {
+      "detail": "all exchanges bind to the manifest, runtime contract, TaskSpec, and checkpoint",
+      "id": "transcript_binding",
+      "status": "passed"
+    }
+  ],
+  "frames": [
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "operation": "probe",
+        "request_id": 0,
+        "schema_version": 1
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 0,
+        "result": {
+          "adapter_id": "mjx_warp",
+          "batch_checkpoint_schema": 2,
+          "conformance_report_schema": 1,
+          "execution_boundary": "out_of_process_python",
+          "kind": "rne_accelerator_capability_report",
+          "precision": "f64",
+          "protocol_schema": 1,
+          "requires_nvidia_gpu": true,
+          "runtime": {
+            "jax_backend": null,
+            "jax_cuda_plugin_version": null,
+            "jax_devices": [],
+            "jax_version": null,
+            "jaxlib_version": null,
+            "machine": "<runtime>",
+            "mujoco_mjx_version": null,
+            "mujoco_version": null,
+            "nvidia_driver_version": null,
+            "platform": "<runtime>",
+            "python_version": "<runtime>",
+            "warp_version": null
+          },
+          "runtime_contract": {
+            "architecture": "x86_64",
+            "cuda_major": 13,
+            "nvidia_driver_minimum": 580,
+            "official_sources": [
+              "https://docs.jax.dev/en/latest/installation.html",
+              "https://pypi.org/pypi/jax/0.10.2/json",
+              "https://pypi.org/pypi/mujoco-mjx/3.9.0/json"
+            ],
+            "operating_system": "linux",
+            "packages": {
+              "jax": "0.10.2",
+              "jax_cuda_plugin": "0.10.2",
+              "jaxlib": "0.10.2",
+              "mujoco": "3.9.0",
+              "mujoco_mjx": "3.9.0",
+              "warp_lang": "1.12.1"
+            },
+            "python": "3.12",
+            "schema_version": 1
+          },
+          "runtime_contract_schema": 1,
+          "runtime_id": "mujoco_mjx_warp",
+          "scale_report_schema": 1,
+          "schema_version": 1,
+          "status": "test_only",
+          "supported_batch_widths": [
+            1,
+            16,
+            256,
+            4096
+          ],
+          "supported_task_ids": [
+            "rne.physics.free_fall.mjx.v1"
+          ],
+          "task_spec_schema": 1,
+          "unavailable_reason_code": null,
+          "unsupported_features": [
+            "automatic_differentiation",
+            "midpoint_implicitfast_integrator",
+            "noslip_solver",
+            "pgs_solver",
+            "plugin_sensors"
+          ]
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "auto_reset": false,
+        "batch_width": 1,
+        "kind": "rne_accelerator_request",
+        "operation": "create",
+        "request_id": 1,
+        "root_seed": 42,
+        "schema_version": 1,
+        "session_id": "contract",
+        "task_spec": {
+          "action": {
+            "tensors": [
+              {
+                "bounds": {
+                  "lower": [
+                    0.0
+                  ],
+                  "upper": [
+                    0.0
+                  ]
+                },
+                "dtype": "f64",
+                "layout": "row_major",
+                "name": "noop",
+                "shape": [
+                  1
+                ],
+                "unit": "1"
+              }
+            ]
+          },
+          "control_step_s": 0.016666666,
+          "curriculum": {
+            "stages": [
+              {
+                "name": "baseline",
+                "parameters": {
+                  "gravity_m_s2": {
+                    "unit": "m/s^2",
+                    "value": -9.81
+                  }
+                },
+                "starts_at_episode": 0
+              }
+            ]
+          },
+          "kind": "rne_task_spec",
+          "observation": {
+            "tensors": [
+              {
+                "bounds": null,
+                "dtype": "f64",
+                "layout": "row_major",
+                "name": "position_y_m",
+                "shape": [],
+                "unit": "m"
+              },
+              {
+                "bounds": null,
+                "dtype": "f64",
+                "layout": "row_major",
+                "name": "velocity_y_m_s",
+                "shape": [],
+                "unit": "m/s"
+              }
+            ]
+          },
+          "randomization": {
+            "parameters": [
+              {
+                "distribution": {
+                  "type": "constant",
+                  "value": 5.0
+                },
+                "name": "initial_position_y_m",
+                "unit": "m"
+              }
+            ]
+          },
+          "reset": {
+            "seed_strategy": "split_mix64_lane_episode_v1",
+            "supports_partial_reset": true
+          },
+          "reward": {
+            "aggregation": "weighted_sum",
+            "terms": [
+              {
+                "name": "position_y_m",
+                "unit": "m",
+                "weight": 1.0
+              }
+            ]
+          },
+          "schema_version": 1,
+          "task_id": "rne.physics.free_fall.mjx.v1",
+          "termination": {
+            "conditions": [
+              {
+                "kind": "failure",
+                "name": "non_finite_state"
+              }
+            ],
+            "max_episode_steps": 60
+          }
+        }
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 1,
+        "result": {
+          "episode_indices": [
+            0
+          ],
+          "episode_seeds": [
+            1298720818104676741
+          ],
+          "lane_ids": [
+            0
+          ],
+          "lane_replay_digests": [
+            18016906945709849408
+          ],
+          "observations": [
+            [
+              5.0,
+              0.0
+            ]
+          ],
+          "replay_digest": 10687404251403166205,
+          "reset": [
+            true
+          ],
+          "session_id": "contract"
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "lane_ids": [
+          0
+        ],
+        "operation": "reset_lanes",
+        "request_id": 2,
+        "schema_version": 1,
+        "session_id": "contract"
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 2,
+        "result": {
+          "episode_indices": [
+            1
+          ],
+          "episode_seeds": [
+            6147948423359611076
+          ],
+          "lane_ids": [
+            0
+          ],
+          "lane_replay_digests": [
+            7933392803188615342
+          ],
+          "observations": [
+            [
+              5.0,
+              0.0
+            ]
+          ],
+          "replay_digest": 9676316741091682490,
+          "reset": [
+            true
+          ]
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "actions": [
+          [
+            0.0
+          ]
+        ],
+        "kind": "rne_accelerator_request",
+        "operation": "step",
+        "request_id": 3,
+        "schema_version": 1,
+        "session_id": "contract"
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 3,
+        "result": {
+          "episode_indices": [
+            1
+          ],
+          "episode_seeds": [
+            6147948423359611076
+          ],
+          "lane_ids": [
+            0
+          ],
+          "lane_replay_digests": [
+            1025258777869343529
+          ],
+          "observations": [
+            [
+              4.997275000218,
+              -0.16349999346000002
+            ]
+          ],
+          "replay_digest": 3700532629046168812,
+          "reset": [
+            false
+          ],
+          "rewards": [
+            4.997275000218
+          ],
+          "terminated": [
+            false
+          ],
+          "truncated": [
+            false
+          ]
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "operation": "checkpoint",
+        "request_id": 4,
+        "schema_version": 1,
+        "session_id": "contract"
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 4,
+        "result": {
+          "auto_reset": false,
+          "lanes": [
+            {
+              "episode_index": 1,
+              "episode_seed": 6147948423359611076,
+              "lane_id": 0,
+              "pending_auto_reset": false,
+              "replay_digest": 1025258777869343529
+            }
+          ],
+          "num_envs": 1,
+          "operations": [
+            {
+              "lane_ids": [
+                0
+              ],
+              "type": "reset_lanes"
+            },
+            {
+              "actions": [
+                [
+                  0.0
+                ]
+              ],
+              "type": "step"
+            }
+          ],
+          "replay_digest": 3700532629046168812,
+          "schema_version": 2,
+          "seed": 42,
+          "seed_strategy": "split_mix64_lane_episode_v1",
+          "task_spec": {
+            "action": {
+              "tensors": [
+                {
+                  "bounds": {
+                    "lower": [
+                      0.0
+                    ],
+                    "upper": [
+                      0.0
+                    ]
+                  },
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "noop",
+                  "shape": [
+                    1
+                  ],
+                  "unit": "1"
+                }
+              ]
+            },
+            "control_step_s": 0.016666666,
+            "curriculum": {
+              "stages": [
+                {
+                  "name": "baseline",
+                  "parameters": {
+                    "gravity_m_s2": {
+                      "unit": "m/s^2",
+                      "value": -9.81
+                    }
+                  },
+                  "starts_at_episode": 0
+                }
+              ]
+            },
+            "kind": "rne_task_spec",
+            "observation": {
+              "tensors": [
+                {
+                  "bounds": null,
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "position_y_m",
+                  "shape": [],
+                  "unit": "m"
+                },
+                {
+                  "bounds": null,
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "velocity_y_m_s",
+                  "shape": [],
+                  "unit": "m/s"
+                }
+              ]
+            },
+            "randomization": {
+              "parameters": [
+                {
+                  "distribution": {
+                    "type": "constant",
+                    "value": 5.0
+                  },
+                  "name": "initial_position_y_m",
+                  "unit": "m"
+                }
+              ]
+            },
+            "reset": {
+              "seed_strategy": "split_mix64_lane_episode_v1",
+              "supports_partial_reset": true
+            },
+            "reward": {
+              "aggregation": "weighted_sum",
+              "terms": [
+                {
+                  "name": "position_y_m",
+                  "unit": "m",
+                  "weight": 1.0
+                }
+              ]
+            },
+            "schema_version": 1,
+            "task_id": "rne.physics.free_fall.mjx.v1",
+            "termination": {
+              "conditions": [
+                {
+                  "kind": "failure",
+                  "name": "non_finite_state"
+                }
+              ],
+              "max_episode_steps": 60
+            }
+          }
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "checkpoint": {
+          "auto_reset": false,
+          "lanes": [
+            {
+              "episode_index": 1,
+              "episode_seed": 6147948423359611076,
+              "lane_id": 0,
+              "pending_auto_reset": false,
+              "replay_digest": 1025258777869343529
+            }
+          ],
+          "num_envs": 1,
+          "operations": [
+            {
+              "lane_ids": [
+                0
+              ],
+              "type": "reset_lanes"
+            },
+            {
+              "actions": [
+                [
+                  0.0
+                ]
+              ],
+              "type": "step"
+            }
+          ],
+          "replay_digest": 3700532629046168812,
+          "schema_version": 2,
+          "seed": 42,
+          "seed_strategy": "split_mix64_lane_episode_v1",
+          "task_spec": {
+            "action": {
+              "tensors": [
+                {
+                  "bounds": {
+                    "lower": [
+                      0.0
+                    ],
+                    "upper": [
+                      0.0
+                    ]
+                  },
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "noop",
+                  "shape": [
+                    1
+                  ],
+                  "unit": "1"
+                }
+              ]
+            },
+            "control_step_s": 0.016666666,
+            "curriculum": {
+              "stages": [
+                {
+                  "name": "baseline",
+                  "parameters": {
+                    "gravity_m_s2": {
+                      "unit": "m/s^2",
+                      "value": -9.81
+                    }
+                  },
+                  "starts_at_episode": 0
+                }
+              ]
+            },
+            "kind": "rne_task_spec",
+            "observation": {
+              "tensors": [
+                {
+                  "bounds": null,
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "position_y_m",
+                  "shape": [],
+                  "unit": "m"
+                },
+                {
+                  "bounds": null,
+                  "dtype": "f64",
+                  "layout": "row_major",
+                  "name": "velocity_y_m_s",
+                  "shape": [],
+                  "unit": "m/s"
+                }
+              ]
+            },
+            "randomization": {
+              "parameters": [
+                {
+                  "distribution": {
+                    "type": "constant",
+                    "value": 5.0
+                  },
+                  "name": "initial_position_y_m",
+                  "unit": "m"
+                }
+              ]
+            },
+            "reset": {
+              "seed_strategy": "split_mix64_lane_episode_v1",
+              "supports_partial_reset": true
+            },
+            "reward": {
+              "aggregation": "weighted_sum",
+              "terms": [
+                {
+                  "name": "position_y_m",
+                  "unit": "m",
+                  "weight": 1.0
+                }
+              ]
+            },
+            "schema_version": 1,
+            "task_id": "rne.physics.free_fall.mjx.v1",
+            "termination": {
+              "conditions": [
+                {
+                  "kind": "failure",
+                  "name": "non_finite_state"
+                }
+              ],
+              "max_episode_steps": 60
+            }
+          }
+        },
+        "kind": "rne_accelerator_request",
+        "operation": "restore",
+        "request_id": 5,
+        "schema_version": 1,
+        "session_id": "contract"
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 5,
+        "result": {
+          "episode_indices": [
+            1
+          ],
+          "episode_seeds": [
+            6147948423359611076
+          ],
+          "lane_ids": [
+            0
+          ],
+          "lane_replay_digests": [
+            1025258777869343529
+          ],
+          "observations": [
+            [
+              4.997275000218,
+              -0.16349999346000002
+            ]
+          ],
+          "replay_digest": 3700532629046168812,
+          "reset": [
+            false
+          ]
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "operation": "close",
+        "request_id": 6,
+        "schema_version": 1,
+        "session_id": "contract"
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 6,
+        "result": {
+          "closed": true,
+          "session_id": "contract"
+        },
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "operation": "unsupported_v1_fixture",
+        "request_id": 7,
+        "schema_version": 1
+      },
+      "response": {
+        "error": {
+          "code": "unsupported_operation",
+          "details": {},
+          "message": "unsupported operation 'unsupported_v1_fixture'"
+        },
+        "kind": "rne_accelerator_response",
+        "ok": false,
+        "request_id": 7,
+        "schema_version": 1
+      }
+    },
+    {
+      "request": {
+        "kind": "rne_accelerator_request",
+        "operation": "shutdown",
+        "request_id": 8,
+        "schema_version": 1
+      },
+      "response": {
+        "kind": "rne_accelerator_response",
+        "ok": true,
+        "request_id": 8,
+        "result": {
+          "shutdown": true
+        },
+        "schema_version": 1
+      }
+    }
+  ],
+  "kind": "rne_accelerator_process_conformance_report",
+  "protocol_schema": 1,
+  "root_seed": 42,
+  "schema_version": 1,
+  "status": "passed",
+  "subject": {
+    "adapter_file": "server.py",
+    "adapter_sha256": "1d198d00e2a32e0e5bd07806b51f4118dbcacd0d85b0fc16497b27fc442e321f",
+    "adapter_size_bytes": 6751,
+    "argument_count": 5,
+    "arguments_sha256": "e8fd88e2683b2eb057b51fce3e1f3ea6249094093d4f35bf0e81f2d43c2f6057",
+    "launcher_file": "python",
+    "manifest_file": "accelerator.toml",
+    "manifest_sha256": "0779e70e09a5ec033f8ad053be07f811fd2c29213712b3a17161d76299734f75",
+    "runtime_file": "runtime.toml",
+    "runtime_sha256": "6dc8b72f72fcd7d0022c3fa3154ef72a6cbc16b5df805325094f3f9bdf8f2d11",
+    "task_file": "free-fall-task-spec-v1.json",
+    "task_sha256": "2ac62f7e5c72bb555196baae5776fc28d62b6f94a7f3d819d480ef1096133fe7"
+  },
+  "task_id": "rne.physics.free_fall.mjx.v1",
+  "task_spec_schema": 1,
+  "task_spec_sha256": "f810d056d33c7891e12a0b9b920e8f78fd91972aa4bbf6ee0597c791285d9210"
+}

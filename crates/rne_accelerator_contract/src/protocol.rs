@@ -435,7 +435,7 @@ impl AcceleratorProtocolTranscript {
     }
 }
 
-fn validate_request_envelope(
+pub(crate) fn validate_request_envelope(
     value: &Value,
     request_id: u64,
     operation: &str,
@@ -460,7 +460,7 @@ fn validate_request_envelope(
     )
 }
 
-fn validate_response_envelope(
+pub(crate) fn validate_response_envelope(
     value: &Value,
     request_id: u64,
     success: bool,

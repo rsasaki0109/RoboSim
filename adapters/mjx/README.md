@@ -28,6 +28,13 @@ The wire operations are `probe`, `create`, `reset_lanes`, `step`, `checkpoint`,
 JSON objects separated by newlines. See
 [the protocol contract](../../docs/ACCELERATOR_PROTOCOL.md).
 
+The native `rne-accelerator-conformance` binary can launch any compatible
+external JSONL process without a shell and emit an eleven-check,
+content-addressed report. `rne-accelerator-protocol-mock` provides the
+dependency-free installed-bundle rehearsal subject; passing that mock proves
+the process contract, not GPU availability. See the standalone command and
+third-party adapter argument rules in the protocol contract.
+
 Generate the local contract-test conformance report with:
 
 ```text
