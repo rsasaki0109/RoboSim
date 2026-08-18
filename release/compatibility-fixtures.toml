@@ -65,6 +65,13 @@ path = "tests/golden/replays/generic-replay-v1.json"
 canonical_json_sha256 = "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217"
 
 [[fixture]]
+id = "frontend_message_families_v1"
+contract = "frontend_message_families"
+schema_version = 1
+path = "tests/golden/protocol/frontend-message-families-v1.json"
+canonical_json_sha256 = "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc"
+
+[[fixture]]
 id = "frontend_transport_v1"
 contract = "frontend_transport"
 schema_version = 1

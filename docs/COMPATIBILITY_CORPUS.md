@@ -24,7 +24,7 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains twenty-five fixtures:
+contains twenty-six fixtures:
 
 | Contract | Retained artifact |
 |---|---|
@@ -35,7 +35,7 @@ contains twenty-five fixtures:
 | Historical decisions | Frontend transport v1, TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
 | Renderer dataset evidence | renderer capture report v1 |
-| Frontend | current and first committed protocol-v1 `ClientHello` frame bytes and negotiated limits |
+| Frontend | all ten protocol-v1 message families plus current and first committed `ClientHello` frame bytes and negotiated limits |
 | Historical migration | retained zero-step snapshot v1 plus provenance-bound, sensor-bearing snapshots v1 and v2 restored as v3 |
 | Failure evidence | Failure Capsule v1 |
 | Hardware safety | process-mock conformance v1 |
@@ -142,15 +142,15 @@ The renderer capture report uses the same strict public `rne_data` type in the
 producer, independent dataset verifier, and installed compatibility runner; its
 fixture freezes schema and aggregate RGB-D invariants without imposing a
 cross-adapter pixel golden.
-It retains one negotiated frontend reference frame rather than every message
-kind and freezes the C layout rather than every platform's compiled library
+It retains exact frames and typed payload semantics for all ten protocol-v1
+message kinds, including negotiation, control, status, RGB-D, LiDAR, and gap
+delivery. It freezes the C layout rather than every platform's compiled library
 image. Python call shape is verified by the separate installed wheel manifest.
 The fixed 31-crate Rust API baseline establishes source-level history. The
 snapshot v1/v2-to-v3 matrix proves multi-generation state migration, while the
 checkpoint/replay decision matrix proves both exact retention and an explicit
 non-migratable boundary. Dataset bundle, TaskSpec, Failure Capsule, and frontend
 transport now have exact ancestor retention, but none has a second public
-schema to exercise a transition. Broader frontend message-family coverage and
-any future v1-to-v2
-migrations or required-rerun decisions remain future work.
+schema to exercise a transition. Future v1-to-v2 migrations or required-rerun
+decisions remain future work.
 Independent-use and six-month stability gates remain mandatory.

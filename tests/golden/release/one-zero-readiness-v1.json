@@ -1,7 +1,7 @@
 {
   "kind": "rne_one_zero_readiness_report",
   "schema_version": 1,
-  "manifest_sha256": "sha256:d0fce6034729140f744ce24aea153e967af8fbf04cd254866f88e243e5cbcb21",
+  "manifest_sha256": "sha256:70c2873ea6329ed0fc82fa5bb4b18e412adc27525500bfac93417cf8b4fca8f0",
   "release_version": "0.1.0",
   "as_of": "2026-08-16",
   "candidate_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
@@ -50,13 +50,13 @@
     {
       "id": "historical_compatibility",
       "status": "passed",
-      "detail": "minimum_compatibility_checks=25",
+      "detail": "minimum_compatibility_checks=26",
       "evidence_sha256": [
         "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf",
-        "sha256:0d7e326f7e79abc79a515a67ad785ce2a2397359275f89c3c8df7783c42bf1a8",
         "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235",
+        "sha256:1bfdc4d80b2459b3c7b18b47dbfdc8bc8790c923b8a7a7a9bef330779dff5fab",
         "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1",
-        "sha256:1eee439aaf6fb2b6a2776ace1ce3e43c9e00bddaef914b0a7e4d55964aa4bd35",
+        "sha256:211760921520af9c3d68ee1656437d7559c87c6a5d0f3ea28b577fc4da7b0eac",
         "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd",
         "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396",
         "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
@@ -64,6 +64,7 @@
         "sha256:6e659e42ae0cd7970a10dcf21064d0a5d2f3531f18ff7a336e4a64c313f3647a",
         "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
         "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8",
+        "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc",
         "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f",
         "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
         "sha256:a17643456136ebb956a1d8f1a0ccb969e7636a98ace5e94c13a00fe1f80ee6fe",

@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 63] = [
+const BUNDLE_FILES: [(&str, &str); 64] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -191,6 +191,10 @@ const BUNDLE_FILES: [(&str, &str); 63] = [
     (
         "tests/golden/replays/generic-replay-v1.json",
         "tests/golden/replays/generic-replay-v1.json",
+    ),
+    (
+        "tests/golden/protocol/frontend-message-families-v1.json",
+        "tests/golden/protocol/frontend-message-families-v1.json",
     ),
     (
         "tests/golden/protocol/frontend-transport-v1.json",

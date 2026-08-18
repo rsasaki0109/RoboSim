@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:0d7e326f7e79abc79a515a67ad785ce2a2397359275f89c3c8df7783c42bf1a8",
+  "registry_sha256": "sha256:1bfdc4d80b2459b3c7b18b47dbfdc8bc8790c923b8a7a7a9bef330779dff5fab",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -106,6 +106,18 @@
       "schema_version": 1,
       "path": "tests/golden/replays/generic-replay-v1.json",
       "canonical_json_sha256": "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "frontend_message_families_v1",
+      "contract": "frontend_message_families",
+      "schema_version": 1,
+      "path": "tests/golden/protocol/frontend-message-families-v1.json",
+      "canonical_json_sha256": "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

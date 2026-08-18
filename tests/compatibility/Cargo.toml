@@ -17,6 +17,7 @@ doc = false
 [dependencies]
 anyhow = { workspace = true }
 rne_ai = { workspace = true }
+rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_hardware_gateway = { workspace = true }
 rne_log = { workspace = true }

@@ -16,9 +16,13 @@ use rne_ai::{
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
     TASK_SPEC_SCHEMA_VERSION, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };
+use rne_core::control::{ControlCommand, RunnerControlState};
 use rne_data::transport::{
-    negotiate_transport, ClientHello, NegotiationPolicy, NegotiationRejectCode,
-    SensorFrameMetadata, TransportCapabilities, TransportFrame, TransportMessageKind,
+    decode_control_command, decode_image_depth, decode_image_rgb8, decode_lidar_point_cloud,
+    encode_control_command, encode_image_depth, encode_image_rgb8, encode_lidar_point_cloud,
+    negotiate_transport, ClientHello, ControlAck, GapNotice, NegotiatedTransport,
+    NegotiationPolicy, NegotiationReject, NegotiationRejectCode, SensorFrameMetadata, ServerHello,
+    StatusMessage, TransportCapabilities, TransportFrame, TransportMessageKind,
     TRANSPORT_MAX_PAYLOAD_BYTES,
 };
 use rne_data::{
@@ -27,8 +31,8 @@ use rne_data::{
     encode_dataset_annotation, encode_dataset_imu, encode_dataset_task_outcome,
     encode_dataset_transform, DatasetActionSample, DatasetBundle, DatasetError,
     DatasetGroundTruthAnnotation, DatasetManifest, DatasetTaskOutcomeSample,
-    DepthPairEvaluationReport, DepthPairMetricSpec, ImuSample, PoseSample,
-    RendererDatasetCaptureReport, StreamId, DATASET_BUNDLE_SCHEMA_VERSION,
+    DepthPairEvaluationReport, DepthPairMetricSpec, ImageDepth, ImageRgb8, ImuSample, PointCloud,
+    PoseSample, RendererDatasetCaptureReport, StreamId, DATASET_BUNDLE_SCHEMA_VERSION,
     DATASET_PAYLOAD_SCHEMA_VERSION, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
 };
 use rne_hardware_gateway::mock::MockConformanceReport;
@@ -73,6 +77,20 @@ pub const HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION: u32 = 1;
 const MAX_FIXTURE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: u64 = 256 * 1024;
 const MAX_DETAIL_CHARS: usize = 240;
+const FRONTEND_FAMILY_SESSION_ID: u64 = 0x1122_3344_5566_7788;
+const FRONTEND_FAMILY_FIRST_SEQUENCE: u64 = 100;
+const FRONTEND_MESSAGE_FAMILIES: [(&str, TransportMessageKind); 10] = [
+    ("client_hello", TransportMessageKind::ClientHello),
+    ("server_hello", TransportMessageKind::ServerHello),
+    ("reject", TransportMessageKind::Reject),
+    ("control_command", TransportMessageKind::ControlCommand),
+    ("control_ack", TransportMessageKind::ControlAck),
+    ("status", TransportMessageKind::Status),
+    ("image_rgb8", TransportMessageKind::ImageRgb8),
+    ("image_depth_f32", TransportMessageKind::ImageDepthF32),
+    ("lidar_point_cloud", TransportMessageKind::LidarPointCloud),
+    ("gap", TransportMessageKind::Gap),
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FixtureSpec {
@@ -82,7 +100,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 25] = [
+const FIXTURE_SPECS: [FixtureSpec; 26] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -136,6 +154,12 @@ const FIXTURE_SPECS: [FixtureSpec; 25] = [
         contract: "generic_replay",
         schema_version: 1,
         version_field: "version",
+    },
+    FixtureSpec {
+        id: "frontend_message_families_v1",
+        contract: "frontend_message_families",
+        schema_version: 1,
+        version_field: "schema_version",
     },
     FixtureSpec {
         id: "frontend_transport_v1",
@@ -699,6 +723,25 @@ struct FrontendTransportFixture {
     frame_hex: String,
     hello: FrontendHelloFixture,
     negotiated: NegotiatedTransportFixture,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendMessageFamiliesFixture {
+    schema_version: u32,
+    frames: Vec<FrontendMessageFrameFixture>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendMessageFrameFixture {
+    message_kind: String,
+    protocol_major: u16,
+    protocol_minor: u16,
+    flags: u16,
+    sequence: u64,
+    session_id: u64,
+    frame_hex: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -1363,6 +1406,10 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         "generic_replay" => {
             let fixture: ReplayArtifact = serde_json::from_value(value)?;
             fixture.validate()?;
+        }
+        "frontend_message_families" => {
+            let fixture: FrontendMessageFamiliesFixture = serde_json::from_value(value)?;
+            validate_frontend_message_families(&fixture)?;
         }
         "frontend_transport" => {
             let fixture: FrontendTransportFixture = serde_json::from_value(value)?;
@@ -2559,6 +2606,278 @@ fn validate_frontend_transport(fixture: &FrontendTransportFixture) -> anyhow::Re
     Ok(())
 }
 
+fn validate_frontend_message_families(
+    fixture: &FrontendMessageFamiliesFixture,
+) -> anyhow::Result<()> {
+    ensure!(
+        fixture.schema_version == 1,
+        "frontend message-family fixture schema mismatch"
+    );
+    ensure!(
+        fixture.frames.len() == FRONTEND_MESSAGE_FAMILIES.len(),
+        "frontend message-family fixture must cover exactly ten protocol-v1 kinds"
+    );
+    for (index, (frame_fixture, (name, kind))) in fixture
+        .frames
+        .iter()
+        .zip(FRONTEND_MESSAGE_FAMILIES)
+        .enumerate()
+    {
+        ensure!(
+            frame_fixture.message_kind == name,
+            "frontend message-family order mismatch at {name}"
+        );
+        let expected_sequence = FRONTEND_FAMILY_FIRST_SEQUENCE + index as u64;
+        ensure!(
+            frame_fixture.protocol_major == 1
+                && frame_fixture.protocol_minor == 0
+                && frame_fixture.flags == 0
+                && frame_fixture.sequence == expected_sequence
+                && frame_fixture.session_id == FRONTEND_FAMILY_SESSION_ID,
+            "frontend {name} fixture header contract mismatch"
+        );
+        let bytes = decode_lower_hex(&frame_fixture.frame_hex)?;
+        let frame = TransportFrame::decode(&bytes, TRANSPORT_MAX_PAYLOAD_BYTES)?;
+        ensure!(
+            frame.protocol_major == frame_fixture.protocol_major
+                && frame.protocol_minor == frame_fixture.protocol_minor
+                && frame.kind == kind
+                && frame.flags == frame_fixture.flags
+                && frame.sequence == frame_fixture.sequence
+                && frame.session_id == frame_fixture.session_id,
+            "frontend {name} frame header mismatch"
+        );
+        ensure!(
+            frame.encode()? == bytes,
+            "frontend {name} frame did not re-encode exactly"
+        );
+        ensure!(
+            frame.payload == reference_frontend_payload(kind)?,
+            "frontend {name} payload bytes changed"
+        );
+        validate_reference_frontend_payload(kind, &frame.payload)?;
+        ensure_rejects_edge_mutations(&bytes, |candidate| {
+            TransportFrame::decode(candidate, TRANSPORT_MAX_PAYLOAD_BYTES).map(|_| ())
+        })?;
+        ensure_rejects_edge_mutations(&frame.payload, |candidate| {
+            decode_frontend_payload(kind, candidate)
+        })?;
+    }
+    Ok(())
+}
+
+fn reference_client_hello() -> ClientHello {
+    ClientHello {
+        min_protocol_major: 1,
+        max_protocol_major: 1,
+        capabilities: TransportCapabilities::ALL_V1,
+        required_capabilities: TransportCapabilities::CONTROL.union(TransportCapabilities::STATUS),
+        max_payload_bytes: 1_048_576,
+        queue_frame_limit: 16,
+        queue_byte_limit: 2_097_152,
+        resume_after_sequence: Some(41),
+    }
+}
+
+fn reference_negotiated_transport() -> NegotiatedTransport {
+    NegotiatedTransport {
+        protocol_major: 1,
+        protocol_minor: 0,
+        capabilities: TransportCapabilities::ALL_V1,
+        max_payload_bytes: 1_048_576,
+        queue_frame_limit: 16,
+        queue_byte_limit: 2_097_152,
+        resume_after_sequence: Some(41),
+    }
+}
+
+fn reference_sensor_metadata() -> SensorFrameMetadata {
+    SensorFrameMetadata {
+        stream_id: 7,
+        sensor_sequence: 11,
+        capture_ticks: 20,
+        available_ticks: 25,
+    }
+}
+
+fn reference_lidar_cloud() -> PointCloud {
+    let mut cloud = PointCloud::new();
+    cloud.push_return(Vec3::new(1.0, 2.0, 3.0), 0.5, 7, 1, 2, 0.01);
+    cloud.push_return(Vec3::new(4.0, 5.0, 6.0), 0.75, 8, 2, 3, 0.02);
+    cloud
+}
+
+fn reference_frontend_payload(kind: TransportMessageKind) -> anyhow::Result<Vec<u8>> {
+    Ok(match kind {
+        TransportMessageKind::ClientHello => reference_client_hello().encode_payload(),
+        TransportMessageKind::ServerHello => ServerHello {
+            negotiated: reference_negotiated_transport(),
+            reconnect_generation: 2,
+            current_sequence: 99,
+            dropped_messages: 4,
+        }
+        .encode_payload(),
+        TransportMessageKind::Reject => NegotiationReject {
+            code: NegotiationRejectCode::UnsupportedVersion,
+            message: "protocol v1 required".to_string(),
+        }
+        .encode_payload(),
+        TransportMessageKind::ControlCommand => {
+            encode_control_command(ControlCommand::Step { frames: 17 })
+        }
+        TransportMessageKind::ControlAck => ControlAck {
+            command_sequence: 103,
+            state: RunnerControlState::Paused,
+        }
+        .encode_payload(),
+        TransportMessageKind::Status => StatusMessage {
+            step: 3,
+            sim_time_ticks: 50,
+            state: RunnerControlState::Paused,
+            snapshot_json: br#"{"base":[1,2,3]}"#.to_vec(),
+        }
+        .encode_payload()?,
+        TransportMessageKind::ImageRgb8 => encode_image_rgb8(
+            reference_sensor_metadata(),
+            &ImageRgb8::from_rgba8(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        )?,
+        TransportMessageKind::ImageDepthF32 => encode_image_depth(
+            reference_sensor_metadata(),
+            &ImageDepth::new(2, 1, vec![1.25, 9.5]),
+        )?,
+        TransportMessageKind::LidarPointCloud => {
+            encode_lidar_point_cloud(reference_sensor_metadata(), &reference_lidar_cloud())?
+        }
+        TransportMessageKind::Gap => GapNotice {
+            first_missing_sequence: 20,
+            last_missing_sequence: 22,
+            total_dropped_messages: 3,
+        }
+        .encode_payload(),
+    })
+}
+
+fn validate_reference_frontend_payload(
+    kind: TransportMessageKind,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    match kind {
+        TransportMessageKind::ClientHello => {
+            ensure!(
+                ClientHello::decode_payload(payload)? == reference_client_hello(),
+                "client hello semantics changed"
+            );
+        }
+        TransportMessageKind::ServerHello => {
+            ensure!(
+                ServerHello::decode_payload(payload)?
+                    == ServerHello {
+                        negotiated: reference_negotiated_transport(),
+                        reconnect_generation: 2,
+                        current_sequence: 99,
+                        dropped_messages: 4,
+                    },
+                "server hello semantics changed"
+            );
+        }
+        TransportMessageKind::Reject => {
+            ensure!(
+                NegotiationReject::decode_payload(payload)?
+                    == NegotiationReject {
+                        code: NegotiationRejectCode::UnsupportedVersion,
+                        message: "protocol v1 required".to_string(),
+                    },
+                "negotiation rejection semantics changed"
+            );
+        }
+        TransportMessageKind::ControlCommand => {
+            ensure!(
+                decode_control_command(payload)? == ControlCommand::Step { frames: 17 },
+                "control command semantics changed"
+            );
+        }
+        TransportMessageKind::ControlAck => {
+            ensure!(
+                ControlAck::decode_payload(payload)?
+                    == ControlAck {
+                        command_sequence: 103,
+                        state: RunnerControlState::Paused,
+                    },
+                "control acknowledgement semantics changed"
+            );
+        }
+        TransportMessageKind::Status => {
+            ensure!(
+                StatusMessage::decode_payload(payload)?
+                    == StatusMessage {
+                        step: 3,
+                        sim_time_ticks: 50,
+                        state: RunnerControlState::Paused,
+                        snapshot_json: br#"{"base":[1,2,3]}"#.to_vec(),
+                    },
+                "status semantics changed"
+            );
+        }
+        TransportMessageKind::ImageRgb8 => {
+            ensure!(
+                decode_image_rgb8(payload)?
+                    == (
+                        reference_sensor_metadata(),
+                        ImageRgb8::from_rgba8(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                    ),
+                "RGB8 semantics changed"
+            );
+        }
+        TransportMessageKind::ImageDepthF32 => {
+            ensure!(
+                decode_image_depth(payload)?
+                    == (
+                        reference_sensor_metadata(),
+                        ImageDepth::new(2, 1, vec![1.25, 9.5]),
+                    ),
+                "depth semantics changed"
+            );
+        }
+        TransportMessageKind::LidarPointCloud => {
+            ensure!(
+                decode_lidar_point_cloud(payload)?
+                    == (reference_sensor_metadata(), reference_lidar_cloud()),
+                "LiDAR semantics changed"
+            );
+        }
+        TransportMessageKind::Gap => {
+            ensure!(
+                GapNotice::decode_payload(payload)?
+                    == GapNotice {
+                        first_missing_sequence: 20,
+                        last_missing_sequence: 22,
+                        total_dropped_messages: 3,
+                    },
+                "gap semantics changed"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn decode_frontend_payload(
+    kind: TransportMessageKind,
+    payload: &[u8],
+) -> Result<(), rne_data::transport::TransportError> {
+    match kind {
+        TransportMessageKind::ClientHello => ClientHello::decode_payload(payload).map(|_| ()),
+        TransportMessageKind::ServerHello => ServerHello::decode_payload(payload).map(|_| ()),
+        TransportMessageKind::Reject => NegotiationReject::decode_payload(payload).map(|_| ()),
+        TransportMessageKind::ControlCommand => decode_control_command(payload).map(|_| ()),
+        TransportMessageKind::ControlAck => ControlAck::decode_payload(payload).map(|_| ()),
+        TransportMessageKind::Status => StatusMessage::decode_payload(payload).map(|_| ()),
+        TransportMessageKind::ImageRgb8 => decode_image_rgb8(payload).map(|_| ()),
+        TransportMessageKind::ImageDepthF32 => decode_image_depth(payload).map(|_| ()),
+        TransportMessageKind::LidarPointCloud => decode_lidar_point_cloud(payload).map(|_| ()),
+        TransportMessageKind::Gap => GapNotice::decode_payload(payload).map(|_| ()),
+    }
+}
+
 fn validate_dataset_payload(fixture: &DatasetPayloadFixture) -> anyhow::Result<()> {
     ensure!(
         fixture.schema_version == DATASET_PAYLOAD_SCHEMA_VERSION,
@@ -2933,6 +3252,24 @@ mod tests {
         )
         .expect("read golden");
         assert_eq!(actual.replace("\r\n", "\n"), expected.replace("\r\n", "\n"));
+    }
+
+    #[test]
+    fn frontend_message_families_reject_reordering_and_wire_tampering() {
+        let root = workspace_root();
+        let bytes =
+            fs::read(root.join("tests/golden/protocol/frontend-message-families-v1.json")).unwrap();
+        let fixture: FrontendMessageFamiliesFixture = serde_json::from_slice(&bytes).unwrap();
+        validate_frontend_message_families(&fixture).unwrap();
+
+        let mut reordered = fixture.clone();
+        reordered.frames.swap(0, 1);
+        assert!(validate_frontend_message_families(&reordered).is_err());
+
+        let mut tampered = fixture;
+        let last = tampered.frames[9].frame_hex.len() - 2;
+        tampered.frames[9].frame_hex.replace_range(last.., "01");
+        assert!(validate_frontend_message_families(&tampered).is_err());
     }
 
     #[test]

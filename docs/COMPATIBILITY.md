@@ -291,10 +291,10 @@ trees, schema declarations, and golden blobs, executes the complete corpus with
 the current readers, and requires the supplied report to equal the fresh report
 exactly. The audit records the report, registry, and every fixture digest.
 
-The twenty-five-fixture registry additionally freezes a complete frontend
-`ClientHello` frame, all five dataset-native payload families, behavior replay
-v1, scenario replay v4, the renderer-backed RGB-D capture report, the controller
-C ABI-v3 64-bit layout, three historical
+The twenty-six-fixture registry additionally freezes all ten frontend protocol-v1
+message families and the historical `ClientHello` frame, all five dataset-native
+payload families, behavior replay v1, scenario replay v4, the renderer-backed
+RGB-D capture report, the controller C ABI-v3 64-bit layout, three historical
 mobile-manipulator migrations, one exact legacy checkpoint restore, and two
 explicit old-scenario required-rerun decisions. The original zero-step schema-v1
 case remains retained. Two stronger cases contain 7-tick, sensor-bearing
