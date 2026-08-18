@@ -391,6 +391,9 @@ pins, and selection placeholders. Installed rehearsal regenerates and conforms
 that harness on both tier-1 platforms. Its fixture responder is deliberately
 marked nonqualifying: only a replaced, independently maintained backend with
 retained subject bytes and physical runtime evidence can enter readiness.
+The harness carries canonical `rne-scaffold.json` schema v1; incompatible
+generator changes require an additive schema and retained v1 generation rather
+than rewriting the installed authoring surface.
 
 The readiness tracker's v2 external-certification contract closes the final
 report-substitution gap before real outreach: each independent source revision
@@ -420,8 +423,8 @@ that the forms cannot silently drop a readiness requirement. Issues remain a
 review queue and never substitute for the typed audit.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
-executable installed contract. A strict registry content-addresses twenty-nine
-historical and current TaskSpec identities, checkpoint,
+executable installed contract. A strict registry content-addresses thirty-five
+historical and current fixtures spanning TaskSpec identities, checkpoint,
 generic/behavior/scenario replay, dataset, renderer capture, all ten frontend
 protocol-v1 message families, controller C ABI and plugin-conformance report,
 historical migration, Failure Capsule, TaskSpec-bound hardware session, and
@@ -489,7 +492,7 @@ These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
 explicit assessment date, and emits nine fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
-  retained 34-check historical compatibility replay and clean blocker registry
+retained 35-check historical compatibility replay and clean blocker registry
 report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.

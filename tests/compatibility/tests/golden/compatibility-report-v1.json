@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:64ff71b9ec20a1c64ed3308af9b6cfd84a5942f520c84d1b979ec34991348976",
+  "registry_sha256": "sha256:62f4c8359e67bec282b0b5083fa418a41914006ad49f9013bd4d1f8213febfc8",
   "checks": [
     {
       "id": "accelerator_capability_v1",
@@ -46,6 +46,18 @@
       "schema_version": 1,
       "path": "tests/golden/accelerators/protocol-transcript-v1.json",
       "canonical_json_sha256": "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "accelerator_scaffold_v1",
+      "contract": "accelerator_scaffold",
+      "schema_version": 1,
+      "path": "tests/golden/accelerators/scaffold-contract-v1.json",
+      "canonical_json_sha256": "sha256:ad79d0c78ed2f6bc45c3dcdfc4000e4e7897e42732ec48e22779bbd81424c332",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

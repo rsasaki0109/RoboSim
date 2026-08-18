@@ -45,7 +45,7 @@ all eight operation families plus one stable unsupported-operation error. The
 Rust reader requires exact envelope fields and order, binds the embedded
 TaskSpec, recomputes the lane episode seed, reads the Python checkpoint as
 `PortableBatchCheckpoint<Vec<f64>>`, and requires restore to embed that exact
-checkpoint and reproduce its state. The transcript is the 33rd installed
+checkpoint and reproduce its state. The transcript is a retained installed
 compatibility fixture, so future schemas and unknown fields are also exercised
 without Python or accelerator dependencies.
 
@@ -75,7 +75,8 @@ Run the installed deterministic lifecycle from a bundle root:
 Start an external adapter without copying RNE implementation code:
 
 ```powershell
-./bin/rne-accelerator-conformance scaffold my_accelerator --dir ./accelerators
+./bin/rne-accelerator-conformance scaffold my_accelerator `
+  --dir ./accelerators --schema 1
 Set-Location ./accelerators/my_accelerator
 ../../bin/rne-accelerator-conformance `
   --adapter python `
@@ -89,7 +90,8 @@ Set-Location ./accelerators/my_accelerator
 
 The scaffold has no runtime dependency beyond Python for its initial self-test.
 It includes the typed contracts, a bounded JSONL fixture responder, pinned
-requirements, model placeholder, and selection record. Replace `dispatch` with
+requirements, model placeholder, selection record, and canonical
+`rne-scaffold.json` binding every generated file. Replace `dispatch` with
 the independently maintained backend and update every placeholder before
 submitting evidence. The generated fixture only proves framing and the authoring
 path: copying, renaming, or conforming it is not third-party evidence, does not

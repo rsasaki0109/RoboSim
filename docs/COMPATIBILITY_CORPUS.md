@@ -24,11 +24,11 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains thirty-four fixtures:
+contains thirty-five fixtures:
 
 | Contract | Retained artifact |
 |---|---|
-| Accelerator boundary | capability, complete nine-exchange protocol lifecycle, content-addressed process conformance, CPU parity/conformance, and scale reports, all bound to the selected manifest, runtime pins, and TaskSpec |
+| Accelerator boundary | capability, complete nine-exchange protocol lifecycle, content-addressed process conformance, schema-v1 scaffold file-set contract, CPU parity/conformance, and scale reports, all bound to the selected manifest, runtime pins, and TaskSpec |
 | Task contract | retained original TaskSpec v1 and current sensor-goal TaskSpec v1 under distinct identities |
 | Batch execution | portable batch checkpoint v2 |
 | Controller ABI and conformance | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1 |
@@ -150,6 +150,15 @@ when an older supported artifact needs explicit retention. Update its typed
 dispatch, tests, golden report, contract registry, compatibility documentation,
 and release bundle together. Do not silently replace an older fixture with a
 newer shape; keep both while the older version is supported.
+
+The accelerator scaffold is a versioned authoring surface. Its retained
+`rne-scaffold.json` fixes the adapter name, ordered ten-file directory shape,
+and exact length/SHA-256 for the nine generated author files; the tenth file is
+the canonical self-manifest. A compatible implementation change must regenerate
+the same schema-v1 contract. An intentional incompatible template, file-set, or
+semantic change requires a new scaffold schema and golden while the CLI and
+installed reader continue to accept `--schema 1`. Never rewrite the v1 golden
+or silently make its generator emit v2 content.
 
 The current corpus is an expanded v0.9 slice, not a complete 1.0 declaration.
 The renderer capture report uses the same strict public `rne_data` type in the

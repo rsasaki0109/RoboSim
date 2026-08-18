@@ -5,6 +5,7 @@ use super::{
     validate_contract_registry, validate_release_metadata, workspace_root, RELEASE_VERSION,
 };
 use anyhow::{bail, Context};
+use rne_accelerator_contract::AcceleratorScaffoldContract;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,7 +55,7 @@ const INSTALL_CHECK_IDS: [&str; 10] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 76] = [
+const BUNDLE_FILES: [(&str, &str); 77] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -159,6 +160,10 @@ const BUNDLE_FILES: [(&str, &str); 76] = [
     (
         "tests/golden/accelerators/protocol-transcript-v1.json",
         "tests/golden/accelerators/protocol-transcript-v1.json",
+    ),
+    (
+        "tests/golden/accelerators/scaffold-contract-v1.json",
+        "tests/golden/accelerators/scaffold-contract-v1.json",
     ),
     (
         "tests/golden/accelerators/scale-report-v1.json",
@@ -1567,6 +1572,8 @@ fn run_accelerator_scaffold_rehearsal(
             OsString::from(NAME),
             OsString::from("--dir"),
             parent.clone().into_os_string(),
+            OsString::from("--schema"),
+            OsString::from("1"),
         ],
         &[],
     ) {
@@ -1582,6 +1589,21 @@ fn run_accelerator_scaffold_rehearsal(
     };
     if !readme.contains("cannot qualify as independent evidence") {
         eprintln!("accelerator scaffold omitted its nonqualifying-evidence warning");
+        return false;
+    }
+    let contract_path = directory.join("rne-scaffold.json");
+    let contract = match fs::read(&contract_path)
+        .map_err(anyhow::Error::from)
+        .and_then(|bytes| AcceleratorScaffoldContract::from_json_slice(&bytes).map_err(Into::into))
+    {
+        Ok(contract) => contract,
+        Err(error) => {
+            eprintln!("could not validate accelerator scaffold contract: {error:#}");
+            return false;
+        }
+    };
+    if let Err(error) = contract.validate_directory(&directory) {
+        eprintln!("accelerator scaffold directory differs from its contract: {error}");
         return false;
     }
     let report = output_dir.join("accelerator-scaffold-conformance.json");

@@ -34,7 +34,11 @@ pub use protocol::{
     ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION,
 };
 pub use scaffold::{
-    scaffold_accelerator_adapter, validate_accelerator_scaffold_name, AcceleratorScaffoldError,
+    accelerator_scaffold_contract, accelerator_scaffold_contract_for_schema,
+    scaffold_accelerator_adapter, scaffold_accelerator_adapter_for_schema,
+    validate_accelerator_scaffold_name, AcceleratorScaffoldContract, AcceleratorScaffoldError,
+    AcceleratorScaffoldFile, ACCELERATOR_SCAFFOLD_CONTRACT_KIND,
+    ACCELERATOR_SCAFFOLD_MIN_SCHEMA_VERSION, ACCELERATOR_SCAFFOLD_SCHEMA_VERSION,
 };
 pub use scale::{AcceleratorScaleReport, AcceleratorScaleRun, ACCELERATOR_SCALE_REPORT_KIND};
 

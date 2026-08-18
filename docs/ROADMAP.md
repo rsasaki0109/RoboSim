@@ -112,6 +112,8 @@ protocol-v1 authoring scaffold. Release rehearsal creates it from the packaged
 binary and runs its bounded Python fixture through the same process kit. This
 proves the clean-install authoring route only; the fixture cannot count as the
 independent accelerator, backend, or hardware evidence required for 1.0.
+Its canonical schema-v1 self-manifest freezes every generated file identity;
+future incompatible scaffold changes must retain v1 and add a new schema.
 The installed release CLI now also exposes `rne-asset plugin check`, a
 standalone controller-plugin conformance runner with a versioned,
 content-addressed report and deterministic reset replay. Release rehearsal runs
@@ -137,7 +139,7 @@ controller libraries and manifests, physics implementation/source bundles, and
 hardware adapter bytes plus TaskSpec and normalized launch contract back to the
 report's content identity and external source revision.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for twenty-nine historical/current TaskSpec identities, checkpoint,
+corpus for thirty-five historical/current fixtures spanning TaskSpec identities, checkpoint,
 generic/behavior/scenario replay, dataset, renderer capture, all ten frontend
 protocol-v1 message families, controller C ABI and plugin-conformance report,
 historical migration, Failure Capsule, TaskSpec-bound hardware session, and

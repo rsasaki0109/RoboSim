@@ -107,7 +107,7 @@ rehearsal. From its top-level directory:
   --task adapters/mjx/fixtures/free-fall-task-spec-v1.json \
   --output accelerator-protocol-conformance.json
 ./bin/rne-accelerator-conformance scaffold my_accelerator \
-  --dir accelerator-authoring
+  --dir accelerator-authoring --schema 1
 ./bin/rne-asset plugin list --path lib
 ./bin/rne-asset plugin check \
   --library lib/librne_plugin_example_velocity_servo.so \
@@ -126,6 +126,7 @@ refuses successful replays, existing destinations, symlinks, path escapes,
 malformed known evidence, and digest mismatches.
 The generated accelerator scaffold contains an initially passing fixture
 responder so an author can validate JSONL framing before installing a backend.
+Its `rne-scaffold.json` strictly records schema v1 and every generated file.
 That fixture is explicitly nonqualifying reference material: replace its
 `dispatch` implementation, model, pins, and selection record before using the
 standalone command for external evidence.

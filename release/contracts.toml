@@ -61,6 +61,8 @@ protocol = 1
 capability_report = 1
 conformance_report = 1
 process_conformance_report = 1
+scaffold_minimum = 1
+scaffold_current = 1
 runtime_contract = 1
 scale_report = 1
 

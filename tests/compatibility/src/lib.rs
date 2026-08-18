@@ -9,12 +9,14 @@
 
 use anyhow::{bail, ensure, Context};
 use rne_accelerator_contract::{
-    AcceleratorCapabilityReport, AcceleratorConformanceReport, AcceleratorManifest,
-    AcceleratorProcessConformanceReport, AcceleratorProtocolTranscript, AcceleratorRuntimeContract,
+    accelerator_scaffold_contract_for_schema, AcceleratorCapabilityReport,
+    AcceleratorConformanceReport, AcceleratorManifest, AcceleratorProcessConformanceReport,
+    AcceleratorProtocolTranscript, AcceleratorRuntimeContract, AcceleratorScaffoldContract,
     AcceleratorScaleReport, ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
     ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
     ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION,
-    ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION, ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION, ACCELERATOR_SCAFFOLD_SCHEMA_VERSION,
+    ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
 };
 use rne_ai::{
     BehaviorReplayArtifact, Episode, EpisodeStep, MobileManipulatorSim,
@@ -112,7 +114,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 34] = [
+const FIXTURE_SPECS: [FixtureSpec; 35] = [
     FixtureSpec {
         id: "accelerator_capability_v1",
         contract: "accelerator_capability",
@@ -135,6 +137,12 @@ const FIXTURE_SPECS: [FixtureSpec; 34] = [
         id: "accelerator_protocol_v1",
         contract: "accelerator_protocol",
         schema_version: ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "accelerator_scaffold_v1",
+        contract: "accelerator_scaffold",
+        schema_version: ACCELERATOR_SCAFFOLD_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1509,6 +1517,18 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
                 root.join("adapters/mjx/fixtures/free-fall-task-spec-v1.json"),
             )?)?;
             fixture.validate_against(&manifest, &runtime, &task)?;
+        }
+        "accelerator_scaffold" => {
+            let fixture: AcceleratorScaffoldContract = serde_json::from_value(value)?;
+            fixture.validate()?;
+            ensure!(
+                fixture
+                    == accelerator_scaffold_contract_for_schema(
+                        &fixture.adapter_name,
+                        fixture.schema_version,
+                    )?,
+                "accelerator scaffold generator differs from retained schema"
+            );
         }
         "behavior_replay" => {
             let fixture: BehaviorReplayArtifact = serde_json::from_value(value)?;

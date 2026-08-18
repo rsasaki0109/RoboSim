@@ -1399,6 +1399,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "accelerators",
+            "scaffold_minimum",
+            u64::from(accelerator::ACCELERATOR_SCAFFOLD_MIN_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "scaffold_current",
+            u64::from(accelerator::ACCELERATOR_SCAFFOLD_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
             "runtime_contract",
             u64::from(accelerator::ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION),
         ),

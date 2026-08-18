@@ -30,6 +30,13 @@ path = "tests/golden/accelerators/protocol-transcript-v1.json"
 canonical_json_sha256 = "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb"
 
 [[fixture]]
+id = "accelerator_scaffold_v1"
+contract = "accelerator_scaffold"
+schema_version = 1
+path = "tests/golden/accelerators/scaffold-contract-v1.json"
+canonical_json_sha256 = "sha256:ad79d0c78ed2f6bc45c3dcdfc4000e4e7897e42732ec48e22779bbd81424c332"
+
+[[fixture]]
 id = "accelerator_scale_v1"
 contract = "accelerator_scale"
 schema_version = 1

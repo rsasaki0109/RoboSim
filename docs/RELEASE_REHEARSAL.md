@@ -30,7 +30,8 @@ mock, then generates a dependency-free adapter scaffold from the installed CLI
 and runs the same process kit against it. Both eleven-check content-addressed
 reports must bind the exact manifest, runtime contract, TaskSpec, checkpoint,
 and clean shutdown. The scaffold README must retain its explicit warning that
-the fixture is authoring-path evidence, not independent accelerator evidence.
+the fixture is authoring-path evidence, not independent accelerator evidence;
+its canonical `rne-scaffold.json` must validate the exact schema-v1 file set.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path

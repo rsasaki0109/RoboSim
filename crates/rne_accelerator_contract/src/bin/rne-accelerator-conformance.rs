@@ -1,8 +1,8 @@
 //! Standalone CLI for external accelerator process conformance.
 
 use rne_accelerator_contract::{
-    run_accelerator_process_conformance, scaffold_accelerator_adapter,
-    AcceleratorProcessConformanceConfig,
+    run_accelerator_process_conformance, scaffold_accelerator_adapter_for_schema,
+    AcceleratorProcessConformanceConfig, ACCELERATOR_SCAFFOLD_SCHEMA_VERSION,
 };
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ const USAGE: &str = "rne-accelerator-conformance \
   --adapter PROGRAM [--adapter-arg ARG]... [--subject FILE] \
   --manifest accelerator.toml --runtime runtime.toml --task task.json \
   [--timeout-ms N] [--output REPORT.json]\n\
-rne-accelerator-conformance scaffold NAME [--dir PARENT]";
+rne-accelerator-conformance scaffold NAME [--dir PARENT] [--schema 1]";
 
 fn main() {
     if let Err(error) = run() {
@@ -69,6 +69,8 @@ fn run_scaffold(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn st
     }
     let mut parent = PathBuf::from("accelerators");
     let mut parent_was_set = false;
+    let mut schema_version = ACCELERATOR_SCAFFOLD_SCHEMA_VERSION;
+    let mut schema_was_set = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--dir" if !parent_was_set => {
@@ -76,6 +78,14 @@ fn run_scaffold(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn st
                 parent_was_set = true;
             }
             "--dir" => return Err("--dir may only be specified once".into()),
+            "--schema" if !schema_was_set => {
+                let value = required(&mut args, "--schema")?;
+                schema_version = value
+                    .parse::<u32>()
+                    .map_err(|error| format!("invalid --schema {value:?}: {error}"))?;
+                schema_was_set = true;
+            }
+            "--schema" => return Err("--schema may only be specified once".into()),
             "--help" | "-h" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -85,7 +95,7 @@ fn run_scaffold(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn st
             }
         }
     }
-    let directory = scaffold_accelerator_adapter(&name, &parent)?;
+    let directory = scaffold_accelerator_adapter_for_schema(&name, &parent, schema_version)?;
     println!(
         "created accelerator adapter scaffold {}",
         directory.display()
@@ -200,5 +210,13 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "--dir may only be specified once");
+
+        let error = run_scaffold(
+            ["example", "--schema", "1", "--schema", "1"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "--schema may only be specified once");
     }
 }
