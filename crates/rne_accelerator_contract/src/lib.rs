@@ -12,12 +12,14 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 mod conformance;
+mod scale;
 
 pub use conformance::{
     AcceleratorConformanceActual, AcceleratorConformanceFaultInjection,
     AcceleratorConformanceMetrics, AcceleratorConformanceReference, AcceleratorConformanceReport,
     AcceleratorConformanceTolerances, ACCELERATOR_CONFORMANCE_REPORT_KIND,
 };
+pub use scale::{AcceleratorScaleReport, AcceleratorScaleRun, ACCELERATOR_SCALE_REPORT_KIND};
 
 /// Stable capability-report discriminator.
 pub const ACCELERATOR_CAPABILITY_REPORT_KIND: &str = "rne_accelerator_capability_report";

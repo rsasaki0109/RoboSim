@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 72] = [
+const BUNDLE_FILES: [(&str, &str); 73] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -144,6 +144,10 @@ const BUNDLE_FILES: [(&str, &str); 72] = [
     (
         "tests/golden/accelerators/conformance-report-v1.json",
         "tests/golden/accelerators/conformance-report-v1.json",
+    ),
+    (
+        "tests/golden/accelerators/scale-report-v1.json",
+        "tests/golden/accelerators/scale-report-v1.json",
     ),
     (
         "assets/scenes/mesh_diff_drive.rne.scene.toml",

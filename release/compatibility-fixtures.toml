@@ -16,6 +16,13 @@ path = "tests/golden/accelerators/conformance-report-v1.json"
 canonical_json_sha256 = "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5"
 
 [[fixture]]
+id = "accelerator_scale_v1"
+contract = "accelerator_scale"
+schema_version = 1
+path = "tests/golden/accelerators/scale-report-v1.json"
+canonical_json_sha256 = "sha256:23810e9647a2a322e1fc2ee0f50fe91dd606719bba80eacb8df30488fdaa9bef"
+
+[[fixture]]
 id = "behavior_replay_v1"
 contract = "behavior_replay"
 schema_version = 1

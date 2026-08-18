@@ -271,6 +271,18 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "throughput"):
             validate_scale_report(tampered)
 
+        bad_seed = deepcopy(report)
+        bad_seed["runs"][1]["lane_zero_episode_seed"] ^= 1
+        bad_seed["content_sha256"] = scale_report_digest(bad_seed)
+        with self.assertRaisesRegex(ProtocolError, "episode seed"):
+            validate_scale_report(bad_seed)
+
+        relabelled = deepcopy(report)
+        relabelled["evidence_class"] = "accelerator"
+        relabelled["content_sha256"] = scale_report_digest(relabelled)
+        with self.assertRaisesRegex(ProtocolError, "available backend"):
+            validate_scale_report(relabelled)
+
     def test_normalized_scale_report_matches_golden(self) -> None:
         report = build_scale_report(
             ADAPTER_ROOT,

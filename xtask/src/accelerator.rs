@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use rne_accelerator_contract::{
     AcceleratorCapabilityReport, AcceleratorConformanceReport, AcceleratorManifest,
-    AcceleratorRuntimeContract, AcceleratorRuntimePackages,
+    AcceleratorRuntimeContract, AcceleratorRuntimePackages, AcceleratorScaleReport,
 };
 pub(crate) use rne_accelerator_contract::{
     ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION, ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
@@ -80,6 +80,7 @@ pub(crate) fn validate_contract(root: &Path) -> Result<AcceleratorManifest> {
     validate_runtime_contract(root, &manifest)?;
     validate_capability_fixture(root, &manifest)?;
     validate_conformance_fixture(root, &manifest)?;
+    validate_scale_fixture(root, &manifest)?;
     run_python_contract_tests(root)?;
     Ok(manifest)
 }
@@ -306,6 +307,19 @@ fn validate_conformance_fixture(root: &Path, manifest: &AcceleratorManifest) -> 
     Ok(())
 }
 
+fn validate_scale_fixture(root: &Path, manifest: &AcceleratorManifest) -> Result<()> {
+    let runtime: AcceleratorRuntimeContract =
+        toml::from_str(&fs::read_to_string(root.join(&manifest.runtime_contract))?)?;
+    let task: rne_ai::TaskSpec =
+        serde_json::from_slice(&fs::read(root.join(&manifest.binding_task_spec))?)?;
+    let model = fs::read(root.join(&manifest.binding_model))?;
+    let report_path = root.join("tests/golden/accelerators/scale-report-v1.json");
+    let report = AcceleratorScaleReport::from_json_slice(&fs::read(&report_path)?)
+        .with_context(|| format!("parse accelerator scale report {}", report_path.display()))?;
+    report.validate_against(manifest, &runtime, &task, &model)?;
+    Ok(())
+}
+
 fn run_python_contract_tests(root: &Path) -> Result<()> {
     let python = super::python_command()?;
     let status = Command::new(python)
@@ -339,6 +353,7 @@ mod tests {
         validate_runtime_contract(&root, &manifest).expect("runtime contract");
         validate_capability_fixture(&root, &manifest).expect("capability fixture");
         validate_conformance_fixture(&root, &manifest).expect("conformance fixture");
+        validate_scale_fixture(&root, &manifest).expect("scale fixture");
     }
 
     #[test]

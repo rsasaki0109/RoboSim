@@ -10,8 +10,9 @@
 use anyhow::{bail, ensure, Context};
 use rne_accelerator_contract::{
     AcceleratorCapabilityReport, AcceleratorConformanceReport, AcceleratorManifest,
-    AcceleratorRuntimeContract, ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
-    ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    AcceleratorRuntimeContract, AcceleratorScaleReport,
+    ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION, ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
 };
 use rne_ai::{
     BehaviorReplayArtifact, Episode, EpisodeStep, MobileManipulatorSim,
@@ -109,7 +110,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 31] = [
+const FIXTURE_SPECS: [FixtureSpec; 32] = [
     FixtureSpec {
         id: "accelerator_capability_v1",
         contract: "accelerator_capability",
@@ -120,6 +121,12 @@ const FIXTURE_SPECS: [FixtureSpec; 31] = [
         id: "accelerator_conformance_v1",
         contract: "accelerator_conformance",
         schema_version: ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "accelerator_scale_v1",
+        contract: "accelerator_scale",
+        schema_version: ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1414,7 +1421,10 @@ fn validate_typed_input(
     value: Value,
     bytes: &[u8],
 ) -> anyhow::Result<()> {
-    if spec.contract != "accelerator_conformance" {
+    if !matches!(
+        spec.contract,
+        "accelerator_conformance" | "accelerator_scale"
+    ) {
         return validate_typed(root, spec, value);
     }
     let actual_schema = value
@@ -1428,7 +1438,6 @@ fn validate_typed_input(
         spec.schema_version,
         actual_schema
     );
-    let fixture = AcceleratorConformanceReport::from_json_slice(bytes)?;
     let manifest: AcceleratorManifest = toml::from_str(&fs::read_to_string(
         root.join("adapters/mjx/accelerator.toml"),
     )?)?;
@@ -1438,7 +1447,13 @@ fn validate_typed_input(
         root.join("adapters/mjx/fixtures/free-fall-task-spec-v1.json"),
     )?)?;
     let model = fs::read(root.join("adapters/mjx/fixtures/free-fall-v1.xml"))?;
-    fixture.validate_against(&manifest, &runtime, &task, &model)?;
+    match spec.contract {
+        "accelerator_conformance" => AcceleratorConformanceReport::from_json_slice(bytes)?
+            .validate_against(&manifest, &runtime, &task, &model)?,
+        "accelerator_scale" => AcceleratorScaleReport::from_json_slice(bytes)?
+            .validate_against(&manifest, &runtime, &task, &model)?,
+        _ => unreachable!("raw accelerator contract was filtered above"),
+    }
     Ok(())
 }
 

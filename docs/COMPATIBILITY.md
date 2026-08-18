@@ -147,6 +147,12 @@ reference, metrics, verdict, deterministic lane-zero seed, Python-canonical
 content digest, TaskSpec digest, and normalized-model digest. The installed
 bundle includes the exact manifest, runtime contract, TaskSpec, and MJCF needed
 for that verification.
+Scale-report v1 is retained through the same raw-number reader. It recomputes
+transitions and throughput, binds every width to the manifest, and requires
+lane-zero replay digest, episode index, and derived seed to remain identical
+across widths. Only real `available` accelerator evidence covering all four
+promotion widths can satisfy the accelerator promotion verdict; incomplete
+dependency-free `contract_test` evidence remains test-only.
 
 Dataset bundle schema v1 freezes the `RNEDATA1` file header, 80-byte record
 header, stream/field ordering, simulation capture and availability ticks,

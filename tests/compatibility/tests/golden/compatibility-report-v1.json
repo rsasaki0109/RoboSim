@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:cef4403856989f8d86d60d6d242f92991cb5e37d91898d3451bf59fe80162682",
+  "registry_sha256": "sha256:91ee170c50fbe3df827d29867852bc050e0d8a5ddad18ea8f13724f821dd8eb2",
   "checks": [
     {
       "id": "accelerator_capability_v1",
@@ -22,6 +22,18 @@
       "schema_version": 1,
       "path": "tests/golden/accelerators/conformance-report-v1.json",
       "canonical_json_sha256": "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "accelerator_scale_v1",
+      "contract": "accelerator_scale",
+      "schema_version": 1,
+      "path": "tests/golden/accelerators/scale-report-v1.json",
+      "canonical_json_sha256": "sha256:23810e9647a2a322e1fc2ee0f50fe91dd606719bba80eacb8df30488fdaa9bef",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

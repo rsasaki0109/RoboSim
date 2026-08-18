@@ -20,6 +20,7 @@ from rne_mjx_adapter.protocol import (
     SUPPORTED_BATCH_WIDTHS,
     ProtocolError,
     canonical_json,
+    derive_episode_seed,
     load_json_fixture,
 )
 from rne_mjx_adapter.server import create_backend
@@ -181,6 +182,10 @@ def validate_scale_report(report: Any) -> dict[str, Any]:
         raise ProtocolError("report_invalid", "unknown scale evidence class")
     if report["evidence_class"] == "contract_test" and report["backend_status"] != "test_only":
         raise ProtocolError("report_invalid", "contract-test scale must use test_only backend")
+    if report["evidence_class"] == "accelerator" and report["backend_status"] != "available":
+        raise ProtocolError("report_invalid", "accelerator scale must use available backend")
+    if report["root_seed"] != DEFAULT_ROOT_SEED:
+        raise ProtocolError("report_invalid", "scale root seed mismatch")
     if report["measurement_boundary"] != "python_session_api":
         raise ProtocolError("report_invalid", "scale measurement boundary mismatch")
     if not isinstance(report["runs"], list) or not report["runs"]:
@@ -214,12 +219,22 @@ def validate_scale_report(report: Any) -> dict[str, Any]:
             raise ProtocolError("report_invalid", "scale run timing is invalid")
         if run["batch_width"] != report["requested_widths"][index]:
             raise ProtocolError("report_invalid", "scale run order differs from requested widths")
+        if run["lane_zero_episode_seed"] != derive_episode_seed(
+            report["root_seed"], 0, run["lane_zero_episode_index"]
+        ):
+            raise ProtocolError("report_invalid", "scale lane-zero episode seed mismatch")
         expected_throughput = run["transitions"] * 1_000_000_000.0 / run["elapsed_ns"]
         if run["throughput_transitions_s"] != expected_throughput:
             raise ProtocolError("report_invalid", "scale throughput was not recomputed")
-    digest_consistent = len(
-        {run["lane_zero_replay_digest"] for run in report["runs"]}
-    ) == 1
+    lane_zero_identities = {
+        (
+            run["lane_zero_replay_digest"],
+            run["lane_zero_episode_index"],
+            run["lane_zero_episode_seed"],
+        )
+        for run in report["runs"]
+    }
+    digest_consistent = len(lane_zero_identities) == 1
     if report["lane_zero_digest_consistent"] != digest_consistent:
         raise ProtocolError("report_invalid", "lane-zero consistency verdict mismatch")
     promotion_complete = report["requested_widths"] == list(SUPPORTED_BATCH_WIDTHS)

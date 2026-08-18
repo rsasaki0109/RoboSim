@@ -109,3 +109,10 @@ second, lane-zero episode metadata/digest, runtime contract, and report digest.
 The monotonic clock is used only around runner calls and cannot affect physics,
 reset order, checkpoint state, or replay digests. The declared measurement
 boundary is the blocking Python session API, not JSONL serialization.
+The Rust reader recomputes transition counts and throughput from each positive
+elapsed-nanosecond value, validates ordered manifest-supported widths, and
+requires lane-zero replay digest, episode index, and deterministically derived
+seed to be identical across widths. A physical `accelerator` report passes only
+with all four promotion widths and an `available` pinned GPU runtime. The
+two-width fake golden proves the contract plumbing only and remains
+`contract_test` evidence.

@@ -445,7 +445,7 @@ impl AcceleratorConformanceReport {
     }
 }
 
-fn validate_evidence_runtime(
+pub(super) fn validate_evidence_runtime(
     status: &str,
     contract: &AcceleratorRuntimeContract,
     runtime: &AcceleratorRuntimeProbe,
@@ -516,13 +516,15 @@ fn parse_raw_f64(value: &RawValue) -> Result<f64, AcceleratorContractError> {
     Ok(parsed)
 }
 
-fn task_spec_sha256(task_spec: &TaskSpec) -> Result<String, AcceleratorContractError> {
+pub(super) fn task_spec_sha256(task_spec: &TaskSpec) -> Result<String, AcceleratorContractError> {
     let value = serde_json::to_value(task_spec)
         .map_err(|error| invalid(format!("serialize bound TaskSpec: {error}")))?;
     Ok(sha256(canonical_python_json(&value)?.as_bytes()))
 }
 
-fn normalized_model_sha256(model_bytes: &[u8]) -> Result<String, AcceleratorContractError> {
+pub(super) fn normalized_model_sha256(
+    model_bytes: &[u8],
+) -> Result<String, AcceleratorContractError> {
     require(
         model_bytes.len() <= 1024 * 1024,
         "accelerator model exceeds 1 MiB",
@@ -532,7 +534,10 @@ fn normalized_model_sha256(model_bytes: &[u8]) -> Result<String, AcceleratorCont
     Ok(sha256(text.replace("\r\n", "\n").as_bytes()))
 }
 
-fn validate_hex_sha256(value: &str, label: &str) -> Result<(), AcceleratorContractError> {
+pub(super) fn validate_hex_sha256(
+    value: &str,
+    label: &str,
+) -> Result<(), AcceleratorContractError> {
     require(
         value.len() == 64
             && value
@@ -542,11 +547,11 @@ fn validate_hex_sha256(value: &str, label: &str) -> Result<(), AcceleratorContra
     )
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn canonical_python_json(value: &Value) -> Result<String, AcceleratorContractError> {
+pub(super) fn canonical_python_json(value: &Value) -> Result<String, AcceleratorContractError> {
     let mut output = String::new();
     write_canonical(value, &mut output)?;
     Ok(output)
