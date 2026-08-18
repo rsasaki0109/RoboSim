@@ -7,11 +7,11 @@ release_version = "0.1.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183
 minimum_external_projects = 2
-minimum_compatibility_checks = 30
+minimum_compatibility_checks = 31
 unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
-compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:b798bae0afea221532f35cd79469e62531f7b2c17eb5f5f8c6623e7ea7a3484c" }
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:4f26ec006928196afce5bcbf8d4f5bf3da4004b62d4f2ae75d4f4509f3784823" }
 
 [candidate]
 revision = "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc"

@@ -9,7 +9,8 @@ x64 and rejects the session if that precision cannot be provided.
 
 The non-published `rne_accelerator_contract` workspace crate is the
 dependency-free-from-vendor Rust reader embedded in the installed compatibility
-verifier for manifest v1, runtime-contract v1, and capability-report v1. Its
+verifier for manifest v1, runtime-contract v1, capability-report v1, and
+conformance-report v1. Its
 `validate_against` path binds the report to the exact manifest, runtime pins,
 and validated TaskSpec. The installed compatibility verifier uses that reader;
 it does not need Python or an accelerator package to reject schema or identity
@@ -79,6 +80,15 @@ named tolerances, actual lane-zero outcome/digest, checkpoint schema, runtime,
 and a digest over all report content. The dependency-free fake can prove report
 and fault-detection plumbing, but its `contract_test` evidence class cannot pass
 an accelerator promotion gate.
+
+The Rust conformance reader preserves raw JSON number lexemes before parsing
+them as `f64`, so Python-produced reference, observed, metric, and digest fields
+are checked without decimal-parser drift. It recomputes metric deltas, verdict,
+lane-zero episode seed, Python-canonical content digest, and CPU reference
+values. `validate_against` additionally hashes the exact TaskSpec and
+LF-normalized MJCF bytes and binds the runtime contract, supported batch width,
+checkpoint schema, task identity, and episode bound. Relabelling dependency-free
+`contract_test` evidence as an available accelerator fails closed.
 
 Runtime-contract v1 pins the promotion line to Linux x86-64, Python 3.12,
 CUDA 13, NVIDIA driver 580 or newer, JAX/JAXlib/CUDA plugin 0.10.2,

@@ -9,8 +9,9 @@
 
 use anyhow::{bail, ensure, Context};
 use rne_accelerator_contract::{
-    AcceleratorCapabilityReport, AcceleratorManifest, AcceleratorRuntimeContract,
-    ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
+    AcceleratorCapabilityReport, AcceleratorConformanceReport, AcceleratorManifest,
+    AcceleratorRuntimeContract, ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
 };
 use rne_ai::{
     BehaviorReplayArtifact, Episode, EpisodeStep, MobileManipulatorSim,
@@ -108,11 +109,17 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 30] = [
+const FIXTURE_SPECS: [FixtureSpec; 31] = [
     FixtureSpec {
         id: "accelerator_capability_v1",
         contract: "accelerator_capability",
         schema_version: ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "accelerator_conformance_v1",
+        contract: "accelerator_conformance",
+        schema_version: ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1374,7 +1381,8 @@ fn try_check_fixture(
         digest
     );
 
-    validate_typed(root, spec, value.clone()).context("accepted fixture was rejected")?;
+    validate_typed_input(root, spec, value.clone(), &bytes)
+        .context("accepted fixture was rejected")?;
 
     let mut future = value.clone();
     let future_object = future
@@ -1384,7 +1392,8 @@ fn try_check_fixture(
         spec.version_field.to_string(),
         Value::from(u64::from(spec.schema_version) + 10_000),
     );
-    let future_schema_rejected = validate_typed(root, spec, future).is_err();
+    let future_bytes = serde_json::to_vec(&future)?;
+    let future_schema_rejected = validate_typed_input(root, spec, future, &future_bytes).is_err();
 
     let mut unknown = value;
     let unknown_object = unknown
@@ -1394,8 +1403,43 @@ fn try_check_fixture(
         "rne_unknown_compatibility_field".to_string(),
         Value::Bool(true),
     );
-    let unknown_field_rejected = validate_typed(root, spec, unknown).is_err();
+    let unknown_bytes = serde_json::to_vec(&unknown)?;
+    let unknown_field_rejected = validate_typed_input(root, spec, unknown, &unknown_bytes).is_err();
     Ok((true, future_schema_rejected, unknown_field_rejected))
+}
+
+fn validate_typed_input(
+    root: &Path,
+    spec: FixtureSpec,
+    value: Value,
+    bytes: &[u8],
+) -> anyhow::Result<()> {
+    if spec.contract != "accelerator_conformance" {
+        return validate_typed(root, spec, value);
+    }
+    let actual_schema = value
+        .get(spec.version_field)
+        .and_then(Value::as_u64)
+        .context("fixture omitted its integer version field")?;
+    ensure!(
+        actual_schema == u64::from(spec.schema_version),
+        "unsupported {} schema: expected {}, got {}",
+        spec.contract,
+        spec.schema_version,
+        actual_schema
+    );
+    let fixture = AcceleratorConformanceReport::from_json_slice(bytes)?;
+    let manifest: AcceleratorManifest = toml::from_str(&fs::read_to_string(
+        root.join("adapters/mjx/accelerator.toml"),
+    )?)?;
+    let runtime: AcceleratorRuntimeContract =
+        toml::from_str(&fs::read_to_string(root.join("adapters/mjx/runtime.toml"))?)?;
+    let task: TaskSpec = serde_json::from_slice(&fs::read(
+        root.join("adapters/mjx/fixtures/free-fall-task-spec-v1.json"),
+    )?)?;
+    let model = fs::read(root.join("adapters/mjx/fixtures/free-fall-v1.xml"))?;
+    fixture.validate_against(&manifest, &runtime, &task, &model)?;
+    Ok(())
 }
 
 fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Result<()> {

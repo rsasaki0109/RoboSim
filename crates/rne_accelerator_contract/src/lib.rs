@@ -11,6 +11,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
+mod conformance;
+
+pub use conformance::{
+    AcceleratorConformanceActual, AcceleratorConformanceFaultInjection,
+    AcceleratorConformanceMetrics, AcceleratorConformanceReference, AcceleratorConformanceReport,
+    AcceleratorConformanceTolerances, ACCELERATOR_CONFORMANCE_REPORT_KIND,
+};
+
 /// Stable capability-report discriminator.
 pub const ACCELERATOR_CAPABILITY_REPORT_KIND: &str = "rne_accelerator_capability_report";
 /// Current accelerator manifest schema.

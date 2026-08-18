@@ -142,6 +142,11 @@ The installed corpus retains capability-report v1 and validates it through
 `rne_accelerator_contract` against the selected manifest, exact runtime pins,
 and bound TaskSpec. Status tampering cannot turn `test_only` or `unavailable`
 evidence into an available accelerator claim.
+It also retains conformance-report v1 and independently recomputes its CPU
+reference, metrics, verdict, deterministic lane-zero seed, Python-canonical
+content digest, TaskSpec digest, and normalized-model digest. The installed
+bundle includes the exact manifest, runtime contract, TaskSpec, and MJCF needed
+for that verification.
 
 Dataset bundle schema v1 freezes the `RNEDATA1` file header, 80-byte record
 header, stream/field ordering, simulation capture and availability ticks,

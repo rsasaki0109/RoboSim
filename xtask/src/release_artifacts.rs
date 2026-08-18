@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 70] = [
+const BUNDLE_FILES: [(&str, &str); 72] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -134,8 +134,16 @@ const BUNDLE_FILES: [(&str, &str); 70] = [
         "adapters/mjx/fixtures/free-fall-task-spec-v1.json",
     ),
     (
+        "adapters/mjx/fixtures/free-fall-v1.xml",
+        "adapters/mjx/fixtures/free-fall-v1.xml",
+    ),
+    (
         "tests/golden/accelerators/capability-report-v1.json",
         "tests/golden/accelerators/capability-report-v1.json",
+    ),
+    (
+        "tests/golden/accelerators/conformance-report-v1.json",
+        "tests/golden/accelerators/conformance-report-v1.json",
     ),
     (
         "assets/scenes/mesh_diff_drive.rne.scene.toml",

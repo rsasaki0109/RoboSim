@@ -193,6 +193,18 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "verdict"):
             validate_report(tampered)
 
+        bad_seed = deepcopy(report)
+        bad_seed["actual"]["lane_zero_episode_seed"] ^= 1
+        bad_seed["content_sha256"] = _report_digest(bad_seed)
+        with self.assertRaisesRegex(ProtocolError, "lane-zero"):
+            validate_report(bad_seed)
+
+        relabelled = deepcopy(report)
+        relabelled["evidence_class"] = "accelerator"
+        relabelled["content_sha256"] = _report_digest(relabelled)
+        with self.assertRaisesRegex(ProtocolError, "available backend"):
+            validate_report(relabelled)
+
     def test_conformance_report_atomic_write_retries_stale_temp(self) -> None:
         report = build_report(
             ADAPTER_ROOT,
