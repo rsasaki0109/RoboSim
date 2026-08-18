@@ -21,9 +21,11 @@ use rne_hardware_gateway::mock::{
 use rne_hardware_gateway::shadow::{
     ShadowComparisonReport, SHADOW_COMPARISON_REPORT_KIND, SHADOW_COMPARISON_SCHEMA_VERSION,
 };
+#[cfg(test)]
+use rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION;
 use rne_hardware_gateway::wire::{
     HardwareSessionEvidence, HardwareWireTrace, HARDWARE_SESSION_EVIDENCE_KIND,
-    HARDWARE_WIRE_SCHEMA_VERSION, HARDWARE_WIRE_TRACE_KIND,
+    HARDWARE_WIRE_TRACE_KIND,
 };
 use rne_hardware_lekiwi::session::{
     LeKiwiReferenceSessionEvidence, LEKIWI_REFERENCE_SESSION_KIND,
@@ -314,25 +316,15 @@ fn validate_hardware_evidence<'a>(
             HARDWARE_SESSION_EVIDENCE_KIND => {
                 let session: HardwareSessionEvidence = serde_json::from_slice(bytes)
                     .context("invalid hardware session evidence JSON")?;
-                anyhow::ensure!(
-                    session.schema_version == HARDWARE_WIRE_SCHEMA_VERSION,
-                    "unsupported hardware session evidence schema {}",
-                    session.schema_version
-                );
-                let normalized = HardwareSessionEvidence::new(
-                    session.wire_trace.clone(),
-                    session.gateway.clone(),
-                )
-                .map_err(|error| anyhow::anyhow!("invalid hardware session evidence: {error}"))?;
-                anyhow::ensure!(
-                    normalized == session,
-                    "hardware session evidence top-level metadata is inconsistent"
-                );
-                anyhow::ensure!(
-                    tasks.contains_key(&session.task_id),
+                let task = tasks.get(&session.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
                     "hardware session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
                     session.task_id
-                );
+                    )
+                })?;
+                session.validate_against(task).map_err(|error| {
+                    anyhow::anyhow!("invalid hardware session evidence: {error}")
+                })?;
             }
             LEKIWI_REFERENCE_SESSION_KIND => {
                 let reference: LeKiwiReferenceSessionEvidence = serde_json::from_slice(bytes)
@@ -1454,7 +1446,7 @@ mod tests {
             },
             adapter: Some(HardwareAdapterConformanceIdentity {
                 device_id: "external-adapter-v1".to_string(),
-                task_id: "rne.diff_drive.goal.v1".to_string(),
+                task_id: "rne.diff_drive.sensor_goal.v1".to_string(),
                 wire_schema_version: HARDWARE_WIRE_SCHEMA_VERSION,
                 observation_width: 9,
                 action_width: 2,

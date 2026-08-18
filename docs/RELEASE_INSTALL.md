@@ -89,7 +89,7 @@ rehearsal. From its top-level directory:
   --adapter-arg --device-id \
   --adapter-arg installed-mock-v1 \
   --adapter-arg --expected-task-id \
-  --adapter-arg rne.diff_drive.goal.v1 \
+  --adapter-arg rne.diff_drive.sensor_goal.v1 \
   --adapter-arg --observation-width \
   --adapter-arg 9 \
   --adapter-arg --action-width \

@@ -1,7 +1,7 @@
 {
   "kind": "rne_hardware_shadow_comparison",
   "schema_version": 1,
-  "task_id": "rne.diff_drive.goal.v1",
+  "task_id": "rne.diff_drive.sensor_goal.v1",
   "tolerances": [
     {
       "tensor_name": "base_position_m",

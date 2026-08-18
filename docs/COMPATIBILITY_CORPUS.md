@@ -24,11 +24,11 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains twenty-seven fixtures:
+contains twenty-nine fixtures:
 
 | Contract | Retained artifact |
 |---|---|
-| Task contract | TaskSpec v1 |
+| Task contract | retained original TaskSpec v1 and current sensor-goal TaskSpec v1 under distinct identities |
 | Batch execution | portable batch checkpoint v2 |
 | Controller ABI and conformance | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1 |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
@@ -38,7 +38,7 @@ contains twenty-seven fixtures:
 | Frontend | all ten protocol-v1 message families plus current and first committed `ClientHello` frame bytes and negotiated limits |
 | Historical migration | retained zero-step snapshot v1 plus provenance-bound, sensor-bearing snapshots v1 and v2 restored as v3 |
 | Failure evidence | Failure Capsule v1 |
-| Hardware safety | process-mock conformance v1 |
+| Hardware safety | process-mock conformance v1 and TaskSpec-bound process-disconnect session evidence v1 |
 | Physics | built-in conformance v2 and external-backend conformance v1 |
 
 For every entry the runner:
@@ -74,6 +74,12 @@ required capabilities, and strict report deserialization. Its placeholder
 library digest is not third-party execution evidence. The 1.0 readiness gate
 separately requires an independently owned repository and rehashes the retained
 real library and manifest against a freshly validated conformance report.
+
+The original five-element `rne.diff_drive.goal.v1` TaskSpec remains immutable.
+The current nine-element sensor-bearing contract uses the distinct
+`rne.diff_drive.sensor_goal.v1` identity. Session evidence is accepted only
+after its Open/Ready widths are recomputed from that exact TaskSpec; matching a
+task ID string alone is insufficient.
 
 ## Historical source provenance
 

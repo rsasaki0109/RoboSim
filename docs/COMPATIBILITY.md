@@ -291,8 +291,9 @@ trees, schema declarations, and golden blobs, executes the complete corpus with
 the current readers, and requires the supplied report to equal the fresh report
 exactly. The audit records the report, registry, and every fixture digest.
 
-The twenty-seven-fixture registry additionally freezes the controller-plugin
-conformance report v1, all ten frontend protocol-v1 message families and the
+The twenty-nine-fixture registry additionally freezes the controller-plugin
+conformance report v1, the current sensor-goal TaskSpec and its process-isolated
+hardware session, all ten frontend protocol-v1 message families and the
 historical `ClientHello` frame, all five dataset-native
 payload families, behavior replay v1, scenario replay v4, the renderer-backed
 RGB-D capture report, the controller C ABI-v3 64-bit layout, three historical
@@ -316,6 +317,12 @@ the report reader only. It cannot satisfy third-party-plugin readiness: that
 gate independently requires external ownership and subject-bound library and
 manifest bytes whose hashes, sizes, names, and negotiated identity match the
 submitted report.
+
+The retained original `rne.diff_drive.goal.v1` artifact has five flattened
+observations. The current sensor-bearing task has nine and therefore uses the
+new `rne.diff_drive.sensor_goal.v1` identity instead of silently redefining the
+old ID. Its hardware-session reader replays the wire trace and derives both
+opening widths from the registered current TaskSpec.
 
 The frontend frame is also retained in a provenance-bound historical decision.
 Protocol v1's introducing commit/tree and the first full `ClientHello` golden

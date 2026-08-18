@@ -169,13 +169,7 @@ impl LeKiwiReferenceSessionEvidence {
                 self.session.mode,
             ));
         }
-        let rebuilt = HardwareSessionEvidence::new(
-            self.session.wire_trace.clone(),
-            self.session.gateway.clone(),
-        )?;
-        if rebuilt != self.session {
-            return Err(LeKiwiReferenceSessionEvidenceError::InvalidSessionEnvelope);
-        }
+        self.session.validate_against(&self.profile.task)?;
         let Some(HardwareWireTraceEntry::Host { frame }) = self.session.wire_trace.entries.first()
         else {
             return Err(LeKiwiReferenceSessionEvidenceError::InvalidOpenContract);

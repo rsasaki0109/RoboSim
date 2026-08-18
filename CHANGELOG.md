@@ -6,6 +6,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Freeze the current sensor-goal TaskSpec and its process-isolated hardware
+  session as the twenty-eighth and twenty-ninth installed compatibility
+  fixtures. Session validation now replays the complete wire/gateway contract
+  and recomputes observation/action widths from the exact supplied TaskSpec.
+- Separate the current nine-element sensor task as
+  `rne.diff_drive.sensor_goal.v1`; the retained five-element
+  `rne.diff_drive.goal.v1` contract remains immutable instead of sharing an ID
+  with incompatible observation semantics. Dataset v2 evidence is regenerated
+  against the new TaskSpec digest; the older v1 dataset summary is unchanged.
 - Freeze controller-plugin conformance report v1 as the twenty-seventh
   installed compatibility fixture. The typed reader now rejects non-portable
   subject names, non-canonical digests, unsupported ABI/schema identities,
@@ -118,7 +127,7 @@ All notable changes to Robot Native Engine are documented in this file.
   TaskSpec/Failure Capsule use, third-party plugin and backend/adapter reports,
   LeKiwi physical evidence, same-tag Linux/Windows release rehearsals, the exact
   compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
-  The committed tracker retains and freshly replays the complete 27-check
+  The committed tracker retains and freshly replays the complete 29-check
   historical compatibility report, so the honest baseline is now 2/9 and
   remains ineligible; no tag or 1.0 claim is created.
 - **Fail-closed 1.x promotion interlock**: `release-check`, platform
@@ -151,7 +160,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Replayed historical-compatibility evidence**: the 1.0 readiness gate no
   longer accepts a registry-shaped compatibility report on its pass flags
   alone. It revalidates ancestor revisions, trees, schema declarations, and
-  golden blobs, executes all 27 fixtures through the current typed readers,
+  golden blobs, executes all 29 fixtures through the current typed readers,
   and requires the retained report to match that fresh result exactly.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
@@ -181,7 +190,7 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  twenty-seven content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  twenty-nine content-addressed TaskSpec, checkpoint, generic/behavior/scenario
   replay, dataset, renderer capture, all frontend protocol-v1 message families,
   controller C ABI and plugin-conformance report, historical migration,
   Failure Capsule, hardware, and physics artifacts through their current typed

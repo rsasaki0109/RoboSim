@@ -16,7 +16,7 @@ fn bound_mock_config() -> HardwareAdapterConformanceConfig {
         "--device-id",
         "rne-external-mock-v1",
         "--expected-task-id",
-        "rne.diff_drive.goal.v1",
+        "rne.diff_drive.sensor_goal.v1",
         "--observation-width",
         "9",
         "--action-width",

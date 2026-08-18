@@ -151,6 +151,10 @@ records, and the successful terminal outcome. The v1 summary remains as a
 compatibility fixture. The selected one-metre goal is retained as a typed,
 seed-bearing run decision instead of being inferred from the trajectory.
 
+Dataset v2 binds the nine-element `rne.diff_drive.sensor_goal.v1` TaskSpec.
+The retained v1 summary keeps its original digest; it is not relabelled after
+the task identity correction.
+
 `xtask ci-headless` regenerates this capture in a fresh temporary target and
 checks the golden. The Windows/Linux evidence matrix performs the same capture
 from a clean checkout, verifies the complete bundle, independently regenerates

@@ -2,13 +2,13 @@
   "kind": "rne_hardware_session_evidence",
   "schema_version": 1,
   "session_id": "rne.mock.disconnect.v1",
-  "task_id": "rne.diff_drive.goal.v1",
+  "task_id": "rne.diff_drive.sensor_goal.v1",
   "mode": "hil",
   "wire_trace": {
     "kind": "rne_hardware_wire_trace",
     "schema_version": 1,
     "session_id": "rne.mock.disconnect.v1",
-    "task_id": "rne.diff_drive.goal.v1",
+    "task_id": "rne.diff_drive.sensor_goal.v1",
     "entries": [
       {
         "direction": "host",
@@ -19,7 +19,7 @@
           "sequence": 1,
           "payload": {
             "type": "open",
-            "task_id": "rne.diff_drive.goal.v1",
+            "task_id": "rne.diff_drive.sensor_goal.v1",
             "mode": "hil",
             "observation_width": 9,
             "action_width": 2
@@ -36,7 +36,7 @@
           "payload": {
             "type": "ready",
             "device_id": "rne-mock-process-v1",
-            "task_id": "rne.diff_drive.goal.v1",
+            "task_id": "rne.diff_drive.sensor_goal.v1",
             "observation_width": 9,
             "action_width": 2
           }
@@ -123,7 +123,7 @@
   "gateway": {
     "kind": "rne_hardware_gateway_evidence",
     "schema_version": 1,
-    "task_id": "rne.diff_drive.goal.v1",
+    "task_id": "rne.diff_drive.sensor_goal.v1",
     "mode": "hil",
     "events": [
       {
@@ -164,7 +164,7 @@
     ],
     "final_snapshot": {
       "schema_version": 1,
-      "task_id": "rne.diff_drive.goal.v1",
+      "task_id": "rne.diff_drive.sensor_goal.v1",
       "mode": "hil",
       "connection_state": "disconnected",
       "safety_latch": "disconnected",

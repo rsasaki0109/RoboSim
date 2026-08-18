@@ -36,6 +36,7 @@ use rne_data::{
     DATASET_PAYLOAD_SCHEMA_VERSION, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
 };
 use rne_hardware_gateway::mock::MockConformanceReport;
+use rne_hardware_gateway::wire::{HardwareSessionEvidence, HARDWARE_WIRE_SCHEMA_VERSION};
 use rne_log::{
     FailureCapsule, FailureCapsuleError, ReplayArtifact, FAILURE_CAPSULE_SCHEMA_VERSION,
 };
@@ -103,7 +104,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 27] = [
+const FIXTURE_SPECS: [FixtureSpec; 29] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -189,6 +190,12 @@ const FIXTURE_SPECS: [FixtureSpec; 27] = [
         version_field: "schema_version",
     },
     FixtureSpec {
+        id: "hardware_session_evidence_v1",
+        contract: "hardware_session_evidence",
+        schema_version: HARDWARE_WIRE_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
         id: "mobile_manipulator_snapshot_v1_to_v3",
         contract: "historical_mobile_manipulator_snapshot",
         schema_version: 1,
@@ -246,6 +253,12 @@ const FIXTURE_SPECS: [FixtureSpec; 27] = [
         id: "scenario_replay_v4",
         contract: "scenario_replay",
         schema_version: 4,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "task_spec_sensor_goal_v1",
+        contract: "task_spec",
+        schema_version: TASK_SPEC_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1435,6 +1448,13 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         "hardware_mock_conformance" => {
             let fixture: MockConformanceReport = serde_json::from_value(value)?;
             fixture.validate()?;
+        }
+        "hardware_session_evidence" => {
+            let fixture: HardwareSessionEvidence = serde_json::from_value(value)?;
+            let task: TaskSpec = serde_json::from_slice(&fs::read(
+                root.join("assets/tasks/diff_drive_goal.task.json"),
+            )?)?;
+            fixture.validate_against(&task)?;
         }
         "historical_mobile_manipulator_snapshot" => {
             let fixture: HistoricalMigrationFixture = serde_json::from_value(value)?;
@@ -3259,6 +3279,34 @@ mod tests {
     }
 
     #[test]
+    fn sensor_task_identity_and_hardware_session_cannot_alias_the_retained_task() {
+        let root = workspace_root();
+        let current: TaskSpec = serde_json::from_slice(
+            &fs::read(root.join("assets/tasks/diff_drive_goal.task.json")).unwrap(),
+        )
+        .unwrap();
+        let retained: TaskSpec = serde_json::from_slice(
+            &fs::read(root.join("tests/golden/tasks/task-spec-v1.json")).unwrap(),
+        )
+        .unwrap();
+        let session: HardwareSessionEvidence = serde_json::from_slice(
+            &fs::read(
+                root.join("tests/golden/hardware/gateway-process-disconnect-session-v1.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(current.task_id, "rne.diff_drive.sensor_goal.v1");
+        assert_eq!(retained.task_id, "rne.diff_drive.goal.v1");
+        assert_ne!(current.task_id, retained.task_id);
+        assert_eq!(flattened_width(&current.observation.tensors), 9);
+        assert_eq!(flattened_width(&retained.observation.tensors), 5);
+        session.validate_against(&current).unwrap();
+        assert!(session.validate_against(&retained).is_err());
+    }
+
+    #[test]
     fn committed_report_matches_golden_shape() {
         let root = workspace_root();
         let report = run_compatibility(&root, &root.join("release/compatibility-fixtures.toml"))
@@ -3287,6 +3335,13 @@ mod tests {
         let last = tampered.frames[9].frame_hex.len() - 2;
         tampered.frames[9].frame_hex.replace_range(last.., "01");
         assert!(validate_frontend_message_families(&tampered).is_err());
+    }
+
+    fn flattened_width(tensors: &[rne_ai::TensorSpec]) -> usize {
+        tensors
+            .iter()
+            .map(|tensor| tensor.shape.iter().copied().product::<usize>())
+            .sum()
     }
 
     #[test]

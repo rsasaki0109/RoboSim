@@ -406,12 +406,12 @@ that the forms cannot silently drop a readiness requirement. Issues remain a
 review queue and never substitute for the typed audit.
 
 The expanded v0.9 compatibility slice turns retained artifacts into an
-executable installed contract. A strict registry content-addresses twenty-seven
-TaskSpec, checkpoint, generic/behavior/scenario replay, dataset, renderer
-capture, all ten frontend protocol-v1 message families, controller C ABI and
-plugin-conformance report,
-historical migration, Failure Capsule,
-hardware, and physics fixtures. `rne-compatibility` must accept each artifact with its current typed
+executable installed contract. A strict registry content-addresses twenty-nine
+historical and current TaskSpec identities, checkpoint,
+generic/behavior/scenario replay, dataset, renderer capture, all ten frontend
+protocol-v1 message families, controller C ABI and plugin-conformance report,
+historical migration, Failure Capsule, TaskSpec-bound hardware session, and
+physics fixtures. `rne-compatibility` must accept each artifact with its current typed
 reader and reject deterministic future-schema and unknown-field mutations.
 Binary frontend and dataset fixtures additionally require exact wire round
 trips and malformed-input rejection. CI publishes the stable report and both
@@ -475,7 +475,7 @@ These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
 explicit assessment date, and emits nine fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
-retained 27-check historical compatibility replay and clean blocker registry
+retained 29-check historical compatibility replay and clean blocker registry
 report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.

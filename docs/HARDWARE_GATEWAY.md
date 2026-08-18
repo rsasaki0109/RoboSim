@@ -131,6 +131,13 @@ registered in `release/contracts.toml`. Canonical evidence includes:
   process cases covering command deadline, disconnect, explicit reconnect,
   stale command, actuator limit, and device emergency stop.
 
+`HardwareSessionEvidence::validate_against` replays the complete nested trace,
+normalizes the outer envelope, constructs a gateway from the supplied TaskSpec,
+and requires the Open/Ready observation and action widths to equal the exact
+flattened task spaces. The current sensor-bearing diff-drive contract is
+`rne.diff_drive.sensor_goal.v1`; the older five-element
+`rne.diff_drive.goal.v1` artifact remains a separate compatibility identity.
+
 The external adapter report is intentionally content-addressed rather than a
 fixed binary golden: native executable bytes differ by target. The integration
 test requires two fresh runs against the fixed-binding Rust mock to be exactly

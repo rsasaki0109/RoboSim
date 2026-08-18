@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 65] = [
+const BUNDLE_FILES: [(&str, &str); 66] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -211,6 +211,10 @@ const BUNDLE_FILES: [(&str, &str); 65] = [
     (
         "tests/golden/hardware/gateway-mock-conformance-v1.json",
         "tests/golden/hardware/gateway-mock-conformance-v1.json",
+    ),
+    (
+        "tests/golden/hardware/gateway-process-disconnect-session-v1.json",
+        "tests/golden/hardware/gateway-process-disconnect-session-v1.json",
     ),
     (
         "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json",
@@ -1270,7 +1274,7 @@ fn run_install_rehearsal(
             OsString::from("--adapter-arg"),
             OsString::from("--expected-task-id"),
             OsString::from("--adapter-arg"),
-            OsString::from("rne.diff_drive.goal.v1"),
+            OsString::from("rne.diff_drive.sensor_goal.v1"),
             OsString::from("--adapter-arg"),
             OsString::from("--observation-width"),
             OsString::from("--adapter-arg"),

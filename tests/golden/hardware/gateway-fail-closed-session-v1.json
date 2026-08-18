@@ -1,7 +1,7 @@
 {
   "kind": "rne_hardware_gateway_evidence",
   "schema_version": 1,
-  "task_id": "rne.diff_drive.goal.v1",
+  "task_id": "rne.diff_drive.sensor_goal.v1",
   "mode": "live",
   "events": [
     {
@@ -29,7 +29,7 @@
   ],
   "final_snapshot": {
     "schema_version": 1,
-    "task_id": "rne.diff_drive.goal.v1",
+    "task_id": "rne.diff_drive.sensor_goal.v1",
     "mode": "live",
     "connection_state": "connected",
     "safety_latch": "actuator_limit",

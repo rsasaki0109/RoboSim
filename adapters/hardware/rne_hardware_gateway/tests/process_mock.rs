@@ -1,8 +1,8 @@
 use rne_ai::TaskSpec;
 use rne_hardware_gateway::wire::{
     DeviceWireFrame, DeviceWirePayload, HardwareSessionEvidence, HardwareWireCodec,
-    HardwareWireTraceOutcome, HardwareWireTraceRecorder, HostWireFrame, HostWirePayload,
-    WireDisconnectReason,
+    HardwareWireTraceEntry, HardwareWireTraceOutcome, HardwareWireTraceRecorder, HostWireFrame,
+    HostWirePayload, WireDisconnectReason,
 };
 use rne_hardware_gateway::{
     CommandDisposition, GatewayConfig, HardwareGateway, HardwareMode, SafetyReason,
@@ -26,7 +26,7 @@ fn process_disconnect_session_matches_golden() {
         actuation_capacity: 2,
         event_capacity: 32,
     };
-    let mut gateway = HardwareGateway::new(task, config).expect("gateway");
+    let mut gateway = HardwareGateway::new(task.clone(), config).expect("gateway");
     let codec = HardwareWireCodec::default();
     let session_id = "rne.mock.disconnect.v1";
     let task_id = gateway.task_spec().task_id.clone();
@@ -119,6 +119,34 @@ fn process_disconnect_session_matches_golden() {
         .expect("complete wire trace");
     let evidence = HardwareSessionEvidence::new(trace, gateway.take_evidence())
         .expect("correlate session evidence");
+    evidence
+        .validate_against(&task)
+        .expect("rebind session to TaskSpec");
+    let mut wrong_task = task.clone();
+    wrong_task.task_id = "rne.other.task.v1".to_string();
+    assert!(evidence.validate_against(&wrong_task).is_err());
+    let mut wrong_width = evidence.clone();
+    let HardwareWireTraceEntry::Host { frame } = &mut wrong_width.wire_trace.entries[0] else {
+        panic!("validated trace starts with a host frame");
+    };
+    let HostWirePayload::Open {
+        observation_width, ..
+    } = &mut frame.payload
+    else {
+        panic!("validated trace starts with open");
+    };
+    *observation_width += 1;
+    let HardwareWireTraceEntry::Device { frame } = &mut wrong_width.wire_trace.entries[1] else {
+        panic!("validated trace continues with a device frame");
+    };
+    let DeviceWirePayload::Ready {
+        observation_width, ..
+    } = &mut frame.payload
+    else {
+        panic!("validated trace continues with ready");
+    };
+    *observation_width += 1;
+    assert!(wrong_width.validate_against(&task).is_err());
     let actual = format!(
         "{}\n",
         serde_json::to_string_pretty(&evidence).expect("serialize evidence")

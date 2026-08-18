@@ -6,9 +6,10 @@
 //! oversized or multi-line input before deserializing it.
 
 use crate::{
-    ActuationFrame, GatewayConnectionState, GatewayEvidence, HardwareMode, SafetyReason,
-    HARDWARE_GATEWAY_EVIDENCE_KIND, HARDWARE_GATEWAY_SCHEMA_VERSION,
+    ActuationFrame, GatewayConfig, GatewayConnectionState, GatewayEvidence, HardwareGateway,
+    HardwareMode, SafetyReason, HARDWARE_GATEWAY_EVIDENCE_KIND, HARDWARE_GATEWAY_SCHEMA_VERSION,
 };
+use rne_ai::TaskSpec;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::BufRead;
 
@@ -558,13 +559,15 @@ impl HardwareSessionEvidence {
                 gateway: gateway.task_id.clone(),
             });
         }
-        let open = wire_trace
+        let Some(open) = wire_trace
             .entries
             .first()
             .and_then(HardwareWireTraceEntry::host_frame)
-            .expect("validated trace starts with a host frame");
+        else {
+            return Err(HardwareSessionEvidenceError::InvalidOpenContract);
+        };
         let HostWirePayload::Open { mode, .. } = &open.payload else {
-            unreachable!("validated trace starts with an open frame");
+            return Err(HardwareSessionEvidenceError::InvalidOpenContract);
         };
         if *mode != gateway.mode {
             return Err(HardwareSessionEvidenceError::ModeMismatch {
@@ -616,11 +619,88 @@ impl HardwareSessionEvidence {
             gateway,
         })
     }
+
+    /// Validates the outer envelope and all nested wire/gateway correlations.
+    pub fn validate(&self) -> Result<(), HardwareSessionEvidenceError> {
+        if self.kind != HARDWARE_SESSION_EVIDENCE_KIND {
+            return Err(HardwareSessionEvidenceError::InvalidKind {
+                actual: self.kind.clone(),
+            });
+        }
+        if self.schema_version != HARDWARE_WIRE_SCHEMA_VERSION {
+            return Err(HardwareSessionEvidenceError::UnsupportedSchemaVersion {
+                actual: self.schema_version,
+            });
+        }
+        let normalized = Self::new(self.wire_trace.clone(), self.gateway.clone())?;
+        if normalized != *self {
+            return Err(HardwareSessionEvidenceError::InvalidEnvelope);
+        }
+        Ok(())
+    }
+
+    /// Rebinds the session to the exact TaskSpec identity and flattened widths.
+    pub fn validate_against(&self, task: &TaskSpec) -> Result<(), HardwareSessionEvidenceError> {
+        self.validate()?;
+        if self.task_id != task.task_id {
+            return Err(HardwareSessionEvidenceError::BoundTaskMismatch {
+                evidence: self.task_id.clone(),
+                task: task.task_id.clone(),
+            });
+        }
+        let gateway = HardwareGateway::new(
+            task.clone(),
+            GatewayConfig {
+                mode: self.mode,
+                ..GatewayConfig::default()
+            },
+        )
+        .map_err(|error| HardwareSessionEvidenceError::InvalidTaskContract {
+            reason: error.to_string(),
+        })?;
+        let Some(HardwareWireTraceEntry::Host { frame }) = self.wire_trace.entries.first() else {
+            return Err(HardwareSessionEvidenceError::InvalidOpenContract);
+        };
+        let HostWirePayload::Open {
+            observation_width,
+            action_width,
+            ..
+        } = &frame.payload
+        else {
+            return Err(HardwareSessionEvidenceError::InvalidOpenContract);
+        };
+        if *observation_width != gateway.observation_width()
+            || *action_width != gateway.action_width()
+        {
+            return Err(HardwareSessionEvidenceError::OpenDimensionsMismatch {
+                expected_observation: gateway.observation_width(),
+                actual_observation: *observation_width,
+                expected_action: gateway.action_width(),
+                actual_action: *action_width,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Failure correlating process frames with gateway safety evidence.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum HardwareSessionEvidenceError {
+    /// The artifact discriminator is not the hardware-session evidence kind.
+    #[error("invalid hardware session evidence kind {actual:?}")]
+    InvalidKind {
+        /// Rejected discriminator.
+        actual: String,
+    },
+    /// The outer evidence schema is unsupported.
+    #[error("unsupported hardware session evidence schema {actual}")]
+    UnsupportedSchemaVersion {
+        /// Rejected schema version.
+        actual: u32,
+    },
+    /// Top-level identity differs from the validated nested artifacts.
+    #[error("hardware session evidence envelope is inconsistent")]
+    InvalidEnvelope,
     /// The process trace failed its complete replay validation.
     #[error("invalid hardware wire trace: {reason}")]
     InvalidWireTrace {
@@ -630,6 +710,9 @@ pub enum HardwareSessionEvidenceError {
     /// The gateway evidence kind or schema version is unsupported.
     #[error("invalid hardware gateway evidence contract")]
     InvalidGatewayContract,
+    /// A validated trace unexpectedly omitted its opening contract.
+    #[error("hardware session evidence has no valid opening contract")]
+    InvalidOpenContract,
     /// Wire and gateway artifacts name different tasks.
     #[error("hardware evidence task mismatch: wire {wire:?}, gateway {gateway:?}")]
     TaskMismatch {
@@ -645,6 +728,34 @@ pub enum HardwareSessionEvidenceError {
         wire: HardwareMode,
         /// Gateway authority mode.
         gateway: HardwareMode,
+    },
+    /// The supplied TaskSpec and evidence name different task contracts.
+    #[error("hardware session TaskSpec mismatch: evidence {evidence:?}, task {task:?}")]
+    BoundTaskMismatch {
+        /// Task identity recorded by the evidence.
+        evidence: String,
+        /// Task identity supplied for verification.
+        task: String,
+    },
+    /// The supplied TaskSpec cannot construct a hardware gateway.
+    #[error("invalid hardware session TaskSpec: {reason}")]
+    InvalidTaskContract {
+        /// Gateway construction failure.
+        reason: String,
+    },
+    /// The opening process dimensions differ from the flattened TaskSpec.
+    #[error(
+        "hardware session open dimensions mismatch: observations expected {expected_observation}, got {actual_observation}; actions expected {expected_action}, got {actual_action}"
+    )]
+    OpenDimensionsMismatch {
+        /// Flattened observation width derived from the TaskSpec.
+        expected_observation: usize,
+        /// Observation width recorded by the opening frame.
+        actual_observation: usize,
+        /// Flattened action width derived from the TaskSpec.
+        expected_action: usize,
+        /// Action width recorded by the opening frame.
+        actual_action: usize,
     },
     /// Terminal wire and gateway safety states disagree.
     #[error("hardware terminal wire outcome does not match gateway safety state")]
