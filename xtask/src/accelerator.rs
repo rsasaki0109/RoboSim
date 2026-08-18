@@ -1,71 +1,22 @@
 //! Validation for the one selected optional accelerator adapter.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use rne_accelerator_contract::{
+    AcceleratorCapabilityReport, AcceleratorManifest, AcceleratorRuntimeContract,
+    AcceleratorRuntimePackages,
+};
+pub(crate) use rne_accelerator_contract::{
+    ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION, ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    ACCELERATOR_MANIFEST_SCHEMA_VERSION, ACCELERATOR_PROTOCOL_SCHEMA_VERSION,
+    ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION, ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION,
+};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-pub(crate) const ACCELERATOR_MANIFEST_SCHEMA_VERSION: u32 = 1;
-pub(crate) const ACCELERATOR_PROTOCOL_SCHEMA_VERSION: u32 = 1;
-pub(crate) const ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION: u32 = 1;
-pub(crate) const ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION: u32 = 1;
-pub(crate) const ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION: u32 = 1;
-pub(crate) const ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION: u32 = 1;
 const SELECTED_MANIFEST: &str = "adapters/mjx/accelerator.toml";
 const BATCH_WIDTHS: [usize; 4] = [1, 16, 256, 4096];
 const TASK_ID: &str = "rne.physics.free_fall.mjx.v1";
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AcceleratorManifest {
-    schema_version: u32,
-    id: String,
-    selected: bool,
-    status: String,
-    runtime: String,
-    precision: String,
-    execution_boundary: String,
-    core_dependency: bool,
-    requires_nvidia_gpu: bool,
-    task_spec_schema: u32,
-    batch_checkpoint_schema: u32,
-    protocol_schema: u32,
-    capability_report_schema: u32,
-    conformance_report_schema: u32,
-    scale_report_schema: u32,
-    supported_batch_widths: Vec<usize>,
-    binding_task_spec: String,
-    binding_model: String,
-    runtime_contract: String,
-    requirements: String,
-    selection_adr: String,
-    official_sources: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct RuntimeContract {
-    schema_version: u32,
-    operating_system: String,
-    architecture: String,
-    python: String,
-    cuda_major: u32,
-    nvidia_driver_minimum: u32,
-    packages: RuntimePackages,
-    official_sources: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct RuntimePackages {
-    jax: String,
-    jaxlib: String,
-    jax_cuda_plugin: String,
-    mujoco: String,
-    mujoco_mjx: String,
-    warp_lang: String,
-}
 
 pub(crate) fn accelerator_check(args: &mut impl Iterator<Item = String>) -> Result<()> {
     anyhow::ensure!(
@@ -127,6 +78,7 @@ pub(crate) fn validate_contract(root: &Path) -> Result<AcceleratorManifest> {
     let manifest = validate_selected_manifest(root)?;
     validate_task_binding(root, &manifest)?;
     validate_runtime_contract(root, &manifest)?;
+    validate_capability_fixture(root, &manifest)?;
     run_python_contract_tests(root)?;
     Ok(manifest)
 }
@@ -142,6 +94,7 @@ pub(crate) fn validate_selected_manifest(root: &Path) -> Result<AcceleratorManif
 }
 
 fn validate_manifest(root: &Path, manifest: &AcceleratorManifest) -> Result<()> {
+    manifest.validate()?;
     anyhow::ensure!(
         manifest.schema_version == ACCELERATOR_MANIFEST_SCHEMA_VERSION,
         "accelerator manifest schema must be {ACCELERATOR_MANIFEST_SCHEMA_VERSION}"
@@ -258,8 +211,9 @@ fn validate_runtime_contract(root: &Path, manifest: &AcceleratorManifest) -> Res
     let contract_path = root.join(&manifest.runtime_contract);
     let contract_text = fs::read_to_string(&contract_path)
         .with_context(|| format!("read accelerator runtime {}", contract_path.display()))?;
-    let contract: RuntimeContract = toml::from_str(&contract_text)
+    let contract: AcceleratorRuntimeContract = toml::from_str(&contract_text)
         .with_context(|| format!("parse accelerator runtime {}", contract_path.display()))?;
+    contract.validate()?;
     anyhow::ensure!(
         contract.schema_version == ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION,
         "accelerator runtime-contract schema mismatch"
@@ -274,7 +228,7 @@ fn validate_runtime_contract(root: &Path, manifest: &AcceleratorManifest) -> Res
     );
     anyhow::ensure!(
         contract.packages
-            == (RuntimePackages {
+            == (AcceleratorRuntimePackages {
                 jax: "0.10.2".to_string(),
                 jaxlib: "0.10.2".to_string(),
                 jax_cuda_plugin: "0.10.2".to_string(),
@@ -316,6 +270,23 @@ fn validate_runtime_contract(root: &Path, manifest: &AcceleratorManifest) -> Res
     Ok(())
 }
 
+fn validate_capability_fixture(root: &Path, manifest: &AcceleratorManifest) -> Result<()> {
+    let runtime: AcceleratorRuntimeContract =
+        toml::from_str(&fs::read_to_string(root.join(&manifest.runtime_contract))?)?;
+    let task: rne_ai::TaskSpec =
+        serde_json::from_slice(&fs::read(root.join(&manifest.binding_task_spec))?)?;
+    let report_path = root.join("tests/golden/accelerators/capability-report-v1.json");
+    let report: AcceleratorCapabilityReport = serde_json::from_slice(&fs::read(&report_path)?)
+        .with_context(|| {
+            format!(
+                "parse accelerator capability report {}",
+                report_path.display()
+            )
+        })?;
+    report.validate_against(manifest, &runtime, &task)?;
+    Ok(())
+}
+
 fn run_python_contract_tests(root: &Path) -> Result<()> {
     let python = super::python_command()?;
     let status = Command::new(python)
@@ -347,6 +318,7 @@ mod tests {
         assert_eq!(manifest.supported_batch_widths, BATCH_WIDTHS);
         validate_task_binding(&root, &manifest).expect("task binding");
         validate_runtime_contract(&root, &manifest).expect("runtime contract");
+        validate_capability_fixture(&root, &manifest).expect("capability fixture");
     }
 
     #[test]

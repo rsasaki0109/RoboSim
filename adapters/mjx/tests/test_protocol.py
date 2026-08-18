@@ -22,6 +22,7 @@ from rne_mjx_adapter.protocol import (  # noqa: E402
     derive_episode_seed,
     load_json_fixture,
     validate_bound_task_spec,
+    validate_capability_report,
     validate_task_spec,
 )
 from conformance import (  # noqa: E402
@@ -123,10 +124,46 @@ class ProtocolTests(unittest.TestCase):
 
     def test_runtime_probe_is_versioned_and_fail_closed(self) -> None:
         report = MjxWarpBackend(self.fixtures).capability_report()
+        validate_capability_report(report)
         self.assertEqual(report["kind"], CAPABILITY_REPORT_KIND)
         self.assertIn(report["status"], {"available", "unavailable"})
         if report["status"] == "unavailable":
             self.assertIsNotNone(report["unavailable_reason_code"])
+
+    def test_capability_report_rejects_status_and_runtime_tampering(self) -> None:
+        report = FakeBackend(self.fixtures).capability_report()
+        validate_capability_report(report)
+
+        available = deepcopy(report)
+        available["status"] = "available"
+        with self.assertRaisesRegex(ProtocolError, "available runtime"):
+            validate_capability_report(available)
+
+        available["runtime"].update(
+            {
+                "python_version": "3.12.4",
+                "platform": "linux",
+                "machine": "x86_64",
+                "jax_version": available["runtime_contract"]["packages"]["jax"],
+                "jaxlib_version": available["runtime_contract"]["packages"]["jaxlib"],
+                "jax_cuda_plugin_version": available["runtime_contract"]["packages"]["jax_cuda_plugin"],
+                "mujoco_version": available["runtime_contract"]["packages"]["mujoco"],
+                "mujoco_mjx_version": available["runtime_contract"]["packages"]["mujoco_mjx"],
+                "warp_version": available["runtime_contract"]["packages"]["warp_lang"],
+                "jax_backend": "gpu",
+                "jax_devices": ["CUDA:0"],
+                "nvidia_driver_version": "580.42",
+            }
+        )
+        validate_capability_report(available)
+        available["runtime"]["nvidia_driver_version"] = "579.99"
+        with self.assertRaisesRegex(ProtocolError, "available runtime"):
+            validate_capability_report(available)
+
+        unknown = deepcopy(report)
+        unknown["unknown"] = True
+        with self.assertRaisesRegex(ProtocolError, "fields"):
+            validate_capability_report(unknown)
 
     def test_conformance_report_passes_and_fault_injection_fails(self) -> None:
         report = build_report(

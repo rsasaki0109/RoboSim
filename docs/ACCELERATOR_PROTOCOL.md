@@ -7,6 +7,18 @@ Python objects never cross the boundary.
 The v1 free-fall binding is f64; the production process explicitly enables JAX
 x64 and rejects the session if that precision cannot be provided.
 
+The non-published `rne_accelerator_contract` workspace crate is the
+dependency-free-from-vendor Rust reader embedded in the installed compatibility
+verifier for manifest v1, runtime-contract v1, and capability-report v1. Its
+`validate_against` path binds the report to the exact manifest, runtime pins,
+and validated TaskSpec. The installed compatibility verifier uses that reader;
+it does not need Python or an accelerator package to reject schema or identity
+drift.
+It does not add a 32nd publishable package to the immutable 0.1.0 Rust
+API baseline. Publishing a reusable library requires a later minor-version
+baseline transition; the standalone `rne-compatibility` binary is the supported
+reader in this release line.
+
 ## Envelope and lifecycle
 
 Every request contains exactly `kind = "rne_accelerator_request"`,
@@ -74,6 +86,12 @@ MuJoCo/MJX 3.9.0, and Warp 1.12.1. The MuJoCo line matches the existing CPU
 backend. `probe` returns unavailable before stepping if any host or package pin
 differs, if JAX does not select `gpu`, or if the expected device cannot be
 enumerated.
+Capability generation validates the complete report before returning it.
+`available` requires the pinned package versions, GPU backend, and at least one
+device; `unavailable` requires a stable reason code; dependency-free
+`test_only` evidence must not claim accelerator packages, devices, or a GPU
+backend. Unknown fields and mismatches against the selected manifest, runtime
+contract, or TaskSpec fail closed in both Python and Rust readers.
 
 `xtask accelerator-scale` emits scale-report v1 for widths 1, 16, 256, and
 4096. It records warm-up/measured counts, elapsed nanoseconds, transitions per

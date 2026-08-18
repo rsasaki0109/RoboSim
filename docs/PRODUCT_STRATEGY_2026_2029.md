@@ -475,7 +475,7 @@ These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
 explicit assessment date, and emits nine fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
-retained 29-check historical compatibility replay and clean blocker registry
+  retained 30-check historical compatibility replay and clean blocker registry
 report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.

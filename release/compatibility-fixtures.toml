@@ -2,6 +2,13 @@ schema_version = 1
 release_version = "0.1.0"
 
 [[fixture]]
+id = "accelerator_capability_v1"
+contract = "accelerator_capability"
+schema_version = 1
+path = "tests/golden/accelerators/capability-report-v1.json"
+canonical_json_sha256 = "sha256:87aea0aed415beb06bb321bf7d234516c53f16df3e1ccad1ef244e1d2beddeb2"
+
+[[fixture]]
 id = "behavior_replay_v1"
 contract = "behavior_replay"
 schema_version = 1

@@ -138,6 +138,10 @@ state is not a substitute for portable batch-checkpoint v2.
 Accelerator conformance-report v1 and runtime-contract v1 are versioned as
 well. A report made by the dependency-free fake is explicitly `contract_test`
 evidence and cannot be re-labelled as hardware evidence.
+The installed corpus retains capability-report v1 and validates it through
+`rne_accelerator_contract` against the selected manifest, exact runtime pins,
+and bound TaskSpec. Status tampering cannot turn `test_only` or `unavailable`
+evidence into an available accelerator claim.
 
 Dataset bundle schema v1 freezes the `RNEDATA1` file header, 80-byte record
 header, stream/field ordering, simulation capture and availability ticks,

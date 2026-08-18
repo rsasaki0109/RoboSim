@@ -16,6 +16,7 @@ doc = false
 
 [dependencies]
 anyhow = { workspace = true }
+rne_accelerator_contract = { workspace = true }
 rne_ai = { workspace = true }
 rne_core = { workspace = true }
 rne_data = { workspace = true }

@@ -34,6 +34,7 @@ from .protocol import (
     require_exact_keys,
     require_unsigned,
     validate_bound_task_spec,
+    validate_capability_report,
 )
 
 TASK_ID = "rne.physics.free_fall.mjx.v1"
@@ -655,7 +656,7 @@ def _capability_report(
     runtime_contract: dict[str, Any],
     runtime: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    report = {
         "kind": CAPABILITY_REPORT_KIND,
         "schema_version": CAPABILITY_REPORT_SCHEMA_VERSION,
         "adapter_id": ADAPTER_ID,
@@ -677,6 +678,7 @@ def _capability_report(
         "runtime_contract": deepcopy(runtime_contract),
         "runtime_contract_schema": runtime_contract["schema_version"],
     }
+    return validate_capability_report(report)
 
 
 def _load_runtime_contract(path: Path) -> dict[str, Any]:
