@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "rne_controller_plugin_conformance_report",
+  "status": "passed",
+  "subject": {
+    "library_file": "reference-controller.library",
+    "library_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "library_size_bytes": 4096,
+    "manifest_file": "rne-plugin.json",
+    "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "controller": {
+    "name": "reference_controller",
+    "abi_version": 3,
+    "controller_schema_version": 1,
+    "capabilities": [
+      "joint_position_observation",
+      "joint_velocity_command"
+    ]
+  },
+  "checks": [
+    {
+      "id": "manifest_identity",
+      "status": "passed",
+      "detail": "manifest and binary names match"
+    },
+    {
+      "id": "abi_symbols",
+      "status": "passed",
+      "detail": "loaded ABI v3"
+    },
+    {
+      "id": "capability_negotiation",
+      "status": "passed",
+      "detail": "2 canonical capabilities"
+    },
+    {
+      "id": "fixed_step_schema",
+      "status": "passed",
+      "detail": "2 validated action frames"
+    },
+    {
+      "id": "reset_replay_exact",
+      "status": "passed",
+      "detail": "identical reset replay actions"
+    },
+    {
+      "id": "lifecycle_shutdown",
+      "status": "passed",
+      "detail": "shutdown accepted exactly once"
+    }
+  ]
+}

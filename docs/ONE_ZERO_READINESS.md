@@ -93,7 +93,7 @@ stars.
 | `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound nine-check install reports, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
-| `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 26 registered typed-reader checks, including fail-closed future/unknown-field mutations and verified historical Git revision/tree/blob provenance |
+| `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 27 registered typed-reader checks, including fail-closed future/unknown-field mutations and verified historical Git revision/tree/blob provenance |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
@@ -105,7 +105,7 @@ The archive-bound install result is separately registered as
 `evidence.archive_install_rehearsal_report = 1`.
 The report check order is fixed and a committed golden captures the current
 honest baseline. `manifest_sha256` binds the complete normalized input,
-including external identities and support fields. The retained 26-check
+including external identities and support fields. The retained 27-check
 compatibility report is byte-for-byte equal to a fresh typed-reader replay and
 the blocker registry is clean, so the committed 2026-08-16 baseline is
 `eligible=false` with 2 of 9 checks satisfied. The remaining seven checks still

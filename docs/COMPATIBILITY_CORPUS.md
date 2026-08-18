@@ -24,13 +24,13 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains twenty-six fixtures:
+contains twenty-seven fixtures:
 
 | Contract | Retained artifact |
 |---|---|
 | Task contract | TaskSpec v1 |
 | Batch execution | portable batch checkpoint v2 |
-| Controller ABI | ABI-v3 64-bit C layout, capabilities, and required symbols |
+| Controller ABI and conformance | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1 |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
 | Historical decisions | Frontend transport v1, TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
@@ -67,6 +67,13 @@ The report has no timestamps, host paths, random IDs, or timing data. The same
 registry and fixture content therefore produce identical report bytes on Linux
 and Windows. Canonical JSON hashing deliberately ignores indentation and line
 endings while preserving every parsed field and value.
+
+The controller-plugin report fixture is a synthesized reader/schema vector. It
+freezes canonical check ordering, subject identity, supported ABI/schema,
+required capabilities, and strict report deserialization. Its placeholder
+library digest is not third-party execution evidence. The 1.0 readiness gate
+separately requires an independently owned repository and rehashes the retained
+real library and manifest against a freshly validated conformance report.
 
 ## Historical source provenance
 

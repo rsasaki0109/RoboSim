@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:1bfdc4d80b2459b3c7b18b47dbfdc8bc8790c923b8a7a7a9bef330779dff5fab",
+  "registry_sha256": "sha256:b904c4fa3cf2b3f80f16b13a608abd592654784174310d4c10e595ab23b034cc",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -22,6 +22,18 @@
       "schema_version": 1,
       "path": "tests/golden/plugins/controller-c-abi-layout-v3.json",
       "canonical_json_sha256": "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "controller_plugin_conformance_v1",
+      "contract": "controller_plugin_conformance",
+      "schema_version": 1,
+      "path": "tests/golden/plugins/controller-plugin-conformance-v1.json",
+      "canonical_json_sha256": "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

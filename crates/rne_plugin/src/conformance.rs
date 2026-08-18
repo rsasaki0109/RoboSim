@@ -1,10 +1,10 @@
 //! Standalone conformance runner for dynamically loaded controller plugins.
 
 use crate::{
-    ControllerActionFrame, ControllerCapability, ControllerConfiguration, ControllerHost,
-    ControllerJointObservation, ControllerObservationFrame, ControllerPlugin,
+    ControllerActionFrame, ControllerCapability, ControllerConfiguration, ControllerDescriptor,
+    ControllerHost, ControllerJointObservation, ControllerObservationFrame, ControllerPlugin,
     ControllerResetContext, ControllerRobotObservation, LoadedControllerPlugin, PluginManifest,
-    CONTROLLER_SCHEMA_VERSION,
+    CONTROLLER_SCHEMA_VERSION, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_MIN_ABI_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -134,6 +134,37 @@ impl ControllerPluginConformanceReport {
                 "report kind drifted".to_string(),
             ));
         }
+        validate_subject_file("library_file", &self.subject.library_file)?;
+        validate_subject_file("manifest_file", &self.subject.manifest_file)?;
+        for digest in [
+            self.subject.library_sha256.as_str(),
+            self.subject.manifest_sha256.as_str(),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return invalid_report("subject digest is not lowercase SHA-256 hex");
+            }
+        }
+        if let Some(controller) = &self.controller {
+            if !(RNE_PLUGIN_MIN_ABI_VERSION..=RNE_PLUGIN_ABI_VERSION)
+                .contains(&controller.abi_version)
+            {
+                return invalid_report("controller ABI is outside the supported range");
+            }
+            let descriptor = ControllerDescriptor {
+                schema_version: controller.controller_schema_version,
+                name: controller.name.clone(),
+                capabilities: controller.capabilities.clone(),
+            };
+            descriptor.validate().map_err(|error| {
+                ControllerPluginConformanceError::InvalidReport(format!(
+                    "controller identity is invalid: {error}"
+                ))
+            })?;
+        }
         if self
             .checks
             .iter()
@@ -146,7 +177,7 @@ impl ControllerPluginConformanceReport {
         }
         if self.checks.iter().any(|check| {
             !matches!(check.status.as_str(), "passed" | "failed" | "not_run")
-                || check.detail.len() > 512
+                || check.detail.chars().count() > 512
         }) {
             return Err(ControllerPluginConformanceError::InvalidReport(
                 "check status or diagnostic is invalid".to_string(),
@@ -164,14 +195,22 @@ impl ControllerPluginConformanceReport {
                 "aggregate status does not match checks".to_string(),
             ));
         }
-        for digest in [
-            self.subject.library_sha256.as_str(),
-            self.subject.manifest_sha256.as_str(),
-        ] {
-            if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(ControllerPluginConformanceError::InvalidReport(
-                    "subject digest is not SHA-256 hex".to_string(),
-                ));
+        if self.status == "passed" {
+            if self.subject.library_size_bytes == 0 {
+                return invalid_report("a passing report must bind a non-empty library");
+            }
+            let Some(controller) = self.controller.as_ref() else {
+                return invalid_report("a passing report requires a controller identity");
+            };
+            for required in [
+                ControllerCapability::JointPositionObservation,
+                ControllerCapability::JointVelocityCommand,
+            ] {
+                if controller.capabilities.binary_search(&required).is_err() {
+                    return invalid_report(
+                        "a passing report is missing a required controller capability",
+                    );
+                }
             }
         }
         Ok(())
@@ -220,6 +259,28 @@ impl ControllerPluginConformanceReport {
         })
         .to_string();
     }
+}
+
+fn validate_subject_file(field: &str, value: &str) -> Result<(), ControllerPluginConformanceError> {
+    if value.is_empty()
+        || value != value.trim()
+        || value.chars().count() > 255
+        || matches!(value, "." | "..")
+        || value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return Err(ControllerPluginConformanceError::InvalidReport(format!(
+            "{field} must be a portable basename"
+        )));
+    }
+    Ok(())
+}
+
+fn invalid_report<T>(message: &str) -> Result<T, ControllerPluginConformanceError> {
+    Err(ControllerPluginConformanceError::InvalidReport(
+        message.to_string(),
+    ))
 }
 
 /// Failure reading inputs or serializing a conformance report.
@@ -469,4 +530,107 @@ fn file_name(path: &Path) -> String {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn passing_report() -> ControllerPluginConformanceReport {
+        ControllerPluginConformanceReport {
+            schema_version: CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            kind: CONTROLLER_PLUGIN_CONFORMANCE_REPORT_KIND.to_string(),
+            status: "passed".to_string(),
+            subject: ControllerPluginConformanceSubject {
+                library_file: "reference_controller.dll".to_string(),
+                library_sha256: "a".repeat(64),
+                library_size_bytes: 4_096,
+                manifest_file: "rne-plugin.json".to_string(),
+                manifest_sha256: "b".repeat(64),
+            },
+            controller: Some(ControllerPluginConformanceIdentity {
+                name: "reference_controller".to_string(),
+                abi_version: RNE_PLUGIN_ABI_VERSION,
+                controller_schema_version: CONTROLLER_SCHEMA_VERSION,
+                capabilities: vec![
+                    ControllerCapability::JointPositionObservation,
+                    ControllerCapability::JointVelocityCommand,
+                ],
+            }),
+            checks: CHECK_IDS
+                .iter()
+                .map(|id| ControllerPluginConformanceCheck {
+                    id: (*id).to_string(),
+                    status: "passed".to_string(),
+                    detail: format!("{id} passed"),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn passing_report_requires_canonical_subject_and_controller_identity() {
+        passing_report().validate().expect("valid passing report");
+
+        let mut invalid = passing_report();
+        invalid.subject.library_file = "plugins/reference_controller.dll".to_string();
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid.subject.manifest_file = "C:\\rne-plugin.json".to_string();
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid.subject.library_sha256 = "A".repeat(64);
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid.subject.library_size_bytes = 0;
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid.controller.as_mut().expect("identity").abi_version = RNE_PLUGIN_MIN_ABI_VERSION - 1;
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid
+            .controller
+            .as_mut()
+            .expect("identity")
+            .controller_schema_version += 1;
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid
+            .controller
+            .as_mut()
+            .expect("identity")
+            .capabilities
+            .reverse();
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = passing_report();
+        invalid
+            .controller
+            .as_mut()
+            .expect("identity")
+            .capabilities
+            .pop();
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn failed_report_can_describe_an_empty_library() {
+        let mut report = passing_report();
+        report.status = "failed".to_string();
+        report.subject.library_size_bytes = 0;
+        report.controller = None;
+        report.checks[0].status = "failed".to_string();
+        report.checks[1..].iter_mut().for_each(|check| {
+            check.status = "not_run".to_string();
+            check.detail.clear();
+        });
+
+        report.validate().expect("valid semantic failure report");
+    }
 }

@@ -45,6 +45,9 @@ use rne_openscenario::{
 };
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
 use rne_physics_conformance_suite::ConformanceReport;
+use rne_plugin::{
+    ControllerPluginConformanceReport, CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
+};
 use rne_plugin_sdk::{
     RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
     RneJointVelocityV3, RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION,
@@ -100,7 +103,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 26] = [
+const FIXTURE_SPECS: [FixtureSpec; 27] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -111,6 +114,12 @@ const FIXTURE_SPECS: [FixtureSpec; 26] = [
         id: "controller_c_abi_v3",
         contract: "controller_c_abi",
         schema_version: 1,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "controller_plugin_conformance_v1",
+        contract: "controller_plugin_conformance",
+        schema_version: CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1386,6 +1395,14 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         "controller_c_abi" => {
             let fixture: ControllerCAbiFixture = serde_json::from_value(value)?;
             validate_controller_c_abi(&fixture)?;
+        }
+        "controller_plugin_conformance" => {
+            let fixture: ControllerPluginConformanceReport = serde_json::from_value(value)?;
+            fixture.validate()?;
+            ensure!(
+                fixture.passed(),
+                "controller plugin conformance fixture failed"
+            );
         }
         "dataset_bundle" => {
             let fixture: DatasetManifest = serde_json::from_value(value)?;

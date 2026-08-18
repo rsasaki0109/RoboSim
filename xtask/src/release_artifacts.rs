@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 64] = [
+const BUNDLE_FILES: [(&str, &str); 65] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -163,6 +163,10 @@ const BUNDLE_FILES: [(&str, &str); 64] = [
     (
         "tests/golden/plugins/controller-c-abi-layout-v3.json",
         "tests/golden/plugins/controller-c-abi-layout-v3.json",
+    ),
+    (
+        "tests/golden/plugins/controller-plugin-conformance-v1.json",
+        "tests/golden/plugins/controller-plugin-conformance-v1.json",
     ),
     (
         "tests/golden/datasets/bundle-manifest-v1.json",

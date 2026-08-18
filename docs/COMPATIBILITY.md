@@ -291,8 +291,9 @@ trees, schema declarations, and golden blobs, executes the complete corpus with
 the current readers, and requires the supplied report to equal the fresh report
 exactly. The audit records the report, registry, and every fixture digest.
 
-The twenty-six-fixture registry additionally freezes all ten frontend protocol-v1
-message families and the historical `ClientHello` frame, all five dataset-native
+The twenty-seven-fixture registry additionally freezes the controller-plugin
+conformance report v1, all ten frontend protocol-v1 message families and the
+historical `ClientHello` frame, all five dataset-native
 payload families, behavior replay v1, scenario replay v4, the renderer-backed
 RGB-D capture report, the controller C ABI-v3 64-bit layout, three historical
 mobile-manipulator migrations, one exact legacy checkpoint restore, and two
@@ -309,6 +310,12 @@ Git checkout. Binary fixtures pair semantic fields with lowercase hex bytes:
 acceptance requires exact decode/re-encode identity plus rejection of
 truncation and trailing bytes. Frontend validation also rejects corrupt magic,
 unknown message kinds, and an incompatible negotiated major version.
+
+The synthesized passing controller-plugin report is compatibility evidence for
+the report reader only. It cannot satisfy third-party-plugin readiness: that
+gate independently requires external ownership and subject-bound library and
+manifest bytes whose hashes, sizes, names, and negotiated identity match the
+submitted report.
 
 The frontend frame is also retained in a provenance-bound historical decision.
 Protocol v1's introducing commit/tree and the first full `ClientHello` golden
