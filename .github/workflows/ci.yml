@@ -326,6 +326,10 @@ jobs:
           cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
           cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
+      - name: Capture and verify the WGPU renderer dataset
+        run: |
+          cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          cargo run --locked -p xtask -- dataset-check artifacts/datasets/unitree-g1-wgpu.rne-dataset
       - name: Upload trust evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -335,6 +339,7 @@ jobs:
             artifacts/evidence/
             artifacts/datasets/diff-drive-reference.rne-dataset/
             artifacts/datasets/diff-drive-depth-evaluation.json
+            artifacts/datasets/unitree-g1-wgpu.rne-dataset/
 
   parity:
     # M5 defines the GitHub-hosted Windows parity runner as its benchmark class.

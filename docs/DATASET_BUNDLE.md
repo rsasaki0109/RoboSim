@@ -157,10 +157,43 @@ from a clean checkout, verifies the complete bundle, independently regenerates
 the depth report, and uploads both for inspection. A digest mismatch fails the
 job rather than being normalized away.
 
+## Renderer-specific capture evidence
+
+Example 71 connects the WGPU-backed Unitree G1 head camera to the same
+streaming bundle writer. It requires a real WGPU initialization, records twelve
+RGB/depth pairs one record at a time, and binds the resulting dataset to the
+portable `rne.unitree_g1.gait.v1` TaskSpec plus explicit Brown-Conrady
+calibration, rolling-shutter timing, three-tick output latency, and deterministic
+noise parameters:
+
+```powershell
+cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- `
+  --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset `
+  --require-renderer
+cargo run --locked -p xtask -- dataset-check `
+  artifacts/datasets/unitree-g1-wgpu.rne-dataset
+```
+
+`--require-renderer` fails when WGPU is unavailable or `RNE_SKIP_GPU` is set;
+it cannot turn the existing CPU smoke fallback into renderer evidence. The
+bundle contains the exact serialized TaskSpec, a renderer-contract document,
+and a report bound to the verified manifest digest. The manifest also binds the
+scene, robot description, URDF and mesh tree, HDRI, glTF environment tree, and
+floor textures. Evidence mode rejects HDRI and fallback-control environment
+overrides; `dataset-check` streams and rehashes all retained workspace inputs
+without loading an asset tree into memory.
+
+WGPU pixels are not a cross-adapter correctness golden: each clean
+Windows/Linux evidence job instead verifies schema, payload hashes, ordering,
+calibration, timestamps, latency, noise, finite depth, record counts, complete
+shard digest, and source-asset digests. Headless offline metrics remain the
+renderer-independent gate described above.
+
 ## Compatibility
 
-Dataset bundle schema v1, dataset-native payload schema v1, and
-offline-evaluation schema v1 are registered in `release/contracts.toml`.
+Dataset bundle schema v1, dataset-native payload schema v1, offline-evaluation
+schema v1, and renderer-capture report schema v1 are registered in
+`release/contracts.toml`.
 Ordered stream/field arrays, enum values, binary
 headers, units, and digest construction are semantic. Readers reject an
 unknown schema instead of guessing. A future lossless migration must retain

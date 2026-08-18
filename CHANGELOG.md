@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a portable Unitree G1 gait TaskSpec and connect the real WGPU head-camera
+  path to a streaming, TaskSpec-bound RGB-D dataset with calibration, timing,
+  latency, noise, renderer identity, complete scene/robot/mesh/environment input
+  digests, and mandatory Windows/Linux evidence-job verification. Renderer
+  unavailability and asset overrides now fail explicit capture requests instead
+  of being reported as evidence through the CPU smoke fallback.
+
 - Document the current best-effort 0.x support status and the exact published
   policy decision required before 1.0, without presenting draft intent as a
   maintainer commitment.

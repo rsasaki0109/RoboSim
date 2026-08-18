@@ -40,8 +40,11 @@ calibration, noise seeds, assets, domain-randomization decisions, and explicit
 drop gaps. Offline depth-pair evaluation is renderer-free and recomputes
 committed metrics from the bundle. RGB8/depth/LiDAR plus dataset-native
 IMU/transform/action/outcome/annotation codecs are bound and headless fixtures
-freeze their complete shard digests. The remaining evidence gap has moved to
-completed clean-run platform provenance and renderer-specific capture evidence.
+freeze their complete shard digests. The WGPU-backed Unitree G1 head camera now
+streams a TaskSpec-bound twelve-frame RGB/depth bundle with explicit calibration,
+latency, noise, and renderer identity; both platform evidence jobs require and
+upload it instead of accepting the CPU fallback. Completed clean-run platform
+provenance remains required before treating that matrix as external evidence.
 
 The reference capture now records a successful seeded diff-drive run with
 action, outcome, transform, IMU, LiDAR, RGB, sensor depth, and ideal scene depth
@@ -51,7 +54,8 @@ Windows/Linux evidence matrix. The known 5 mm depth bias remains below the
 10 mm gate across 52,224 compared pixels. The workflow definition enforces
 cross-platform equality; a completed clean CI run is still required before
 treating that equality as external platform evidence. A renderer-specific
-capture remains separate evidence rather than a headless requirement.
+capture remains separate evidence rather than a headless requirement, so
+CPU-only simulation and offline evaluation stay renderer-free.
 
 The v0.6 foundation has started without pulling hardware concerns into core.
 `rne_hardware_gateway` binds the same TaskSpec to playback, shadow, HIL, and

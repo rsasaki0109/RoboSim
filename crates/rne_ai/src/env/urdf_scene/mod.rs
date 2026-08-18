@@ -54,7 +54,8 @@ pub use unitree_g1_gait::{
     UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
 };
 pub use unitree_g1_gait_episode::{
-    UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
+    unitree_g1_gait_task_spec, UnitreeG1GaitAction, UnitreeG1GaitEpisode,
+    UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
 pub use unitree_g1_inspection::unitree_g1_inspection_targets;
 pub use unitree_g1_inspection_episode::{

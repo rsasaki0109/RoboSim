@@ -1418,6 +1418,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
         ),
         (
+            "datasets",
+            "renderer_capture_report",
+            u64::from(dataset::RENDERER_CAPTURE_REPORT_SCHEMA_VERSION),
+        ),
+        (
             "hardware",
             "gateway_evidence",
             u64::from(rne_hardware_gateway::HARDWARE_GATEWAY_SCHEMA_VERSION),

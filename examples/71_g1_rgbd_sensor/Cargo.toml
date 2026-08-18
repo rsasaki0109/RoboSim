@@ -20,6 +20,9 @@ rne_render = { workspace = true }
 rne_render_wgpu = { workspace = true, features = ["viewer"] }
 rne_sensor = { workspace = true }
 rne_world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [[example]]
 name = "71_g1_rgbd_sensor"

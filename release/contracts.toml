@@ -67,6 +67,7 @@ scale_report = 1
 bundle = 1
 payload = 1
 offline_evaluation = 1
+renderer_capture_report = 1
 
 [hardware]
 gateway_evidence = 1

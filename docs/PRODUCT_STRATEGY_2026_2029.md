@@ -231,6 +231,14 @@ Delivery slices:
 - keep wgpu as the portable baseline and evaluate external high-fidelity
   rendering only through an adapter.
 
+Current implementation status: the renderer-free diff-drive reference bundle
+retains the headless correctness and offline-metric golden. Separately, the
+WGPU Unitree G1 head camera now streams twelve RGB/depth pairs into the same
+bundle format, bound to a portable gait TaskSpec and explicit calibration,
+rolling-shutter, latency, and noise metadata. Clean Windows/Linux evidence jobs
+must initialize WGPU, regenerate and verify the bundle, and upload it; the CPU
+smoke fallback is rejected for this renderer-specific evidence.
+
 Exit evidence:
 
 - a dataset verifies all payload hashes, stream ordering, calibration, units,
