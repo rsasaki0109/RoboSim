@@ -384,6 +384,14 @@ claims fail closed until portable vectors exist. Failure Capsules require the
 exact hashed implementation subject. The in-repository reference is authoring
 evidence, not the independent backend certification required for 1.0.
 
+The sixth v0.8 authoring slice adds `rne-accelerator-conformance scaffold` to
+the installed kit. It creates a non-overwriting, dependency-free Python JSONL
+harness with typed manifest, runtime, TaskSpec, checkpoint transcript, model,
+pins, and selection placeholders. Installed rehearsal regenerates and conforms
+that harness on both tier-1 platforms. Its fixture responder is deliberately
+marked nonqualifying: only a replaced, independently maintained backend with
+retained subject bytes and physical runtime evidence can enter readiness.
+
 The readiness tracker's v2 external-certification contract closes the final
 report-substitution gap before real outreach: each independent source revision
 must retain the exact controller library and manifest, physics implementation

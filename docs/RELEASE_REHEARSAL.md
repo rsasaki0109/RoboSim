@@ -26,8 +26,11 @@ check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
 denied; the scaffold SDK must match the bundled SDK byte-for-byte.
 The accelerator check executes all nine JSONL exchanges against the bundled
-mock, then requires the eleven-check content-addressed report to bind the exact
-manifest, runtime contract, TaskSpec, checkpoint, and clean shutdown.
+mock, then generates a dependency-free adapter scaffold from the installed CLI
+and runs the same process kit against it. Both eleven-check content-addressed
+reports must bind the exact manifest, runtime contract, TaskSpec, checkpoint,
+and clean shutdown. The scaffold README must retain its explicit warning that
+the fixture is authoring-path evidence, not independent accelerator evidence.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path
@@ -42,7 +45,8 @@ file name, byte length, and SHA-256 to the extracted bundle root,
 rehearsal. Validation reconstructs the checksum graph and requires the staged
 and independently extracted verdict maps to be identical.
 After all ten checks pass, xtask deletes the tool-owned wheel virtual
-environment and controller scaffold. `release-bundle` additionally deletes its
+environment and controller and accelerator scaffolds. `release-bundle`
+additionally deletes its
 internal `.rehearsal-<target>` directory and target-local copied supply-chain
 evidence only after `release-report.json` and `SHA256SUMS` verify. The bundle,
 archive-bound reports, replays, conformance reports, and Failure Capsule remain.

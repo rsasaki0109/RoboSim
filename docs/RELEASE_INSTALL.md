@@ -106,6 +106,8 @@ rehearsal. From its top-level directory:
   --runtime adapters/mjx/runtime.toml \
   --task adapters/mjx/fixtures/free-fall-task-spec-v1.json \
   --output accelerator-protocol-conformance.json
+./bin/rne-accelerator-conformance scaffold my_accelerator \
+  --dir accelerator-authoring
 ./bin/rne-asset plugin list --path lib
 ./bin/rne-asset plugin check \
   --library lib/librne_plugin_example_velocity_servo.so \
@@ -122,6 +124,11 @@ not GPU availability or promotion performance. Use `.exe` on Windows and
 commands are headless and require neither ROS2 nor a renderer. Capsule creation
 refuses successful replays, existing destinations, symlinks, path escapes,
 malformed known evidence, and digest mismatches.
+The generated accelerator scaffold contains an initially passing fixture
+responder so an author can validate JSONL framing before installing a backend.
+That fixture is explicitly nonqualifying reference material: replace its
+`dispatch` implementation, model, pins, and selection record before using the
+standalone command for external evidence.
 The compatibility command reads only the retained registry and fixtures under
 the extracted bundle, verifies their canonical JSON digests, runs the current
 typed readers, and checks fail-closed future-schema and unknown-field handling.
@@ -191,16 +198,18 @@ cargo run --locked -p xtask -- release-bundle \
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
-reruns all ten schema-v5 installed-artifact checks, including accelerator
-process conformance, the compatibility corpus, and the exact Python API
-manifest. Its schema-v1 outer report records the
+reruns all ten schema-v5 installed-artifact checks. Its accelerator check runs
+both the installed reference mock and a freshly generated dependency-free
+scaffold through process conformance. Separate checks cover the compatibility
+corpus and the exact Python API manifest. Its schema-v1 outer report records the
 exact archive and extracted release/checksum identities; tagged release CI
 attests that report as a separate subject.
 
 On success, the command retains the archive-bound report, replays,
 conformance reports, compatibility/Python API reports, and Failure Capsule, but
-removes its tool-owned wheel virtual environment and generated controller
-scaffold. A failed check retains those transient directories for debugging.
+removes its tool-owned wheel virtual environment and generated controller and
+accelerator scaffolds. A failed check retains those transient directories for
+debugging.
 Cleanup is bounded to the exact expected child directories and refuses
 symlinks, regular files, or paths outside the selected output directory.
 

@@ -107,6 +107,11 @@ signs a separate archive-install report whose digest chain fixes the archive,
 extracted release report, SHA256SUMS member graph, and ten-check rehearsal;
 readiness manifest v4 freshly verifies both signed subjects and audits
 third-party accelerator adapters without weakening the external-system gate.
+The installed accelerator conformance CLI also generates a dependency-free
+protocol-v1 authoring scaffold. Release rehearsal creates it from the packaged
+binary and runs its bounded Python fixture through the same process kit. This
+proves the clean-install authoring route only; the fixture cannot count as the
+independent accelerator, backend, or hardware evidence required for 1.0.
 The installed release CLI now also exposes `rne-asset plugin check`, a
 standalone controller-plugin conformance runner with a versioned,
 content-addressed report and deterministic reset replay. Release rehearsal runs

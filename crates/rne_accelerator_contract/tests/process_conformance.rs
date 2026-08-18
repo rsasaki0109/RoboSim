@@ -1,6 +1,6 @@
 use rne_accelerator_contract::{
-    run_accelerator_process_conformance, AcceleratorProcessConformanceConfig,
-    AcceleratorProcessConformanceReport,
+    run_accelerator_process_conformance, scaffold_accelerator_adapter,
+    AcceleratorProcessConformanceConfig, AcceleratorProcessConformanceReport,
 };
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -91,4 +91,43 @@ fn missing_program_is_a_reported_spawn_failure_not_an_input_alias() {
     assert_eq!(report.checks[0].status, "failed");
     assert!(report.checks[0].detail.contains("could not spawn"));
     assert!(report.frames.is_empty());
+}
+
+#[test]
+fn generated_accelerator_scaffold_passes_the_standalone_process_runner() {
+    let parent = std::env::temp_dir().join(format!(
+        "rne-accelerator-scaffold-process-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&parent);
+    let directory = scaffold_accelerator_adapter("scaffold_process", &parent).unwrap();
+    let adapter = directory.join("adapter.py");
+    let mut config = AcceleratorProcessConformanceConfig::new(python_command());
+    config.arguments = vec![adapter.clone().into_os_string()];
+    config.subject = adapter;
+    let report = run_accelerator_process_conformance(
+        &directory.join("accelerator.toml"),
+        &directory.join("runtime.toml"),
+        &directory.join("task.json"),
+        &config,
+    )
+    .unwrap();
+    assert!(report.passed(), "scaffold checks: {:#?}", report.checks);
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+fn python_command() -> OsString {
+    if let Some(value) = std::env::var_os("PYTHON") {
+        return value;
+    }
+    for candidate in ["python3", "python"] {
+        if std::process::Command::new(candidate)
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            return OsString::from(candidate);
+        }
+    }
+    panic!("accelerator scaffold conformance requires python3 or python");
 }

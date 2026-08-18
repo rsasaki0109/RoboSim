@@ -14,6 +14,7 @@ use thiserror::Error;
 mod conformance;
 mod process_conformance;
 mod protocol;
+mod scaffold;
 mod scale;
 
 pub use conformance::{
@@ -31,6 +32,9 @@ pub use process_conformance::{
 pub use protocol::{
     AcceleratorProtocolFrame, AcceleratorProtocolTranscript, ACCELERATOR_PROTOCOL_TRANSCRIPT_KIND,
     ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION,
+};
+pub use scaffold::{
+    scaffold_accelerator_adapter, validate_accelerator_scaffold_name, AcceleratorScaffoldError,
 };
 pub use scale::{AcceleratorScaleReport, AcceleratorScaleRun, ACCELERATOR_SCALE_REPORT_KIND};
 

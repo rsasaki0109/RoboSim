@@ -1343,7 +1343,7 @@ fn run_install_rehearsal(
     );
 
     let accelerator_report = output_dir.join("accelerator-protocol-conformance.json");
-    let accelerator_passed = run_check_command(
+    let reference_accelerator_passed = run_check_command(
         "external accelerator protocol conformance",
         bundle_dir,
         &accelerator_conformance,
@@ -1379,6 +1379,13 @@ fn run_install_rehearsal(
         "status",
         &serde_json::Value::String("passed".to_string()),
     );
+    let scaffold_accelerator_passed = run_accelerator_scaffold_rehearsal(
+        bundle_dir,
+        output_dir,
+        python,
+        &accelerator_conformance,
+    );
+    let accelerator_passed = reference_accelerator_passed && scaffold_accelerator_passed;
 
     let plugin_report = output_dir.join("controller-plugin-conformance.json");
     let reference_plugin_passed = run_check_command(
@@ -1532,6 +1539,69 @@ fn run_scaffold_rehearsal(
                 .into_os_string(),
             OsString::from("--manifest"),
             crate_dir.join("rne-plugin.json").into_os_string(),
+            OsString::from("--output"),
+            report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    )
+}
+
+fn run_accelerator_scaffold_rehearsal(
+    bundle_dir: &Path,
+    output_dir: &Path,
+    python: &Path,
+    accelerator_conformance: &Path,
+) -> bool {
+    const NAME: &str = "release_scaffold_accelerator";
+    let parent = output_dir.join("accelerator-authoring");
+    if !run_check_command(
+        "scaffold accelerator adapter",
+        bundle_dir,
+        accelerator_conformance,
+        &[
+            OsString::from("scaffold"),
+            OsString::from(NAME),
+            OsString::from("--dir"),
+            parent.clone().into_os_string(),
+        ],
+        &[],
+    ) {
+        return false;
+    }
+    let directory = parent.join(NAME);
+    let readme = match fs::read_to_string(directory.join("README.md")) {
+        Ok(readme) => readme,
+        Err(error) => {
+            eprintln!("could not read accelerator scaffold README: {error}");
+            return false;
+        }
+    };
+    if !readme.contains("cannot qualify as independent evidence") {
+        eprintln!("accelerator scaffold omitted its nonqualifying-evidence warning");
+        return false;
+    }
+    let report = output_dir.join("accelerator-scaffold-conformance.json");
+    run_check_command(
+        "scaffolded accelerator conformance",
+        bundle_dir,
+        accelerator_conformance,
+        &[
+            OsString::from("--adapter"),
+            python.as_os_str().to_os_string(),
+            OsString::from("--adapter-arg"),
+            directory.join("adapter.py").into_os_string(),
+            OsString::from("--subject"),
+            directory.join("adapter.py").into_os_string(),
+            OsString::from("--manifest"),
+            directory.join("accelerator.toml").into_os_string(),
+            OsString::from("--runtime"),
+            directory.join("runtime.toml").into_os_string(),
+            OsString::from("--task"),
+            directory.join("task.json").into_os_string(),
             OsString::from("--output"),
             report.clone().into_os_string(),
         ],
@@ -1791,7 +1861,11 @@ fn remove_generated_child(parent: &Path, path: &Path, expected_name: &str) -> an
 }
 
 fn cleanup_install_rehearsal_transients(output_dir: &Path) -> anyhow::Result<()> {
-    for name in ["wheel-venv", "controller-authoring"] {
+    for name in [
+        "wheel-venv",
+        "controller-authoring",
+        "accelerator-authoring",
+    ] {
         remove_generated_child(output_dir, &output_dir.join(name), name)?;
     }
     Ok(())
@@ -2042,12 +2116,19 @@ mod tests {
         fs::create_dir_all(output.join("wheel-venv/lib")).expect("wheel venv");
         fs::create_dir_all(output.join("controller-authoring/scaffold/target"))
             .expect("controller authoring");
+        fs::create_dir_all(output.join("accelerator-authoring/scaffold"))
+            .expect("accelerator authoring");
         fs::write(output.join("wheel-venv/lib/module.py"), b"temporary").expect("venv file");
         fs::write(
             output.join("controller-authoring/scaffold/target/plugin"),
             b"temporary",
         )
         .expect("controller build");
+        fs::write(
+            output.join("accelerator-authoring/scaffold/adapter.py"),
+            b"temporary",
+        )
+        .expect("accelerator scaffold");
         fs::write(
             output.join("archive-install-rehearsal-report.json"),
             b"retained",
@@ -2061,6 +2142,7 @@ mod tests {
 
         assert!(!output.join("wheel-venv").exists());
         assert!(!output.join("controller-authoring").exists());
+        assert!(!output.join("accelerator-authoring").exists());
         assert_eq!(
             fs::read(output.join("archive-install-rehearsal-report.json")).unwrap(),
             b"retained"

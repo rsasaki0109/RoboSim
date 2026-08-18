@@ -72,6 +72,29 @@ Run the installed deterministic lifecycle from a bundle root:
   --output accelerator-protocol-conformance.json
 ```
 
+Start an external adapter without copying RNE implementation code:
+
+```powershell
+./bin/rne-accelerator-conformance scaffold my_accelerator --dir ./accelerators
+Set-Location ./accelerators/my_accelerator
+../../bin/rne-accelerator-conformance `
+  --adapter python `
+  --adapter-arg adapter.py `
+  --subject adapter.py `
+  --manifest accelerator.toml `
+  --runtime runtime.toml `
+  --task task.json `
+  --output conformance.json
+```
+
+The scaffold has no runtime dependency beyond Python for its initial self-test.
+It includes the typed contracts, a bounded JSONL fixture responder, pinned
+requirements, model placeholder, and selection record. Replace `dispatch` with
+the independently maintained backend and update every placeholder before
+submitting evidence. The generated fixture only proves framing and the authoring
+path: copying, renaming, or conforming it is not third-party evidence, does not
+prove GPU availability or scale, and cannot satisfy a 1.0 external-system gate.
+
 For an interpreted third-party adapter, pass its interpreter as `--adapter`,
 repeat `--adapter-arg` for each argument, and pass the adapter implementation
 file as `--subject`. Spawn, timeout, malformed JSON, envelope, correlation, and
