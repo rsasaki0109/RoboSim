@@ -191,7 +191,9 @@ The deterministic CPU reference runner now implements lane-local seeds,
 partial reset, stable lane order, deferred auto-reset, and replay restoration.
 Rust/Python schema agreement, TaskSpec-derived Gymnasium spaces, and measured
 1/16/256/4096 CPU scaling evidence are present. ADR 014 selects only MJX-Warp;
-its GPU adapter and promotion evidence remain governed by the exit criteria
+the dependency-free Rust verifier also replays a complete nine-exchange JSONL
+protocol transcript, including checkpoint/restore and fail-closed error paths.
+Its GPU adapter and promotion evidence remain governed by the exit criteria
 below, so the milestone is not complete merely because the portable foundation
 exists.
 
@@ -475,7 +477,7 @@ These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
 explicit assessment date, and emits nine fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
-  retained 32-check historical compatibility replay and clean blocker registry
+  retained 33-check historical compatibility replay and clean blocker registry
 report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.

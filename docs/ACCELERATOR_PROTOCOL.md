@@ -9,9 +9,9 @@ x64 and rejects the session if that precision cannot be provided.
 
 The non-published `rne_accelerator_contract` workspace crate is the
 dependency-free-from-vendor Rust reader embedded in the installed compatibility
-verifier for manifest v1, runtime-contract v1, capability-report v1, and
-conformance-report v1. Its
-`validate_against` path binds the report to the exact manifest, runtime pins,
+verifier for manifest v1, runtime-contract v1, capability-report v1,
+protocol-transcript v1, conformance-report v1, and scale-report v1. Its
+`validate_against` paths bind the evidence to the exact manifest, runtime pins,
 and validated TaskSpec. The installed compatibility verifier uses that reader;
 it does not need Python or an accelerator package to reject schema or identity
 drift.
@@ -39,6 +39,15 @@ The operations are:
   chronological step/reset operation log;
 - `close`: destroys one session;
 - `shutdown`: destroys all sessions and exits cleanly.
+
+The committed protocol-transcript v1 golden records nine correlated exchanges:
+all eight operation families plus one stable unsupported-operation error. The
+Rust reader requires exact envelope fields and order, binds the embedded
+TaskSpec, recomputes the lane episode seed, reads the Python checkpoint as
+`PortableBatchCheckpoint<Vec<f64>>`, and requires restore to embed that exact
+checkpoint and reproduce its state. The transcript is the 33rd installed
+compatibility fixture, so future schemas and unknown fields are also exercised
+without Python or accelerator dependencies.
 
 The process permits at most eight sessions, each with at most 100,000 replay
 operations. It accepts only the evidence widths 1, 16, 256, and 4096. A terminal

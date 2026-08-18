@@ -12,12 +12,17 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 mod conformance;
+mod protocol;
 mod scale;
 
 pub use conformance::{
     AcceleratorConformanceActual, AcceleratorConformanceFaultInjection,
     AcceleratorConformanceMetrics, AcceleratorConformanceReference, AcceleratorConformanceReport,
     AcceleratorConformanceTolerances, ACCELERATOR_CONFORMANCE_REPORT_KIND,
+};
+pub use protocol::{
+    AcceleratorProtocolFrame, AcceleratorProtocolTranscript, ACCELERATOR_PROTOCOL_TRANSCRIPT_KIND,
+    ACCELERATOR_PROTOCOL_TRANSCRIPT_SCHEMA_VERSION,
 };
 pub use scale::{AcceleratorScaleReport, AcceleratorScaleRun, ACCELERATOR_SCALE_REPORT_KIND};
 
