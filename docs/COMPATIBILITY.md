@@ -286,8 +286,8 @@ gains/limits, and joint-kind mismatches before a physics step.
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,
-accelerator-protocol/scaffold, dataset, hardware, and evidence constants; changing one
-side alone fails.
+accelerator-protocol/scaffold, controller-scaffold, dataset, hardware, and
+evidence constants; changing one side alone fails.
 
 The installed compatibility corpus is indexed by
 `release/compatibility-fixtures.toml`. Each entry fixes a reader identity,
@@ -306,9 +306,9 @@ trees, schema declarations, and golden blobs, executes the complete corpus with
 the current readers, and requires the supplied report to equal the fresh report
 exactly. The audit records the report, registry, and every fixture digest.
 
-The thirty-five-fixture registry additionally freezes the accelerator scaffold
-schema-v1 file set, controller-plugin conformance report v1, the current
-sensor-goal TaskSpec and its process-isolated
+The thirty-six-fixture registry additionally freezes the accelerator and
+controller scaffold schema-v1 file sets, controller-plugin conformance report
+v1, the current sensor-goal TaskSpec and its process-isolated
 hardware session, all ten frontend protocol-v1 message families and the
 historical `ClientHello` frame, all five dataset-native
 payload families, behavior replay v1, scenario replay v4, the renderer-backed

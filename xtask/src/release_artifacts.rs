@@ -6,6 +6,7 @@ use super::{
 };
 use anyhow::{bail, Context};
 use rne_accelerator_contract::AcceleratorScaffoldContract;
+use rne_plugin::ControllerPluginScaffoldContract;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,7 +56,7 @@ const INSTALL_CHECK_IDS: [&str; 10] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 77] = [
+const BUNDLE_FILES: [(&str, &str); 78] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -212,6 +213,10 @@ const BUNDLE_FILES: [(&str, &str); 77] = [
     (
         "tests/golden/plugins/controller-plugin-conformance-v1.json",
         "tests/golden/plugins/controller-plugin-conformance-v1.json",
+    ),
+    (
+        "tests/golden/plugins/controller-scaffold-v1.json",
+        "tests/golden/plugins/controller-scaffold-v1.json",
     ),
     (
         "tests/golden/datasets/bundle-manifest-v1.json",
@@ -1483,12 +1488,30 @@ fn run_scaffold_rehearsal(
             OsString::from(NAME),
             OsString::from("--dir"),
             parent.clone().into_os_string(),
+            OsString::from("--schema"),
+            OsString::from("1"),
         ],
         &[],
     ) {
         return false;
     }
     let crate_dir = parent.join(NAME);
+    let contract_path = crate_dir.join("rne-scaffold.json");
+    let contract = match fs::read(&contract_path)
+        .map_err(anyhow::Error::from)
+        .and_then(|bytes| {
+            ControllerPluginScaffoldContract::from_json_slice(&bytes).map_err(Into::into)
+        }) {
+        Ok(contract) => contract,
+        Err(error) => {
+            eprintln!("could not validate controller scaffold contract: {error:#}");
+            return false;
+        }
+    };
+    if let Err(error) = contract.validate_directory(&crate_dir) {
+        eprintln!("controller scaffold directory differs from its contract: {error}");
+        return false;
+    }
     let bundled_sdk = bundle_dir.join("sdk/rust/rne_plugin_sdk.rs");
     let scaffold_sdk = crate_dir.join("src/rne_plugin_sdk.rs");
     match (fs::read(&bundled_sdk), fs::read(&scaffold_sdk)) {

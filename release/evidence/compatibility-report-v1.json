@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:62f4c8359e67bec282b0b5083fa418a41914006ad49f9013bd4d1f8213febfc8",
+  "registry_sha256": "sha256:5a211c895de93c8e95f03a0fb40947a1250379d5a977012fce9a820afaba391c",
   "checks": [
     {
       "id": "accelerator_capability_v1",
@@ -106,6 +106,18 @@
       "schema_version": 1,
       "path": "tests/golden/plugins/controller-plugin-conformance-v1.json",
       "canonical_json_sha256": "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "controller_plugin_scaffold_v1",
+      "contract": "controller_plugin_scaffold",
+      "schema_version": 1,
+      "path": "tests/golden/plugins/controller-scaffold-v1.json",
+      "canonical_json_sha256": "sha256:e01ce884cc707b7b71e189114d7eada83cd7ae531ea5323f478443b20f939573",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

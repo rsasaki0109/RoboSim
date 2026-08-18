@@ -8,6 +8,8 @@ controller_schema = 1
 conformance_report = 1
 authoring_sdk = 1
 c_layout = 1
+scaffold_minimum = 1
+scaffold_current = 1
 
 [frontend_transport]
 major = 1

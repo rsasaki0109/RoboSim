@@ -24,14 +24,14 @@ history, reruns the same corpus with current typed readers, and requires the
 retained report to match the newly computed report exactly.
 
 The strict registry is `release/compatibility-fixtures.toml`. Schema v1
-contains thirty-five fixtures:
+contains thirty-six fixtures:
 
 | Contract | Retained artifact |
 |---|---|
 | Accelerator boundary | capability, complete nine-exchange protocol lifecycle, content-addressed process conformance, schema-v1 scaffold file-set contract, CPU parity/conformance, and scale reports, all bound to the selected manifest, runtime pins, and TaskSpec |
 | Task contract | retained original TaskSpec v1 and current sensor-goal TaskSpec v1 under distinct identities |
 | Batch execution | portable batch checkpoint v2 |
-| Controller ABI and conformance | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1 |
+| Controller ABI, conformance, and authoring | ABI-v3 64-bit C layout, capabilities, and required symbols; controller-plugin conformance report v1; content-addressed controller scaffold schema v1 |
 | Replay | generic replay v1, behavior replay v1, and scenario replay v4 |
 | Historical decisions | Frontend transport v1, TaskSpec v1, Failure Capsule v1, dataset bundle v1, and vectorized checkpoint v1 retained exactly; scenario replay v2 and v3 rejected with a required-rerun decision |
 | Dataset | bundle manifest v1, depth evaluation v1, and native payload v1 |
@@ -75,6 +75,12 @@ required capabilities, and strict report deserialization. Its placeholder
 library digest is not third-party execution evidence. The 1.0 readiness gate
 separately requires an independently owned repository and rehashes the retained
 real library and manifest against a freshly validated conformance report.
+
+The separate controller-scaffold fixture is generated from the retained
+schema-v1 implementation for the fixed `compatibility_controller` identity.
+It freezes ordered paths, byte lengths, and SHA-256 digests for the vendored
+SDK and all author files. It proves reproducible offline authoring output, not
+independent third-party adoption or execution evidence.
 
 The original five-element `rne.diff_drive.goal.v1` TaskSpec remains immutable.
 The current nine-element sensor-bearing contract uses the distinct

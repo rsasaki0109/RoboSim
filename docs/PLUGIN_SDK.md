@@ -16,7 +16,7 @@ not need those implementation APIs.
 The installed CLI vendors the exact SDK module into every new scaffold:
 
 ```bash
-rne-asset plugin new my_controller --dir plugins
+rne-asset plugin new my_controller --dir plugins --schema 1
 cargo build --offline --manifest-path plugins/my_controller/Cargo.toml
 rne-asset plugin check \
   --library plugins/my_controller/target/debug/libmy_controller.so \
@@ -28,6 +28,13 @@ Use `my_controller.dll` on Windows or `libmy_controller.dylib` on macOS. The
 generated crate has no registry dependencies. Its `src/rne_plugin_sdk.rs` must
 remain byte-for-byte compatible with the SDK version declared by the release;
 regenerating the scaffold is the simplest upgrade path.
+
+Every generated crate also contains canonical `rne-scaffold.json`. Schema v1
+content-addresses the exact four author files (`Cargo.toml`, the vendored SDK,
+`src/lib.rs`, and `rne-plugin.json`) and rejects missing, extra, modified, or
+symlinked entries. `--schema 1` deliberately reproduces that retained output;
+future incompatible generator changes must add a new schema and keep the old
+generator available for the documented compatibility window.
 
 Authors who manage dependencies directly may instead use the exact matching
 `rne_plugin_sdk` crate version and import the same ABI items. The release bundle
@@ -61,6 +68,8 @@ that it created. `rne-asset plugin check` exercises those observable contracts.
 ## Compatibility
 
 - `RNE_PLUGIN_SDK_VERSION` versions the Rust authoring surface.
+- `CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION` versions generated authoring
+  files independently from the SDK and C ABI.
 - `RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION` versions the layout fixture.
 - `RNE_PLUGIN_ABI_VERSION` selects the exported C ABI.
 - Capability bits are additive within one ABI version; unknown bits fail

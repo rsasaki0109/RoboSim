@@ -65,6 +65,13 @@ path = "tests/golden/plugins/controller-plugin-conformance-v1.json"
 canonical_json_sha256 = "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7"
 
 [[fixture]]
+id = "controller_plugin_scaffold_v1"
+contract = "controller_plugin_scaffold"
+schema_version = 1
+path = "tests/golden/plugins/controller-scaffold-v1.json"
+canonical_json_sha256 = "sha256:e01ce884cc707b7b71e189114d7eada83cd7ae531ea5323f478443b20f939573"
+
+[[fixture]]
 id = "dataset_bundle_v1"
 contract = "dataset_bundle"
 schema_version = 1

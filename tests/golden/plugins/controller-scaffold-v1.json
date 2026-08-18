@@ -1,0 +1,27 @@
+{
+  "kind": "rne_controller_plugin_scaffold_contract",
+  "schema_version": 1,
+  "plugin_name": "compatibility_controller",
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "byte_length": 306,
+      "sha256": "sha256:f222391f7bbb7c5c7285b85ca527c0c04ac805a2dc29105602e181c7a547de53"
+    },
+    {
+      "path": "src/rne_plugin_sdk.rs",
+      "byte_length": 5861,
+      "sha256": "sha256:eeffd3a579ab9665175e91a66011985a04f6604804e83f5653c34c5d8a618ae2"
+    },
+    {
+      "path": "src/lib.rs",
+      "byte_length": 11284,
+      "sha256": "sha256:65e22e2118e5b5d8e5327dbf51091c1c5d0d42da8edfd2d7e3d2994415e8d4ae"
+    },
+    {
+      "path": "rne-plugin.json",
+      "byte_length": 65,
+      "sha256": "sha256:1f1f6d141433217f058bf1c38918ba51af093a1d5948b5183b9718c2a7a4734b"
+    }
+  ]
+}

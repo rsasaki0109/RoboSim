@@ -139,11 +139,12 @@ controller libraries and manifests, physics implementation/source bundles, and
 hardware adapter bytes plus TaskSpec and normalized launch contract back to the
 report's content identity and external source revision.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
-corpus for thirty-five historical/current fixtures spanning TaskSpec identities, checkpoint,
-generic/behavior/scenario replay, dataset, renderer capture, all ten frontend
-protocol-v1 message families, controller C ABI and plugin-conformance report,
-historical migration, Failure Capsule, TaskSpec-bound hardware session, and
-physics artifacts. `rne-compatibility` runs every current typed reader, proves
+corpus for thirty-six historical/current fixtures spanning TaskSpec identities,
+checkpoint, generic/behavior/scenario replay, dataset, renderer capture, all
+ten frontend protocol-v1 message families, controller C ABI,
+plugin-conformance report, controller-scaffold contract, historical migration,
+Failure Capsule, TaskSpec-bound hardware session, and physics artifacts.
+`rne-compatibility` runs every current typed reader, proves
 fail-closed handling of a deterministic future schema and unknown field, and
 verifies byte-exact frontend/dataset payload round trips with malformed-input
 rejection. Release rehearsal requires the same corpus after extraction on both

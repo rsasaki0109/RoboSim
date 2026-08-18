@@ -150,7 +150,7 @@ The bundle includes the dependency-free authoring module at
 registry dependencies (a Rust toolchain is required):
 
 ```bash
-./bin/rne-asset plugin new release_controller --dir authoring
+./bin/rne-asset plugin new release_controller --dir authoring --schema 1
 cargo build --offline \
   --manifest-path authoring/release_controller/Cargo.toml
 ./bin/rne-asset plugin check \
@@ -161,6 +161,9 @@ cargo build --offline \
 
 Use the corresponding `.exe` and `.dll` names on Windows. The generated
 `src/rne_plugin_sdk.rs` is byte-identical to the module included in the bundle.
+Its canonical `rne-scaffold.json` also verifies the exact schema-v1 file set
+before the offline build, so extra, missing, symlinked, or modified author files
+fail the installed rehearsal.
 C and C++ controller authors can instead include `sdk/c/rne_plugin_sdk.h`; the
 installed compatibility corpus verifies its registered 64-bit ABI-v3 layout
 and required symbols.

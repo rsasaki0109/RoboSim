@@ -43,7 +43,13 @@ pub use lifecycle::{
     ControllerLifecycleError, ControllerLifecycleState, ControllerNegotiation,
     ControllerPluginError, ControllerResetContext,
 };
-pub use scaffold::{scaffold_controller_plugin, validate_plugin_name, ScaffoldError};
+pub use scaffold::{
+    controller_plugin_scaffold_contract, controller_plugin_scaffold_contract_for_schema,
+    scaffold_controller_plugin, scaffold_controller_plugin_for_schema, validate_plugin_name,
+    ControllerPluginScaffoldContract, ControllerPluginScaffoldFile, ScaffoldError,
+    CONTROLLER_PLUGIN_SCAFFOLD_CONTRACT_KIND, CONTROLLER_PLUGIN_SCAFFOLD_MIN_SCHEMA_VERSION,
+    CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION,
+};
 pub use scheduler::{ControllerScheduleError, ControllerScheduler};
 
 /// Plugin kind used for discovery.

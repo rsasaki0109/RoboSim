@@ -1229,6 +1229,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_plugin::RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION),
         ),
         (
+            "controller_abi",
+            "scaffold_minimum",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_MIN_SCHEMA_VERSION),
+        ),
+        (
+            "controller_abi",
+            "scaffold_current",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION),
+        ),
+        (
             "frontend_transport",
             "major",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MAJOR),

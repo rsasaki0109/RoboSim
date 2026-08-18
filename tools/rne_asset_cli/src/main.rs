@@ -283,6 +283,12 @@ enum PluginCommand {
         /// Parent directory receiving the plugin crate.
         #[arg(long, value_name = "DIR", default_value = ".")]
         dir: PathBuf,
+        /// Retained controller scaffold schema to generate.
+        #[arg(
+            long,
+            default_value_t = rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION
+        )]
+        schema: u32,
     },
     /// List built-in and discoverable controller plugins.
     List {
@@ -3008,10 +3014,13 @@ fn co_sim_command(path: &Path, routes: &Path, steps: u64, determinism_check: boo
 /// Dispatches the `plugin` subcommands.
 fn plugin_command(command: PluginCommand) -> Result<()> {
     match command {
-        PluginCommand::New { name, dir } => {
-            let crate_dir = rne_plugin::scaffold_controller_plugin(&name, &dir)
+        PluginCommand::New { name, dir, schema } => {
+            let crate_dir = rne_plugin::scaffold_controller_plugin_for_schema(&name, &dir, schema)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
-            println!("plugin: scaffolded `{name}` at {}", crate_dir.display());
+            println!(
+                "plugin: scaffolded `{name}` schema {schema} at {}",
+                crate_dir.display()
+            );
             println!(
                 "  cargo build --manifest-path {}/Cargo.toml",
                 crate_dir.display()
@@ -4220,12 +4229,14 @@ mod tests {
         plugin_command(PluginCommand::New {
             name: "cli_plugin".to_string(),
             dir: parent.clone(),
+            schema: 1,
         })
         .expect("scaffold plugin");
 
         let crate_dir = parent.join("cli_plugin");
         assert!(crate_dir.join("Cargo.toml").exists());
         assert!(crate_dir.join("src/lib.rs").exists());
+        assert!(crate_dir.join("rne-scaffold.json").exists());
         assert!(crate_dir.join("src/rne_plugin_sdk.rs").exists());
         assert!(crate_dir.join("rne-plugin.json").exists());
         let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).expect("read lib.rs");

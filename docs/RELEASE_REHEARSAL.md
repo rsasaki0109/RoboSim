@@ -24,7 +24,8 @@ relabelled as v5. The hardware check executes nine
 TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
-denied; the scaffold SDK must match the bundled SDK byte-for-byte.
+denied; the scaffold SDK must match the bundled SDK byte-for-byte and its
+canonical schema-v1 `rne-scaffold.json` must validate the exact author file set.
 The accelerator check executes all nine JSONL exchanges against the bundled
 mock, then generates a dependency-free adapter scaffold from the installed CLI
 and runs the same process kit against it. Both eleven-check content-addressed
@@ -32,6 +33,8 @@ reports must bind the exact manifest, runtime contract, TaskSpec, checkpoint,
 and clean shutdown. The scaffold README must retain its explicit warning that
 the fixture is authoring-path evidence, not independent accelerator evidence;
 its canonical `rne-scaffold.json` must validate the exact schema-v1 file set.
+Both scaffold contracts are retained compatibility fixtures; neither counts as
+independent external implementation evidence.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path

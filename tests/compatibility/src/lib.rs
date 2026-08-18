@@ -57,7 +57,9 @@ use rne_openscenario::{
 use rne_physics_conformance::ExternalPhysicsBackendConformanceReport;
 use rne_physics_conformance_suite::ConformanceReport;
 use rne_plugin::{
-    ControllerPluginConformanceReport, CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    controller_plugin_scaffold_contract_for_schema, ControllerPluginConformanceReport,
+    ControllerPluginScaffoldContract, CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
+    CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION,
 };
 use rne_plugin_sdk::{
     RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
@@ -114,7 +116,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 35] = [
+const FIXTURE_SPECS: [FixtureSpec; 36] = [
     FixtureSpec {
         id: "accelerator_capability_v1",
         contract: "accelerator_capability",
@@ -167,6 +169,12 @@ const FIXTURE_SPECS: [FixtureSpec; 35] = [
         id: "controller_plugin_conformance_v1",
         contract: "controller_plugin_conformance",
         schema_version: CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "controller_plugin_scaffold_v1",
+        contract: "controller_plugin_scaffold",
+        schema_version: CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1544,6 +1552,18 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
             ensure!(
                 fixture.passed(),
                 "controller plugin conformance fixture failed"
+            );
+        }
+        "controller_plugin_scaffold" => {
+            let fixture: ControllerPluginScaffoldContract = serde_json::from_value(value)?;
+            fixture.validate()?;
+            ensure!(
+                fixture
+                    == controller_plugin_scaffold_contract_for_schema(
+                        &fixture.plugin_name,
+                        fixture.schema_version,
+                    )?,
+                "controller plugin scaffold generator differs from retained schema"
             );
         }
         "dataset_bundle" => {
