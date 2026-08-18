@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 1;
+const REGISTRY_SCHEMA_VERSION: u32 = 2;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -28,6 +28,8 @@ struct IntakeRoute {
     issue_template: String,
     independent_owner_required: bool,
     author_assistance_allowed: bool,
+    qualifying_kinds: Vec<String>,
+    audited_nonqualifying_kinds: Vec<String>,
     required_metadata: Vec<String>,
     required_artifacts: Vec<String>,
     #[serde(default)]
@@ -40,6 +42,8 @@ struct ExpectedRoute {
     readiness_check: &'static str,
     minimum_accepted: u32,
     author_assistance_allowed: bool,
+    qualifying_kinds: &'static [&'static str],
+    audited_nonqualifying_kinds: &'static [&'static str],
     template: &'static str,
     metadata: &'static [&'static str],
     artifacts: &'static [&'static str],
@@ -53,6 +57,8 @@ const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
         readiness_check: "external_projects",
         minimum_accepted: 2,
         author_assistance_allowed: false,
+        qualifying_kinds: &[],
+        audited_nonqualifying_kinds: &[],
         template: ".github/ISSUE_TEMPLATE/external-project-evidence.yml",
         metadata: &[
             "owner",
@@ -82,6 +88,8 @@ const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
         readiness_check: "third_party_plugin",
         minimum_accepted: 1,
         author_assistance_allowed: true,
+        qualifying_kinds: &[],
+        audited_nonqualifying_kinds: &[],
         template: ".github/ISSUE_TEMPLATE/third-party-plugin-evidence.yml",
         metadata: &["owner", "repository", "revision"],
         artifacts: &["library", "manifest", "report"],
@@ -104,6 +112,8 @@ const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
         readiness_check: "external_system",
         minimum_accepted: 1,
         author_assistance_allowed: true,
+        qualifying_kinds: &["physics_backend", "hardware_adapter"],
+        audited_nonqualifying_kinds: &["accelerator_adapter"],
         template: ".github/ISSUE_TEMPLATE/external-system-evidence.yml",
         metadata: &["owner", "repository", "revision", "kind"],
         artifacts: &["subject", "report"],
@@ -111,6 +121,10 @@ const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
             "hardware_adapter.task_spec",
             "hardware_adapter.adapter_arguments",
             "hardware_adapter.safety_authorization",
+            "accelerator_adapter.task_spec",
+            "accelerator_adapter.adapter_arguments",
+            "accelerator_adapter.accelerator_manifest",
+            "accelerator_adapter.runtime_contract",
         ],
         form_fields: &[
             "independence",
@@ -122,6 +136,8 @@ const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
             "subject",
             "task_spec",
             "adapter_arguments",
+            "accelerator_manifest",
+            "runtime_contract",
             "report",
             "conformance_command",
             "safety",
@@ -282,6 +298,18 @@ fn validate_route(route: &IntakeRoute, expected: &ExpectedRoute) -> Result<()> {
         route.id
     );
     ensure_exact(
+        &route.qualifying_kinds,
+        expected.qualifying_kinds,
+        "qualifying kinds",
+        &route.id,
+    )?;
+    ensure_exact(
+        &route.audited_nonqualifying_kinds,
+        expected.audited_nonqualifying_kinds,
+        "audited nonqualifying kinds",
+        &route.id,
+    )?;
+    ensure_exact(
         &route.required_metadata,
         expected.metadata,
         "metadata",
@@ -427,6 +455,21 @@ fn validate_issue_form(text: &str, route: &IntakeRoute) -> Result<()> {
         text.contains("A submitted issue is not acceptance evidence"),
         "issue form must say that submission is not acceptance"
     );
+    if route.id == "external_system" {
+        let physics = text
+            .find("        - physics_backend\n")
+            .context("external system form omitted physics_backend")?;
+        let hardware = text
+            .find("        - hardware_adapter\n")
+            .context("external system form omitted hardware_adapter")?;
+        let accelerator = text
+            .find("        - accelerator_adapter\n")
+            .context("external system form omitted accelerator_adapter")?;
+        anyhow::ensure!(
+            physics < hardware && hardware < accelerator,
+            "external system kind options are not canonical"
+        );
+    }
     Ok(())
 }
 
@@ -437,6 +480,29 @@ mod tests {
     #[test]
     fn committed_external_intake_contract_is_complete() {
         validate_committed(&workspace_root().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn external_system_eligibility_and_form_kinds_cannot_drift() {
+        let root = workspace_root().unwrap();
+        let registry: IntakeRegistry =
+            toml::from_str(&fs::read_to_string(root.join(DEFAULT_REGISTRY)).unwrap()).unwrap();
+        let route = registry
+            .route
+            .iter()
+            .find(|route| route.id == "external_system")
+            .unwrap();
+        assert_eq!(
+            route.qualifying_kinds,
+            ["physics_backend", "hardware_adapter"]
+        );
+        assert_eq!(route.audited_nonqualifying_kinds, ["accelerator_adapter"]);
+        let form = fs::read_to_string(root.join(&route.issue_template)).unwrap();
+        validate_issue_form(&form, route).unwrap();
+        assert!(
+            validate_issue_form(&form.replace("        - accelerator_adapter\n", ""), route)
+                .is_err()
+        );
     }
 
     #[test]
@@ -468,6 +534,8 @@ mod tests {
             issue_template: "test.yml".to_string(),
             independent_owner_required: true,
             author_assistance_allowed: false,
+            qualifying_kinds: Vec::new(),
+            audited_nonqualifying_kinds: Vec::new(),
             required_metadata: Vec::new(),
             required_artifacts: Vec::new(),
             conditional_requirements: Vec::new(),
@@ -484,7 +552,7 @@ mod tests {
 
     #[test]
     fn registry_and_paths_fail_closed() {
-        let unknown = "schema_version = 1\nguide_path = \"guide.md\"\nunknown = true\n";
+        let unknown = "schema_version = 2\nguide_path = \"guide.md\"\nunknown = true\n";
         assert!(toml::from_str::<IntakeRegistry>(unknown).is_err());
         for path in [
             "",

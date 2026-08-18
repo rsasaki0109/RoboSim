@@ -62,6 +62,14 @@ wrapper are `actions/attest@v4` subjects and each receives a fresh strict
 verification receipt during readiness evaluation. The gate reconstructs the
 checksum member graph instead of trusting either report's aggregate status.
 
+Tracker schema v4 adds independently owned accelerator-adapter evidence as a
+separate audited collection. Evaluation reparses the retained TaskSpec,
+accelerator manifest, runtime contract, and complete process report, then
+rehashes those files, the adapter subject, and normalized launch arguments.
+These entries are deliberately excluded from the `external_system` count:
+only a third-party physics backend or hardware adapter satisfies that 1.0
+condition, so adding accelerator ecosystem evidence cannot weaken promotion.
+
 ## Consequences
 
 - RNE can report incremental progress without claiming 1.0 readiness.
@@ -73,6 +81,8 @@ checksum member graph instead of trusting either report's aggregate status.
   review; the tool verifies identities, structure, provenance, and bytes.
 - A passing conformance JSON cannot be moved onto different plugin, backend, or
   adapter bytes inside the readiness pack.
+- Passing accelerator evidence is visible and tamper-checked without being
+  misrepresented as the required external backend or hardware adapter.
 - A compatibility JSON cannot substitute for executing the registered corpus;
   promotion replays all readers and requires an exact report match.
 - The committed tracker may count historical compatibility because its

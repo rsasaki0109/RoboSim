@@ -105,7 +105,8 @@ tag, source and signer commit, predicate, issuer, runner class, and archive
 digest before accepting a strict schema-v1 receipt. Each platform now also
 signs a separate archive-install report whose digest chain fixes the archive,
 extracted release report, SHA256SUMS member graph, and ten-check rehearsal;
-readiness manifest v3 freshly verifies both signed subjects.
+readiness manifest v4 freshly verifies both signed subjects and audits
+third-party accelerator adapters without weakening the external-system gate.
 The installed release CLI now also exposes `rne-asset plugin check`, a
 standalone controller-plugin conformance runner with a versioned,
 content-addressed report and deterministic reset replay. Release rehearsal runs

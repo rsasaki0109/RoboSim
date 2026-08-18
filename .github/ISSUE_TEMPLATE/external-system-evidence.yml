@@ -1,11 +1,11 @@
-name: External backend or hardware adapter evidence
-description: Submit an independently maintained physics backend or hardware adapter conformance result.
+name: External backend, hardware, or accelerator evidence
+description: Submit an independently maintained physics backend, hardware adapter, or accelerator adapter conformance result.
 title: "[External system evidence] "
 body:
   - type: markdown
     attributes:
       value: |
-        Follow the backend or hardware guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Follow the backend, hardware, or accelerator guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
         A submitted issue is not acceptance evidence. The readiness gate rebinds every report to its exact implementation subject.
   - type: checkboxes
     id: independence
@@ -27,6 +27,7 @@ body:
       options:
         - physics_backend
         - hardware_adapter
+        - accelerator_adapter
     validations:
       required: true
   - type: input
@@ -76,15 +77,29 @@ body:
   - type: textarea
     id: task_spec
     attributes:
-      label: Hardware TaskSpec or not-applicable declaration
-      description: For hardware, provide immutable URL, file name, size, and sha256. For physics, state not applicable.
+      label: Adapter TaskSpec or not-applicable declaration
+      description: For hardware or accelerator adapters, provide immutable URL, file name, size, and sha256. For physics, state not applicable.
     validations:
       required: true
   - type: textarea
     id: adapter_arguments
     attributes:
       label: Normalized adapter arguments or not-applicable declaration
-      description: For hardware, provide the exact ordered JSON list using the adapter-subject marker. For physics, state not applicable.
+      description: For hardware or accelerator adapters, provide the exact ordered JSON list using the adapter-subject marker. For physics, state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: accelerator_manifest
+    attributes:
+      label: Accelerator manifest or not-applicable declaration
+      description: For accelerator adapters, provide immutable URL, file name, size, and sha256 for the exact TOML manifest. Otherwise state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: runtime_contract
+    attributes:
+      label: Accelerator runtime contract or not-applicable declaration
+      description: For accelerator adapters, provide immutable URL, file name, size, and sha256 for the exact TOML runtime contract. Otherwise state not applicable.
     validations:
       required: true
   - type: textarea
@@ -112,7 +127,7 @@ body:
     attributes:
       label: Safety declaration
       options:
-        - label: This is physics-only, or hardware conformance ran against a sandbox, simulator, process mock, or correctly isolated HIL rig with explicit authorization.
+        - label: This is physics or accelerator process conformance, or hardware conformance ran against a sandbox, simulator, process mock, or correctly isolated HIL rig with explicit authorization.
           required: true
     validations:
       required: true

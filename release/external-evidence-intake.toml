@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 
 [[route]]
@@ -8,6 +8,8 @@ minimum_accepted = 2
 issue_template = ".github/ISSUE_TEMPLATE/external-project-evidence.yml"
 independent_owner_required = true
 author_assistance_allowed = false
+qualifying_kinds = []
+audited_nonqualifying_kinds = []
 required_metadata = ["owner", "repository", "revision", "first_used_on", "last_verified_on", "author_assistance"]
 required_artifacts = ["task_spec", "failure_capsule"]
 form_fields = ["independence", "repository", "revision", "rne_release", "first_used_on", "last_verified_on", "task_spec", "failure_capsule", "reproduction_command", "verification"]
@@ -19,6 +21,8 @@ minimum_accepted = 1
 issue_template = ".github/ISSUE_TEMPLATE/third-party-plugin-evidence.yml"
 independent_owner_required = true
 author_assistance_allowed = true
+qualifying_kinds = []
+audited_nonqualifying_kinds = []
 required_metadata = ["owner", "repository", "revision"]
 required_artifacts = ["library", "manifest", "report"]
 form_fields = ["independence", "repository", "revision", "rne_release", "platform", "library", "manifest", "report", "conformance_command", "verification"]
@@ -30,7 +34,9 @@ minimum_accepted = 1
 issue_template = ".github/ISSUE_TEMPLATE/external-system-evidence.yml"
 independent_owner_required = true
 author_assistance_allowed = true
+qualifying_kinds = ["physics_backend", "hardware_adapter"]
+audited_nonqualifying_kinds = ["accelerator_adapter"]
 required_metadata = ["owner", "repository", "revision", "kind"]
 required_artifacts = ["subject", "report"]
-conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization"]
-form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "report", "conformance_command", "safety", "verification"]
+conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization", "accelerator_adapter.task_spec", "accelerator_adapter.adapter_arguments", "accelerator_adapter.accelerator_manifest", "accelerator_adapter.runtime_contract"]
+form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "accelerator_manifest", "runtime_contract", "report", "conformance_command", "safety", "verification"]

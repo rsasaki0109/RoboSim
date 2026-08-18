@@ -8,6 +8,9 @@ use super::{
     workspace_root, RELEASE_VERSION,
 };
 use anyhow::{bail, Context};
+use rne_accelerator_contract::{
+    AcceleratorManifest, AcceleratorProcessConformanceReport, AcceleratorRuntimeContract,
+};
 use rne_ai::TaskSpec;
 use rne_compatibility_suite::CompatibilityFixtureReport;
 use rne_hardware_gateway::{
@@ -28,7 +31,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 3;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 4;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -45,6 +48,7 @@ const MINIMUM_COMPATIBILITY_CHECKS: usize = 34;
 pub(crate) const MAX_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ADAPTER_ARGUMENTS: usize = 128;
 const MAX_ADAPTER_ARGUMENT_BYTES: usize = 4_096;
+const ACCELERATOR_ADAPTER_EVIDENCE_FILES: usize = 5;
 const PLATFORM_RELEASE_EVIDENCE_FILES: usize = 7;
 const CHECK_IDS: [&str; 9] = [
     "stability_window",
@@ -78,6 +82,7 @@ struct ReadinessManifest {
     third_party_plugin: Vec<ThirdPartyPluginEvidence>,
     #[serde(default)]
     external_system: Vec<ExternalSystemEvidence>,
+    accelerator_adapter: Vec<AcceleratorAdapterEvidence>,
     #[serde(default)]
     platform_release: Vec<PlatformReleaseEvidence>,
     #[serde(default)]
@@ -154,6 +159,22 @@ struct ExternalSystemEvidence {
     subject: EvidenceRef,
     #[serde(default)]
     task_spec: Option<EvidenceRef>,
+    #[serde(default)]
+    adapter_arguments: Vec<String>,
+    report: EvidenceRef,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcceleratorAdapterEvidence {
+    id: String,
+    owner: String,
+    repository: String,
+    revision: String,
+    subject: EvidenceRef,
+    task_spec: EvidenceRef,
+    accelerator_manifest: EvidenceRef,
+    runtime_contract: EvidenceRef,
     #[serde(default)]
     adapter_arguments: Vec<String>,
     report: EvidenceRef,
@@ -678,6 +699,13 @@ fn validate_unique_manifest_entries(manifest: &ReadinessManifest) -> anyhow::Res
             .iter()
             .map(|entry| entry.id.as_str()),
     )?;
+    unique_ids(
+        "accelerator adapter",
+        manifest
+            .accelerator_adapter
+            .iter()
+            .map(|entry| entry.id.as_str()),
+    )?;
     let platforms = manifest
         .platform_release
         .iter()
@@ -722,6 +750,7 @@ fn evaluate(
 
     let plugin_digests = verify_third_party_plugins(evidence_root, manifest)?;
     let system_digests = verify_external_systems(evidence_root, manifest)?;
+    let accelerator_adapter_digests = verify_accelerator_adapters(evidence_root, manifest)?;
     let hardware_digests = verify_reference_hardware(evidence_root, manifest)?;
     let release_digests = verify_platform_releases(root, evidence_root, manifest)?;
     let compatibility_digests = verify_compatibility(root, evidence_root, manifest)?;
@@ -770,8 +799,9 @@ fn evaluate(
             CHECK_IDS[3],
             !manifest.external_system.is_empty(),
             format!(
-                "verified_external_systems={}",
-                manifest.external_system.len()
+                "verified_external_systems={} audited_accelerator_adapters={}",
+                manifest.external_system.len(),
+                accelerator_adapter_digests.len() / ACCELERATOR_ADAPTER_EVIDENCE_FILES
             ),
             system_digests,
         ),
@@ -1123,6 +1153,123 @@ fn verify_external_systems(
     Ok(digests)
 }
 
+fn verify_accelerator_adapters(
+    evidence_root: &Path,
+    manifest: &ReadinessManifest,
+) -> anyhow::Result<Vec<String>> {
+    let mut repositories = BTreeSet::new();
+    let mut subjects = BTreeSet::new();
+    let mut digests = Vec::new();
+    for entry in &manifest.accelerator_adapter {
+        validate_identifier("accelerator adapter id", &entry.id)?;
+        validate_external_owner(
+            &manifest.project_owner,
+            &entry.owner,
+            &entry.repository,
+            "accelerator adapter",
+        )?;
+        validate_external_revision("accelerator adapter", &entry.id, &entry.revision)?;
+        anyhow::ensure!(
+            repositories.insert(entry.repository.as_str()),
+            "accelerator adapter repository is duplicated: {}",
+            entry.repository
+        );
+
+        let subject = verify_evidence(evidence_root, &entry.subject)?;
+        let task = verify_evidence(evidence_root, &entry.task_spec)?;
+        let manifest_evidence = verify_evidence(evidence_root, &entry.accelerator_manifest)?;
+        let runtime_evidence = verify_evidence(evidence_root, &entry.runtime_contract)?;
+        let report_evidence = verify_evidence(evidence_root, &entry.report)?;
+
+        let task_spec: TaskSpec = serde_json::from_slice(&task.bytes)
+            .with_context(|| format!("parse accelerator adapter {} TaskSpec", entry.id))?;
+        task_spec
+            .validate()
+            .with_context(|| format!("validate accelerator adapter {} TaskSpec", entry.id))?;
+        let accelerator_manifest: AcceleratorManifest = toml::from_str(
+            std::str::from_utf8(&manifest_evidence.bytes).with_context(|| {
+                format!("accelerator adapter {} manifest is not UTF-8", entry.id)
+            })?,
+        )
+        .with_context(|| format!("parse accelerator adapter {} manifest", entry.id))?;
+        accelerator_manifest
+            .validate()
+            .with_context(|| format!("validate accelerator adapter {} manifest", entry.id))?;
+        let runtime: AcceleratorRuntimeContract = toml::from_str(
+            std::str::from_utf8(&runtime_evidence.bytes).with_context(|| {
+                format!(
+                    "accelerator adapter {} runtime contract is not UTF-8",
+                    entry.id
+                )
+            })?,
+        )
+        .with_context(|| format!("parse accelerator adapter {} runtime contract", entry.id))?;
+        runtime.validate().with_context(|| {
+            format!("validate accelerator adapter {} runtime contract", entry.id)
+        })?;
+        let report: AcceleratorProcessConformanceReport =
+            serde_json::from_slice(&report_evidence.bytes).with_context(|| {
+                format!("parse accelerator adapter {} process report", entry.id)
+            })?;
+        report
+            .validate_against(&accelerator_manifest, &runtime, &task_spec)
+            .with_context(|| {
+                format!(
+                    "bind accelerator adapter {} report to retained contracts",
+                    entry.id
+                )
+            })?;
+
+        verify_unprefixed_subject(
+            "accelerator adapter subject",
+            &subject,
+            &report.subject.adapter_file,
+            &report.subject.adapter_sha256,
+            Some(report.subject.adapter_size_bytes),
+        )?;
+        verify_unprefixed_subject(
+            "accelerator adapter TaskSpec",
+            &task,
+            &report.subject.task_file,
+            &report.subject.task_sha256,
+            None,
+        )?;
+        verify_unprefixed_subject(
+            "accelerator adapter manifest",
+            &manifest_evidence,
+            &report.subject.manifest_file,
+            &report.subject.manifest_sha256,
+            None,
+        )?;
+        verify_unprefixed_subject(
+            "accelerator adapter runtime contract",
+            &runtime_evidence,
+            &report.subject.runtime_file,
+            &report.subject.runtime_sha256,
+            None,
+        )?;
+        verify_normalized_arguments(
+            "accelerator adapter",
+            &entry.adapter_arguments,
+            report.subject.argument_count,
+            &report.subject.arguments_sha256,
+        )?;
+        anyhow::ensure!(
+            subjects.insert(subject.sha256.clone()),
+            "accelerator adapter subject is duplicated: {}",
+            entry.subject.path
+        );
+        digests.extend([
+            subject.sha256,
+            task.sha256,
+            manifest_evidence.sha256,
+            runtime_evidence.sha256,
+            report_evidence.sha256,
+        ]);
+    }
+    Ok(digests)
+}
+
 fn verify_unprefixed_subject(
     label: &str,
     evidence: &VerifiedEvidence,
@@ -1168,22 +1315,35 @@ fn verify_adapter_arguments(
     arguments: &[String],
     subject: &HardwareAdapterConformanceSubject,
 ) -> anyhow::Result<()> {
+    verify_normalized_arguments(
+        "external hardware adapter",
+        arguments,
+        subject.argument_count,
+        &subject.arguments_sha256,
+    )
+}
+
+fn verify_normalized_arguments(
+    label: &str,
+    arguments: &[String],
+    expected_count: usize,
+    expected_sha256: &str,
+) -> anyhow::Result<()> {
     anyhow::ensure!(
         arguments.len() <= MAX_ADAPTER_ARGUMENTS,
-        "external hardware adapter launch contract exceeds {MAX_ADAPTER_ARGUMENTS} arguments"
+        "{label} launch contract exceeds {MAX_ADAPTER_ARGUMENTS} arguments"
     );
     for (index, argument) in arguments.iter().enumerate() {
         anyhow::ensure!(
             argument.len() <= MAX_ADAPTER_ARGUMENT_BYTES && !argument.chars().any(char::is_control),
-            "external hardware adapter argument {index} is not bounded printable text"
+            "{label} argument {index} is not bounded printable text"
         );
     }
     let bytes = serde_json::to_vec(arguments).context("serialize adapter launch arguments")?;
     let digest = sha256_prefixed(&bytes);
     anyhow::ensure!(
-        subject.argument_count == arguments.len()
-            && subject.arguments_sha256 == digest["sha256:".len()..],
-        "external hardware adapter launch arguments do not match the conformance report"
+        expected_count == arguments.len() && expected_sha256 == &digest["sha256:".len()..],
+        "{label} launch arguments do not match the conformance report"
     );
     Ok(())
 }
@@ -1969,7 +2129,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 3
+schema_version = 4
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -1978,6 +2138,7 @@ minimum_compatibility_checks = 34
 unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
+accelerator_adapter = []
 
 [candidate]
 revision = "0000000000000000000000000000000000000000"
@@ -2015,6 +2176,103 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
         fs::write(temp.path().join(subject_name), swapped).unwrap();
         manifest.external_system[0].subject.sha256 = sha256_prefixed(swapped);
         assert!(verify_external_systems(temp.path(), &manifest).is_err());
+    }
+
+    #[test]
+    fn external_accelerator_report_is_rebound_without_satisfying_external_system() {
+        let root = workspace_root().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fixtures = [
+            (
+                "server.py",
+                root.join("adapters/mjx/rne_mjx_adapter/server.py"),
+            ),
+            (
+                "accelerator.toml",
+                root.join("adapters/mjx/accelerator.toml"),
+            ),
+            ("runtime.toml", root.join("adapters/mjx/runtime.toml")),
+            (
+                "free-fall-task-spec-v1.json",
+                root.join("adapters/mjx/fixtures/free-fall-task-spec-v1.json"),
+            ),
+            (
+                "process-conformance-report-v1.json",
+                root.join("tests/golden/accelerators/process-conformance-report-v1.json"),
+            ),
+        ];
+        for (name, source) in &fixtures {
+            fs::copy(source, temp.path().join(name)).unwrap();
+        }
+        let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
+        let manifest_text = format!(
+            r#"
+schema_version = 4
+release_version = "0.1.0"
+project_owner = "project-owner"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 34
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+
+[candidate]
+revision = "0000000000000000000000000000000000000000"
+tree = "0000000000000000000000000000000000000000"
+since = "2026-08-15"
+
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""
+
+[[accelerator_adapter]]
+id = "external-accelerator"
+owner = "external-owner"
+repository = "https://example.invalid/accelerator"
+revision = "1111111111111111111111111111111111111111"
+subject = {{ path = "server.py", sha256 = "{}" }}
+task_spec = {{ path = "free-fall-task-spec-v1.json", sha256 = "{}" }}
+accelerator_manifest = {{ path = "accelerator.toml", sha256 = "{}" }}
+runtime_contract = {{ path = "runtime.toml", sha256 = "{}" }}
+adapter_arguments = ["-m", "rne_mjx_adapter", "--backend", "fake", "--allow-test-backend"]
+report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
+"#,
+            digest("server.py"),
+            digest("free-fall-task-spec-v1.json"),
+            digest("accelerator.toml"),
+            digest("runtime.toml"),
+            digest("process-conformance-report-v1.json"),
+        );
+        let mut manifest: ReadinessManifest = toml::from_str(&manifest_text).unwrap();
+        assert!(manifest.external_system.is_empty());
+        assert_eq!(
+            verify_accelerator_adapters(temp.path(), &manifest)
+                .unwrap()
+                .len(),
+            ACCELERATOR_ADAPTER_EVIDENCE_FILES
+        );
+
+        manifest.accelerator_adapter[0].adapter_arguments.swap(0, 1);
+        assert!(verify_accelerator_adapters(temp.path(), &manifest).is_err());
+        manifest.accelerator_adapter[0].adapter_arguments.swap(0, 1);
+
+        let runtime_path = temp.path().join("runtime.toml");
+        let runtime_bytes = fs::read(&runtime_path).unwrap();
+        let mut semantically_equivalent_runtime = runtime_bytes.clone();
+        semantically_equivalent_runtime.push(b'\n');
+        fs::write(&runtime_path, &semantically_equivalent_runtime).unwrap();
+        manifest.accelerator_adapter[0].runtime_contract.sha256 =
+            sha256_prefixed(&semantically_equivalent_runtime);
+        assert!(verify_accelerator_adapters(temp.path(), &manifest).is_err());
+        fs::write(&runtime_path, &runtime_bytes).unwrap();
+        manifest.accelerator_adapter[0].runtime_contract.sha256 = sha256_prefixed(&runtime_bytes);
+
+        fs::write(temp.path().join("server.py"), b"substituted adapter").unwrap();
+        manifest.accelerator_adapter[0].subject.sha256 = digest("server.py");
+        assert!(verify_accelerator_adapters(temp.path(), &manifest).is_err());
     }
 
     #[test]
@@ -2236,7 +2494,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 3
+schema_version = 4
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2246,6 +2504,7 @@ unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 unexpected = true
+accelerator_adapter = []
 
 [candidate]
 revision = "0000000000000000000000000000000000000000"
@@ -2262,9 +2521,9 @@ policy_url = ""
     }
 
     #[test]
-    fn platform_release_manifest_v3_requires_the_complete_archive_chain() {
+    fn platform_release_manifest_v4_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 3
+schema_version = 4
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2273,6 +2532,7 @@ minimum_compatibility_checks = 34
 unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
+accelerator_adapter = []
 
 [candidate]
 revision = "0000000000000000000000000000000000000000"
@@ -2300,6 +2560,9 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
         let parsed: ReadinessManifest = toml::from_str(manifest).unwrap();
         assert_eq!(parsed.platform_release.len(), 1);
 
+        let relabelled_v3 = manifest.replace("accelerator_adapter = []\n", "");
+        assert!(toml::from_str::<ReadinessManifest>(&relabelled_v3).is_err());
+
         let missing_checksum = manifest.replace(
             "checksum_manifest = { path = \"release/SHA256SUMS\", sha256 = \"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\" }\n",
             "",
@@ -2313,9 +2576,9 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     }
 
     #[test]
-    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v3() {
+    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v4() {
         let manifest = r#"
-schema_version = 3
+schema_version = 4
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2324,6 +2587,7 @@ minimum_compatibility_checks = 34
 unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
+accelerator_adapter = []
 
 [candidate]
 revision = "0000000000000000000000000000000000000000"

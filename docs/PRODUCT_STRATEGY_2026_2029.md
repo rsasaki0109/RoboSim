@@ -401,7 +401,11 @@ and no-overwrite rules while copying and hashing one file, then emits its
 canonical TOML reference. It cannot add manifest claims, determine ownership,
 or turn staged bytes into a passing check.
 The companion external-intake registry fixes three public submission routes
-for task reproductions, controller plugins, and backend/hardware systems.
+for task reproductions, controller plugins, and backend/hardware/accelerator
+systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
+manifests, runtime contracts, arguments, and process reports separately; these
+do not count as the external physics backend or hardware adapter required for
+1.0.
 Required GitHub forms collect immutable revisions, subject bytes, typed
 reports, commands, dates, and safety/independence declarations; CI validates
 that the forms cannot silently drop a readiness requirement. Issues remain a

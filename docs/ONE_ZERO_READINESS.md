@@ -83,6 +83,11 @@ regular files no larger than 64 MiB and rejects symlinks or paths outside the
 pack. It does not download URLs, create tags, or infer evidence from GitHub
 stars.
 
+Manifest v4 requires the accelerator evidence collection to be explicit. Use
+`accelerator_adapter = []` at the top level while no entries are retained;
+replace that empty array with one or more `[[accelerator_adapter]]` tables when
+evidence is accepted.
+
 ## Fixed checks
 
 | Check | Passing evidence |
@@ -90,7 +95,7 @@ stars.
 | `stability_window` | At least 183 calendar days since the immutable Rust API baseline, at least 183 days of observed external-project use, and zero declared unplanned breaks |
 | `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with a valid TaskSpec and fully verifiable Failure Capsule produced without repository-author assistance |
 | `third_party_plugin` | At least one externally owned controller plugin whose passing typed report is rebound to the exact retained library and manifest bytes |
-| `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments |
+| `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound ten-check install reports, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
 | `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 34 registered typed-reader checks, including fail-closed accelerator capability/status/protocol/process/conformance/scale, future/unknown-field mutations, and verified historical Git revision/tree/blob provenance |
@@ -98,7 +103,7 @@ stars.
 | `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
 The manifest, report, and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_manifest = 3`,
+`evidence.one_zero_readiness_manifest = 4`,
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The archive-bound install result is separately registered as
@@ -168,7 +173,25 @@ task_spec = { path = "systems/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 # subject path is represented by the runner as "<adapter-subject>".
 adapter_arguments = ["<adapter-subject>", "--sandbox", "isolated-v1"]
 report = { path = "systems/hardware-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
+[[accelerator_adapter]]
+id = "external-accelerator"
+owner = "external-owner"
+repository = "https://example.invalid/accelerator"
+revision = "<40-lowercase-hex-commit>"
+subject = { path = "accelerators/adapter.py", sha256 = "sha256:<64-lowercase-hex>" }
+task_spec = { path = "accelerators/task.json", sha256 = "sha256:<64-lowercase-hex>" }
+accelerator_manifest = { path = "accelerators/accelerator.toml", sha256 = "sha256:<64-lowercase-hex>" }
+runtime_contract = { path = "accelerators/runtime.toml", sha256 = "sha256:<64-lowercase-hex>" }
+adapter_arguments = ["-m", "external_adapter", "--mode", "conformance"]
+report = { path = "accelerators/process-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 ```
+
+Manifest v4 adds the separately audited `accelerator_adapter` entries. Each
+entry is fail-closed and content-addressed, but only `external_system` entries
+of kind `physics_backend` or `hardware_adapter` count toward 1.0 eligibility;
+v3 evidence therefore cannot be relabelled without adding and revalidating the
+new manifest shape.
 
 Compatibility evidence must be assessed from a complete source checkout whose
 Git object database contains the registered historical commits. The gate

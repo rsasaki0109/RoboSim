@@ -85,7 +85,7 @@ Failure Capsules recognize this report kind only when those exact adapter and
 TaskSpec bytes are included as evidence. The capsule verifier checks both
 subject hashes and the negotiated TaskSpec identity before accepting the set.
 
-Readiness manifest v3 also requires the exact adapter subject, TaskSpec,
+Readiness manifest v4 also requires the exact adapter subject, TaskSpec,
 external repository URL, lowercase 40-character tested commit, and the
 normalized argument list hashed by the report. Use `"<adapter-subject>"` where
 the runner replaced an argument equal to the original subject path. The gate

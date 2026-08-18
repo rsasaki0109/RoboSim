@@ -1,7 +1,7 @@
 {
   "kind": "rne_one_zero_readiness_report",
   "schema_version": 1,
-  "manifest_sha256": "sha256:b024889081e22e85102741fb66f7b81ddb30e968213e700e0fa58621c123643c",
+  "manifest_sha256": "sha256:c90c4d04a391b8e413a69a8d4399834f98f66d46831a91c272861a42be56451e",
   "release_version": "0.1.0",
   "as_of": "2026-08-16",
   "candidate_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
@@ -32,7 +32,7 @@
     {
       "id": "external_system",
       "status": "not_met",
-      "detail": "verified_external_systems=0",
+      "detail": "verified_external_systems=0 audited_accelerator_adapters=0",
       "evidence_sha256": []
     },
     {

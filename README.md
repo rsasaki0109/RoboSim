@@ -40,7 +40,7 @@ source tree is not required to submit evidence.
 
 - [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
 - [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
-- [Conform an external physics backend or hardware adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+- [Conform an external physics backend, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
 
 Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
 before running a qualifying test. Opening an issue is only the start of review:

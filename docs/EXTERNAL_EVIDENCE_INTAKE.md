@@ -7,7 +7,9 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Validate the registry, this guide, and
+`release/external-evidence-intake.toml`. Registry v2 distinguishes qualifying
+physics/hardware kinds from audited nonqualifying accelerator evidence instead
+of treating every submission as a 1.0 credit. Validate the registry, this guide, and
 all required issue-form fields before publishing a release:
 
 ```bash
@@ -108,9 +110,11 @@ to match the manifest. See [Controller plugin SDK](PLUGIN_SDK.md).
 ## `external_system`
 
 Use
-`.github/ISSUE_TEMPLATE/external-system-evidence.yml` for either an
-independently maintained `physics_backend` or `hardware_adapter`. Exactly one
-passing external system is required, though retaining both is preferred.
+`.github/ISSUE_TEMPLATE/external-system-evidence.yml` for an independently
+maintained `physics_backend`, `hardware_adapter`, or `accelerator_adapter`.
+Exactly one passing physics backend or hardware adapter is required for 1.0;
+an accelerator adapter is audited ecosystem evidence but cannot satisfy that
+gate.
 
 Physics submissions include the exact implementation binary or deterministic
 source bundle named by the report and the complete
@@ -136,6 +140,26 @@ rne-hardware-conformance \
 
 This process-protocol pass is not physical safety certification. See
 [External hardware adapter conformance](HARDWARE_ADAPTER_CONFORMANCE.md).
+
+Accelerator submissions retain the exact adapter subject, TaskSpec,
+`accelerator.toml`, `runtime.toml`, normalized ordered argument list, and the
+complete process-conformance report. Run the installed standalone kit:
+
+```bash
+rne-accelerator-conformance \
+  --manifest path/to/accelerator.toml \
+  --runtime path/to/runtime.toml \
+  --task path/to/task.json \
+  --adapter path/to/adapter \
+  --subject path/to/tested-subject \
+  --output path/to/accelerator-process-report.json \
+  --adapter-arg first-normalized-argument
+```
+
+The readiness audit parses all four typed inputs, validates the complete
+nine-exchange transcript, and independently rehashes all retained bytes and
+the normalized JSON argument array. See
+[Accelerator process protocol](ACCELERATOR_PROTOCOL.md).
 
 ## Maintainer acceptance
 
