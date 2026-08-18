@@ -1,0 +1,67 @@
+name: MJX-Warp evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Linux NVIDIA conformance
+    runs-on: [self-hosted, Linux, X64, rne-mjx-warp]
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Create pinned Python runtime
+        shell: bash
+        run: |
+          python3.12 -m venv .venv-mjx
+          .venv-mjx/bin/python -m pip install --disable-pip-version-check --upgrade pip
+          .venv-mjx/bin/python -m pip install --disable-pip-version-check \
+            --requirement adapters/mjx/requirements-gpu.txt
+          echo "$PWD/.venv-mjx/bin" >> "$GITHUB_PATH"
+      - name: Validate adapter contracts
+        run: cargo run --locked -p xtask -- accelerator-check
+      - name: Capture runtime provenance
+        shell: bash
+        run: |
+          mkdir -p artifacts/accelerator
+          nvidia-smi --query-gpu=name,driver_version,memory.total \
+            --format=csv,noheader > artifacts/accelerator/nvidia-smi.csv
+          python -m pip freeze --all > artifacts/accelerator/pip-freeze.txt
+          python --version > artifacts/accelerator/python-version.txt
+      - name: Run required batch widths
+        shell: bash
+        run: |
+          for width in 1 16 256 4096; do
+            cargo run --locked -p xtask -- accelerator-conformance \
+              --batch-width "$width" \
+              --output "artifacts/accelerator/conformance-${width}.json"
+          done
+      - name: Measure required batch widths
+        run: >-
+          cargo run --locked -p xtask -- accelerator-scale
+          --output artifacts/accelerator/scale.json
+      - name: Prove injected divergence is detected
+        shell: bash
+        run: |
+          if cargo run --locked -p xtask -- accelerator-conformance \
+            --batch-width 1 \
+            --inject-position-bias-m 0.01 \
+            --output artifacts/accelerator/injected-divergence.json; then
+            echo "fault injection unexpectedly passed" >&2
+            exit 1
+          fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mjx-warp-evidence-${{ github.sha }}
+          path: artifacts/accelerator
+          if-no-files-found: error
+          retention-days: 30

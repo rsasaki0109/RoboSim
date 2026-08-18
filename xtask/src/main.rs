@@ -1,11 +1,14 @@
 //! Workspace automation tasks for Robot Native Engine.
 
+mod accelerator;
 mod benchmark;
 mod capability_report;
+mod dataset;
 mod evidence;
 mod failure_capsule;
 mod release_artifacts;
 mod release_exit;
+mod task_scale;
 
 use image::AnimationDecoder;
 use serde::{Deserialize, Serialize};
@@ -103,6 +106,12 @@ fn run() -> anyhow::Result<()> {
         "release-exit" => release_exit::release_exit(&mut args),
         "capability-report" => capability_report::capability_report(&mut args),
         "benchmark" => benchmark::benchmark(&mut args),
+        "task-scale" => task_scale::task_scale(&mut args),
+        "accelerator-check" => accelerator::accelerator_check(&mut args),
+        "accelerator-conformance" => accelerator::accelerator_conformance(&mut args),
+        "accelerator-scale" => accelerator::accelerator_scale(&mut args),
+        "dataset-check" => dataset::dataset_check(&mut args),
+        "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
         "evidence" => evidence::evidence(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
@@ -1075,6 +1084,61 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_core::DETERMINISM_CONTRACT_SCHEMA_VERSION),
         ),
         (
+            "tasks",
+            "task_spec",
+            u64::from(rne_ai::TASK_SPEC_SCHEMA_VERSION),
+        ),
+        (
+            "tasks",
+            "batch_checkpoint",
+            u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
+        ),
+        (
+            "accelerators",
+            "manifest",
+            u64::from(accelerator::ACCELERATOR_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "protocol",
+            u64::from(accelerator::ACCELERATOR_PROTOCOL_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "capability_report",
+            u64::from(accelerator::ACCELERATOR_CAPABILITY_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "conformance_report",
+            u64::from(accelerator::ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "runtime_contract",
+            u64::from(accelerator::ACCELERATOR_RUNTIME_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "scale_report",
+            u64::from(accelerator::ACCELERATOR_SCALE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
+            "bundle",
+            u64::from(rne_data::DATASET_BUNDLE_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
+            "payload",
+            u64::from(rne_data::DATASET_PAYLOAD_SCHEMA_VERSION),
+        ),
+        (
+            "datasets",
+            "offline_evaluation",
+            u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1103,6 +1167,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "benchmark_report",
             u64::from(benchmark::BENCHMARK_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "task_scale_report",
+            u64::from(task_scale::TASK_SCALE_REPORT_SCHEMA_VERSION),
         ),
         (
             "evidence",
@@ -1766,8 +1835,10 @@ fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartiti
 
 /// Runs the explicit CPU-only headless renderer and sensor test gates.
 fn ci_headless() -> anyhow::Result<()> {
+    accelerator::validate_contract(&workspace_root()?)?;
     run_step("cargo test --locked -p rne_render --lib")?;
-    run_step("cargo test --locked -p rne_sensor --lib")
+    run_step("cargo test --locked -p rne_sensor --lib")?;
+    dataset::dataset_reference_smoke()
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.

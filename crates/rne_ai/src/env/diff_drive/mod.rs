@@ -23,6 +23,10 @@ use crate::goal::{
 use crate::observation::DiffDriveObservation;
 use crate::reward::DiffDriveRewardConfig;
 use crate::rng::DeterministicRng;
+use crate::task::{
+    ActionSpec, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec, TaskSpec, TensorBounds,
+    TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind, TerminationSpec,
+};
 use rne_log::{
     ReplayHeader, ReplayRandomSnapshot, ReplayRandomSnapshotError, ReplayRngState, SimulationLog,
 };
@@ -150,6 +154,55 @@ impl Default for DiffDriveEpisodeConfig {
             rng_seed: 1,
         }
     }
+}
+
+/// Returns the portable contract for the built-in single-robot goal task.
+///
+/// The observation order matches [`DiffDriveObservation`] without its optional
+/// peer fields. Actions are left/right wheel angular velocities in that order.
+/// Reward terms exactly describe [`DiffDriveRewardConfig::compute`].
+pub fn diff_drive_goal_task_spec(
+    max_episode_steps: u64,
+    reward: DiffDriveRewardConfig,
+) -> TaskSpec {
+    TaskSpec::new(
+        "rne.diff_drive.goal.v1",
+        1.0 / 60.0,
+        ObservationSpec::new(vec![
+            TensorSpec::new("base_position_m", TensorDType::F64, vec![3], "m"),
+            TensorSpec::new("base_yaw_rad", TensorDType::F64, vec![], "rad"),
+            TensorSpec::new("wheel_velocity_rad_s", TensorDType::F64, vec![2], "rad/s"),
+            TensorSpec::new(
+                "imu_linear_acceleration_y_m_s2",
+                TensorDType::F64,
+                vec![],
+                "m/s^2",
+            ),
+            TensorSpec::new("lidar_point_count", TensorDType::I64, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, i64::MAX as f64)),
+            TensorSpec::new("goal_delta_x_m", TensorDType::F64, vec![], "m"),
+        ]),
+        ActionSpec::new(vec![TensorSpec::new(
+            "wheel_velocity_rad_s",
+            TensorDType::F64,
+            vec![2],
+            "rad/s",
+        )
+        .with_bounds(TensorBounds::broadcast(-10.0, 10.0))]),
+        RewardSpec::weighted_sum(vec![
+            RewardTermSpec::new("forward_progress_m", reward.progress_scale, "m"),
+            RewardTermSpec::new("step", -reward.step_penalty, "1"),
+            RewardTermSpec::new("goal_reached", reward.goal_bonus, "1"),
+        ]),
+        TerminationSpec::new(
+            vec![TerminationConditionSpec::new(
+                "goal_reached",
+                TerminationKind::Success,
+            )],
+            Some(max_episode_steps),
+        ),
+        ResetSpec::splitmix64(true),
+    )
 }
 
 /// Goal-reaching episode built on top of [`DiffDriveSim`].
@@ -489,6 +542,17 @@ where
 mod tests {
     use super::*;
     use crate::policy::{ConstantVelocityPolicy, Policy};
+
+    #[test]
+    fn goal_task_spec_matches_committed_asset() {
+        let task = diff_drive_goal_task_spec(180, DiffDriveRewardConfig::default());
+        task.validate().expect("diff-drive task spec");
+        let expected: TaskSpec = serde_json::from_str(include_str!(
+            "../../../../../assets/tasks/diff_drive_goal.task.json"
+        ))
+        .expect("parse committed task spec");
+        assert_eq!(task, expected);
+    }
 
     #[test]
     fn episode_reaches_goal_with_forward_policy() {

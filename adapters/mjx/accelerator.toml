@@ -1,0 +1,26 @@
+schema_version = 1
+id = "mjx_warp"
+selected = true
+status = "experimental"
+runtime = "mujoco_mjx_warp"
+precision = "f64"
+execution_boundary = "out_of_process_python"
+core_dependency = false
+requires_nvidia_gpu = true
+task_spec_schema = 1
+batch_checkpoint_schema = 2
+protocol_schema = 1
+capability_report_schema = 1
+conformance_report_schema = 1
+scale_report_schema = 1
+supported_batch_widths = [1, 16, 256, 4096]
+binding_task_spec = "adapters/mjx/fixtures/free-fall-task-spec-v1.json"
+binding_model = "adapters/mjx/fixtures/free-fall-v1.xml"
+runtime_contract = "adapters/mjx/runtime.toml"
+requirements = "adapters/mjx/requirements-gpu.txt"
+selection_adr = "docs/adr/014-mjx-warp-accelerator-selection.md"
+official_sources = [
+  "https://mujoco.readthedocs.io/en/latest/mjx.html",
+  "https://genesis-world.readthedocs.io/en/latest/user_guide/overview/installation.html",
+  "https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html",
+]

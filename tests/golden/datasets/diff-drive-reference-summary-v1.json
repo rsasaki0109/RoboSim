@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "dataset_id": "rne-diff-drive-reference-v1",
+  "task_spec_sha256": "sha256:ad6e5a8b6a755b5f781555c3e59c774ba314fffa927f773f5fc86922fedd9f84",
+  "manifest_sha256": "sha256:112c0991f5e2238b870c0e66546d0fe139128a6911642b4804290f19c10d4b35",
+  "shard_sha256": "sha256:f6aed38dd09fe764ca50406e37037db38840a0f204cd6735411464f2e648bbdc",
+  "stream_count": 5,
+  "record_count": 419,
+  "sample_count": 419,
+  "dropped_count": 0,
+  "imu_samples": 101,
+  "lidar_samples": 15,
+  "action_samples": 101,
+  "outcome_samples": 101,
+  "transform_samples": 101,
+  "terminated": true,
+  "truncated": false
+}

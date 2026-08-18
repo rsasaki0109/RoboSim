@@ -14,6 +14,10 @@ Build the extension and run the CPU smokes from the repository root:
 .venv/bin/python examples/66_locomotion_rl/train_ppo.py --smoke
 ```
 
-The observation is a 21-element vector containing base pose/velocities, relative
-tilt, foot impulses, gait phase, and episode progress. The five action values are
-stride, swing lift, roll correction, pitch correction, and lateral calf extension.
+The native episode publishes canonical TaskSpec v1 JSON. `run.py` validates that
+schema through `rne_py`, derives the 21-element observation and five-element
+action shapes, float dtype, ordered bounds, and Gymnasium spaces from it, and
+never maintains a second handwritten space declaration. The observation
+contains base pose/velocities, relative tilt, foot impulses, gait phase, and
+episode progress. Actions are stride, swing lift, roll correction, pitch
+correction, and lateral calf extension in TaskSpec order.

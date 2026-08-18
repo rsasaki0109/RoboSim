@@ -92,6 +92,43 @@ benchmark, and Failure Capsule artifacts. OpenSCENARIO, SDF, MJCF, URDF, SUMO,
 and PLATEAU inputs are import formats: accepted subsets are documented, and
 unsupported constructs remain explicit import errors.
 
+TaskSpec schema v1 rejects unknown fields and validates fixed tensor shape,
+dtype, row-major order, units, bounds, reward terms, termination, reset,
+curriculum, and randomization before execution. Ordered arrays are semantic.
+Portable batch checkpoint schema v2 embeds its TaskSpec and chronological
+step/partial-reset operations. The legacy `VectorizedEpisode` API and its
+checkpoint remain unchanged for patch compatibility; new portable execution
+uses the separately additive `PortableBatchRunner` API.
+
+Accelerator protocol v1 and accelerator capability-report v1 are frozen
+contracts. Adapters reject unknown envelope fields and unsupported TaskSpecs
+before stepping. Adding an operation or field requires a protocol-version
+change unless the existing schema explicitly marks it optional. Runtime-private
+state is not a substitute for portable batch-checkpoint v2.
+Accelerator conformance-report v1 and runtime-contract v1 are versioned as
+well. A report made by the dependency-free fake is explicitly `contract_test`
+evidence and cannot be re-labelled as hardware evidence.
+
+Dataset bundle schema v1 freezes the `RNEDATA1` file header, 80-byte record
+header, stream/field ordering, simulation capture and availability ticks,
+explicit gap records, calibration/noise declarations, payload hashes, shard
+hashes, and manifest self-hash. Offline evaluation report schema v1 freezes
+the depth-pair metric fields and digest construction. A report is trusted only
+after metrics are recomputed from its referenced verified bundle. Unknown
+fields, implicit sequence gaps, non-finite values, and unknown schemas are
+rejected. Canonical shapes live under `tests/golden/datasets/`.
+Dataset-native payload encodings `imu.v1`, `pose2d.v1`, `action_f64.v1`,
+`task_outcome.v1`, and `ground_truth_f64.v1` use fixed little-endian metadata
+and reject trailing bytes; their combined reference shard digest is frozen.
+The real diff-drive reference capture additionally freezes its TaskSpec,
+manifest, complete shard, per-stream counts, terminal verdict, and recomputed
+RGB-D evaluation report in
+`tests/golden/datasets/diff-drive-reference-summary-v2.json`. Its v1 summary is
+retained as an older compatibility fixture. DataBus sensor sequence values are
+normalized to zero-based dataset-local sequence values; stream identity,
+timestamps, physical payload values, calibration, declared storage resolution,
+and noise behavior remain semantic.
+
 The evidence-manifest schema inventories one verified run of the capability,
 physics-conformance, benchmark, and Failure Capsule gates. It is provenance,
 not a claim that compiler- and platform-bearing capsule bytes match across
@@ -114,8 +151,9 @@ gains/limits, and joint-kind mismatches before a physics step.
 
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
-transport, asset, replay, physics, determinism, and evidence constants; changing
-one side alone fails.
+transport, asset, replay, physics, determinism, task, accelerator-selection,
+accelerator-protocol, dataset, and evidence constants; changing one side alone
+fails.
 
 ## Replay migration
 

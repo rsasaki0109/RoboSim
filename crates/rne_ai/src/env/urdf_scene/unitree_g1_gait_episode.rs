@@ -57,7 +57,7 @@ impl Default for UnitreeG1GaitAction {
 }
 
 /// Observation emitted by [`UnitreeG1GaitEpisode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnitreeG1GaitObservation {
     /// Pelvis X position in meters.
     pub base_x_m: f64,

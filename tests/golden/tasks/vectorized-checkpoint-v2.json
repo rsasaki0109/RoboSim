@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "seed": 42,
+  "num_envs": 2,
+  "auto_reset": true,
+  "seed_strategy": "split_mix64_lane_episode_v1",
+  "task_spec": null,
+  "lanes": [
+    {
+      "lane_id": 0,
+      "episode_index": 0,
+      "episode_seed": 1298720818104676741,
+      "pending_auto_reset": false,
+      "replay_digest": 11
+    },
+    {
+      "lane_id": 1,
+      "episode_index": 1,
+      "episode_seed": 4463085590718191916,
+      "pending_auto_reset": false,
+      "replay_digest": 22
+    }
+  ],
+  "operations": [
+    {
+      "type": "step",
+      "actions": [
+        1,
+        2
+      ]
+    },
+    {
+      "type": "reset_lanes",
+      "lane_ids": [
+        1
+      ]
+    }
+  ],
+  "replay_digest": 33
+}

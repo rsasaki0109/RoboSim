@@ -1,0 +1,19 @@
+schema_version = 1
+operating_system = "linux"
+architecture = "x86_64"
+python = "3.12"
+cuda_major = 13
+nvidia_driver_minimum = 580
+official_sources = [
+  "https://docs.jax.dev/en/latest/installation.html",
+  "https://pypi.org/pypi/jax/0.10.2/json",
+  "https://pypi.org/pypi/mujoco-mjx/3.9.0/json",
+]
+
+[packages]
+jax = "0.10.2"
+jaxlib = "0.10.2"
+jax_cuda_plugin = "0.10.2"
+mujoco = "3.9.0"
+mujoco_mjx = "3.9.0"
+warp_lang = "1.12.1"

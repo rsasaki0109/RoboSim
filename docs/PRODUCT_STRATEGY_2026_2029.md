@@ -185,6 +185,16 @@ Exit evidence:
 
 RNE should standardize the task before selecting a GPU stack.
 
+Implementation foundation: TaskSpec schema v1 and vectorized checkpoint schema
+v2 are pinned by ADR 013, release-contract entries, and golden JSON fixtures.
+The deterministic CPU reference runner now implements lane-local seeds,
+partial reset, stable lane order, deferred auto-reset, and replay restoration.
+Rust/Python schema agreement, TaskSpec-derived Gymnasium spaces, and measured
+1/16/256/4096 CPU scaling evidence are present. ADR 014 selects only MJX-Warp;
+its GPU adapter and promotion evidence remain governed by the exit criteria
+below, so the milestone is not complete merely because the portable foundation
+exists.
+
 Delivery slices:
 
 - freeze versioned `TaskSpec`, `ObservationSpec`, `ActionSpec`, `RewardSpec`,

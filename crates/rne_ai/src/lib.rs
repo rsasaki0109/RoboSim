@@ -20,10 +20,12 @@ pub mod mm_minimal_kinematics;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
+pub mod portable_batch;
 pub mod reach;
 pub mod render;
 pub mod reward;
 pub mod rng;
+pub mod task;
 pub mod transport;
 pub mod vectorized;
 
@@ -60,21 +62,23 @@ pub use camera::{
 pub use control_eval::{ControlEvalReport, ControlMetrics, ControlTrackingSample, MetricSpread};
 pub use domain_randomization::DiffDriveDomainRandomization;
 pub use env::{
-    cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,
-    lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, mm_lift_pick_scene_path,
-    mm_lift_scene_path, mm_minimal_clutter_scene_path, mm_minimal_grasp_scene_path,
-    mm_minimal_scene_path, mm_minimal_transport_scene_path, mm_mobile_clutter_scene_path,
-    mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path, mm_mobile_scene_path,
-    mm_mobile_twist_to_wheel_velocities, quadruped_scene_path, quadruped_trot_targets,
-    run_unitree_g1_commanded_gait, run_unitree_g1_commanded_gait_with_policy, so101_scene_path,
-    unitree_g1_dex3_pick_targets, unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path,
-    unitree_g1_factory_scene_path, unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
+    cart_minimal_scene_path, diff_drive_goal_task_spec, humanoid_scene_path, lekiwi_scene_path,
+    lekiwi_so101_scene_path, lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s,
+    mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_clutter_scene_path,
+    mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
+    mm_mobile_clutter_scene_path, mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path,
+    mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, quadruped_scene_path,
+    quadruped_trot_targets, run_unitree_g1_commanded_gait,
+    run_unitree_g1_commanded_gait_with_policy, so101_scene_path, unitree_g1_dex3_pick_targets,
+    unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path, unitree_g1_factory_scene_path,
+    unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_inspection_targets,
     unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path, unitree_go2_dynamic_scene_path,
-    unitree_go2_scene_path, unitree_go2_scheduled_targets, unitree_go2_terrain_scene_path,
-    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s,
-    ClutterPickConfig, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
+    unitree_go2_scene_path, unitree_go2_scheduled_targets, unitree_go2_task_spec,
+    unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
+    unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s, ClutterPickConfig,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
     DiffDriveEpisodeSnapshotError, DiffDriveSim, GraspMode, HumanoidAction, HumanoidEpisode,
     HumanoidEpisodeConfig, HumanoidObservation, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeProgressSnapshot,
@@ -145,6 +149,11 @@ pub use policy::{
     LocomotionPolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase, Policy,
     VisuomotorReachPolicy,
 };
+pub use portable_batch::{
+    PortableBatchCheckpoint, PortableBatchConfig, PortableBatchError, PortableBatchLaneCheckpoint,
+    PortableBatchOperation, PortableBatchRunner, PortableBatchStep,
+    PORTABLE_BATCH_CHECKPOINT_VERSION,
+};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
     JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,
@@ -156,6 +165,14 @@ pub use render::{
 };
 pub use reward::{DiffDriveRewardConfig, MobileManipulatorRewardConfig, MobileManipulatorTask};
 pub use rng::DeterministicRng;
+pub use task::{
+    derive_episode_seed, ActionSpec, CurriculumSpec, CurriculumStageSpec, EpisodeSeedStrategy,
+    ObservationSpec, RandomDistributionSpec, RandomizationParameterSpec, RandomizationSpec,
+    ResetSpec, RewardAggregation, RewardSpec, RewardTermSpec, TaskParameterSpec, TaskSpec,
+    TaskSpecValidationError, TensorBounds, TensorDType, TensorLayout, TensorSpec,
+    TerminationConditionSpec, TerminationKind, TerminationSpec, TASK_SPEC_KIND,
+    TASK_SPEC_SCHEMA_VERSION,
+};
 pub use transport::{
     body_moved_at_least_m, body_within_zone_m, displacement_m, had_finger_contact,
     named_translation_m, TRANSPORT_SUCCESS_M,

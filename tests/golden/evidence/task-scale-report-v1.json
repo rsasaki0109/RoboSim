@@ -1,0 +1,113 @@
+{
+  "kind": "rne_task_scale_report",
+  "schema_version": 1,
+  "engine_version": "0.1.0",
+  "task_spec": {
+    "kind": "rne_task_spec",
+    "schema_version": 1,
+    "task_id": "rne.reference.kinematic.v1",
+    "control_step_s": 0.01,
+    "observation": {
+      "tensors": [
+        {
+          "name": "position_m",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "m",
+          "layout": "row_major",
+          "bounds": null
+        },
+        {
+          "name": "velocity_m_s",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "m/s",
+          "layout": "row_major",
+          "bounds": null
+        }
+      ]
+    },
+    "action": {
+      "tensors": [
+        {
+          "name": "acceleration_m_s2",
+          "dtype": "f64",
+          "shape": [],
+          "unit": "m/s^2",
+          "layout": "row_major",
+          "bounds": {
+            "lower": [
+              -1.0
+            ],
+            "upper": [
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    "reward": {
+      "aggregation": "weighted_sum",
+      "terms": [
+        {
+          "name": "position_error_m",
+          "weight": -1.0,
+          "unit": "m"
+        }
+      ]
+    },
+    "termination": {
+      "conditions": [
+        {
+          "name": "origin_reached",
+          "kind": "success"
+        }
+      ],
+      "max_episode_steps": 1024
+    },
+    "reset": {
+      "seed_strategy": "split_mix64_lane_episode_v1",
+      "supports_partial_reset": true
+    },
+    "curriculum": null,
+    "randomization": null
+  },
+  "backend": "rne_cpu_reference",
+  "precision": "f64",
+  "hardware": {
+    "operating_system": "test-os",
+    "architecture": "test-arch",
+    "cpu": "test-cpu",
+    "logical_cpus": 1
+  },
+  "warmup_steps": 1,
+  "measured_steps": 1,
+  "determinism_contract": {
+    "schema_version": 1,
+    "name": "task_scale_lane_zero_batch_width_invariance",
+    "scope": {
+      "subject": "task/rne.reference.kinematic.v1/lane/0",
+      "observables": [
+        "episode_seed",
+        "observation",
+        "reward",
+        "termination",
+        "replay_digest"
+      ],
+      "first_step": 0,
+      "step_count": 2
+    },
+    "guarantee": {
+      "tier": "exact"
+    }
+  },
+  "samples": [
+    {
+      "batch_size": 1,
+      "transitions": 1,
+      "elapsed_ns": 1,
+      "throughput_transitions_per_s": 1.0,
+      "lane_zero_replay_digest": 7
+    }
+  ]
+}

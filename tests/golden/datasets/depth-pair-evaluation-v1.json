@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "dataset_manifest_sha256": "sha256:f16a82b0e9f3159c999afaa4de1be6e32d0ec5c98d8466a447042ab2b2864b14",
+  "predicted_stream": 10,
+  "ground_truth_stream": 11,
+  "compared_frames": 2,
+  "compared_pixels": 6,
+  "dropped_pairs": 1,
+  "mean_absolute_error_m": 0.05000003178914388,
+  "root_mean_square_error_m": 0.0645497224369077,
+  "max_absolute_error_m": 0.09999990463256836,
+  "tolerance_m": 0.11,
+  "passed": true,
+  "content_sha256": "sha256:2df0d03ef0188624b234039046a41ccbff53030978168726721e655c553fc852"
+}

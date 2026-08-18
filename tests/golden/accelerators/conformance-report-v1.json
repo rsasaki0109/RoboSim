@@ -1,0 +1,77 @@
+{
+  "actual": {
+    "lane_zero_episode_seed": 1298720818104676741,
+    "lane_zero_replay_digest": 1609612854872239593,
+    "position_y_m": 0.013250398939986585,
+    "velocity_y_m_s": -9.80999960760001
+  },
+  "adapter_id": "mjx_warp",
+  "backend_status": "test_only",
+  "batch_width": 1,
+  "checkpoint_schema": 2,
+  "content_sha256": "95dd77830d21cee2cae6a268ae0cccf752833beb8258a70329b94c862f81e35d",
+  "evidence_class": "contract_test",
+  "fault_injection": {
+    "position_bias_m": 0.0
+  },
+  "kind": "rne_accelerator_conformance_report",
+  "metrics": {
+    "position_delta_m": 4.884981308350689e-15,
+    "velocity_delta_m_s": 8.881784197001252e-15
+  },
+  "model_sha256": "4f3adebd73933b1ec59c91e8e84064811acd39099dc8475ceb0e45f9a1fa12fa",
+  "passed": true,
+  "precision": "f64",
+  "reference": {
+    "backend_id": "mujoco_cpu",
+    "case_id": "mujoco.rigid_body.free_fall",
+    "integration": "f64_semi_implicit_euler",
+    "position_y_m": 0.01325039893999147,
+    "velocity_y_m_s": -9.809999607600002
+  },
+  "root_seed": 42,
+  "runtime_contract": {
+    "architecture": "x86_64",
+    "cuda_major": 13,
+    "nvidia_driver_minimum": 580,
+    "official_sources": [
+      "https://docs.jax.dev/en/latest/installation.html",
+      "https://pypi.org/pypi/jax/0.10.2/json",
+      "https://pypi.org/pypi/mujoco-mjx/3.9.0/json"
+    ],
+    "operating_system": "linux",
+    "packages": {
+      "jax": "0.10.2",
+      "jax_cuda_plugin": "0.10.2",
+      "jaxlib": "0.10.2",
+      "mujoco": "3.9.0",
+      "mujoco_mjx": "3.9.0",
+      "warp_lang": "1.12.1"
+    },
+    "python": "3.12",
+    "schema_version": 1
+  },
+  "runtime": {
+    "jax_backend": null,
+    "jax_cuda_plugin_version": null,
+    "jax_devices": [],
+    "jax_version": null,
+    "jaxlib_version": null,
+    "machine": "<runtime>",
+    "mujoco_mjx_version": null,
+    "mujoco_version": null,
+    "nvidia_driver_version": null,
+    "platform": "<runtime>",
+    "python_version": "<runtime>",
+    "warp_version": null
+  },
+  "schema_version": 1,
+  "steps": 60,
+  "task_id": "rne.physics.free_fall.mjx.v1",
+  "task_spec_schema": 1,
+  "task_spec_sha256": "f810d056d33c7891e12a0b9b920e8f78fd91972aa4bbf6ee0597c791285d9210",
+  "tolerances": {
+    "position_delta_m": 1e-09,
+    "velocity_delta_m_s": 1e-09
+  }
+}

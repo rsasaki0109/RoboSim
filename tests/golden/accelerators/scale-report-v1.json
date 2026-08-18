@@ -1,0 +1,79 @@
+{
+  "adapter_id": "mjx_warp",
+  "backend_status": "test_only",
+  "content_sha256": "b9dc35dcbc1046cb5cac68bc586e52558a78b3f5fb190a0a9931fc5016677ac4",
+  "evidence_class": "contract_test",
+  "kind": "rne_accelerator_scale_report",
+  "lane_zero_digest_consistent": true,
+  "measured_steps": 3,
+  "measurement_boundary": "python_session_api",
+  "model_sha256": "4f3adebd73933b1ec59c91e8e84064811acd39099dc8475ceb0e45f9a1fa12fa",
+  "passed": true,
+  "precision": "f64",
+  "promotion_widths_complete": false,
+  "requested_widths": [
+    1,
+    16
+  ],
+  "root_seed": 42,
+  "runs": [
+    {
+      "batch_width": 1,
+      "elapsed_ns": 1,
+      "lane_zero_episode_index": 0,
+      "lane_zero_episode_seed": 1298720818104676741,
+      "lane_zero_replay_digest": 1574040029365597958,
+      "throughput_transitions_s": 3000000000.0,
+      "transitions": 3
+    },
+    {
+      "batch_width": 16,
+      "elapsed_ns": 1,
+      "lane_zero_episode_index": 0,
+      "lane_zero_episode_seed": 1298720818104676741,
+      "lane_zero_replay_digest": 1574040029365597958,
+      "throughput_transitions_s": 48000000000.0,
+      "transitions": 48
+    }
+  ],
+  "runtime": {
+    "jax_backend": null,
+    "jax_cuda_plugin_version": null,
+    "jax_devices": [],
+    "jax_version": null,
+    "jaxlib_version": null,
+    "machine": "<runtime>",
+    "mujoco_mjx_version": null,
+    "mujoco_version": null,
+    "nvidia_driver_version": null,
+    "platform": "<runtime>",
+    "python_version": "<runtime>",
+    "warp_version": null
+  },
+  "runtime_contract": {
+    "architecture": "x86_64",
+    "cuda_major": 13,
+    "nvidia_driver_minimum": 580,
+    "official_sources": [
+      "https://docs.jax.dev/en/latest/installation.html",
+      "https://pypi.org/pypi/jax/0.10.2/json",
+      "https://pypi.org/pypi/mujoco-mjx/3.9.0/json"
+    ],
+    "operating_system": "linux",
+    "packages": {
+      "jax": "0.10.2",
+      "jax_cuda_plugin": "0.10.2",
+      "jaxlib": "0.10.2",
+      "mujoco": "3.9.0",
+      "mujoco_mjx": "3.9.0",
+      "warp_lang": "1.12.1"
+    },
+    "python": "3.12",
+    "schema_version": 1
+  },
+  "schema_version": 1,
+  "task_id": "rne.physics.free_fall.mjx.v1",
+  "task_spec_schema": 1,
+  "task_spec_sha256": "f810d056d33c7891e12a0b9b920e8f78fd91972aa4bbf6ee0597c791285d9210",
+  "warmup_steps": 1
+}

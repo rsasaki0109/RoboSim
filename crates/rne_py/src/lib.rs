@@ -6,9 +6,10 @@ mod sim;
 
 use pyo3::prelude::*;
 use rne_ai::{
-    DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
+    unitree_go2_task_spec, DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
     IkMobileClutterPickPlacePolicy, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, Policy,
-    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+    PortableBatchConfig, PortableBatchRunner, PortableBatchStep, TaskSpec, UnitreeGo2Action,
+    UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
 };
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
@@ -21,6 +22,26 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 const CHECKPOINT_TEMP_CREATE_ATTEMPTS: u32 = 64;
+
+/// Validates a TaskSpec JSON document and returns its canonical compact JSON.
+#[pyfunction]
+fn canonical_task_spec_json(task_spec_json: &str) -> PyResult<String> {
+    let task_spec: TaskSpec = serde_json::from_str(task_spec_json).map_err(|error| {
+        pyo3::exceptions::PyValueError::new_err(format!("failed to parse TaskSpec JSON: {error}"))
+    })?;
+    task_spec.validate().map_err(|error| {
+        pyo3::exceptions::PyValueError::new_err(format!("invalid TaskSpec: {error}"))
+    })?;
+    serde_json::to_string(&task_spec).map_err(|error| {
+        pyo3::exceptions::PyValueError::new_err(format!("failed to serialize TaskSpec: {error}"))
+    })
+}
+
+/// Returns the v1 lane-local episode seed used by the Rust batch runner.
+#[pyfunction(name = "derive_episode_seed")]
+fn py_derive_episode_seed(root_seed: u64, lane_id: u64, episode_index: u64) -> u64 {
+    rne_ai::derive_episode_seed(root_seed, lane_id, episode_index)
+}
 
 /// Resolves a task name to a mobile manipulator episode configuration.
 fn mm_episode_config(task: &str) -> PyResult<MobileManipulatorEpisodeConfig> {
@@ -368,6 +389,7 @@ fn unitree_go2_step_result(
 #[pyclass(name = "UnitreeGo2GaitEpisode")]
 struct PyUnitreeGo2GaitEpisode {
     inner: UnitreeGo2Episode,
+    task_spec: TaskSpec,
 }
 
 #[pymethods]
@@ -376,6 +398,11 @@ impl PyUnitreeGo2GaitEpisode {
     #[new]
     #[pyo3(signature = (max_steps=600, seed=1))]
     fn new(max_steps: u64, seed: u64) -> PyResult<Self> {
+        if max_steps == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_steps must be greater than zero",
+            ));
+        }
         let config = UnitreeGo2EpisodeConfig {
             max_steps,
             ..UnitreeGo2EpisodeConfig::default()
@@ -385,7 +412,22 @@ impl PyUnitreeGo2GaitEpisode {
                 "failed to load Unitree Go2 gait scene: {error:?}"
             ))
         })?;
-        Ok(Self { inner })
+        let task_spec = unitree_go2_task_spec(max_steps);
+        task_spec.validate().map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "internal Unitree Go2 TaskSpec is invalid: {error}"
+            ))
+        })?;
+        Ok(Self { inner, task_spec })
+    }
+
+    /// Returns the canonical portable TaskSpec JSON used by this episode.
+    fn task_spec_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.task_spec).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to serialize Unitree Go2 TaskSpec: {error}"
+            ))
+        })
     }
 
     /// Resets the episode and returns its 21-element numeric observation.
@@ -430,6 +472,246 @@ impl PyUnitreeGo2GaitEpisode {
 impl From<rne_ai::EpisodeStep<UnitreeGo2Observation>> for PyUnitreeGo2StepResult {
     fn from(value: rne_ai::EpisodeStep<UnitreeGo2Observation>) -> Self {
         unitree_go2_step_result(value)
+    }
+}
+
+/// Result of a portable Unitree Go2 batch reset or step.
+#[pyclass(name = "PortableUnitreeGo2BatchStep", skip_from_py_object)]
+#[derive(Clone)]
+struct PyPortableUnitreeGo2BatchStep {
+    lane_ids: Vec<u64>,
+    episode_indices: Vec<u64>,
+    episode_seeds: Vec<Option<u64>>,
+    resets: Vec<bool>,
+    observations: Vec<Vec<f64>>,
+    rewards: Vec<f64>,
+    terminated: Vec<bool>,
+    truncated: Vec<bool>,
+}
+
+#[pymethods]
+impl PyPortableUnitreeGo2BatchStep {
+    /// Stable lane IDs in result order.
+    #[getter]
+    fn lane_ids(&self) -> Vec<u64> {
+        self.lane_ids.clone()
+    }
+
+    /// Lane-local episode indices in result order.
+    #[getter]
+    fn episode_indices(&self) -> Vec<u64> {
+        self.episode_indices.clone()
+    }
+
+    /// Derived episode seeds in result order.
+    #[getter]
+    fn episode_seeds(&self) -> Vec<Option<u64>> {
+        self.episode_seeds.clone()
+    }
+
+    /// Reset mask in result order.
+    #[getter]
+    fn resets(&self) -> Vec<bool> {
+        self.resets.clone()
+    }
+
+    /// Flat 21-value observations in stable TaskSpec order.
+    #[getter]
+    fn observations(&self) -> Vec<Vec<f64>> {
+        self.observations.clone()
+    }
+
+    /// Scalar rewards in result order.
+    #[getter]
+    fn rewards(&self) -> Vec<f64> {
+        self.rewards.clone()
+    }
+
+    /// Termination flags in result order.
+    #[getter]
+    fn terminated(&self) -> Vec<bool> {
+        self.terminated.clone()
+    }
+
+    /// Truncation flags in result order.
+    #[getter]
+    fn truncated(&self) -> Vec<bool> {
+        self.truncated.clone()
+    }
+}
+
+impl From<PortableBatchStep<UnitreeGo2Observation>> for PyPortableUnitreeGo2BatchStep {
+    fn from(step: PortableBatchStep<UnitreeGo2Observation>) -> Self {
+        Self {
+            lane_ids: step.lane_ids,
+            episode_indices: step.episode_indices,
+            episode_seeds: step.episode_seeds,
+            resets: step.resets,
+            observations: step
+                .observations
+                .into_iter()
+                .map(unitree_go2_observation_vector)
+                .collect(),
+            rewards: step.rewards,
+            terminated: step.terminated,
+            truncated: step.truncated,
+        }
+    }
+}
+
+/// TaskSpec-bound deterministic CPU batch for Unitree Go2 gait learning.
+#[pyclass(name = "PortableUnitreeGo2Batch")]
+struct PyPortableUnitreeGo2Batch {
+    inner: PortableBatchRunner<UnitreeGo2Episode>,
+}
+
+#[pymethods]
+impl PyPortableUnitreeGo2Batch {
+    /// Creates a deterministic batch with stable lane IDs and lane-local seeds.
+    #[new]
+    #[pyo3(signature = (num_envs=1, max_steps=600, seed=1, auto_reset=true))]
+    fn new(num_envs: usize, max_steps: u64, seed: u64, auto_reset: bool) -> PyResult<Self> {
+        if num_envs == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "num_envs must be positive",
+            ));
+        }
+        if max_steps == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_steps must be greater than zero",
+            ));
+        }
+        let episode_config = UnitreeGo2EpisodeConfig {
+            max_steps,
+            ..UnitreeGo2EpisodeConfig::default()
+        };
+        let first_seed = rne_ai::derive_episode_seed(seed, 0, 0);
+        UnitreeGo2Episode::new_with_seed(episode_config.clone(), first_seed).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to load Unitree Go2 batch scene: {error:?}"
+            ))
+        })?;
+        let factory_config = episode_config.clone();
+        let inner = PortableBatchRunner::from_task_spec(
+            unitree_go2_task_spec(max_steps),
+            PortableBatchConfig {
+                num_envs,
+                seed,
+                auto_reset,
+            },
+            move |episode_seed| {
+                UnitreeGo2Episode::new_with_seed(factory_config.clone(), episode_seed)
+                    .expect("preflight-validated Unitree Go2 scene must remain loadable")
+            },
+        )
+        .map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "internal Unitree Go2 TaskSpec is invalid: {error}"
+            ))
+        })?;
+        Ok(Self { inner })
+    }
+
+    /// Number of stable batch lanes.
+    #[getter]
+    fn num_envs(&self) -> usize {
+        self.inner.num_envs()
+    }
+
+    /// Canonical TaskSpec JSON bound to this batch and its checkpoints.
+    fn task_spec_json(&self) -> PyResult<String> {
+        serde_json::to_string(
+            self.inner
+                .task_spec()
+                .expect("portable Go2 batch always has a TaskSpec"),
+        )
+        .map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to serialize Unitree Go2 TaskSpec: {error}"
+            ))
+        })
+    }
+
+    /// Fully resets the batch to lane-local episode zero.
+    fn reset(&mut self) -> PyPortableUnitreeGo2BatchStep {
+        self.inner.reset().into()
+    }
+
+    /// Partially resets canonical increasing lane IDs.
+    fn reset_lanes(&mut self, lane_ids: Vec<u64>) -> PyResult<PyPortableUnitreeGo2BatchStep> {
+        self.inner
+            .reset_lanes(&lane_ids)
+            .map(PyPortableUnitreeGo2BatchStep::from)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Applies one five-value gait action per lane in stable ID order.
+    fn step(
+        &mut self,
+        actions: Vec<(f64, f64, f64, f64, f64)>,
+    ) -> PyResult<PyPortableUnitreeGo2BatchStep> {
+        if actions.len() != self.inner.num_envs() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected {} actions, got {}",
+                self.inner.num_envs(),
+                actions.len()
+            )));
+        }
+        let actions = actions
+            .into_iter()
+            .map(
+                |(
+                    stride_rad,
+                    foot_lift_rad,
+                    roll_correction_rad,
+                    pitch_correction_rad,
+                    lateral_extension_rad,
+                )| UnitreeGo2Action {
+                    stride_rad,
+                    foot_lift_rad,
+                    roll_correction_rad,
+                    pitch_correction_rad,
+                    lateral_extension_rad,
+                },
+            )
+            .collect::<Vec<_>>();
+        Ok(self.inner.step(&actions).into())
+    }
+
+    /// Returns one lane's batch-width-independent replay digest.
+    fn lane_replay_digest(&self, lane_id: u64) -> PyResult<u64> {
+        self.inner.lane_replay_digest(lane_id).ok_or_else(|| {
+            pyo3::exceptions::PyIndexError::new_err(format!(
+                "lane ID {lane_id} out of range for {} lanes",
+                self.inner.num_envs()
+            ))
+        })
+    }
+
+    /// Returns the versioned deterministic batch checkpoint as JSON.
+    fn checkpoint_json(&self) -> PyResult<String> {
+        let checkpoint = self
+            .inner
+            .checkpoint()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        serde_json::to_string(&checkpoint).map_err(|error| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "failed to serialize portable batch checkpoint: {error}"
+            ))
+        })
+    }
+
+    /// Restores a deterministic batch checkpoint from JSON.
+    fn restore_checkpoint_json(&mut self, checkpoint_json: &str) -> PyResult<()> {
+        let checkpoint: rne_ai::PortableBatchCheckpoint<UnitreeGo2Action> =
+            serde_json::from_str(checkpoint_json).map_err(|error| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "failed to parse portable batch checkpoint: {error}"
+                ))
+            })?;
+        self.inner
+            .restore_checkpoint(&checkpoint)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 }
 
@@ -1551,12 +1833,18 @@ impl PyVectorizedMobileManipulatorEnv {
 #[pymodule]
 fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add("TASK_SPEC_SCHEMA_VERSION", rne_ai::TASK_SPEC_SCHEMA_VERSION)?;
+    m.add("TASK_SPEC_KIND", rne_ai::TASK_SPEC_KIND)?;
+    m.add_function(wrap_pyfunction!(canonical_task_spec_json, m)?)?;
+    m.add_function(wrap_pyfunction!(py_derive_episode_seed, m)?)?;
     m.add_class::<PyDiffDriveSim>()?;
     m.add_class::<PyDiffDriveEpisode>()?;
     m.add_class::<PyObservation>()?;
     m.add_class::<PyStepResult>()?;
     m.add_class::<PyUnitreeGo2GaitEpisode>()?;
     m.add_class::<PyUnitreeGo2StepResult>()?;
+    m.add_class::<PyPortableUnitreeGo2Batch>()?;
+    m.add_class::<PyPortableUnitreeGo2BatchStep>()?;
     m.add_class::<PyMmLiftJointTarget>()?;
     m.add_class::<PyMmLiftGripperTarget>()?;
     m.add_class::<PyMmAction>()?;
@@ -1658,6 +1946,42 @@ mod tests {
             final_x = sim.step(6.0, 6.0).base_x_m;
         }
         assert!(final_x > 0.5);
+    }
+
+    #[test]
+    fn python_task_spec_api_matches_rust_schema_and_seed_contract() {
+        let env = PyUnitreeGo2GaitEpisode::new(123, 6602).unwrap();
+        let json = env.task_spec_json().unwrap();
+        let canonical = canonical_task_spec_json(&json).unwrap();
+        let spec: TaskSpec = serde_json::from_str(&canonical).unwrap();
+        assert_eq!(spec, unitree_go2_task_spec(123));
+        assert_eq!(
+            py_derive_episode_seed(42, 2, 1),
+            rne_ai::derive_episode_seed(42, 2, 1)
+        );
+    }
+
+    #[test]
+    fn python_portable_batch_exposes_lane_metadata_and_restores_checkpoint() {
+        let mut batch = PyPortableUnitreeGo2Batch::new(1, 4, 42, false).unwrap();
+        let reset = batch.reset();
+        assert_eq!(reset.lane_ids, vec![0]);
+        assert_eq!(
+            reset.episode_seeds,
+            vec![Some(rne_ai::derive_episode_seed(42, 0, 0))]
+        );
+        let action = vec![(0.12, 0.16, 0.0, 0.0, 0.0)];
+        batch.step(action.clone()).unwrap();
+        let checkpoint = batch.checkpoint_json().unwrap();
+        let expected = batch.step(action.clone()).unwrap();
+
+        let mut restored = PyPortableUnitreeGo2Batch::new(1, 4, 42, false).unwrap();
+        restored.restore_checkpoint_json(&checkpoint).unwrap();
+        let actual = restored.step(action).unwrap();
+        assert_eq!(actual.observations, expected.observations);
+        assert_eq!(actual.rewards, expected.rewards);
+        assert_eq!(actual.terminated, expected.terminated);
+        assert_eq!(actual.truncated, expected.truncated);
     }
 
     #[test]

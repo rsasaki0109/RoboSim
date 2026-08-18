@@ -1,0 +1,118 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.diff_drive.goal.v1",
+  "control_step_s": 0.02,
+  "observation": {
+    "tensors": [
+      {
+        "name": "base_position_m",
+        "dtype": "f64",
+        "shape": [
+          2
+        ],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "base_yaw_rad",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "target_position_m",
+        "dtype": "f64",
+        "shape": [
+          2
+        ],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "wheel_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [
+          2
+        ],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [
+            -10.0
+          ],
+          "upper": [
+            10.0
+          ]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "goal_progress",
+        "weight": 1.0,
+        "unit": "1"
+      },
+      {
+        "name": "action_effort",
+        "weight": -0.01,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "goal_reached",
+        "kind": "success"
+      },
+      {
+        "name": "out_of_bounds",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 500
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": true
+  },
+  "curriculum": {
+    "stages": [
+      {
+        "name": "baseline",
+        "starts_at_episode": 0,
+        "parameters": {
+          "goal_distance_m": {
+            "value": 1.0,
+            "unit": "m"
+          }
+        }
+      }
+    ]
+  },
+  "randomization": {
+    "parameters": [
+      {
+        "name": "initial_yaw_rad",
+        "unit": "rad",
+        "distribution": {
+          "type": "uniform",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
+        }
+      }
+    ]
+  }
+}
