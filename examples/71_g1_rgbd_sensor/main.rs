@@ -18,7 +18,8 @@ use rne_data::{
     DataBus, DatasetAsset, DatasetBundle, DatasetBundleWriter, DatasetCalibration,
     DatasetFieldSpec, DatasetGapPolicy, DatasetLatencyModel, DatasetLatencySpec, DatasetManifest,
     DatasetNoiseSpec, DatasetStreamKind, DatasetStreamSpec, DatasetTimingSpec, Frame, ImageDepth,
-    ImageRgb8, InMemoryDataBus, StreamId,
+    ImageRgb8, InMemoryDataBus, RendererDatasetCaptureReport, StreamId,
+    RENDERER_DATASET_CAPTURE_REPORT_KIND, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
 };
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Transform3, Vec3};
@@ -35,7 +36,6 @@ use rne_sensor::{
     SensorState, CAMERA_DEPTH_STREAM_OFFSET,
 };
 use rne_world::Transform3 as WorldTransform3;
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -78,20 +78,6 @@ struct IndustrialProp {
 struct RgbdCapture {
     rgb: Frame<ImageRgb8>,
     depth: Frame<ImageDepth>,
-}
-
-#[derive(Debug, Serialize)]
-struct RendererDatasetReport {
-    kind: &'static str,
-    schema_version: u32,
-    status: &'static str,
-    renderer: &'static str,
-    dataset_manifest_sha256: String,
-    task_spec_sha256: String,
-    stream_count: u64,
-    record_count: u64,
-    sample_count: u64,
-    frame_count: usize,
 }
 
 /// A camera sensor entity with its own empty physics world.
@@ -288,11 +274,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         if task_digest != bundle.manifest().task_spec_sha256 {
             return Err(io::Error::other("renderer dataset TaskSpec digest mismatch").into());
         }
-        let report = RendererDatasetReport {
-            kind: "rne_renderer_dataset_capture_report",
-            schema_version: 1,
-            status: "passed",
-            renderer: "rne_render_wgpu",
+        let report = RendererDatasetCaptureReport {
+            kind: RENDERER_DATASET_CAPTURE_REPORT_KIND.to_string(),
+            schema_version: RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            renderer: "rne_render_wgpu".to_string(),
             dataset_manifest_sha256: bundle.manifest().content_sha256.clone(),
             task_spec_sha256: task_digest,
             stream_count: verification.stream_count,
@@ -300,6 +286,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             sample_count: verification.sample_count,
             frame_count: FRAME_COUNT,
         };
+        report.validate_against(&bundle.manifest().content_sha256, &verification)?;
         let mut report_bytes = serde_json::to_vec_pretty(&report)?;
         report_bytes.push(b'\n');
         fs::write(

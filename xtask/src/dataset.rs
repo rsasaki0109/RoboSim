@@ -1,7 +1,10 @@
 //! Headless dataset bundle verification and offline evaluation commands.
 
 use anyhow::{Context, Result};
-use rne_data::{DatasetBundle, DatasetVerificationReport, DepthPairMetricSpec, StreamId};
+use rne_data::{
+    DatasetBundle, DatasetVerificationReport, DepthPairMetricSpec, RendererDatasetCaptureReport,
+    StreamId,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -10,24 +13,10 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-pub(crate) const RENDERER_CAPTURE_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RENDERER_CAPTURE_REPORT_SCHEMA_VERSION: u32 =
+    rne_data::RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION;
 const RENDERER_CAPTURE_REPORT: &str = "renderer-capture-report.json";
 const WGPU_G1_DATASET_ID: &str = "rne-unitree-g1-wgpu-rgbd-v1";
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RendererDatasetReport {
-    kind: String,
-    schema_version: u32,
-    status: String,
-    renderer: String,
-    dataset_manifest_sha256: String,
-    task_spec_sha256: String,
-    stream_count: u64,
-    record_count: u64,
-    sample_count: u64,
-    frame_count: usize,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,8 +114,8 @@ fn verify_renderer_capture(
     verification: &DatasetVerificationReport,
 ) -> Result<()> {
     let report_bytes = read_regular_file(&dataset_root.join(RENDERER_CAPTURE_REPORT), 64 * 1024)?;
-    let report: RendererDatasetReport = serde_json::from_slice(&report_bytes)?;
-    validate_renderer_report_shape(&report, verification, &bundle.manifest().content_sha256)?;
+    let report: RendererDatasetCaptureReport = serde_json::from_slice(&report_bytes)?;
+    validate_wgpu_renderer_report(&report, verification, &bundle.manifest().content_sha256)?;
 
     let task_asset = bundle
         .manifest()
@@ -231,32 +220,15 @@ fn verify_renderer_capture(
     Ok(())
 }
 
-fn validate_renderer_report_shape(
-    report: &RendererDatasetReport,
+fn validate_wgpu_renderer_report(
+    report: &RendererDatasetCaptureReport,
     verification: &DatasetVerificationReport,
     manifest_sha256: &str,
 ) -> Result<()> {
+    report.validate_against(manifest_sha256, verification)?;
     anyhow::ensure!(
-        report.kind == "rne_renderer_dataset_capture_report"
-            && report.schema_version == RENDERER_CAPTURE_REPORT_SCHEMA_VERSION
-            && report.status == "passed"
-            && report.renderer == "rne_render_wgpu",
+        report.renderer == "rne_render_wgpu",
         "renderer capture report identity is invalid"
-    );
-    anyhow::ensure!(
-        report.dataset_manifest_sha256 == manifest_sha256
-            && report.dataset_manifest_sha256 == verification.manifest_sha256,
-        "renderer capture report is not bound to the verified manifest"
-    );
-    anyhow::ensure!(
-        report.stream_count == verification.stream_count
-            && report.record_count == verification.record_count
-            && report.sample_count == verification.sample_count
-            && verification.passed
-            && verification.dropped_count == 0
-            && report.frame_count > 0
-            && report.record_count == (report.frame_count as u64) * 2,
-        "renderer capture report counts do not match the verified RGB-D bundle"
     );
     Ok(())
 }
@@ -393,7 +365,7 @@ mod tests {
             dropped_count: 0,
             passed: true,
         };
-        let report = RendererDatasetReport {
+        let report = RendererDatasetCaptureReport {
             kind: "rne_renderer_dataset_capture_report".into(),
             schema_version: RENDERER_CAPTURE_REPORT_SCHEMA_VERSION,
             status: "passed".into(),
@@ -405,22 +377,22 @@ mod tests {
             sample_count: 24,
             frame_count: 12,
         };
-        validate_renderer_report_shape(&report, &verification, &manifest).unwrap();
+        validate_wgpu_renderer_report(&report, &verification, &manifest).unwrap();
 
         let mut wrong_renderer = report.clone();
         wrong_renderer.renderer = "headless".into();
-        assert!(validate_renderer_report_shape(&wrong_renderer, &verification, &manifest).is_err());
+        assert!(validate_wgpu_renderer_report(&wrong_renderer, &verification, &manifest).is_err());
         let mut wrong_digest = report.clone();
         wrong_digest.dataset_manifest_sha256 = format!("sha256:{}", "c".repeat(64));
-        assert!(validate_renderer_report_shape(&wrong_digest, &verification, &manifest).is_err());
+        assert!(validate_wgpu_renderer_report(&wrong_digest, &verification, &manifest).is_err());
         let mut wrong_count = report;
         wrong_count.record_count = 22;
-        assert!(validate_renderer_report_shape(&wrong_count, &verification, &manifest).is_err());
+        assert!(validate_wgpu_renderer_report(&wrong_count, &verification, &manifest).is_err());
 
         let unknown = format!(
             "{{\"kind\":\"rne_renderer_dataset_capture_report\",\"schema_version\":1,\"status\":\"passed\",\"renderer\":\"rne_render_wgpu\",\"dataset_manifest_sha256\":\"{manifest}\",\"task_spec_sha256\":\"sha256:{}\",\"stream_count\":2,\"record_count\":24,\"sample_count\":24,\"frame_count\":12,\"unknown\":true}}",
             "b".repeat(64)
         );
-        assert!(serde_json::from_str::<RendererDatasetReport>(&unknown).is_err());
+        assert!(serde_json::from_str::<RendererDatasetCaptureReport>(&unknown).is_err());
     }
 }

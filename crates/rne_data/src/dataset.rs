@@ -28,6 +28,10 @@ use thiserror::Error;
 
 /// Current dataset bundle manifest and record schema.
 pub const DATASET_BUNDLE_SCHEMA_VERSION: u32 = 1;
+/// Current renderer-backed dataset capture report schema.
+pub const RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION: u32 = 1;
+/// Stable renderer-backed dataset capture report discriminator.
+pub const RENDERER_DATASET_CAPTURE_REPORT_KIND: &str = "rne_renderer_dataset_capture_report";
 /// Maximum accepted manifest size.
 pub const DATASET_MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 /// Maximum number of declared streams in one bundle.
@@ -108,6 +112,118 @@ pub enum DatasetError {
     /// Bytes remained after the declared shard boundary.
     #[error("dataset shard contains trailing or undeclared bytes")]
     TrailingBytes,
+}
+
+/// Renderer-backed RGB-D capture evidence bound to a verified dataset bundle.
+///
+/// The report deliberately records renderer identity and aggregate dataset
+/// counts, but not pixel hashes: exact pixels may differ across conforming GPU
+/// adapters. Payload integrity remains bound by the dataset manifest digest.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererDatasetCaptureReport {
+    /// Stable [`RENDERER_DATASET_CAPTURE_REPORT_KIND`] discriminator.
+    pub kind: String,
+    /// Renderer capture report schema version.
+    pub schema_version: u32,
+    /// Successful capture verdict; schema v1 accepts only `passed`.
+    pub status: String,
+    /// Renderer implementation identity.
+    pub renderer: String,
+    /// SHA-256 identity of the verified dataset manifest.
+    pub dataset_manifest_sha256: String,
+    /// SHA-256 identity of the TaskSpec retained by the bundle.
+    pub task_spec_sha256: String,
+    /// Number of dataset streams; RGB-D schema v1 requires two.
+    pub stream_count: u64,
+    /// Number of records retained across the RGB and depth streams.
+    pub record_count: u64,
+    /// Number of non-gap samples retained across both streams.
+    pub sample_count: u64,
+    /// Number of paired RGB-D frames.
+    pub frame_count: usize,
+}
+
+impl RendererDatasetCaptureReport {
+    /// Validates schema identity, digests, and intrinsic RGB-D count invariants.
+    pub fn validate(&self) -> Result<(), DatasetError> {
+        if self.kind != RENDERER_DATASET_CAPTURE_REPORT_KIND {
+            return Err(invalid(
+                "renderer_report.kind",
+                "unexpected report discriminator",
+            ));
+        }
+        if self.schema_version != RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION {
+            return Err(invalid(
+                "renderer_report.schema_version",
+                format!(
+                    "expected {}, got {}",
+                    RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION, self.schema_version
+                ),
+            ));
+        }
+        if self.status != "passed" {
+            return Err(invalid(
+                "renderer_report.status",
+                "schema v1 requires passed",
+            ));
+        }
+        if self.renderer.trim().is_empty() {
+            return Err(invalid("renderer_report.renderer", "must not be empty"));
+        }
+        validate_sha256(
+            "renderer_report.dataset_manifest_sha256",
+            &self.dataset_manifest_sha256,
+        )?;
+        validate_sha256("renderer_report.task_spec_sha256", &self.task_spec_sha256)?;
+        if self.stream_count != 2 {
+            return Err(invalid(
+                "renderer_report.stream_count",
+                "RGB-D requires two streams",
+            ));
+        }
+        if self.frame_count == 0 {
+            return Err(invalid("renderer_report.frame_count", "must be positive"));
+        }
+        let expected_records = u64::try_from(self.frame_count)
+            .ok()
+            .and_then(|frames| frames.checked_mul(self.stream_count))
+            .ok_or_else(|| DatasetError::InvalidField {
+                field: "renderer_report.frame_count",
+                reason: "record count overflow".to_string(),
+            })?;
+        if self.record_count != expected_records || self.sample_count != expected_records {
+            return Err(invalid(
+                "renderer_report.record_count",
+                "record and sample counts must equal paired frame count",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Binds the report to one complete, gap-free dataset verification result.
+    pub fn validate_against(
+        &self,
+        manifest_sha256: &str,
+        verification: &DatasetVerificationReport,
+    ) -> Result<(), DatasetError> {
+        self.validate()?;
+        if verification.schema_version != DATASET_BUNDLE_SCHEMA_VERSION
+            || !verification.passed
+            || verification.dropped_count != 0
+            || self.dataset_manifest_sha256 != manifest_sha256
+            || self.dataset_manifest_sha256 != verification.manifest_sha256
+            || self.stream_count != verification.stream_count
+            || self.record_count != verification.record_count
+            || self.sample_count != verification.sample_count
+        {
+            return Err(invalid(
+                "renderer_report.dataset_manifest_sha256",
+                "report is not bound to the complete verified bundle",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Semantic role and codec family for a declared stream.
@@ -1579,5 +1695,63 @@ fn invalid(field: &'static str, reason: impl Into<String>) -> DatasetError {
     DatasetError::InvalidField {
         field,
         reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+mod renderer_report_tests {
+    use super::*;
+
+    fn digest(byte: char) -> String {
+        format!("sha256:{}", byte.to_string().repeat(64))
+    }
+
+    fn report() -> RendererDatasetCaptureReport {
+        RendererDatasetCaptureReport {
+            kind: RENDERER_DATASET_CAPTURE_REPORT_KIND.to_string(),
+            schema_version: RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            renderer: "rne_render_wgpu".to_string(),
+            dataset_manifest_sha256: digest('a'),
+            task_spec_sha256: digest('b'),
+            stream_count: 2,
+            record_count: 24,
+            sample_count: 24,
+            frame_count: 12,
+        }
+    }
+
+    #[test]
+    fn renderer_capture_report_binds_complete_rgbd_verification() {
+        let report = report();
+        let verification = DatasetVerificationReport {
+            schema_version: DATASET_BUNDLE_SCHEMA_VERSION,
+            manifest_sha256: report.dataset_manifest_sha256.clone(),
+            stream_count: 2,
+            record_count: 24,
+            sample_count: 24,
+            dropped_count: 0,
+            passed: true,
+        };
+        report
+            .validate_against(&report.dataset_manifest_sha256, &verification)
+            .unwrap();
+
+        let mut dropped = verification;
+        dropped.dropped_count = 1;
+        assert!(report
+            .validate_against(&report.dataset_manifest_sha256, &dropped)
+            .is_err());
+    }
+
+    #[test]
+    fn renderer_capture_report_rejects_schema_shape_and_unknown_fields() {
+        let mut invalid = report();
+        invalid.record_count = 23;
+        assert!(invalid.validate().is_err());
+
+        let mut value = serde_json::to_value(report()).unwrap();
+        value["unknown"] = serde_json::Value::Bool(true);
+        assert!(serde_json::from_value::<RendererDatasetCaptureReport>(value).is_err());
     }
 }

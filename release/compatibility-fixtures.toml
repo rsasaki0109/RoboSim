@@ -128,6 +128,13 @@ path = "tests/golden/tasks/vectorized-checkpoint-v2.json"
 canonical_json_sha256 = "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5"
 
 [[fixture]]
+id = "renderer_capture_report_v1"
+contract = "renderer_capture_report"
+schema_version = 1
+path = "tests/golden/datasets/renderer-capture-report-v1.json"
+canonical_json_sha256 = "sha256:d69d3577146f3c20769b5e74593a32f720553567db6a80acab81e346f4b9f672"
+
+[[fixture]]
 id = "scenario_replay_v2_533729d_requires_rerun"
 contract = "historical_artifact_decision"
 schema_version = 1

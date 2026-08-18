@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Freeze renderer-backed RGB-D capture report v1 as the twenty-fifth installed
+  compatibility fixture. Producer, independent dataset verifier, and installed
+  compatibility kit now share one strict `rne_data` type; readiness requires
+  all 25 typed-reader checks while cross-adapter pixel hashes remain outside
+  the compatibility contract.
+
 - Add a portable Unitree G1 gait TaskSpec and connect the real WGPU head-camera
   path to a streaming, TaskSpec-bound RGB-D dataset with calibration, timing,
   latency, noise, renderer identity, complete scene/robot/mesh/environment input
@@ -100,7 +106,7 @@ All notable changes to Robot Native Engine are documented in this file.
   TaskSpec/Failure Capsule use, third-party plugin and backend/adapter reports,
   LeKiwi physical evidence, same-tag Linux/Windows release rehearsals, the exact
   compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
-  The committed tracker retains and freshly replays the complete 24-check
+  The committed tracker retains and freshly replays the complete 25-check
   historical compatibility report, so the honest baseline is now 2/9 and
   remains ineligible; no tag or 1.0 claim is created.
 - **Fail-closed 1.x promotion interlock**: `release-check`, platform
@@ -133,7 +139,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Replayed historical-compatibility evidence**: the 1.0 readiness gate no
   longer accepts a registry-shaped compatibility report on its pass flags
   alone. It revalidates ancestor revisions, trees, schema declarations, and
-  golden blobs, executes all 24 fixtures through the current typed readers,
+  golden blobs, executes all 25 fixtures through the current typed readers,
   and requires the retained report to match that fresh result exactly.
 - **Frontend transport history retention**: protocol v1's introducing commit
   and first committed full `ClientHello` golden are now bound to exact Git
@@ -163,8 +169,9 @@ All notable changes to Robot Native Engine are documented in this file.
   source CI and extracted bundles emit a deterministic verification report.
   Installed-rehearsal schema v4 appends the ninth `python_api` check.
 - **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
-  twenty-four content-addressed TaskSpec, checkpoint, generic/behavior/scenario
-  replay, dataset, frontend transport, controller C ABI, historical migration,
+  twenty-five content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  replay, dataset, renderer capture, frontend transport, controller C ABI,
+  historical migration,
   Failure Capsule, hardware, and physics artifacts through their current typed
   readers. The frontend and dataset payload fixtures also require byte-exact
   re-encoding and fail-closed handling of corrupt, truncated, and trailing

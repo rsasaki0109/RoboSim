@@ -51,7 +51,7 @@ const INSTALL_CHECK_IDS: [&str; 9] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 62] = [
+const BUNDLE_FILES: [(&str, &str); 63] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -227,6 +227,10 @@ const BUNDLE_FILES: [(&str, &str); 62] = [
     (
         "tests/golden/tasks/vectorized-checkpoint-v2.json",
         "tests/golden/tasks/vectorized-checkpoint-v2.json",
+    ),
+    (
+        "tests/golden/datasets/renderer-capture-report-v1.json",
+        "tests/golden/datasets/renderer-capture-report-v1.json",
     ),
     (
         "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json",

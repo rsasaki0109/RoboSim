@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:873aa20a1d7fda1509ae3698b686f45fe5e500591ee04f0a31d28c5035646ca9",
+  "registry_sha256": "sha256:0d7e326f7e79abc79a515a67ad785ce2a2397359275f89c3c8df7783c42bf1a8",
   "checks": [
     {
       "id": "behavior_replay_v1",
@@ -214,6 +214,18 @@
       "schema_version": 2,
       "path": "tests/golden/tasks/vectorized-checkpoint-v2.json",
       "canonical_json_sha256": "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
+      "accepted": true,
+      "future_schema_rejected": true,
+      "unknown_field_rejected": true,
+      "passed": true,
+      "detail": "accepted; future schema and unknown field rejected"
+    },
+    {
+      "id": "renderer_capture_report_v1",
+      "contract": "renderer_capture_report",
+      "schema_version": 1,
+      "path": "tests/golden/datasets/renderer-capture-report-v1.json",
+      "canonical_json_sha256": "sha256:d69d3577146f3c20769b5e74593a32f720553567db6a80acab81e346f4b9f672",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

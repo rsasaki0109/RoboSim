@@ -27,8 +27,9 @@ use rne_data::{
     encode_dataset_annotation, encode_dataset_imu, encode_dataset_task_outcome,
     encode_dataset_transform, DatasetActionSample, DatasetBundle, DatasetError,
     DatasetGroundTruthAnnotation, DatasetManifest, DatasetTaskOutcomeSample,
-    DepthPairEvaluationReport, DepthPairMetricSpec, ImuSample, PoseSample, StreamId,
-    DATASET_BUNDLE_SCHEMA_VERSION, DATASET_PAYLOAD_SCHEMA_VERSION,
+    DepthPairEvaluationReport, DepthPairMetricSpec, ImuSample, PoseSample,
+    RendererDatasetCaptureReport, StreamId, DATASET_BUNDLE_SCHEMA_VERSION,
+    DATASET_PAYLOAD_SCHEMA_VERSION, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
 };
 use rne_hardware_gateway::mock::MockConformanceReport;
 use rne_log::{
@@ -81,7 +82,7 @@ struct FixtureSpec {
     version_field: &'static str,
 }
 
-const FIXTURE_SPECS: [FixtureSpec; 24] = [
+const FIXTURE_SPECS: [FixtureSpec; 25] = [
     FixtureSpec {
         id: "behavior_replay_v1",
         contract: "behavior_replay",
@@ -188,6 +189,12 @@ const FIXTURE_SPECS: [FixtureSpec; 24] = [
         id: "portable_batch_checkpoint_v2",
         contract: "portable_batch_checkpoint",
         schema_version: 2,
+        version_field: "schema_version",
+    },
+    FixtureSpec {
+        id: "renderer_capture_report_v1",
+        contract: "renderer_capture_report",
+        schema_version: RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
         version_field: "schema_version",
     },
     FixtureSpec {
@@ -1389,6 +1396,10 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         "portable_batch_checkpoint" => {
             let fixture: PortableBatchCheckpoint<u64> = serde_json::from_value(value)?;
             validate_checkpoint(&fixture)?;
+        }
+        "renderer_capture_report" => {
+            let fixture: RendererDatasetCaptureReport = serde_json::from_value(value)?;
+            fixture.validate()?;
         }
         "scenario_replay" => {
             let fixture: ScenarioReplayArtifact = serde_json::from_value(value)?;
