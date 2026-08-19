@@ -213,6 +213,7 @@ impl MockDeviceFault {
 
 /// Configuration for one deterministic mock device process.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MockDeviceConfig {
     /// Stable device identity returned by the open handshake.
     pub device_id: String,
@@ -468,6 +469,7 @@ impl MockHardwareDevice {
 
 /// Failure configuring or executing the deterministic mock device.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum MockDeviceError {
     /// The configured device identity is empty.
     #[error("mock device_id must not be empty")]
