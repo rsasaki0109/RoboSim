@@ -15,8 +15,11 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config = parse_args(env::args().skip(1))?;
-    let mut device = MockHardwareDevice::new(config)?;
+    let (config, binding) = parse_args(env::args().skip(1))?;
+    let mut device = match binding {
+        Some(binding) => MockHardwareDevice::with_binding(config, binding)?,
+        None => MockHardwareDevice::new(config)?,
+    };
     let codec = HardwareWireCodec::default();
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -42,7 +45,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn parse_args(
     mut args: impl Iterator<Item = String>,
-) -> Result<MockDeviceConfig, Box<dyn std::error::Error>> {
+) -> Result<(MockDeviceConfig, Option<MockDeviceBinding>), Box<dyn std::error::Error>> {
     let mut config = MockDeviceConfig::default();
     let mut task_id = None;
     let mut observation_width = None;
@@ -98,13 +101,17 @@ fn parse_args(
             other => return Err(format!("unknown option {other:?}").into()),
         }
     }
-    config.binding = match (task_id, observation_width, action_width) {
+    let binding = match (task_id, observation_width, action_width) {
         (None, None, None) => None,
-        (Some(task_id), Some(observation_width), Some(action_width)) => Some(MockDeviceBinding {
-            task_id,
-            observation_width,
-            action_width,
-        }),
+        (Some(task_id), Some(observation_width), Some(action_width)) => {
+            let binding = MockDeviceBinding {
+                task_id,
+                observation_width,
+                action_width,
+            };
+            binding.validate()?;
+            Some(binding)
+        }
         _ => {
             return Err(
                 "fixed binding requires --expected-task-id, --observation-width, and --action-width"
@@ -113,7 +120,7 @@ fn parse_args(
         }
     };
     config.validate()?;
-    Ok(config)
+    Ok((config, binding))
 }
 
 fn required_value(

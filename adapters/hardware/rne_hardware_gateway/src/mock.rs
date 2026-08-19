@@ -213,14 +213,11 @@ impl MockDeviceFault {
 
 /// Configuration for one deterministic mock device process.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct MockDeviceConfig {
     /// Stable device identity returned by the open handshake.
     pub device_id: String,
     /// Optional exact-count terminal fault.
     pub fault: Option<MockDeviceFault>,
-    /// Optional fixed TaskSpec binding enforced during open.
-    pub binding: Option<MockDeviceBinding>,
 }
 
 /// Fixed TaskSpec identity and flattened widths enforced by a mock process.
@@ -234,6 +231,24 @@ pub struct MockDeviceBinding {
     pub action_width: usize,
 }
 
+/// Invalid fixed TaskSpec binding supplied to a mock device.
+#[derive(Debug, thiserror::Error)]
+pub enum MockDeviceBindingError {
+    /// A fixed TaskSpec binding is empty or zero-width.
+    #[error("mock TaskSpec binding must have a task id and non-zero widths")]
+    Invalid,
+}
+
+impl MockDeviceBinding {
+    /// Validates a non-empty task identity and non-zero flattened widths.
+    pub fn validate(&self) -> Result<(), MockDeviceBindingError> {
+        if self.task_id.trim().is_empty() || self.observation_width == 0 || self.action_width == 0 {
+            return Err(MockDeviceBindingError::Invalid);
+        }
+        Ok(())
+    }
+}
+
 impl MockDeviceConfig {
     /// Validates a non-empty identity and non-zero fault count.
     pub fn validate(&self) -> Result<(), MockDeviceError> {
@@ -242,13 +257,6 @@ impl MockDeviceConfig {
         }
         if self.fault.is_some_and(|fault| fault.count() == 0) {
             return Err(MockDeviceError::ZeroFaultCount);
-        }
-        if self.binding.as_ref().is_some_and(|binding| {
-            binding.task_id.trim().is_empty()
-                || binding.observation_width == 0
-                || binding.action_width == 0
-        }) {
-            return Err(MockDeviceError::InvalidBinding);
         }
         Ok(())
     }
@@ -259,7 +267,6 @@ impl Default for MockDeviceConfig {
         Self {
             device_id: "rne-mock-device-v1".to_string(),
             fault: None,
-            binding: None,
         }
     }
 }
@@ -276,6 +283,7 @@ struct MockSession {
 #[derive(Debug)]
 pub struct MockHardwareDevice {
     config: MockDeviceConfig,
+    binding: Option<MockDeviceBinding>,
     session: Option<MockSession>,
     last_host_sequence: Option<u64>,
     observation_count: u64,
@@ -289,6 +297,24 @@ impl MockHardwareDevice {
         config.validate()?;
         Ok(Self {
             config,
+            binding: None,
+            session: None,
+            last_host_sequence: None,
+            observation_count: 0,
+            actuation_count: 0,
+            terminal: false,
+        })
+    }
+
+    /// Creates a mock that enforces one fixed TaskSpec binding during open.
+    pub fn with_binding(
+        config: MockDeviceConfig,
+        binding: MockDeviceBinding,
+    ) -> Result<Self, MockDeviceError> {
+        config.validate()?;
+        Ok(Self {
+            config,
+            binding: Some(binding),
             session: None,
             last_host_sequence: None,
             observation_count: 0,
@@ -327,7 +353,7 @@ impl MockHardwareDevice {
                 if self.session.is_some() {
                     return Ok(rejection(&frame, WireRejectionCode::AlreadyOpen));
                 }
-                if self.config.binding.as_ref().is_some_and(|binding| {
+                if self.binding.as_ref().is_some_and(|binding| {
                     binding.task_id != *task_id
                         || binding.observation_width != *observation_width
                         || binding.action_width != *action_width
@@ -442,7 +468,6 @@ impl MockHardwareDevice {
 
 /// Failure configuring or executing the deterministic mock device.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
 pub enum MockDeviceError {
     /// The configured device identity is empty.
     #[error("mock device_id must not be empty")]
@@ -450,9 +475,6 @@ pub enum MockDeviceError {
     /// A one-based injected fault count is zero.
     #[error("mock fault count must be greater than zero")]
     ZeroFaultCount,
-    /// A fixed TaskSpec binding is empty or zero-width.
-    #[error("mock TaskSpec binding must have a task id and non-zero widths")]
-    InvalidBinding,
     /// The host frame is not valid protocol v1.
     #[error(transparent)]
     InvalidFrame(#[from] HardwareWireError),
@@ -534,7 +556,6 @@ mod tests {
         let mut device = MockHardwareDevice::new(MockDeviceConfig {
             device_id: "mock-fault".into(),
             fault: Some(MockDeviceFault::DisconnectAfterActuations { count: 1 }),
-            binding: None,
         })
         .unwrap();
         device.handle(open(1)).unwrap();
@@ -568,7 +589,6 @@ mod tests {
             MockHardwareDevice::new(MockDeviceConfig {
                 device_id: "mock".into(),
                 fault: Some(MockDeviceFault::EmergencyStopAfterObservations { count: 0 }),
-                binding: None,
             }),
             Err(MockDeviceError::ZeroFaultCount)
         ));
@@ -576,15 +596,17 @@ mod tests {
 
     #[test]
     fn fixed_binding_and_shadow_authority_fail_closed() {
-        let mut device = MockHardwareDevice::new(MockDeviceConfig {
-            device_id: "bound-mock".into(),
-            fault: None,
-            binding: Some(MockDeviceBinding {
+        let mut device = MockHardwareDevice::with_binding(
+            MockDeviceConfig {
+                device_id: "bound-mock".into(),
+                fault: None,
+            },
+            MockDeviceBinding {
                 task_id: "rne.test.task.v1".into(),
                 observation_width: 3,
                 action_width: 2,
-            }),
-        })
+            },
+        )
         .unwrap();
         let wrong = device
             .handle(HostWireFrame::new(
