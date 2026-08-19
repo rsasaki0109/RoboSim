@@ -4,6 +4,8 @@ use std::ffi::{c_char, c_void};
 
 /// Version of the dependency-free Rust authoring surface.
 pub const RNE_PLUGIN_SDK_VERSION: u32 = 1;
+/// Schema version of the content-addressed 64-bit C layout fixture.
+pub const RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION: u32 = 1;
 /// Oldest controller-plugin ABI accepted by the current host.
 pub const RNE_PLUGIN_MIN_ABI_VERSION: u32 = 2;
 /// Current controller-plugin ABI for new plugins.

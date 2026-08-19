@@ -25,8 +25,8 @@ pub use rne_plugin_sdk::{
     RneControllerResetV3Fn, RneControllerShutdownV3Fn, RneControllerStepFn,
     RneControllerStepResultV3, RneControllerStepV3Fn, RneJointObservationV3, RneJointPosition,
     RneJointVelocity, RneJointVelocityV3, RnePluginAbiVersionFn, RnePluginCapabilitiesFn,
-    RnePluginNameFn, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2, RNE_PLUGIN_MIN_ABI_VERSION,
-    RNE_PLUGIN_SDK_VERSION,
+    RnePluginNameFn, RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION, RNE_PLUGIN_ABI_VERSION,
+    RNE_PLUGIN_ABI_VERSION_V2, RNE_PLUGIN_MIN_ABI_VERSION, RNE_PLUGIN_SDK_VERSION,
 };
 use rne_plugin_sdk::{
     RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION, RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND,
