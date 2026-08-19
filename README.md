@@ -77,6 +77,7 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
 | Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
+
 ## Independent validation wanted
 
 RNE remains below 1.0 until real projects outside this repository reproduce
@@ -195,6 +196,15 @@ RNE source tree.
 ## Selected demos
 
 ### PLATEAU city and sensors
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
+    <img src="docs/media/plateau-car.gif" alt="Vehicle driving through an official PLATEAU Sanjo City tile with traffic signals, lanes, and LiDAR overlay" width="800">
+  </picture>
+  <br>
+  <sub>PLATEAU city import: official tile, traffic signals, kinematic vehicles, and sensor overlay.</sub>
+</p>
 
 Example 46 imports a bounded official PLATEAU Sanjo City tile once, then renders
 both the deterministic 100-actor traffic capture and a bounded, controlled
