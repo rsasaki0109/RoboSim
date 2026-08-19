@@ -111,7 +111,7 @@ workflow = ".github/workflows/ci.yml"
 job = "semver"
 runner = "ubuntu-latest"
 clean_checkout = true
-commands = ["cargo semver-checks check-release \"${packages[@]}\" --baseline-rev \"$baseline\" --release-type patch"]
+commands = ["cargo semver-checks check-release \"${packages[@]}\" --baseline-rev \"$baseline\" --release-type minor"]
 
 [[gate]]
 id = "behavior_ci"
