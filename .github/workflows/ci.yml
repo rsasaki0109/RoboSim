@@ -145,7 +145,39 @@ jobs:
           else
             baseline="HEAD^"
           fi
-          cargo semver-checks check-release ${{ matrix.packages }} --baseline-rev "$baseline" --release-type patch
+
+          # Collect changed files relative to baseline.
+          changed="$(git diff --name-only "$baseline" HEAD)"
+
+          # Resolve each requested package to its manifest path and check
+          # whether any file under that crate's directory has changed.
+          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+          requested=( ${{ matrix.packages }} )
+          packages=()
+          for ((index = 0; index < ${#requested[@]}; index += 2)); do
+            package="${requested[index + 1]}"
+            manifest="$(jq -r --arg p "$package" \
+              '.packages[] | select(.name == $p) | .manifest_path' \
+              <<<"$metadata")"
+            if [[ -z "$manifest" ]]; then
+              echo "unknown package: $package" >&2
+              exit 1
+            fi
+            crate_dir="${manifest%/Cargo.toml}"
+            crate_dir="${crate_dir#"$GITHUB_WORKSPACE/"}"
+            if echo "$changed" | grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$"; then
+              packages+=("-p" "$package")
+            else
+              echo "skip $package (no changes under $crate_dir)"
+            fi
+          done
+
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "all packages in this shard are unchanged; semver check skipped"
+            exit 0
+          fi
+
+          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type patch
 
   behavior_ci:
     runs-on: ubuntu-latest
