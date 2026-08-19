@@ -480,10 +480,7 @@ fn rejects_wrong_step_and_post_compile_topology_change() {
         .expect("compile topology");
     assert!(matches!(
         backend.step(physics_world, SimDuration::from_hertz(Hertz::new(120.0))),
-        Err(PhysicsError::BackendInitializationFailed {
-            backend_id: "mujoco",
-            ..
-        })
+        Err(PhysicsError::InitializationFailed)
     ));
 
     spawn_body(
@@ -495,9 +492,6 @@ fn rejects_wrong_step_and_post_compile_topology_change() {
     );
     assert!(matches!(
         backend.sync_from_ecs(&mut world, physics_world),
-        Err(PhysicsError::BackendInitializationFailed {
-            backend_id: "mujoco",
-            ..
-        })
+        Err(PhysicsError::InitializationFailed)
     ));
 }

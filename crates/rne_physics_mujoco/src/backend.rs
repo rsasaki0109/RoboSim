@@ -218,7 +218,6 @@ impl MuJoCoBackend {
     }
 
     fn map_error(error: MuJoCoError) -> PhysicsError {
-        let message = error.to_string();
         match error {
             MuJoCoError::MissingCapability { capability, .. } => {
                 PhysicsError::MissingCapabilities {
@@ -232,10 +231,7 @@ impl MuJoCoBackend {
                 entity_index,
                 reason,
             },
-            _ => PhysicsError::BackendInitializationFailed {
-                backend_id: "mujoco",
-                message,
-            },
+            _ => PhysicsError::InitializationFailed,
         }
     }
 }

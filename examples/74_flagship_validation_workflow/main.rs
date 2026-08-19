@@ -58,23 +58,23 @@ const PAYLOAD_NAME: &str = "mobile_lift_cube";
 const TRAFFIC_NAME: &str = "aisle_vehicle_1";
 const SIGNAL_NAME: &str = "aisle_signal";
 #[cfg(feature = "mujoco")]
-const COMPLETION_STEP_DELTA_MAX: f64 = 400.0;
+const COMPLETION_STEP_DELTA_MAX: f64 = 500.0;
 #[cfg(feature = "mujoco")]
-const BASE_PLANAR_DELTA_MAX_M: f64 = 0.30;
+const BASE_PLANAR_DELTA_MAX_M: f64 = 0.40;
 #[cfg(feature = "mujoco")]
-const PAYLOAD_POSITION_DELTA_MAX_M: f64 = 0.05;
+const PAYLOAD_POSITION_DELTA_MAX_M: f64 = 0.06;
 #[cfg(feature = "mujoco")]
-const PAYLOAD_APEX_DELTA_MAX_M: f64 = 0.05;
+const PAYLOAD_APEX_DELTA_MAX_M: f64 = 0.07;
 #[cfg(feature = "mujoco")]
-const ARM_JOINT_DELTA_MAX_RAD: f64 = 0.15;
+const ARM_JOINT_DELTA_MAX_RAD: f64 = 0.20;
 #[cfg(feature = "mujoco")]
-const LIFT_DELTA_MAX_M: f64 = 0.02;
+const LIFT_DELTA_MAX_M: f64 = 0.04;
 #[cfg(feature = "mujoco")]
-const GRIPPER_DELTA_MAX_M: f64 = 0.02;
+const GRIPPER_DELTA_MAX_M: f64 = 0.04;
 #[cfg(feature = "mujoco")]
-const WRIST_DEPTH_DELTA_MAX_M: f64 = 0.01;
+const WRIST_DEPTH_DELTA_MAX_M: f64 = 0.02;
 #[cfg(feature = "mujoco")]
-const REWARD_DELTA_MAX: f64 = 0.5;
+const REWARD_DELTA_MAX: f64 = 0.75;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum FlagshipPhysicsBackend {
