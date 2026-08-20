@@ -14,9 +14,7 @@ use crate::env::office_agv_delivery::{
     evaluate_office_desk_delivery_stop, office_agv_delivery_scene_path, OfficeAgvDeliveryCourse,
     OfficePlanarAabb, OFFICE_DELIVERY_DESK_NAME, OFFICE_PICKUP_DOCK_NAME,
 };
-use crate::env::office_agv_shared_aisle::{
-    OfficeAgvSharedAisleCourse, OFFICE_ONCOMING_AGV_NAME,
-};
+use crate::env::office_agv_shared_aisle::{OfficeAgvSharedAisleCourse, OFFICE_ONCOMING_AGV_NAME};
 use crate::env::DiffDriveSim;
 use crate::task::{
     ActionSpec, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec, TaskSpec, TensorBounds,
@@ -95,11 +93,7 @@ impl OfficeAgvDeskPlaceCourse {
 
 /// Returns whether a cargo center lies inside the desk place box.
 #[must_use]
-pub fn evaluate_office_desk_place(
-    cargo_x_m: f64,
-    cargo_z_m: f64,
-    place: OfficePlanarAabb,
-) -> bool {
+pub fn evaluate_office_desk_place(cargo_x_m: f64, cargo_z_m: f64, place: OfficePlanarAabb) -> bool {
     cargo_x_m >= place.min_x_m
         && cargo_x_m <= place.max_x_m
         && cargo_z_m >= place.min_z_m
@@ -329,8 +323,7 @@ impl OfficeAgvDeskPlaceScenario {
     fn advance_other_agv(&mut self) {
         let elapsed_s = self.sim.step_count() as f64 * DT_S;
         let step_m = self.course.aisle.other_speed_m_s * DT_S;
-        let turn_x_m =
-            0.5 * (self.course.aisle.shared_min_x_m + self.course.aisle.shared_max_x_m);
+        let turn_x_m = 0.5 * (self.course.aisle.shared_min_x_m + self.course.aisle.shared_max_x_m);
         match self.other_motion {
             OtherMotion::Waiting => {
                 if elapsed_s >= self.course.aisle.other_departure_delay_s {
@@ -363,11 +356,10 @@ impl OfficeAgvDeskPlaceScenario {
             drive.left_wheel_velocity_rad_s,
             drive.right_wheel_velocity_rad_s,
         );
-        let aabb = self.course.delivery().robot_aabb(
-            drive.base_x_m,
-            drive.base_z_m,
-            drive.base_yaw_rad,
-        );
+        let aabb =
+            self.course
+                .delivery()
+                .robot_aabb(drive.base_x_m, drive.base_z_m, drive.base_yaw_rad);
         let other = self.course.aisle.other_aabb(self.other_agv_x_m, 0.0);
         let shared_aisle_occupied = self.course.aisle.other_occupies_shared(self.other_agv_x_m);
         let other_agv_contact = self.other_agv_contact || aabb.overlaps(other);
@@ -490,11 +482,7 @@ impl OfficeAgvDeskPlaceScenario {
         if !self.desk_place_complete
             && self.desk_delivery_complete
             && !self.cargo_loaded
-            && evaluate_office_desk_place(
-                self.cargo_x_m,
-                self.cargo_z_m,
-                self.course.place_aabb(),
-            )
+            && evaluate_office_desk_place(self.cargo_x_m, self.cargo_z_m, self.course.place_aabb())
         {
             self.place_streak = self
                 .place_streak
@@ -526,9 +514,8 @@ impl OfficeAgvDeskPlaceScenario {
                 DiffDriveAction::forward(0.0)
             }
             ScriptPhase::ApproachYield => {
-                let stop_x_m = self.course.aisle.shared_min_x_m
-                    - self.course.delivery().robot_half_x_m
-                    - 0.15;
+                let stop_x_m =
+                    self.course.aisle.shared_min_x_m - self.course.delivery().robot_half_x_m - 0.15;
                 if observation.base_x_m >= stop_x_m {
                     self.phase = ScriptPhase::HoldYield;
                     DiffDriveAction::forward(0.0)
@@ -656,9 +643,7 @@ impl BehaviorScenario for OfficeAgvDeskPlaceScenario {
             BehaviorContract::eventually(
                 "yielded_for_shared_aisle",
                 deadline,
-                |observation: &OfficeAgvDeskPlaceObservation| {
-                    observation.yielded_for_shared_aisle
-                },
+                |observation: &OfficeAgvDeskPlaceObservation| observation.yielded_for_shared_aisle,
             )?
             .with_entities([OFFICE_ONCOMING_AGV_NAME])?,
             BehaviorContract::eventually(
