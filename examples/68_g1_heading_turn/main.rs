@@ -1,4 +1,4 @@
-//! Evaluates and searches a command-conditioned G1 heading-yaw candidate.
+//! Evaluates the pinned G1 heading-yaw envelopes (v0.2 and v0.2.1).
 //!
 //! The v0.2 harness preserves the v0.1 learned stride and its hybrid actuator
 //! boundary: eight proximal joints use torque-PD while ankles, arms, and waist
@@ -6,16 +6,21 @@
 //! proximal overlay's measured stance gates. A deterministic CEM searches the
 //! command-scaled yaw overlay against both commanded directions and scores a
 //! three-member one-ULP replay ensemble.
+//!
+//! Acceptance:
+//! - v0.2 (240 ticks): final body-yaw sign matches the turn command
+//! - v0.2.1 (480 ticks): mean yaw-rate sign matches; integrated yaw may still
+//!   cross zero on this contact schedule
 
 use rne_ai::{
     run_unitree_g1_commanded_gait_with_policy, UnitreeG1CommandedGaitConfig,
     UnitreeG1CommandedGaitOutcome, UnitreeG1CommandedTorquePolicy, UnitreeG1TorqueOverlay,
-    UnitreeG1VelocityCommand,
+    UnitreeG1VelocityCommand, UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V021, UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
 };
 
 const FORWARD_M_S: f64 = 0.0276;
 const TURN_RATE_RAD_S: f64 = 0.05;
-const EVAL_STEPS: u64 = 240;
 const CEM_DIM: usize = 48;
 
 #[derive(Clone, Copy, Debug)]
@@ -32,13 +37,8 @@ impl Candidate {
 
     fn policy(self) -> UnitreeG1CommandedTorquePolicy {
         UnitreeG1CommandedTorquePolicy {
-            yaw_rate_kp_nm_per_rad_s: 32.0,
-            max_yaw_torque_nm: 16.0,
-            negative_yaw_rate_gain_scale: 0.5,
             yaw_overlay: self.yaw_overlay,
-            yaw_overlay_gain: 8.0,
-            mirror_yaw_overlay_negative: false,
-            ..UnitreeG1CommandedTorquePolicy::default()
+            ..UnitreeG1CommandedTorquePolicy::validated_heading()
         }
     }
 }
@@ -56,7 +56,7 @@ fn config(command: UnitreeG1VelocityCommand, steps: u64) -> UnitreeG1CommandedGa
         // A bounded target makes this first heading contract a stable turn
         // reference instead of letting a small-rate plant error integrate
         // into an unbounded pose request.
-        heading_target_clamp_rad: 0.08,
+        heading_target_clamp_rad: UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
         ..UnitreeG1CommandedGaitConfig::default()
     }
 }
@@ -75,11 +75,12 @@ fn print_outcome(label: &str, outcome: UnitreeG1CommandedGaitOutcome) {
         .turn_radius_m
         .map_or_else(|| "none".to_owned(), |value| format!("{value:.3} m"));
     println!(
-        "{label:>7}: cmd=({:+.4} m/s,{:+.3} rad/s) target={:+.3} yaw={:+.3} err={:+.3} rateErr={:.3} radius={radius:>8} x={:+.3} z={:+.3} minH={:.3} tilt={:.3} tau={:.2} fell={} digest=0x{:016x}",
+        "{label:>7}: cmd=({:+.4} m/s,{:+.3} rad/s) target={:+.3} yaw={:+.3} meanRate={:+.4} err={:+.3} rateErr={:.3} radius={radius:>8} x={:+.3} z={:+.3} minH={:.3} tilt={:.3} tau={:.2} fell={} digest=0x{:016x}",
         outcome.command.forward_m_s,
         outcome.command.yaw_rate_rad_s,
         outcome.target_heading_rad,
         outcome.total_yaw_rad,
+        outcome.mean_yaw_rate_rad_s,
         outcome.heading_error_rad,
         outcome.mean_abs_yaw_rate_error_rad_s,
         outcome.base_x_displacement_m,
@@ -166,17 +167,17 @@ fn direction_score(
         || right.fell
         || left.min_height_m <= 0.75
         || right.min_height_m <= 0.75
-        || left.total_yaw_rad <= 0.01
-        || right.total_yaw_rad >= -0.001
+        || left.mean_yaw_rate_rad_s <= 0.005
+        || right.mean_yaw_rate_rad_s >= -0.005
         || !finite(left)
         || !finite(right)
     {
         return -10.0;
     }
-    let signed_yaw = left.total_yaw_rad.min(-right.total_yaw_rad);
+    let signed_rate = left.mean_yaw_rate_rad_s.min(-right.mean_yaw_rate_rad_s);
     let rate_error = left.mean_abs_yaw_rate_error_rad_s + right.mean_abs_yaw_rate_error_rad_s;
     let heading_error = left.heading_error_rad.abs() + right.heading_error_rad.abs();
-    5.0 * signed_yaw - rate_error - heading_error - left.max_tilt_rad.max(right.max_tilt_rad)
+    5.0 * signed_rate - rate_error - heading_error - left.max_tilt_rad.max(right.max_tilt_rad)
 }
 
 fn score(params: &[f64; CEM_DIM], steps: u64) -> f64 {
@@ -225,7 +226,11 @@ fn bounded_sample(rng: &mut u64, mean: f64, sigma: f64) -> f64 {
 
 fn train_cem(smoke: bool) {
     std::panic::set_hook(Box::new(|_| {}));
-    let steps = if smoke { 120 } else { EVAL_STEPS };
+    let steps = if smoke {
+        120
+    } else {
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V021
+    };
     let population = if smoke { 4 } else { 8 };
     let iterations = if smoke { 1 } else { 3 };
     let mut mean = [0.0; CEM_DIM];
@@ -282,6 +287,31 @@ fn train_cem(smoke: bool) {
     );
 }
 
+fn assert_v02_final_yaw(left: UnitreeG1CommandedGaitOutcome, right: UnitreeG1CommandedGaitOutcome) {
+    assert!(left.total_yaw_rad > 0.01, "left body yaw lost its sign");
+    assert!(right.total_yaw_rad < -0.001, "right body yaw lost its sign");
+    assert!(left.target_heading_rad > 0.0);
+    assert!(right.target_heading_rad < 0.0);
+    assert!(left.turn_radius_m.is_some());
+    assert!(right.turn_radius_m.is_some());
+}
+
+fn assert_v021_mean_rate(
+    left: UnitreeG1CommandedGaitOutcome,
+    right: UnitreeG1CommandedGaitOutcome,
+) {
+    assert!(
+        left.mean_yaw_rate_rad_s > 0.005,
+        "left mean yaw rate lost its sign ({:+.4})",
+        left.mean_yaw_rate_rad_s
+    );
+    assert!(
+        right.mean_yaw_rate_rad_s < -0.005,
+        "right mean yaw rate lost its sign ({:+.4})",
+        right.mean_yaw_rate_rad_s
+    );
+}
+
 fn main() {
     let smoke = std::env::args().any(|argument| argument == "--smoke");
     if std::env::args().any(|argument| argument == "--train") {
@@ -289,51 +319,70 @@ fn main() {
         return;
     }
 
-    let steps = if smoke { 120 } else { EVAL_STEPS };
-    let outcomes = evaluate_candidate(Candidate::validated_heading(), steps);
+    if smoke {
+        let outcomes = evaluate_candidate(Candidate::validated_heading(), 120);
+        for (label, outcome) in [
+            ("forward", outcomes[0]),
+            ("stop", outcomes[1]),
+            ("left", outcomes[2]),
+            ("right", outcomes[3]),
+        ] {
+            print_outcome(label, outcome);
+            assert!(finite(outcome));
+        }
+        return;
+    }
+
+    println!(
+        "v0.2 envelope ({} ticks, final yaw sign)",
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V02
+    );
+    let v02 = evaluate_candidate(
+        Candidate::validated_heading(),
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
+    );
     for (label, outcome) in [
-        ("forward", outcomes[0]),
-        ("stop", outcomes[1]),
-        ("left", outcomes[2]),
-        ("right", outcomes[3]),
+        ("forward", v02[0]),
+        ("stop", v02[1]),
+        ("left", v02[2]),
+        ("right", v02[3]),
     ] {
         print_outcome(label, outcome);
         assert!(finite(outcome));
-    }
-
-    if !smoke {
-        for outcome in outcomes {
-            assert!(!outcome.fell, "v0.2 G1 command fell");
-            assert!(
-                outcome.min_height_m > 0.75,
-                "G1 dropped below the heading envelope"
-            );
-        }
-        assert!(outcomes[0].total_displacement_m > 0.02);
+        assert!(!outcome.fell, "v0.2 G1 command fell");
         assert!(
-            outcomes[2].total_yaw_rad > 0.01,
-            "left body yaw lost its sign"
-        );
-        assert!(
-            outcomes[3].total_yaw_rad < -0.001,
-            "right body yaw lost its sign"
-        );
-        assert!(outcomes[2].target_heading_rad > 0.0);
-        assert!(outcomes[3].target_heading_rad < 0.0);
-        assert!(outcomes[2].turn_radius_m.is_some());
-        assert!(outcomes[3].turn_radius_m.is_some());
-
-        let replay = run(
-            UnitreeG1VelocityCommand {
-                forward_m_s: FORWARD_M_S,
-                yaw_rate_rad_s: TURN_RATE_RAD_S,
-            },
-            EVAL_STEPS,
-            Candidate::validated_heading(),
-        );
-        assert_eq!(
-            outcomes[2], replay,
-            "heading replay must be bit deterministic"
+            outcome.min_height_m > 0.75,
+            "G1 dropped below the heading envelope"
         );
     }
+    assert!(v02[0].total_displacement_m > 0.02);
+    assert_v02_final_yaw(v02[2], v02[3]);
+    let replay = run(
+        UnitreeG1VelocityCommand {
+            forward_m_s: FORWARD_M_S,
+            yaw_rate_rad_s: TURN_RATE_RAD_S,
+        },
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
+        Candidate::validated_heading(),
+    );
+    assert_eq!(v02[2], replay, "heading replay must be bit deterministic");
+
+    println!(
+        "v0.2.1 envelope ({} ticks, mean yaw-rate sign)",
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V021
+    );
+    let v021 = evaluate_candidate(
+        Candidate::validated_heading(),
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V021,
+    );
+    for (label, outcome) in [("left", v021[2]), ("right", v021[3])] {
+        print_outcome(label, outcome);
+        assert!(finite(outcome));
+        assert!(!outcome.fell, "v0.2.1 G1 command fell");
+        assert!(
+            outcome.min_height_m > 0.75,
+            "G1 dropped below the extended heading envelope"
+        );
+    }
+    assert_v021_mean_rate(v021[2], v021[3]);
 }

@@ -166,27 +166,37 @@ negative-turn gain of `0.5`: the official model's contact schedule is
 directionally asymmetric, so the negative channel gets extra authority while
 the final motor command remains inside the same torque ceiling.
 
-Example 68 pins the current acceptance envelope at 240 locomotion ticks (4 s),
-`forward_m_s = 0.0276`, `yaw_rate_rad_s = ±0.05`, and a bounded target of
-`±0.08 rad`. The optimized release run measures:
+Example 68 pins two acceptance envelopes on the same candidate:
 
-| command | target heading | body yaw | final error | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
-| right `(+0.0276, -0.05)` | −0.080 rad | −0.002 rad | −0.078 rad | 0.266 rad/s | 0.026 m | 0.784 m | 0.090 rad | 18.05 N·m | no |
+| envelope | ticks | claim |
+|---|---:|---|
+| v0.2 | 240 (4 s) | final body-yaw sign matches ±0.05 rad/s turn commands |
+| v0.2.1 | 480 (8 s) | mean yaw-rate sign matches; integrated yaw may still cross zero |
+
+Pinned commands remain `forward_m_s = 0.0276`, `yaw_rate_rad_s = ±0.05`, and a
+bounded target of `±0.08 rad`. The optimized release run measures:
+
+| command | target heading | body yaw (4 s) | mean yaw rate (8 s) | final error (4 s) | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | ≈ +0.051 rad/s | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
+| right `(+0.0276, -0.05)` | −0.080 rad | −0.002 rad | ≈ −0.043 rad/s | −0.078 rad | 0.266 rad/s | 0.026 m | 0.784 m | 0.090 rad | 18.05 N·m | no |
 
 The sign reversal, height above 0.75 m, no-fall result, finite metrics, torque
 ceiling of 88 N·m, and bit-exact replay are pinned by the library test and the
-full example. These values are a bounded candidate result, not a claim that a
-G1 can hold the requested yaw rate indefinitely; at longer horizons the current
-contact schedule can lose heading sign. A follow-up should improve the contact
-schedule and validate a longer envelope before widening the command contract.
+full example. The 4 s final-yaw claim and the 8 s mean-rate claim are both
+bounded candidate results, not a claim that a G1 can hold the requested yaw
+rate indefinitely. Aggressive contact-schedule retunes that try to keep
+integrated yaw signed for 8 s still fall or lose the short-horizon final-yaw
+gate; the honest next step is a better gait schedule, not a larger torque
+budget. `UnitreeG1CommandedTorquePolicy::validated_heading()` freezes the
+gains shared by both envelopes.
 
 Example 68 also provides a deterministic 48-dimensional CEM over the optional
 eight-joint yaw overlay on top of that bounded calibration. It evaluates both
-turn directions, scores the median of three ULP-perturbed replays, catches
-deterministic solver panics as rejected candidates, and falls back to the
-validated zero-overlay candidate when search does not improve it:
+turn directions, scores the median of three ULP-perturbed replays against the
+mean-rate sign gate, catches deterministic solver panics as rejected
+candidates, and falls back to the validated zero-overlay candidate when search
+does not improve it:
 
 ```bash
 cargo run --release -p g1_heading_turn --example 68_g1_heading_turn

@@ -58,7 +58,7 @@ All notable changes to Robot Native Engine are documented in this file.
   the 2.2 km city loop.
 
 - Add an SSL simulation-protocol UDP adapter spike (`rne_adapter_ssl`) for
-  ports 10300–10302 with prost encode/decode of `RobotControl` and ball-teleport
+  ports 10300 E0302 with prost encode/decode of `RobotControl` and ball-teleport
   `SimulatorCommand`. Core crates stay protobuf-free; geometry scoring stays in
   example 76.
 
@@ -79,6 +79,10 @@ All notable changes to Robot Native Engine are documented in this file.
   example 82. Contest scoring stays analytic; this does not claim true
   volumetric splat depth.
 
+- Extend the G1 heading-yaw candidate to a v0.2.1 envelope: the same validated
+  gains now pin a 480-tick mean yaw-rate sign contract beside the existing
+  240-tick final-yaw sign gate (`validated_heading`, example 68).
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.
@@ -88,7 +92,7 @@ All notable changes to Robot Native Engine are documented in this file.
   and place (`rne.g1.workbench_mission.v1`). This is not a Nav2 or MoveIt port.
 
 - Add a headless RoboCup SSL Division B 2v2 analog that scores official
-  9 m × 6 m field geometry, goal-mouth crossing, out-of-bounds, and the
+  9 m ÁE6 m field geometry, goal-mouth crossing, out-of-bounds, and the
   6.5 m/s ball-speed cap (`rne.ssl.small_pitch_2v2.v1`) without speaking
   the grSim / SSL simulation protobuf ports.
 
@@ -658,15 +662,15 @@ All notable changes to Robot Native Engine are documented in this file.
   `LogicFile`, executes the scenario over the traffic runtime, and verifies
   determinism when configured. Example: `assets/runs/scenario_speed.rne.run.toml`.
 - **OpenSCENARIO scenario executor**: `rne_openscenario` now executes a
-  scenario document over the traffic runtime — it derives an actor-compatible
+  scenario document over the traffic runtime  Eit derives an actor-compatible
   route from the road network, spawns the scenario entities as traffic actors,
   and applies each timed `AbsoluteSpeed` action while stepping the deterministic
   kinematic traffic systems. Deterministic replay tests pin the outcome.
 - **Minimal OpenSCENARIO 1.0 importer** (`rne_openscenario`): parses a strict
-  OpenSCENARIO 1.0 subset — `FileHeader` 1.0, `RoadNetwork/LogicFile` road
+  OpenSCENARIO 1.0 subset  E`FileHeader` 1.0, `RoadNetwork/LogicFile` road
   reference, `Entities` vehicles/bicycles/pedestrians, `Init` teleport spawn
   poses, and storyboard `SpeedAction` events with `AbsoluteTargetSpeed` and a
-  `SimulationTimeCondition` — into a versioned `.rne.scenario.json` document.
+  `SimulationTimeCondition`  Einto a versioned `.rne.scenario.json` document.
   Unsupported elements are rejected with a clear error; golden and round-trip
   tests pin the canonical JSON.
 - **Contact and failure annotations**: the replay artifact now records per-step
@@ -757,7 +761,7 @@ All notable changes to Robot Native Engine are documented in this file.
   intentionally invalid tray layout cover both report outcomes.
 - **Friction-based grasp core (v0.14 Phase B)**: opt-in `GraspMode::Friction` on
   `MobileManipulatorSim` (`set_grasp_mode`) holds a grasped object with
-  force-limited finger squeeze and surface friction only — no weld joint is
+  force-limited finger squeeze and surface friction only  Eno weld joint is
   inserted, the object stays a free rigid body, and the grasp drops when both
   fingers stop bearing load for 5 consecutive steps (or on an open command).
   The finger motors get a 1.0 N·m force cap in friction mode so the squeeze
@@ -766,7 +770,7 @@ All notable changes to Robot Native Engine are documented in this file.
   digest are bit-for-bit unchanged. Supporting plumbing: `ContactEvent` now
   carries the pair's accumulated normal-impulse magnitude from Rapier's solver
   (`impulse`, N·s per step), and scene TOML obstacles accept an optional
-  `friction` coefficient override — used by the new tests to prove a µ=0.02
+  `friction` coefficient override  Eused by the new tests to prove a µ=0.02
   cube slips out of the same grasp that carries a µ=0.5 cube.
 - **Friction-grasp task migration (v0.14 Phase C)**: continued-close policies
   now converge on a bounded 15-step pinch target instead of winding the finger
@@ -806,7 +810,7 @@ All notable changes to Robot Native Engine are documented in this file.
   actors or spawn only a prefix of the new vehicle set.
 - **`mm_mobile` arm servo sway**: base motion alone (a yaw turn, or a driving
   turn like the hero pick approach) back-drove the uncommanded shoulder/elbow
-  position hold by up to ~0.30 rad — the base's yaw acceleration couples the
+  position hold by up to ~0.30 rad  Ethe base's yaw acceleration couples the
   outboard arm chain's full inertia into the joints, and the shared 400/60
   spring constants (tuned for command tracking) are far too soft to resist it,
   so the swinging arm bulldozed tabletop objects during driving approaches.
@@ -817,12 +821,11 @@ All notable changes to Robot Native Engine are documented in this file.
   regression bound tighten accordingly.
 
 - **README hero capture**: the hero GIF's task cube was a render-only decoration
-  keyframe-lerped into the gripper at a hardcoded step — it visibly flew ~1.5 m
+  keyframe-lerped into the gripper at a hardcoded step  Eit visibly flew ~1.5 m
   through the air into a gripper that never approached it, and slid ~0.74 m back
   to the place target after release. The cube is now a real dynamic body in a new
   `mm_mobile_hero` scene (physical pick table + place tray), picked by the actual
-  two-finger contact-gated grasp weld via an observation-gated approach → grasp →
-  retreat → carry → release policy, and dropped onto the tray by physics. New
+  two-finger contact-gated grasp weld via an observation-gated approach ↁEgrasp ↁE  retreat ↁEcarry ↁErelease policy, and dropped onto the tray by physics. New
   smoke regression guards: pre-grasp object displacement, post-release slide,
   real `is_grasping()` grasp duration.
 
@@ -839,7 +842,7 @@ All notable changes to Robot Native Engine are documented in this file.
   replay of the best candidate.
 - **`train_mobile_clutter_ppo.py`**: SB3 PPO integration smoke on `mobile_clutter_place_center`.
 - **Mobile clutter place E2E**: `IkMobileClutterPickPlacePolicy` now completes the full
-  navigate → grasp → place loop on `mm_mobile_clutter` (observation-gated phases: poke-grasp
+  navigate ↁEgrasp ↁEplace loop on `mm_mobile_clutter` (observation-gated phases: poke-grasp
   drive, straight retreat that drags the welded object clear of the tabletop contact wedge,
   carry drive that parks the object over the target, object-over-target release gate). The
   two mobile clutter E2E tests run un-ignored, and example 34 places `clutter_cube_a` on the
@@ -857,7 +860,7 @@ All notable changes to Robot Native Engine are documented in this file.
   Euler yaw, which aliased transient contact tilt into corrupted headings), making drive
   phases deterministic; mobile arm joints use position-hold motors with an anti-windup lead
   and the mobile world runs at the lift robot's solver iteration count.
-- **`mm_minimal` settle physics (linux CI)**: the fixed-base SCARA arm never settled — its
+- **`mm_minimal` settle physics (linux CI)**: the fixed-base SCARA arm never settled  Eits
   chassis/arm colliders interpenetrated (injecting contact energy every tick) and its
   shoulder/elbow were bare velocity motors with no restoring force, so the idle pose was a
   sustained chaotic oscillation that merely sampled differently per platform. The arm now
@@ -975,7 +978,7 @@ All notable changes to Robot Native Engine are documented in this file.
   the existing `/cmd_vel`, `/gripper_command`, and arm topics. Verified by the ci-ros2 smoke.
 
 - **`LiftPickPlacePolicy`**: a reusable scripted pick-and-place policy (state machine) for
-  the `mm_lift` robot — lower → grasp → lift → swing → settle → lower → release. It implements
+  the `mm_lift` robot  Elower ↁEgrasp ↁElift ↁEswing ↁEsettle ↁElower ↁErelease. It implements
   `Policy<MobileManipulatorEpisode>` and is now the single source for the pick-and-place
   trajectory used by example 31 and the episode test (previously duplicated inline).
 - **Configurable place location**: `LiftPickPlacePolicy::with_swing_steps` sets how far the
@@ -1004,17 +1007,15 @@ All notable changes to Robot Native Engine are documented in this file.
   `lift_pick_place_episode_picks_carries_and_places`.
 
 - **Full 3D pick-and-place** (manipulator-redesign phase 4, final): the `mm_lift` robot now
-  performs an end-to-end pick→lift→carry→place — lower the top-down claw over a ground cube,
+  performs an end-to-end pick→lift→carry→place  Elower the top-down claw over a ground cube,
   grasp it, lift it, swing the arm to a new spot, lower it, and open to release. Test
   `lift_picks_carries_and_places_cube` and example
   `31_mobile_manipulator_lift_pick_place` (carries the cube ~1.1 m and releases it; wired
-  into `xtask ci`). This completes the four-phase manipulator redesign (column base →
-  controllable arm → top-down claw → pick-and-place).
+  into `xtask ci`). This completes the four-phase manipulator redesign (column base ↁE  controllable arm ↁEtop-down claw ↁEpick-and-place).
 
 - **Real 3D pick** (manipulator-redesign phase 3): the `mm_lift` gripper is redesigned as a
   **top-down claw** (two fingers hang down to straddle an object) so it can lower over a cube
-  on the ground, grasp it (contact-triggered weld), and the lift raises it off the ground —
-  the previous side-grip could not pick a ground object because its body collided with it.
+  on the ground, grasp it (contact-triggered weld), and the lift raises it off the ground  E  the previous side-grip could not pick a ground object because its body collided with it.
   New `mm_lift_pick` scene + `mm_lift_pick_scene_path()` and test
   `lift_picks_cube_off_ground_and_raises_it`.
 
@@ -1026,7 +1027,7 @@ All notable changes to Robot Native Engine are documented in this file.
 
 - **Lift robot arm is now controllable** (manipulator-redesign phase 2): the arm revolute
   joints are position (spring-damper) motors with a raised torque cap, so the heavy arm
-  moves to a commanded angle and *holds* it — a plain velocity motor was too weak to move
+  moves to a commanded angle and *holds* it  Ea plain velocity motor was too weak to move
   or hold it. Fixed a geometry bug where the upper arm overlapped the carriage and jammed
   the shoulder; the arm now also settles perfectly straight. New test
   `lift_arm_tracks_and_holds_commanded_pose`.
@@ -1034,7 +1035,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Lift robot can now lower its gripper to the ground** (manipulator-redesign phase 1):
   `mm_lift` is rebuilt on a tall fixed **column** with the arm hanging from a sliding
   carriage, so the lift lowers the gripper from rest (~0.81 m) down to near ground
-  (~0.26 m) and raises it to carry — the previous box base let the lift only go up. The
+  (~0.26 m) and raises it to carry  Ethe previous box base let the lift only go up. The
   arm also settles much straighter. New test `lift_lowers_gripper_toward_ground`; existing
   lift tests/smoke unchanged in intent.
 
@@ -1050,7 +1051,7 @@ All notable changes to Robot Native Engine are documented in this file.
   between the base and shoulder, so the whole SCARA arm can be raised and lowered.
   `MobileManipulatorSim::new_mm_lift()` loads it; `MobileManipulatorAction.lift_velocity_m_s`
   drives the lift (other robots ignore it). The lift is a **position (spring-damper) motor**,
-  so it holds the ~6 kg arm against gravity at a commanded height without drift — vertical
+  so it holds the ~6 kg arm against gravity at a commanded height without drift  Evertical
   lifting was previously blocked by the velocity-only motor. Covered by a unit test
   (controllable, reversible vertical motion) and a replay-determinism test.
 - **Example 30 lift smoke**: `30_mobile_manipulator_lift` raises the `mm_lift` arm with
@@ -1082,7 +1083,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **`MobileManipulatorEpisodeConfig::reach()`** dense-reward reach task (exposed to Python
   as `MobileManipulatorEpisode("reach")`); target placed so it needs active control
 - **Example 27 training loop** (`train.py`): Cross-Entropy-Method policy optimization that
-  learns the reach task end-to-end with no external deps (mean reward ~2 → ~12)
+  learns the reach task end-to-end with no external deps (mean reward ~2 ↁE~12)
 - **`VectorizedMobileManipulatorEnv`**: batched mobile-manipulator episodes for
   population-based / parallel RL rollouts (parity with `VectorizedDiffDriveEnv`), with
   example 28 evaluating a policy population in lock-step
@@ -1100,7 +1101,7 @@ All notable changes to Robot Native Engine are documented in this file.
   (`is_grasping`, `grasped_object`)
 - **`MobileManipulatorTask::Place`** and **`MobileManipulatorEpisodeConfig::place()`**:
   pick up a cube, carry it, and set it down at a target location
-- **Example 26 pick-and-place smoke**: full grasp → carry → release → settle cycle
+- **Example 26 pick-and-place smoke**: full grasp ↁEcarry ↁErelease ↁEsettle cycle
 - **`rne_py` mobile manipulator bindings**: `MobileManipulatorSim` / `MobileManipulatorEpisode`
   (place / transport / inspect) exposed to Python with `is_grasping`
 - **Example 27 RL env**: gymnasium-style `MobileManipulatorPlaceEnv` wrapper + scripted
@@ -1108,8 +1109,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **ROS 2 `/gripper_command`** (`std_msgs/Float64`): drives the gripper in
   `mobile_manipulator` mode (negative closes/grasps, positive opens/releases)
 - **ROS 2 `ee_link` TF frame**: end-effector pose published on `/tf` relative to `base_link`
-- **ROS 2 `/arm_joint_position`** (`sensor_msgs/JointState`): position-control the arm —
-  the node drives `shoulder_joint` / `elbow_joint` toward the commanded positions with a
+- **ROS 2 `/arm_joint_position`** (`sensor_msgs/JointState`): position-control the arm  E  the node drives `shoulder_joint` / `elbow_joint` toward the commanded positions with a
   clamped P-controller (a velocity command cancels the target)
 - **ROS 2 `/arm_joint_trajectory`** (`trajectory_msgs/JointTrajectory`): follow a sequence
   of `shoulder_joint` / `elbow_joint` waypoints, advancing to the next when the current one
@@ -1117,7 +1117,7 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
-- **ROS 2 node build**: `sensor_msgs/Image.is_bigendian` type mismatch (`bool` → `u8`)
+- **ROS 2 node build**: `sensor_msgs/Image.is_bigendian` type mismatch (`bool` ↁE`u8`)
   that broke `rne_ros2_node` compilation
 - **`mm_mobile` drive wheels**: wheel joints were stacked vertically (`xyz="0 ±0.225 0"`)
   so only one wheel touched the ground and the base spun in place; relocated to a proper
@@ -1158,7 +1158,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Example 23 transport smoke**: finger contact + cube displacement ≥ 2 cm
 - **`[wrist_camera]` robot asset section** mounted on URDF arm links
 - **Wrist camera DataBus** (`ImageRgb8`) in `MobileManipulatorSim`
-- **Example 24 wrist cam smoke**: publishes 64×48 RGBA8 frames
+- **Example 24 wrist cam smoke**: publishes 64ÁE8 RGBA8 frames
 
 ### Changed
 
@@ -1274,8 +1274,8 @@ All notable changes to Robot Native Engine are documented in this file.
 - **Agent Entity** with attachable policies (`11_agent_policy`)
 - **Assets** (`rne_assets`): `.rne.scene.toml` / `.rne.robot.toml` loaders (example `06_scene_load`)
 - **Rendering**: primitive color + depth pass (`07_render_primitives`), URDF STL mesh draw (`09_urdf_mesh_render`)
-- **Robot**: URDF → collider/visual auto attach; **Rapier joint-driven** diff-drive wheels (`DiffDriveDriveMode::JointDriven`)
-- **Integration**: end-to-end scene → episode → optional render (`08_scene_episode`)
+- **Robot**: URDF ↁEcollider/visual auto attach; **Rapier joint-driven** diff-drive wheels (`DiffDriveDriveMode::JointDriven`)
+- **Integration**: end-to-end scene ↁEepisode ↁEoptional render (`08_scene_episode`)
 - **ROS 2**: native `rclrs` node (`adapters/ros2/rne_ros2_node`); optional CI via `xtask ci-ros2` and GitHub Actions
 - **CI**: GitHub Actions workflow for core workspace (`ci.yml`)
 - Examples `05`–`11` and expanded determinism coverage for joint-driven physics

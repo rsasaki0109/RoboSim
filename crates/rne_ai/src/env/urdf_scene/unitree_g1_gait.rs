@@ -501,6 +501,36 @@ impl Default for UnitreeG1CommandedTorquePolicy {
 }
 
 impl UnitreeG1CommandedTorquePolicy {
+    /// Pinned v0.2 / v0.2.1 heading-yaw candidate used by example 68.
+    ///
+    /// The same gains keep the 240-tick final-yaw sign contract and the
+    /// 480-tick mean yaw-rate sign contract. Contact-schedule asymmetry is
+    /// absorbed by the reduced negative-turn scale rather than by a larger
+    /// absolute torque budget.
+    #[must_use]
+    pub const fn validated_heading() -> Self {
+        Self {
+            overlay: UnitreeG1TorqueOverlay::LEARNED_STRIDE,
+            nominal_forward_velocity_m_s: 0.0276,
+            forward_velocity_feedback_gain: 0.25,
+            yaw_rate_kp_nm_per_rad_s: 32.0,
+            negative_yaw_rate_gain_scale: 0.5,
+            heading_kp_nm_per_rad: 0.0,
+            max_yaw_torque_nm: 16.0,
+            max_heading_torque_nm: 8.0,
+            stance_gated_yaw: false,
+            yaw_hip_pitch_kp_nm_per_rad_s: 0.0,
+            yaw_hip_roll_kp_nm_per_rad_s: 0.0,
+            yaw_knee_kp_nm_per_rad_s: 0.0,
+            yaw_rate_torque_weights_nm_per_rad_s: [0.0; 8],
+            yaw_torque_right_sign: -1.0,
+            yaw_overlay: UnitreeG1TorqueOverlay::ZERO,
+            yaw_overlay_gain: 8.0,
+            yaw_overlay_joint_gains: [1.0; 8],
+            mirror_yaw_overlay_negative: false,
+        }
+    }
+
     /// Computes eight proximal-joint feed-forward torques for one command.
     ///
     /// A zero forward command suppresses the learned phase action; callers
