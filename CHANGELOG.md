@@ -70,6 +70,10 @@ All notable changes to Robot Native Engine are documented in this file.
   stand-in fixture fallback, PLY override, and `GaussianSplatCaptureReport`
   with `ply_sha256` / `standin` for example 78 dataset capture.
 
+- Add a G1 `head_link` hybrid capture over the Tsukuba 3DGS sidewalk background
+  (example 81). Contest scoring and the full RGB-D DataBus path stay in
+  examples 75 and 71.
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.
