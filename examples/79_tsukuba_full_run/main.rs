@@ -4,8 +4,8 @@
 //! no roadway entry. This is not the 2.2 km city loop.
 
 use rne_ai::{
-    run_behavior_scenarios, tsukuba_full_run_task_spec, BehaviorContractStatus,
-    BehaviorSeedStatus, TsukubaFullRunFault, TsukubaFullRunScenario,
+    run_behavior_scenarios, tsukuba_full_run_task_spec, BehaviorContractStatus, BehaviorSeedStatus,
+    TsukubaFullRunFault, TsukubaFullRunScenario,
 };
 
 fn main() {
@@ -44,9 +44,7 @@ fn main() {
             .expect("first stop contract");
         println!(
             "skip-stops: status={:?} stop={:?} steps={}",
-            failure.seeds[0].status,
-            stop.status,
-            failure.seeds[0].steps
+            failure.seeds[0].status, stop.status, failure.seeds[0].steps
         );
         if failure.seeds[0].status != BehaviorSeedStatus::Failed
             || stop.status != BehaviorContractStatus::Failed

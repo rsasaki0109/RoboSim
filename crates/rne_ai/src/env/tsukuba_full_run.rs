@@ -213,7 +213,8 @@ impl TsukubaFullRunScenario {
             || aabb.min_z_m < -self.course.sidewalk_half_width_m;
         let past_goal = drive.base_x_m >= self.course.goal_x_m;
         let signal_green = matches!(self.phase, ScriptPhase::CrossStopLine(_))
-            || (matches!(self.phase, ScriptPhase::WaitSignal(_)) && self.phase_ticks >= SIGNAL_RED_STEPS)
+            || (matches!(self.phase, ScriptPhase::WaitSignal(_))
+                && self.phase_ticks >= SIGNAL_RED_STEPS)
             || matches!(self.phase, ScriptPhase::Finish | ScriptPhase::Halt);
         let full_run_complete = self.stop_line_complete.iter().all(|complete| *complete)
             && self.signal_wait_complete.iter().all(|complete| *complete)
@@ -402,7 +403,10 @@ impl BehaviorScenario for TsukubaFullRunScenario {
                 "signal_wait_at_crossings",
                 deadline,
                 |observation: &TsukubaFullRunObservation| {
-                    observation.signal_wait_complete.iter().all(|complete| *complete)
+                    observation
+                        .signal_wait_complete
+                        .iter()
+                        .all(|complete| *complete)
                 },
             )?
             .with_entities(["stop_line_1", "stop_line_2", "stop_line_3"])?,
@@ -550,10 +554,7 @@ fn planar_speed(sim: &DiffDriveSim, spawned: &DiffDriveSpawned) -> f64 {
 fn fault_dimensions(fault: TsukubaFullRunFault) -> Vec<BehaviorDimension> {
     vec![BehaviorDimension {
         name: "skip_stop_lines".to_string(),
-        value: BehaviorDimensionValue::Boolean(matches!(
-            fault,
-            TsukubaFullRunFault::SkipStopLines
-        )),
+        value: BehaviorDimensionValue::Boolean(matches!(fault, TsukubaFullRunFault::SkipStopLines)),
         baseline: BehaviorDimensionValue::Boolean(false),
     }]
 }
