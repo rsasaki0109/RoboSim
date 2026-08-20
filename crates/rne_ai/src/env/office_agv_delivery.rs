@@ -515,8 +515,7 @@ impl OfficeAgvDeliveryScenario {
                 DiffDriveAction::forward(0.0)
             }
             ScriptPhase::ApproachDesk => {
-                let stop_x_m =
-                    self.course.desk_face_x_m - self.course.robot_half_x_m - 0.35;
+                let stop_x_m = self.course.desk_face_x_m - self.course.robot_half_x_m - 0.35;
                 if observation.base_x_m >= stop_x_m {
                     self.phase = ScriptPhase::HoldDesk;
                     DiffDriveAction::forward(0.0)
@@ -747,9 +746,8 @@ mod tests {
     fn office_delivery_task_spec_validates() {
         let spec = office_agv_delivery_task_spec(DEFAULT_MAX_STEPS);
         spec.validate().expect("task spec");
-        let path = crate::asset_path::bundled_asset_path(Path::new(
-            "tasks/office_agv_delivery.task.json",
-        ));
+        let path =
+            crate::asset_path::bundled_asset_path(Path::new("tasks/office_agv_delivery.task.json"));
         let loaded: TaskSpec =
             serde_json::from_slice(&std::fs::read(path).expect("committed task spec"))
                 .expect("parse task spec");
