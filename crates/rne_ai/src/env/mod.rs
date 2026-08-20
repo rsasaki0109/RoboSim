@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod ssl_small_pitch;
 pub mod tsukuba_confirmation;
 pub mod urdf_scene;
 
@@ -28,6 +29,13 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
     MM_MOBILE_WHEEL_RADIUS_M, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+};
+pub use ssl_small_pitch::{
+    evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
+    SslSmallPitch, SslSmallPitchFault, SslSmallPitchObservation, SslSmallPitchScenario,
+    SSL_BALL_NAME, SSL_BALL_RADIUS_M, SSL_DIV_B_FIELD_LENGTH_M, SSL_DIV_B_FIELD_WIDTH_M,
+    SSL_GOAL_DEPTH_M, SSL_GOAL_WIDTH_M, SSL_MAX_BALL_SPEED_M_S, SSL_ROBOT_MAX_RADIUS_M,
+    SSL_SMALL_PITCH_TASK_ID,
 };
 pub use tsukuba_confirmation::{
     evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,

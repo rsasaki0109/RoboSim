@@ -125,6 +125,13 @@ pub use env::{
     UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use env::{
+    evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
+    SslSmallPitch, SslSmallPitchFault, SslSmallPitchObservation, SslSmallPitchScenario,
+    SSL_BALL_NAME, SSL_BALL_RADIUS_M, SSL_DIV_B_FIELD_LENGTH_M, SSL_DIV_B_FIELD_WIDTH_M,
+    SSL_GOAL_DEPTH_M, SSL_GOAL_WIDTH_M, SSL_MAX_BALL_SPEED_M_S, SSL_ROBOT_MAX_RADIUS_M,
+    SSL_SMALL_PITCH_TASK_ID,
+};
+pub use env::{
     evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,
     tsukuba_confirmation_task_spec, TsukubaConfirmationCourse, TsukubaConfirmationFault,
     TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,

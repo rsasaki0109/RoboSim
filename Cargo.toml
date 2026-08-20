@@ -110,6 +110,7 @@ members = [
   "examples/73_diff_drive_dataset_capture",
   "examples/74_flagship_validation_workflow",
   "examples/75_tsukuba_confirmation",
+  "examples/76_ssl_small_pitch",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
