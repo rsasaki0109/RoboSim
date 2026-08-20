@@ -3,6 +3,7 @@
 pub mod diff_drive;
 pub mod mobile_manipulator;
 pub mod office_agv_delivery;
+pub mod office_agv_desk_place;
 pub mod office_agv_shared_aisle;
 pub mod ssl_small_pitch;
 pub mod tsukuba_confirmation;
@@ -38,6 +39,11 @@ pub use office_agv_delivery::{
     OfficeAgvDeliveryObservation, OfficeAgvDeliveryScenario, OfficePlanarAabb, OfficeStopJudgement,
     OFFICE_AGV_DELIVERY_TASK_ID, OFFICE_DELIVERY_DESK_NAME, OFFICE_DESK_DELIVERY_BEFORE_M,
     OFFICE_PICKUP_DOCK_NAME,
+};
+pub use office_agv_desk_place::{
+    evaluate_office_desk_place, office_agv_desk_place_task_path, office_agv_desk_place_task_spec,
+    OfficeAgvDeskPlaceCourse, OfficeAgvDeskPlaceFault, OfficeAgvDeskPlaceObservation,
+    OfficeAgvDeskPlaceScenario, OFFICE_AGV_DESK_PLACE_TASK_ID, OFFICE_CARGO_NAME,
 };
 pub use office_agv_shared_aisle::{
     evaluate_office_shared_aisle_block, office_agv_shared_aisle_task_path,

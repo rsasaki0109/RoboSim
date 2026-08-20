@@ -1,0 +1,14 @@
+[package]
+name = "office_agv_desk_place"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "86_office_agv_desk_place"
+path = "main.rs"

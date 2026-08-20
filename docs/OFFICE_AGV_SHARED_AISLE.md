@@ -37,5 +37,5 @@ cargo run --locked -p office_agv_shared_aisle --example 85_office_agv_shared_ais
 
 - `rne_traffic` ECS actors, signals, or route catalogs (flagship remains the
   traffic-runtime reference)
-- Shelf or desk manipulation / G1 carry (D-3)
+- Desk cargo unload — see [OFFICE_AGV_DESK_PLACE.md](OFFICE_AGV_DESK_PLACE.md)
 - Multi-AGV fleets or full office floor plans
