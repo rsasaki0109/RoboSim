@@ -1,0 +1,76 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2026
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/tsukuba_confirmation.rne.robot.toml"
+
+[[objects]]
+name = "sidewalk"
+translation_m = [3.75, 0.01, 0.0]
+visual = { shape = "box", size_m = [8.5, 0.02, 2.0], color_rgba = [0.78, 0.76, 0.72, 1.0] }
+
+[[objects]]
+name = "roadway"
+translation_m = [3.75, 0.005, 2.2]
+visual = { shape = "box", size_m = [8.5, 0.01, 2.4], color_rgba = [0.22, 0.22, 0.24, 1.0] }
+
+[[objects]]
+name = "crosswalk_1"
+translation_m = [2.2, 0.015, 0.8]
+visual = { shape = "box", size_m = [0.5, 0.01, 3.6], color_rgba = [0.92, 0.92, 0.90, 1.0] }
+
+[[objects]]
+name = "crosswalk_2"
+translation_m = [4.4, 0.015, 0.8]
+visual = { shape = "box", size_m = [0.5, 0.01, 3.6], color_rgba = [0.92, 0.92, 0.90, 1.0] }
+
+[[objects]]
+name = "road_edge_1_mark"
+translation_m = [2.2, 0.02, 0.0]
+visual = { shape = "box", size_m = [0.04, 0.01, 2.0], color_rgba = [0.98, 0.98, 0.98, 1.0] }
+
+[[objects]]
+name = "road_edge_2_mark"
+translation_m = [4.4, 0.02, 0.0]
+visual = { shape = "box", size_m = [0.04, 0.01, 2.0], color_rgba = [0.98, 0.98, 0.98, 1.0] }
+
+[[objects]]
+name = "green_cone"
+translation_m = [6.0, 0.2, 0.0]
+visual = { shape = "box", size_m = [0.24, 0.4, 0.24], color_rgba = [0.12, 0.72, 0.22, 1.0] }
+collision = { shape = "box", size_m = [0.24, 0.4, 0.24] }
+body_type = "fixed"
+
+[[task_markers]]
+name = "start"
+kind = "start"
+translation_m = [0.5, 0.0, 0.0]
+radius_m = 0.3
+
+[[task_markers]]
+name = "road_edge_1"
+kind = "road_edge"
+translation_m = [2.2, 0.0, 0.0]
+radius_m = 1.5
+
+[[task_markers]]
+name = "road_edge_2"
+kind = "road_edge"
+translation_m = [4.4, 0.0, 0.0]
+radius_m = 1.5
+
+[[task_markers]]
+name = "green_cone_zone"
+kind = "obstacle"
+translation_m = [6.0, 0.0, 0.0]
+radius_m = 0.4
+
+[[task_markers]]
+name = "confirmation_end"
+kind = "goal"
+translation_m = [7.2, 0.0, 0.0]
+radius_m = 0.4

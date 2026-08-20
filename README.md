@@ -318,6 +318,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
 - [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
+- [Tsukuba confirmation run](docs/TSUKUBA_CONFIRMATION_RUN.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

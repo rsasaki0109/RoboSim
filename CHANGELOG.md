@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a headless Tsukuba Challenge 2026 confirmation-run analog that scores the
+  official road-edge 1.5 m stop box, stop-line 1 m / 0.5 m box, green-cone
+  contact fail, e-stop rest, and no-roadway-entry contracts on a scaled
+  sidewalk scene (`rne.tsukuba.confirmation.v1`).
+
 - Freeze the current sensor-goal TaskSpec and its process-isolated hardware
   session as the twenty-eighth and twenty-ninth installed compatibility
   fixtures. Session validation now replays the complete wire/gateway contract
