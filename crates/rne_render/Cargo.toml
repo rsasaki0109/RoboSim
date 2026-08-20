@@ -16,6 +16,7 @@ rne_math = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 tobj = { workspace = true }
 
 [dev-dependencies]

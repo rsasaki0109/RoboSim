@@ -40,17 +40,21 @@ impl WgpuRenderBackend {
         });
 
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
+            power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
         }))
         .ok_or(RenderError::NoAdapter)?;
 
+        let mut required_limits = adapter.limits();
+        required_limits.max_storage_buffers_per_shader_stage =
+            required_limits.max_storage_buffers_per_shader_stage.max(16);
+
         let (device, queue) = block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("rne_render_wgpu"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,
@@ -80,6 +84,16 @@ impl WgpuRenderBackend {
         &self.environment
     }
 
+    /// Returns the underlying GPU device for optional render adapters.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Returns the underlying GPU queue for optional render adapters.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
     /// Replaces the temporal anti-aliasing settings for subsequent renders.
     pub fn set_taa(&mut self, settings: TaaSettings) {
         self.taa = settings.sanitized();
@@ -98,6 +112,48 @@ impl WgpuRenderBackend {
         if let Some(renderer) = self.primitive.as_mut() {
             renderer.reset_taa_history();
         }
+    }
+
+    fn ensure_primitive_renderer(&mut self) -> Result<&mut PrimitiveRenderer, RenderError> {
+        if self.primitive.is_none() {
+            let mut renderer = PrimitiveRenderer::new(
+                &self.device,
+                &self.queue,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            );
+            renderer.set_taa(self.taa);
+            self.primitive = Some(renderer);
+        }
+        Ok(self.primitive.as_mut().expect("primitive renderer"))
+    }
+
+    /// Renders a Gaussian-splat background and mesh foreground in one capture.
+    pub fn render_hybrid_scene_camera<B: crate::background::BackgroundRenderPass>(
+        &mut self,
+        background: &mut B,
+        camera: &Camera,
+        view: &Transform3,
+        scene: &RenderScene,
+        clear_color: [f32; 4],
+    ) -> Result<CameraPassOutput, RenderError> {
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        let environment = self.environment.clone();
+        let renderer = self.ensure_primitive_renderer()?;
+        renderer.render_with_background(
+            PrimitiveRenderPass {
+                device: &device,
+                queue: &queue,
+                target: camera.render_target(),
+                camera,
+                view,
+                scene,
+                environment: &environment,
+                clear_color,
+                preserve_color: true,
+            },
+            background,
+        )
     }
 
     fn render_clear_inner(
@@ -169,25 +225,20 @@ impl RenderBackend for WgpuRenderBackend {
         scene: &RenderScene,
         clear_color: [f32; 4],
     ) -> Result<CameraPassOutput, RenderError> {
-        if self.primitive.is_none() {
-            let mut renderer = PrimitiveRenderer::new(
-                &self.device,
-                &self.queue,
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            );
-            renderer.set_taa(self.taa);
-            self.primitive = Some(renderer);
-        }
-        let renderer = self.primitive.as_mut().expect("primitive renderer");
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        let environment = self.environment.clone();
+        let renderer = self.ensure_primitive_renderer()?;
         renderer.render(PrimitiveRenderPass {
-            device: &self.device,
-            queue: &self.queue,
+            device: &device,
+            queue: &queue,
             target: camera.render_target(),
             camera,
             view,
             scene,
-            environment: &self.environment,
+            environment: &environment,
             clear_color,
+            preserve_color: false,
         })
     }
 }

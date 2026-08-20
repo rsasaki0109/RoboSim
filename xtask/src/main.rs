@@ -2611,6 +2611,13 @@ fn run_asset_smokes() -> anyhow::Result<()> {
     run_step("cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke")?;
     run_step(
         "cargo run --locked -p tsukuba_confirmation --example 75_tsukuba_confirmation -- --smoke",
+    )?;
+    run_step("cargo run --locked -p ssl_small_pitch --example 76_ssl_small_pitch -- --smoke")?;
+    run_step(
+        "cargo run --locked -p g1_workbench_mission --example 77_g1_workbench_mission -- --smoke",
+    )?;
+    run_step(
+        "cargo run --locked -p tsukuba_3dgs_background --example 78_tsukuba_3dgs_background -- --smoke",
     )
 }
 

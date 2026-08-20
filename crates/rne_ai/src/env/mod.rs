@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod ssl_small_pitch;
 pub mod tsukuba_confirmation;
 pub mod urdf_scene;
 
@@ -29,6 +30,13 @@ pub use mobile_manipulator::{
     MM_MOBILE_WHEEL_RADIUS_M, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
 };
+pub use ssl_small_pitch::{
+    evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
+    SslSmallPitch, SslSmallPitchFault, SslSmallPitchObservation, SslSmallPitchScenario,
+    SSL_BALL_NAME, SSL_BALL_RADIUS_M, SSL_DIV_B_FIELD_LENGTH_M, SSL_DIV_B_FIELD_WIDTH_M,
+    SSL_GOAL_DEPTH_M, SSL_GOAL_WIDTH_M, SSL_MAX_BALL_SPEED_M_S, SSL_ROBOT_MAX_RADIUS_M,
+    SSL_SMALL_PITCH_TASK_ID,
+};
 pub use tsukuba_confirmation::{
     evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,
     tsukuba_confirmation_task_spec, TsukubaConfirmationCourse, TsukubaConfirmationFault,
@@ -47,11 +55,11 @@ pub use urdf_scene::{
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_gait_task_spec,
     unitree_g1_inspection_targets, unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path,
-    unitree_go2_dynamic_scene_path, unitree_go2_scene_path, unitree_go2_scheduled_targets,
-    unitree_go2_task_spec, unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
-    unitree_go2_trot_targets_with_overlay, HumanoidAction, HumanoidEpisode, HumanoidEpisodeConfig,
-    HumanoidObservation, QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig,
-    QuadrupedObservation, UnitreeG1Action, UnitreeG1CommandedGaitConfig,
+    unitree_g1_workbench_task_spec, unitree_go2_dynamic_scene_path, unitree_go2_scene_path,
+    unitree_go2_scheduled_targets, unitree_go2_task_spec, unitree_go2_terrain_scene_path,
+    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, HumanoidAction,
+    HumanoidEpisode, HumanoidEpisodeConfig, HumanoidObservation, QuadrupedAction, QuadrupedEpisode,
+    QuadrupedEpisodeConfig, QuadrupedObservation, UnitreeG1Action, UnitreeG1CommandedGaitConfig,
     UnitreeG1CommandedGaitOutcome, UnitreeG1CommandedTorquePolicy, UnitreeG1Dex3Action,
     UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario, UnitreeG1Dex3Episode,
     UnitreeG1Dex3EpisodeConfig, UnitreeG1Dex3HandCommand, UnitreeG1Dex3Observation,
@@ -62,6 +70,7 @@ pub use urdf_scene::{
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
     UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeG1TorqueOverlay,
     UnitreeG1TorquePolicyInput, UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
+    UnitreeG1WorkbenchFault, UnitreeG1WorkbenchMissionScenario, UnitreeG1WorkbenchObservation,
     UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2GaitCommand,
     UnitreeGo2GaitOverlay, UnitreeGo2GaitSchedule, UnitreeGo2LegSchedule, UnitreeGo2Observation,
     UnitreeGo2PureTorquePolicy, UnitreeGo2Push, UnitreeGo2TerrainObservation,
@@ -71,9 +80,10 @@ pub use urdf_scene::{
     UrdfSceneSim, VectorizedUnitreeG1GaitCheckpoint, VectorizedUnitreeG1GaitConfig,
     VectorizedUnitreeG1GaitEnv, VectorizedUnitreeG1GaitStep, VectorizedUnitreeGo2GaitCheckpoint,
     VectorizedUnitreeGo2GaitConfig, VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep,
-    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
-    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,
-    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
+    G1_WORKBENCH_ARM_WINDOW_M, G1_WORKBENCH_MIN_PELVIS_Y_M, G1_WORKBENCH_MISSION_TASK_ID,
+    G1_WORKBENCH_PARK_RADIUS_M, LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD,
+    LEKIWI_WHEEL_JOINT_SIGN, LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+    QUADRUPED_FOOT_LINKS, UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
     UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
     UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
     UNITREE_G1_TORQUE_PD_STIFFNESS, UNITREE_GO2_POLICY_FEATURES,

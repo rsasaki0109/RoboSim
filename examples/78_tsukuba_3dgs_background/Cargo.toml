@@ -1,0 +1,18 @@
+[package]
+name = "tsukuba_3dgs_background"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_3dgs = { workspace = true }
+rne_render_wgpu = { workspace = true }
+
+[[example]]
+name = "78_tsukuba_3dgs_background"
+path = "main.rs"

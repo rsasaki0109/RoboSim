@@ -6,6 +6,19 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
+  capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
+  stays headless and analytic; splats are visual-only.
+
+- Add a headless Grove-G1 style workbench mission that parks the dynamic G1
+  inside 0.5 m of the factory marker, then runs the pelvis-pinned Dex3 pick
+  and place (`rne.g1.workbench_mission.v1`). This is not a Nav2 or MoveIt port.
+
+- Add a headless RoboCup SSL Division B 2v2 analog that scores official
+  9 m × 6 m field geometry, goal-mouth crossing, out-of-bounds, and the
+  6.5 m/s ball-speed cap (`rne.ssl.small_pitch_2v2.v1`) without speaking
+  the grSim / SSL simulation protobuf ports.
+
 - Add a headless Tsukuba Challenge 2026 confirmation-run analog that scores the
   official road-edge 1.5 m stop box, stop-line 1 m / 0.5 m box, green-cone
   contact fail, e-stop rest, and no-roadway-entry contracts on a scaled

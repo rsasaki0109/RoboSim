@@ -1,0 +1,140 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.ssl.small_pitch_2v2.v1",
+  "control_step_s": 0.016666666666666666,
+  "observation": {
+    "tensors": [
+      {
+        "name": "ball_position_m",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "ball_speed_m_s",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "m/s",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "attacker_position_m",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "in_yellow_goal",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "in_blue_goal",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "out_of_field",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "ball_speed_illegal",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "wheel_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [8],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [-10.0],
+          "upper": [10.0]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "ball_progress_x_m",
+        "weight": 1.0,
+        "unit": "m"
+      },
+      {
+        "name": "step",
+        "weight": -0.001,
+        "unit": "1"
+      },
+      {
+        "name": "yellow_goal",
+        "weight": 10.0,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "yellow_goal",
+        "kind": "success"
+      },
+      {
+        "name": "blue_goal",
+        "kind": "failure"
+      },
+      {
+        "name": "out_of_field",
+        "kind": "failure"
+      },
+      {
+        "name": "ball_speed_illegal",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 2000
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": true
+  },
+  "curriculum": null,
+  "randomization": null
+}

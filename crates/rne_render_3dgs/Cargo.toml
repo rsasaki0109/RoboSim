@@ -1,0 +1,20 @@
+[package]
+name = "rne_render_3dgs"
+description = "3D Gaussian splat render adapter for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+glam = "0.29"
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true }
+thiserror = { workspace = true }
+wgpu = { workspace = true }
+wgpu-3dgs-viewer = "0.2"
+
+[dev-dependencies]
+approx = "0.5"

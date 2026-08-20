@@ -1,0 +1,10 @@
+kind = "diff_drive"
+model_name = "ssl_blue_1"
+
+[diff_drive]
+wheel_radius_m = 0.05
+track_width_m = 0.14
+base_half_extents_m = [0.09, 0.075, 0.09]
+max_wheel_velocity_rad_s = 10.0
+initial_translation_m = [-2.5, 0.075, 1.2]
+drive_mode = "kinematic"

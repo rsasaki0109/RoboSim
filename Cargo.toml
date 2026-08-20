@@ -19,6 +19,7 @@ members = [
   "crates/rne_log",
   "crates/rne_sensor",
   "crates/rne_render",
+  "crates/rne_render_3dgs",
   "crates/rne_render_wgpu",
   "crates/rne_ai",
   "crates/rne_accelerator_contract",
@@ -110,6 +111,9 @@ members = [
   "examples/73_diff_drive_dataset_capture",
   "examples/74_flagship_validation_workflow",
   "examples/75_tsukuba_confirmation",
+  "examples/76_ssl_small_pitch",
+  "examples/77_g1_workbench_mission",
+  "examples/78_tsukuba_3dgs_background",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
@@ -163,6 +167,7 @@ rne_plugin_sdk = { version = "=0.1.0", path = "crates/rne_plugin_sdk" }
 rne_plugin = { version = "=0.1.0", path = "crates/rne_plugin" }
 rne_py = { version = "=0.1.0", path = "crates/rne_py" }
 rne_render = { version = "=0.1.0", path = "crates/rne_render" }
+rne_render_3dgs = { version = "=0.1.0", path = "crates/rne_render_3dgs" }
 rne_render_wgpu = { version = "=0.1.0", path = "crates/rne_render_wgpu" }
 rne_robot = { version = "=0.1.0", path = "crates/rne_robot" }
 rne_sdf = { version = "=0.1.0", path = "crates/rne_sdf" }
