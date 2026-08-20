@@ -77,6 +77,10 @@ struct G1Walker {
     min_height_m: f64,
     trail_m: Vec<[f64; 2]>,
     capture_active: bool,
+    camera_focus_xz_m: [f64; 2],
+    camera_focus_y_m: f64,
+    camera_along_xz: [f64; 2],
+    camera_yaw_rad: f64,
 }
 
 impl G1Walker {
@@ -110,6 +114,10 @@ impl G1Walker {
             min_height_m: observed.base_y_m,
             trail_m: Vec::new(),
             capture_active: false,
+            camera_focus_xz_m: [observed.base_x_m, observed.base_z_m],
+            camera_focus_y_m: observed.base_y_m * 0.42,
+            camera_along_xz: [0.0, 1.0],
+            camera_yaw_rad: 0.0,
         }
     }
 
@@ -124,6 +132,43 @@ impl G1Walker {
         self.trail_m.clear();
         self.capture_active = true;
         self.record_trail();
+        self.lock_camera();
+    }
+
+    fn lock_camera(&mut self) {
+        let observed = self.sim.observe();
+        let pelvis = self.sim.named_transform("pelvis").expect("G1 pelvis pose");
+        let body_forward = pelvis.rotation * Vec3::Z;
+        let along = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
+        let along = if along.length_squared() > 0.0 {
+            along
+        } else {
+            Vec3::Z
+        };
+        let side = Vec3::new(-along.z, 0.0, along.x);
+        let eye_direction = (-along * 0.45 + side * 0.90).normalize_or_zero();
+        self.camera_along_xz = [along.x, along.z];
+        self.camera_yaw_rad = eye_direction.x.atan2(eye_direction.z);
+        self.camera_focus_xz_m = [observed.base_x_m, observed.base_z_m];
+        self.camera_focus_y_m = observed.base_y_m * 0.42;
+    }
+
+    fn advance_camera(&mut self) {
+        let observed = self.sim.observe();
+        let along = Vec3::new(self.camera_along_xz[0], 0.0, self.camera_along_xz[1]);
+        let travel = Vec3::new(
+            observed.base_x_m - self.capture_start_xz_m[0],
+            0.0,
+            observed.base_z_m - self.capture_start_xz_m[1],
+        );
+        let along_m = travel.dot(along);
+        let target = Vec3::new(self.capture_start_xz_m[0], 0.0, self.capture_start_xz_m[1])
+            + along * along_m;
+        // Follow only the along-track displacement. Height, heading, and lateral
+        // COM sway stay locked so step bounce does not shake the orbit.
+        const FOLLOW: f64 = 0.12;
+        self.camera_focus_xz_m[0] += FOLLOW * (target.x - self.camera_focus_xz_m[0]);
+        self.camera_focus_xz_m[1] += FOLLOW * (target.z - self.camera_focus_xz_m[1]);
     }
 
     fn step_frame(&mut self, steps: u64) {
@@ -284,6 +329,7 @@ fn main() {
 
     for frame in 0..FRAME_COUNT {
         learned.step_frame(STEPS_PER_FRAME);
+        learned.advance_camera();
         let rgba = render_panel(
             &mut backend,
             &camera,
@@ -438,7 +484,6 @@ fn render_panel(
     floor_roughness_texture: &Arc<ImageFrame>,
     trail_color: [f32; 4],
 ) -> Vec<u8> {
-    let observed = walker.sim.observe();
     let mut scene = build_visual_render_scene(walker.sim.world());
     scene.items.retain(|item| {
         !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
@@ -468,26 +513,13 @@ fn render_panel(
     mesh_cache
         .resolve_scene(&mut scene, mesh_root_refs)
         .expect("resolve official G1 meshes");
-    let pelvis = walker
-        .sim
-        .named_transform("pelvis")
-        .expect("G1 pelvis pose");
-    let body_forward = pelvis.rotation * Vec3::Z;
-    let along = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
-    let along = if along.length_squared() > 0.0 {
-        along
-    } else {
-        Vec3::Z
-    };
-    let side = Vec3::new(-along.z, 0.0, along.x);
-    let eye_direction = (-along * 0.45 + side * 0.90).normalize_or_zero();
     let orbit = CameraOrbit {
         focus: Vec3::new(
-            observed.base_x_m,
-            observed.base_y_m * 0.42,
-            observed.base_z_m,
+            walker.camera_focus_xz_m[0],
+            walker.camera_focus_y_m,
+            walker.camera_focus_xz_m[1],
         ),
-        yaw_rad: eye_direction.x.atan2(eye_direction.z),
+        yaw_rad: walker.camera_yaw_rad,
         pitch_rad: 1.22,
         distance_m: 1.85,
     };
