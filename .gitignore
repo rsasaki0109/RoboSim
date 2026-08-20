@@ -52,3 +52,7 @@ adapters/ros2/rne_ros2_node/target/
 /examples/27_mobile_manipulator_rl/rollout.svg
 /examples/27_mobile_manipulator_rl/rollout_house.gif
 /examples/27_mobile_manipulator_rl/rollout_house.json
+
+# Large optional Kenkyugakuen splat scans (preferred_ply_path in manifest).
+/assets/environments/tsukuba_kenkyugakuen.ply
+/assets/environments/*.kenkyugakuen.ply

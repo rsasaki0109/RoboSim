@@ -12,6 +12,8 @@ rne_math = { workspace = true }
 rne_render = { workspace = true }
 rne_render_3dgs = { workspace = true }
 rne_render_wgpu = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [[example]]
 name = "78_tsukuba_3dgs_background"

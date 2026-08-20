@@ -2,6 +2,7 @@ kind = "rne_gaussian_splat_environment"
 schema_version = 1
 environment_id = "tsukuba.confirmation.fixture.v1"
 ply_path = "tsukuba_confirmation_fixture.ply"
+standin = false
 translation_m = [0.0, 0.0, 0.0]
 rotation_y_rad = 0.0
 scale = 1.0

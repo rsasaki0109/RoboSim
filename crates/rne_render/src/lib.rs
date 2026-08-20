@@ -29,9 +29,11 @@ pub use camera::Camera;
 pub use depth::{hash_depth_f32, scene_depth_probe, DepthFrame};
 pub use environment::{EnvironmentLighting, EnvironmentMap, EnvironmentMapError};
 pub use gaussian_splat::{
-    load_gaussian_splat_manifest, tsukuba_confirmation_splat_manifest_path,
-    validate_gaussian_splat_manifest, GaussianSplatEnvironment, GaussianSplatError,
-    HybridRenderScene, GAUSSIAN_SPLAT_RENDERER_ID_V1,
+    load_gaussian_splat_manifest, load_gaussian_splat_manifest_with_override,
+    tsukuba_confirmation_splat_manifest_path, tsukuba_kenkyugakuen_splat_manifest_path,
+    validate_gaussian_splat_manifest, validate_gaussian_splat_manifest_with_override,
+    GaussianSplatCaptureReport, GaussianSplatEnvironment, GaussianSplatError, HybridRenderScene,
+    GAUSSIAN_SPLAT_RENDERER_ID_V1,
 };
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};

@@ -1,15 +1,22 @@
 //! Tsukuba confirmation hybrid capture: 3DGS sidewalk background + mesh overlay.
 //!
 //! Contest scoring stays in example 75. This example is viewer/dataset only.
+//!
+//! ```text
+//! --smoke
+//! --environment fixture|kenkyugakuen   (default: kenkyugakuen)
+//! --ply PATH                           override PLY (clears standin)
+//! ```
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_math::{Quat, Transform3, Vec3};
 use rne_render::{
-    validate_gaussian_splat_manifest, Camera, HybridRenderScene, RenderScene, RenderSceneItem,
-    VisualShape,
+    validate_gaussian_splat_manifest_with_override, Camera, GaussianSplatCaptureReport,
+    HybridRenderScene, RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -20,19 +27,47 @@ const CLEAR_COLOR: [f32; 4] = [0.55, 0.62, 0.68, 1.0];
 
 fn main() {
     let smoke = std::env::args().any(|argument| argument == "--smoke");
+    let environment_name = arg_value("--environment").unwrap_or_else(|| "kenkyugakuen".into());
+    let ply_override = arg_value("--ply")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("RNE_SPLAT_PLY").map(PathBuf::from));
+
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest = repo_root.join("assets/environments/tsukuba_confirmation.rne.splat.toml");
-    let environment = validate_gaussian_splat_manifest(&manifest).expect("splat manifest");
+    let manifest = match environment_name.as_str() {
+        "fixture" | "confirmation" => {
+            repo_root.join("assets/environments/tsukuba_confirmation.rne.splat.toml")
+        }
+        "kenkyugakuen" => repo_root.join("assets/environments/tsukuba_kenkyugakuen.rne.splat.toml"),
+        other => {
+            eprintln!("unknown --environment {other}; use fixture or kenkyugakuen");
+            std::process::exit(2);
+        }
+    };
+
+    let environment =
+        validate_gaussian_splat_manifest_with_override(&manifest, ply_override.as_deref())
+            .expect("splat manifest");
+    let ply_sha256 = sha256_file(&environment.ply_path);
 
     if smoke || std::env::var_os("RNE_SKIP_GPU").is_some() {
+        let report = GaussianSplatCaptureReport::new(&environment, ply_sha256.clone(), None, None);
         println!(
-            "smoke: environment_id={} renderer={} ply={}",
-            environment.environment_id,
-            environment.renderer_identity,
-            environment.ply_path.display()
+            "smoke: environment_id={} renderer={} standin={} ply={} sha256={}",
+            report.environment_id,
+            report.renderer_identity,
+            report.standin,
+            report.ply_path,
+            report.ply_sha256
         );
+        write_report(&report_path(&repo_root), &report);
         if smoke {
             assert!(environment.ply_path.is_file());
+            if environment_name == "kenkyugakuen" && ply_override.is_none() {
+                assert!(
+                    environment.standin,
+                    "checkout without preferred PLY must report standin"
+                );
+            }
         }
         return;
     }
@@ -41,6 +76,10 @@ fn main() {
         Ok(backend) => backend,
         Err(error) => {
             eprintln!("wgpu unavailable; Tsukuba 3DGS smoke passed: {error}");
+            write_report(
+                &report_path(&repo_root),
+                &GaussianSplatCaptureReport::new(&environment, ply_sha256, None, None),
+            );
             return;
         }
     };
@@ -49,6 +88,10 @@ fn main() {
         Ok(background) => background,
         Err(error) => {
             eprintln!("splat background unavailable; Tsukuba 3DGS smoke passed: {error}");
+            write_report(
+                &report_path(&repo_root),
+                &GaussianSplatCaptureReport::new(&environment, ply_sha256, None, None),
+            );
             return;
         }
     };
@@ -61,7 +104,7 @@ fn main() {
         distance_m: 5.5,
     };
     let view = orbit.camera_transform();
-    let hybrid = HybridRenderScene::new(environment, tsukuba_confirmation_foreground());
+    let hybrid = HybridRenderScene::new(environment.clone(), tsukuba_confirmation_foreground());
 
     let output = match render_hybrid_scene_camera(
         &mut backend,
@@ -74,15 +117,20 @@ fn main() {
         Ok(output) => output,
         Err(error) => {
             eprintln!("hybrid capture unavailable; Tsukuba 3DGS smoke passed: {error}");
+            write_report(
+                &report_path(&repo_root),
+                &GaussianSplatCaptureReport::new(&environment, ply_sha256, None, None),
+            );
             return;
         }
     };
 
     let hash = output.color.hash_pixels();
     println!(
-        "capture: environment={} renderer={} rgba_hash={hash}",
+        "capture: environment={} renderer={} standin={} rgba_hash={hash}",
         background.environment_id(),
         background.renderer_identity(),
+        environment.standin,
     );
     assert_ne!(hash, 0);
 
@@ -98,6 +146,45 @@ fn main() {
         &output.color.rgba8,
     );
     println!("wrote {}", png_path.display());
+    write_report(
+        &report_path(&repo_root),
+        &GaussianSplatCaptureReport::new(&environment, ply_sha256, Some(hash), Some(png_path)),
+    );
+}
+
+fn arg_value(flag: &str) -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(argument) = args.next() {
+        if argument == flag {
+            return args.next();
+        }
+        if let Some(value) = argument.strip_prefix(&format!("{flag}=")) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn report_path(repo_root: &Path) -> PathBuf {
+    let dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("target"));
+    dir.join("tsukuba_splat_capture.json")
+}
+
+fn write_report(path: &Path, report: &GaussianSplatCaptureReport) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let json = serde_json::to_string_pretty(report).expect("capture report json");
+    fs::write(path, json).expect("write capture report");
+    println!("report {}", path.display());
+}
+
+fn sha256_file(path: &Path) -> String {
+    let bytes = fs::read(path).expect("read ply for sha256");
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn tsukuba_confirmation_foreground() -> RenderScene {
