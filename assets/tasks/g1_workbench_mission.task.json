@@ -1,7 +1,7 @@
 {
   "kind": "rne_task_spec",
   "schema_version": 1,
-  "task_id": "rne.g1.workbench_mission.v1",
+  "task_id": "rne.g1.workbench_mission.v2",
   "control_step_s": 0.016666666666666666,
   "observation": {
     "tensors": [

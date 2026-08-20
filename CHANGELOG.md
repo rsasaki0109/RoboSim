@@ -62,6 +62,10 @@ All notable changes to Robot Native Engine are documented in this file.
   `SimulatorCommand`. Core crates stay protobuf-free; geometry scoring stays in
   example 76.
 
+- Tighten the Grove-G1 workbench mission to v2: Dex3 starts only after the
+  geometric 0.2 m arm window, park/arm/walk budgets are tunable, and `--smoke`
+  covers the `DropPart` fault (`rne.g1.workbench_mission.v2`).
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.
