@@ -1,0 +1,14 @@
+[package]
+name = "g1_workbench_mission"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "77_g1_workbench_mission"
+path = "main.rs"

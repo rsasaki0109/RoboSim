@@ -1,0 +1,139 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.g1.workbench_mission.v1",
+  "control_step_s": 0.016666666666666666,
+  "observation": {
+    "tensors": [
+      {
+        "name": "workbench_distance_m",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "pelvis_y_m",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "parked",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "in_arm_window",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "upright",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "grasped",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "placed",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "advance",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "approach_progress_m",
+        "weight": 1.0,
+        "unit": "m"
+      },
+      {
+        "name": "step",
+        "weight": -0.001,
+        "unit": "1"
+      },
+      {
+        "name": "mission_complete",
+        "weight": 10.0,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "mission_complete",
+        "kind": "success"
+      },
+      {
+        "name": "fallen",
+        "kind": "failure"
+      },
+      {
+        "name": "dropped_part",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 800
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": true
+  },
+  "curriculum": null,
+  "randomization": null
+}

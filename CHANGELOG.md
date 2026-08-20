@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a headless Grove-G1 style workbench mission that parks the dynamic G1
+  inside 0.5 m of the factory marker, then runs the pelvis-pinned Dex3 pick
+  and place (`rne.g1.workbench_mission.v1`). This is not a Nav2 or MoveIt port.
+
 - Add a headless RoboCup SSL Division B 2v2 analog that scores official
   9 m × 6 m field geometry, goal-mouth crossing, out-of-bounds, and the
   6.5 m/s ball-speed cap (`rne.ssl.small_pitch_2v2.v1`) without speaking

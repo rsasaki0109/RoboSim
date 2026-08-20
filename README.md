@@ -320,6 +320,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [Tsukuba confirmation run](docs/TSUKUBA_CONFIRMATION_RUN.md)
 - [SSL small-pitch 2v2](docs/SSL_SMALL_PITCH.md)
+- [G1 workbench mission](docs/G1_WORKBENCH_MISSION.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

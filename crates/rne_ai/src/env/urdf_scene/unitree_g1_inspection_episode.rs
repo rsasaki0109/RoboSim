@@ -101,6 +101,18 @@ impl UnitreeG1InspectionEpisode {
         })
     }
 
+    /// Underlying factory simulation used by mission orchestration.
+    #[must_use]
+    pub fn simulation(&self) -> &UrdfSceneSim {
+        &self.sim
+    }
+
+    /// Current inspection observation without advancing the episode.
+    #[must_use]
+    pub fn current_observation(&self) -> UnitreeG1InspectionObservation {
+        self.observation()
+    }
+
     fn observation(&self) -> UnitreeG1InspectionObservation {
         let base = self.sim.observe();
         let (marker_x_m, _, marker_z_m, marker_radius_m) = self

@@ -14,6 +14,7 @@ mod unitree_g1_gait_episode;
 mod unitree_g1_inspection;
 mod unitree_g1_inspection_episode;
 mod unitree_g1_parts_episode;
+mod unitree_g1_workbench_mission;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
 mod vectorized;
@@ -67,6 +68,11 @@ pub use unitree_g1_inspection_episode::{
 pub use unitree_g1_parts_episode::{
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
     UnitreeG1PartsObservation, UnitreeG1PartsPhase,
+};
+pub use unitree_g1_workbench_mission::{
+    unitree_g1_workbench_task_spec, UnitreeG1WorkbenchFault, UnitreeG1WorkbenchMissionScenario,
+    UnitreeG1WorkbenchObservation, G1_WORKBENCH_ARM_WINDOW_M, G1_WORKBENCH_MIN_PELVIS_Y_M,
+    G1_WORKBENCH_MISSION_TASK_ID, G1_WORKBENCH_PARK_RADIUS_M,
 };
 pub use unitree_go2_episode::{
     unitree_go2_task_spec, UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig,

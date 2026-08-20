@@ -111,6 +111,7 @@ members = [
   "examples/74_flagship_validation_workflow",
   "examples/75_tsukuba_confirmation",
   "examples/76_ssl_small_pitch",
+  "examples/77_g1_workbench_mission",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
