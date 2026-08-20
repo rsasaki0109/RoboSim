@@ -139,7 +139,7 @@ id = "frontend_transport_v1_be53f16"
 contract = "historical_artifact_decision"
 schema_version = 1
 path = "tests/golden/compatibility/frontend-transport-v1-be53f16.json"
-canonical_json_sha256 = "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf"
+canonical_json_sha256 = "sha256:4159a061dd1e7f0c695af239c1be3cbe1f6257a655cb6cf3e3f701b640994d9e"
 
 [[fixture]]
 id = "hardware_mock_conformance_v1"

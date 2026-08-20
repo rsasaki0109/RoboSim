@@ -18,7 +18,10 @@ Protocol v1 was introduced by commit
 streaming runner and hardened payload and negotiation limits without changing
 the frame encoding. The first committed full `ClientHello` golden was added by
 commit `be53f16347beb7df822850748d0e01ce41d227a0`, tree
-`78a68abd73fb4564793559d8e75e021ad5090129`.
+`78a68abd73fb4564793559d8e75e021ad5090129`. After that tip was squash-merged,
+the verifier binds the same golden blob to the reachable `main` ancestor
+`9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4`, tree
+`5d888b77e0d4785fa57c9edd10ce1292089fab5a`.
 
 ## Decision
 

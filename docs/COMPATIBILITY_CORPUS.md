@@ -133,7 +133,7 @@ schema transition yet:
 | TaskSpec v1 | `70a9ff35afbf0215803dd288103bdda79fa46891` | `94459bcb0c5090921bf6edbcf6f63246ebdd6a40` | Exact typed validation and semantic JSON round trip |
 | Dataset bundle v1 | `aecafb62c99f432b2a76956575f4562c6047a6bc` | `0bc9d2d48185282da31dc80eb8857d84012a5928` | Original manifest plus 736-byte shard; two streams, six records, four samples, two drops, and exact offline-evaluation digest |
 | Failure Capsule v1 | `61d6c813e79d7eac6a8ab212776d620069f98905` | `5dac12166fe39da5a1207426f3e7520851e415d2` | Exact typed validation and semantic JSON round trip |
-| Frontend transport v1 | `be53f16347beb7df822850748d0e01ce41d227a0` | `78a68abd73fb4564793559d8e75e021ad5090129` | Original `ClientHello` frame blob; exact frame/payload round trip and negotiation with fail-closed mutations |
+| Frontend transport v1 | `9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4` (squash of original `be53f16`) | `5d888b77e0d4785fa57c9edd10ce1292089fab5a` | Original `ClientHello` frame blob; exact frame/payload round trip and negotiation with fail-closed mutations |
 
 Their original golden blobs are byte-identical to the retained current
 goldens. Source `release-check` verifies those blobs at the recorded revisions,

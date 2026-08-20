@@ -490,7 +490,7 @@ fn digest_mix(digest: &mut u64, value: f64) {
     *digest = digest.wrapping_mul(0x00000100000001b3);
 }
 
-/// Feed-forward scale applied to [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] in
+/// Feed-forward scale applied to [`crate::UnitreeG1TorqueOverlay::LEARNED_STRIDE`] in
 /// scripted walk segments that are not driven by a velocity command policy.
 pub const UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE: f64 = 0.66;
 

@@ -14,6 +14,11 @@ All notable changes to Robot Native Engine are documented in this file.
   `main`.
 - Make MJX process-conformance subject digests ignore Windows CRLF checkouts
   so the golden matches the LF bytes stored in git (and used on Linux CI).
+- Retarget the frontend-transport historical decision from pre-squash tip
+  `be53f16` to reachable `main` ancestor `9e1ea8c` so `release-check` ancestry
+  gates pass after squash merges.
+- Fix a broken `rne_ai` rustdoc link to `UnitreeG1TorqueOverlay::LEARNED_STRIDE`
+  that failed `cargo doc -D warnings` during release-check.
 
 ### Added
 

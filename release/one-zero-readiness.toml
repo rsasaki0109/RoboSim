@@ -13,12 +13,12 @@ unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 accelerator_adapter = []
-compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:63cd4fe2b774e54a80fad571a5f713af0e86d254b13520dac5592d86967417e9" }
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:cecb0f35f2ea48cf9cdf420df054fda0b6a5a43dd7aa23d92e9bef89da910f4d" }
 
 [candidate]
-revision = "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc"
-tree = "1fa3646facf095431b014bc394e8a6934a549f20"
-since = "2026-08-15"
+revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"
+tree = "5d888b77e0d4785fa57c9edd10ce1292089fab5a"
+since = "2026-08-20"
 
 # These fields remain intentionally empty until maintainers make and publish
 # a concrete compatibility-support commitment.
