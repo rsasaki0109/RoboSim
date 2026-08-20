@@ -27,6 +27,8 @@ All notable changes to Robot Native Engine are documented in this file.
   magnitude while still beating the straight-walk drift budget.
 - Follow symlinks when hashing accelerator process-conformance subjects so
   Cargo `CARGO_BIN_EXE_*` mock binaries are accepted on Linux CI.
+- Fetch full git history in the sharded test jobs so readiness/baseline
+  ancestry checks can resolve the retargeted Rust API baseline commit.
 
 ### Added
 

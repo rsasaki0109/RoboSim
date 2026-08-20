@@ -38,6 +38,9 @@ jobs:
         partition: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Readiness/history tests need baseline and historical commits.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
