@@ -42,6 +42,8 @@ The next contest analog is RoboCup SSL Division B 2v2 field geometry, not a grSi
 
 The Grove-G1 analog is a 0.5 m park then Dex3 pick/place workcell, not a Nav2 or MoveIt port. See [G1_WORKBENCH_MISSION.md](G1_WORKBENCH_MISSION.md).
 
+Optional Tsukuba viewer backgrounds can use committed 3DGS splats without changing confirmation-run scoring. See [TSUKUBA_3DGS_BACKGROUND.md](TSUKUBA_3DGS_BACKGROUND.md).
+
 The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
 calibration, noise seeds, assets, domain-randomization decisions, and explicit

@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
+  capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
+  stays headless and analytic; splats are visual-only.
+
 - Add a headless Grove-G1 style workbench mission that parks the dynamic G1
   inside 0.5 m of the factory marker, then runs the pelvis-pinned Dex3 pick
   and place (`rne.g1.workbench_mission.v1`). This is not a Nav2 or MoveIt port.

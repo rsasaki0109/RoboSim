@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 pub mod backend;
+pub mod background;
 pub mod camera;
 mod environment_filter;
 mod primitive;
@@ -14,6 +15,7 @@ mod overlay;
 pub mod viewer;
 
 pub use backend::WgpuRenderBackend;
+pub use background::BackgroundRenderPass;
 pub use camera::CameraOrbit;
 pub use taa::TaaSettings;
 #[cfg(feature = "viewer")]

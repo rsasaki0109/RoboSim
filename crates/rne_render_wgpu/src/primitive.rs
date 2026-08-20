@@ -1,3 +1,4 @@
+use crate::background::BackgroundRenderPass;
 use crate::environment_filter::{prefilter_environment, SPECULAR_MIP_LEVELS};
 use crate::taa::{TaaSettings, TemporalAntiAliasing, PACKED_DEPTH_CLEAR, PACKED_DEPTH_FORMAT};
 
@@ -782,8 +783,10 @@ pub struct PrimitiveSurfacePass<'a> {
     pub scene: &'a RenderScene,
     /// HDR environment lighting and background settings.
     pub environment: &'a EnvironmentLighting,
-    /// Clear color for empty pixels.
+    /// Clear color for empty pixels when the color buffer is cleared first.
     pub clear_color: [f32; 4],
+    /// When true, preserve existing color-buffer contents instead of clearing.
+    pub preserve_color: bool,
     /// Render targets.
     pub targets: &'a PrimitiveRenderViews<'a>,
 }
@@ -804,8 +807,10 @@ pub struct PrimitiveRenderPass<'a> {
     pub scene: &'a RenderScene,
     /// HDR environment lighting and background settings.
     pub environment: &'a EnvironmentLighting,
-    /// Clear color for empty pixels.
+    /// Clear color for empty pixels when the color buffer is cleared first.
     pub clear_color: [f32; 4],
+    /// When true, preserve existing color-buffer contents instead of clearing.
+    pub preserve_color: bool,
 }
 
 impl PrimitiveRenderer {
@@ -1533,6 +1538,7 @@ impl PrimitiveRenderer {
         let scene = pass.scene;
         let environment = pass.environment;
         let clear_color = pass.clear_color;
+        let preserve_color = pass.preserve_color;
         let targets = pass.targets;
         let base_view_proj = camera.view_projection(view);
         let scene_key = scene_temporal_key(scene);
@@ -1842,12 +1848,16 @@ impl PrimitiveRenderer {
                 view: scene_color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(clear_color[0]),
-                        g: f64::from(clear_color[1]),
-                        b: f64::from(clear_color[2]),
-                        a: f64::from(clear_color[3]),
-                    }),
+                    load: if preserve_color {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(clear_color[0]),
+                            g: f64::from(clear_color[1]),
+                            b: f64::from(clear_color[2]),
+                            a: f64::from(clear_color[3]),
+                        })
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })];
@@ -2097,6 +2107,7 @@ impl PrimitiveRenderer {
                 scene,
                 environment,
                 clear_color,
+                preserve_color: pass.preserve_color,
                 targets: &PrimitiveRenderViews {
                     width: target.width,
                     height: target.height,
@@ -2123,6 +2134,166 @@ impl PrimitiveRenderer {
             });
             depth_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("rne_depth_readback"),
+                size: buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &color_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &color_buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(bytes_per_row),
+                        rows_per_image: Some(target.height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: target.width,
+                    height: target.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &packed_depth_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &depth_buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(bytes_per_row),
+                        rows_per_image: Some(target.height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: target.width,
+                    height: target.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit(Some(encoder.finish()));
+        }
+
+        let color = map_color_buffer(device, &color_buffer, target)?;
+        let depth = map_depth_buffer(device, &depth_buffer, target, camera)?;
+        Ok(CameraPassOutput { color, depth })
+    }
+
+    /// Renders a mesh scene over an optional pre-drawn background color buffer.
+    pub fn render_with_background<B: BackgroundRenderPass>(
+        &mut self,
+        pass: PrimitiveRenderPass<'_>,
+        background: &mut B,
+    ) -> Result<CameraPassOutput, RenderError> {
+        let target = pass.target;
+        let camera = pass.camera;
+        let view = pass.view;
+        let scene = pass.scene;
+        let environment = pass.environment;
+        let clear_color = pass.clear_color;
+        let device = pass.device;
+        let queue = pass.queue;
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_hybrid_color_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        background.render_background(device, queue, &color_view, camera, view, clear_color)?;
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_hybrid_depth_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let packed_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rne_hybrid_packed_depth_target"),
+            size: wgpu::Extent3d {
+                width: target.width.max(1),
+                height: target.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: PACKED_DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let packed_depth_view =
+            packed_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.render_to_views_inner(
+            PrimitiveSurfacePass {
+                device,
+                queue,
+                camera,
+                view,
+                scene,
+                environment,
+                clear_color,
+                preserve_color: true,
+                targets: &PrimitiveRenderViews {
+                    width: target.width,
+                    height: target.height,
+                    color_view: &color_view,
+                    depth_view: &depth_view,
+                },
+            },
+            Some(&packed_depth_view),
+        )?;
+
+        let color_buffer;
+        let depth_buffer;
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("rne_hybrid_readback_encoder"),
+            });
+            let bytes_per_row = align_to(target.width * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+            let buffer_size = bytes_per_row as u64 * target.height as u64;
+            color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("rne_hybrid_color_readback"),
+                size: buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            depth_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("rne_hybrid_depth_readback"),
                 size: buffer_size,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
