@@ -127,6 +127,13 @@ pub use env::{
     UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use env::{
+    evaluate_office_desk_delivery_stop, office_agv_delivery_scene_path,
+    office_agv_delivery_task_spec, OfficeAgvDeliveryCourse, OfficeAgvDeliveryFault,
+    OfficeAgvDeliveryObservation, OfficeAgvDeliveryScenario, OfficePlanarAabb, OfficeStopJudgement,
+    OFFICE_AGV_DELIVERY_TASK_ID, OFFICE_DELIVERY_DESK_NAME, OFFICE_DESK_DELIVERY_BEFORE_M,
+    OFFICE_PICKUP_DOCK_NAME,
+};
+pub use env::{
     evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
     SslSmallPitch, SslSmallPitchFault, SslSmallPitchObservation, SslSmallPitchScenario,
     SSL_BALL_NAME, SSL_BALL_RADIUS_M, SSL_DIV_B_FIELD_LENGTH_M, SSL_DIV_B_FIELD_WIDTH_M,

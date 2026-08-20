@@ -1,0 +1,165 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.office.agv_delivery.v1",
+  "control_step_s": 0.016666666666666666,
+  "observation": {
+    "tensors": [
+      {
+        "name": "base_position_m",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "base_yaw_rad",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "wheel_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [2],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [-10.0],
+          "upper": [10.0]
+        }
+      },
+      {
+        "name": "lidar_point_count",
+        "dtype": "i64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [9.223372036854776e18]
+        }
+      },
+      {
+        "name": "out_of_corridor",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "dock_pickup_complete",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "desk_delivery_complete",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "desk_without_pickup",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "desk_overshoot",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "wheel_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [2],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [-10.0],
+          "upper": [10.0]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "forward_progress_m",
+        "weight": 1.0,
+        "unit": "m"
+      },
+      {
+        "name": "step",
+        "weight": -0.001,
+        "unit": "1"
+      },
+      {
+        "name": "delivery_complete",
+        "weight": 10.0,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "delivery_complete",
+        "kind": "success"
+      },
+      {
+        "name": "out_of_corridor",
+        "kind": "failure"
+      },
+      {
+        "name": "desk_without_pickup",
+        "kind": "failure"
+      },
+      {
+        "name": "desk_overshoot",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 1200
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": true
+  },
+  "curriculum": null,
+  "randomization": null
+}

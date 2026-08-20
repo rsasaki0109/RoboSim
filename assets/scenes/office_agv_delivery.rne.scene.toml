@@ -1,0 +1,60 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2026
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/office_agv_delivery.rne.robot.toml"
+
+[[objects]]
+name = "corridor_floor"
+translation_m = [4.5, 0.01, 0.0]
+visual = { shape = "box", size_m = [10.0, 0.02, 2.0], color_rgba = [0.86, 0.84, 0.80, 1.0] }
+
+[[objects]]
+name = "wall_north"
+translation_m = [4.5, 0.6, 1.15]
+visual = { shape = "box", size_m = [10.0, 1.2, 0.1], color_rgba = [0.72, 0.74, 0.76, 1.0] }
+collision = { shape = "box", size_m = [10.0, 1.2, 0.1] }
+body_type = "fixed"
+
+[[objects]]
+name = "wall_south"
+translation_m = [4.5, 0.6, -1.15]
+visual = { shape = "box", size_m = [10.0, 1.2, 0.1], color_rgba = [0.72, 0.74, 0.76, 1.0] }
+collision = { shape = "box", size_m = [10.0, 1.2, 0.1] }
+body_type = "fixed"
+
+[[objects]]
+name = "pickup_dock"
+translation_m = [2.5, 0.05, 0.0]
+visual = { shape = "box", size_m = [0.8, 0.1, 1.2], color_rgba = [0.20, 0.45, 0.78, 1.0] }
+collision = { shape = "box", size_m = [0.8, 0.1, 1.2] }
+body_type = "fixed"
+
+[[objects]]
+name = "delivery_desk"
+translation_m = [7.45, 0.4, 0.0]
+visual = { shape = "box", size_m = [0.7, 0.8, 1.4], color_rgba = [0.55, 0.38, 0.24, 1.0] }
+collision = { shape = "box", size_m = [0.7, 0.8, 1.4] }
+body_type = "fixed"
+
+[[task_markers]]
+name = "start"
+kind = "start"
+translation_m = [0.5, 0.0, 0.0]
+radius_m = 0.3
+
+[[task_markers]]
+name = "pickup_dock_zone"
+kind = "pickup"
+translation_m = [2.5, 0.0, 0.0]
+radius_m = 0.7
+
+[[task_markers]]
+name = "delivery_desk_zone"
+kind = "goal"
+translation_m = [6.4, 0.0, 0.0]
+radius_m = 0.6
