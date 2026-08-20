@@ -36,9 +36,9 @@ The vehicle and UAV captures use one city definition and one coordinate frame.
 The scene combines official PLATEAU geometry with road pavement, sidewalks,
 curbs, lane and crossing markings, signals, streetlights, guardrails, varied
 facades and roofs, vegetation, and a populated deterministic traffic layer.
-The vehicle capture uses a road-level tracking camera; the UAV capture shows
-the aircraft body and rotors from a chase camera rather than presenting a free
-flying camera as a drone.
+The vehicle capture uses a road-level tracking camera with onboard RGB-D
+insets; the UAV capture shows the aircraft body and rotors from a chase camera
+and a gimballed nadir-forward RGB-D inset mounted on the airframe.
 
 ## Regeneration
 

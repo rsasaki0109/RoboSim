@@ -1,5 +1,5 @@
 use super::{
-    unitree_g1_factory_scene_path, unitree_g1_inspection_targets, UrdfJointPositionTarget,
+    step_unitree_g1_inspection, unitree_g1_factory_scene_path, UrdfJointPositionTarget,
     UrdfSceneSim,
 };
 use crate::{Episode, EpisodeStep};
@@ -145,8 +145,7 @@ impl Episode for UnitreeG1InspectionEpisode {
     fn step(&mut self, action: Self::Action) -> EpisodeStep<Self::Observation> {
         let before_distance_m = self.observation().marker_distance_m;
         if action.advance {
-            self.sim
-                .step_joint_position_targets(&unitree_g1_inspection_targets(self.step_at_marker));
+            step_unitree_g1_inspection(&mut self.sim, self.step_at_marker);
             self.step_in_episode += 1;
             self.step_at_marker += 1;
         }

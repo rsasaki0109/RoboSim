@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_factory_scene_path, unitree_g1_inspection_targets,
+    build_visual_render_scene, step_unitree_g1_inspection, unitree_g1_factory_scene_path,
     UrdfJointPositionTarget, UrdfSceneSim,
 };
 use rne_math::{Transform3, Vec3};
@@ -56,9 +56,7 @@ fn main() {
     for frame in 0..FRAME_COUNT {
         for substep in 0..STEPS_PER_FRAME {
             let step = frame as u64 * STEPS_PER_FRAME + substep;
-            sim.step_joint_position_targets(&unitree_g1_inspection_targets(
-                step % STEPS_PER_INSPECTION,
-            ));
+            step_unitree_g1_inspection(&mut sim, step % STEPS_PER_INSPECTION);
         }
         let mut scene = build_visual_render_scene(sim.world());
         scene.items.retain(|item| {

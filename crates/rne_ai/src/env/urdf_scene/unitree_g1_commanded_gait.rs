@@ -490,6 +490,73 @@ fn digest_mix(digest: &mut u64, value: f64) {
     *digest = digest.wrapping_mul(0x00000100000001b3);
 }
 
+/// Feed-forward scale applied to [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] in
+/// scripted walk segments that are not driven by a velocity command policy.
+pub const UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE: f64 = 0.66;
+
+/// Advances one 60 Hz tick using the validated G1 hybrid control split.
+///
+/// Ankles and arms track `targets` through position motors updated without
+/// stepping; hips and knees track the same targets through torque PD with
+/// optional proximal feed-forward torques in [`UNITREE_G1_TORQUE_LINKS`] order.
+pub fn step_unitree_g1_hybrid_joint_targets(
+    sim: &mut UrdfSceneSim,
+    targets: &[UrdfJointPositionTarget<'_>],
+    feed_forward_nm: [f64; 8],
+) {
+    step_unitree_g1_hybrid_joint_targets_with_limits(
+        sim,
+        targets,
+        feed_forward_nm,
+        UNITREE_G1_TORQUE_PD_STIFFNESS,
+        UNITREE_G1_TORQUE_PD_DAMPING,
+        UNITREE_G1_TORQUE_LIMIT_NM,
+        UNITREE_G1_SPEED_LIMIT_RAD_S,
+    );
+}
+
+/// Hybrid G1 tick with explicit PD and actuator limits.
+pub fn step_unitree_g1_hybrid_joint_targets_with_limits(
+    sim: &mut UrdfSceneSim,
+    targets: &[UrdfJointPositionTarget<'_>],
+    feed_forward_nm: [f64; 8],
+    kp: f64,
+    kd: f64,
+    torque_limit_nm: f64,
+    speed_limit_rad_s: f64,
+) {
+    let servo: Vec<_> = targets
+        .iter()
+        .filter(|target| !UNITREE_G1_TORQUE_LINKS.contains(&target.link_name))
+        .copied()
+        .collect();
+    sim.set_joint_position_targets(&servo);
+    let torques: Vec<UrdfJointTorqueTarget<'_>> = UNITREE_G1_TORQUE_LINKS
+        .iter()
+        .enumerate()
+        .map(|(index, link_name)| {
+            let target_position = targets
+                .iter()
+                .find(|target| target.link_name == *link_name)
+                .expect("G1 torque link in joint targets")
+                .position;
+            let q = sim
+                .named_joint_position(link_name)
+                .expect("G1 joint position");
+            let qd = sim
+                .named_joint_velocity(link_name)
+                .expect("G1 joint velocity");
+            UrdfJointTorqueTarget {
+                link_name,
+                torque_nm: (kp * (target_position - q) - kd * qd + feed_forward_nm[index])
+                    .clamp(-torque_limit_nm, torque_limit_nm),
+                max_velocity_rad_s: speed_limit_rad_s,
+            }
+        })
+        .collect();
+    sim.step_joint_torques(&torques);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

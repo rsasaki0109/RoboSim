@@ -71,7 +71,8 @@ pub use env::{
     mm_mobile_clutter_scene_path, mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path,
     mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, quadruped_scene_path,
     quadruped_trot_targets, run_unitree_g1_commanded_gait,
-    run_unitree_g1_commanded_gait_with_policy, so101_scene_path, unitree_g1_dex3_pick_targets,
+    run_unitree_g1_commanded_gait_with_policy, so101_scene_path,
+    step_unitree_g1_hybrid_joint_targets, step_unitree_g1_inspection, unitree_g1_dex3_pick_targets,
     unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path, unitree_g1_factory_scene_path,
     unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
@@ -117,10 +118,11 @@ pub use env::{
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
-    QUADRUPED_FOOT_LINKS, UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS,
-    UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM,
-    UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
-    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+    QUADRUPED_FOOT_LINKS, UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
+    UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
+    UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
+    UNITREE_G1_TORQUE_PD_STIFFNESS, UNITREE_GO2_POLICY_FEATURES,
+    UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{

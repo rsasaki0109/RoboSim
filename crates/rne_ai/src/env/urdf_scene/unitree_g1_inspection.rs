@@ -1,4 +1,7 @@
-use super::{unitree_g1_gait_targets, UnitreeG1GaitCommand, UrdfJointPositionTarget};
+use super::{
+    step_unitree_g1_hybrid_joint_targets, unitree_g1_gait_targets, UnitreeG1GaitCommand,
+    UrdfJointPositionTarget, UrdfSceneSim,
+};
 
 /// Generates a deterministic G1 walk-and-inspect task pose.
 ///
@@ -40,6 +43,16 @@ pub fn unitree_g1_inspection_targets(step: u64) -> [UrdfJointPositionTarget<'sta
     set_target(&mut targets, "right_elbow_link", 0.42 - 0.24 * blend);
     set_target(&mut targets, "right_wrist_roll_rubber_hand", 0.35 * blend);
     targets
+}
+
+/// Advances one factory-inspection tick on the validated hybrid G1 pathway.
+///
+/// Point-and-confirm segments use the same hybrid stepper as the locomotion
+/// harness; approach segments reuse the pinned stride/lift/cycle pose envelope
+/// without learned transport torques so marker radii stay satisfied.
+pub fn step_unitree_g1_inspection(sim: &mut UrdfSceneSim, step: u64) {
+    let targets = unitree_g1_inspection_targets(step);
+    step_unitree_g1_hybrid_joint_targets(sim, &targets, [0.0; 8]);
 }
 
 fn smoothstep(value: f64) -> f64 {
