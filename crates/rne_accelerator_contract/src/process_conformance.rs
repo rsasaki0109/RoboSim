@@ -908,12 +908,15 @@ fn normalized_arguments(
 }
 
 fn read_input(path: &Path, maximum: u64) -> Result<Vec<u8>, AcceleratorProcessConformanceError> {
+    // Follow symlinks so Cargo/target layout wrappers still hash as regular
+    // subject bytes. Rejecting symlink metadata made Linux CI fail when
+    // `CARGO_BIN_EXE_*` resolved through a link to the built mock binary.
     let metadata =
-        fs::symlink_metadata(path).map_err(|error| AcceleratorProcessConformanceError::Read {
+        fs::metadata(path).map_err(|error| AcceleratorProcessConformanceError::Read {
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > maximum {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > maximum {
         return Err(AcceleratorProcessConformanceError::Read {
             path: path.display().to_string(),
             message: format!("input must be a non-empty regular file at or below {maximum} bytes"),

@@ -25,6 +25,8 @@ All notable changes to Robot Native Engine are documented in this file.
   required G1 WGPU dataset capture can run without a hardware GPU.
 - Soften the Go2 robust-turn smoke yaw floor to match current Linux CI arc
   magnitude while still beating the straight-walk drift budget.
+- Follow symlinks when hashing accelerator process-conformance subjects so
+  Cargo `CARGO_BIN_EXE_*` mock binaries are accepted on Linux CI.
 
 ### Added
 
