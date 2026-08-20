@@ -33,7 +33,7 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
         <img src="docs/media/unitree-g1-learned-stride.gif" alt="Official Unitree G1 dynamically walking under a bounded torque policy" width="460">
       </picture>
       <br><b>G1 biped locomotion</b><br>
-      <sub>Official 23-DoF model; two measured command windows, upright and limit checked.</sub>
+      <sub>Official 23-DoF hybrid walk; learned stride, upright, two measured windows. Sustained heading tracking is still outside this envelope.</sub>
     </td>
   </tr>
   <tr>
@@ -61,7 +61,7 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
         <img src="docs/media/plateau-uav.gif" alt="A bounded controlled quadrotor flying through a detailed official PLATEAU city" width="600">
       </picture>
       <br><b>Urban UAV simulation</b><br>
-      <sub>A rendered quadrotor—not a free camera—with bounded acceleration, speed, yaw, tilt, building clearance, and exact replay checks.</sub>
+      <sub>A rendered quadrotor—not a free camera—with an onboard RGB-D gimbal, bounded flight, building clearance, and exact replay checks.</sub>
     </td>
   </tr>
 </table>

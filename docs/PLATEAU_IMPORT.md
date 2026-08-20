@@ -175,7 +175,9 @@ It writes the twelve-second material-aware vehicle animations
 reduced-motion PNGs. The same run writes `docs/media/plateau-uav.gif` and
 `docs/media/plateau-uav.png`: a visible quadrotor controlled through the
 backend-neutral `MultirotorFlight` component follows a smooth route over the
-same street and live traffic. It is not a free-flying camera. The flight gate
+same street and live traffic. A gimballed RGB-D camera is mounted on the
+airframe; the chase view keeps the aircraft in frame and the inset shows the
+onboard color and depth streams. It is not a free-flying camera. The flight gate
 checks bounded speed, acceleration, yaw rate, and tilt; at most 1.0 m RMS
 position error and 0.6 m altitude error; at least 2.0 m building clearance;
 zero collisions; and byte-for-byte identical replay frames and stable hashes.

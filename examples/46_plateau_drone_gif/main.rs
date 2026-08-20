@@ -92,6 +92,12 @@ const CAMERA_FOV_Y_RAD: f64 = 0.715_584_993_317_675_1;
 /// Slight downward tilt so the camera frames the road ahead.
 const CAMERA_PITCH_RAD: f64 = -0.045;
 const CAMERA_STREAM_ID: u64 = 46_906;
+/// Onboard UAV RGB-D stream, distinct from the vehicle ADAS camera.
+const UAV_CAMERA_STREAM_ID: u64 = 46_907;
+/// Slightly wider than the car camera so a nadir-forward aerial view reads the street.
+const UAV_CAMERA_FOV_Y_RAD: f64 = 0.87;
+/// Downward gimbal pitch so the UAV inset shows pavement and traffic, not empty sky.
+const UAV_CAMERA_PITCH_RAD: f64 = -0.48;
 /// Root world seed shared by the deterministic sensor captures.
 const CITY_WORLD_SEED: u64 = 46;
 /// Sensor readout time; the car covers real ground while the rows are scanned out.
@@ -595,7 +601,9 @@ fn main() {
         return;
     }
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let generated_dir = repo_root.join("target/plateau-sanjo-drive-demo");
+    let generated_dir = std::env::var_os("RNE_GENERATED_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("target/plateau-sanjo-drive-demo"));
     let source_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/sanjo_2025");
     let buildings = import_citygml_file(
         &source_dir.join("56383756_bldg_6697.gml"),
@@ -788,6 +796,31 @@ fn main() {
     let vehicle_assets = VehicleRenderAssets::load();
     let city_traffic =
         simulate_city_fleet_frames(&topology.network, &city_scenario, capture_frame_count);
+    let uav_camera_capture = capture_uav_camera_frames(
+        &city_scene,
+        Some((&vehicle_assets, &city_traffic)),
+        &uav_replay.frames,
+    );
+    assert_eq!(uav_camera_capture.frames.len(), uav_replay.frames.len());
+    assert_eq!(
+        uav_camera_capture.pixels_per_frame,
+        (CAMERA_WIDTH * CAMERA_HEIGHT) as usize
+    );
+    assert!(
+        uav_camera_capture.nearest_depth_m > 0.0 && uav_camera_capture.nearest_depth_m.is_finite(),
+        "UAV onboard camera must observe scene geometry, got {}",
+        uav_camera_capture.nearest_depth_m
+    );
+    println!(
+        "UAV onboard camera ready: {}x{} fov_y_rad={:.3} frames={} nearest_depth_m={:.2} mean_center_depth_m={:.2} stable_hash={}",
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT,
+        UAV_CAMERA_FOV_Y_RAD,
+        uav_camera_capture.frames.len(),
+        uav_camera_capture.nearest_depth_m,
+        uav_camera_capture.mean_center_depth_m,
+        uav_camera_capture.stable_hash,
+    );
 
     let scene_item_limit = if debug_overlay == TrafficDebugOverlay::default() {
         MAX_STATIC_SCENE_ITEMS
@@ -1077,6 +1110,17 @@ fn main() {
             false,
         );
         append_uav_trail(&mut scene, &uav_replay.frames, frame_index);
+        let previous_uav = frame_index
+            .checked_sub(1)
+            .and_then(|index| uav_replay.frames.get(index).copied());
+        let onboard = sample_camera_rgbd_swept(
+            &mut backend,
+            &uav_camera_sweep(previous_uav, uav),
+            &uav_camera_spec(),
+            SimTime::from_ticks(frame_index as u64),
+            &scene,
+            uav_camera_noise_key(frame_index),
+        );
         append_quadrotor(&mut scene, uav);
         let output = backend
             .render_scene_camera(
@@ -1092,6 +1136,20 @@ fn main() {
             output.color.width,
             output.color.height,
             camera.far_m as f32,
+        );
+        blit_camera_insets(
+            &mut FrameBuffer {
+                pixels: &mut presented,
+                width: output.color.width,
+                height: output.color.height,
+            },
+            InsetImage {
+                pixels: &onboard.rgb.rgba8,
+                width: onboard.rgb.width,
+                height: onboard.rgb.height,
+            },
+            &onboard.depth.depth_m,
+            80.0,
         );
         let mut frame_buffer = FrameBuffer {
             pixels: &mut presented,
@@ -1114,7 +1172,8 @@ fn main() {
         .expect("write controlled PLATEAU UAV frame");
     }
     let uav_gif_path = media_dir.join("plateau-uav.gif");
-    build_gif(&uav_frames_dir, &uav_gif_path).expect("encode controlled PLATEAU UAV GIF");
+    build_gif_with(&uav_frames_dir, &uav_gif_path, 560, 112)
+        .expect("encode controlled PLATEAU UAV GIF");
     let uav_poster_frame = render_frame_count.saturating_sub(1).min(48);
     image::open(uav_frames_dir.join(format!("frame-{uav_poster_frame:03}.png")))
         .expect("read controlled PLATEAU UAV poster frame")
@@ -2213,6 +2272,127 @@ fn vehicle_camera_transform(vehicle: VehicleFrame) -> Transform3 {
         ) + forward * (vehicle.class.length_m() * 0.18),
         rotation,
     )
+}
+
+fn uav_camera_spec() -> CameraSpec {
+    CameraSpec {
+        width: CAMERA_WIDTH,
+        height: CAMERA_HEIGHT,
+        fov_y_rad: UAV_CAMERA_FOV_Y_RAD,
+        seed: UAV_CAMERA_STREAM_ID,
+        distortion: CameraDistortion {
+            k1: -0.18,
+            k2: 0.04,
+            ..CameraDistortion::default()
+        },
+        readout_time_s: CAMERA_READOUT_TIME_S,
+        rolling_shutter_bands: CAMERA_ROLLING_SHUTTER_BANDS,
+        auto_exposure_target_luminance: 0.48,
+        auto_exposure_max_ev: 2.0,
+        shot_noise_scale: 0.0005,
+        read_noise_stddev: 0.0025,
+        vignette_strength: 0.28,
+        ..CameraSpec::default()
+    }
+}
+
+fn uav_camera_sweep(previous: Option<UavFrame>, frame: UavFrame) -> CameraSweep {
+    let pose = uav_camera_transform(frame);
+    let previous_pose = previous.map(uav_camera_transform).unwrap_or(pose);
+    CameraSweep::new(previous_pose, pose)
+}
+
+fn uav_camera_noise_key(frame_index: usize) -> SensorNoiseKey {
+    SensorNoiseKey::new(
+        CITY_WORLD_SEED,
+        UAV_CAMERA_STREAM_ID,
+        UAV_CAMERA_STREAM_ID,
+        frame_index as u64 + 1,
+    )
+}
+
+/// Levelled gimbal pose: heading follows the UAV, pitch is a fixed downward look.
+///
+/// The render view convention looks along local `-Z`.
+fn uav_camera_transform(frame: UavFrame) -> Transform3 {
+    let body_forward = frame.transform.rotation * Vec3::X;
+    let heading = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
+    let heading = if heading.length_squared() > 0.0 {
+        heading
+    } else {
+        Vec3::X
+    };
+    let yaw = (-heading.x).atan2(-heading.z);
+    let rotation =
+        (Quat::from_rotation_y(yaw) * Quat::from_rotation_x(UAV_CAMERA_PITCH_RAD)).normalize();
+    Transform3::from_translation_rotation(
+        frame.transform.translation + frame.transform.rotation * Vec3::new(0.42, -0.14, 0.0),
+        rotation,
+    )
+}
+
+fn capture_uav_camera_frames(
+    city_scene: &RenderScene,
+    traffic: Option<(&VehicleRenderAssets, &[Vec<VehicleFrame>])>,
+    uav_frames: &[UavFrame],
+) -> CityCameraCapture {
+    let spec = uav_camera_spec();
+    let mut render = HeadlessRenderBackend::new();
+    let mut frames = Vec::with_capacity(uav_frames.len());
+    let mut stable_hash = 0xcbf29ce484222325_u64;
+    let mut pixels_per_frame = 0_usize;
+    let mut nearest_depth_m = f32::INFINITY;
+    let mut center_depth_sum = 0.0_f64;
+    let mut previous: Option<UavFrame> = None;
+
+    for (frame_index, uav) in uav_frames.iter().copied().enumerate() {
+        let mut scene = city_scene.clone();
+        if let Some((assets, traffic_frames)) = traffic {
+            let vehicles = traffic_frames
+                .get(frame_index)
+                .or_else(|| traffic_frames.last())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if !vehicles.is_empty() {
+                append_city_fleet(&mut scene, assets, vehicles, 0, false);
+            }
+        }
+        let sample = sample_camera_rgbd_swept(
+            &mut render,
+            &uav_camera_sweep(previous, uav),
+            &spec,
+            SimTime::from_ticks(frame_index as u64),
+            &scene,
+            uav_camera_noise_key(frame_index),
+        );
+        previous = Some(uav);
+        pixels_per_frame = sample.depth.depth_m.len();
+        let center_depth_m = sample.depth.center_depth_m();
+        let min_depth_m = sample.depth.min_depth_m();
+        nearest_depth_m = nearest_depth_m.min(min_depth_m);
+        center_depth_sum += f64::from(center_depth_m);
+        stable_hash = hash_camera_sample(stable_hash, &sample);
+        frames.push(CityCameraFrame {
+            center_depth_m,
+            min_depth_m,
+        });
+    }
+
+    CityCameraCapture {
+        stable_hash,
+        pixels_per_frame,
+        nearest_depth_m: if nearest_depth_m.is_finite() {
+            nearest_depth_m
+        } else {
+            0.0
+        },
+        mean_center_depth_m: if frames.is_empty() {
+            0.0
+        } else {
+            center_depth_sum / frames.len() as f64
+        },
+        frames,
+    }
 }
 
 /// Captures the onboard camera deterministically without a GPU.
@@ -3454,6 +3634,32 @@ fn run_uav_smoke() {
         "UAV smoke path length {:.3} m is too short",
         first.path_length_m,
     );
+    let mut camera_scene = RenderScene::default();
+    push_box(
+        &mut camera_scene,
+        Vec3::new(40.0, -0.1, 0.0),
+        Quat::IDENTITY,
+        Vec3::new(100.0, 0.2, 50.0),
+        [0.28, 0.30, 0.32, 1.0],
+    );
+    push_box(
+        &mut camera_scene,
+        Vec3::new(18.0, 4.0, 0.0),
+        Quat::IDENTITY,
+        Vec3::new(6.0, 8.0, 6.0),
+        [0.55, 0.42, 0.30, 1.0],
+    );
+    let camera_capture = capture_uav_camera_frames(&camera_scene, None, &first.frames);
+    assert_eq!(camera_capture.frames.len(), first.frames.len());
+    assert_eq!(
+        camera_capture.pixels_per_frame,
+        (CAMERA_WIDTH * CAMERA_HEIGHT) as usize
+    );
+    assert!(
+        camera_capture.nearest_depth_m > 0.0 && camera_capture.nearest_depth_m.is_finite(),
+        "UAV smoke camera must observe geometry, got {}",
+        camera_capture.nearest_depth_m
+    );
     println!(
         "controlled UAV smoke ok: path_m={:.1} rms_error_m={:.3} altitude_error_m={:.3} max_horizontal_speed_m_s={:.2} max_climb_speed_m_s={:.2} max_acceleration_m_s2={:.2} max_yaw_rate_rad_s={:.2} max_tilt_rad={:.3} building_clearance_m={:.2} collisions={} stable_hash={}",
         first.path_length_m,
@@ -4128,6 +4334,23 @@ fn append_quadrotor(scene: &mut RenderScene, frame: UavFrame) {
         0.055,
         [1.0, 0.08, 0.04, 1.0],
     );
+    let camera_pose = uav_camera_transform(frame);
+    push_cylinder(
+        scene,
+        camera_pose.translation,
+        camera_pose.rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+        0.045,
+        0.09,
+        [0.06, 0.07, 0.08, 1.0],
+    );
+    push_cylinder(
+        scene,
+        camera_pose.translation + camera_pose.rotation * Vec3::NEG_Z * 0.05,
+        camera_pose.rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+        0.032,
+        0.05,
+        [0.12, 0.16, 0.22, 1.0],
+    );
 }
 
 fn uav_chase_camera(frame: UavFrame) -> CameraOrbit {
@@ -4271,6 +4494,18 @@ fn to_srgb_byte(value: f32) -> u8 {
 }
 
 fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
+    build_gif_with(frames_dir, gif_path, 600, 128)
+}
+
+fn build_gif_with(
+    frames_dir: &Path,
+    gif_path: &Path,
+    width_px: u32,
+    max_colors: u32,
+) -> std::io::Result<()> {
+    let filter = format!(
+        "fps=12,scale={width_px}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={max_colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
+    );
     let status = std::process::Command::new("ffmpeg")
         .args([
             "-y",
@@ -4279,7 +4514,7 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
             "-i",
             &frames_dir.join("frame-%03d.png").to_string_lossy(),
             "-vf",
-            "fps=12,scale=600:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
+            &filter,
             &gif_path.to_string_lossy(),
         ])
         .status()?;
@@ -5550,6 +5785,35 @@ mod tests {
             // It is mounted above the road and ahead of the vehicle origin.
             assert!(pose.translation.y > 0.5);
             assert!((pose.translation - vehicle.transform.translation).dot(heading) > 0.0);
+        }
+    }
+
+    #[test]
+    fn onboard_camera_looks_along_the_uav_heading() {
+        for yaw_rad in [0.0_f64, 0.7, -1.9, 3.0, 2.4] {
+            let uav = UavFrame {
+                transform: Transform3::from_translation_rotation(
+                    Vec3::new(4.0, 12.0, -3.0),
+                    Quat::from_rotation_y(yaw_rad),
+                ),
+                velocity_m_s: Vec3::new(6.0, 0.0, 0.0),
+                target_position_m: Vec3::new(4.0, 12.0, -3.0),
+                target_yaw_rad: yaw_rad,
+                position_error_m: 0.0,
+                rotor_angle_rad: 0.0,
+            };
+            let pose = uav_camera_transform(uav);
+            let heading = uav.transform.rotation * Vec3::X;
+            let heading = Vec3::new(heading.x, 0.0, heading.z).normalize_or_zero();
+            let view_forward = pose.rotation * Vec3::NEG_Z;
+            let horizontal = Vec3::new(view_forward.x, 0.0, view_forward.z).normalize_or_zero();
+            assert!(
+                horizontal.dot(heading) > 0.999,
+                "UAV camera must face the body heading at yaw {yaw_rad}"
+            );
+            assert!(view_forward.y < 0.0, "UAV camera must look down");
+            assert!(pose.translation.y < uav.transform.translation.y);
+            assert!((pose.translation - uav.transform.translation).dot(heading) > 0.0);
         }
     }
 

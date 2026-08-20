@@ -32,7 +32,9 @@ pub use quadruped_episode::{
 };
 pub use unitree_g1_commanded_gait::{
     run_unitree_g1_commanded_gait, run_unitree_g1_commanded_gait_with_policy,
-    UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome, UNITREE_G1_POSITION_DAMPING,
+    step_unitree_g1_hybrid_joint_targets, step_unitree_g1_hybrid_joint_targets_with_limits,
+    UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome,
+    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
     UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
     UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
     UNITREE_G1_TORQUE_PD_STIFFNESS,
@@ -57,7 +59,7 @@ pub use unitree_g1_gait_episode::{
     unitree_g1_gait_task_spec, UnitreeG1GaitAction, UnitreeG1GaitEpisode,
     UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
-pub use unitree_g1_inspection::unitree_g1_inspection_targets;
+pub use unitree_g1_inspection::{step_unitree_g1_inspection, unitree_g1_inspection_targets};
 pub use unitree_g1_inspection_episode::{
     UnitreeG1InspectionAction, UnitreeG1InspectionEpisode, UnitreeG1InspectionEpisodeConfig,
     UnitreeG1InspectionObservation,
@@ -2237,18 +2239,21 @@ mod tests {
             sim.step_joint_position_targets(&stand);
         }
         let command = UnitreeG1GaitCommand::default();
+        let start_x_m = sim.observe().base_x_m;
         for step in 0..120 {
-            sim.step_joint_position_targets(&unitree_g1_gait_targets(step, command));
+            let targets = unitree_g1_gait_targets(step, command);
+            step_unitree_g1_hybrid_joint_targets(&mut sim, &targets, [0.0; 8]);
         }
         let observation = sim.observe();
+        let drift_m = observation.base_x_m - start_x_m;
         assert!(observation.base_x_m.is_finite());
         assert!(
-            observation.base_x_m > 0.005,
-            "G1 did not advance: {observation:?}"
+            drift_m.abs() < 0.15,
+            "hybrid step-in-place drifted too far: {drift_m:+.3} m ({observation:?})"
         );
-        assert!(observation.base_y_m > 0.35, "G1 gait fell: {observation:?}");
+        assert!(observation.base_y_m > 0.7, "G1 gait fell: {observation:?}");
         assert!(
-            observation.base_yaw_rad.abs() < 1.2,
+            observation.base_relative_yaw_rad.abs() < 0.3,
             "G1 yaw drifted: {observation:?}"
         );
     }

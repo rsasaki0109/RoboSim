@@ -1,10 +1,8 @@
-//! Renders the commanded G1 locomotion milestone as a side-by-side hero GIF.
+//! Renders the commanded G1 learned-stride walk as the README hero GIF.
 //!
-//! The blue panel is the plain hybrid stepper and the orange panel is the
-//! pinned [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] under the command
-//! boundary's positive differential-steering request. Both panels settle,
-//! discard the same 8 s transient, and then render the measured windows.
-//! `--smoke` exercises that physics path without initializing a renderer.
+//! The capture follows [`UnitreeG1TorqueOverlay::LEARNED_STRIDE`] under a
+//! forward command. `--smoke` still compares that walk against the plain
+//! hybrid stepper without initializing a renderer.
 //! Set `RNE_HDRI_PATH` to a Radiance `.hdr` equirectangular map to enable the
 //! photoreal environment background and image-based lighting.
 //! Set `RNE_TAA=1` to enable deterministic temporal anti-aliasing for static
@@ -28,9 +26,8 @@ use rne_render::{
 };
 use rne_render_wgpu::{CameraOrbit, TaaSettings, WgpuRenderBackend};
 
-const PANEL_WIDTH: u32 = 480;
-const PANEL_HEIGHT: u32 = 530;
-const BANNER_HEIGHT: u32 = 10;
+const PANEL_WIDTH: u32 = 960;
+const PANEL_HEIGHT: u32 = 540;
 const FRAME_COUNT: usize = 80;
 const STEPS_PER_FRAME: u64 = 12;
 const PREROLL_STEPS: u64 = 480;
@@ -273,40 +270,21 @@ fn main() {
         forward_m_s: 0.0276,
         yaw_rate_rad_s: 0.0,
     };
-    let steering = UnitreeG1VelocityCommand {
-        forward_m_s: 0.0276,
-        yaw_rate_rad_s: 0.05,
-    };
-    let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO, forward);
-    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, steering);
-    baseline.step_frame(PREROLL_STEPS);
+    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, forward);
     learned.step_frame(PREROLL_STEPS);
-    baseline.begin_capture();
     learned.begin_capture();
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     configure_environment(&mut backend);
     configure_taa(&mut backend);
     let camera = Camera::new(PANEL_WIDTH, PANEL_HEIGHT, std::f64::consts::FRAC_PI_4);
-    let mesh_roots: Vec<PathBuf> = baseline.sim.mesh_package_roots().to_vec();
+    let mesh_roots: Vec<PathBuf> = learned.sim.mesh_package_roots().to_vec();
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
     let mut mesh_cache = MeshRenderCache::new();
 
     for frame in 0..FRAME_COUNT {
-        baseline.step_frame(STEPS_PER_FRAME);
         learned.step_frame(STEPS_PER_FRAME);
-        let left = render_panel(
-            &mut backend,
-            &camera,
-            &mut mesh_cache,
-            &mesh_root_refs,
-            &baseline,
-            &floor_texture,
-            &floor_normal_texture,
-            &floor_roughness_texture,
-            [0.16, 0.58, 0.96, 1.0],
-        );
-        let right = render_panel(
+        let rgba = render_panel(
             &mut backend,
             &camera,
             &mut mesh_cache,
@@ -317,16 +295,19 @@ fn main() {
             &floor_roughness_texture,
             [0.98, 0.54, 0.16, 1.0],
         );
-        let composite = composite_side_by_side(&left, &right);
         write_png(
             &frames_dir.join(format!("frame-{frame:03}.png")),
-            &composite,
-            PANEL_WIDTH * 2,
-            PANEL_HEIGHT + BANNER_HEIGHT,
+            &rgba,
+            PANEL_WIDTH,
+            PANEL_HEIGHT,
         )
         .expect("write learned G1 frame");
     }
 
+    let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO, forward);
+    baseline.step_frame(PREROLL_STEPS);
+    baseline.begin_capture();
+    baseline.step_frame(CAPTURE_STEPS);
     let baseline_min = baseline.minimum_window_m();
     let learned_min = learned.minimum_window_m();
     assert!(
@@ -416,12 +397,8 @@ fn run_smoke() {
         forward_m_s: 0.0276,
         yaw_rate_rad_s: 0.0,
     };
-    let steering = UnitreeG1VelocityCommand {
-        forward_m_s: 0.0276,
-        yaw_rate_rad_s: 0.05,
-    };
     let mut baseline = G1Walker::new(UnitreeG1TorqueOverlay::ZERO, forward);
-    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, steering);
+    let mut learned = G1Walker::new(UnitreeG1TorqueOverlay::LEARNED_STRIDE, forward);
     baseline.step_frame(PREROLL_STEPS);
     learned.step_frame(PREROLL_STEPS);
     baseline.begin_capture();
@@ -479,7 +456,7 @@ fn render_panel(
             transform: Transform3 {
                 translation: Vec3::new(position[0], 0.012, position[1]),
                 rotation: rne_math::Quat::IDENTITY,
-                scale: Vec3::new(0.035, 0.006, 0.035),
+                scale: Vec3::new(0.055, 0.008, 0.055),
             },
             shape: VisualShape::Box { size_m: Vec3::ONE },
             color_rgba: trail_color,
@@ -491,15 +468,28 @@ fn render_panel(
     mesh_cache
         .resolve_scene(&mut scene, mesh_root_refs)
         .expect("resolve official G1 meshes");
+    let pelvis = walker
+        .sim
+        .named_transform("pelvis")
+        .expect("G1 pelvis pose");
+    let body_forward = pelvis.rotation * Vec3::Z;
+    let along = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
+    let along = if along.length_squared() > 0.0 {
+        along
+    } else {
+        Vec3::Z
+    };
+    let side = Vec3::new(-along.z, 0.0, along.x);
+    let eye_direction = (-along * 0.45 + side * 0.90).normalize_or_zero();
     let orbit = CameraOrbit {
         focus: Vec3::new(
-            walker.capture_start_xz_m[0] + 0.20,
-            observed.base_y_m + 0.05,
-            walker.capture_start_xz_m[1],
+            observed.base_x_m,
+            observed.base_y_m * 0.42,
+            observed.base_z_m,
         ),
-        yaw_rad: -0.72,
-        pitch_rad: 1.16,
-        distance_m: 2.60,
+        yaw_rad: eye_direction.x.atan2(eye_direction.z),
+        pitch_rad: 1.22,
+        distance_m: 1.85,
     };
     let output = backend
         .render_scene_camera(camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
@@ -734,35 +724,6 @@ fn push_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color_rgba
         base_color_texture: None,
         material: Default::default(),
     });
-}
-
-fn composite_side_by_side(left: &[u8], right: &[u8]) -> Vec<u8> {
-    let width = (PANEL_WIDTH * 2) as usize;
-    let height = (PANEL_HEIGHT + BANNER_HEIGHT) as usize;
-    let mut composite = vec![0_u8; width * height * 4];
-    for y in 0..BANNER_HEIGHT as usize {
-        for x in 0..width {
-            let offset = (y * width + x) * 4;
-            let color = if x < PANEL_WIDTH as usize {
-                [66, 140, 220, 255]
-            } else {
-                [226, 138, 52, 255]
-            };
-            composite[offset..offset + 4].copy_from_slice(&color);
-        }
-    }
-    for y in 0..PANEL_HEIGHT as usize {
-        let row = y + BANNER_HEIGHT as usize;
-        let panel_row = y * PANEL_WIDTH as usize * 4;
-        let panel_bytes = PANEL_WIDTH as usize * 4;
-        let left_offset = row * width * 4;
-        composite[left_offset..left_offset + panel_bytes]
-            .copy_from_slice(&left[panel_row..panel_row + panel_bytes]);
-        let right_offset = left_offset + panel_bytes;
-        composite[right_offset..right_offset + panel_bytes]
-            .copy_from_slice(&right[panel_row..panel_row + panel_bytes]);
-    }
-    composite
 }
 
 fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {

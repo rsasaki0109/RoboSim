@@ -1,6 +1,6 @@
 use super::{
-    unitree_g1_dynamic_scene_path, unitree_g1_gait_targets, UnitreeG1GaitCommand,
-    UrdfJointPositionTarget, UrdfSceneSim,
+    step_unitree_g1_hybrid_joint_targets, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
+    UnitreeG1GaitCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
 use crate::{
     ActionSpec, Episode, EpisodeStep, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec,
@@ -274,7 +274,7 @@ impl Episode for UnitreeG1GaitEpisode {
         };
         let mut targets = unitree_g1_gait_targets(self.step_in_episode, command);
         targets[12].position = action.yaw_correction_rad.clamp(-0.25, 0.25);
-        self.sim.step_joint_position_targets(&targets);
+        step_unitree_g1_hybrid_joint_targets(&mut self.sim, &targets, [0.0; 8]);
         self.step_in_episode += 1;
 
         let forward_delta_m = self.sim.observe().base_x_m - before_x_m;
