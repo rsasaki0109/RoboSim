@@ -363,11 +363,10 @@ impl OfficeAgvSharedAisleScenario {
             drive.left_wheel_velocity_rad_s,
             drive.right_wheel_velocity_rad_s,
         );
-        let aabb = self.course.delivery.robot_aabb(
-            drive.base_x_m,
-            drive.base_z_m,
-            drive.base_yaw_rad,
-        );
+        let aabb =
+            self.course
+                .delivery
+                .robot_aabb(drive.base_x_m, drive.base_z_m, drive.base_yaw_rad);
         let other = self.course.other_aabb(self.other_agv_x_m, 0.0);
         let shared_aisle_occupied = self.course.other_occupies_shared(self.other_agv_x_m);
         let other_agv_contact = self.other_agv_contact || aabb.overlaps(other);
@@ -493,9 +492,8 @@ impl OfficeAgvSharedAisleScenario {
                 DiffDriveAction::forward(0.0)
             }
             ScriptPhase::ApproachYield => {
-                let stop_x_m = self.course.shared_min_x_m
-                    - self.course.delivery.robot_half_x_m
-                    - 0.15;
+                let stop_x_m =
+                    self.course.shared_min_x_m - self.course.delivery.robot_half_x_m - 0.15;
                 if observation.base_x_m >= stop_x_m {
                     self.phase = ScriptPhase::HoldYield;
                     DiffDriveAction::forward(0.0)
@@ -510,9 +508,8 @@ impl OfficeAgvSharedAisleScenario {
                 DiffDriveAction::forward(0.0)
             }
             ScriptPhase::ApproachDesk => {
-                let stop_x_m = self.course.delivery.desk_face_x_m
-                    - self.course.delivery.robot_half_x_m
-                    - 0.35;
+                let stop_x_m =
+                    self.course.delivery.desk_face_x_m - self.course.delivery.robot_half_x_m - 0.35;
                 if observation.base_x_m >= stop_x_m {
                     self.phase = ScriptPhase::HoldDesk;
                     DiffDriveAction::forward(0.0)
