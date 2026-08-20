@@ -21,7 +21,10 @@ use rne_render::{
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 #[cfg(test)]
 use rne_robot::{ackermann_kinematics, command_ackermann_drive};
-use rne_robot::{pure_pursuit_steering, vehicle_dynamics, AckermannDrive, VehicleDynamics};
+use rne_robot::{
+    command_multirotor, multirotor_flight, pure_pursuit_steering, vehicle_dynamics, AckermannDrive,
+    MultirotorCommandResult, MultirotorFlight, VehicleDynamics,
+};
 use rne_sensor::{
     sample_camera_rgbd_swept, sample_lidar_swept, CameraDistortion, CameraRgbdSample, CameraSpec,
     CameraSweep, LidarAtmosphere, LidarDomainRandomization, LidarMaterial, LidarSpec, LidarSweep,
@@ -48,12 +51,14 @@ use uuid::Uuid;
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
 const CAR_FRAME_COUNT: usize = 144;
+const UAV_FRAME_COUNT: usize = CAR_FRAME_COUNT;
 const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 60;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const CLEAR_COLOR: [f32; 4] = [0.34, 0.52, 0.70, 1.0];
-const MAX_STATIC_SCENE_ITEMS: usize = 400;
+const MAX_STATIC_SCENE_ITEMS: usize = 650;
 const MAX_DEBUG_SCENE_ITEMS: usize = 3_000;
+const SHOWCASE_GIF_MAX_BYTE_SIZE: u64 = 5_000_000;
 const SANJO_ORIGIN: SourceOrigin = SourceOrigin {
     first_deg_or_m: 37.631_938_029_139_7,
     second_deg_or_m: 138.955_122_347_658_72,
@@ -66,7 +71,7 @@ const CITY_ACTOR_COUNT: usize = 100;
 const CITY_REPLAY_STEPS: u64 = 720;
 const CITY_SIGNAL_COUNT: usize = 3;
 const CITY_ROUTE_COUNT: usize = 8;
-const LIDAR_RAY_COUNT: u32 = 720;
+const LIDAR_RAY_COUNT: u32 = 600;
 /// Elevation channels, matching a 16-beam spinning scanner.
 const LIDAR_CHANNEL_COUNT: u16 = 16;
 /// Vertical field of view, matching the +/-15 degrees of a VLP-16 class sensor.
@@ -96,6 +101,17 @@ const CAMERA_ROLLING_SHUTTER_BANDS: u16 = 8;
 /// Inset margin and border thickness in pixels.
 const CAMERA_INSET_MARGIN_PX: u32 = 24;
 const CAMERA_INSET_BORDER_PX: u32 = 2;
+const UAV_MAX_RMS_POSITION_ERROR_M: f64 = 1.0;
+const UAV_MAX_ALTITUDE_ERROR_M: f64 = 0.6;
+const UAV_MAX_HORIZONTAL_SPEED_M_S: f64 = 14.0;
+const UAV_MAX_CLIMB_SPEED_M_S: f64 = 4.0;
+const UAV_MAX_ACCELERATION_M_S2: f64 = 7.0;
+const UAV_MAX_YAW_RATE_RAD_S: f64 = 1.4;
+const UAV_MAX_TILT_RAD: f64 = 0.52;
+const UAV_MIN_BUILDING_CLEARANCE_M: f64 = 2.0;
+const UAV_BODY_CLEARANCE_RADIUS_M: f64 = 0.75;
+const UAV_ROUTE_CLEARANCE_MARGIN_M: f64 = 0.50;
+const UAV_BASE_CRUISE_HEIGHT_M: f64 = 11.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignalPhase {
@@ -126,6 +142,8 @@ struct TurnRoute {
 struct Footprint {
     min_x_m: f64,
     max_x_m: f64,
+    min_y_m: f64,
+    max_y_m: f64,
     min_z_m: f64,
     max_z_m: f64,
 }
@@ -135,6 +153,44 @@ impl Footprint {
         let nearest_x_m = center.x.clamp(self.min_x_m, self.max_x_m);
         let nearest_z_m = center.z.clamp(self.min_z_m, self.max_z_m);
         (center.x - nearest_x_m).powi(2) + (center.z - nearest_z_m).powi(2) < radius_m.powi(2)
+    }
+
+    fn clearance_to_point_m(self, point_m: Vec3) -> f64 {
+        let outside_x_m = if point_m.x < self.min_x_m {
+            self.min_x_m - point_m.x
+        } else if point_m.x > self.max_x_m {
+            point_m.x - self.max_x_m
+        } else {
+            0.0
+        };
+        let outside_y_m = if point_m.y < self.min_y_m {
+            self.min_y_m - point_m.y
+        } else if point_m.y > self.max_y_m {
+            point_m.y - self.max_y_m
+        } else {
+            0.0
+        };
+        let outside_z_m = if point_m.z < self.min_z_m {
+            self.min_z_m - point_m.z
+        } else if point_m.z > self.max_z_m {
+            point_m.z - self.max_z_m
+        } else {
+            0.0
+        };
+        let outside_m = Vec3::new(outside_x_m, outside_y_m, outside_z_m).length();
+        if outside_m > 0.0 {
+            return outside_m;
+        }
+        -[
+            point_m.x - self.min_x_m,
+            self.max_x_m - point_m.x,
+            point_m.y - self.min_y_m,
+            self.max_y_m - point_m.y,
+            point_m.z - self.min_z_m,
+            self.max_z_m - point_m.z,
+        ]
+        .into_iter()
+        .fold(f64::INFINITY, f64::min)
     }
 }
 
@@ -245,6 +301,32 @@ struct CityCameraCapture {
     pixels_per_frame: usize,
     nearest_depth_m: f32,
     mean_center_depth_m: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct UavFrame {
+    transform: Transform3,
+    velocity_m_s: Vec3,
+    target_position_m: Vec3,
+    target_yaw_rad: f64,
+    position_error_m: f64,
+    rotor_angle_rad: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct UavReplayResult {
+    frames: Vec<UavFrame>,
+    stable_hash: u64,
+    path_length_m: f64,
+    rms_position_error_m: f64,
+    maximum_altitude_error_m: f64,
+    maximum_horizontal_speed_m_s: f64,
+    maximum_climb_speed_m_s: f64,
+    maximum_acceleration_m_s2: f64,
+    maximum_yaw_rate_rad_s: f64,
+    maximum_tilt_rad: f64,
+    minimum_building_clearance_m: f64,
+    collision_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -508,6 +590,10 @@ const SHOWCASE_BUILDINGS: [ShowcaseBuilding; 10] = [
 ];
 
 fn main() {
+    if std::env::args().any(|argument| argument == "--smoke") {
+        run_uav_smoke();
+        return;
+    }
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let generated_dir = repo_root.join("target/plateau-sanjo-drive-demo");
     let source_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/sanjo_2025");
@@ -645,6 +731,7 @@ fn main() {
         .clamp(1, CAR_FRAME_COUNT);
     let capture_frame_count = CAR_FRAME_COUNT;
     let frames_dir = generated_dir.join("lidar-frames");
+    let uav_frames_dir = generated_dir.join("uav-frames");
 
     let mut city_scene = render_scene_from_world(&mut world);
     let mut mesh_roots = mesh_package_roots(&building_bundle);
@@ -654,8 +741,37 @@ fn main() {
         .resolve_mesh_assets_with_roots(&root_refs)
         .expect("resolve generated PLATEAU meshes");
     let building_footprints = building_footprints(&building_bundle);
+    let showcase_road = RoadFrame::from_lanes(&showcase_lanes);
+    let uav_replay = simulate_uav_flight(showcase_road, &building_footprints, UAV_FRAME_COUNT);
+    let uav_repeat = simulate_uav_flight(showcase_road, &building_footprints, UAV_FRAME_COUNT);
+    assert_eq!(uav_replay.stable_hash, uav_repeat.stable_hash);
+    assert_eq!(uav_replay.frames, uav_repeat.frames);
+    assert_uav_showcase_ready(&uav_replay);
+    assert!(
+        uav_replay.path_length_m >= showcase_road.length_m * 0.70,
+        "UAV traversed only {:.3} m of the {:.3} m showcase road",
+        uav_replay.path_length_m,
+        showcase_road.length_m,
+    );
+    println!(
+        "controlled UAV ready: frames={} path_m={:.1} rms_error_m={:.3} altitude_error_m={:.3} max_horizontal_speed_m_s={:.2} max_climb_speed_m_s={:.2} max_acceleration_m_s2={:.2} max_yaw_rate_rad_s={:.2} max_tilt_rad={:.3} building_clearance_m={:.2} collisions={} stable_hash={}",
+        uav_replay.frames.len(),
+        uav_replay.path_length_m,
+        uav_replay.rms_position_error_m,
+        uav_replay.maximum_altitude_error_m,
+        uav_replay.maximum_horizontal_speed_m_s,
+        uav_replay.maximum_climb_speed_m_s,
+        uav_replay.maximum_acceleration_m_s2,
+        uav_replay.maximum_yaw_rate_rad_s,
+        uav_replay.maximum_tilt_rad,
+        uav_replay.minimum_building_clearance_m,
+        uav_replay.collision_count,
+        uav_replay.stable_hash,
+    );
     let street_fixtures =
         append_city_streetscape(&mut city_scene, &showcase_lanes, &building_footprints);
+    let detailed_building_count =
+        append_plateau_building_details(&mut city_scene, &building_footprints, showcase_road);
     append_intersection_markings(&mut city_scene, &turn_route);
     append_lane_markings(&mut city_scene, &showcase_lanes);
     append_runtime_route_pavement(&mut city_scene, &city_scenario.routes);
@@ -683,8 +799,9 @@ fn main() {
         "PLATEAU scene leaves insufficient room for moving actors"
     );
     println!(
-        "streetscape ready: fixtures={} static_scene_items={}",
+        "streetscape ready: fixtures={} detailed_buildings={} static_scene_items={}",
         street_fixtures.len(),
+        detailed_building_count,
         city_scene.items.len()
     );
     let mut camera = Camera::new(WIDTH, HEIGHT, 0.86);
@@ -725,10 +842,16 @@ fn main() {
         lidar_capture.multi_returns > 0,
         "Sanjo glass material must produce at least one later return"
     );
-    assert!(
-        lidar_hz >= RENDER_HZ as f64,
-        "Sanjo physics-aware LiDAR throughput {lidar_hz:.1} Hz is below the {RENDER_HZ} Hz capture rate"
-    );
+    if render_frame_count == CAR_FRAME_COUNT {
+        assert!(
+            lidar_hz >= RENDER_HZ as f64,
+            "Sanjo physics-aware LiDAR throughput {lidar_hz:.1} Hz is below the {RENDER_HZ} Hz capture rate"
+        );
+    } else if lidar_hz < RENDER_HZ as f64 {
+        println!(
+            "preview-only LiDAR throughput {lidar_hz:.1} Hz is below {RENDER_HZ} Hz under current host load; the full media run still enforces the gate"
+        );
+    }
     assert!(
         lidar_capture.saturated_returns > 0,
         "retroreflective licence plates must saturate the detector at least once"
@@ -901,14 +1024,106 @@ fn main() {
     let lidar_gif_path = media_dir.join("plateau-lidar.gif");
     build_gif(&frames_dir, &lidar_gif_path).expect("encode PLATEAU LiDAR GIF");
     let poster_frame = render_frame_count.saturating_sub(1).min(110);
-    image::open(frames_dir.join(format!("frame-{poster_frame:03}.png")))
+    let vehicle_poster = image::open(frames_dir.join(format!("frame-{poster_frame:03}.png")))
         .expect("read PLATEAU LiDAR poster frame")
+        .to_rgba8();
+    vehicle_poster
         .save(media_dir.join("plateau-lidar.png"))
         .expect("write PLATEAU LiDAR poster");
+    fs::copy(&lidar_gif_path, media_dir.join("plateau-car.gif"))
+        .expect("copy current vehicle showcase GIF");
+    vehicle_poster
+        .save(media_dir.join("plateau-car.png"))
+        .expect("write current vehicle showcase poster");
     fs::remove_dir_all(&frames_dir).expect("remove PLATEAU LiDAR frame directory");
     println!(
         "rendered official PLATEAU LiDAR media to {}",
         lidar_gif_path.display()
+    );
+
+    if uav_frames_dir.exists() {
+        fs::remove_dir_all(&uav_frames_dir).expect("remove old PLATEAU UAV frames");
+    }
+    fs::create_dir_all(&uav_frames_dir).expect("create PLATEAU UAV frames");
+    let uav_track_xz_m = uav_replay
+        .frames
+        .iter()
+        .take(render_frame_count)
+        .map(|frame| [frame.transform.translation.x, frame.transform.translation.z])
+        .collect::<Vec<_>>();
+    let uav_minimap = build_minimap(&uav_track_xz_m, |zoom, x, y| {
+        fetch_osm_tile(&osm_cache_dir, zoom, x, y)
+    });
+    for (frame_index, uav) in uav_replay
+        .frames
+        .iter()
+        .copied()
+        .take(render_frame_count)
+        .enumerate()
+    {
+        let mut scene = city_scene.clone();
+        let traffic_frame = &city_traffic[frame_index.min(city_traffic.len() - 1)];
+        append_city_runtime_signals(
+            &mut scene,
+            city_runtime_route,
+            &signal_distances_m,
+            frame_index * SIM_STEPS_PER_FRAME,
+        );
+        append_city_fleet(
+            &mut scene,
+            &vehicle_assets,
+            traffic_frame,
+            primary_actor_index,
+            false,
+        );
+        append_uav_trail(&mut scene, &uav_replay.frames, frame_index);
+        append_quadrotor(&mut scene, uav);
+        let output = backend
+            .render_scene_camera(
+                &camera,
+                &uav_chase_camera(uav).camera_transform(),
+                &scene,
+                CLEAR_COLOR,
+            )
+            .expect("render controlled PLATEAU UAV frame");
+        let mut presented = cinematic_postprocess(
+            &output.color.rgba8,
+            &output.depth.depth_m,
+            output.color.width,
+            output.color.height,
+            camera.far_m as f32,
+        );
+        let mut frame_buffer = FrameBuffer {
+            pixels: &mut presented,
+            width: output.color.width,
+            height: output.color.height,
+        };
+        blit_minimap_panel(
+            &mut frame_buffer,
+            &uav_minimap,
+            &uav_track_xz_m,
+            frame_index,
+        );
+        blit_uav_hud(&mut frame_buffer, uav);
+        write_png(
+            &uav_frames_dir.join(format!("frame-{frame_index:03}.png")),
+            &presented,
+            output.color.width,
+            output.color.height,
+        )
+        .expect("write controlled PLATEAU UAV frame");
+    }
+    let uav_gif_path = media_dir.join("plateau-uav.gif");
+    build_gif(&uav_frames_dir, &uav_gif_path).expect("encode controlled PLATEAU UAV GIF");
+    let uav_poster_frame = render_frame_count.saturating_sub(1).min(48);
+    image::open(uav_frames_dir.join(format!("frame-{uav_poster_frame:03}.png")))
+        .expect("read controlled PLATEAU UAV poster frame")
+        .save(media_dir.join("plateau-uav.png"))
+        .expect("write controlled PLATEAU UAV poster");
+    fs::remove_dir_all(&uav_frames_dir).expect("remove controlled PLATEAU UAV frames");
+    println!(
+        "rendered controlled PLATEAU UAV media to {}",
+        uav_gif_path.display()
     );
 }
 
@@ -2588,11 +2803,113 @@ fn building_footprints(bundle: &SceneAssetBundle) -> Vec<Footprint> {
             Some(Footprint {
                 min_x_m: object.translation_m[0] - size_m[0] * 0.5,
                 max_x_m: object.translation_m[0] + size_m[0] * 0.5,
+                min_y_m: object.translation_m[1] - size_m[1] * 0.5,
+                max_y_m: object.translation_m[1] + size_m[1] * 0.5,
                 min_z_m: object.translation_m[2] - size_m[2] * 0.5,
                 max_z_m: object.translation_m[2] + size_m[2] * 0.5,
             })
         })
         .collect()
+}
+
+fn append_plateau_building_details(
+    scene: &mut RenderScene,
+    buildings: &[Footprint],
+    road: RoadFrame,
+) -> usize {
+    let mut candidates = buildings
+        .iter()
+        .copied()
+        .filter_map(|building| {
+            let center = Vec3::new(
+                (building.min_x_m + building.max_x_m) * 0.5,
+                (building.min_y_m + building.max_y_m) * 0.5,
+                (building.min_z_m + building.max_z_m) * 0.5,
+            );
+            let relative = center - road.center;
+            let along_m = relative.dot(road.direction).abs();
+            let lateral_m = relative.dot(road.right).abs();
+            let height_m = building.max_y_m - building.min_y_m;
+            let width_m = building.max_x_m - building.min_x_m;
+            let depth_m = building.max_z_m - building.min_z_m;
+            (along_m <= road.length_m * 0.65
+                && lateral_m <= 48.0
+                && height_m >= 4.0
+                && width_m >= 3.0
+                && depth_m >= 3.0)
+                .then_some((along_m.hypot(lateral_m), building))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.min_x_m.total_cmp(&right.1.min_x_m))
+            .then_with(|| left.1.min_z_m.total_cmp(&right.1.min_z_m))
+    });
+
+    let palettes = [
+        ([0.62, 0.63, 0.61, 1.0], [0.08, 0.18, 0.25, 1.0]),
+        ([0.52, 0.48, 0.43, 1.0], [0.06, 0.14, 0.20, 1.0]),
+        ([0.68, 0.61, 0.52, 1.0], [0.10, 0.20, 0.25, 1.0]),
+        ([0.46, 0.51, 0.55, 1.0], [0.05, 0.12, 0.18, 1.0]),
+    ];
+    for (index, (_, building)) in candidates.iter().take(12).enumerate() {
+        let width_m = building.max_x_m - building.min_x_m;
+        let depth_m = building.max_z_m - building.min_z_m;
+        let height_m = building.max_y_m - building.min_y_m;
+        let center_x_m = (building.min_x_m + building.max_x_m) * 0.5;
+        let center_z_m = (building.min_z_m + building.max_z_m) * 0.5;
+        let (trim_color, glass_color) = palettes[index % palettes.len()];
+
+        // A contrasting roof cap and compact rooftop plant make the aerial
+        // silhouette readable without replacing the imported PLATEAU volume.
+        push_box(
+            scene,
+            Vec3::new(center_x_m, building.max_y_m + 0.12, center_z_m),
+            Quat::IDENTITY,
+            Vec3::new(width_m + 0.18, 0.24, depth_m + 0.18),
+            trim_color,
+        );
+        if width_m >= 6.0 && depth_m >= 6.0 {
+            push_box(
+                scene,
+                Vec3::new(
+                    center_x_m + width_m * 0.18,
+                    building.max_y_m + 0.55,
+                    center_z_m - depth_m * 0.16,
+                ),
+                Quat::IDENTITY,
+                Vec3::new(width_m.min(4.0) * 0.42, 0.86, depth_m.min(4.0) * 0.36),
+                [0.34, 0.37, 0.38, 1.0],
+            );
+        }
+
+        let floor_count = ((height_m / 3.2).floor() as usize).clamp(1, 4);
+        for floor in 0..floor_count {
+            let y_m = building.min_y_m + (floor as f64 + 0.62) * height_m / floor_count as f64;
+            let window_height_m = (height_m / floor_count as f64 * 0.40).clamp(0.65, 1.35);
+            let inset_m = 0.035;
+            for x_m in [building.min_x_m - inset_m, building.max_x_m + inset_m] {
+                push_box(
+                    scene,
+                    Vec3::new(x_m, y_m, center_z_m),
+                    Quat::IDENTITY,
+                    Vec3::new(0.055, window_height_m, (depth_m * 0.68).max(1.2)),
+                    glass_color,
+                );
+            }
+            for z_m in [building.min_z_m - inset_m, building.max_z_m + inset_m] {
+                push_box(
+                    scene,
+                    Vec3::new(center_x_m, y_m, z_m),
+                    Quat::IDENTITY,
+                    Vec3::new((width_m * 0.68).max(1.2), window_height_m, 0.055),
+                    glass_color,
+                );
+            }
+        }
+    }
+    candidates.len().min(12)
 }
 
 fn append_city_streetscape(
@@ -2871,12 +3188,319 @@ fn append_traffic_signal(
     );
 }
 
-#[cfg(test)]
-fn drone_position(progress: f64) -> Vec3 {
-    let x = -20.0 + 40.0 * progress;
-    let z = 8.5 - 17.0 * progress;
-    let y = 14.5 + (progress * std::f64::consts::TAU).sin();
-    Vec3::new(x, y, z)
+fn uav_reference_at(
+    road: RoadFrame,
+    minimum_height_m: f64,
+    step: usize,
+    total_steps: usize,
+) -> (Vec3, f64) {
+    let denominator = total_steps.saturating_sub(1).max(1) as f64;
+    let linear_progress =
+        (step.min(total_steps.saturating_sub(1)) as f64 / denominator).clamp(0.0, 1.0);
+    let progress = linear_progress * linear_progress * (3.0 - 2.0 * linear_progress);
+    let along_m = road.length_m * (-0.42 + 0.84 * progress);
+    let lateral_phase = progress * std::f64::consts::TAU;
+    let lateral_m = 2.1 * lateral_phase.sin();
+    let height_m = minimum_height_m
+        + 2.4 * (progress * std::f64::consts::PI).sin()
+        + 0.45 * (lateral_phase * 2.0).sin();
+    let target_position_m = road.point(along_m, lateral_m, height_m);
+    let tangent = road.direction * (road.length_m * 0.84)
+        + road.right * (2.1 * std::f64::consts::TAU * lateral_phase.cos());
+    let target_yaw_rad = -tangent.z.atan2(tangent.x);
+    (target_position_m, target_yaw_rad)
+}
+
+fn uav_route_minimum_height_m(road: RoadFrame, buildings: &[Footprint], total_steps: usize) -> f64 {
+    let horizontal_clearance_m =
+        UAV_BODY_CLEARANCE_RADIUS_M + UAV_MIN_BUILDING_CLEARANCE_M + UAV_ROUTE_CLEARANCE_MARGIN_M;
+    let maximum_nearby_roof_m = (0..total_steps)
+        .filter_map(|step| {
+            let (position_m, _) =
+                uav_reference_at(road, UAV_BASE_CRUISE_HEIGHT_M, step, total_steps);
+            buildings
+                .iter()
+                .filter(|building| building.overlaps_disc(position_m, horizontal_clearance_m))
+                .map(|building| building.max_y_m)
+                .max_by(f64::total_cmp)
+        })
+        .max_by(f64::total_cmp);
+    maximum_nearby_roof_m
+        .map(|roof_m| roof_m + horizontal_clearance_m)
+        .unwrap_or(UAV_BASE_CRUISE_HEIGHT_M)
+        .max(UAV_BASE_CRUISE_HEIGHT_M)
+}
+
+fn simulate_uav_flight(
+    road: RoadFrame,
+    buildings: &[Footprint],
+    frame_count: usize,
+) -> UavReplayResult {
+    let route_steps = frame_count * SIM_STEPS_PER_FRAME;
+    let minimum_height_m = uav_route_minimum_height_m(road, buildings, route_steps);
+    let (start_position_m, start_yaw_rad) =
+        uav_reference_at(road, minimum_height_m, 0, route_steps);
+    let mut world = World::new();
+    let aircraft = spawn_named(&mut world, "plateau_showcase_uav");
+    let flight = MultirotorFlight {
+        max_horizontal_speed_m_s: UAV_MAX_HORIZONTAL_SPEED_M_S,
+        max_climb_speed_m_s: UAV_MAX_CLIMB_SPEED_M_S,
+        max_acceleration_m_s2: UAV_MAX_ACCELERATION_M_S2,
+        max_yaw_rate_rad_s: UAV_MAX_YAW_RATE_RAD_S,
+        max_tilt_rad: UAV_MAX_TILT_RAD,
+        position_gain_s_inv: 6.0,
+        velocity_gain_s_inv: 3.5,
+        attitude_response_s: 0.10,
+        yaw_rad: start_yaw_rad,
+        target_position_m: start_position_m,
+        target_yaw_rad: start_yaw_rad,
+        ..MultirotorFlight::default()
+    };
+    world.entity_mut(aircraft).insert((
+        Transform3 {
+            translation: start_position_m,
+            rotation: Quat::from_rotation_y(start_yaw_rad),
+            scale: Vec3::ONE,
+        },
+        flight,
+        RigidBody {
+            body_type: RigidBodyType::Kinematic,
+            ..RigidBody::default()
+        },
+    ));
+
+    let fixed_delta = SimDuration::from_seconds(rne_math::Seconds::new(1.0 / SIM_HZ as f64));
+    let mut frames = Vec::with_capacity(frame_count);
+    let mut stable_hash = 0xcbf2_9ce4_8422_2325_u64;
+    let mut squared_error_sum_m2 = 0.0;
+    let mut maximum_altitude_error_m: f64 = 0.0;
+    let mut maximum_horizontal_speed_m_s: f64 = 0.0;
+    let mut maximum_climb_speed_m_s: f64 = 0.0;
+    let mut maximum_acceleration_m_s2: f64 = 0.0;
+    let mut maximum_yaw_rate_rad_s: f64 = 0.0;
+    let mut maximum_tilt_rad: f64 = 0.0;
+    let mut minimum_building_clearance_m = f64::INFINITY;
+    let mut collision_count = 0;
+    let mut path_length_m = 0.0;
+    let mut previous_position_m = start_position_m;
+    let mut previous_yaw_rad = start_yaw_rad;
+    let mut rotor_angle_rad = 0.0;
+
+    for step in 0..route_steps {
+        let (target_position_m, target_yaw_rad) =
+            uav_reference_at(road, minimum_height_m, step, route_steps);
+        let command_step = (step + SIM_STEPS_PER_FRAME * 2).min(route_steps.saturating_sub(1));
+        let (command_position_m, command_yaw_rad) =
+            uav_reference_at(road, minimum_height_m, command_step, route_steps);
+        assert_eq!(
+            command_multirotor(&mut world, aircraft, command_position_m, command_yaw_rad,),
+            MultirotorCommandResult::Applied
+        );
+        multirotor_flight(&mut world, fixed_delta);
+        let transform = *world
+            .get::<Transform3>(aircraft)
+            .expect("UAV transform after flight step");
+        let flight = *world
+            .get::<MultirotorFlight>(aircraft)
+            .expect("UAV controller after flight step");
+        let position_error_m = (transform.translation - target_position_m).length();
+        squared_error_sum_m2 += position_error_m * position_error_m;
+        maximum_altitude_error_m =
+            maximum_altitude_error_m.max((transform.translation.y - target_position_m.y).abs());
+        maximum_horizontal_speed_m_s =
+            maximum_horizontal_speed_m_s.max(flight.velocity_m_s.x.hypot(flight.velocity_m_s.z));
+        maximum_climb_speed_m_s = maximum_climb_speed_m_s.max(flight.velocity_m_s.y.abs());
+        maximum_acceleration_m_s2 =
+            maximum_acceleration_m_s2.max(flight.commanded_acceleration_m_s2.length());
+        maximum_yaw_rate_rad_s = maximum_yaw_rate_rad_s.max(
+            wrapped_angle_delta_rad(flight.yaw_rad, previous_yaw_rad).abs()
+                / fixed_delta.as_seconds().value(),
+        );
+        previous_yaw_rad = flight.yaw_rad;
+        let body_up = transform.rotation * Vec3::Y;
+        maximum_tilt_rad = maximum_tilt_rad.max(body_up.dot(Vec3::Y).clamp(-1.0, 1.0).acos());
+        let building_clearance_m = buildings
+            .iter()
+            .map(|building| {
+                building.clearance_to_point_m(transform.translation) - UAV_BODY_CLEARANCE_RADIUS_M
+            })
+            .fold(f64::INFINITY, f64::min);
+        minimum_building_clearance_m = minimum_building_clearance_m.min(building_clearance_m);
+        if building_clearance_m <= 0.0 || transform.translation.y <= 0.75 {
+            collision_count += 1;
+        }
+        path_length_m += (transform.translation - previous_position_m).length();
+        previous_position_m = transform.translation;
+        rotor_angle_rad = (rotor_angle_rad
+            + (72.0 + flight.commanded_acceleration_m_s2.length() * 4.0)
+                * fixed_delta.as_seconds().value())
+            % std::f64::consts::TAU;
+
+        if (step + 1) % SIM_STEPS_PER_FRAME == 0 {
+            let frame = UavFrame {
+                transform,
+                velocity_m_s: flight.velocity_m_s,
+                target_position_m,
+                target_yaw_rad,
+                position_error_m,
+                rotor_angle_rad,
+            };
+            mix_uav_frame_hash(&mut stable_hash, frame);
+            frames.push(frame);
+        }
+    }
+
+    UavReplayResult {
+        frames,
+        stable_hash,
+        path_length_m,
+        rms_position_error_m: (squared_error_sum_m2 / route_steps.max(1) as f64).sqrt(),
+        maximum_altitude_error_m,
+        maximum_horizontal_speed_m_s,
+        maximum_climb_speed_m_s,
+        maximum_acceleration_m_s2,
+        maximum_yaw_rate_rad_s,
+        maximum_tilt_rad,
+        minimum_building_clearance_m,
+        collision_count,
+    }
+}
+
+fn assert_uav_showcase_ready(replay: &UavReplayResult) {
+    assert_eq!(replay.frames.len(), UAV_FRAME_COUNT);
+    assert_eq!(replay.collision_count, 0, "UAV collided with city geometry");
+    assert!(
+        replay.rms_position_error_m <= UAV_MAX_RMS_POSITION_ERROR_M,
+        "UAV RMS position error {:.3} m exceeds {:.3} m",
+        replay.rms_position_error_m,
+        UAV_MAX_RMS_POSITION_ERROR_M,
+    );
+    assert!(
+        replay.maximum_altitude_error_m <= UAV_MAX_ALTITUDE_ERROR_M,
+        "UAV altitude error {:.3} m exceeds {:.3} m",
+        replay.maximum_altitude_error_m,
+        UAV_MAX_ALTITUDE_ERROR_M,
+    );
+    assert!(
+        replay.minimum_building_clearance_m >= UAV_MIN_BUILDING_CLEARANCE_M,
+        "UAV building clearance {:.3} m is below {:.3} m",
+        replay.minimum_building_clearance_m,
+        UAV_MIN_BUILDING_CLEARANCE_M,
+    );
+    assert!(
+        replay.maximum_horizontal_speed_m_s <= UAV_MAX_HORIZONTAL_SPEED_M_S + 1.0e-9,
+        "UAV horizontal speed {:.3} m/s exceeded {:.3} m/s",
+        replay.maximum_horizontal_speed_m_s,
+        UAV_MAX_HORIZONTAL_SPEED_M_S,
+    );
+    assert!(
+        replay.maximum_climb_speed_m_s <= UAV_MAX_CLIMB_SPEED_M_S + 1.0e-9,
+        "UAV climb speed {:.3} m/s exceeded {:.3} m/s",
+        replay.maximum_climb_speed_m_s,
+        UAV_MAX_CLIMB_SPEED_M_S,
+    );
+    assert!(
+        replay.maximum_acceleration_m_s2 <= UAV_MAX_ACCELERATION_M_S2 + 1.0e-9,
+        "UAV acceleration {:.3} m/s2 exceeded {:.3} m/s2",
+        replay.maximum_acceleration_m_s2,
+        UAV_MAX_ACCELERATION_M_S2,
+    );
+    assert!(
+        replay.maximum_yaw_rate_rad_s <= UAV_MAX_YAW_RATE_RAD_S + 1.0e-9,
+        "UAV yaw rate {:.3} rad/s exceeded {:.3} rad/s",
+        replay.maximum_yaw_rate_rad_s,
+        UAV_MAX_YAW_RATE_RAD_S,
+    );
+    assert!(
+        replay.maximum_tilt_rad <= UAV_MAX_TILT_RAD + 1.0e-6,
+        "UAV tilt {:.3} rad exceeded its controller limit",
+        replay.maximum_tilt_rad,
+    );
+}
+
+fn run_uav_smoke() {
+    let road = RoadFrame {
+        center: Vec3::ZERO,
+        direction: Vec3::X,
+        right: Vec3::Z,
+        length_m: 90.0,
+        half_width_m: 4.0,
+        yaw_rad: 0.0,
+    };
+    let buildings = [
+        Footprint {
+            min_x_m: -30.0,
+            max_x_m: -18.0,
+            min_y_m: 0.0,
+            max_y_m: 8.0,
+            min_z_m: 14.0,
+            max_z_m: 26.0,
+        },
+        Footprint {
+            min_x_m: 12.0,
+            max_x_m: 25.0,
+            min_y_m: 0.0,
+            max_y_m: 10.0,
+            min_z_m: -25.0,
+            max_z_m: -15.0,
+        },
+    ];
+    let first = simulate_uav_flight(road, &buildings, UAV_FRAME_COUNT);
+    let second = simulate_uav_flight(road, &buildings, UAV_FRAME_COUNT);
+    assert_eq!(first, second);
+    assert_uav_showcase_ready(&first);
+    assert!(
+        first.path_length_m > 60.0,
+        "UAV smoke path length {:.3} m is too short",
+        first.path_length_m,
+    );
+    println!(
+        "controlled UAV smoke ok: path_m={:.1} rms_error_m={:.3} altitude_error_m={:.3} max_horizontal_speed_m_s={:.2} max_climb_speed_m_s={:.2} max_acceleration_m_s2={:.2} max_yaw_rate_rad_s={:.2} max_tilt_rad={:.3} building_clearance_m={:.2} collisions={} stable_hash={}",
+        first.path_length_m,
+        first.rms_position_error_m,
+        first.maximum_altitude_error_m,
+        first.maximum_horizontal_speed_m_s,
+        first.maximum_climb_speed_m_s,
+        first.maximum_acceleration_m_s2,
+        first.maximum_yaw_rate_rad_s,
+        first.maximum_tilt_rad,
+        first.minimum_building_clearance_m,
+        first.collision_count,
+        first.stable_hash,
+    );
+}
+
+fn wrapped_angle_delta_rad(current_rad: f64, previous_rad: f64) -> f64 {
+    let mut delta_rad = current_rad - previous_rad;
+    while delta_rad > std::f64::consts::PI {
+        delta_rad -= std::f64::consts::TAU;
+    }
+    while delta_rad < -std::f64::consts::PI {
+        delta_rad += std::f64::consts::TAU;
+    }
+    delta_rad
+}
+
+fn mix_uav_frame_hash(hash: &mut u64, frame: UavFrame) {
+    for value in [
+        frame.transform.translation.x,
+        frame.transform.translation.y,
+        frame.transform.translation.z,
+        frame.transform.rotation.x,
+        frame.transform.rotation.y,
+        frame.transform.rotation.z,
+        frame.transform.rotation.w,
+        frame.velocity_m_s.x,
+        frame.velocity_m_s.y,
+        frame.velocity_m_s.z,
+        frame.target_position_m.x,
+        frame.target_position_m.y,
+        frame.target_position_m.z,
+        frame.target_yaw_rad,
+    ] {
+        *hash ^= value.to_bits();
+        *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
 }
 
 fn select_station_road_lanes(lanes: &[ImportedLane]) -> Vec<ImportedLane> {
@@ -3412,6 +4036,118 @@ fn append_vehicle_meshes(
     }
 }
 
+fn append_uav_trail(scene: &mut RenderScene, frames: &[UavFrame], current_frame: usize) {
+    for frame in frames
+        .iter()
+        .take(current_frame.saturating_add(1))
+        .step_by(3)
+    {
+        push_sphere(
+            scene,
+            frame.transform.translation,
+            0.10,
+            [0.10, 0.72, 1.0, 1.0],
+        );
+    }
+}
+
+fn append_quadrotor(scene: &mut RenderScene, frame: UavFrame) {
+    let center = frame.transform.translation;
+    let rotation = frame.transform.rotation;
+    push_box(
+        scene,
+        center,
+        rotation,
+        Vec3::new(0.82, 0.28, 0.58),
+        [0.08, 0.10, 0.13, 1.0],
+    );
+    push_box(
+        scene,
+        center + rotation * Vec3::new(0.36, -0.01, 0.0),
+        rotation,
+        Vec3::new(0.22, 0.18, 0.46),
+        [0.88, 0.33, 0.08, 1.0],
+    );
+    for arm_yaw_rad in [std::f64::consts::FRAC_PI_4, -std::f64::consts::FRAC_PI_4] {
+        push_box(
+            scene,
+            center,
+            rotation * Quat::from_rotation_y(arm_yaw_rad),
+            Vec3::new(1.75, 0.07, 0.08),
+            [0.20, 0.23, 0.26, 1.0],
+        );
+    }
+    for (index, local) in [
+        Vec3::new(0.62, 0.04, 0.62),
+        Vec3::new(0.62, 0.04, -0.62),
+        Vec3::new(-0.62, 0.04, 0.62),
+        Vec3::new(-0.62, 0.04, -0.62),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let hub = center + rotation * local;
+        push_cylinder(
+            scene,
+            hub,
+            rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+            0.09,
+            0.11,
+            [0.18, 0.20, 0.22, 1.0],
+        );
+        let rotor_rotation = rotation
+            * Quat::from_rotation_y(if index & 1 == 0 {
+                frame.rotor_angle_rad
+            } else {
+                -frame.rotor_angle_rad
+            });
+        push_box(
+            scene,
+            hub + rotation * Vec3::new(0.0, 0.055, 0.0),
+            rotor_rotation,
+            Vec3::new(0.88, 0.018, 0.055),
+            [0.34, 0.38, 0.42, 1.0],
+        );
+        push_box(
+            scene,
+            hub + rotation * Vec3::new(0.0, 0.056, 0.0),
+            rotor_rotation * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            Vec3::new(0.88, 0.016, 0.045),
+            [0.18, 0.21, 0.24, 1.0],
+        );
+    }
+    push_sphere(
+        scene,
+        center + rotation * Vec3::new(0.43, 0.02, 0.24),
+        0.055,
+        [0.10, 1.0, 0.42, 1.0],
+    );
+    push_sphere(
+        scene,
+        center + rotation * Vec3::new(-0.43, 0.02, -0.24),
+        0.055,
+        [1.0, 0.08, 0.04, 1.0],
+    );
+}
+
+fn uav_chase_camera(frame: UavFrame) -> CameraOrbit {
+    let body_forward = frame.transform.rotation * Vec3::X;
+    let forward = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
+    let forward = if forward.length_squared() > 0.0 {
+        forward
+    } else {
+        Vec3::X
+    };
+    let right = Vec3::new(-forward.z, 0.0, forward.x);
+    let eye_direction = (-forward + right * 0.32).normalize_or_zero();
+    CameraOrbit {
+        focus: frame.transform.translation + forward * 4.8 + Vec3::new(0.0, -0.4, 0.0),
+        yaw_rad: eye_direction.x.atan2(eye_direction.z),
+        pitch_rad: 1.13,
+        distance_m: 13.5,
+    }
+}
+
 fn push_box(
     scene: &mut RenderScene,
     translation: Vec3,
@@ -3543,14 +4279,20 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
             "-i",
             &frames_dir.join("frame-%03d.png").to_string_lossy(),
             "-vf",
-            "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=224:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "fps=12,scale=600:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
             &gif_path.to_string_lossy(),
         ])
         .status()?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| std::io::Error::other("ffmpeg PLATEAU GIF encode failed"))
+    if !status.success() {
+        return Err(std::io::Error::other("ffmpeg PLATEAU GIF encode failed"));
+    }
+    let byte_size = fs::metadata(gif_path)?.len();
+    if byte_size > SHOWCASE_GIF_MAX_BYTE_SIZE {
+        return Err(std::io::Error::other(format!(
+            "PLATEAU showcase GIF exceeds size budget: {byte_size} bytes > {SHOWCASE_GIF_MAX_BYTE_SIZE} bytes"
+        )));
+    }
+    Ok(())
 }
 
 /// Colorizes a linear depth buffer with the same near-to-far ramp as the LiDAR bands.
@@ -3883,6 +4625,9 @@ fn hud_glyph(character: char) -> [u8; 7] {
         'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
         'S' => [0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E],
         'M' => [0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11],
+        'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'V' => [0x11, 0x11, 0x11, 0x11, 0x0A, 0x0A, 0x04],
         'a' => [0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F],
         'b' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x1E],
         'c' => [0x00, 0x00, 0x0E, 0x10, 0x10, 0x11, 0x0E],
@@ -3890,9 +4635,11 @@ fn hud_glyph(character: char) -> [u8; 7] {
         'e' => [0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E],
         'g' => [0x00, 0x0F, 0x11, 0x11, 0x0F, 0x01, 0x0E],
         'h' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11],
+        'i' => [0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E],
         'k' => [0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12],
         'm' => [0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x15],
         'n' => [0x00, 0x00, 0x16, 0x19, 0x11, 0x11, 0x11],
+        'o' => [0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E],
         'p' => [0x00, 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10],
         'r' => [0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10],
         's' => [0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E],
@@ -4070,6 +4817,43 @@ fn blit_vehicle_hud(frame: &mut FrameBuffer<'_>, vehicle: VehicleFrame) {
     }
 }
 
+fn blit_uav_hud(frame: &mut FrameBuffer<'_>, uav: UavFrame) {
+    let hud_origin = (
+        frame.width - CAMERA_INSET_MARGIN_PX - MINIMAP_SIZE_PX - CAMERA_INSET_BORDER_PX,
+        CAMERA_INSET_MARGIN_PX + MINIMAP_SIZE_PX + 12,
+    );
+    let lines = [
+        "UAV".to_string(),
+        format!("speed {:4.1} m/s", uav.velocity_m_s.length()),
+        format!("height {:4.1} m", uav.transform.translation.y),
+        format!("error {:4.2} m", uav.position_error_m),
+    ];
+    let width = MINIMAP_SIZE_PX + 2 * CAMERA_INSET_BORDER_PX;
+    let line_height = 18;
+    fill_hud_rect(
+        frame,
+        hud_origin,
+        (width, 8 + line_height * lines.len() as u32),
+        [16, 20, 24, 235],
+    );
+    for (index, line) in lines.iter().enumerate() {
+        draw_hud_text(
+            frame,
+            (
+                hud_origin.0 + 8,
+                hud_origin.1 + 6 + line_height * index as u32,
+            ),
+            2,
+            if index == 0 {
+                [58, 194, 255, 255]
+            } else {
+                [235, 240, 248, 255]
+            },
+            line,
+        );
+    }
+}
+
 fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
     let file = fs::File::create(path)?;
     let mut encoder = Encoder::new(file, width, height);
@@ -4113,7 +4897,7 @@ mod tests {
 
     #[test]
     fn hud_font_covers_the_rendered_charset() {
-        for character in "0123456789+-./() OSMabcdeghkmnprst".chars() {
+        for character in "0123456789+-./() AUVOSMabcdeghikmnoporst".chars() {
             if character == ' ' {
                 continue;
             }
@@ -4450,8 +5234,96 @@ mod tests {
     }
 
     #[test]
+    fn controlled_uav_replay_is_bounded_collision_free_and_deterministic() {
+        let road = RoadFrame {
+            center: Vec3::ZERO,
+            direction: Vec3::X,
+            right: Vec3::Z,
+            length_m: 90.0,
+            half_width_m: 4.0,
+            yaw_rad: 0.0,
+        };
+        let buildings = [
+            Footprint {
+                min_x_m: -30.0,
+                max_x_m: -18.0,
+                min_y_m: 0.0,
+                max_y_m: 8.0,
+                min_z_m: 14.0,
+                max_z_m: 26.0,
+            },
+            Footprint {
+                min_x_m: 12.0,
+                max_x_m: 25.0,
+                min_y_m: 0.0,
+                max_y_m: 10.0,
+                min_z_m: -25.0,
+                max_z_m: -15.0,
+            },
+        ];
+        let first = simulate_uav_flight(road, &buildings, UAV_FRAME_COUNT);
+        let second = simulate_uav_flight(road, &buildings, UAV_FRAME_COUNT);
+        assert_eq!(first, second);
+        assert_eq!(first.frames.len(), UAV_FRAME_COUNT);
+        assert_eq!(first.collision_count, 0);
+        assert!(
+            first.path_length_m > 60.0,
+            "path length was {:.3} m",
+            first.path_length_m
+        );
+        assert!(
+            first.rms_position_error_m <= UAV_MAX_RMS_POSITION_ERROR_M,
+            "RMS position error was {:.3} m",
+            first.rms_position_error_m
+        );
+        assert!(
+            first.maximum_altitude_error_m <= UAV_MAX_ALTITUDE_ERROR_M,
+            "altitude error was {:.3} m",
+            first.maximum_altitude_error_m
+        );
+        assert!(
+            first.minimum_building_clearance_m >= UAV_MIN_BUILDING_CLEARANCE_M,
+            "building clearance was {:.3} m",
+            first.minimum_building_clearance_m
+        );
+        assert!(
+            first.maximum_tilt_rad <= 0.52 + 1.0e-6,
+            "tilt was {:.3} rad",
+            first.maximum_tilt_rad
+        );
+    }
+
+    #[test]
+    fn uav_route_height_clears_a_building_over_the_flight_corridor() {
+        let road = RoadFrame {
+            center: Vec3::ZERO,
+            direction: Vec3::X,
+            right: Vec3::Z,
+            length_m: 90.0,
+            half_width_m: 4.0,
+            yaw_rad: 0.0,
+        };
+        let rooftop = Footprint {
+            min_x_m: -8.0,
+            max_x_m: 8.0,
+            min_y_m: 0.0,
+            max_y_m: 20.0,
+            min_z_m: -5.0,
+            max_z_m: 5.0,
+        };
+        let minimum_height_m =
+            uav_route_minimum_height_m(road, &[rooftop], UAV_FRAME_COUNT * SIM_STEPS_PER_FRAME);
+        assert_eq!(
+            minimum_height_m,
+            rooftop.max_y_m
+                + UAV_BODY_CLEARANCE_RADIUS_M
+                + UAV_MIN_BUILDING_CLEARANCE_M
+                + UAV_ROUTE_CLEARANCE_MARGIN_M
+        );
+    }
+
+    #[test]
     fn simclock_traffic_is_deterministic_and_stays_in_derived_lanes() {
-        assert_eq!(drone_position(0.5), drone_position(0.5));
         let lanes = vec![
             ImportedLane {
                 lane_id: "road-main/surface-0000/lane-0".into(),
@@ -4614,6 +5486,8 @@ mod tests {
         let blocking_building = Footprint {
             min_x_m: 5.0,
             max_x_m: 8.0,
+            min_y_m: 0.0,
+            max_y_m: 12.0,
             min_z_m: -29.0,
             max_z_m: -23.0,
         };

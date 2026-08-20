@@ -237,6 +237,14 @@ the sustained turn itself, while its exact rate is platform-local.
 Parameter-scale robustness — a turn that survives *gait-level* variation —
 is a different objective for a later search.
 
+The README comparison in `examples/60_go2_turn_gif` replays that same
+`LEARNED_ROBUST_TURN` overlay beside the zero-feed-forward torque-PD walk. Its
+capture begins after the 480-step transient and measures the full 960 rendered
+steps. The media gate requires the baseline to hold heading, the overlay to
+exceed 0.45 rad of turn while transporting the body by more than 1.0 m, and
+both official dynamic Go2 models to remain upright. `-- --smoke` runs the
+identical interval without initializing wgpu.
+
 ## Closing the loop: a state-feedback torque policy
 
 Every controller above is a clock — phase-indexed offsets or torques
