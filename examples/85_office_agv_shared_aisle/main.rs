@@ -35,10 +35,9 @@ fn main() {
     }
 
     if smoke || fail_ignore_yield {
-        let failure =
-            run_behavior_scenarios("office_agv_shared_aisle_ignore_yield", [1], |seed| {
-                OfficeAgvSharedAisleScenario::new(seed, OfficeAgvSharedAisleFault::IgnoreYield)
-            });
+        let failure = run_behavior_scenarios("office_agv_shared_aisle_ignore_yield", [1], |seed| {
+            OfficeAgvSharedAisleScenario::new(seed, OfficeAgvSharedAisleFault::IgnoreYield)
+        });
         let contact = failure.seeds[0]
             .contracts
             .iter()
