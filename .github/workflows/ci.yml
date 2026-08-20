@@ -260,21 +260,32 @@ jobs:
             git cat-file -e "$baseline:$frozen_manifest"
             packages+=("-p" "$package")
           done
-<<<<<<< HEAD
-          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type minor
-=======
+
+          # Skip unchanged packages in this shard (CI speedup from #179).
+          changed="$(git diff --name-only "$baseline" HEAD)"
+          filtered=()
+          for ((index = 0; index < ${#packages[@]}; index += 2)); do
+            flag="${packages[index]}"
+            package="${packages[index + 1]}"
+            manifest="$(jq -r --arg p "$package" \
+              '.packages[] | select(.name == $p) | .manifest_path' \
+              <<<"$metadata")"
+            crate_dir="${manifest%/Cargo.toml}"
+            crate_dir="${crate_dir#"$GITHUB_WORKSPACE/"}"
+            if echo "$changed" | grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$"; then
+              filtered+=("$flag" "$package")
+            else
+              echo "skip $package (no changes under $crate_dir)"
+            fi
+          done
+          packages=("${filtered[@]}")
+
           if (( ${#packages[@]} == 0 )); then
-            echo "all packages in this shard are new; SemVer begins after the baseline lands"
+            echo "all packages in this shard are unchanged; semver check skipped"
             exit 0
           fi
-          # rne_plugin moved its C-ABI types into rne_plugin_sdk and re-exports
-          # them with `pub use`.  cargo-semver-checks 0.49.0 does not track
-          # re-export chains, so it reports the structs as missing when the
-          # defining file moves.  The actual ABI is identical; this is a minor
-          # re-organisation, not a breaking change.  Use --release-type minor so
-          # that only true breaking (major-bump) violations fail the check.
-          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type minor
->>>>>>> 8457259... fix(ci): use --release-type minor for semver check
+
+          cargo semver-checks check-release "${packages[@]}" --baseline-rev "$baseline" --release-type patch
 
   behavior_ci:
     runs-on: ubuntu-latest
