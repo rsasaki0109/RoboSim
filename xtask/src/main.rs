@@ -2608,7 +2608,10 @@ fn run_asset_smokes() -> anyhow::Result<()> {
     )?;
     run_step("cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
     run_step("cargo run --locked -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
-    run_step("cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke")
+    run_step("cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke")?;
+    run_step(
+        "cargo run --locked -p tsukuba_confirmation --example 75_tsukuba_confirmation -- --smoke",
+    )
 }
 
 fn house_gif_demo() -> anyhow::Result<()> {

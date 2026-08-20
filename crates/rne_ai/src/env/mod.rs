@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod tsukuba_confirmation;
 pub mod urdf_scene;
 
 pub use diff_drive::DiffDriveSim;
@@ -27,6 +28,13 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
     MM_MOBILE_WHEEL_RADIUS_M, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+};
+pub use tsukuba_confirmation::{
+    evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,
+    tsukuba_confirmation_task_spec, TsukubaConfirmationCourse, TsukubaConfirmationFault,
+    TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,
+    TsukubaStopJudgement, TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
+    TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
 };
 pub use urdf_scene::{
     cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,

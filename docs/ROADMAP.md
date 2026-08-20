@@ -34,6 +34,10 @@ available.
 | 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
 | 0.7 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
 
+Contest scoring starts with the Tsukuba Challenge 2026 confirmation run, not a
+city-scale photoreal clone. See [TSUKUBA_CONFIRMATION_RUN.md](TSUKUBA_CONFIRMATION_RUN.md):
+the first exit is the official stop/cone/e-stop geometry, headless.
+
 The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
 calibration, noise seeds, assets, domain-randomization decisions, and explicit

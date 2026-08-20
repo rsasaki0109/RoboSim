@@ -124,6 +124,13 @@ pub use env::{
     UNITREE_G1_TORQUE_PD_STIFFNESS, UNITREE_GO2_POLICY_FEATURES,
     UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
+pub use env::{
+    evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,
+    tsukuba_confirmation_task_spec, TsukubaConfirmationCourse, TsukubaConfirmationFault,
+    TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,
+    TsukubaStopJudgement, TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
+    TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
+};
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,

@@ -109,6 +109,7 @@ members = [
   "examples/72_mobile_lift_friction_pick_place",
   "examples/73_diff_drive_dataset_capture",
   "examples/74_flagship_validation_workflow",
+  "examples/75_tsukuba_confirmation",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
