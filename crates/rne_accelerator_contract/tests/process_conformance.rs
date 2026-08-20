@@ -22,11 +22,23 @@ fn contracts() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     )
 }
 
+fn mock_program() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_rne-accelerator-protocol-mock"))
+}
+
+/// Content-addressed subject for mock launcher tests.
+///
+/// The mock debug binary is the process launcher, not the hashed adapter
+/// artifact. Debug builds can exceed the 64 MiB subject limit (~280 MiB on CI).
+fn mock_subject(transcript: &Path) -> PathBuf {
+    transcript.to_path_buf()
+}
+
 #[test]
 fn standalone_process_runner_passes_the_complete_installed_mock_lifecycle() {
     let (manifest, runtime, task, transcript) = contracts();
-    let program = PathBuf::from(env!("CARGO_BIN_EXE_rne-accelerator-protocol-mock"));
-    let mut config = AcceleratorProcessConformanceConfig::new(&program);
+    let mut config = AcceleratorProcessConformanceConfig::new(mock_program());
+    config.subject = mock_subject(&transcript);
     config.arguments = vec![OsString::from("--transcript"), transcript.into_os_string()];
     let report = run_accelerator_process_conformance(&manifest, &runtime, &task, &config).unwrap();
     report.validate().unwrap();
@@ -41,9 +53,9 @@ fn standalone_process_runner_passes_the_complete_installed_mock_lifecycle() {
 
 #[test]
 fn timeout_kills_only_the_launched_child_and_emits_a_valid_failed_report() {
-    let (manifest, runtime, task, _) = contracts();
-    let program = PathBuf::from(env!("CARGO_BIN_EXE_rne-accelerator-protocol-mock"));
-    let mut config = AcceleratorProcessConformanceConfig::new(&program);
+    let (manifest, runtime, task, transcript) = contracts();
+    let mut config = AcceleratorProcessConformanceConfig::new(mock_program());
+    config.subject = mock_subject(&transcript);
     config.arguments = vec![OsString::from("--stall")];
     config.response_timeout_ms = 25;
     let report = run_accelerator_process_conformance(&manifest, &runtime, &task, &config).unwrap();
@@ -61,8 +73,8 @@ fn timeout_kills_only_the_launched_child_and_emits_a_valid_failed_report() {
 #[test]
 fn stdout_after_shutdown_is_rejected_without_blocking_the_reader_join() {
     let (manifest, runtime, task, transcript) = contracts();
-    let program = PathBuf::from(env!("CARGO_BIN_EXE_rne-accelerator-protocol-mock"));
-    let mut config = AcceleratorProcessConformanceConfig::new(&program);
+    let mut config = AcceleratorProcessConformanceConfig::new(mock_program());
+    config.subject = mock_subject(&transcript);
     config.arguments = vec![
         OsString::from("--transcript"),
         transcript.into_os_string(),
@@ -80,12 +92,11 @@ fn stdout_after_shutdown_is_rejected_without_blocking_the_reader_join() {
 
 #[test]
 fn missing_program_is_a_reported_spawn_failure_not_an_input_alias() {
-    let (manifest, runtime, task, _) = contracts();
-    let subject = PathBuf::from(env!("CARGO_BIN_EXE_rne-accelerator-protocol-mock"));
+    let (manifest, runtime, task, transcript) = contracts();
     let mut config = AcceleratorProcessConformanceConfig::new(
         root().join("definitely-missing-accelerator-process"),
     );
-    config.subject = subject;
+    config.subject = mock_subject(&transcript);
     let report = run_accelerator_process_conformance(&manifest, &runtime, &task, &config).unwrap();
     report.validate().unwrap();
     assert_eq!(report.checks[0].status, "failed");
