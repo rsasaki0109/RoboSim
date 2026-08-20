@@ -4854,6 +4854,8 @@ dependencies = [
  "rne_render",
  "rne_render_3dgs",
  "rne_render_wgpu",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
