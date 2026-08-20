@@ -4,6 +4,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Repair CI merge blockers from the Tsukuba 3DGS landing: restore
+  `preserve_color` in the wgpu viewer surface pass, keep `rne_render_3dgs`
+  unpublished so the frozen 0.1.0 public package set stays intact, drop
+  release-rehearsal pull-request path filters that skipped required gates, and
+  retarget the Rust API baseline to a commit that is actually an ancestor of
+  `main`.
+
 ### Added
 
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer

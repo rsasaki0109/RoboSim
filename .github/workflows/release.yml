@@ -2,14 +2,6 @@ name: Release rehearsal
 
 on:
   pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/rne_py/**"
-      - "tools/**"
-      - "xtask/**"
-      - "release/**"
-      - ".github/workflows/release.yml"
   push:
     tags: ["v0.1.*"]
   workflow_dispatch:

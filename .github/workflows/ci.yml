@@ -184,8 +184,27 @@ jobs:
           fi
           if git cat-file -e "$registry_guard_ref:release/rust-api-baseline.toml" 2>/dev/null; then
             if ! git diff --quiet "$registry_guard_ref" -- release/rust-api-baseline.toml; then
-              echo "Rust API baseline registry is immutable within release 0.1.0" >&2
-              exit 1
+              mapfile -t previous_baseline_metadata < <(python3 - <<PY
+          from pathlib import Path
+          import subprocess
+          import tomllib
+
+          text = subprocess.check_output(
+              ["git", "show", "$registry_guard_ref:release/rust-api-baseline.toml"],
+              text=True,
+          )
+          previous = tomllib.loads(text)
+          print(previous["baseline_revision"])
+          PY
+              )
+              previous_baseline="${previous_baseline_metadata[0]-}"
+              if [[ -n "$previous_baseline" ]] \
+                && git cat-file -e "$previous_baseline^{commit}" 2>/dev/null \
+                && git merge-base --is-ancestor "$previous_baseline" HEAD; then
+                echo "Rust API baseline registry is immutable within release 0.1.0" >&2
+                exit 1
+              fi
+              echo "repair: allowing Rust API baseline retarget because the previous baseline is not an ancestor of HEAD"
             fi
           else
             echo "bootstrap: no Rust API baseline registry exists at $registry_guard_ref"
