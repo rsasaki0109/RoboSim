@@ -46,7 +46,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
 
       - uses: ros-tooling/setup-ros@v0.7
         with:
@@ -60,6 +62,12 @@ jobs:
             python3-pip \
             ros-jazzy-rclpy \
             ros-jazzy-simulation-interfaces
+
+      - name: Keep Cargo on PATH after ROS setup
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustc -vV
+          cargo -vV
 
       - name: Smoke test rne_ros2_bridge
         run: ./adapters/ros2/rne_ros2_bridge/smoke_test.sh

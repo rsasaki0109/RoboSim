@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.1.0",
-  "registry_sha256": "sha256:5a211c895de93c8e95f03a0fb40947a1250379d5a977012fce9a820afaba391c",
+  "registry_sha256": "sha256:c09def97f7899947b64b98e7894ad21b5d7003424775895e6f006e6f9a7f39be",
   "checks": [
     {
       "id": "accelerator_capability_v1",
@@ -237,7 +237,7 @@
       "contract": "historical_artifact_decision",
       "schema_version": 1,
       "path": "tests/golden/compatibility/frontend-transport-v1-be53f16.json",
-      "canonical_json_sha256": "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf",
+      "canonical_json_sha256": "sha256:4159a061dd1e7f0c695af239c1be3cbe1f6257a655cb6cf3e3f701b640994d9e",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

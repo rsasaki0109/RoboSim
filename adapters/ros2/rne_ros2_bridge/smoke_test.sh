@@ -28,6 +28,14 @@ fi
 
 cd "$BRIDGE_DIR"
 
+# ROS setup can drop ~/.cargo/bin from PATH; maturin needs a working rustc.
+export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:${PATH}"
+if ! command -v rustc >/dev/null || ! command -v cargo >/dev/null; then
+  echo "rustc/cargo not on PATH after ROS setup" >&2
+  exit 1
+fi
+rustc -vV >/dev/null
+
 if ! python3 -c "import rclpy" 2>/dev/null; then
   echo "rclpy not found; install ros-\${ROS_DISTRO:-jazzy}-rclpy (e.g. sudo apt install ros-jazzy-rclpy)" >&2
   exit 1

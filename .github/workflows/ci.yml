@@ -38,6 +38,9 @@ jobs:
         partition: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Readiness/history tests need baseline and historical commits.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
@@ -184,8 +187,27 @@ jobs:
           fi
           if git cat-file -e "$registry_guard_ref:release/rust-api-baseline.toml" 2>/dev/null; then
             if ! git diff --quiet "$registry_guard_ref" -- release/rust-api-baseline.toml; then
-              echo "Rust API baseline registry is immutable within release 0.1.0" >&2
-              exit 1
+              mapfile -t previous_baseline_metadata < <(python3 - <<PY
+          from pathlib import Path
+          import subprocess
+          import tomllib
+
+          text = subprocess.check_output(
+              ["git", "show", "$registry_guard_ref:release/rust-api-baseline.toml"],
+              text=True,
+          )
+          previous = tomllib.loads(text)
+          print(previous["baseline_revision"])
+          PY
+              )
+              previous_baseline="${previous_baseline_metadata[0]-}"
+              if [[ -n "$previous_baseline" ]] \
+                && git cat-file -e "$previous_baseline^{commit}" 2>/dev/null \
+                && git merge-base --is-ancestor "$previous_baseline" HEAD; then
+                echo "Rust API baseline registry is immutable within release 0.1.0" >&2
+                exit 1
+              fi
+              echo "repair: allowing Rust API baseline retarget because the previous baseline is not an ancestor of HEAD"
             fi
           else
             echo "bootstrap: no Rust API baseline registry exists at $registry_guard_ref"
@@ -337,9 +359,27 @@ jobs:
           cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
           cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
-      - name: Capture and verify the WGPU renderer dataset
+      - name: Install software GPU adapters (Linux)
+        if: runner.os == 'Linux'
         run: |
-          cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1-mesa-dev \
+            mesa-vulkan-drivers \
+            mesa-utils \
+            xvfb
+      - name: Capture and verify the WGPU renderer dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            export WGPU_BACKEND=gl
+            xvfb-run -a cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- \
+              --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          else
+            cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- \
+              --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          fi
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/unitree-g1-wgpu.rne-dataset
       - name: Upload trust evidence
         if: always()

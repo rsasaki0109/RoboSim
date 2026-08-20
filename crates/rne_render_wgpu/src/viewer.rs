@@ -239,6 +239,7 @@ impl InteractiveViewer {
                 scene,
                 environment: &self.environment,
                 clear_color,
+                preserve_color: false,
                 targets: &PrimitiveRenderViews {
                     width: self.config.width,
                     height: self.config.height,

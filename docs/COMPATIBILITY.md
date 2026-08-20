@@ -342,7 +342,8 @@ opening widths from the registered current TaskSpec.
 
 The frontend frame is also retained in a provenance-bound historical decision.
 Protocol v1's introducing commit/tree and the first full `ClientHello` golden
-commit/tree are checked as reachable ancestors. The golden blob at `be53f16`
+commit/tree are checked as reachable ancestors. The golden blob retained from
+the original `be53f16` freeze (bound on `main` via squash `9e1ea8c`)
 must equal the current blob, and the installed reader repeats the exact frame,
 payload, negotiation, and fail-closed mutation checks without Git history.
 
