@@ -1,0 +1,15 @@
+[package]
+name = "ssl_adapter_smoke"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_adapter_ssl = { path = "../../adapters/ssl/rne_adapter_ssl" }
+prost = "0.13"
+
+[[example]]
+name = "80_ssl_adapter_smoke"
+path = "main.rs"

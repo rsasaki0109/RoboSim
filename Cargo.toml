@@ -34,6 +34,7 @@ members = [
   "crates/rne_traci",
   "crates/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
+  "adapters/ssl/rne_adapter_ssl",
   "adapters/hardware/rne_hardware_gateway",
   "adapters/hardware/rne_hardware_lekiwi",
   "examples/00_hello_world",
@@ -115,6 +116,7 @@ members = [
   "examples/77_g1_workbench_mission",
   "examples/78_tsukuba_3dgs_background",
   "examples/79_tsukuba_full_run",
+  "examples/80_ssl_adapter_smoke",
   "examples/84_office_agv_delivery",
   "examples/85_office_agv_shared_aisle",
   "examples/86_office_agv_desk_place",
@@ -147,6 +149,7 @@ version = "0.1.0"
 # Internal crates use exact release requirements so packaged manifests resolve the
 # same release set from a registry after Cargo removes local paths.
 rne_adapter_ros2 = { version = "=0.1.0", path = "adapters/ros2/rne_adapter_ros2" }
+rne_adapter_ssl = { version = "=0.1.0", path = "adapters/ssl/rne_adapter_ssl" }
 rne_accelerator_contract = { version = "=0.1.0", path = "crates/rne_accelerator_contract" }
 rne_hardware_gateway = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_gateway" }
 rne_hardware_lekiwi = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_lekiwi" }
