@@ -29,6 +29,8 @@ All notable changes to Robot Native Engine are documented in this file.
   Cargo `CARGO_BIN_EXE_*` mock binaries are accepted on Linux CI.
 - Fetch full git history in the sharded test jobs so readiness/baseline
   ancestry checks can resolve the retargeted Rust API baseline commit.
+- Pin the ROS 2 Python bridge workflow to Rust 1.95.0 so maturin matches the
+  repo `rust-toolchain.toml` instead of a partial `stable` install.
 
 ### Added
 
