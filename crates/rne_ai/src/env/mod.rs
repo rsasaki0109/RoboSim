@@ -7,6 +7,7 @@ pub mod office_agv_desk_place;
 pub mod office_agv_shared_aisle;
 pub mod ssl_small_pitch;
 pub mod tsukuba_confirmation;
+pub mod tsukuba_full_run;
 pub mod urdf_scene;
 
 pub use diff_drive::DiffDriveSim;
@@ -64,6 +65,11 @@ pub use tsukuba_confirmation::{
     TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,
     TsukubaStopJudgement, TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
     TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
+};
+pub use tsukuba_full_run::{
+    tsukuba_full_run_scene_path, tsukuba_full_run_task_spec, TsukubaFullRunCourse,
+    TsukubaFullRunFault, TsukubaFullRunObservation, TsukubaFullRunScenario,
+    TSUKUBA_FULL_RUN_TASK_ID,
 };
 pub use urdf_scene::{
     cart_minimal_scene_path, humanoid_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,

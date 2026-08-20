@@ -157,6 +157,9 @@ pub use env::{
     TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,
     TsukubaStopJudgement, TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
     TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
+    tsukuba_full_run_scene_path, tsukuba_full_run_task_spec, TsukubaFullRunCourse,
+    TsukubaFullRunFault, TsukubaFullRunObservation, TsukubaFullRunScenario,
+    TSUKUBA_FULL_RUN_TASK_ID,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{

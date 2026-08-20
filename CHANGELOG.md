@@ -52,6 +52,11 @@ All notable changes to Robot Native Engine are documented in this file.
   stay-in-lane, stopped pickup-dock visit, and 1.2 m desk-face delivery stop
   contracts on a short analytic aisle (`rne.office.agv_delivery.v1`).
 
+- Add a headless Tsukuba Challenge 2026 shortened full-run analog that scores
+  three official stop-line boxes, timed pedestrian-signal waits, and no roadway
+  entry on a scaled sidewalk segment (`rne.tsukuba.full_run.v1`). This is not
+  the 2.2 km city loop.
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.

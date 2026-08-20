@@ -319,6 +319,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
 - [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [Tsukuba confirmation run](docs/TSUKUBA_CONFIRMATION_RUN.md)
+- [Tsukuba full run](docs/TSUKUBA_FULL_RUN.md)
 - [SSL small-pitch 2v2](docs/SSL_SMALL_PITCH.md)
 - [G1 workbench mission](docs/G1_WORKBENCH_MISSION.md)
 - [Tsukuba 3DGS background](docs/TSUKUBA_3DGS_BACKGROUND.md)

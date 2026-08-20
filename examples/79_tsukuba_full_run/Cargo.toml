@@ -1,0 +1,14 @@
+[package]
+name = "tsukuba_full_run"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "79_tsukuba_full_run"
+path = "main.rs"

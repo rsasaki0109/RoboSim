@@ -114,6 +114,7 @@ members = [
   "examples/76_ssl_small_pitch",
   "examples/77_g1_workbench_mission",
   "examples/78_tsukuba_3dgs_background",
+  "examples/79_tsukuba_full_run",
   "examples/84_office_agv_delivery",
   "examples/85_office_agv_shared_aisle",
   "examples/86_office_agv_desk_place",

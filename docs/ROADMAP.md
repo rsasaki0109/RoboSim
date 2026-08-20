@@ -38,6 +38,10 @@ Contest scoring starts with the Tsukuba Challenge 2026 confirmation run, not a
 city-scale photoreal clone. See [TSUKUBA_CONFIRMATION_RUN.md](TSUKUBA_CONFIRMATION_RUN.md):
 the first exit is the official stop/cone/e-stop geometry, headless.
 
+The shortened full-run analog scores three signalized crossings with the same
+official stop-line box on a ~10 m sidewalk segment. See
+[TSUKUBA_FULL_RUN.md](TSUKUBA_FULL_RUN.md).
+
 The next contest analog is RoboCup SSL Division B 2v2 field geometry, not a grSim protocol clone. See [SSL_SMALL_PITCH.md](SSL_SMALL_PITCH.md).
 
 The Grove-G1 analog is a 0.5 m park then Dex3 pick/place workcell, not a Nav2 or MoveIt port. See [G1_WORKBENCH_MISSION.md](G1_WORKBENCH_MISSION.md).
