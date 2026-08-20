@@ -114,6 +114,7 @@ members = [
   "examples/76_ssl_small_pitch",
   "examples/77_g1_workbench_mission",
   "examples/78_tsukuba_3dgs_background",
+  "examples/84_office_agv_delivery",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",

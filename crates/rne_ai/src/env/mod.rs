@@ -2,6 +2,7 @@
 
 pub mod diff_drive;
 pub mod mobile_manipulator;
+pub mod office_agv_delivery;
 pub mod ssl_small_pitch;
 pub mod tsukuba_confirmation;
 pub mod urdf_scene;
@@ -29,6 +30,13 @@ pub use mobile_manipulator::{
     VectorizedMobileManipulatorStep, MM_MOBILE_TRACK_WIDTH_M, MM_MOBILE_WHEEL_JOINT_SIGN,
     MM_MOBILE_WHEEL_RADIUS_M, MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+};
+pub use office_agv_delivery::{
+    evaluate_office_desk_delivery_stop, office_agv_delivery_scene_path,
+    office_agv_delivery_task_spec, OfficeAgvDeliveryCourse, OfficeAgvDeliveryFault,
+    OfficeAgvDeliveryObservation, OfficeAgvDeliveryScenario, OfficePlanarAabb, OfficeStopJudgement,
+    OFFICE_AGV_DELIVERY_TASK_ID, OFFICE_DELIVERY_DESK_NAME, OFFICE_DESK_DELIVERY_BEFORE_M,
+    OFFICE_PICKUP_DOCK_NAME,
 };
 pub use ssl_small_pitch::{
     evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
