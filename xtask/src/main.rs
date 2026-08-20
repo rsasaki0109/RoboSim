@@ -2626,6 +2626,9 @@ fn run_asset_smokes() -> anyhow::Result<()> {
     )?;
     run_step(
         "cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --smoke",
+    )?;
+    run_step(
+        "cargo run --locked -p office_agv_shared_aisle --example 85_office_agv_shared_aisle -- --smoke",
     )
 }
 

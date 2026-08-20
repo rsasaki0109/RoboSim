@@ -134,6 +134,12 @@ pub use env::{
     OFFICE_PICKUP_DOCK_NAME,
 };
 pub use env::{
+    evaluate_office_shared_aisle_block, office_agv_shared_aisle_task_path,
+    office_agv_shared_aisle_task_spec, OfficeAgvSharedAisleCourse, OfficeAgvSharedAisleFault,
+    OfficeAgvSharedAisleObservation, OfficeAgvSharedAisleScenario, OFFICE_AGV_SHARED_AISLE_TASK_ID,
+    OFFICE_ONCOMING_AGV_NAME,
+};
+pub use env::{
     evaluate_ssl_ball_region, ssl_small_pitch_scene_path, ssl_small_pitch_task_spec, SslBallRegion,
     SslSmallPitch, SslSmallPitchFault, SslSmallPitchObservation, SslSmallPitchScenario,
     SSL_BALL_NAME, SSL_BALL_RADIUS_M, SSL_DIV_B_FIELD_LENGTH_M, SSL_DIV_B_FIELD_WIDTH_M,

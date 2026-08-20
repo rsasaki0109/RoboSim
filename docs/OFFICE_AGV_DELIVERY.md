@@ -32,7 +32,7 @@ cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --
 
 ## Not in this slice
 
-- Shared-aisle traffic / other AGVs (D-2)
+- Shared-aisle traffic / other AGVs — see [OFFICE_AGV_SHARED_AISLE.md](OFFICE_AGV_SHARED_AISLE.md)
 - Shelf or desk manipulation / G1 carry (D-3)
 - Full office floor plans, elevators, or multi-floor routing
 - Perception of packages (pickup/delivery remain geometric)

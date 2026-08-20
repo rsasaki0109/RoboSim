@@ -40,6 +40,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a headless office AGV shared-aisle delivery analog that yields to a
+  kinematic oncoming AGV, then completes dock-to-desk scoring
+  (`rne.office.agv_shared_aisle.v1`).
+
 - Add a headless office AGV dock-to-desk delivery analog that scores corridor
   stay-in-lane, stopped pickup-dock visit, and 1.2 m desk-face delivery stop
   contracts on a short analytic aisle (`rne.office.agv_delivery.v1`).
