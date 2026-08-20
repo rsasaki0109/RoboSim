@@ -21,6 +21,10 @@ All notable changes to Robot Native Engine are documented in this file.
   that failed `cargo doc -D warnings` during release-check.
 - Relax the G1 commanded-stride smoke margin from exact 2.0x to 1.9x so Linux
   CI does not fail on a few millimeters of clearance noise.
+- Install Mesa/Xvfb and force `WGPU_BACKEND=gl` for Ubuntu evidence so the
+  required G1 WGPU dataset capture can run without a hardware GPU.
+- Soften the Go2 robust-turn smoke yaw floor to match current Linux CI arc
+  magnitude while still beating the straight-walk drift budget.
 
 ### Added
 

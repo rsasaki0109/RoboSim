@@ -356,9 +356,27 @@ jobs:
           cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
           cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
-      - name: Capture and verify the WGPU renderer dataset
+      - name: Install software GPU adapters (Linux)
+        if: runner.os == 'Linux'
         run: |
-          cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1-mesa-dev \
+            mesa-vulkan-drivers \
+            mesa-utils \
+            xvfb
+      - name: Capture and verify the WGPU renderer dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            export WGPU_BACKEND=gl
+            xvfb-run -a cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- \
+              --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          else
+            cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- \
+              --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          fi
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/unitree-g1-wgpu.rne-dataset
       - name: Upload trust evidence
         if: always()
