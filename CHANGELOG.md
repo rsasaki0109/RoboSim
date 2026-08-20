@@ -12,6 +12,8 @@ All notable changes to Robot Native Engine are documented in this file.
   release-rehearsal pull-request path filters that skipped required gates, and
   retarget the Rust API baseline to a commit that is actually an ancestor of
   `main`.
+- Make MJX process-conformance subject digests ignore Windows CRLF checkouts
+  so the golden matches the LF bytes stored in git (and used on Linux CI).
 
 ### Added
 

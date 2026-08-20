@@ -38,6 +38,17 @@ CHECKS = (
 )
 
 
+def _repo_text_bytes(path: Path) -> bytes:
+    """Reads subject bytes as committed LF text, ignoring checkout CRLF."""
+
+    data = path.read_bytes()
+    # Windows checkouts may materialize CRLF even when git stores LF
+    # (`eol=lf`). Subject digests must stay platform-neutral.
+    if b"\r\n" in data:
+        data = data.replace(b"\r\n", b"\n")
+    return data
+
+
 def build_process_conformance_fixture(adapter_root: Path) -> dict[str, Any]:
     """Builds a platform-neutral typed-reader fixture from the frozen lifecycle."""
 
@@ -46,10 +57,10 @@ def build_process_conformance_fixture(adapter_root: Path) -> dict[str, Any]:
     manifest_path = adapter_root / "accelerator.toml"
     runtime_path = adapter_root / "runtime.toml"
     task_path = adapter_root / "fixtures" / "free-fall-task-spec-v1.json"
-    subject = subject_path.read_bytes()
-    manifest = manifest_path.read_bytes()
-    runtime = runtime_path.read_bytes()
-    task = task_path.read_bytes()
+    subject = _repo_text_bytes(subject_path)
+    manifest = _repo_text_bytes(manifest_path)
+    runtime = _repo_text_bytes(runtime_path)
+    task = _repo_text_bytes(task_path)
     arguments = [
         "-m",
         "rne_mjx_adapter",
