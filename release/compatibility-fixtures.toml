@@ -1,0 +1,254 @@
+schema_version = 1
+release_version = "0.1.0"
+
+[[fixture]]
+id = "accelerator_capability_v1"
+contract = "accelerator_capability"
+schema_version = 1
+path = "tests/golden/accelerators/capability-report-v1.json"
+canonical_json_sha256 = "sha256:87aea0aed415beb06bb321bf7d234516c53f16df3e1ccad1ef244e1d2beddeb2"
+
+[[fixture]]
+id = "accelerator_conformance_v1"
+contract = "accelerator_conformance"
+schema_version = 1
+path = "tests/golden/accelerators/conformance-report-v1.json"
+canonical_json_sha256 = "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5"
+
+[[fixture]]
+id = "accelerator_process_conformance_v1"
+contract = "accelerator_process_conformance"
+schema_version = 1
+path = "tests/golden/accelerators/process-conformance-report-v1.json"
+canonical_json_sha256 = "sha256:e8ed4422d85492da4638d1b31d65e297a3dfa12dd3cae0001739c18022b6f68c"
+
+[[fixture]]
+id = "accelerator_protocol_v1"
+contract = "accelerator_protocol"
+schema_version = 1
+path = "tests/golden/accelerators/protocol-transcript-v1.json"
+canonical_json_sha256 = "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb"
+
+[[fixture]]
+id = "accelerator_scaffold_v1"
+contract = "accelerator_scaffold"
+schema_version = 1
+path = "tests/golden/accelerators/scaffold-contract-v1.json"
+canonical_json_sha256 = "sha256:ad79d0c78ed2f6bc45c3dcdfc4000e4e7897e42732ec48e22779bbd81424c332"
+
+[[fixture]]
+id = "accelerator_scale_v1"
+contract = "accelerator_scale"
+schema_version = 1
+path = "tests/golden/accelerators/scale-report-v1.json"
+canonical_json_sha256 = "sha256:23810e9647a2a322e1fc2ee0f50fe91dd606719bba80eacb8df30488fdaa9bef"
+
+[[fixture]]
+id = "behavior_replay_v1"
+contract = "behavior_replay"
+schema_version = 1
+path = "tests/golden/replays/behavior-replay-v1.json"
+canonical_json_sha256 = "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c"
+
+[[fixture]]
+id = "controller_c_abi_v3"
+contract = "controller_c_abi"
+schema_version = 1
+path = "tests/golden/plugins/controller-c-abi-layout-v3.json"
+canonical_json_sha256 = "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036"
+
+[[fixture]]
+id = "controller_plugin_conformance_v1"
+contract = "controller_plugin_conformance"
+schema_version = 1
+path = "tests/golden/plugins/controller-plugin-conformance-v1.json"
+canonical_json_sha256 = "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7"
+
+[[fixture]]
+id = "controller_plugin_scaffold_v1"
+contract = "controller_plugin_scaffold"
+schema_version = 1
+path = "tests/golden/plugins/controller-scaffold-v1.json"
+canonical_json_sha256 = "sha256:e01ce884cc707b7b71e189114d7eada83cd7ae531ea5323f478443b20f939573"
+
+[[fixture]]
+id = "dataset_bundle_v1"
+contract = "dataset_bundle"
+schema_version = 1
+path = "tests/golden/datasets/bundle-manifest-v1.json"
+canonical_json_sha256 = "sha256:e995a3a56a44577cc6b848355f29367a88167570829661b32e32e76eb06f6832"
+
+[[fixture]]
+id = "dataset_bundle_v1_aecafb6"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/dataset-bundle-v1-aecafb6.json"
+canonical_json_sha256 = "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1"
+
+[[fixture]]
+id = "dataset_depth_evaluation_v1"
+contract = "dataset_offline_evaluation"
+schema_version = 1
+path = "tests/golden/datasets/depth-pair-evaluation-v1.json"
+canonical_json_sha256 = "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16"
+
+[[fixture]]
+id = "dataset_payload_v1"
+contract = "dataset_payload"
+schema_version = 1
+path = "tests/golden/datasets/native-payload-v1.json"
+canonical_json_sha256 = "sha256:df6888b4313d564841fa83ab775691e09cb14ba7bbd94018ca3bc36efeb94245"
+
+[[fixture]]
+id = "failure_capsule_v1"
+contract = "failure_capsule"
+schema_version = 1
+path = "tests/golden/evidence/failure-capsule-v1.json"
+canonical_json_sha256 = "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa"
+
+[[fixture]]
+id = "failure_capsule_v1_61d6c81"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/failure-capsule-v1-61d6c81.json"
+canonical_json_sha256 = "sha256:d6e954b5baf91fadae0809dabd54ec67f8ff2a0b3ea05fe4fef73e4dd1d58246"
+
+[[fixture]]
+id = "generic_replay_v1"
+contract = "generic_replay"
+schema_version = 1
+path = "tests/golden/replays/generic-replay-v1.json"
+canonical_json_sha256 = "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217"
+
+[[fixture]]
+id = "frontend_message_families_v1"
+contract = "frontend_message_families"
+schema_version = 1
+path = "tests/golden/protocol/frontend-message-families-v1.json"
+canonical_json_sha256 = "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc"
+
+[[fixture]]
+id = "frontend_transport_v1"
+contract = "frontend_transport"
+schema_version = 1
+path = "tests/golden/protocol/frontend-transport-v1.json"
+canonical_json_sha256 = "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71"
+
+[[fixture]]
+id = "frontend_transport_v1_be53f16"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/frontend-transport-v1-be53f16.json"
+canonical_json_sha256 = "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf"
+
+[[fixture]]
+id = "hardware_mock_conformance_v1"
+contract = "hardware_mock_conformance"
+schema_version = 1
+path = "tests/golden/hardware/gateway-mock-conformance-v1.json"
+canonical_json_sha256 = "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8"
+
+[[fixture]]
+id = "hardware_session_evidence_v1"
+contract = "hardware_session_evidence"
+schema_version = 1
+path = "tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+canonical_json_sha256 = "sha256:2f6146f794cd7bed1d43f23ba6797ae9d74a58cb146609b2410b47410ffc9281"
+
+[[fixture]]
+id = "mobile_manipulator_snapshot_v1_to_v3"
+contract = "historical_mobile_manipulator_snapshot"
+schema_version = 1
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v1-to-v3.json"
+canonical_json_sha256 = "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f"
+
+[[fixture]]
+id = "mobile_manipulator_snapshot_v1_47525b1_to_v3"
+contract = "historical_mobile_manipulator_snapshot_provenance"
+schema_version = 2
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v1-47525b1-to-v3.json"
+canonical_json_sha256 = "sha256:be30a0bdc92f8fe099410f166c02abc096fab503d40a32b943f0aae7544ea2a8"
+
+[[fixture]]
+id = "mobile_manipulator_snapshot_v2_2255cbe_to_v3"
+contract = "historical_mobile_manipulator_snapshot_provenance"
+schema_version = 2
+path = "tests/golden/migrations/mobile-manipulator-snapshot-v2-2255cbe-to-v3.json"
+canonical_json_sha256 = "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f"
+
+[[fixture]]
+id = "physics_conformance_v2"
+contract = "physics_conformance"
+schema_version = 2
+path = "tests/golden/physics/conformance-report-v2.json"
+canonical_json_sha256 = "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd"
+
+[[fixture]]
+id = "physics_external_conformance_v1"
+contract = "external_physics_conformance"
+schema_version = 1
+path = "crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json"
+canonical_json_sha256 = "sha256:ca5868832023438150c9f9d73e44ea88437e98a7ab147cb5bdb776a848426647"
+
+[[fixture]]
+id = "portable_batch_checkpoint_v2"
+contract = "portable_batch_checkpoint"
+schema_version = 2
+path = "tests/golden/tasks/vectorized-checkpoint-v2.json"
+canonical_json_sha256 = "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5"
+
+[[fixture]]
+id = "renderer_capture_report_v1"
+contract = "renderer_capture_report"
+schema_version = 1
+path = "tests/golden/datasets/renderer-capture-report-v1.json"
+canonical_json_sha256 = "sha256:d69d3577146f3c20769b5e74593a32f720553567db6a80acab81e346f4b9f672"
+
+[[fixture]]
+id = "scenario_replay_v2_533729d_requires_rerun"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/scenario-replay-v2-533729d-requires-rerun.json"
+canonical_json_sha256 = "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396"
+
+[[fixture]]
+id = "scenario_replay_v3_e959e3f_requires_rerun"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/scenario-replay-v3-e959e3f-requires-rerun.json"
+canonical_json_sha256 = "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235"
+
+[[fixture]]
+id = "scenario_replay_v4"
+contract = "scenario_replay"
+schema_version = 4
+path = "tests/golden/replays/scenario-replay-v4.json"
+canonical_json_sha256 = "sha256:6e659e42ae0cd7970a10dcf21064d0a5d2f3531f18ff7a336e4a64c313f3647a"
+
+[[fixture]]
+id = "task_spec_sensor_goal_v1"
+contract = "task_spec"
+schema_version = 1
+path = "assets/tasks/diff_drive_goal.task.json"
+canonical_json_sha256 = "sha256:97fbab0cc8ce36a44a4519136bff059d1bdc77673ee414cf5083f2fe2514d936"
+
+[[fixture]]
+id = "task_spec_v1"
+contract = "task_spec"
+schema_version = 1
+path = "tests/golden/tasks/task-spec-v1.json"
+canonical_json_sha256 = "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c"
+
+[[fixture]]
+id = "task_spec_v1_70a9ff3"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/task-spec-v1-70a9ff3.json"
+canonical_json_sha256 = "sha256:a17643456136ebb956a1d8f1a0ccb969e7636a98ace5e94c13a00fe1f80ee6fe"
+
+[[fixture]]
+id = "vectorized_episode_checkpoint_v1_bd4d44f"
+contract = "historical_artifact_decision"
+schema_version = 1
+path = "tests/golden/compatibility/vectorized-episode-checkpoint-v1-bd4d44f.json"
+canonical_json_sha256 = "sha256:c4cffa03ee47dfc92fe748cda9d7f84d5b0283ad20d44a6da1f4bbbe865d4264"

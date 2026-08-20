@@ -1,0 +1,110 @@
+{
+  "kind": "rne_one_zero_readiness_report",
+  "schema_version": 1,
+  "manifest_sha256": "sha256:77e6ecc03be26da8c17eca379e3605e0087af0a0bcb322ae11927469f3f88b3e",
+  "release_version": "0.1.0",
+  "as_of": "2026-08-16",
+  "candidate_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+  "candidate_tree": "1fa3646facf095431b014bc394e8a6934a549f20",
+  "candidate_since": "2026-08-15",
+  "calendar_stability_days": 1,
+  "observed_external_use_days": 0,
+  "eligible": false,
+  "checks": [
+    {
+      "id": "stability_window",
+      "status": "not_met",
+      "detail": "calendar=1/183, observed_external_use=0/183, unplanned_breaking_changes=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "external_projects",
+      "status": "not_met",
+      "detail": "verified_external_projects=0/2",
+      "evidence_sha256": []
+    },
+    {
+      "id": "third_party_plugin",
+      "status": "not_met",
+      "detail": "verified_third_party_plugins=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "external_system",
+      "status": "not_met",
+      "detail": "verified_external_systems=0 audited_accelerator_adapters=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "reference_hardware",
+      "status": "not_met",
+      "detail": "verified_reference_hardware_runs=0",
+      "evidence_sha256": []
+    },
+    {
+      "id": "release_artifacts",
+      "status": "not_met",
+      "detail": "verified_platform_releases=0/2",
+      "evidence_sha256": []
+    },
+    {
+      "id": "historical_compatibility",
+      "status": "passed",
+      "detail": "minimum_compatibility_checks=36",
+      "evidence_sha256": [
+        "sha256:06190ad1aec8fe5a41be2f103fe3ccb4ca1e1068949ad2404370b7ba83ecaccf",
+        "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235",
+        "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7",
+        "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1",
+        "sha256:23810e9647a2a322e1fc2ee0f50fe91dd606719bba80eacb8df30488fdaa9bef",
+        "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb",
+        "sha256:2f6146f794cd7bed1d43f23ba6797ae9d74a58cb146609b2410b47410ffc9281",
+        "sha256:5a211c895de93c8e95f03a0fb40947a1250379d5a977012fce9a820afaba391c",
+        "sha256:63cd4fe2b774e54a80fad571a5f713af0e86d254b13520dac5592d86967417e9",
+        "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd",
+        "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396",
+        "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
+        "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217",
+        "sha256:6e659e42ae0cd7970a10dcf21064d0a5d2f3531f18ff7a336e4a64c313f3647a",
+        "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
+        "sha256:87aea0aed415beb06bb321bf7d234516c53f16df3e1ccad1ef244e1d2beddeb2",
+        "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8",
+        "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc",
+        "sha256:97fbab0cc8ce36a44a4519136bff059d1bdc77673ee414cf5083f2fe2514d936",
+        "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f",
+        "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
+        "sha256:a17643456136ebb956a1d8f1a0ccb969e7636a98ace5e94c13a00fe1f80ee6fe",
+        "sha256:ad79d0c78ed2f6bc45c3dcdfc4000e4e7897e42732ec48e22779bbd81424c332",
+        "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c",
+        "sha256:be30a0bdc92f8fe099410f166c02abc096fab503d40a32b943f0aae7544ea2a8",
+        "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa",
+        "sha256:c4cffa03ee47dfc92fe748cda9d7f84d5b0283ad20d44a6da1f4bbbe865d4264",
+        "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036",
+        "sha256:ca5868832023438150c9f9d73e44ea88437e98a7ab147cb5bdb776a848426647",
+        "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f",
+        "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5",
+        "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16",
+        "sha256:d69d3577146f3c20769b5e74593a32f720553567db6a80acab81e346f4b9f672",
+        "sha256:d6e954b5baf91fadae0809dabd54ec67f8ff2a0b3ea05fe4fef73e4dd1d58246",
+        "sha256:df6888b4313d564841fa83ab775691e09cb14ba7bbd94018ca3bc36efeb94245",
+        "sha256:e01ce884cc707b7b71e189114d7eada83cd7ae531ea5323f478443b20f939573",
+        "sha256:e8ed4422d85492da4638d1b31d65e297a3dfa12dd3cae0001739c18022b6f68c",
+        "sha256:e995a3a56a44577cc6b848355f29367a88167570829661b32e32e76eb06f6832"
+      ]
+    },
+    {
+      "id": "p0_p1_blockers",
+      "status": "passed",
+      "detail": "release blocker registry has zero open P0/P1 entries",
+      "evidence_sha256": [
+        "sha256:abb056299b68221fe201c27b82139fad553d853426128a706911130dee163a34"
+      ]
+    },
+    {
+      "id": "support_commitment",
+      "status": "not_met",
+      "detail": "committed=false maintainer=<missing> support_period=<missing>",
+      "evidence_sha256": []
+    }
+  ]
+}

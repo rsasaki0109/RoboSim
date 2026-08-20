@@ -22,6 +22,7 @@ from rne_mjx_adapter.protocol import (  # noqa: E402
     derive_episode_seed,
     load_json_fixture,
     validate_bound_task_spec,
+    validate_capability_report,
     validate_task_spec,
 )
 from conformance import (  # noqa: E402
@@ -34,6 +35,11 @@ from scale import (  # noqa: E402
     _report_digest as scale_report_digest,
     build_scale_report,
     validate_scale_report,
+)
+from protocol_fixture import build_transcript, validate_transcript  # noqa: E402
+from process_conformance_fixture import (  # noqa: E402
+    build_process_conformance_fixture,
+    validate_process_conformance_fixture,
 )
 
 
@@ -123,10 +129,46 @@ class ProtocolTests(unittest.TestCase):
 
     def test_runtime_probe_is_versioned_and_fail_closed(self) -> None:
         report = MjxWarpBackend(self.fixtures).capability_report()
+        validate_capability_report(report)
         self.assertEqual(report["kind"], CAPABILITY_REPORT_KIND)
         self.assertIn(report["status"], {"available", "unavailable"})
         if report["status"] == "unavailable":
             self.assertIsNotNone(report["unavailable_reason_code"])
+
+    def test_capability_report_rejects_status_and_runtime_tampering(self) -> None:
+        report = FakeBackend(self.fixtures).capability_report()
+        validate_capability_report(report)
+
+        available = deepcopy(report)
+        available["status"] = "available"
+        with self.assertRaisesRegex(ProtocolError, "available runtime"):
+            validate_capability_report(available)
+
+        available["runtime"].update(
+            {
+                "python_version": "3.12.4",
+                "platform": "linux",
+                "machine": "x86_64",
+                "jax_version": available["runtime_contract"]["packages"]["jax"],
+                "jaxlib_version": available["runtime_contract"]["packages"]["jaxlib"],
+                "jax_cuda_plugin_version": available["runtime_contract"]["packages"]["jax_cuda_plugin"],
+                "mujoco_version": available["runtime_contract"]["packages"]["mujoco"],
+                "mujoco_mjx_version": available["runtime_contract"]["packages"]["mujoco_mjx"],
+                "warp_version": available["runtime_contract"]["packages"]["warp_lang"],
+                "jax_backend": "gpu",
+                "jax_devices": ["CUDA:0"],
+                "nvidia_driver_version": "580.42",
+            }
+        )
+        validate_capability_report(available)
+        available["runtime"]["nvidia_driver_version"] = "579.99"
+        with self.assertRaisesRegex(ProtocolError, "available runtime"):
+            validate_capability_report(available)
+
+        unknown = deepcopy(report)
+        unknown["unknown"] = True
+        with self.assertRaisesRegex(ProtocolError, "fields"):
+            validate_capability_report(unknown)
 
     def test_conformance_report_passes_and_fault_injection_fails(self) -> None:
         report = build_report(
@@ -155,6 +197,18 @@ class ProtocolTests(unittest.TestCase):
         tampered["content_sha256"] = _report_digest(tampered)
         with self.assertRaisesRegex(ProtocolError, "verdict"):
             validate_report(tampered)
+
+        bad_seed = deepcopy(report)
+        bad_seed["actual"]["lane_zero_episode_seed"] ^= 1
+        bad_seed["content_sha256"] = _report_digest(bad_seed)
+        with self.assertRaisesRegex(ProtocolError, "lane-zero"):
+            validate_report(bad_seed)
+
+        relabelled = deepcopy(report)
+        relabelled["evidence_class"] = "accelerator"
+        relabelled["content_sha256"] = _report_digest(relabelled)
+        with self.assertRaisesRegex(ProtocolError, "available backend"):
+            validate_report(relabelled)
 
     def test_conformance_report_atomic_write_retries_stale_temp(self) -> None:
         report = build_report(
@@ -222,6 +276,18 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "throughput"):
             validate_scale_report(tampered)
 
+        bad_seed = deepcopy(report)
+        bad_seed["runs"][1]["lane_zero_episode_seed"] ^= 1
+        bad_seed["content_sha256"] = scale_report_digest(bad_seed)
+        with self.assertRaisesRegex(ProtocolError, "episode seed"):
+            validate_scale_report(bad_seed)
+
+        relabelled = deepcopy(report)
+        relabelled["evidence_class"] = "accelerator"
+        relabelled["content_sha256"] = scale_report_digest(relabelled)
+        with self.assertRaisesRegex(ProtocolError, "available backend"):
+            validate_scale_report(relabelled)
+
     def test_normalized_scale_report_matches_golden(self) -> None:
         report = build_scale_report(
             ADAPTER_ROOT,
@@ -265,6 +331,34 @@ class ProtocolTests(unittest.TestCase):
         with golden_path.open("r", encoding="utf-8") as source:
             golden = json.load(source)
         self.assertEqual(report, golden)
+
+    def test_protocol_transcript_matches_golden(self) -> None:
+        transcript = build_transcript(ADAPTER_ROOT)
+        golden_path = (
+            REPOSITORY_ROOT
+            / "tests"
+            / "golden"
+            / "accelerators"
+            / "protocol-transcript-v1.json"
+        )
+        with golden_path.open("r", encoding="utf-8") as source:
+            golden = json.load(source)
+        self.assertEqual(transcript, golden)
+        validate_transcript(golden)
+
+    def test_process_conformance_report_matches_golden(self) -> None:
+        report = build_process_conformance_fixture(ADAPTER_ROOT)
+        golden_path = (
+            REPOSITORY_ROOT
+            / "tests"
+            / "golden"
+            / "accelerators"
+            / "process-conformance-report-v1.json"
+        )
+        with golden_path.open("r", encoding="utf-8") as source:
+            golden = json.load(source)
+        self.assertEqual(report, golden)
+        validate_process_conformance_fixture(golden)
 
 
 if __name__ == "__main__":

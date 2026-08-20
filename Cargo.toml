@@ -5,9 +5,11 @@ members = [
   "crates/rne_ecs",
   "crates/rne_world",
   "crates/rne_physics",
+  "crates/rne_physics_conformance",
   "crates/rne_physics_rapier",
   "crates/rne_physics_analytic",
   "crates/rne_physics_mujoco",
+  "crates/rne_plugin_sdk",
   "crates/rne_plugin",
   "crates/rne_plugin_example_velocity_servo",
   "crates/rne_plugin_legacy_v2_fixture",
@@ -19,6 +21,7 @@ members = [
   "crates/rne_render",
   "crates/rne_render_wgpu",
   "crates/rne_ai",
+  "crates/rne_accelerator_contract",
   "crates/rne_assets",
   "crates/rne_py",
   "crates/rne_plateau",
@@ -30,6 +33,8 @@ members = [
   "crates/rne_traci",
   "crates/rne_urdf_import",
   "adapters/ros2/rne_adapter_ros2",
+  "adapters/hardware/rne_hardware_gateway",
+  "adapters/hardware/rne_hardware_lekiwi",
   "examples/00_hello_world",
   "examples/01_falling_cube",
   "examples/01_diff_drive_lidar",
@@ -103,9 +108,11 @@ members = [
   "examples/71_g1_rgbd_sensor",
   "examples/72_mobile_lift_friction_pick_place",
   "examples/73_diff_drive_dataset_capture",
+  "examples/74_flagship_validation_workflow",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",
+  "tests/compatibility",
   "tests/physics_conformance",
   "tests/scenario_scale",
   "tools/rne_asset_cli",
@@ -131,6 +138,9 @@ version = "0.1.0"
 # Internal crates use exact release requirements so packaged manifests resolve the
 # same release set from a registry after Cargo removes local paths.
 rne_adapter_ros2 = { version = "=0.1.0", path = "adapters/ros2/rne_adapter_ros2" }
+rne_accelerator_contract = { version = "=0.1.0", path = "crates/rne_accelerator_contract" }
+rne_hardware_gateway = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_gateway" }
+rne_hardware_lekiwi = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_lekiwi" }
 rne_ai = { version = "=0.1.0", path = "crates/rne_ai" }
 rne_assets = { version = "=0.1.0", path = "crates/rne_assets" }
 rne_core = { version = "=0.1.0", path = "crates/rne_core" }
@@ -143,9 +153,12 @@ rne_math = { version = "=0.1.0", path = "crates/rne_math" }
 rne_mjcf = { version = "=0.1.0", path = "crates/rne_mjcf" }
 rne_openscenario = { version = "=0.1.0", path = "crates/rne_openscenario" }
 rne_physics = { version = "=0.1.0", path = "crates/rne_physics" }
+rne_physics_conformance = { version = "=0.1.0", path = "crates/rne_physics_conformance" }
 rne_physics_analytic = { version = "=0.1.0", path = "crates/rne_physics_analytic" }
+rne_physics_mujoco = { version = "=0.1.0", path = "crates/rne_physics_mujoco" }
 rne_physics_rapier = { version = "=0.1.0", path = "crates/rne_physics_rapier" }
 rne_plateau = { version = "=0.1.0", path = "crates/rne_plateau" }
+rne_plugin_sdk = { version = "=0.1.0", path = "crates/rne_plugin_sdk" }
 rne_plugin = { version = "=0.1.0", path = "crates/rne_plugin" }
 rne_py = { version = "=0.1.0", path = "crates/rne_py" }
 rne_render = { version = "=0.1.0", path = "crates/rne_render" }
@@ -180,7 +193,7 @@ pollster = "0.4"
 pyo3 = { version = "0.29", features = ["abi3-py39"] }
 png = "0.18"
 roxmltree = "0.20"
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 image = { version = "0.25", default-features = false, features = ["hdr", "jpeg", "png"] }
 earcutr = "0.5"
 gltf = "1.4.1"

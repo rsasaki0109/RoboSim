@@ -32,7 +32,7 @@ available.
 | 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, and canonical contact evidence while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; a deliberately tightened first divergence reproduces from a verified replay/report Failure Capsule on Windows and Linux |
 | 0.4 Scalable learning | Ordered vector environments, deterministic reset streams, batched observations/actions, and accelerator adapters outside core | Single-environment replay matches its lane in a batch; throughput reports name hardware, batch size, and scenario |
 | 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
-| 0.6 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
+| 0.7 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
 
 The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
@@ -40,8 +40,11 @@ calibration, noise seeds, assets, domain-randomization decisions, and explicit
 drop gaps. Offline depth-pair evaluation is renderer-free and recomputes
 committed metrics from the bundle. RGB8/depth/LiDAR plus dataset-native
 IMU/transform/action/outcome/annotation codecs are bound and headless fixtures
-freeze their complete shard digests. The remaining evidence gap has moved to
-completed clean-run platform provenance and renderer-specific capture evidence.
+freeze their complete shard digests. The WGPU-backed Unitree G1 head camera now
+streams a TaskSpec-bound twelve-frame RGB/depth bundle with explicit calibration,
+latency, noise, and renderer identity; both platform evidence jobs require and
+upload it instead of accepting the CPU fallback. Completed clean-run platform
+provenance remains required before treating that matrix as external evidence.
 
 The reference capture now records a successful seeded diff-drive run with
 action, outcome, transform, IMU, LiDAR, RGB, sensor depth, and ideal scene depth
@@ -51,7 +54,138 @@ Windows/Linux evidence matrix. The known 5 mm depth bias remains below the
 10 mm gate across 52,224 compared pixels. The workflow definition enforces
 cross-platform equality; a completed clean CI run is still required before
 treating that equality as external platform evidence. A renderer-specific
-capture remains separate evidence rather than a headless requirement.
+capture remains separate evidence rather than a headless requirement, so
+CPU-only simulation and offline evaluation stay renderer-free.
+
+The v0.6 foundation has started without pulling hardware concerns into core.
+`rne_hardware_gateway` binds the same TaskSpec to playback, shadow, HIL, and
+live authority modes, accepts injected monotonic host ticks, bounds every
+queue, and fails closed on deadline, stale data, disconnect, actuator limit,
+clock regression, queue overrun, and emergency stop. A golden over-limit
+session freezes schema-v1 events and final state. A byte-bounded versioned
+process protocol and deterministic child-process mock now freeze an injected
+disconnect with both device watchdog and gateway stops. The remaining process
+fault matrix now passes six child-process cases: deadline, disconnect,
+reconnect, stale command, limit, and emergency stop. A TaskSpec-bound shadow
+comparator records ordered tolerances, separate host/SimClock timestamps, first
+divergence, and a revalidated golden verdict. Failure Capsule create/verify preserves these
+typed artifacts beside the corresponding simulation replay and rejects missing
+TaskSpec or tampered aggregates. LeKiwi + SO-101 is now the selected reference:
+the brand-specific adapter pins LeRobot v0.6.0, freezes a base-only TaskSpec and
+unit mapping, holds the observed arm pose, and passes strict child-process
+bridge, shadow-authority, and independent-watchdog tests. A profile-bound host
+runner now turns the actual Open/poll/actuate/zero-stop/Close exchange into one
+validated artifact, distinguishes mock from physical device identity, and
+refuses a clean completion with authority, pending output, or a safety latch.
+A versioned physical-evidence manifest and staged verifier now prevent mock,
+mixed-device, incomplete safety, unverified dataset, or checklist-only output
+from satisfying the exit. A real LeKiwi shadow, HIL safety matrix, and
+low-speed live run remain open.
+
+The first v0.7 flagship slice is also integrated. `cargo run --locked -p xtask
+-- flagship` coordinates imported mobile-lift assets, RGB-D inspection,
+signal-controlled traffic, navigation, and friction pick/place in one fixed-step
+runner. It emits a passing seven-contract report, minimizes a seeded
+perception blackout from three active dimensions to one, verifies the replay
+and Failure Capsule, and writes a self-contained browser inspector. Windows and
+Linux run the same command in CI. The runtime-gated `xtask flagship
+--cross-backend` path now executes the identical TaskSpec and policy on Rapier
+and native MuJoCo 3.9, requires exact task/contract outcomes, compares nine
+named unit-bearing tolerances instead of cross-solver hashes, and uploads the
+verified comparison report from the dedicated Windows/Linux MuJoCo job.
+
+The v0.8 ecosystem track starts with signed release provenance. Tag and manual
+release rehearsals now attest each native archive and ABI3 wheel through GitHub
+OIDC/Sigstore using SLSA v1 provenance. The tag publish job verifies every
+subject before release creation, and `xtask release-check` enforces the
+machine-readable `release/artifact-attestation.toml` trust policy. Platform
+jobs retain the exact signed bundles, and the 1.0 readiness audit replays their
+cryptographic verification against the exact repository, workflow identity,
+tag, source and signer commit, predicate, issuer, runner class, and archive
+digest before accepting a strict schema-v1 receipt. Each platform now also
+signs a separate archive-install report whose digest chain fixes the archive,
+extracted release report, SHA256SUMS member graph, and ten-check rehearsal;
+readiness manifest v4 freshly verifies both signed subjects and audits
+third-party accelerator adapters without weakening the external-system gate.
+The installed accelerator conformance CLI also generates a dependency-free
+protocol-v1 authoring scaffold. Release rehearsal creates it from the packaged
+binary and runs its bounded Python fixture through the same process kit. This
+proves the clean-install authoring route only; the fixture cannot count as the
+independent accelerator, backend, or hardware evidence required for 1.0.
+Its canonical schema-v1 self-manifest freezes every generated file identity;
+future incompatible scaffold changes must retain v1 and add a new schema.
+The installed release CLI now also exposes `rne-asset plugin check`, a
+standalone controller-plugin conformance runner with a versioned,
+content-addressed report and deterministic reset replay. Release rehearsal runs
+the kit against the bundled reference shared library on both tier-1 platforms.
+The host-independent `rne_plugin_sdk` now owns the C-ABI definitions, while the
+offline scaffold vendors the exact SDK module. Installed rehearsal generates,
+builds with warnings denied, loads, and conforms a fresh controller plugin.
+The installed bundle now also ships `rne-hardware-conformance` and a fixed-
+binding process mock. The content-addressed schema-v1 report executes nine
+TaskSpec, protocol, authority, and fail-closed cases against any external
+adapter executable; the same catalog passes the Rust mock and Python LeKiwi
+bridge, and both tier-1 release rehearsals rerun it from installed artifacts.
+The publishable `rne_physics_conformance` authoring crate now gives external
+Rust backends a distinct content-addressed schema-v1 report. Its immutable
+nine-check catalog accepts arbitrary backend identities, fixes unit-bearing
+tolerances in the kit, rejects capability overclaims, and binds Failure Capsule
+evidence to the exact implementation subject. The existing built-in comparison
+runner is retained as `rne_physics_conformance_suite`; independent third-party
+certification remains a v0.9 exit gate.
+Readiness manifest v2 now requires that future independent certification retain
+the exact tested subjects rather than only a passing JSON report. It binds
+controller libraries and manifests, physics implementation/source bundles, and
+hardware adapter bytes plus TaskSpec and normalized launch contract back to the
+report's content identity and external source revision.
+The expanded v0.9 compatibility slice adds an installed, content-addressed
+corpus for thirty-six historical/current fixtures spanning TaskSpec identities,
+checkpoint, generic/behavior/scenario replay, dataset, renderer capture, all
+ten frontend protocol-v1 message families, controller C ABI,
+plugin-conformance report, controller-scaffold contract, historical migration,
+Failure Capsule, TaskSpec-bound hardware session, and physics artifacts.
+`rne-compatibility` runs every current typed reader, proves
+fail-closed handling of a deterministic future schema and unknown field, and
+verifies byte-exact frontend/dataset payload round trips with malformed-input
+rejection. Release rehearsal requires the same corpus after extraction on both
+tier-1 platforms. The 1.0 readiness audit also replays the source corpus,
+rechecks every historical Git revision/tree/blob, and requires the retained
+report to equal that fresh execution rather than trusting its pass flags. The
+language-boundary slice ships a C/C++ header, freezes the
+64-bit ABI layout and ten required symbols, and verifies 24 Python exports and
+their exact call shapes from source CI and the installed ABI3 wheel. This
+advances the freeze but does not replace external-use or six-month stability
+gates. The final conditions are tracked by `release/one-zero-readiness.toml`
+and audited with `cargo run --locked -p xtask -- release-readiness --as-of
+YYYY-MM-DD`. Its nine-check schema-v1 report currently remains ineligible;
+[ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md) defines the evidence pack and
+promotion mode. `xtask readiness-pack init` safely creates that pack on an
+external disk from the honest baseline, while `readiness-pack stage` stores
+individual files and emits their canonical SHA-256 TOML references without
+claiming third-party independence or promotion eligibility. The fixed
+external-intake registry and required issue forms expose the three real
+third-party evidence routes while keeping human independence review and the
+typed readiness audit authoritative.
+
+The history matrix also binds the introducing TaskSpec v1, dataset bundle v1,
+and Failure Capsule v1 revisions. The installed dataset case reconstructs its
+original binary shard and reruns stream/gap/digest/offline-evaluation checks;
+TaskSpec and Failure Capsule require exact typed round trips. Future public
+schema transitions still require a migration or explicit required-rerun case.
+
+Frontend protocol v1 history is bound separately to its introducing commit and
+the first committed full `ClientHello` golden. The source/current golden blob
+must remain identical, while installed validation repeats exact wire round
+trips, negotiation, and malformed-input rejection.
+
+The historical matrix retains the original schema-v1 case and restores actual
+7-tick, sensor-bearing schema-v1 and schema-v2 artifacts as v3. It binds each
+source revision/tree and source/current digest, preserves the v2 depth frame,
+and compares complete normalized state within the registered tolerance.
+The Rust surface now has a fixed 31-crate baseline registry. CI verifies the
+recorded commit/tree, exact package paths, and pinned semver-checks version
+before applying patch-level compatibility rules; moving PR bases cannot erase
+an accepted API from history.
 
 The 0.2 foundation deliberately keeps performance timings separate from stable
 correctness evidence. `DeterminismContract` describes exact, tolerance, or
@@ -98,7 +232,7 @@ release repetitions on the named runner class and fails below 60 headless
 steps/s or on any classified/unexplained violation.
 
 M6 acceptance is encoded in `release/exit-matrix.toml` and evaluated by
-`cargo run --locked -p xtask -- release-exit`. The contract freezes 12 CI jobs
+`cargo run --locked -p xtask -- release-exit`. The contract freezes 14 CI jobs
 plus clean Linux and Windows artifact rehearsals, maps them to the exact
 workflow runner and command, requires locked graph-building invocations, and
 names `CI / workspace` and `Release

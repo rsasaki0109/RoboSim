@@ -1,0 +1,12 @@
+{
+  "kind": "rne_renderer_dataset_capture_report",
+  "schema_version": 1,
+  "status": "passed",
+  "renderer": "rne_render_wgpu",
+  "dataset_manifest_sha256": "sha256:b20d3a18f7d950ab6dc839f89d63bac0d40e0df661d85927ce628f6abe412582",
+  "task_spec_sha256": "sha256:c312c43f805745d4f8064a0c23b7579e8b8ce9f9d79a70da890a18df4249c9fb",
+  "stream_count": 2,
+  "record_count": 24,
+  "sample_count": 24,
+  "frame_count": 12
+}

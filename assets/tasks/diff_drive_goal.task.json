@@ -1,7 +1,7 @@
 {
   "kind": "rne_task_spec",
   "schema_version": 1,
-  "task_id": "rne.diff_drive.goal.v1",
+  "task_id": "rne.diff_drive.sensor_goal.v1",
   "control_step_s": 0.016666666666666666,
   "observation": {
     "tensors": [

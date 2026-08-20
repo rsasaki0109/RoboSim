@@ -1,7 +1,8 @@
 //! Mobile manipulator episode environment.
 
 use super::sim::{
-    MobileManipulatorSim, MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
+    MobileManipulatorPhysicsFactory, MobileManipulatorSim, MobileManipulatorSimSnapshot,
+    MobileManipulatorSimSnapshotError,
 };
 use crate::action::MobileManipulatorAction;
 use crate::episode::{Episode, EpisodeRandomSnapshot, EpisodeStep};
@@ -16,6 +17,7 @@ use crate::transport::{
     TRANSPORT_SUCCESS_M,
 };
 use rne_log::{ReplayRandomSnapshot, ReplayRandomSnapshotError, ReplayRngState};
+use rne_physics::PhysicsBackend;
 use rne_world::WorldRandomSnapshot;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -468,8 +470,37 @@ impl EpisodeProgressState {
 impl MobileManipulatorEpisode {
     /// Creates a new episode environment with the given configuration.
     pub fn new(config: MobileManipulatorEpisodeConfig) -> Self {
-        let sim =
-            MobileManipulatorSim::from_scene_path(&config.scene_path).expect("episode simulation");
+        Self::try_new(config).expect("episode simulation")
+    }
+
+    /// Tries to create an episode with the built-in Rapier physics path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an asset error when the configured scene or initial physics world is invalid.
+    pub fn try_new(config: MobileManipulatorEpisodeConfig) -> Result<Self, rne_assets::AssetError> {
+        let sim = MobileManipulatorSim::from_scene_path(&config.scene_path)?;
+        Ok(Self::from_sim(config, sim))
+    }
+
+    /// Creates an episode through an injected native physics execution path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an asset error when the scene is invalid, the backend cannot be
+    /// constructed, or its initial world cannot be created.
+    pub fn try_new_with_physics<B: PhysicsBackend>(
+        config: MobileManipulatorEpisodeConfig,
+        physics_factory: MobileManipulatorPhysicsFactory<B>,
+    ) -> Result<Self, rne_assets::AssetError> {
+        let sim = MobileManipulatorSim::from_scene_path_with_physics(
+            &config.scene_path,
+            physics_factory,
+        )?;
+        Ok(Self::from_sim(config, sim))
+    }
+
+    fn from_sim(config: MobileManipulatorEpisodeConfig, sim: MobileManipulatorSim) -> Self {
         let effective_task = config.task.clone();
         let rng = crate::rng::DeterministicRng::new(config.rng_seed);
         let reach_curriculum = config
@@ -550,6 +581,11 @@ impl MobileManipulatorEpisode {
     /// Returns read access to the underlying simulation.
     pub fn simulation(&self) -> &MobileManipulatorSim {
         &self.sim
+    }
+
+    /// Returns the stable identifier of the active native physics execution path.
+    pub fn physics_backend_id(&self) -> &'static str {
+        self.sim.physics_backend_id()
     }
 
     /// Selects the grasp strategy used by the underlying simulation.
@@ -726,8 +762,7 @@ impl Episode for MobileManipulatorEpisode {
     type Action = MobileManipulatorAction;
 
     fn reset(&mut self) -> EpisodeStep<Self::Observation> {
-        self.sim = MobileManipulatorSim::from_scene_path(&self.config.scene_path)
-            .expect("reload episode simulation");
+        self.sim.reset();
         self.episode_index += 1;
         self.step_in_episode = 0;
         self.total_reward = 0.0;

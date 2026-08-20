@@ -1,22 +1,45 @@
 //! Deterministic ECS-to-MJCF compilation kept private to the MuJoCo adapter.
 
-use rne_ecs::{Entity, World};
+use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointActuation, PhysicsCapability, PhysicsWorldDesc,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, FixedJointDesc, JointActuation, JointMotor, PhysicsCapability,
+    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
-use rne_world::Transform3;
+use rne_world::{world_transform_of, Transform3};
 use std::fmt::Write as _;
 use thiserror::Error;
 
 const QUATERNION_TOLERANCE: f64 = 1.0e-9;
+const LEGACY_REVOLUTE_STIFFNESS_MAX: f64 = 100.0;
+const LEGACY_REVOLUTE_DAMPING_MAX: f64 = 20.0;
+const LEGACY_PRISMATIC_STIFFNESS_MAX: f64 = 1_000.0;
+const LEGACY_PRISMATIC_DAMPING_MAX: f64 = 80.0;
+
+pub(crate) fn legacy_motor_gains(motor: JointMotor, revolute: bool) -> (f64, f64) {
+    let (stiffness_max, damping_max) = if revolute {
+        (LEGACY_REVOLUTE_STIFFNESS_MAX, LEGACY_REVOLUTE_DAMPING_MAX)
+    } else {
+        (LEGACY_PRISMATIC_STIFFNESS_MAX, LEGACY_PRISMATIC_DAMPING_MAX)
+    };
+    (
+        motor.stiffness.min(stiffness_max),
+        motor.gain.min(damping_max),
+    )
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CompiledRigidBodyModel {
     pub(crate) mjcf: String,
     pub(crate) bindings: Vec<BodyBinding>,
     pub(crate) topology: Vec<BodyTopology>,
+    pub(crate) joint_dynamics: Vec<JointDynamics>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JointDynamics {
+    entity: Entity,
+    legacy_passive_damping: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +81,7 @@ pub(crate) struct BodyTopology {
     entity: Entity,
     body_type: RigidBodyType,
     mass_kg: f64,
-    collider: Collider,
+    collider: Option<Collider>,
     structural_transform: Option<Transform3>,
     joint: Option<JointSpec>,
 }
@@ -84,9 +107,12 @@ impl JointSpec {
 struct BodyInput {
     entity: Entity,
     rigid_body: RigidBody,
-    collider: Collider,
+    collider: Option<Collider>,
+    local_transform: Transform3,
     transform: Transform3,
+    ecs_parent: Option<Entity>,
     joint: Option<JointSpec>,
+    legacy_motor: Option<JointMotor>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -100,8 +126,6 @@ pub(crate) enum CompileError {
     EmptyWorld,
     #[error("entity {entity_index} has a collider but no rigid body")]
     ColliderWithoutRigidBody { entity_index: u32 },
-    #[error("entity {entity_index} has a rigid body but no collider")]
-    MissingCollider { entity_index: u32 },
     #[error("entity {entity_index} has a rigid body but no Transform3")]
     MissingTransform { entity_index: u32 },
     #[error("entity {entity_index} has multiple joint descriptions")]
@@ -139,10 +163,24 @@ pub(crate) fn compile_rigid_body_model(
 
     let mut mjcf =
         String::from("<mujoco model=\"rne-ecs-dynamics\">\n  <compiler angle=\"radian\"/>\n");
+    let integrator = if bodies.iter().any(|body| {
+        matches!(
+            body.joint,
+            Some(JointSpec::Revolute(_) | JointSpec::Prismatic(_))
+        )
+    }) {
+        // Stiff position-controlled robot joints need MuJoCo's implicit
+        // velocity treatment at 60 Hz. Collider-only rigid-body fixtures keep
+        // Euler so their registered semi-implicit conformance vector remains
+        // unchanged.
+        "implicitfast"
+    } else {
+        "Euler"
+    };
     write!(
         mjcf,
-        "  <option timestep=\"{timestep_s:.9}\" gravity=\"{}\" integrator=\"Euler\"",
-        vector(desc.gravity_m_s2)
+        "  <option timestep=\"{timestep_s:.9}\" gravity=\"{}\" integrator=\"{integrator}\"",
+        vector(desc.gravity_m_s2),
     )
     .expect("writing to String cannot fail");
     if desc.solver_iterations > 0 {
@@ -175,10 +213,20 @@ pub(crate) fn compile_rigid_body_model(
         mjcf.push_str("  </actuator>\n");
     }
     mjcf.push_str("</mujoco>\n");
+    let joint_dynamics = bodies
+        .iter()
+        .filter_map(|body| {
+            legacy_passive_damping(*body).map(|legacy_passive_damping| JointDynamics {
+                entity: body.entity,
+                legacy_passive_damping,
+            })
+        })
+        .collect();
     Ok(CompiledRigidBodyModel {
         mjcf,
         bindings,
         topology,
+        joint_dynamics,
     })
 }
 
@@ -194,18 +242,18 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                     entity_index: entity.index(),
                 });
             }
-            (Some(_), None) => {
-                return Err(CompileError::MissingCollider {
-                    entity_index: entity.index(),
-                });
-            }
             (None, None) => continue,
-            (Some(rigid_body), Some(collider)) => {
-                let transform = entity_ref.get::<Transform3>().copied().ok_or(
+            (Some(rigid_body), collider) => {
+                let local_transform = entity_ref.get::<Transform3>().copied().ok_or(
                     CompileError::MissingTransform {
                         entity_index: entity.index(),
                     },
                 )?;
+                // ECS Transform3 components are local to their Parent. MuJoCo's
+                // compiler consumes world poses before deriving its own nested
+                // body frames, so feeding the local component directly would
+                // apply every parent transform twice for imported robots.
+                let transform = world_transform_of(world, entity);
                 validate_body(entity, rigid_body, collider, transform)?;
                 let joints = [
                     entity_ref
@@ -227,12 +275,20 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                         entity_index: entity.index(),
                     });
                 }
+                let legacy_motor = entity_ref
+                    .get::<JointActuation>()
+                    .is_none()
+                    .then(|| entity_ref.get::<JointMotor>().copied())
+                    .flatten();
                 bodies.push(BodyInput {
                     entity,
                     rigid_body,
                     collider,
+                    local_transform,
                     transform,
+                    ecs_parent: entity_ref.get::<Parent>().map(|parent| parent.0),
                     joint: joints.into_iter().flatten().next(),
+                    legacy_motor,
                 });
             }
         }
@@ -263,6 +319,7 @@ fn validate_joint_graph(bodies: &[BodyInput], world: &World) -> Result<(), Compi
         }
         validate_joint(body, joint)?;
         validate_actuation(world, body.entity, joint)?;
+        validate_legacy_motor(body, joint)?;
 
         let mut cursor = parent;
         for _ in 0..bodies.len() {
@@ -281,6 +338,34 @@ fn validate_joint_graph(bodies: &[BodyInput], world: &World) -> Result<(), Compi
         }
     }
     Ok(())
+}
+
+fn validate_legacy_motor(body: &BodyInput, joint: JointSpec) -> Result<(), CompileError> {
+    let Some(motor) = body.legacy_motor else {
+        return Ok(());
+    };
+    if matches!(joint, JointSpec::Fixed(_)) {
+        return Err(CompileError::InvalidActuation {
+            entity_index: body.entity.index(),
+            reason: "legacy JointMotor cannot actuate a fixed joint",
+        });
+    }
+    if motor.velocity_rad_s.is_finite()
+        && motor.gain.is_finite()
+        && motor.stiffness.is_finite()
+        && motor.target_position.is_finite()
+        && motor.max_force.is_finite()
+        && motor.gain >= 0.0
+        && motor.stiffness >= 0.0
+        && motor.max_force >= 0.0
+    {
+        Ok(())
+    } else {
+        Err(CompileError::InvalidActuation {
+            entity_index: body.entity.index(),
+            reason: "legacy JointMotor value, gain, or limit",
+        })
+    }
 }
 
 fn validate_joint(child: &BodyInput, joint: JointSpec) -> Result<(), CompileError> {
@@ -373,7 +458,15 @@ fn write_body(
                 Transform3::IDENTITY
             }
         },
-        |parent| relative_transform(parent.transform, body.transform),
+        |parent| {
+            if matches!(body.joint, Some(JointSpec::Fixed(_)))
+                && body.ecs_parent == Some(parent.entity)
+            {
+                body.local_transform
+            } else {
+                relative_transform(parent.transform, body.transform)
+            }
+        },
     );
     writeln!(
         output,
@@ -384,7 +477,11 @@ fn write_body(
     .expect("writing to String cannot fail");
 
     let joint = write_joint(output, body, structural_transform, depth + 1, actuators);
-    write_geom(output, index, body.rigid_body, body.collider, depth + 1);
+    if let Some(collider) = body.collider {
+        write_geom(output, index, body.rigid_body, collider, depth + 1);
+    } else {
+        write_inertial(output, body.rigid_body, depth + 1);
+    }
     bindings.push(BodyBinding {
         entity: body.entity,
         body_name,
@@ -447,6 +544,7 @@ fn write_joint(
                 vector(axis_child)
             )
             .expect("writing to String cannot fail");
+            write_legacy_damping(output, body, true);
             write_range(output, desc.lower_rad, desc.upper_rad);
             output.push_str("/>\n");
             actuators.push(format!(
@@ -466,6 +564,7 @@ fn write_joint(
                 vector(axis_child)
             )
             .expect("writing to String cannot fail");
+            write_legacy_damping(output, body, false);
             write_range(output, desc.lower_m, desc.upper_m);
             output.push_str("/>\n");
             actuators.push(format!(
@@ -477,6 +576,22 @@ fn write_joint(
             }
         }
     }
+}
+
+fn legacy_passive_damping(body: BodyInput) -> Option<f64> {
+    match (body.joint, body.legacy_motor) {
+        (Some(JointSpec::Revolute(_)), Some(motor)) => Some(legacy_motor_gains(motor, true).1),
+        (Some(JointSpec::Prismatic(_)), Some(motor)) => Some(legacy_motor_gains(motor, false).1),
+        _ => None,
+    }
+}
+
+fn write_legacy_damping(output: &mut String, body: BodyInput, revolute: bool) {
+    let Some(motor) = body.legacy_motor else {
+        return;
+    };
+    let damping = legacy_motor_gains(motor, revolute).1;
+    write!(output, " damping=\"{damping:.17}\"").expect("writing to String cannot fail");
 }
 
 fn write_range(output: &mut String, lower: Option<f64>, upper: Option<f64>) {
@@ -500,7 +615,7 @@ fn relative_transform(parent: Transform3, child: Transform3) -> Transform3 {
 fn validate_body(
     entity: Entity,
     rigid_body: RigidBody,
-    collider: Collider,
+    collider: Option<Collider>,
     transform: Transform3,
 ) -> Result<(), CompileError> {
     let entity_index = entity.index();
@@ -526,6 +641,9 @@ fn validate_body(
         "angular_velocity_rad_s",
         rigid_body.angular_velocity_rad_s,
     )?;
+    let Some(collider) = collider else {
+        return Ok(());
+    };
     validate_vec3(
         entity_index,
         "collider local translation_m",
@@ -615,6 +733,21 @@ fn write_geom(
         quaternion(rotation),
         rigid_body.mass_kg,
         collider.material.friction,
+    )
+    .expect("writing to String cannot fail");
+}
+
+fn write_inertial(output: &mut String, rigid_body: RigidBody, depth: usize) {
+    // RNE's compact rigid-body contract does not expose an inertia tensor.
+    // Colliderless URDF links still need positive inertia in MuJoCo, so use a
+    // small isotropic tensor derived solely from their declared mass. This is
+    // a backend-private representation detail, not a new public physics type.
+    let inertia_kg_m2 = (rigid_body.mass_kg * 1.0e-2).max(1.0e-9);
+    let indent = "  ".repeat(depth);
+    writeln!(
+        output,
+        "{indent}<inertial pos=\"0 0 0\" mass=\"{:.17}\" diaginertia=\"{:.17} {:.17} {:.17}\"/>",
+        rigid_body.mass_kg, inertia_kg_m2, inertia_kg_m2, inertia_kg_m2,
     )
     .expect("writing to String cannot fail");
 }
@@ -754,6 +887,40 @@ mod tests {
     }
 
     #[test]
+    fn legacy_motor_damping_is_native_dynamics_not_body_topology() {
+        let mut world = World::new();
+        let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
+        let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
+        world.entity_mut(child).insert((
+            RevoluteJointDesc {
+                parent: root,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointMotor {
+                gain: 60.0,
+                stiffness: 400.0,
+                ..JointMotor::default()
+            },
+        ));
+
+        let first =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert!(first.mjcf.contains("damping=\"20.00000000000000000\""));
+        assert_eq!(first.joint_dynamics.len(), 1);
+
+        world.get_mut::<JointMotor>(child).unwrap().gain = 10.0;
+        let changed =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert_eq!(first.topology, changed.topology);
+        assert_ne!(first.joint_dynamics, changed.joint_dynamics);
+        assert!(changed.mjcf.contains("damping=\"10.00000000000000000\""));
+    }
+
+    #[test]
     fn compiles_revolute_and_prismatic_tree_with_actuators() {
         let mut world = World::new();
         let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
@@ -797,6 +964,7 @@ mod tests {
             compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
         assert!(compiled.mjcf.contains("type=\"hinge\""));
         assert!(compiled.mjcf.contains("type=\"slide\""));
+        assert!(compiled.mjcf.contains("integrator=\"implicitfast\""));
         assert!(compiled.mjcf.contains("<actuator>"));
         assert!(compiled.mjcf.contains("rne_actuator_1"));
         assert!(compiled.mjcf.contains("rne_actuator_2"));
@@ -808,6 +976,34 @@ mod tests {
             compiled.bindings[2].joint,
             JointBinding::Prismatic { .. }
         ));
+    }
+
+    #[test]
+    fn colliderless_articulated_link_compiles_with_backend_private_inertia() {
+        let mut world = World::new();
+        let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
+        let child = body(
+            &mut world,
+            "visual_only_wheel",
+            RigidBodyType::Dynamic,
+            -Vec3::Y,
+        );
+        world.entity_mut(child).remove::<Collider>();
+        world.entity_mut(child).insert(RevoluteJointDesc {
+            parent: root,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::Y,
+            lower_rad: None,
+            upper_rad: None,
+        });
+
+        let compiled = compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666)
+            .expect("colliderless articulated link");
+        assert!(compiled
+            .mjcf
+            .contains("<inertial pos=\"0 0 0\" mass=\"2.00000000000000000\""));
+        assert!(!compiled.mjcf.contains("rne_geom_1"));
     }
 
     #[test]

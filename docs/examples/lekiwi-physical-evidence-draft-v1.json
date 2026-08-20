@@ -1,0 +1,151 @@
+{
+  "kind": "rne_lekiwi_physical_evidence_manifest",
+  "schema_version": 1,
+  "run_id": "REPLACE_RUN_ID",
+  "rne_commit": "0000000000000000000000000000000000000000",
+  "upstream_revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+  "inventory": {
+    "device_id": "rne.lekiwi_so101.physical.v1:REPLACE_ROBOT_ID",
+    "robot_id": "REPLACE_ROBOT_ID",
+    "base_controller_id": "REPLACE_BASE_CONTROLLER_ID",
+    "arm_bus_id": "REPLACE_ARM_BUS_ID",
+    "front_camera_id": "REPLACE_FRONT_CAMERA_ID",
+    "wrist_camera_id": "REPLACE_WRIST_CAMERA_ID",
+    "os_image": "REPLACE_OS_IMAGE",
+    "python_version": "REPLACE_PYTHON_VERSION",
+    "calibration": {
+      "kind": "lerobot_lekiwi_calibration",
+      "schema_version": 1,
+      "path": "inventory/calibration.json",
+      "sha256": ""
+    }
+  },
+  "operators": [
+    {
+      "operator_id": "REPLACE_PRIMARY_OPERATOR",
+      "role": "primary"
+    },
+    {
+      "operator_id": "REPLACE_SAFETY_OPERATOR",
+      "role": "physical_cutoff_and_observer"
+    }
+  ],
+  "power_isolation": {
+    "primary_operator_id": "REPLACE_PRIMARY_OPERATOR",
+    "safety_operator_id": "REPLACE_SAFETY_OPERATOR",
+    "tested": false,
+    "diagnostic": {
+      "kind": "rne_lekiwi_power_isolation_diagnostic",
+      "schema_version": 1,
+      "path": "diagnostics/power-isolation.json",
+      "sha256": ""
+    }
+  },
+  "host_termination": {
+    "observer_operator_id": "REPLACE_SAFETY_OPERATOR",
+    "terminated_session_id": "REPLACE_TERMINATED_SESSION_ID",
+    "safe_stop_observed": false,
+    "stop_latency_ms": 0,
+    "measurement_uncertainty_ms": 0,
+    "diagnostic": {
+      "kind": "rne_lekiwi_host_termination_diagnostic",
+      "schema_version": 1,
+      "path": "diagnostics/host-termination.json",
+      "sha256": ""
+    }
+  },
+  "clean_host_checkout": false,
+  "artifacts": {
+    "task_spec": {
+      "kind": "rne_task_spec",
+      "schema_version": 1,
+      "path": "contracts/lekiwi.task.json",
+      "sha256": ""
+    },
+    "reference_profile": {
+      "kind": "rne_hardware_reference_profile",
+      "schema_version": 1,
+      "path": "contracts/lekiwi-profile.json",
+      "sha256": ""
+    },
+    "elevated_shadow_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/elevated-shadow.json",
+      "sha256": ""
+    },
+    "elevated_shadow_comparison": {
+      "kind": "rne_hardware_shadow_comparison",
+      "schema_version": 1,
+      "path": "reports/elevated-shadow-comparison.json",
+      "sha256": ""
+    },
+    "command_deadline_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/command-deadline.json",
+      "sha256": ""
+    },
+    "device_watchdog_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/device-watchdog.json",
+      "sha256": ""
+    },
+    "actuator_limit_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/actuator-limit.json",
+      "sha256": ""
+    },
+    "emergency_stop_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/emergency-stop.json",
+      "sha256": ""
+    },
+    "reconnect_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/reconnect.json",
+      "sha256": ""
+    },
+    "low_speed_live_success_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/low-speed-live-success.json",
+      "sha256": ""
+    },
+    "low_speed_live_failure_session": {
+      "kind": "rne_lekiwi_reference_session",
+      "schema_version": 1,
+      "path": "sessions/low-speed-live-failure.json",
+      "sha256": ""
+    },
+    "camera_dataset_manifest": {
+      "kind": "rne_dataset_bundle_manifest",
+      "schema_version": 1,
+      "path": "dataset/manifest.json",
+      "sha256": ""
+    },
+    "camera_offline_evaluation": {
+      "kind": "rne_dataset_depth_pair_evaluation",
+      "schema_version": 1,
+      "path": "dataset/offline-evaluation.json",
+      "sha256": ""
+    },
+    "failure_capsule_manifest": {
+      "kind": "rne_failure_capsule",
+      "schema_version": 1,
+      "path": "capsule/capsule.json",
+      "sha256": ""
+    },
+    "clean_host_reproduction": {
+      "kind": "rne_lekiwi_clean_host_reproduction",
+      "schema_version": 1,
+      "path": "diagnostics/clean-host.txt",
+      "sha256": ""
+    }
+  },
+  "content_sha256": ""
+}

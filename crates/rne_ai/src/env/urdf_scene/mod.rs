@@ -54,7 +54,8 @@ pub use unitree_g1_gait::{
     UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
 };
 pub use unitree_g1_gait_episode::{
-    UnitreeG1GaitAction, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
+    unitree_g1_gait_task_spec, UnitreeG1GaitAction, UnitreeG1GaitEpisode,
+    UnitreeG1GaitEpisodeConfig, UnitreeG1GaitObservation,
 };
 pub use unitree_g1_inspection::unitree_g1_inspection_targets;
 pub use unitree_g1_inspection_episode::{
@@ -1651,9 +1652,7 @@ fn find_entity_by_name(world: &World, name: &str) -> Option<Entity> {
 }
 
 fn assets_scene_path(file_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes")
-        .join(file_name)
+    crate::asset_path::bundled_asset_path(Path::new("scenes").join(file_name))
 }
 
 /// Built-in SO-101 scene path.

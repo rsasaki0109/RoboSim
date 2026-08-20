@@ -5,10 +5,22 @@ release_version = "0.1.0"
 minimum = 2
 current = 3
 controller_schema = 1
+conformance_report = 1
+authoring_sdk = 1
+c_layout = 1
+scaffold_minimum = 1
+scaffold_current = 1
 
 [frontend_transport]
 major = 1
 minor = 0
+
+[python]
+api_contract = 1
+api_report = 1
+
+[rust]
+public_api_baseline = 1
 
 [assets]
 run_manifest = 1
@@ -29,6 +41,7 @@ behavior_failure_case = 1
 snapshot = 1
 backend_manifest = 2
 conformance_report = 2
+external_conformance_report = 1
 tolerance_registry = 1
 
 [determinism]
@@ -37,12 +50,21 @@ contract = 1
 [tasks]
 task_spec = 1
 batch_checkpoint = 2
+vectorized_episode_checkpoint = 1
+
+[snapshots]
+mobile_manipulator_minimum = 1
+mobile_manipulator_current = 3
+mobile_manipulator_migration = 2
 
 [accelerators]
 manifest = 1
 protocol = 1
 capability_report = 1
 conformance_report = 1
+process_conformance_report = 1
+scaffold_minimum = 1
+scaffold_current = 1
 runtime_contract = 1
 scale_report = 1
 
@@ -50,14 +72,39 @@ scale_report = 1
 bundle = 1
 payload = 1
 offline_evaluation = 1
+renderer_capture_report = 1
+
+[hardware]
+gateway_evidence = 1
+wire_protocol = 1
+wire_trace = 1
+session_evidence = 1
+shadow_comparison = 1
+mock_conformance = 1
+adapter_conformance = 1
+reference_profile = 1
+lekiwi_device_bridge = 1
+lekiwi_reference_session = 1
+lekiwi_physical_evidence = 1
+lekiwi_power_isolation_diagnostic = 1
+lekiwi_host_termination_diagnostic = 1
 
 [evidence]
 fuzz_smoke_report = 1
 release_report = 1
-install_rehearsal_report = 1
+install_rehearsal_report = 5
+archive_install_rehearsal_report = 1
 final_exit_report = 1
+one_zero_readiness_report = 1
+one_zero_readiness_manifest = 4
+github_attestation_verification = 1
+compatibility_fixture_report = 1
+historical_compatibility_decision = 1
+artifact_attestation_policy = 1
 capability_report = 1
 benchmark_report = 1
 task_scale_report = 1
 failure_capsule = 1
 evidence_manifest = 1
+flagship_workflow_report = 1
+flagship_cross_backend_report = 1

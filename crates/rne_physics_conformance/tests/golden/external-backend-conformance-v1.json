@@ -1,0 +1,171 @@
+{
+  "kind": "rne_external_physics_backend_conformance_report",
+  "schema_version": 1,
+  "catalog_version": 1,
+  "tolerance_registry_version": 1,
+  "subject": {
+    "label": "reference-external-backend-source.tar.zst",
+    "sha256": "sha256:61ff506e88ae5bec62c03b23d22bf13be83e21990c8c50bd9488055bf007f4e0"
+  },
+  "manifest_sha256": "sha256:99cc6aa5dea521fb9b43dbd1b475e4578e527765c1784a38165d80e607dde723",
+  "manifest": {
+    "schema_version": 2,
+    "backend_id": "reference_external_backend",
+    "adapter_version": "0.1.0",
+    "engine_id": "independent_ballistic_engine",
+    "engine_version": "1",
+    "capabilities": [
+      "rigid_body",
+      "deterministic_step",
+      "kinematic_body"
+    ],
+    "repeatability": "same_runtime_exact"
+  },
+  "runtime_capabilities": [
+    "rigid_body",
+    "deterministic_step",
+    "kinematic_body"
+  ],
+  "covered_capabilities": [
+    "rigid_body",
+    "deterministic_step",
+    "kinematic_body"
+  ],
+  "checks": [
+    {
+      "id": "manifest_identity",
+      "capability": null,
+      "status": "passed",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "manifest and runtime capability declarations match"
+    },
+    {
+      "id": "rigid_body.free_fall",
+      "capability": "rigid_body",
+      "status": "passed",
+      "snapshot_hash": 16928331619681826849,
+      "metrics": [
+        {
+          "id": "position_y_m",
+          "unit": "m",
+          "measured": 0.013250398939986585,
+          "expected": 0.09500039239999225,
+          "absolute_error": 0.08174999346000567,
+          "tolerance": {
+            "id": "external_free_fall_position_m_v1",
+            "absolute": 0.1,
+            "relative": 0.0,
+            "allowed_error": 0.1,
+            "rationale": "common explicit, semi-implicit, and production solver integration conventions differ by at most one bounded O(dt) term"
+          },
+          "passed": true
+        },
+        {
+          "id": "velocity_y_m_s",
+          "unit": "m/s",
+          "measured": -9.80999960760001,
+          "expected": -9.81,
+          "absolute_error": 3.9239998983475743e-7,
+          "tolerance": {
+            "id": "external_free_fall_velocity_m_s_v1",
+            "absolute": 0.001,
+            "relative": 0.0,
+            "allowed_error": 0.001,
+            "rationale": "constant acceleration permits only numeric pipeline rounding after one second"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "shared 60 Hz free-fall vector"
+    },
+    {
+      "id": "articulation.revolute_limit",
+      "capability": "articulation",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "gpu_rigid_body.catalog_unsupported",
+      "capability": "gpu_rigid_body",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "deterministic_step.repeat_snapshot",
+      "capability": "deterministic_step",
+      "status": "passed",
+      "snapshot_hash": 13396057057586800601,
+      "metrics": [],
+      "detail": "two fresh executions produced identical canonical snapshots"
+    },
+    {
+      "id": "soft_body.catalog_unsupported",
+      "capability": "soft_body",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "contact_force.resting_impulse",
+      "capability": "contact_force",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "raycast_batch.ordered_hits",
+      "capability": "raycast_batch",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "kinematic_body.external_pose",
+      "capability": "kinematic_body",
+      "status": "passed",
+      "snapshot_hash": 14217145254463747888,
+      "metrics": [
+        {
+          "id": "translation_error_m",
+          "unit": "m",
+          "measured": 0.0,
+          "expected": 0.0,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "external_kinematic_translation_m_v1",
+            "absolute": 1e-6,
+            "relative": 0.0,
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied translation permits only f32 conversion rounding"
+          },
+          "passed": true
+        },
+        {
+          "id": "rotation_error_rad",
+          "unit": "rad",
+          "measured": 2.9802322387695312e-8,
+          "expected": 0.0,
+          "absolute_error": 2.9802322387695312e-8,
+          "tolerance": {
+            "id": "external_kinematic_rotation_rad_v1",
+            "absolute": 1e-6,
+            "relative": 0.0,
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied rotation permits only normalized f32 conversion rounding"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "externally supplied pose remains authoritative across a fixed step"
+    }
+  ],
+  "passed": true
+}

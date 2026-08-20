@@ -1,0 +1,118 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.lekiwi_so101.base_shadow.v1",
+  "control_step_s": 0.03333333333333333,
+  "observation": {
+    "tensors": [
+      {
+        "name": "arm_joint_position_rad",
+        "dtype": "f64",
+        "shape": [
+          5
+        ],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "gripper_position_pct",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "pct",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [
+            0.0
+          ],
+          "upper": [
+            100.0
+          ]
+        }
+      },
+      {
+        "name": "base_linear_velocity_m_s",
+        "dtype": "f64",
+        "shape": [
+          2
+        ],
+        "unit": "m/s",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "base_angular_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": null
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "base_linear_velocity_m_s",
+        "dtype": "f64",
+        "shape": [
+          2
+        ],
+        "unit": "m/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [
+            -0.1
+          ],
+          "upper": [
+            0.1
+          ]
+        }
+      },
+      {
+        "name": "base_angular_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [
+            -0.5235987755982988
+          ],
+          "upper": [
+            0.5235987755982988
+          ]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "shadow_tracking_error",
+        "weight": -1.0,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "operator_complete",
+        "kind": "success"
+      },
+      {
+        "name": "safety_trip",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 1800
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": false
+  },
+  "curriculum": null,
+  "randomization": null
+}

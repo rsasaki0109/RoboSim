@@ -166,7 +166,7 @@ pub fn diff_drive_goal_task_spec(
     reward: DiffDriveRewardConfig,
 ) -> TaskSpec {
     TaskSpec::new(
-        "rne.diff_drive.goal.v1",
+        "rne.diff_drive.sensor_goal.v1",
         1.0 / 60.0,
         ObservationSpec::new(vec![
             TensorSpec::new("base_position_m", TensorDType::F64, vec![3], "m"),

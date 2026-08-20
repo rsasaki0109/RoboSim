@@ -11,10 +11,16 @@ use image::{Delay, Frame as GifFrame, RgbaImage};
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
     build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets,
-    UnitreeG1GaitCommand, UrdfSceneSim,
+    unitree_g1_gait_task_spec, UnitreeG1GaitCommand, UrdfSceneSim,
 };
 use rne_core::{SimDuration, SimTime};
-use rne_data::{DataBus, Frame, ImageDepth, ImageRgb8, InMemoryDataBus, StreamId};
+use rne_data::{
+    DataBus, DatasetAsset, DatasetBundle, DatasetBundleWriter, DatasetCalibration,
+    DatasetFieldSpec, DatasetGapPolicy, DatasetLatencyModel, DatasetLatencySpec, DatasetManifest,
+    DatasetNoiseSpec, DatasetStreamKind, DatasetStreamSpec, DatasetTimingSpec, Frame, ImageDepth,
+    ImageRgb8, InMemoryDataBus, RendererDatasetCaptureReport, StreamId,
+    RENDERER_DATASET_CAPTURE_REPORT_KIND, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
+};
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Transform3, Vec3};
 use rne_physics::{PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId};
@@ -30,8 +36,11 @@ use rne_sensor::{
     SensorState, CAMERA_DEPTH_STREAM_OFFSET,
 };
 use rne_world::Transform3 as WorldTransform3;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::error::Error;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -45,6 +54,9 @@ const CAMERA_STREAM_ID: u64 = 7101;
 const CAMERA_FRAME_ID: u32 = 7101;
 const SETTLE_STEPS: u64 = 240;
 const G1_MESH_MINIMUM: usize = 20;
+const RGB_STREAM: StreamId = StreamId::new(CAMERA_STREAM_ID);
+const DEPTH_STREAM: StreamId = StreamId::new(CAMERA_STREAM_ID + CAMERA_DEPTH_STREAM_OFFSET);
+const RENDERER_CONTRACT: &[u8] = b"{\n  \"kind\": \"rne_renderer_capture_contract\",\n  \"schema_version\": 1,\n  \"backend\": \"rne_render_wgpu\",\n  \"capture_mode\": \"offscreen_rgbd\"\n}\n";
 const WALK_COMMAND: UnitreeG1GaitCommand = UnitreeG1GaitCommand {
     stride_rad: 0.065,
     foot_lift_rad: 0.12,
@@ -150,23 +162,37 @@ impl CameraRig {
     }
 }
 
-fn main() {
-    if std::env::args().any(|argument| argument == "--smoke")
-        || std::env::var_os("RNE_SKIP_GPU").is_some()
-    {
+fn main() -> Result<(), Box<dyn Error>> {
+    let (smoke, require_renderer, dataset_path) = parse_args()?;
+    if smoke && dataset_path.is_some() {
+        return Err(io::Error::other("--dataset requires the WGPU capture path").into());
+    }
+    if smoke || (std::env::var_os("RNE_SKIP_GPU").is_some() && !require_renderer) {
         run_smoke();
-        return;
+        return Ok(());
+    }
+    if std::env::var_os("RNE_SKIP_GPU").is_some() {
+        return Err(io::Error::other("WGPU capture required but RNE_SKIP_GPU is set").into());
     }
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    if dataset_path.is_some() {
+        validate_renderer_evidence_inputs(&repo_root)?;
+    }
     let floor = load_floor_textures(&repo_root);
     let industrial_prop = load_industrial_prop(&repo_root);
     let mut sim = load_and_settle_g1();
     let mut backend = match WgpuRenderBackend::new() {
         Ok(backend) => backend,
         Err(error) => {
+            if require_renderer || dataset_path.is_some() {
+                return Err(io::Error::other(format!(
+                    "required WGPU renderer is unavailable: {error}"
+                ))
+                .into());
+            }
             eprintln!("wgpu unavailable; G1 RGB-D smoke passed: {error}");
-            return;
+            return Ok(());
         }
     };
     configure_environment(&mut backend, &repo_root);
@@ -178,6 +204,10 @@ fn main() {
     let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
     let output_dir = target_dir(&repo_root).join("rne-g1-rgbd-sensor");
     fs::create_dir_all(&output_dir).expect("create G1 RGB-D output directory");
+    let mut dataset_writer = dataset_path
+        .as_ref()
+        .map(|path| create_renderer_dataset(path, &repo_root))
+        .transpose()?;
     let mut gif_frames = Vec::with_capacity(FRAME_COUNT);
     let mut manifest = String::from(
         "frame,capture_ticks,available_ticks,rgb_hash,depth_hash,min_depth_m,center_depth_m\n",
@@ -195,6 +225,14 @@ fn main() {
             Some(&scene),
         );
         validate_capture(&capture);
+        if let Some(writer) = dataset_writer.as_mut() {
+            let mut rgb = capture.rgb.clone();
+            let mut depth = capture.depth.clone();
+            rgb.sequence = frame_index as u64;
+            depth.sequence = frame_index as u64;
+            writer.write_image_rgb8(&rgb)?;
+            writer.write_image_depth(&depth)?;
+        }
         let rgb_hash = hash_rgba8(&capture.rgb.payload.rgba8);
         let depth_hash = hash_depth_f32(&capture.depth.payload.depth_m);
         let min_depth_m = capture.depth.payload.min_depth_m();
@@ -227,7 +265,358 @@ fn main() {
     )
     .expect("write RGB sensor GIF");
     fs::write(output_dir.join("manifest.csv"), manifest).expect("write RGB-D manifest");
+    if let (Some(writer), Some(dataset_path)) = (dataset_writer, dataset_path.as_ref()) {
+        writer.finish()?;
+        let bundle = DatasetBundle::open(dataset_path)?;
+        let verification = bundle.verify()?;
+        let task_bytes = fs::read(dataset_path.join("task-spec.json"))?;
+        let task_digest = sha256(&task_bytes);
+        if task_digest != bundle.manifest().task_spec_sha256 {
+            return Err(io::Error::other("renderer dataset TaskSpec digest mismatch").into());
+        }
+        let report = RendererDatasetCaptureReport {
+            kind: RENDERER_DATASET_CAPTURE_REPORT_KIND.to_string(),
+            schema_version: RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            renderer: "rne_render_wgpu".to_string(),
+            dataset_manifest_sha256: bundle.manifest().content_sha256.clone(),
+            task_spec_sha256: task_digest,
+            stream_count: verification.stream_count,
+            record_count: verification.record_count,
+            sample_count: verification.sample_count,
+            frame_count: FRAME_COUNT,
+        };
+        report.validate_against(&bundle.manifest().content_sha256, &verification)?;
+        let mut report_bytes = serde_json::to_vec_pretty(&report)?;
+        report_bytes.push(b'\n');
+        fs::write(
+            dataset_path.join("renderer-capture-report.json"),
+            report_bytes,
+        )?;
+        println!(
+            "verified WGPU dataset: manifest={} records={} path={}",
+            bundle.manifest().content_sha256,
+            verification.record_count,
+            dataset_path.display()
+        );
+    }
     println!("rendered G1 RGB-D sensor media to {}", output_dir.display());
+    Ok(())
+}
+
+fn parse_args() -> Result<(bool, bool, Option<PathBuf>), Box<dyn Error>> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<(bool, bool, Option<PathBuf>), Box<dyn Error>> {
+    let mut smoke = false;
+    let mut require_renderer = false;
+    let mut dataset_path = None;
+    let mut args = arguments.into_iter();
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--smoke" if !smoke => smoke = true,
+            "--require-renderer" if !require_renderer => require_renderer = true,
+            "--dataset" if dataset_path.is_none() => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("--dataset requires a path"))?;
+                dataset_path = Some(PathBuf::from(path));
+            }
+            "--smoke" | "--require-renderer" | "--dataset" => {
+                return Err(io::Error::other(format!("duplicate argument: {argument}")).into());
+            }
+            _ => return Err(io::Error::other(format!("unknown argument: {argument}")).into()),
+        }
+    }
+    Ok((smoke, require_renderer, dataset_path))
+}
+
+fn create_renderer_dataset(
+    path: &Path,
+    repo_root: &Path,
+) -> Result<DatasetBundleWriter, Box<dyn Error>> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let task = unitree_g1_gait_task_spec((FRAME_COUNT as u64) * STEPS_PER_FRAME);
+    task.validate()?;
+    let mut task_bytes = serde_json::to_vec_pretty(&task)?;
+    task_bytes.push(b'\n');
+    let task_digest = sha256(&task_bytes);
+    let mut manifest = DatasetManifest::new(
+        "rne-unitree-g1-wgpu-rgbd-v1",
+        task_digest.clone(),
+        SimDuration::from_hertz(Hertz::new(60.0)).ticks(),
+        0,
+        renderer_stream_specs(),
+    );
+    manifest.assets = vec![
+        DatasetAsset {
+            role: "renderer_contract".into(),
+            path: "renderer-contract.json".into(),
+            sha256: sha256(RENDERER_CONTRACT),
+        },
+        DatasetAsset {
+            role: "task_spec".into(),
+            path: "task-spec.json".into(),
+            sha256: task_digest,
+        },
+    ];
+    manifest
+        .assets
+        .extend(renderer_workspace_assets(repo_root)?);
+    let writer = DatasetBundleWriter::create(path, manifest)?;
+    fs::write(path.join("task-spec.json"), task_bytes)?;
+    fs::write(path.join("renderer-contract.json"), RENDERER_CONTRACT)?;
+    Ok(writer)
+}
+
+fn validate_renderer_evidence_inputs(repo_root: &Path) -> Result<(), Box<dyn Error>> {
+    for variable in [
+        "RNE_HDRI_PATH",
+        "RNE_DISABLE_BUNDLED_INDUSTRIAL_ENVIRONMENT",
+        "RNE_DISABLE_INDUSTRIAL_ASSETS",
+    ] {
+        if std::env::var_os(variable).is_some() {
+            return Err(io::Error::other(format!(
+                "renderer dataset evidence rejects environment override {variable}"
+            ))
+            .into());
+        }
+    }
+    for relative in [
+        "assets/scenes/unitree_g1_dynamic.rne.scene.toml",
+        "assets/robots/unitree_g1_dynamic.rne.robot.toml",
+        "assets/robots/g1_description",
+        "assets/environments/polyhaven_machine_shop_01",
+        "examples/63_g1_stride_gif/assets/photoreal_test_bay",
+    ] {
+        if !repo_root.join(relative).exists() {
+            return Err(
+                io::Error::other(format!("renderer dataset input is missing: {relative}")).into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn renderer_workspace_assets(repo_root: &Path) -> Result<Vec<DatasetAsset>, Box<dyn Error>> {
+    let mut sources = vec![
+        (
+            "scene",
+            repo_root.join("assets/scenes/unitree_g1_dynamic.rne.scene.toml"),
+        ),
+        (
+            "robot_model",
+            repo_root.join("assets/robots/unitree_g1_dynamic.rne.robot.toml"),
+        ),
+    ];
+    collect_regular_files(
+        "robot_source",
+        &repo_root.join("assets/robots/g1_description"),
+        &mut sources,
+    )?;
+    collect_regular_files(
+        "environment",
+        &repo_root.join("assets/environments/polyhaven_machine_shop_01"),
+        &mut sources,
+    )?;
+    collect_regular_files(
+        "renderer_texture",
+        &repo_root.join("examples/63_g1_stride_gif/assets/photoreal_test_bay"),
+        &mut sources,
+    )?;
+    sources.sort_by(|left, right| left.1.cmp(&right.1));
+    sources
+        .into_iter()
+        .map(|(role, source)| {
+            let relative = source
+                .strip_prefix(repo_root)
+                .map_err(io::Error::other)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            Ok(DatasetAsset {
+                role: role.into(),
+                path: relative,
+                sha256: sha256_file(&source)?,
+            })
+        })
+        .collect()
+}
+
+fn collect_regular_files<'a>(
+    role: &'a str,
+    directory: &Path,
+    output: &mut Vec<(&'a str, PathBuf)>,
+) -> io::Result<()> {
+    let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            return Err(io::Error::other(format!(
+                "renderer input must not be a symlink: {}",
+                entry.path().display()
+            )));
+        }
+        if file_type.is_dir() {
+            collect_regular_files(role, &entry.path(), output)?;
+        } else if file_type.is_file() {
+            output.push((role, entry.path()));
+        } else {
+            return Err(io::Error::other(format!(
+                "renderer input must be a regular file: {}",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn renderer_stream_specs() -> Vec<DatasetStreamSpec> {
+    let spec = camera_spec();
+    let calibration = DatasetCalibration {
+        model: "brown_conrady_pinhole.v1".into(),
+        reference_frame: "head_link".into(),
+        parameters: BTreeMap::from([
+            ("fov_y_rad".into(), spec.fov_y_rad),
+            ("height_px".into(), f64::from(spec.height)),
+            ("k1".into(), spec.distortion.k1),
+            ("k2".into(), spec.distortion.k2),
+            ("k3".into(), spec.distortion.k3),
+            ("p1".into(), spec.distortion.p1),
+            ("p2".into(), spec.distortion.p2),
+            ("readout_time_s".into(), spec.readout_time_s),
+            (
+                "rolling_shutter_bands".into(),
+                f64::from(spec.rolling_shutter_bands),
+            ),
+            ("width_px".into(), f64::from(spec.width)),
+        ]),
+    };
+    let timing = DatasetTimingSpec {
+        nominal_period_ticks: SimDuration::from_hertz(Hertz::new(CAMERA_RATE_HZ)).ticks(),
+        latency: DatasetLatencySpec {
+            model: DatasetLatencyModel::Fixed,
+            fixed_ticks: Some(CAMERA_LATENCY_TICKS),
+            max_ticks: CAMERA_LATENCY_TICKS,
+        },
+        gap_policy: DatasetGapPolicy::ExplicitRecords,
+    };
+    vec![
+        DatasetStreamSpec {
+            stream_id: RGB_STREAM,
+            name: "unitree_g1_head_rgb".into(),
+            kind: DatasetStreamKind::Rgb8,
+            payload_encoding: "rne.transport.image_rgb8.v1".into(),
+            source_entity: "unitree_g1_head_rgbd_camera".into(),
+            frame_id: "head_link".into(),
+            fields: vec![DatasetFieldSpec {
+                name: "rgba8".into(),
+                dtype: "u8[height,width,4]".into(),
+                unit: "1".into(),
+            }],
+            calibration: Some(calibration.clone()),
+            timing: timing.clone(),
+            noise: Some(DatasetNoiseSpec {
+                model: "rne.camera.rgb_physical.v1".into(),
+                seed: spec.seed,
+                parameters: BTreeMap::from([
+                    ("auto_exposure_max_ev".into(), spec.auto_exposure_max_ev),
+                    (
+                        "auto_exposure_target_luminance".into(),
+                        spec.auto_exposure_target_luminance,
+                    ),
+                    ("exposure_ev".into(), spec.exposure_ev),
+                    ("read_noise_stddev".into(), spec.read_noise_stddev),
+                    ("shot_noise_scale".into(), spec.shot_noise_scale),
+                    ("vignette_strength".into(), spec.vignette_strength),
+                ]),
+            }),
+        },
+        DatasetStreamSpec {
+            stream_id: DEPTH_STREAM,
+            name: "unitree_g1_head_depth".into(),
+            kind: DatasetStreamKind::DepthF32,
+            payload_encoding: "rne.transport.image_depth_f32.v1".into(),
+            source_entity: "unitree_g1_head_rgbd_camera".into(),
+            frame_id: "head_link".into(),
+            fields: vec![DatasetFieldSpec {
+                name: "depth_m".into(),
+                dtype: "f32[height,width]".into(),
+                unit: "m".into(),
+            }],
+            calibration: Some(calibration),
+            timing,
+            noise: Some(DatasetNoiseSpec {
+                model: "rne.camera.depth_geometry.v1".into(),
+                seed: spec.seed,
+                parameters: BTreeMap::new(),
+            }),
+        },
+    ]
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod dataset_tests {
+    use super::*;
+
+    #[test]
+    fn renderer_dataset_cli_is_explicit_and_fail_closed() {
+        let parsed = parse_args_from(
+            ["--dataset", "evidence/g1.rne-dataset", "--require-renderer"].map(str::to_string),
+        )
+        .unwrap();
+        assert!(!parsed.0);
+        assert!(parsed.1);
+        assert_eq!(parsed.2, Some(PathBuf::from("evidence/g1.rne-dataset")));
+        assert!(parse_args_from(["--dataset".to_string()]).is_err());
+        assert!(parse_args_from(["--smoke".to_string(), "--smoke".to_string()]).is_err());
+        assert!(parse_args_from(["evidence/g1.rne-dataset".to_string()]).is_err());
+    }
+
+    #[test]
+    fn renderer_dataset_streams_freeze_calibration_latency_and_noise() {
+        let streams = renderer_stream_specs();
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].stream_id, RGB_STREAM);
+        assert_eq!(streams[1].stream_id, DEPTH_STREAM);
+        for stream in streams {
+            assert_eq!(
+                stream.timing.latency.fixed_ticks,
+                Some(CAMERA_LATENCY_TICKS)
+            );
+            assert!(stream.calibration.is_some());
+            assert!(stream.noise.is_some());
+        }
+        unitree_g1_gait_task_spec((FRAME_COUNT as u64) * STEPS_PER_FRAME)
+            .validate()
+            .unwrap();
+    }
 }
 
 fn run_smoke() {

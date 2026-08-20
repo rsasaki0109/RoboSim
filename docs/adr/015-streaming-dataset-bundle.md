@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted for the v0.5 dataset contract. Initial depth-pair slice implemented
-on 2026-08-15; full reference capture coverage remains in progress.
+Accepted for the v0.5 dataset contract. The depth-pair evaluator and real
+diff-drive RGB-D/LiDAR reference capture were implemented on 2026-08-15;
+completed external Windows/Linux provenance remains in progress.
 
 ## Context
 
@@ -48,7 +49,9 @@ type enters core crates.
 Schema v1 uses one shard. RGB8, depth, and LiDAR reuse the three existing
 lossless sensor codecs; dataset-native v1 codecs cover IMU, planar transform,
 flat action, task outcome, and numeric ground-truth annotation. The complete
-run-stream shard has a frozen integration digest. Real scenario capture and
-seeded cross-platform reproduction evidence must be added without weakening
-the ordering, timing, gap, or digest rules. Self-hashes provide integrity, not
-authenticity; signed provenance belongs to the later ecosystem milestone.
+run-stream shard has a frozen integration digest. The v2 reference scenario
+also freezes RGB, paired sensor/ideal depth, a declared 5 mm depth bias, and
+recomputed offline metrics. Completed clean-run cross-platform provenance must
+be added without weakening the ordering, timing, gap, or digest rules.
+Self-hashes provide integrity, not authenticity; signed provenance belongs to
+the later ecosystem milestone.

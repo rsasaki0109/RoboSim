@@ -128,7 +128,7 @@ const ADVERTISED_CAPABILITIES: &[CapabilityDefinition] = &[
             },
             CapabilityEvidenceDefinition {
                 path: "tests/physics_conformance/src/lib.rs",
-                command: "cargo test --locked -p rne_physics_conformance",
+                command: "cargo test --locked -p rne_physics_conformance_suite",
             },
             CapabilityEvidenceDefinition {
                 path: "docs/PLAN_MUJOCO_SPIKE.md",

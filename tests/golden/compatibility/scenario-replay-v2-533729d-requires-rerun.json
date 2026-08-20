@@ -1,0 +1,54 @@
+{
+  "artifact_contract": "scenario_replay",
+  "current_schema_version": 4,
+  "expected_error": "unsupported scenario replay schema version: expected 4, got 2",
+  "expected_outcome": "rejected_requires_rerun",
+  "expected_replay_digest": null,
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [
+    "scenario_digest",
+    "network_digest",
+    "engine_version",
+    "result.result_digest",
+    "result.final_actors",
+    "result.action_evidence",
+    "result.unapplied_action_count",
+    "result.minimum_observed_gap_m",
+    "result.ownership"
+  ],
+  "reason_code": "missing_required_replay_evidence",
+  "schema_version": 1,
+  "source_artifact": {
+    "control_commands": [],
+    "executed_steps": 300,
+    "kind": "rne-scenario-replay",
+    "network_path": "assets/traffic/corridor.rne.traffic.json",
+    "options": {
+      "hz": 60.0,
+      "steps": 300
+    },
+    "replayable": true,
+    "result": {
+      "average_speed_m_s": 7.999999679999985,
+      "collisions": 0,
+      "final_positions_m": [
+        [
+          15.999998720000036,
+          0.0,
+          1.75
+        ]
+      ],
+      "route_length_m": 40.0,
+      "signal_violations": 0,
+      "stable_hash": 8877782128690619681,
+      "steps": 300
+    },
+    "scenario_path": "assets/scenarios/speed.xosc",
+    "schema_version": 2
+  },
+  "source_artifact_sha256": "sha256:98897446879eb9d890bda6779e0b3199c3192ccb2cdc83d576ca9b24060e665e",
+  "source_revision": "533729ddc78e53284eaa11d823afae18dcd110ab",
+  "source_schema_version": 2,
+  "source_tree": "b016841b2aed16bafc131f6a4698ee3b30cec34d",
+  "source_workspace_version": "0.13.0"
+}

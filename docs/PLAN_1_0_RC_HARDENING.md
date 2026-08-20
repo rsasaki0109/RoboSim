@@ -273,7 +273,7 @@ point at the tested commit.
 
 ## M6-E implementation evidence (2026-08-12)
 
-- `release/exit-matrix.toml` freezes exactly 13 CI jobs and the Linux/Windows
+- `release/exit-matrix.toml` freezes exactly 14 CI jobs and the Linux/Windows
   native rehearsal jobs, including their runner class, clean-checkout
   requirement, and exact command. Graph-building commands must use `--locked`.
   `xtask release-check` rejects drift

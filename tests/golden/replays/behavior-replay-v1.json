@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "kind": "rne_behavior_replay",
+  "engine_version": "0.1.0",
+  "contract_schema_version": 2,
+  "contract_digest": 3856499667522310414,
+  "scenario": "unitree_g1_dex3_invalid_tray",
+  "scenario_digest": 17631795063197885452,
+  "seed": 0,
+  "fixed_delta_ticks": 16666666,
+  "observation_numeric_tolerance": 1e-12,
+  "dimensions": [
+    {
+      "name": "part_offset_x_m",
+      "value": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "name": "part_offset_y_m",
+      "value": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "name": "part_offset_z_m",
+      "value": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "name": "tray_on_inactive_palm",
+      "value": true,
+      "baseline": false
+    }
+  ],
+  "contracts": [
+    {
+      "name": "no_inactive_hand_contact",
+      "kind": {
+        "type": "always"
+      },
+      "entities": [
+        "left_hand_palm_link",
+        "dex3_inspection_part",
+        "dex3_inspection_tray"
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "step": 0,
+      "sim_time_ticks": 0,
+      "action": "initial_observation",
+      "observation": {
+        "contact_center_error_m": 0.05860549507188074,
+        "contact_opposition": -0.3024381442240618,
+        "contact_span_m": 0.15954528661831854,
+        "dual_contact": false,
+        "grasp_attempt": 1,
+        "grasped": false,
+        "inactive_hand_workcell_contact": false,
+        "index_contact": false,
+        "lifted": false,
+        "max_part_height_m": 0.792719304561615,
+        "part_position_m": [
+          0.2889842391014099,
+          0.792719304561615,
+          0.16199153661727905
+        ],
+        "part_position_offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "part_speed_m_s": 0.00028447632734762435,
+        "phase": "approach",
+        "pinch_gap_m": 0.1240369272674563,
+        "place_distance_m": 0.13287099852536358,
+        "placed": false,
+        "stable_contact_steps": 0,
+        "thumb_contact": false,
+        "was_grasped": false,
+        "working_hand_tray_contact": false
+      },
+      "state_digest": 9958711512154682410
+    },
+    {
+      "step": 1,
+      "sim_time_ticks": 16666666,
+      "action": "advance",
+      "observation": {
+        "contact_center_error_m": 0.032457369580772326,
+        "contact_opposition": -0.7702230709217553,
+        "contact_span_m": 0.15944552304574647,
+        "dual_contact": false,
+        "grasp_attempt": 1,
+        "grasped": false,
+        "inactive_hand_workcell_contact": true,
+        "index_contact": false,
+        "lifted": false,
+        "max_part_height_m": 0.792719304561615,
+        "part_position_m": [
+          0.28897979855537415,
+          0.7926496863365173,
+          0.16198575496673584
+        ],
+        "part_position_offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "part_speed_m_s": 0.00028128561952755376,
+        "phase": "approach",
+        "pinch_gap_m": 0.12397550028281623,
+        "place_distance_m": 0.1328771350728543,
+        "placed": false,
+        "stable_contact_steps": 0,
+        "thumb_contact": false,
+        "was_grasped": false,
+        "working_hand_tray_contact": false
+      },
+      "state_digest": 3890490232753071165
+    }
+  ],
+  "failure": {
+    "contract": {
+      "name": "no_inactive_hand_contact",
+      "kind": {
+        "type": "always"
+      },
+      "entities": [
+        "left_hand_palm_link",
+        "dex3_inspection_part",
+        "dex3_inspection_tray"
+      ]
+    },
+    "violation": {
+      "step": 1,
+      "sim_time_ticks": 16666666,
+      "state_digest": 3890490232753071165,
+      "entities": [
+        "left_hand_palm_link",
+        "dex3_inspection_part",
+        "dex3_inspection_tray"
+      ],
+      "message": "predicate was false"
+    }
+  },
+  "minimization": {
+    "source_state_digest": 6320993358965574303,
+    "attempts": 3,
+    "active_dimensions_before": 3,
+    "active_dimensions_after": 1
+  }
+}

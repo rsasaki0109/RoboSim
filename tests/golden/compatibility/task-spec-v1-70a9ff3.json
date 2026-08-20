@@ -1,0 +1,134 @@
+{
+  "artifact_contract": "task_spec",
+  "current_schema_version": 1,
+  "expected_error": null,
+  "expected_outcome": "accepted_and_restored",
+  "expected_replay_digest": null,
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [],
+  "reason_code": "same_schema_validated_artifact",
+  "schema_version": 1,
+  "source_artifact": {
+    "action": {
+      "tensors": [
+        {
+          "bounds": {
+            "lower": [
+              -10.0
+            ],
+            "upper": [
+              10.0
+            ]
+          },
+          "dtype": "f64",
+          "layout": "row_major",
+          "name": "wheel_velocity_rad_s",
+          "shape": [
+            2
+          ],
+          "unit": "rad/s"
+        }
+      ]
+    },
+    "control_step_s": 0.02,
+    "curriculum": {
+      "stages": [
+        {
+          "name": "baseline",
+          "parameters": {
+            "goal_distance_m": {
+              "unit": "m",
+              "value": 1.0
+            }
+          },
+          "starts_at_episode": 0
+        }
+      ]
+    },
+    "kind": "rne_task_spec",
+    "observation": {
+      "tensors": [
+        {
+          "bounds": null,
+          "dtype": "f64",
+          "layout": "row_major",
+          "name": "base_position_m",
+          "shape": [
+            2
+          ],
+          "unit": "m"
+        },
+        {
+          "bounds": null,
+          "dtype": "f64",
+          "layout": "row_major",
+          "name": "base_yaw_rad",
+          "shape": [],
+          "unit": "rad"
+        },
+        {
+          "bounds": null,
+          "dtype": "f64",
+          "layout": "row_major",
+          "name": "target_position_m",
+          "shape": [
+            2
+          ],
+          "unit": "m"
+        }
+      ]
+    },
+    "randomization": {
+      "parameters": [
+        {
+          "distribution": {
+            "maximum": 3.141592653589793,
+            "minimum": -3.141592653589793,
+            "type": "uniform"
+          },
+          "name": "initial_yaw_rad",
+          "unit": "rad"
+        }
+      ]
+    },
+    "reset": {
+      "seed_strategy": "split_mix64_lane_episode_v1",
+      "supports_partial_reset": true
+    },
+    "reward": {
+      "aggregation": "weighted_sum",
+      "terms": [
+        {
+          "name": "goal_progress",
+          "unit": "1",
+          "weight": 1.0
+        },
+        {
+          "name": "action_effort",
+          "unit": "1",
+          "weight": -0.01
+        }
+      ]
+    },
+    "schema_version": 1,
+    "task_id": "rne.diff_drive.goal.v1",
+    "termination": {
+      "conditions": [
+        {
+          "kind": "success",
+          "name": "goal_reached"
+        },
+        {
+          "kind": "failure",
+          "name": "out_of_bounds"
+        }
+      ],
+      "max_episode_steps": 500
+    }
+  },
+  "source_artifact_sha256": "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
+  "source_revision": "70a9ff35afbf0215803dd288103bdda79fa46891",
+  "source_schema_version": 1,
+  "source_tree": "94459bcb0c5090921bf6edbcf6f63246ebdd6a40",
+  "source_workspace_version": "0.1.0"
+}

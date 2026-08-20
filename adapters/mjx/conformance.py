@@ -19,10 +19,13 @@ from rne_mjx_adapter.backend import (
 )
 from rne_mjx_adapter.protocol import (
     ADAPTER_ID,
+    BATCH_CHECKPOINT_SCHEMA_VERSION,
     CONFORMANCE_REPORT_KIND,
     CONFORMANCE_REPORT_SCHEMA_VERSION,
+    SUPPORTED_BATCH_WIDTHS,
     ProtocolError,
     canonical_json,
+    derive_episode_seed,
     load_json_fixture,
 )
 from rne_mjx_adapter.server import create_backend
@@ -195,6 +198,18 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ProtocolError("report_invalid", "unknown evidence class")
     if report["evidence_class"] == "contract_test" and report["backend_status"] != "test_only":
         raise ProtocolError("report_invalid", "contract-test evidence must use test_only backend")
+    if report["evidence_class"] == "accelerator" and report["backend_status"] != "available":
+        raise ProtocolError("report_invalid", "accelerator evidence must use available backend")
+    if (
+        report["root_seed"] != DEFAULT_ROOT_SEED
+        or isinstance(report["batch_width"], bool)
+        or report["batch_width"] not in SUPPORTED_BATCH_WIDTHS
+        or isinstance(report["steps"], bool)
+        or not isinstance(report["steps"], int)
+        or not 1 <= report["steps"] <= 1_000_000
+        or report["checkpoint_schema"] != BATCH_CHECKPOINT_SCHEMA_VERSION
+    ):
+        raise ProtocolError("report_invalid", "conformance execution identity mismatch")
     nested_fields = {
         "reference": {
             "backend_id",
@@ -216,6 +231,10 @@ def validate_report(report: Any) -> dict[str, Any]:
     for field, fields in nested_fields.items():
         if not isinstance(report[field], dict) or set(report[field]) != fields:
             raise ProtocolError("report_invalid", f"{field} fields do not match schema")
+    if report["actual"]["lane_zero_episode_seed"] != derive_episode_seed(
+        report["root_seed"], 0, 0
+    ):
+        raise ProtocolError("report_invalid", "lane-zero episode seed mismatch")
     if (
         report["reference"]["backend_id"] != "mujoco_cpu"
         or report["reference"]["case_id"] != "mujoco.rigid_body.free_fall"

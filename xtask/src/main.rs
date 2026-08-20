@@ -5,11 +5,17 @@ mod benchmark;
 mod capability_report;
 mod dataset;
 mod evidence;
+mod external_intake;
+#[path = "../../tools/rne_asset_cli/src/failure_capsule.rs"]
 mod failure_capsule;
+mod lekiwi_evidence;
+mod readiness_pack;
 mod release_artifacts;
 mod release_exit;
+mod release_readiness;
 mod task_scale;
 
+use anyhow::Context;
 use image::AnimationDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -18,7 +24,7 @@ use std::io::BufReader;
 use std::process::{Command, ExitCode, Stdio};
 use std::{
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -29,6 +35,13 @@ const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
 const CARGO_AUDIT_VERSION: &str = "0.22.2";
+const RUST_API_BASELINE_SCHEMA_VERSION: u32 = 1;
+const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
+const ARTIFACTS_DIR_ENV: &str = "RNE_ARTIFACTS_DIR";
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_adapter_ros2",
     "rne_ai",
@@ -37,14 +50,18 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_data",
     "rne_deformable",
     "rne_ecs",
+    "rne_hardware_gateway",
+    "rne_hardware_lekiwi",
     "rne_log",
     "rne_math",
     "rne_mjcf",
     "rne_openscenario",
     "rne_physics",
+    "rne_physics_conformance",
     "rne_physics_analytic",
     "rne_physics_rapier",
     "rne_plateau",
+    "rne_plugin_sdk",
     "rne_plugin",
     "rne_py",
     "rne_render",
@@ -100,10 +117,13 @@ fn run() -> anyhow::Result<()> {
         "hero-contact-sheet" => hero_contact_sheet(),
         "behavior-ci" => behavior_ci(&mut args),
         "behavior-replay" => behavior_replay(&mut args),
+        "flagship" => flagship(&mut args),
         "release-check" => release_check(&mut args),
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
+        "release-readiness" => release_readiness::release_readiness(&mut args),
+        "readiness-pack" => readiness_pack::run(&mut args),
         "capability-report" => capability_report::capability_report(&mut args),
         "benchmark" => benchmark::benchmark(&mut args),
         "task-scale" => task_scale::task_scale(&mut args),
@@ -113,7 +133,9 @@ fn run() -> anyhow::Result<()> {
         "dataset-check" => dataset::dataset_check(&mut args),
         "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
         "evidence" => evidence::evidence(&mut args),
+        "external-intake-check" => external_intake::run(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
+        "lekiwi-evidence" => lekiwi_evidence::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -136,6 +158,10 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     let metadata = cargo_metadata(&root)?;
     validate_release_metadata(&metadata)?;
     validate_public_docs(&metadata)?;
+    let rust_api_baseline: RustApiBaselineRegistry = toml::from_str(&fs::read_to_string(
+        root.join("release/rust-api-baseline.toml"),
+    )?)?;
+    validate_rust_api_baseline(&root, &metadata, &rust_api_baseline)?;
 
     let blocker_text = fs::read_to_string(root.join("release/blockers.toml"))?;
     let blocker_registry = blocker_text.parse::<toml::Value>()?;
@@ -143,7 +169,19 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     let contract_text = fs::read_to_string(root.join("release/contracts.toml"))?;
     let contract_registry = contract_text.parse::<toml::Value>()?;
     validate_contract_registry(&contract_registry)?;
+    let compatibility = rne_compatibility_suite::run_compatibility(
+        &root,
+        &root.join("release/compatibility-fixtures.toml"),
+    )?;
+    anyhow::ensure!(
+        compatibility.passed,
+        "one or more release compatibility fixtures failed"
+    );
+    rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
+    external_intake::validate_committed(&root)?;
+    release_readiness::validate_committed_manifest(&root)?;
+    release_readiness::enforce_release_promotion(&root)?;
 
     run_cargo_at(
         &root,
@@ -166,10 +204,192 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     run_cargo_owned_at(&root, &package_args, &[])?;
 
     println!(
-        "release metadata ok: version={RELEASE_VERSION} msrv={RELEASE_MSRV} public_packages={}",
-        PUBLIC_RELEASE_PACKAGES.len()
+        "release metadata ok: version={RELEASE_VERSION} msrv={RELEASE_MSRV} public_packages={} rust_api_baseline={}",
+        PUBLIC_RELEASE_PACKAGES.len(),
+        rust_api_baseline.baseline_revision
     );
     Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RustApiBaselineRegistry {
+    schema_version: u32,
+    release_version: String,
+    baseline_revision: String,
+    baseline_tree: String,
+    cargo_semver_checks_version: String,
+    package: Vec<RustApiBaselinePackage>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RustApiBaselinePackage {
+    name: String,
+    manifest_path: String,
+}
+
+fn validate_rust_api_baseline(
+    root: &Path,
+    metadata: &serde_json::Value,
+    registry: &RustApiBaselineRegistry,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        registry.schema_version == RUST_API_BASELINE_SCHEMA_VERSION,
+        "Rust API baseline schema must be {RUST_API_BASELINE_SCHEMA_VERSION}"
+    );
+    anyhow::ensure!(
+        registry.release_version == RELEASE_VERSION,
+        "Rust API baseline release must be {RELEASE_VERSION}"
+    );
+    anyhow::ensure!(
+        registry.cargo_semver_checks_version == CARGO_SEMVER_CHECKS_VERSION,
+        "Rust API baseline must pin cargo-semver-checks {CARGO_SEMVER_CHECKS_VERSION}"
+    );
+    for (field, value) in [
+        ("baseline_revision", registry.baseline_revision.as_str()),
+        ("baseline_tree", registry.baseline_tree.as_str()),
+    ] {
+        anyhow::ensure!(
+            is_lower_git_object_id(value),
+            "Rust API baseline {field} must be a 40-character lowercase Git object ID"
+        );
+    }
+    anyhow::ensure!(
+        registry.package.len() == PUBLIC_RELEASE_PACKAGES.len(),
+        "Rust API baseline package count changed: expected {}, got {}",
+        PUBLIC_RELEASE_PACKAGES.len(),
+        registry.package.len()
+    );
+
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata omitted packages"))?;
+    let mut names = BTreeSet::new();
+    let mut manifest_paths = BTreeSet::new();
+    for (entry, expected_name) in registry.package.iter().zip(PUBLIC_RELEASE_PACKAGES) {
+        anyhow::ensure!(
+            entry.name == *expected_name,
+            "Rust API baseline package order changed: expected {expected_name}, got {}",
+            entry.name
+        );
+        anyhow::ensure!(
+            names.insert(entry.name.as_str()),
+            "Rust API baseline duplicates package {}",
+            entry.name
+        );
+        anyhow::ensure!(
+            manifest_paths.insert(entry.manifest_path.as_str()),
+            "Rust API baseline duplicates manifest {}",
+            entry.manifest_path
+        );
+        validate_baseline_manifest_path(&entry.manifest_path)?;
+
+        let package = packages
+            .iter()
+            .find(|package| package["name"].as_str() == Some(entry.name.as_str()))
+            .with_context(|| format!("cargo metadata omitted baseline package {}", entry.name))?;
+        let current_manifest = package["manifest_path"]
+            .as_str()
+            .with_context(|| format!("package {} omitted manifest_path", entry.name))?;
+        let current_relative = Path::new(current_manifest)
+            .strip_prefix(root)
+            .with_context(|| format!("package {} manifest escaped workspace", entry.name))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        anyhow::ensure!(
+            current_relative == entry.manifest_path,
+            "Rust API baseline manifest moved for {}: expected {}, got {}",
+            entry.name,
+            entry.manifest_path,
+            current_relative
+        );
+    }
+
+    let commit_object = format!("{}^{{commit}}", registry.baseline_revision);
+    ensure_git_success(
+        root,
+        &["cat-file", "-e", &commit_object],
+        "Rust API baseline commit is unavailable",
+    )?;
+    let actual_tree = git_stdout(
+        root,
+        &["show", "-s", "--format=%T", &registry.baseline_revision],
+    )?;
+    anyhow::ensure!(
+        actual_tree == registry.baseline_tree,
+        "Rust API baseline tree changed: expected {}, got {}",
+        registry.baseline_tree,
+        actual_tree
+    );
+    ensure_git_success(
+        root,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &registry.baseline_revision,
+            "HEAD",
+        ],
+        "Rust API baseline must remain an ancestor of HEAD",
+    )?;
+    for entry in &registry.package {
+        let object = format!("{}:{}", registry.baseline_revision, entry.manifest_path);
+        ensure_git_success(
+            root,
+            &["cat-file", "-e", &object],
+            &format!("Rust API baseline omitted {}", entry.manifest_path),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_baseline_manifest_path(path: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(!path.is_empty(), "Rust API baseline manifest path is empty");
+    anyhow::ensure!(
+        !path.contains('\\'),
+        "Rust API baseline manifest path must use forward slashes: {path}"
+    );
+    let parsed = Path::new(path);
+    anyhow::ensure!(
+        !parsed.is_absolute()
+            && parsed
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
+        "Rust API baseline manifest path is not canonical: {path}"
+    );
+    anyhow::ensure!(
+        path.ends_with("/Cargo.toml"),
+        "Rust API baseline manifest path must end in /Cargo.toml: {path}"
+    );
+    Ok(())
+}
+
+fn is_lower_git_object_id(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn ensure_git_success(root: &Path, args: &[&str], context: &str) -> anyhow::Result<()> {
+    let output = Command::new("git").current_dir(root).args(args).output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{context}: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = Command::new("git").current_dir(root).args(args).output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -239,7 +459,8 @@ struct SbomPackage {
 
 /// Checks the pinned dependency policy and emits deterministic supply-chain evidence.
 fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
-    let mut output_dir = PathBuf::from("artifacts/supply-chain");
+    let root = workspace_root()?;
+    let mut output_dir = artifacts_dir(&root)?.join("supply-chain");
     let mut check_tools = true;
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -254,7 +475,6 @@ fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         }
     }
 
-    let root = workspace_root()?;
     let registry_text = fs::read_to_string(root.join("release/supply-chain-exceptions.toml"))?;
     let registry: SupplyChainExceptionRegistry = toml::from_str(&registry_text)?;
     let lock_bytes = fs::read(root.join("Cargo.lock"))?;
@@ -306,7 +526,8 @@ fn supply_chain(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 
 /// Runs deterministic parser campaigns and emits panic-free fuzz evidence.
 fn fuzz_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
-    let mut output_dir = PathBuf::from("artifacts/fuzz-smoke");
+    let root = workspace_root()?;
+    let mut output_dir = artifacts_dir(&root)?.join("fuzz-smoke");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--output-dir" => {
@@ -321,7 +542,6 @@ fn fuzz_smoke(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 
     let report = rne_fuzz_smoke::run_fuzz_smoke_campaign();
     report.validate().map_err(anyhow::Error::msg)?;
-    let root = workspace_root()?;
     let output_dir = if output_dir.is_absolute() {
         output_dir
     } else {
@@ -994,6 +1214,31 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_plugin::CONTROLLER_SCHEMA_VERSION),
         ),
         (
+            "controller_abi",
+            "conformance_report",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "controller_abi",
+            "authoring_sdk",
+            u64::from(rne_plugin::RNE_PLUGIN_SDK_VERSION),
+        ),
+        (
+            "controller_abi",
+            "c_layout",
+            u64::from(rne_plugin::RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION),
+        ),
+        (
+            "controller_abi",
+            "scaffold_minimum",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_MIN_SCHEMA_VERSION),
+        ),
+        (
+            "controller_abi",
+            "scaffold_current",
+            u64::from(rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION),
+        ),
+        (
             "frontend_transport",
             "major",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MAJOR),
@@ -1002,6 +1247,21 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "frontend_transport",
             "minor",
             u64::from(rne_data::transport::TRANSPORT_PROTOCOL_MINOR),
+        ),
+        (
+            "python",
+            "api_contract",
+            u64::from(release_artifacts::PYTHON_API_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "python",
+            "api_report",
+            u64::from(release_artifacts::PYTHON_API_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "rust",
+            "public_api_baseline",
+            u64::from(RUST_API_BASELINE_SCHEMA_VERSION),
         ),
         (
             "assets",
@@ -1075,6 +1335,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "physics",
+            "external_conformance_report",
+            u64::from(
+                rne_physics_conformance::EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "physics",
             "tolerance_registry",
             u64::from(rne_physics::PHYSICS_TOLERANCE_REGISTRY_VERSION),
         ),
@@ -1092,6 +1359,28 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "tasks",
             "batch_checkpoint",
             u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
+        ),
+        (
+            "tasks",
+            "vectorized_episode_checkpoint",
+            u64::from(rne_ai::VECTORIZED_EPISODE_CHECKPOINT_VERSION),
+        ),
+        (
+            "snapshots",
+            "mobile_manipulator_minimum",
+            u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION),
+        ),
+        (
+            "snapshots",
+            "mobile_manipulator_current",
+            u64::from(rne_ai::MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION),
+        ),
+        (
+            "snapshots",
+            "mobile_manipulator_migration",
+            u64::from(
+                rne_compatibility_suite::HISTORICAL_MIGRATION_PROVENANCE_SCHEMA_VERSION,
+            ),
         ),
         (
             "accelerators",
@@ -1112,6 +1401,21 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "accelerators",
             "conformance_report",
             u64::from(accelerator::ACCELERATOR_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "process_conformance_report",
+            u64::from(accelerator::ACCELERATOR_PROCESS_CONFORMANCE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "scaffold_minimum",
+            u64::from(accelerator::ACCELERATOR_SCAFFOLD_MIN_SCHEMA_VERSION),
+        ),
+        (
+            "accelerators",
+            "scaffold_current",
+            u64::from(accelerator::ACCELERATOR_SCAFFOLD_SCHEMA_VERSION),
         ),
         (
             "accelerators",
@@ -1139,6 +1443,84 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(rne_data::DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION),
         ),
         (
+            "datasets",
+            "renderer_capture_report",
+            u64::from(dataset::RENDERER_CAPTURE_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "gateway_evidence",
+            u64::from(rne_hardware_gateway::HARDWARE_GATEWAY_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "wire_protocol",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "wire_trace",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "session_evidence",
+            u64::from(rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "shadow_comparison",
+            u64::from(rne_hardware_gateway::shadow::SHADOW_COMPARISON_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "mock_conformance",
+            u64::from(rne_hardware_gateway::mock::MOCK_CONFORMANCE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "adapter_conformance",
+            u64::from(
+                rne_hardware_gateway::conformance::HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "reference_profile",
+            u64::from(rne_hardware_lekiwi::LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "lekiwi_device_bridge",
+            u64::from(rne_hardware_lekiwi::LEKIWI_DEVICE_BRIDGE_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "lekiwi_reference_session",
+            u64::from(rne_hardware_lekiwi::session::LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "lekiwi_physical_evidence",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "lekiwi_power_isolation_diagnostic",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_DIAGNOSTIC_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "lekiwi_host_termination_diagnostic",
+            u64::from(
+                rne_hardware_lekiwi::physical_evidence::LEKIWI_PHYSICAL_DIAGNOSTIC_SCHEMA_VERSION,
+            ),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1155,8 +1537,49 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "archive_install_rehearsal_report",
+            u64::from(
+                release_artifacts::ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
             "final_exit_report",
             u64::from(release_exit::FINAL_EXIT_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "one_zero_readiness_report",
+            u64::from(release_readiness::REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "one_zero_readiness_manifest",
+            u64::from(release_readiness::MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "github_attestation_verification",
+            u64::from(release_readiness::ATTESTATION_RECEIPT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "compatibility_fixture_report",
+            u64::from(
+                rne_compatibility_suite::COMPATIBILITY_FIXTURE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
+            "historical_compatibility_decision",
+            u64::from(
+                rne_compatibility_suite::HISTORICAL_COMPATIBILITY_DECISION_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
+            "artifact_attestation_policy",
+            u64::from(release_exit::ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION),
         ),
         (
             "evidence",
@@ -1182,6 +1605,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "evidence_manifest",
             u64::from(evidence::EVIDENCE_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "flagship_workflow_report",
+            u64::from(FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "flagship_cross_backend_report",
+            u64::from(FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION),
         ),
     ];
     for (section, key, actual) in expected {
@@ -1227,7 +1660,7 @@ fn run_cargo_owned_at(root: &Path, args: &[String], envs: &[(&str, &str)]) -> an
 /// same public command or integration test a contributor would use manually.
 fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut json_path = root.join("artifacts/oss-parity/report.json");
+    let mut json_path = artifacts_dir(&root)?.join("oss-parity/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1243,11 +1676,11 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let checks = [
         (
             "physics_backend_conformance",
-            "cargo run --locked -q -p rne_physics_conformance --bin rne-physics-conformance -- --output artifacts/physics-conformance/report.json",
+            "cargo run --locked -q -p xtask -- physics-conformance",
         ),
         (
             "scenario_traffic_scale",
-            "cargo run --locked --release -q -p rne_scenario_scale --bin rne-scenario-scale -- --output artifacts/scenario-scale/report.json",
+            "cargo run --locked -q -p xtask -- scenario-scale",
         ),
         (
             "robot_control_replay",
@@ -1373,7 +1806,7 @@ fn parity(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
 /// Runs the backend-neutral physics capability catalog and writes its JSON report.
 fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut output = root.join("artifacts/physics-conformance/report.json");
+    let mut output = artifacts_dir(&root)?.join("physics-conformance/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1393,7 +1826,7 @@ fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Resul
             "--locked",
             "-q",
             "-p",
-            "rne_physics_conformance",
+            "rne_physics_conformance_suite",
             "--bin",
             "rne-physics-conformance",
             "--",
@@ -1406,7 +1839,7 @@ fn physics_conformance(args: &mut impl Iterator<Item = String>) -> anyhow::Resul
 /// Runs the release-mode 100-actor scenario scale gate and writes its JSON report.
 fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let mut output = root.join("artifacts/scenario-scale/report.json");
+    let mut output = artifacts_dir(&root)?.join("scenario-scale/report.json");
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--json" => {
@@ -1439,10 +1872,11 @@ fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()>
 
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
+    let behavior_artifacts = artifacts_dir(&root)?.join("behavior-ci");
     let mut seeds = default_behavior_seeds();
-    let mut json_path = root.join("artifacts/behavior-ci/report.json");
-    let mut junit_path = root.join("artifacts/behavior-ci/junit.xml");
-    let mut artifact_dir = root.join("artifacts/behavior-ci/replays");
+    let mut json_path = behavior_artifacts.join("report.json");
+    let mut junit_path = behavior_artifacts.join("junit.xml");
+    let mut artifact_dir = behavior_artifacts.join("replays");
     let mut failure_case_path = None;
     let mut seeds_explicit = false;
     while let Some(argument) = args.next() {
@@ -1669,6 +2103,253 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
     Ok(())
 }
 
+/// Reproduces the v0.7 shared-aisle flagship success, minimized failure, and capsule.
+fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let mut cross_backend = false;
+    for argument in args {
+        match argument.as_str() {
+            "--cross-backend" => cross_backend = true,
+            other => anyhow::bail!("unknown flagship argument: {other}"),
+        }
+    }
+    let root = workspace_root()?;
+    let artifacts = artifacts_dir(&root)?;
+    fs::create_dir_all(&artifacts)?;
+    let artifacts_metadata = fs::symlink_metadata(&artifacts)?;
+    anyhow::ensure!(
+        artifacts_metadata.is_dir() && !artifacts_metadata.file_type().is_symlink(),
+        "artifacts path must be a real directory"
+    );
+    let artifacts = artifacts.canonicalize()?;
+    let output = artifacts.join("flagship-validation");
+    if output.exists() {
+        let metadata = fs::symlink_metadata(&output)?;
+        anyhow::ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "refusing to replace non-directory or symlinked flagship output {}",
+            output.display()
+        );
+        let resolved = output.canonicalize()?;
+        anyhow::ensure!(
+            resolved.parent() == Some(artifacts.as_path()),
+            "refusing to remove flagship output outside {}",
+            artifacts.display()
+        );
+        fs::remove_dir_all(&resolved)?;
+    }
+
+    run_flagship_workflow(&root, &output, cross_backend)?;
+    let replay = output.join("failure-minimized.rne-replay");
+    let report = output.join("workflow-report.json");
+    let success = output.join("success.behavior-report.json");
+    let failure = output.join("failure.behavior-report.json");
+    let inspector = output.join("replay-inspector.html");
+    let task_spec = output.join("flagship.task.json");
+    let cross_backend_report = output.join("cross-backend-report.json");
+    let mujoco_success = output.join("mujoco-success.behavior-report.json");
+    let capsule = output.join("failure-capsule");
+    let mut create_args = vec![
+        "create".to_string(),
+        "--replay".to_string(),
+        replay.display().to_string(),
+        "--evidence".to_string(),
+        report.display().to_string(),
+        "--evidence".to_string(),
+        success.display().to_string(),
+        "--evidence".to_string(),
+        failure.display().to_string(),
+        "--evidence".to_string(),
+        inspector.display().to_string(),
+        "--evidence".to_string(),
+        task_spec.display().to_string(),
+    ];
+    if cross_backend {
+        create_args.extend([
+            "--evidence".to_string(),
+            cross_backend_report.display().to_string(),
+            "--evidence".to_string(),
+            mujoco_success.display().to_string(),
+        ]);
+    }
+    create_args.extend([
+        "--output".to_string(),
+        capsule.display().to_string(),
+        "--backend".to_string(),
+        "rapier-native".to_string(),
+        "--backend-version".to_string(),
+        "0.22".to_string(),
+    ]);
+    let mut create_args = create_args.into_iter();
+    failure_capsule::run(&mut create_args)?;
+    let mut verify_args = vec!["verify".to_string(), capsule.display().to_string()].into_iter();
+    failure_capsule::run(&mut verify_args)?;
+
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&report)?)?;
+    anyhow::ensure!(
+        report.get("kind").and_then(serde_json::Value::as_str)
+            == Some(FLAGSHIP_WORKFLOW_REPORT_KIND)
+            && report
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(u64::from(FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION)),
+        "flagship report kind/schema mismatch"
+    );
+    anyhow::ensure!(
+        report
+            .pointer("/success/status")
+            .and_then(serde_json::Value::as_str)
+            == Some("passed"),
+        "flagship report does not contain a passing success run"
+    );
+    anyhow::ensure!(
+        report
+            .pointer("/intentional_failure/expected_contract")
+            .and_then(serde_json::Value::as_str)
+            == Some("perception_stream_alive")
+            && report
+                .pointer("/intentional_failure/active_dimensions_before")
+                .and_then(serde_json::Value::as_u64)
+                == Some(3)
+            && report
+                .pointer("/intentional_failure/active_dimensions_after")
+                .and_then(serde_json::Value::as_u64)
+                == Some(1),
+        "flagship failure was not minimized from three dimensions to the blackout"
+    );
+    if cross_backend {
+        anyhow::ensure!(
+            report
+                .get("physics_execution_paths")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|paths| {
+                    paths
+                        == &[
+                            serde_json::Value::String("rapier_native".to_string()),
+                            serde_json::Value::String("mujoco_native".to_string()),
+                        ]
+                })
+                && report
+                    .get("cross_backend_report")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("cross-backend-report.json"),
+            "flagship workflow report does not register both production physics paths"
+        );
+        let cross_report: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cross_backend_report)?)?;
+        anyhow::ensure!(
+            cross_report.get("kind").and_then(serde_json::Value::as_str)
+                == Some(FLAGSHIP_CROSS_BACKEND_REPORT_KIND)
+                && cross_report
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(u64::from(FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION))
+                && cross_report
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("passed")
+                && cross_report
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rne.flagship.mobile_lift_shared_aisle.v1"),
+            "flagship cross-backend report kind/schema/task/status mismatch"
+        );
+        let backends = cross_report
+            .get("backends")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted backends")?;
+        anyhow::ensure!(
+            backends.len() == 2
+                && backends.iter().all(|backend| {
+                    backend.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                }),
+            "flagship cross-backend report did not pass both backends"
+        );
+        let tolerance_checks = cross_report
+            .get("tolerance_checks")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted tolerance checks")?;
+        anyhow::ensure!(
+            !tolerance_checks.is_empty()
+                && tolerance_checks.iter().all(|check| {
+                    check.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                        && check
+                            .get("unit")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some()
+                        && check
+                            .get("maximum_delta")
+                            .and_then(serde_json::Value::as_f64)
+                            .is_some_and(|value| value > 0.0)
+                }),
+            "flagship cross-backend tolerance registry is incomplete or failed"
+        );
+    }
+    let inspector_text = fs::read_to_string(&inspector)?;
+    anyhow::ensure!(
+        inspector_text.contains("id=\"replay-data\"")
+            && inspector_text.contains("minimized failure"),
+        "flagship browser inspector is incomplete"
+    );
+    println!(
+        "v0.7 flagship evidence verified (cross_backend={}): {}",
+        cross_backend,
+        output.display()
+    );
+    Ok(())
+}
+
+fn configured_artifacts_dir(
+    workspace_root: &Path,
+    configured: Option<std::ffi::OsString>,
+) -> anyhow::Result<PathBuf> {
+    let Some(configured) = configured else {
+        return Ok(workspace_root.join("artifacts"));
+    };
+    let path = PathBuf::from(configured);
+    anyhow::ensure!(
+        !path.as_os_str().is_empty() && path.is_absolute(),
+        "{ARTIFACTS_DIR_ENV} must be a non-empty absolute path"
+    );
+    Ok(path)
+}
+
+pub(crate) fn artifacts_dir(workspace_root: &Path) -> anyhow::Result<PathBuf> {
+    configured_artifacts_dir(workspace_root, env::var_os(ARTIFACTS_DIR_ENV))
+}
+
+fn run_flagship_workflow(
+    workspace_root: &Path,
+    output: &Path,
+    cross_backend: bool,
+) -> anyhow::Result<()> {
+    let mut command = Command::new("cargo");
+    command.current_dir(workspace_root).args([
+        "run",
+        "--locked",
+        "-p",
+        "flagship_validation_workflow",
+    ]);
+    if cross_backend {
+        command.args(["--features", "mujoco"]);
+    }
+    command
+        .args(["--example", "74_flagship_validation_workflow", "--"])
+        .arg(output);
+    if cross_backend {
+        command.arg("--cross-backend");
+    }
+
+    println!(
+        "$ cargo run --locked -p flagship_validation_workflow{} --example 74_flagship_validation_workflow -- {}{}",
+        if cross_backend { " --features mujoco" } else { "" },
+        output.display(),
+        if cross_backend { " --cross-backend" } else { "" }
+    );
+    let status = command.status()?;
+    anyhow::ensure!(status.success(), "command failed with status {status}");
+    Ok(())
+}
+
 fn g1_behavior_from_dimensions(
     scenario: &str,
     seed: u64,
@@ -1838,7 +2519,10 @@ fn ci_headless() -> anyhow::Result<()> {
     accelerator::validate_contract(&workspace_root()?)?;
     run_step("cargo test --locked -p rne_render --lib")?;
     run_step("cargo test --locked -p rne_sensor --lib")?;
-    dataset::dataset_reference_smoke()
+    run_step("cargo test --locked -p rne_hardware_gateway")?;
+    run_step("cargo test --locked -p rne_hardware_lekiwi")?;
+    dataset::dataset_reference_smoke()?;
+    flagship(&mut std::iter::empty::<String>())
 }
 
 /// Python RL smokes, including the maturin build of `rne_py`.
@@ -2568,11 +3252,14 @@ fn venv_python(root: &Path) -> PathBuf {
 
 fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     let root = workspace_root()?;
+    let python_api_report = artifacts_dir(&root)?.join("python-api/report.json");
+    let python_api_report = python_api_report.to_string_lossy().into_owned();
     let host_python = python_command()?;
     let venv_py = venv_python(&root);
     if !venv_py.exists() {
         run_step(&format!("{host_python} -m venv .venv"))?;
     }
+    run_program(&venv_py, &["release/test_python_api_compat.py"])?;
     run_program(
         &venv_py,
         &["-m", "pip", "install", "-q", "--upgrade", "pip", "maturin"],
@@ -2597,6 +3284,16 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
             "-m",
             "crates/rne_py/Cargo.toml",
             "--release",
+        ],
+    )?;
+    run_program(
+        &venv_py,
+        &[
+            "release/python_api_compat.py",
+            "--fixture",
+            "release/python-api-v1.json",
+            "--output",
+            &python_api_report,
         ],
     )?;
     for script in [
@@ -2692,6 +3389,7 @@ fn ros_setup_available() -> bool {
 
 fn lint_boundaries() -> anyhow::Result<()> {
     let workspace_root = workspace_root()?;
+    external_intake::validate_committed(&workspace_root)?;
     let forbidden = ["rcl", "rclrs", "rclcpp", "ros2", "adapters/", "../adapters"];
 
     for manifest in find_cargo_tomls(&workspace_root.join("crates"))? {
@@ -2879,9 +3577,10 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cargo_sbom, default_behavior_seeds, extract_hero_digest, frame_delta_ratio,
-        hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition, parse_utc_date_days,
-        validate_blocker_registry, validate_contract_registry, validate_supply_chain_registry,
+        build_cargo_sbom, configured_artifacts_dir, default_behavior_seeds, extract_hero_digest,
+        frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
+        parse_utc_date_days, validate_blocker_registry, validate_contract_registry,
+        validate_rust_api_baseline, validate_supply_chain_registry, RustApiBaselineRegistry,
         SmokePartition, SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
     };
 
@@ -2958,11 +3657,53 @@ mod tests {
     }
 
     #[test]
+    fn flagship_artifacts_can_use_an_explicit_absolute_root() {
+        let workspace = std::env::current_dir().expect("current directory");
+        let external = workspace
+            .parent()
+            .expect("workspace parent")
+            .join("rne external artifacts");
+
+        assert_eq!(
+            configured_artifacts_dir(&workspace, None).unwrap(),
+            workspace.join("artifacts")
+        );
+        assert_eq!(
+            configured_artifacts_dir(&workspace, Some(external.clone().into_os_string())).unwrap(),
+            external
+        );
+        assert!(configured_artifacts_dir(
+            &workspace,
+            Some(std::ffi::OsString::from("relative/artifacts"))
+        )
+        .is_err());
+    }
+
+    #[test]
     fn committed_release_contract_matches_compiled_versions() {
         let registry = include_str!("../../release/contracts.toml")
             .parse::<toml::Value>()
             .expect("release contract TOML");
         validate_contract_registry(&registry).expect("release contract must match constants");
+    }
+
+    #[test]
+    fn committed_rust_api_baseline_is_immutable_and_complete() {
+        let root = super::workspace_root().expect("workspace root");
+        let metadata = super::cargo_metadata(&root).expect("cargo metadata");
+        let registry: RustApiBaselineRegistry =
+            toml::from_str(include_str!("../../release/rust-api-baseline.toml"))
+                .expect("Rust API baseline TOML");
+        validate_rust_api_baseline(&root, &metadata, &registry)
+            .expect("committed Rust API baseline");
+
+        let mut incomplete = registry.clone();
+        incomplete.package.pop();
+        assert!(validate_rust_api_baseline(&root, &metadata, &incomplete).is_err());
+
+        let mut retargeted = registry;
+        retargeted.baseline_tree = "0000000000000000000000000000000000000000".to_string();
+        assert!(validate_rust_api_baseline(&root, &metadata, &retargeted).is_err());
     }
 
     #[test]

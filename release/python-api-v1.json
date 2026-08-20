@@ -1,0 +1,496 @@
+{
+  "kind": "rne_python_api_contract",
+  "schema_version": 1,
+  "module": "rne_py",
+  "release_version": "0.1.0",
+  "exports": [
+    {
+      "name": "DiffDriveEpisode",
+      "kind": "class",
+      "text_signature": "(goal_x_m=2.0, max_steps=300)",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, left_velocity_rad_s, right_velocity_rad_s)"
+        }
+      ],
+      "properties": [
+        "step_in_episode",
+        "total_reward"
+      ]
+    },
+    {
+      "name": "DiffDriveSim",
+      "kind": "class",
+      "text_signature": "()",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, left_velocity_rad_s, right_velocity_rad_s)"
+        }
+      ],
+      "properties": [
+        "step_count"
+      ]
+    },
+    {
+      "name": "IkClutterPickPlacePolicy",
+      "kind": "class",
+      "text_signature": "()",
+      "value": null,
+      "methods": [
+        {
+          "name": "act",
+          "text_signature": "($self, observation)"
+        },
+        {
+          "name": "total_steps",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "IkMobileClutterPickPlacePolicy",
+      "kind": "class",
+      "text_signature": "()",
+      "value": null,
+      "methods": [
+        {
+          "name": "act",
+          "text_signature": "($self, observation)"
+        },
+        {
+          "name": "total_steps",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "IkMobileLiftPickPlacePolicy",
+      "kind": "class",
+      "text_signature": "()",
+      "value": null,
+      "methods": [
+        {
+          "name": "act",
+          "text_signature": "($self, observation)"
+        },
+        {
+          "name": "failure_class",
+          "text_signature": "($self, observation)"
+        },
+        {
+          "name": "phase",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "total_steps",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "MmLiftGripperTarget",
+      "kind": "class",
+      "text_signature": "(x_m, y_m, z_m)",
+      "value": null,
+      "methods": [],
+      "properties": [
+        "x_m",
+        "y_m",
+        "z_m"
+      ]
+    },
+    {
+      "name": "MmLiftJointTarget",
+      "kind": "class",
+      "text_signature": "(lift_m, shoulder_rad, elbow_rad)",
+      "value": null,
+      "methods": [],
+      "properties": [
+        "elbow_rad",
+        "lift_m",
+        "shoulder_rad"
+      ]
+    },
+    {
+      "name": "MmLiftKinematics",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [
+        {
+          "name": "forward_kinematics",
+          "text_signature": "($self, joints)"
+        },
+        {
+          "name": "inverse_kinematics",
+          "text_signature": "($self, target)"
+        },
+        {
+          "name": "inverse_kinematics_at_lift",
+          "text_signature": "($self, lift_m, gripper_x_m, gripper_z_m)"
+        },
+        {
+          "name": "mm_lift",
+          "text_signature": "()"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "MobileManipulatorAction",
+      "kind": "class",
+      "text_signature": "(left_wheel_velocity_rad_s=0.0, right_wheel_velocity_rad_s=0.0, shoulder_velocity_rad_s=0.0, elbow_velocity_rad_s=0.0, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0, lift_velocity_m_s=0.0, lift_joint_target=None, wrist_yaw_target_rad=None)",
+      "value": null,
+      "methods": [],
+      "properties": [
+        "elbow_velocity_rad_s",
+        "gripper_velocity_m_s",
+        "gripper_velocity_rad_s",
+        "left_wheel_velocity_rad_s",
+        "lift_joint_target",
+        "lift_velocity_m_s",
+        "right_wheel_velocity_rad_s",
+        "shoulder_velocity_rad_s",
+        "wrist_yaw_target_rad"
+      ]
+    },
+    {
+      "name": "MobileManipulatorEpisode",
+      "kind": "class",
+      "text_signature": "(task=\"place\")",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "set_grasp_mode",
+          "text_signature": "($self, mode)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, left_wheel_velocity_rad_s=0.0, right_wheel_velocity_rad_s=0.0, shoulder_velocity_rad_s=0.0, elbow_velocity_rad_s=0.0, gripper_velocity_rad_s=0.0, lift_velocity_m_s=0.0, gripper_velocity_m_s=0.0)"
+        },
+        {
+          "name": "step_action",
+          "text_signature": "($self, action)"
+        },
+        {
+          "name": "step_hold_lift_joints",
+          "text_signature": "($self, lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0)"
+        }
+      ],
+      "properties": [
+        "curriculum_stage",
+        "is_grasping",
+        "step_in_episode",
+        "total_reward"
+      ]
+    },
+    {
+      "name": "MobileManipulatorObservation",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "base_x",
+        "base_y",
+        "base_yaw",
+        "base_z",
+        "ee_x",
+        "ee_y",
+        "ee_z",
+        "elbow_position",
+        "gripper_position",
+        "gripper_position_m",
+        "is_grasping",
+        "joint_state_count",
+        "lift_position_m",
+        "shoulder_position",
+        "target_dx",
+        "target_dy",
+        "target_dz",
+        "target_object_index",
+        "wrist_camera_pixels",
+        "wrist_depth_center_m",
+        "wrist_depth_min_m",
+        "wrist_target_depth_m",
+        "wrist_target_offset_x_m",
+        "wrist_target_offset_y_m",
+        "wrist_target_pixel_u_px",
+        "wrist_target_pixel_v_px",
+        "wrist_yaw_position"
+      ]
+    },
+    {
+      "name": "MobileManipulatorSim",
+      "kind": "class",
+      "text_signature": "(mode=\"mm_minimal\")",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "set_grasp_mode",
+          "text_signature": "($self, mode)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, left_wheel_velocity_rad_s=0.0, right_wheel_velocity_rad_s=0.0, shoulder_velocity_rad_s=0.0, elbow_velocity_rad_s=0.0, gripper_velocity_rad_s=0.0, lift_velocity_m_s=0.0, gripper_velocity_m_s=0.0)"
+        },
+        {
+          "name": "step_action",
+          "text_signature": "($self, action)"
+        },
+        {
+          "name": "step_hold_lift_joints",
+          "text_signature": "($self, lift_m, shoulder_rad, elbow_rad, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0)"
+        }
+      ],
+      "properties": [
+        "is_grasping",
+        "step_count"
+      ]
+    },
+    {
+      "name": "MobileManipulatorStepResult",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "done",
+        "observation",
+        "reward",
+        "terminated",
+        "truncated"
+      ]
+    },
+    {
+      "name": "Observation",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "base_x",
+        "base_y",
+        "base_yaw",
+        "base_z",
+        "goal_delta_x",
+        "imu_ay",
+        "left_wheel_velocity",
+        "lidar_points",
+        "peer_delta_x",
+        "peer_delta_z",
+        "peer_separation",
+        "right_wheel_velocity"
+      ]
+    },
+    {
+      "name": "PortableUnitreeGo2Batch",
+      "kind": "class",
+      "text_signature": "(num_envs=1, max_steps=600, seed=1, auto_reset=True)",
+      "value": null,
+      "methods": [
+        {
+          "name": "checkpoint_json",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "lane_replay_digest",
+          "text_signature": "($self, lane_id)"
+        },
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "reset_lanes",
+          "text_signature": "($self, lane_ids)"
+        },
+        {
+          "name": "restore_checkpoint_json",
+          "text_signature": "($self, checkpoint_json)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, actions)"
+        },
+        {
+          "name": "task_spec_json",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": [
+        "num_envs"
+      ]
+    },
+    {
+      "name": "PortableUnitreeGo2BatchStep",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "episode_indices",
+        "episode_seeds",
+        "lane_ids",
+        "observations",
+        "resets",
+        "rewards",
+        "terminated",
+        "truncated"
+      ]
+    },
+    {
+      "name": "StepResult",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "done",
+        "observation",
+        "reward",
+        "terminated",
+        "truncated"
+      ]
+    },
+    {
+      "name": "TASK_SPEC_KIND",
+      "kind": "constant",
+      "text_signature": null,
+      "value": "rne_task_spec",
+      "methods": [],
+      "properties": []
+    },
+    {
+      "name": "TASK_SPEC_SCHEMA_VERSION",
+      "kind": "constant",
+      "text_signature": null,
+      "value": 1,
+      "methods": [],
+      "properties": []
+    },
+    {
+      "name": "UnitreeGo2GaitEpisode",
+      "kind": "class",
+      "text_signature": "(max_steps=600, seed=1)",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, stride_rad=0.12, foot_lift_rad=0.16, roll_correction_rad=0.0, pitch_correction_rad=0.0, lateral_extension_rad=0.0)"
+        },
+        {
+          "name": "task_spec_json",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": [
+        "step_in_episode"
+      ]
+    },
+    {
+      "name": "UnitreeGo2StepResult",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "done",
+        "observation",
+        "reward",
+        "terminated",
+        "truncated"
+      ]
+    },
+    {
+      "name": "VectorizedMobileManipulatorEnv",
+      "kind": "class",
+      "text_signature": "(task=\"reach\", num_envs=16)",
+      "value": null,
+      "methods": [
+        {
+          "name": "checkpoint_json",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "episode_reward",
+          "text_signature": "($self, index)"
+        },
+        {
+          "name": "load_checkpoint",
+          "text_signature": "($self, path)"
+        },
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "restore_checkpoint_json",
+          "text_signature": "($self, checkpoint_json)"
+        },
+        {
+          "name": "save_checkpoint",
+          "text_signature": "($self, path)"
+        },
+        {
+          "name": "set_grasp_mode",
+          "text_signature": "($self, mode)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, actions)"
+        },
+        {
+          "name": "step_actions",
+          "text_signature": "($self, actions)"
+        }
+      ],
+      "properties": [
+        "num_envs"
+      ]
+    },
+    {
+      "name": "canonical_task_spec_json",
+      "kind": "function",
+      "text_signature": "(task_spec_json)",
+      "value": null,
+      "methods": [],
+      "properties": []
+    },
+    {
+      "name": "derive_episode_seed",
+      "kind": "function",
+      "text_signature": "(root_seed, lane_id, episode_index)",
+      "value": null,
+      "methods": [],
+      "properties": []
+    }
+  ]
+}

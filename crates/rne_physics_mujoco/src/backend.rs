@@ -1,20 +1,20 @@
 //! Feature-gated MuJoCo backend implementation.
 
 use crate::compiler::{
-    compile_rigid_body_model, BodyBinding, BodyTopology, CompileError, CompiledRigidBodyModel,
-    JointBinding,
+    compile_rigid_body_model, legacy_motor_gains, BodyBinding, BodyTopology, CompileError,
+    CompiledRigidBodyModel, JointBinding, JointDynamics,
 };
 use crate::EXPECTED_MUJOCO_VERSION_PREFIX;
 use mujoco_rs::prelude::{MjData, MjModel, MjtObj};
 use rne_core::SimDuration;
-use rne_ecs::{Entity, World};
+use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
     ColliderShape, ContactEvent, JointActuation, JointMotor, JointState, PhysicsBackend,
     PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
     RigidBody, RigidBodyType,
 };
-use rne_world::Transform3;
+use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -22,7 +22,6 @@ const FREE_FALL_BODY_NAME: &str = "rne_free_fall_body";
 const FREE_FALL_JOINT_NAME: &str = "rne_free_fall_joint";
 const EXPECTED_FREE_JOINT_QPOS_LEN: usize = 7;
 const EXPECTED_FREE_JOINT_QVEL_LEN: usize = 6;
-
 const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
     PhysicsCapability::Articulation,
@@ -61,8 +60,11 @@ pub enum MuJoCoError {
         entity_index: u32,
     },
     /// The fixed topology changed after the native model was compiled.
-    #[error("MuJoCo world topology changed after step 0")]
-    TopologyChanged,
+    #[error("MuJoCo world topology changed after step 0: {detail}")]
+    TopologyChanged {
+        /// First stable topology difference found during synchronization.
+        detail: String,
+    },
     /// A unit-explicit joint actuation command is invalid.
     #[error("invalid MuJoCo joint actuation on entity {entity_index}: {reason}")]
     InvalidActuation {
@@ -118,6 +120,7 @@ struct MuJoCoWorld {
     desc: PhysicsWorldDesc,
     bindings: Vec<BodyBinding>,
     topology: Vec<BodyTopology>,
+    joint_dynamics: Vec<JointDynamics>,
     caller_mjcf: bool,
     timestep_s: f64,
     geom_entities: Vec<Option<Entity>>,
@@ -410,12 +413,7 @@ fn geometry_bindings(
             })?;
         let sensor = world
             .get::<rne_physics::Collider>(binding.entity)
-            .ok_or_else(|| {
-                MuJoCoError::UnsupportedFixture(
-                    "collider disappeared while binding geometry".to_owned(),
-                )
-            })?
-            .sensor;
+            .is_some_and(|collider| collider.sensor);
         body_entities.insert(body_id, (binding.entity, sensor));
     }
 
@@ -803,8 +801,13 @@ fn joint_control(
             reason: "legacy JointMotor value, gain, or limit",
         });
     }
-    let effort = motor.stiffness * (motor.target_position - position)
-        + motor.gain * (motor.velocity_rad_s - velocity);
+    // The compiled joint applies `-damping * velocity` as MuJoCo-native passive
+    // damping, which `implicitfast` treats implicitly. Keeping only the target
+    // velocity feed-forward here is algebraically the same legacy PD law while
+    // avoiding an explicit high-gain damping force on lightweight robot links.
+    // `JointActuation` above remains exact and is used by conformance fixtures.
+    let (stiffness, damping) = legacy_motor_gains(*motor, revolute);
+    let effort = stiffness * (motor.target_position - position) + damping * motor.velocity_rad_s;
     Ok(if motor.max_force > 0.0 {
         effort.clamp(-motor.max_force, motor.max_force)
     } else {
@@ -849,6 +852,7 @@ impl PhysicsBackend for MuJoCoBackend {
                 desc,
                 bindings: Vec::new(),
                 topology: Vec::new(),
+                joint_dynamics: Vec::new(),
                 caller_mjcf,
                 timestep_s,
                 geom_entities: Vec::new(),
@@ -876,9 +880,25 @@ impl PhysicsBackend for MuJoCoBackend {
 
         let world_state = self.world_mut(physics_world)?;
         if !world_state.topology.is_empty() && world_state.topology != compiled.topology {
-            return Err(Self::map_error(MuJoCoError::TopologyChanged));
+            let detail = world_state
+                .topology
+                .iter()
+                .zip(&compiled.topology)
+                .enumerate()
+                .find(|(_, (expected, actual))| expected != actual)
+                .map(|(index, (expected, actual))| {
+                    format!("entry {index}: expected {expected:?}, got {actual:?}")
+                })
+                .unwrap_or_else(|| {
+                    format!(
+                        "body count changed from {} to {}",
+                        world_state.topology.len(),
+                        compiled.topology.len()
+                    )
+                });
+            return Err(Self::map_error(MuJoCoError::TopologyChanged { detail }));
         }
-        if world_state.data.is_none() {
+        if world_state.data.is_none() || world_state.joint_dynamics != compiled.joint_dynamics {
             let model = MjModel::from_xml_string(&compiled.mjcf)
                 .map_err(|error| Self::map_error(MuJoCoError::ModelLoad(error.to_string())))?;
             require_compiled_model(&model, &compiled.bindings).map_err(Self::map_error)?;
@@ -888,6 +908,7 @@ impl PhysicsBackend for MuJoCoBackend {
         }
         world_state.bindings = compiled.bindings;
         world_state.topology = compiled.topology;
+        world_state.joint_dynamics = compiled.joint_dynamics;
         let (geom_entities, sensor_geoms) = geometry_bindings(
             world_state
                 .data
@@ -1028,9 +1049,24 @@ impl PhysicsBackend for MuJoCoBackend {
                             "articulated body pose",
                         )));
                     }
+                    let world_transform = Transform3::from_translation_rotation(
+                        Vec3::from_slice(&body_view.xpos),
+                        rotation,
+                    );
+                    let local_transform = world
+                        .get::<Parent>(binding.entity)
+                        .map(|parent| {
+                            let parent_world = world_transform_of(world, parent.0);
+                            let inverse_rotation = parent_world.rotation.conjugate();
+                            Transform3::from_translation_rotation(
+                                inverse_rotation
+                                    * (world_transform.translation - parent_world.translation),
+                                (inverse_rotation * world_transform.rotation).normalize(),
+                            )
+                        })
+                        .unwrap_or(world_transform);
                     if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
-                        transform.translation = Vec3::from_slice(&body_view.xpos);
-                        transform.rotation = rotation;
+                        *transform = local_transform;
                     }
                     world.entity_mut(binding.entity).insert(joint_state);
                 }

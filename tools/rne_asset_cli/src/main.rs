@@ -1,5 +1,6 @@
 //! Command-line tools for RNE scene and robot assets.
 
+mod failure_capsule;
 mod frontend_transport;
 
 use anyhow::{Context as _, Result};
@@ -72,6 +73,8 @@ const LIVE_CAMERA_TRANSPORT_MAX_WIDTH: u32 = 1920;
 const LIVE_CAMERA_TRANSPORT_MAX_HEIGHT: u32 = 1080;
 const LIVE_LIDAR_MAX_POINTS: usize = 256;
 const RUNNER_DATA_BUS_RETAINED_FRAMES_PER_STREAM: usize = 2;
+const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
+const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LiveSnapshotOptions {
@@ -242,6 +245,11 @@ enum Commands {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Create or verify a portable, content-addressed Failure Capsule.
+    FailureCapsule {
+        #[command(subcommand)]
+        command: FailureCapsuleCommand,
+    },
     /// Run a headless SUMO co-simulation and report the mirrored vehicles.
     CoSim {
         /// SUMO `.net.xml` path.
@@ -275,12 +283,76 @@ enum PluginCommand {
         /// Parent directory receiving the plugin crate.
         #[arg(long, value_name = "DIR", default_value = ".")]
         dir: PathBuf,
+        /// Retained controller scaffold schema to generate.
+        #[arg(
+            long,
+            default_value_t = rne_plugin::CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION
+        )]
+        schema: u32,
     },
     /// List built-in and discoverable controller plugins.
     List {
         /// Directories searched for plugin shared libraries (repeatable).
         #[arg(long, value_name = "DIR")]
         path: Vec<PathBuf>,
+    },
+    /// Run the standalone controller-plugin conformance kit.
+    Check {
+        /// Controller shared library to load and exercise.
+        #[arg(long, value_name = "PATH")]
+        library: PathBuf,
+        /// `rne-plugin.json` manifest paired with the shared library.
+        #[arg(long, value_name = "PATH")]
+        manifest: PathBuf,
+        /// Machine-readable conformance report destination.
+        #[arg(
+            long,
+            value_name = "PATH",
+            default_value = "controller-plugin-conformance.json"
+        )]
+        output: PathBuf,
+        /// Joint name passed to the plugin constructor.
+        #[arg(long, default_value = "conformance_joint")]
+        joint: String,
+        /// Target joint angle passed to the plugin constructor, in radians.
+        #[arg(long, default_value_t = 1.0)]
+        target_rad: f64,
+        /// Controller gain passed to the plugin constructor.
+        #[arg(long, default_value_t = 2.0)]
+        gain: f64,
+        /// Maximum velocity passed to the plugin constructor, in radians per second.
+        #[arg(long, default_value_t = 5.0)]
+        max_velocity_rad_s: f64,
+        /// Explicit deterministic reset seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum FailureCapsuleCommand {
+    /// Create a new capsule from a failed generic or behavior replay.
+    Create {
+        /// Failed replay copied into the capsule.
+        #[arg(long, short)]
+        replay: PathBuf,
+        /// Evidence file copied into the capsule (repeatable).
+        #[arg(long, short)]
+        evidence: Vec<PathBuf>,
+        /// New destination directory; existing paths are never overwritten.
+        #[arg(long, short)]
+        output: PathBuf,
+        /// Backend identity recorded in capsule provenance.
+        #[arg(long, default_value = "unknown")]
+        backend: String,
+        /// Backend version recorded in capsule provenance.
+        #[arg(long, default_value = "unknown")]
+        backend_version: String,
+    },
+    /// Verify metadata, schemas, paths, and every retained digest.
+    Verify {
+        /// Capsule directory containing `capsule.json`.
+        path: PathBuf,
     },
 }
 
@@ -351,6 +423,7 @@ fn main() -> Result<()> {
             network_id,
         } => sumo_net_command(&path, &out, &network_id),
         Commands::Plugin { command } => plugin_command(command),
+        Commands::FailureCapsule { command } => failure_capsule_command(command),
         Commands::CoSim {
             path,
             routes,
@@ -359,6 +432,39 @@ fn main() -> Result<()> {
         } => co_sim_command(&path, &routes, steps, determinism_check),
         Commands::Watch { path, interval_ms } => watch_command(&path, interval_ms),
     }
+}
+
+fn failure_capsule_command(command: FailureCapsuleCommand) -> Result<()> {
+    let arguments = match command {
+        FailureCapsuleCommand::Create {
+            replay,
+            evidence,
+            output,
+            backend,
+            backend_version,
+        } => {
+            let mut arguments = vec![
+                "create".to_string(),
+                "--replay".to_string(),
+                replay.to_string_lossy().into_owned(),
+                "--output".to_string(),
+                output.to_string_lossy().into_owned(),
+                "--backend".to_string(),
+                backend,
+                "--backend-version".to_string(),
+                backend_version,
+            ];
+            for path in evidence {
+                arguments.push("--evidence".to_string());
+                arguments.push(path.to_string_lossy().into_owned());
+            }
+            arguments
+        }
+        FailureCapsuleCommand::Verify { path } => {
+            vec!["verify".to_string(), path.to_string_lossy().into_owned()]
+        }
+    };
+    failure_capsule::run(&mut arguments.into_iter())
 }
 
 fn validate_command(path: &Path, spawn: bool) -> Result<()> {
@@ -2908,10 +3014,13 @@ fn co_sim_command(path: &Path, routes: &Path, steps: u64, determinism_check: boo
 /// Dispatches the `plugin` subcommands.
 fn plugin_command(command: PluginCommand) -> Result<()> {
     match command {
-        PluginCommand::New { name, dir } => {
-            let crate_dir = rne_plugin::scaffold_controller_plugin(&name, &dir)
+        PluginCommand::New { name, dir, schema } => {
+            let crate_dir = rne_plugin::scaffold_controller_plugin_for_schema(&name, &dir, schema)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
-            println!("plugin: scaffolded `{name}` at {}", crate_dir.display());
+            println!(
+                "plugin: scaffolded `{name}` schema {schema} at {}",
+                crate_dir.display()
+            );
             println!(
                 "  cargo build --manifest-path {}/Cargo.toml",
                 crate_dir.display()
@@ -2929,6 +3038,49 @@ fn plugin_command(command: PluginCommand) -> Result<()> {
             for (name, library_path) in discovered {
                 println!("discovered: {name} ({})", library_path.display());
             }
+            Ok(())
+        }
+        PluginCommand::Check {
+            library,
+            manifest,
+            output,
+            joint,
+            target_rad,
+            gain,
+            max_velocity_rad_s,
+            seed,
+        } => {
+            let report = rne_plugin::run_controller_plugin_conformance(
+                &library,
+                &manifest,
+                &rne_plugin::ControllerPluginConformanceConfig {
+                    joint,
+                    target_rad,
+                    gain,
+                    max_velocity_rad_s,
+                    seed,
+                },
+            )?;
+            if let Some(parent) = output
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("create plugin report directory {}", parent.display())
+                })?;
+            }
+            std::fs::write(&output, report.to_json_pretty()?)
+                .with_context(|| format!("write plugin conformance report {}", output.display()))?;
+            println!(
+                "plugin conformance: status={} report={}",
+                report.status,
+                output.display()
+            );
+            anyhow::ensure!(
+                report.passed(),
+                "controller plugin conformance failed; inspect {}",
+                output.display()
+            );
             Ok(())
         }
     }
@@ -4077,12 +4229,15 @@ mod tests {
         plugin_command(PluginCommand::New {
             name: "cli_plugin".to_string(),
             dir: parent.clone(),
+            schema: 1,
         })
         .expect("scaffold plugin");
 
         let crate_dir = parent.join("cli_plugin");
         assert!(crate_dir.join("Cargo.toml").exists());
         assert!(crate_dir.join("src/lib.rs").exists());
+        assert!(crate_dir.join("rne-scaffold.json").exists());
+        assert!(crate_dir.join("src/rne_plugin_sdk.rs").exists());
         assert!(crate_dir.join("rne-plugin.json").exists());
         let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).expect("read lib.rs");
         assert!(lib.contains("rne_plugin_abi_version"));

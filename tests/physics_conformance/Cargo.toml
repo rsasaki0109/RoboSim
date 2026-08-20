@@ -1,5 +1,5 @@
 [package]
-name = "rne_physics_conformance"
+name = "rne_physics_conformance_suite"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
@@ -16,11 +16,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "rne-physics-conformance"
 path = "src/main.rs"
+doc = false
 
 [[bin]]
 name = "rne-physics-divergence"
 path = "src/divergence.rs"
 required-features = ["mujoco"]
+doc = false
 
 [dependencies]
 anyhow = { workspace = true }

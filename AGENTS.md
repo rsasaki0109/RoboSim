@@ -31,6 +31,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_asset`: asset database and import pipeline
 - `crates/rne_data`: typed DataBus, stream IDs, frame payloads
 - `crates/rne_ai`: agent, observation, action, reward, policy traits
+- `crates/rne_accelerator_contract`: vendor-neutral manifest, runtime, and accelerator evidence readers
 - `crates/rne_plugin`: plugin manifest and loading interfaces
 - `crates/rne_traffic`: backend-neutral traffic semantics, topology, signals, and routing
 - `crates/rne_plugin`: plugin manifest, controller-plugin boundary, dynamic loading of controller plugins through a versioned C ABI, and authoring scaffolds
@@ -41,6 +42,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_sumo`: minimal SUMO `.net.xml` road-network import (offline importer → `.rne.traffic.json`)
 - `crates/rne_traci`: minimal TraCI client for live SUMO co-simulation
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
+- `adapters/hardware/rne_hardware_gateway`: bounded TaskSpec-bound playback/shadow/HIL/live gateway contracts
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests
 - `docs/adr`: architecture decision records
@@ -120,6 +122,7 @@ Allowed dependencies:
 - `rne_sensor` may depend on `rne_physics`, `rne_render`, `rne_data`.
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
 - `rne_traffic` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
+- `rne_accelerator_contract` may depend on `rne_ai`; vendor runtime dependencies remain in adapters.
 - Offline importers such as `rne_plateau` may depend on `rne_traffic`.
 - `adapters/*` may depend on external ecosystems such as ROS2.
 

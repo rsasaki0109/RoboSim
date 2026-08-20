@@ -1,0 +1,107 @@
+name: External task reproduction evidence
+description: Submit an independently reproduced TaskSpec and Failure Capsule for readiness review.
+title: "[External project evidence] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use the exact checklist in docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        A submitted issue is not acceptance evidence. Maintainers re-download, hash, and replay every retained artifact.
+  - type: checkboxes
+    id: independence
+    attributes:
+      label: Independence
+      options:
+        - label: The project repository is owned outside the RNE repository owner.
+          required: true
+        - label: The reproduction was completed without direct assistance from an RNE repository author.
+          required: true
+        - label: The artifacts contain no credentials, personal data, or unredistributable files.
+          required: true
+    validations:
+      required: true
+  - type: input
+    id: repository
+    attributes:
+      label: External repository
+      description: HTTPS URL of the independently owned public repository.
+      placeholder: https://github.com/owner/project
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Tested revision
+      description: Exact lowercase 40-character Git commit ID.
+      placeholder: 0123456789abcdef0123456789abcdef01234567
+    validations:
+      required: true
+  - type: input
+    id: rne_release
+    attributes:
+      label: RNE release
+      description: Exact RNE release tag and archive checksum used for the run.
+      placeholder: v0.x.y, sha256:...
+    validations:
+      required: true
+  - type: input
+    id: first_used_on
+    attributes:
+      label: First real use date
+      description: YYYY-MM-DD date when this project first used the tested candidate surface.
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: input
+    id: last_verified_on
+    attributes:
+      label: Last verification date
+      description: YYYY-MM-DD date of the submitted reproduction.
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: textarea
+    id: task_spec
+    attributes:
+      label: TaskSpec artifact
+      description: Immutable download URL, file name, size, and lowercase sha256 digest.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: failure_capsule
+    attributes:
+      label: Failure Capsule artifact
+      description: Immutable archive URL plus capsule.json path, archive checksum, and verification result.
+      placeholder: |
+        URL:
+        capsule_path:
+        archive_sha256:
+        verify_output:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction_command
+    attributes:
+      label: Clean reproduction commands
+      description: Commands starting from the pinned revision and installed RNE release.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Submission verification
+      options:
+        - label: The TaskSpec validates through the released typed reader.
+          required: true
+        - label: The Failure Capsule verifies and reproduces the declared failure from a clean checkout.
+          required: true
+        - label: Exact downloadable bytes will remain available for maintainer review.
+          required: true
+    validations:
+      required: true

@@ -8,9 +8,15 @@ on:
       - "Cargo.lock"
       - "crates/rne_physics/**"
       - "crates/rne_physics_mujoco/**"
+      - "crates/rne_ai/**"
+      - "examples/74_flagship_validation_workflow/**"
       - "docs/PLAN_MUJOCO_SPIKE.md"
+      - "docs/PRODUCT_STRATEGY_2026_2029.md"
+      - "docs/ROADMAP.md"
+      - "release/contracts.toml"
       - "tests/physics_conformance/**"
       - "xtask/src/failure_capsule.rs"
+      - "xtask/src/main.rs"
       - ".github/workflows/mujoco.yml"
   pull_request:
     paths:
@@ -18,9 +24,15 @@ on:
       - "Cargo.lock"
       - "crates/rne_physics/**"
       - "crates/rne_physics_mujoco/**"
+      - "crates/rne_ai/**"
+      - "examples/74_flagship_validation_workflow/**"
       - "docs/PLAN_MUJOCO_SPIKE.md"
+      - "docs/PRODUCT_STRATEGY_2026_2029.md"
+      - "docs/ROADMAP.md"
+      - "release/contracts.toml"
       - "tests/physics_conformance/**"
       - "xtask/src/failure_capsule.rs"
+      - "xtask/src/main.rs"
       - ".github/workflows/mujoco.yml"
   workflow_dispatch:
 
@@ -116,16 +128,23 @@ jobs:
       - name: Clippy
         run: |
           cargo clippy --locked -p rne_physics_mujoco --features mujoco --all-targets -- -D warnings
-          cargo clippy --locked -p rne_physics_conformance --features mujoco --all-targets -- -D warnings
+          cargo clippy --locked -p rne_physics_conformance_suite --features mujoco --all-targets -- -D warnings
+          cargo clippy --locked -p rne_ai --all-targets -- -D warnings
+          cargo clippy --locked -p flagship_validation_workflow --features mujoco --all-targets -- -D warnings
 
       - name: MuJoCo feature tests
         run: |
           cargo test --locked -p rne_physics_mujoco --features mujoco
-          cargo test --locked -p rne_physics_conformance --features mujoco
+          cargo test --locked -p rne_physics_conformance_suite --features mujoco
+          cargo test --locked -p rne_ai
+          cargo test --locked -p flagship_validation_workflow --features mujoco --example 74_flagship_validation_workflow
+
+      - name: Rapier/MuJoCo flagship TaskSpec evidence
+        run: cargo run --locked -p xtask -- flagship --cross-backend
 
       - name: Cross-backend divergence Failure Capsule
         run: |
-          cargo run --locked -p rne_physics_conformance --features mujoco --bin rne-physics-divergence -- --report artifacts/physics-divergence-source/conformance-report.json --replay artifacts/physics-divergence-source/divergence.rne-replay
+          cargo run --locked -p rne_physics_conformance_suite --features mujoco --bin rne-physics-divergence -- --report artifacts/physics-divergence-source/conformance-report.json --replay artifacts/physics-divergence-source/divergence.rne-replay
           cargo run --locked -p xtask -- failure-capsule create --replay artifacts/physics-divergence-source/divergence.rne-replay --evidence artifacts/physics-divergence-source/conformance-report.json --output artifacts/physics-divergence-capsule --backend rapier-vs-mujoco --backend-version rapier-0.22+mujoco-3.9.0
           cargo run --locked -p xtask -- failure-capsule verify artifacts/physics-divergence-capsule
 
@@ -134,5 +153,13 @@ jobs:
         with:
           name: physics-divergence-${{ matrix.os }}
           path: artifacts/physics-divergence-capsule
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload flagship cross-backend evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagship-cross-backend-${{ matrix.os }}
+          path: artifacts/flagship-validation
           if-no-files-found: error
           retention-days: 14

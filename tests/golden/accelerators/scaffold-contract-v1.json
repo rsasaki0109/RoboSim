@@ -1,0 +1,52 @@
+{
+  "kind": "rne_accelerator_scaffold_contract",
+  "schema_version": 1,
+  "adapter_name": "compatibility_accelerator",
+  "files": [
+    {
+      "path": "adapter.py",
+      "byte_length": 2034,
+      "sha256": "sha256:a8972a4edc8d7bde783bcc1baf5e4efaf9f90f9ba34bdbd129efb61639627926"
+    },
+    {
+      "path": "accelerator.toml",
+      "byte_length": 843,
+      "sha256": "sha256:596d775d51ed1341e9139379d607b1b08027114ade80332208e7a1728aa1c868"
+    },
+    {
+      "path": "runtime.toml",
+      "byte_length": 430,
+      "sha256": "sha256:6dc8b72f72fcd7d0022c3fa3154ef72a6cbc16b5df805325094f3f9bdf8f2d11"
+    },
+    {
+      "path": "task.json",
+      "byte_length": 1271,
+      "sha256": "sha256:98eed9827aabd384c388ecc684ffaee272997edd2d0c925831aec00b32f0a08f"
+    },
+    {
+      "path": "protocol-fixture.json",
+      "byte_length": 18125,
+      "sha256": "sha256:4ac04aad0bf2dfcb0c8395f1e492e30d0ca11278cfda835902221027665cce41"
+    },
+    {
+      "path": "model.xml",
+      "byte_length": 29,
+      "sha256": "sha256:212700d22f83bc0967a416b19040b763f0876392b85ac03f7cd28775eaec83c7"
+    },
+    {
+      "path": "requirements.txt",
+      "byte_length": 174,
+      "sha256": "sha256:d940976fcc42886fc55a0c7918e9d2f38db078eab3ced6bfc00747f0db50be40"
+    },
+    {
+      "path": "SELECTION.md",
+      "byte_length": 237,
+      "sha256": "sha256:999278f8aafad1ee98a7b0124f30290c2754318e5e4c9568a27ee6732962d5b6"
+    },
+    {
+      "path": "README.md",
+      "byte_length": 962,
+      "sha256": "sha256:339d645a3ebeab245a2a87a3f1b90aa378e70d34dbc6f29059ecb75c927cea23"
+    }
+  ]
+}

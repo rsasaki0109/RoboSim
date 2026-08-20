@@ -231,6 +231,181 @@ def validate_bound_task_spec(task_spec: Any, expected: dict[str, Any]) -> dict[s
     return validated
 
 
+def validate_capability_report(report: Any) -> dict[str, Any]:
+    """Validates capability identity, status semantics, and exact runtime pins."""
+
+    if not isinstance(report, dict):
+        raise ProtocolError("report_invalid", "capability report must be an object")
+    required = {
+        "kind",
+        "schema_version",
+        "adapter_id",
+        "runtime_id",
+        "status",
+        "unavailable_reason_code",
+        "execution_boundary",
+        "precision",
+        "protocol_schema",
+        "task_spec_schema",
+        "batch_checkpoint_schema",
+        "conformance_report_schema",
+        "scale_report_schema",
+        "supported_task_ids",
+        "supported_batch_widths",
+        "requires_nvidia_gpu",
+        "unsupported_features",
+        "runtime",
+        "runtime_contract",
+        "runtime_contract_schema",
+    }
+    require_exact_keys(report, required=required, context="capability report")
+    if (
+        report["kind"] != CAPABILITY_REPORT_KIND
+        or report["schema_version"] != CAPABILITY_REPORT_SCHEMA_VERSION
+        or report["adapter_id"] != ADAPTER_ID
+        or report["runtime_id"] != RUNTIME_ID
+        or report["execution_boundary"] != "out_of_process_python"
+        or report["precision"] != "f64"
+        or report["protocol_schema"] != PROTOCOL_SCHEMA_VERSION
+        or report["task_spec_schema"] != TASK_SPEC_SCHEMA_VERSION
+        or report["batch_checkpoint_schema"] != BATCH_CHECKPOINT_SCHEMA_VERSION
+        or report["conformance_report_schema"] != CONFORMANCE_REPORT_SCHEMA_VERSION
+        or report["scale_report_schema"] != SCALE_REPORT_SCHEMA_VERSION
+        or report["supported_task_ids"] != ["rne.physics.free_fall.mjx.v1"]
+        or report["supported_batch_widths"] != list(SUPPORTED_BATCH_WIDTHS)
+        or report["requires_nvidia_gpu"] is not True
+    ):
+        raise ProtocolError("report_invalid", "capability contract identity mismatch")
+    unsupported = report["unsupported_features"]
+    if (
+        not isinstance(unsupported, list)
+        or not unsupported
+        or unsupported != sorted(set(unsupported))
+        or any(not isinstance(feature, str) or not feature for feature in unsupported)
+    ):
+        raise ProtocolError("report_invalid", "unsupported features are not canonical")
+
+    runtime_contract = report["runtime_contract"]
+    runtime_contract_fields = {
+        "schema_version",
+        "operating_system",
+        "architecture",
+        "python",
+        "cuda_major",
+        "nvidia_driver_minimum",
+        "packages",
+        "official_sources",
+    }
+    if not isinstance(runtime_contract, dict):
+        raise ProtocolError("report_invalid", "runtime contract must be an object")
+    require_exact_keys(
+        runtime_contract,
+        required=runtime_contract_fields,
+        context="runtime contract",
+    )
+    package_fields = {
+        "jax",
+        "jaxlib",
+        "jax_cuda_plugin",
+        "mujoco",
+        "mujoco_mjx",
+        "warp_lang",
+    }
+    packages = runtime_contract["packages"]
+    if not isinstance(packages, dict):
+        raise ProtocolError("report_invalid", "runtime packages must be an object")
+    require_exact_keys(packages, required=package_fields, context="runtime packages")
+    if (
+        report["runtime_contract_schema"] != 1
+        or runtime_contract["schema_version"] != 1
+        or runtime_contract["operating_system"] != "linux"
+        or runtime_contract["architecture"] != "x86_64"
+        or runtime_contract["python"] != "3.12"
+        or runtime_contract["cuda_major"] != 13
+        or runtime_contract["nvidia_driver_minimum"] != 580
+        or not isinstance(runtime_contract["official_sources"], list)
+        or not runtime_contract["official_sources"]
+        or any(
+            not isinstance(source, str) or not source.startswith("https://")
+            for source in runtime_contract["official_sources"]
+        )
+    ):
+        raise ProtocolError("report_invalid", "runtime contract is invalid")
+
+    runtime = report["runtime"]
+    runtime_fields = {
+        "python_version",
+        "platform",
+        "machine",
+        "jax_version",
+        "jaxlib_version",
+        "jax_cuda_plugin_version",
+        "mujoco_version",
+        "mujoco_mjx_version",
+        "warp_version",
+        "jax_backend",
+        "jax_devices",
+        "nvidia_driver_version",
+    }
+    if not isinstance(runtime, dict):
+        raise ProtocolError("report_invalid", "runtime probe must be an object")
+    require_exact_keys(runtime, required=runtime_fields, context="runtime probe")
+    for field in ("python_version", "platform", "machine"):
+        if not isinstance(runtime[field], str) or not runtime[field]:
+            raise ProtocolError("report_invalid", f"runtime {field} is invalid")
+    if not isinstance(runtime["jax_devices"], list) or any(
+        not isinstance(device, str) or not device for device in runtime["jax_devices"]
+    ):
+        raise ProtocolError("report_invalid", "runtime devices are invalid")
+
+    status = report["status"]
+    reason = report["unavailable_reason_code"]
+    version_fields = {
+        "jax_version": "jax",
+        "jaxlib_version": "jaxlib",
+        "jax_cuda_plugin_version": "jax_cuda_plugin",
+        "mujoco_version": "mujoco",
+        "mujoco_mjx_version": "mujoco_mjx",
+        "warp_version": "warp_lang",
+    }
+    if status == "available":
+        try:
+            driver_major = int((runtime["nvidia_driver_version"] or "").split(".", maxsplit=1)[0])
+        except (TypeError, ValueError):
+            driver_major = -1
+        if (
+            reason is not None
+            or runtime["platform"] != runtime_contract["operating_system"]
+            or runtime["machine"] != runtime_contract["architecture"]
+            or not (
+                runtime["python_version"] == runtime_contract["python"]
+                or runtime["python_version"].startswith(runtime_contract["python"] + ".")
+            )
+            or driver_major < runtime_contract["nvidia_driver_minimum"]
+            or runtime["jax_backend"] != "gpu"
+            or not runtime["jax_devices"]
+            or any(runtime[field] != packages[package] for field, package in version_fields.items())
+        ):
+            raise ProtocolError("report_invalid", "available runtime claims do not match pins")
+    elif status == "unavailable":
+        if not isinstance(reason, str) or not reason or any(
+            not (character.isalnum() or character in "_.-") for character in reason
+        ):
+            raise ProtocolError("report_invalid", "unavailable reason code is invalid")
+    elif status == "test_only":
+        if (
+            reason is not None
+            or runtime["jax_backend"] is not None
+            or runtime["jax_devices"]
+            or any(runtime[field] is not None for field in version_fields)
+        ):
+            raise ProtocolError("report_invalid", "test-only report claims accelerator runtime")
+    else:
+        raise ProtocolError("report_invalid", "unknown capability status")
+    canonical_json(report)
+    return report
+
+
 def load_json_fixture(path: Path) -> dict[str, Any]:
     """Loads a repository-owned finite JSON fixture."""
 

@@ -1,0 +1,146 @@
+name: External backend, hardware, or accelerator evidence
+description: Submit an independently maintained physics backend, hardware adapter, or accelerator adapter conformance result.
+title: "[External system evidence] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Follow the backend, hardware, or accelerator guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        A submitted issue is not acceptance evidence. The readiness gate rebinds every report to its exact implementation subject.
+  - type: checkboxes
+    id: independence
+    attributes:
+      label: Independence
+      options:
+        - label: The implementation repository is owned outside the RNE repository owner.
+          required: true
+        - label: This is not a renamed or copied in-repository reference implementation.
+          required: true
+        - label: The artifacts contain no credentials, personal data, or unredistributable files.
+          required: true
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: External system kind
+      options:
+        - physics_backend
+        - hardware_adapter
+        - accelerator_adapter
+    validations:
+      required: true
+  - type: input
+    id: repository
+    attributes:
+      label: Implementation repository
+      placeholder: https://github.com/owner/rne-integration
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Tested revision
+      description: Exact lowercase 40-character Git commit ID.
+      placeholder: 0123456789abcdef0123456789abcdef01234567
+    validations:
+      required: true
+  - type: input
+    id: rne_release
+    attributes:
+      label: RNE release
+      description: Exact RNE release or crate version and immutable checksum or lockfile identity.
+      placeholder: v0.x.y, sha256:...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Conformance platform
+      options:
+        - Linux x86-64
+        - Windows x86-64
+    validations:
+      required: true
+  - type: textarea
+    id: subject
+    attributes:
+      label: Exact implementation subject
+      description: Immutable URL, file name, size, and lowercase sha256 digest for the tested binary, script, or deterministic source bundle.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: task_spec
+    attributes:
+      label: Adapter TaskSpec or not-applicable declaration
+      description: For hardware or accelerator adapters, provide immutable URL, file name, size, and sha256. For physics, state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: adapter_arguments
+    attributes:
+      label: Normalized adapter arguments or not-applicable declaration
+      description: For hardware or accelerator adapters, provide the exact ordered JSON list using the adapter-subject marker. For physics, state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: accelerator_manifest
+    attributes:
+      label: Accelerator manifest or not-applicable declaration
+      description: For accelerator adapters, provide immutable URL, file name, size, and sha256 for the exact TOML manifest. Otherwise state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: runtime_contract
+    attributes:
+      label: Accelerator runtime contract or not-applicable declaration
+      description: For accelerator adapters, provide immutable URL, file name, size, and sha256 for the exact TOML runtime contract. Otherwise state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Conformance report
+      description: Immutable URL, exact file name, size, and lowercase sha256 digest.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: conformance_command
+    attributes:
+      label: Exact conformance command
+      description: Include the installed runner or external Rust conformance invocation and exit status.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety declaration
+      options:
+        - label: This is physics or accelerator process conformance, or hardware conformance ran against a sandbox, simulator, process mock, or correctly isolated HIL rig with explicit authorization.
+          required: true
+    validations:
+      required: true
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Submission verification
+      options:
+        - label: The published conformance kit produced a passing typed report.
+          required: true
+        - label: The report names and hashes the exact submitted implementation subject.
+          required: true
+        - label: Exact downloadable subject and report bytes will remain available for review.
+          required: true
+    validations:
+      required: true

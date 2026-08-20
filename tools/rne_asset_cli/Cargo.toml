@@ -13,12 +13,16 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 rne_assets = { workspace = true }
+rne_ai = { workspace = true }
 rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_ecs = { workspace = true }
+rne_hardware_gateway = { workspace = true }
+rne_hardware_lekiwi = { workspace = true }
 rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
+rne_physics_conformance = { workspace = true }
 rne_physics_analytic = { workspace = true }
 rne_physics_rapier = { workspace = true }
 rne_openscenario = { workspace = true }
@@ -30,6 +34,7 @@ rne_traci = { workspace = true }
 rne_traffic = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
+sha2 = { workspace = true }
 rne_world = { workspace = true }
 [dev-dependencies]
 rne_log = { workspace = true }

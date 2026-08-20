@@ -1,0 +1,116 @@
+{
+  "kind": "rne_hardware_shadow_comparison",
+  "schema_version": 1,
+  "task_id": "rne.diff_drive.sensor_goal.v1",
+  "tolerances": [
+    {
+      "tensor_name": "base_position_m",
+      "absolute_tolerance": 0.01
+    },
+    {
+      "tensor_name": "base_yaw_rad",
+      "absolute_tolerance": 0.01
+    },
+    {
+      "tensor_name": "wheel_velocity_rad_s",
+      "absolute_tolerance": 0.1
+    },
+    {
+      "tensor_name": "imu_linear_acceleration_y_m_s2",
+      "absolute_tolerance": 0.1
+    },
+    {
+      "tensor_name": "lidar_point_count",
+      "absolute_tolerance": 0.0
+    },
+    {
+      "tensor_name": "goal_delta_x_m",
+      "absolute_tolerance": 0.02
+    }
+  ],
+  "samples": [
+    {
+      "hardware_sequence": 10,
+      "hardware_received_at_ms": 100,
+      "simulation_step": 50,
+      "simulation_time_ticks": 833333333,
+      "hardware_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "simulation_values": [
+        0.005,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max_absolute_error": 0.005,
+      "sum_absolute_error": 0.005,
+      "mean_absolute_error": 0.0005555555555555556,
+      "violating_elements": 0,
+      "first_violation": null
+    },
+    {
+      "hardware_sequence": 11,
+      "hardware_received_at_ms": 117,
+      "simulation_step": 51,
+      "simulation_time_ticks": 850000000,
+      "hardware_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "simulation_values": [
+        0.02,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max_absolute_error": 0.02,
+      "sum_absolute_error": 0.02,
+      "mean_absolute_error": 0.0022222222222222222,
+      "violating_elements": 1,
+      "first_violation": {
+        "tensor_name": "base_position_m",
+        "tensor_element": 0,
+        "unit": "m",
+        "hardware_value": 0.0,
+        "simulation_value": 0.02,
+        "absolute_error": 0.02,
+        "absolute_tolerance": 0.01
+      }
+    }
+  ],
+  "summary": {
+    "compared_samples": 2,
+    "compared_elements": 18,
+    "violating_samples": 1,
+    "violating_elements": 1,
+    "max_absolute_error": 0.02,
+    "mean_absolute_error": 0.001388888888888889,
+    "passed": false
+  }
+}

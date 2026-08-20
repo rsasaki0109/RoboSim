@@ -55,6 +55,12 @@ colors change, which prevents moving-robot ghosting. Camera motion is
 reprojected through the previous view-projection matrix; static scenes gain
 the strongest edge-quality improvement. The G1 capture exposes the same path
 with `RNE_TAA=1` and optional `RNE_TAA_FEEDBACK` / `RNE_TAA_JITTER_PX`.
+When TAA or CPU depth readback is enabled, the scene pass losslessly packs each
+32-bit fragment depth into a dedicated `Rgba8Unorm` color attachment.
+Reprojection unpacks the exact pixel from that ordinary texture, and CPU
+readback copies it through the universally supported color path. This avoids
+backend-specific depth sampling and depth-buffer-copy requirements across
+Vulkan, Direct3D 12, Metal, and OpenGL/GLSL.
 
 ## Prefiltered image-based lighting
 

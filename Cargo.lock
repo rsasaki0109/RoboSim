@@ -1147,6 +1147,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
+name = "flagship_validation_workflow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bevy_ecs",
+ "rne_ai",
+ "rne_assets",
+ "rne_core",
+ "rne_ecs",
+ "rne_physics",
+ "rne_physics_mujoco",
+ "rne_traffic",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1298,6 +1316,9 @@ dependencies = [
  "rne_render_wgpu",
  "rne_sensor",
  "rne_world",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -3349,6 +3370,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 
 [[package]]
+name = "rne_accelerator_contract"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
 name = "rne_adapter_ros2"
 version = "0.1.0"
 dependencies = [
@@ -3393,15 +3426,19 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "rne_ai",
  "rne_assets",
  "rne_core",
  "rne_data",
  "rne_ecs",
+ "rne_hardware_gateway",
+ "rne_hardware_lekiwi",
  "rne_log",
  "rne_math",
  "rne_openscenario",
  "rne_physics",
  "rne_physics_analytic",
+ "rne_physics_conformance",
  "rne_physics_rapier",
  "rne_plugin",
  "rne_robot",
@@ -3412,6 +3449,7 @@ dependencies = [
  "rne_world",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -3431,6 +3469,30 @@ dependencies = [
  "rne_world",
  "serde",
  "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "rne_compatibility_suite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rne_accelerator_contract",
+ "rne_ai",
+ "rne_core",
+ "rne_data",
+ "rne_hardware_gateway",
+ "rne_log",
+ "rne_math",
+ "rne_openscenario",
+ "rne_physics_conformance",
+ "rne_physics_conformance_suite",
+ "rne_plugin",
+ "rne_plugin_sdk",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "toml",
 ]
 
@@ -3534,6 +3596,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_hardware_gateway"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_hardware_lekiwi"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+ "rne_hardware_gateway",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_log"
 version = "0.1.0"
 dependencies = [
@@ -3611,6 +3696,22 @@ dependencies = [
 name = "rne_physics_conformance"
 version = "0.1.0"
 dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_physics_analytic",
+ "rne_world",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_physics_conformance_suite"
+version = "0.1.0"
+dependencies = [
  "anyhow",
  "rne_ai",
  "rne_core",
@@ -3684,17 +3785,26 @@ name = "rne_plugin"
 version = "0.1.0"
 dependencies = [
  "libloading",
+ "rne_plugin_sdk",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "rne_plugin_example_velocity_servo"
 version = "0.1.0"
+dependencies = [
+ "rne_plugin_sdk",
+]
 
 [[package]]
 name = "rne_plugin_legacy_v2_fixture"
+version = "0.1.0"
+
+[[package]]
+name = "rne_plugin_sdk"
 version = "0.1.0"
 
 [[package]]
@@ -5342,14 +5452,20 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "image",
+ "rne_accelerator_contract",
  "rne_ai",
  "rne_assets",
+ "rne_compatibility_suite",
  "rne_core",
  "rne_data",
  "rne_fuzz_smoke",
+ "rne_hardware_gateway",
+ "rne_hardware_lekiwi",
  "rne_log",
  "rne_openscenario",
  "rne_physics",
+ "rne_physics_analytic",
+ "rne_physics_conformance",
  "rne_plugin",
  "rne_traffic",
  "serde",

@@ -5,85 +5,31 @@
 //! `rne_plugin::cabi::load_controller_library` can open, and exposes the same
 //! velocity-servo policy as the built-in `rne_plugin::VelocityServoController`.
 //!
-//! The plugin intentionally has no dependency on `rne_plugin`: a stable ABI
-//! means the host and the plugin each carry their own copy of the
-//! `#[repr(C)]` interface, versioned by the `rne_plugin_abi_version` symbol.
+//! The plugin depends only on the host-independent `rne_plugin_sdk` ABI crate;
+//! no host implementation type or allocator crosses the shared-library
+//! boundary.
 
 #![deny(missing_docs)]
 
+pub use rne_plugin_sdk::{
+    RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
+    RneJointVelocityV3,
+};
+use rne_plugin_sdk::{
+    RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION, RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND,
+    RNE_CONTROLLER_CAP_MULTI_ROBOT, RNE_PLUGIN_ABI_VERSION,
+};
 use std::ffi::{c_char, c_void, CStr, CString};
 
 /// Current ABI version implemented by this plugin.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = RNE_PLUGIN_ABI_VERSION;
 
-const CAP_JOINT_POSITION_OBSERVATION: u64 = 1 << 0;
-const CAP_JOINT_VELOCITY_COMMAND: u64 = 1 << 2;
-const CAP_MULTI_ROBOT: u64 = 1 << 3;
-const CAPABILITIES: u64 =
-    CAP_JOINT_POSITION_OBSERVATION | CAP_JOINT_VELOCITY_COMMAND | CAP_MULTI_ROBOT;
+const CAPABILITIES: u64 = RNE_CONTROLLER_CAP_JOINT_POSITION_OBSERVATION
+    | RNE_CONTROLLER_CAP_JOINT_VELOCITY_COMMAND
+    | RNE_CONTROLLER_CAP_MULTI_ROBOT;
 
 /// Logical plugin name reported through [`rne_plugin_name`].
 pub const PLUGIN_NAME: &str = "velocity_servo";
-
-/// Joint position observation, mirroring `rne_plugin::cabi::RneJointPosition`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointPosition {
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Joint position in radians.
-    pub position_rad: f64,
-}
-
-/// Joint velocity command, mirroring `rne_plugin::cabi::RneJointVelocity`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocity {
-    /// Joint name as a NUL-terminated UTF-8 string.
-    pub name: *const c_char,
-    /// Commanded joint velocity in radians per second.
-    pub velocity_rad_s: f64,
-}
-
-/// Robot-scoped ABI-v3 joint observation.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointObservationV3 {
-    /// Stable robot ID owned by the host for the duration of the call.
-    pub robot_id: *const c_char,
-    /// Joint name owned by the host for the duration of the call.
-    pub name: *const c_char,
-    /// Joint position in radians.
-    pub position_rad: f64,
-    /// Joint velocity in radians per second, or zero when unavailable.
-    pub velocity_rad_s: f64,
-    /// One when velocity is present, zero otherwise.
-    pub has_velocity: u8,
-    /// Reserved zero bytes.
-    pub reserved: [u8; 7],
-}
-
-/// Robot-scoped ABI-v3 joint velocity command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct RneJointVelocityV3 {
-    /// Stable robot ID copied from the matching observation.
-    pub robot_id: *const c_char,
-    /// Commanded joint name.
-    pub name: *const c_char,
-    /// Commanded joint velocity in radians per second.
-    pub velocity_rad_s: f64,
-}
-
-/// ABI-v3 fixed-step result.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RneControllerStepResultV3 {
-    /// Zero on success.
-    pub status: i32,
-    /// Number of initialized output commands.
-    pub output_count: usize,
-}
 
 /// Controller state owned by the plugin for the lifetime of an instance.
 struct VelocityServoState {

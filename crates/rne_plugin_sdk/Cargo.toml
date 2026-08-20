@@ -1,0 +1,10 @@
+[package]
+name = "rne_plugin_sdk"
+description = "Dependency-free authoring ABI for RNE controller plugins"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

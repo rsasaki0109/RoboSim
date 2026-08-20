@@ -30,7 +30,7 @@ workflow is truly complete.
 | Rendering | Native wgpu, browser replay viewer, PBR materials, glTF maps, HDR/IBL, TAA, legacy `interactive_viewer --connect`, and production `interactive_viewer --frontend-connect` | Remote diff-drive, scenario traffic, and articulated joints project locally; production binary RGB/depth frames drive PiP and full LiDAR frames drive a bounded display overlay without stepping a second physics world |
 | Scenario and traffic | Typed behavior contracts, deterministic traffic routing/signals, PLATEAU assets, multi-seed reports, multi-actor OpenSCENARIO 1.0 execution with per-kind routes and canonical action evidence, mixed runtime/external ownership metrics, versioned scenario replay, offline SUMO import, and recoverable live TraCI co-simulation | None for the M5 scenario-scale and TraCI recovery slice; broader OpenSCENARIO action coverage remains future scope |
 | Replay and evaluation | Episode logs, stable hashes, vectorized checkpoints, behavior CI, JUnit/JSON reports, tagged wheel/joint `.rne-replay` actions, `rne-scenario-replay` XOSC/network/clock/result records, joint-state/sensor summaries, per-step contact statistics, fall/failure annotations in the final report, and browser interval inspection | Full sensor payload streams for every sensor are opt-in via subscriptions |
-| Extension model | Backend-neutral traits, plugin manifests/interfaces (`rne_plugin`), a controller-plugin boundary invoked by the runner, dynamic loading of controller plugins from shared libraries through a versioned C ABI (`rne_plugin::load_controller_library`), name-based runtime discovery (`rne_plugin::discover_controller_plugin`, or `[controller] plugin_paths` in a run manifest) with a built-in fallback, and authoring tooling (`rne-asset plugin new` scaffolds a compilable `cdylib` controller-plugin crate plus a manifest; `rne-asset plugin list` enumerates built-in and discoverable plugins) | None for the current workflow slice |
+| Extension and compatibility model | Dependency-free controller author ABI (`rne_plugin_sdk`), host-side manifests/interfaces (`rne_plugin`), dynamic loading through a versioned C ABI, versioned offline controller and accelerator scaffolding, standalone plugin conformance (`rne-asset plugin check`), standalone accelerator process conformance (`rne-accelerator-conformance`), publishable external physics-backend conformance (`rne_physics_conformance`), content-addressed external hardware-process conformance (`rne-hardware-conformance`), a fixed 31-crate Rust API baseline, and an installed thirty-six-fixture corpus including both scaffold contracts and the plugin-conformance reader, distinct historical/current TaskSpec identities, TaskSpec-bound hardware-session evidence, all ten frontend protocol-v1 message families, renderer-capture evidence, provenance-bound state migration, historical checkpoint/replay decisions, and exact dataset/Failure Capsule ancestor retention | Independent third-party plugin and backend/adapter certification, future schema transitions, and the six-month stability window remain external v0.9/1.0 gates |
 
 ## Delivered first slice
 
@@ -436,7 +436,7 @@ max_velocity_rad_s = 5.0
 implementing the C ABI, with a versioned `rne-plugin.json` manifest:
 
 ```bash
-cargo run --release -p rne_asset_cli -- plugin new my_controller --dir plugins
+cargo run --release -p rne_asset_cli -- plugin new my_controller --dir plugins --schema 1
 cd plugins/my_controller && cargo build
 ```
 
@@ -446,3 +446,32 @@ and loads immediately); replace `rne_controller_step_v3` with your controller.
 and any discoverable plugin libraries in the given directories. An
 end-to-end test scaffolds, builds, and loads a plugin from the generated
 source.
+
+The generated `rne-scaffold.json` content-addresses the exact schema-v1 author
+files. The reader rejects extra, missing, modified, or symlinked entries, and
+the compatibility corpus regenerates the fixed fixture to prevent generator
+drift.
+
+Before distribution, run the standalone conformance kit against the built
+library and its manifest:
+
+```bash
+rne-asset plugin check \
+  --library target/debug/libmy_controller.so \
+  --manifest plugins/my_controller/rne-plugin.json \
+  --output my_controller.conformance.json
+```
+
+Use the platform's `.dll` or `.dylib` name where appropriate. Report schema v1
+content-addresses both inputs and checks manifest/binary identity, supported ABI
+symbols, capability negotiation, fixed-step observation/action validation,
+exact action replay after an identical seeded reset, and lifecycle shutdown.
+Semantic failures still produce a machine-readable failed report and a nonzero
+CLI exit.
+
+The author-facing ABI definitions are isolated in the dependency-free
+`rne_plugin_sdk` crate. `rne-asset plugin new` vendors that exact module into
+the generated crate, so the first build works with `cargo build --offline` and
+does not depend on RNE host crates or crates.io. The reference ABI-v3 plugin
+uses the SDK directly; the frozen ABI-v2 fixture remains independent. See
+[`PLUGIN_SDK.md`](PLUGIN_SDK.md) for ownership and upgrade rules.

@@ -191,7 +191,9 @@ The deterministic CPU reference runner now implements lane-local seeds,
 partial reset, stable lane order, deferred auto-reset, and replay restoration.
 Rust/Python schema agreement, TaskSpec-derived Gymnasium spaces, and measured
 1/16/256/4096 CPU scaling evidence are present. ADR 014 selects only MJX-Warp;
-its GPU adapter and promotion evidence remain governed by the exit criteria
+the dependency-free Rust verifier also replays a complete nine-exchange JSONL
+protocol transcript, including checkpoint/restore and fail-closed error paths.
+Its GPU adapter and promotion evidence remain governed by the exit criteria
 below, so the milestone is not complete merely because the portable foundation
 exists.
 
@@ -231,6 +233,14 @@ Delivery slices:
 - keep wgpu as the portable baseline and evaluate external high-fidelity
   rendering only through an adapter.
 
+Current implementation status: the renderer-free diff-drive reference bundle
+retains the headless correctness and offline-metric golden. Separately, the
+WGPU Unitree G1 head camera now streams twelve RGB/depth pairs into the same
+bundle format, bound to a portable gait TaskSpec and explicit calibration,
+rolling-shutter, latency, and noise metadata. Clean Windows/Linux evidence jobs
+must initialize WGPU, regenerate and verify the bundle, and upload it; the CPU
+smoke fallback is rejected for this renderer-specific evidence.
+
 Exit evidence:
 
 - a dataset verifies all payload hashes, stream ordering, calibration, units,
@@ -241,6 +251,26 @@ Exit evidence:
 
 ### v0.6: sim-to-real and hardware in the loop
 
+Implementation foundation: ADR 016 places a vendor-neutral
+`rne_hardware_gateway` state machine under `adapters/hardware`, never in core.
+It binds TaskSpec observation/action order, injects rather than reads monotonic
+host time, distinguishes playback/shadow/HIL/live authority, enforces bounded
+queues and explicit action limits, and produces schema-v1 event/snapshot
+evidence. A byte-bounded versioned process protocol and deterministic child
+process now add strict session/request correlation, exact trace capture, and a
+golden injected disconnect with both device watchdog and gateway stops. The
+TaskSpec-bound shadow comparator also freezes ordered tolerances, distinct
+host/SimClock timestamps, first divergence, and a revalidated golden verdict.
+Failure Capsule tooling now retains and revalidates TaskSpec, session, wire,
+shadow, and mock-conformance artifacts beside a real simulation failure replay.
+The six child-process cases now cover deadline, disconnect, reconnect, stale
+command, limit, and emergency stop. LeKiwi + SO-101 is selected as the first
+reference robot. Its separate adapter pins LeRobot v0.6.0, freezes a conservative
+base-only TaskSpec and degree/radian mapping, holds the measured arm pose, and
+passes process tests for live mapping, shadow authority denial, direct base stop,
+and its independent watchdog. An actual LeKiwi shadow run, physical safety
+matrix, and low-speed live exit evidence remain open.
+
 Delivery slices:
 
 - define a bounded hardware gateway outside core with explicit deadlines,
@@ -249,8 +279,8 @@ Delivery slices:
 - support playback, shadow, HIL, and live modes without teaching simulation
   logic about wall-clock time;
 - harden the ROS 2 adapter and retain a direct C/Python controller path;
-- choose one affordable reference robot before implementation; brand-specific
-  types remain in an adapter.
+- keep the selected LeKiwi + SO-101 profile brand-specific, and require physical
+  evidence before extending its v1 base-only authority to the arm.
 
 Exit evidence:
 
@@ -283,6 +313,22 @@ Exit evidence is a single clean-checkout command that reproduces the success
 and failure on Windows and Linux. Every subsystem included in the demo must be
 replaceable or testable independently; no special-case core logic is allowed.
 
+The first integrated slice is now executable as `cargo run --locked -p xtask
+-- flagship`. Example 74 loads the mobile-lift scene/robot/URDF, advances
+signal-controlled traffic and the robot at one fixed timestep, gates motion on
+RGB-D inspection and aisle clearance, evaluates seven typed behavior
+contracts, and produces both a successful pick/place and a seeded fail-closed
+perception blackout. The failure minimizes from three active dimensions to one,
+replays identically, is sealed into a verified Failure Capsule, and ships with
+a self-contained browser inspector. `cargo run --locked -p xtask -- flagship
+--cross-backend` additionally executes the unchanged TaskSpec and policy on
+Rapier and native MuJoCo 3.9. It requires the optional MuJoCo runtime and emits
+`cross-backend-report.json`: semantic outcomes are exact, solver state hashes
+remain backend-specific, and completion step, base/payload pose, arm/lift/gripper
+state, RGB-D depth, and reward use named unit-bearing tolerances. The dedicated
+Windows/Linux MuJoCo job verifies the report and includes it in the Failure
+Capsule, closing the second-production-physics-path v0.7 gap.
+
 ### v0.8-v0.9: ecosystem and compatibility
 
 The final pre-1.0 program focuses on other people successfully extending RNE:
@@ -295,6 +341,129 @@ The final pre-1.0 program focuses on other people successfully extending RNE:
 - freeze candidate Rust APIs, C ABI, frontend protocol, TaskSpec, replay,
   dataset, and Failure Capsule formats;
 - provide explicit migration notes and compatibility fixtures for every break.
+
+The first v0.8 supply-chain slice is now encoded in the release workflow:
+Linux and Windows archives plus ABI3 wheels receive GitHub OIDC/Sigstore SLSA
+v1 attestations on tag and manual rehearsal runs. Publication verifies all four
+subjects before creating the prerelease, while `release-check` freezes the
+issuer, repository, workflow, action, permissions, subject classes, and event
+policy in `release/artifact-attestation.toml`. SHA-256 manifests remain the
+independent offline integrity layer inside each archive. The workflow now also
+retains the exact generated Sigstore bundle, while the 1.0 readiness gate
+replays cryptographic verification and regenerates a strict receipt bound to
+the archive digest, repository, workflow certificate identity, tag, source and
+signer revision, issuer, predicate, and runner policy.
+
+The next v0.8 authoring slice is also available from the installed bundle:
+`rne-asset plugin check` produces a content-addressed schema-v1 report for an
+external controller library and manifest. It exercises the supported ABI,
+capability negotiation, typed fixed-step frames, identical seeded-reset replay,
+and shutdown; release rehearsal now uses this full kit in place of a discovery-
+only plugin smoke.
+
+The third v0.8 authoring slice separates the dependency-free
+`rne_plugin_sdk` from the host loader. New scaffolds vendor the exact SDK source
+and build offline; release rehearsal regenerates one plugin from the installed
+CLI, verifies the vendored source against the bundle, compiles it with warnings
+denied, and runs the standalone conformance kit against the result.
+
+The fourth v0.8 certification slice publishes a standalone external hardware-
+adapter runner. It hashes the adapter subject, normalized launch contract, and
+TaskSpec, then executes nine bounded child-process cases covering identity,
+task binding, observation shape/dtype/sequence, bounded HIL actuation, explicit
+safe stop, shadow authority, sequence/session isolation, and width rejection.
+The Rust mock and independently implemented Python LeKiwi bridge pass the same
+public API; installed Linux and Windows bundles rerun it without source files.
+This is reference evidence, not the still-required third-party certification.
+
+The fifth v0.8 authoring slice makes physics conformance consumable outside the
+workspace. The publishable `rne_physics_conformance` crate accepts any
+backend-neutral `PhysicsBackend` factory and emits a content-addressed schema-v1
+report with fixed catalog order and unit-bearing tolerances. GPU and soft-body
+claims fail closed until portable vectors exist. Failure Capsules require the
+exact hashed implementation subject. The in-repository reference is authoring
+evidence, not the independent backend certification required for 1.0.
+
+The sixth v0.8 authoring slice adds `rne-accelerator-conformance scaffold` to
+the installed kit. It creates a non-overwriting, dependency-free Python JSONL
+harness with typed manifest, runtime, TaskSpec, checkpoint transcript, model,
+pins, and selection placeholders. Installed rehearsal regenerates and conforms
+that harness on both tier-1 platforms. Its fixture responder is deliberately
+marked nonqualifying: only a replaced, independently maintained backend with
+retained subject bytes and physical runtime evidence can enter readiness.
+The harness carries canonical `rne-scaffold.json` schema v1; incompatible
+generator changes require an additive schema and retained v1 generation rather
+than rewriting the installed authoring surface.
+
+The readiness tracker's v2 external-certification contract closes the final
+report-substitution gap before real outreach: each independent source revision
+must retain the exact controller library and manifest, physics implementation
+or source bundle, or hardware adapter plus TaskSpec and normalized launch
+arguments. The gate rehashes those subjects and compares file identity, size,
+task identity, and dimensions to the passing report. Human review still proves
+ownership and independence; the machine gate proves the accepted report belongs
+to the preserved implementation bytes.
+
+The external-intake slice makes that contract practical without weakening it.
+`xtask readiness-pack init` creates a non-overwriting external-disk pack from
+the honest 2/9 baseline and its retained compatibility report.
+`readiness-pack stage` enforces the gate's size, path-containment, non-symlink,
+and no-overwrite rules while copying and hashing one file, then emits its
+canonical TOML reference. It cannot add manifest claims, determine ownership,
+or turn staged bytes into a passing check.
+The companion external-intake registry fixes three public submission routes
+for task reproductions, controller plugins, and backend/hardware/accelerator
+systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
+manifests, runtime contracts, arguments, and process reports separately; these
+do not count as the external physics backend or hardware adapter required for
+1.0.
+Required GitHub forms collect immutable revisions, subject bytes, typed
+reports, commands, dates, and safety/independence declarations; CI validates
+that the forms cannot silently drop a readiness requirement. Issues remain a
+review queue and never substitute for the typed audit.
+
+The expanded v0.9 compatibility slice turns retained artifacts into an
+executable installed contract. A strict registry content-addresses thirty-six
+historical and current fixtures spanning TaskSpec identities, checkpoint,
+generic/behavior/scenario replay, dataset, renderer capture, all ten frontend
+protocol-v1 message families, controller C ABI, plugin-conformance report,
+controller-scaffold contract, historical migration, Failure Capsule,
+TaskSpec-bound hardware session, and physics fixtures. `rne-compatibility` must
+accept each artifact with its current typed reader and reject deterministic
+future-schema and unknown-field mutations.
+Binary frontend and dataset fixtures additionally require exact wire round
+trips and malformed-input rejection. CI publishes the stable report and both
+installed release rehearsals rerun it from the extracted corpus. This evidence
+advances the compatibility clock; it does not claim six months of use or
+independent adoption.
+
+The v0.9 language-boundary slice ships a standalone C/C++ controller
+header, freezes every 64-bit ABI-v3 layout and required export, and records the
+ABI3 wheel's 24 public exports with constructor, method, and property call
+shapes. Installed-rehearsal schema v4 verifies that manifest after extraction.
+The historical migration matrix retains the first synthesized schema-v1 case
+and adds actual 7-tick, sensor-bearing schema-v1 and schema-v2 snapshots emitted
+by their recorded ancestor revisions. It fixes both source Git trees and both
+source/current state digests, proves the v2 depth frame survives migration,
+and restores both into v3 in the installed bundle. This is now multi-generation
+state evidence, but it is not yet broad coverage of every public artifact family.
+The next retained history slice additionally restores a real generic vectorized
+checkpoint v1 and records explicit required-rerun decisions for real scenario
+replay v2/v3 artifacts whose serializers predate mandatory v4 result evidence.
+This distinguishes safe compatibility from unsafe schema relabelling.
+The following slice binds the introducing TaskSpec, streaming dataset, and
+Failure Capsule v1 serializers. It retains exact ancestor JSON for all three
+and the dataset's original binary shard, then reruns dataset verification and
+offline evaluation from the installed bundle. These families have no v2 yet;
+the evidence proves same-schema retention without inventing a migration.
+The frontend history slice binds protocol v1's introducing commit and first
+committed full `ClientHello` golden. Exact ancestor bytes must still round trip
+and negotiate through the installed current reader, while malformed and future
+inputs fail closed.
+The Rust candidate surface is anchored separately by a machine-readable
+baseline containing the exact commit, Git tree, tool version, and manifest path
+for all 31 publishable crates. SemVer CI always compares to that immutable
+revision rather than a moving branch parent.
 
 `v0.9` lasts as long as necessary. A calendar date or GitHub star count does
 not turn it into 1.0.
@@ -319,6 +488,18 @@ RNE 1.0 is allowed only when all of the following are true:
 
 Stars may indicate awareness, but they are not an engineering readiness gate.
 If the external-use gates are not met, the project remains at 0.x.
+
+These conditions now have a deterministic machine gate. `xtask
+release-readiness` consumes exact SHA-256-bound external evidence, requires an
+explicit assessment date, and emits nine fixed checks. The committed
+`release/one-zero-readiness.toml` remains intentionally incomplete; its
+retained 36-check historical compatibility replay and clean blocker registry
+report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
+[ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
+only for the eventual promotion and cannot turn missing evidence into a pass.
+The source metadata check, both platform bundle builders, and the aggregate
+release verdict also rerun that audit automatically for any 1.x or later
+version, so changing version metadata alone cannot bypass the external gates.
 
 ## The next 12 weeks
 

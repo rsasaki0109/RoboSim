@@ -2,6 +2,8 @@
 
 #![deny(missing_docs)]
 
+mod asset_path;
+
 pub mod action;
 pub mod agent;
 pub mod behavior;
@@ -73,10 +75,10 @@ pub use env::{
     unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path, unitree_g1_factory_scene_path,
     unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
-    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_inspection_targets,
-    unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path, unitree_go2_dynamic_scene_path,
-    unitree_go2_scene_path, unitree_go2_scheduled_targets, unitree_go2_task_spec,
-    unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_gait_task_spec,
+    unitree_g1_inspection_targets, unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path,
+    unitree_go2_dynamic_scene_path, unitree_go2_scene_path, unitree_go2_scheduled_targets,
+    unitree_go2_task_spec, unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
     unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s, ClutterPickConfig,
     DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
     DiffDriveEpisodeSnapshotError, DiffDriveSim, GraspMode, HumanoidAction, HumanoidEpisode,
@@ -84,15 +86,16 @@ pub use env::{
     MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeProgressSnapshot,
     MobileManipulatorEpisodeSnapshot, MobileManipulatorEpisodeSnapshotError,
     MobileManipulatorFixedJointSnapshot, MobileManipulatorFrameSnapshot,
-    MobileManipulatorJointMotorSnapshot, MobileManipulatorRigidBodySnapshot,
-    MobileManipulatorSensorStateSnapshot, MobileManipulatorSim, MobileManipulatorSimSnapshot,
-    MobileManipulatorSimSnapshotError, MobileManipulatorTransformSnapshot, QuadrupedAction,
-    QuadrupedEpisode, QuadrupedEpisodeConfig, QuadrupedObservation, UnitreeG1Action,
-    UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome, UnitreeG1CommandedTorquePolicy,
-    UnitreeG1Dex3Action, UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario,
-    UnitreeG1Dex3Episode, UnitreeG1Dex3EpisodeConfig, UnitreeG1Dex3HandCommand,
-    UnitreeG1Dex3Observation, UnitreeG1Dex3Phase, UnitreeG1Episode, UnitreeG1EpisodeConfig,
-    UnitreeG1GaitAction, UnitreeG1GaitCommand, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig,
+    MobileManipulatorJointMotorSnapshot, MobileManipulatorPhysicsFactory,
+    MobileManipulatorRigidBodySnapshot, MobileManipulatorSensorStateSnapshot, MobileManipulatorSim,
+    MobileManipulatorSimSnapshot, MobileManipulatorSimSnapshotError,
+    MobileManipulatorTransformSnapshot, QuadrupedAction, QuadrupedEpisode, QuadrupedEpisodeConfig,
+    QuadrupedObservation, UnitreeG1Action, UnitreeG1CommandedGaitConfig,
+    UnitreeG1CommandedGaitOutcome, UnitreeG1CommandedTorquePolicy, UnitreeG1Dex3Action,
+    UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario, UnitreeG1Dex3Episode,
+    UnitreeG1Dex3EpisodeConfig, UnitreeG1Dex3HandCommand, UnitreeG1Dex3Observation,
+    UnitreeG1Dex3Phase, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1GaitAction,
+    UnitreeG1GaitCommand, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig,
     UnitreeG1GaitObservation, UnitreeG1InspectionAction, UnitreeG1InspectionEpisode,
     UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation, UnitreeG1Observation,
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
@@ -112,11 +115,12 @@ pub use env::{
     VectorizedUnitreeG1GaitStep, VectorizedUnitreeGo2GaitCheckpoint,
     VectorizedUnitreeGo2GaitConfig, VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
-    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M, QUADRUPED_FOOT_LINKS,
-    UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S,
-    UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS,
-    UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS, UNITREE_GO2_POLICY_FEATURES,
-    UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+    MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
+    QUADRUPED_FOOT_LINKS, UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS,
+    UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM,
+    UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
+    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use goal::{
@@ -179,5 +183,5 @@ pub use transport::{
 };
 pub use vectorized::{
     VectorizedEpisode, VectorizedEpisodeCheckpoint, VectorizedEpisodeCheckpointError,
-    VectorizedEpisodeConfig, VectorizedEpisodeStep,
+    VectorizedEpisodeConfig, VectorizedEpisodeStep, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };

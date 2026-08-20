@@ -31,6 +31,46 @@ dependency.
 | Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
+## Independent validation wanted
+
+RNE remains below 1.0 until real projects outside this repository reproduce
+tasks and independently maintained extensions pass the shipped conformance
+kits. Native release bundles include the required tools; cloning the RNE
+source tree is not required to submit evidence.
+
+- [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
+- [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
+- [Conform an external physics backend, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+
+Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
+before running a qualifying test. Opening an issue is only the start of review:
+it does not imply acceptance, and in-repository reference implementations do
+not count as independent evidence.
+
+## Vehicle dynamics at the grip limit
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/vehicle-dynamics.png">
+    <img src="docs/media/vehicle-dynamics.gif" alt="The same pure-pursuit controller driving RNE kinematic and tire-limited dynamic vehicle models through a fast corner" width="800">
+  </picture>
+  <br>
+  <sub>One controller, two plants: the dynamic car's trail turns red when the front axle saturates.</sub>
+</p>
+
+Example 49 runs both cars from the same commands at 240 Hz, records their pose and
+tire telemetry deterministically, then renders the 12-second comparison and a
+reduced-motion poster. The no-slip car follows the requested line; the dynamic car
+runs wide once the 18 m corner asks for more lateral force than its tires can supply.
+
+```bash
+cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
+```
+
+Model equations, measured errors, and acceptance tests are in
+[Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
+
 ## G1 locomotion
 
 <p align="center">
@@ -101,6 +141,17 @@ The long example smoke gate is split for CI into `manipulator`, `locomotion`,
 `cargo run -p xtask -- ci-smoke media`.
 
 See [examples/README.md](examples/README.md) for the complete example index.
+
+## Independent integrations
+
+Third-party controller plugins, physics backends, hardware adapters, and real
+external task reproductions can be submitted through the fixed
+[external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
+validates all required issue-form fields with `xtask external-intake-check`;
+submission never implies acceptance or 1.0 readiness. Native bundles expose
+`rne-asset failure-capsule create|verify`, so an independent project can retain
+its required replay evidence from the extracted release without cloning the
+RNE source tree.
 
 ## Selected demos
 
@@ -186,6 +237,7 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p xtask -- ci-headless
+cargo run --locked -p xtask -- flagship
 cargo run -p xtask -- ci
 ```
 
@@ -208,7 +260,14 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Architecture overview](docs/architecture/000_overview.md)
 - [Roadmap](docs/ROADMAP.md)
 - [OSS parity baseline](docs/OSS_PARITY.md)
+- [Controller plugin SDK](docs/PLUGIN_SDK.md)
+- [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
+- [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
+- [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
+- [Support policy and 1.0 commitment](docs/SUPPORT.md)
+- [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)
 - [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
+- [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

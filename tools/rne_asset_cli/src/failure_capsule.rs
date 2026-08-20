@@ -1,16 +1,51 @@
 //! Create and verify portable Failure Capsule directories.
 //!
-//! The top-level `xtask` dispatcher exposes this module as
-//! `failure-capsule create|verify`.
+//! The source-tree `xtask` dispatcher and installed `rne-asset` CLI share this
+//! implementation as `failure-capsule create|verify`.
 
 use anyhow::{bail, Context, Result};
-use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact};
+use rne_ai::{BehaviorReplayAction, BehaviorReplayArtifact, TaskSpec, TASK_SPEC_KIND};
 use rne_core::{DeterminismContract, DeterminismScope};
+#[cfg(test)]
+use rne_hardware_gateway::conformance::{
+    HardwareAdapterConformanceCheck, HardwareAdapterConformanceIdentity,
+    HardwareAdapterConformanceSubject,
+};
+use rne_hardware_gateway::conformance::{
+    HardwareAdapterConformanceReport, HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND,
+    HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+};
+use rne_hardware_gateway::mock::{
+    MockConformanceReport, MOCK_CONFORMANCE_REPORT_KIND, MOCK_CONFORMANCE_SCHEMA_VERSION,
+};
+use rne_hardware_gateway::shadow::{
+    ShadowComparisonReport, SHADOW_COMPARISON_REPORT_KIND, SHADOW_COMPARISON_SCHEMA_VERSION,
+};
+#[cfg(test)]
+use rne_hardware_gateway::wire::HARDWARE_WIRE_SCHEMA_VERSION;
+use rne_hardware_gateway::wire::{
+    HardwareSessionEvidence, HardwareWireTrace, HARDWARE_SESSION_EVIDENCE_KIND,
+    HARDWARE_WIRE_TRACE_KIND,
+};
+use rne_hardware_lekiwi::session::{
+    LeKiwiReferenceSessionEvidence, LEKIWI_REFERENCE_SESSION_KIND,
+    LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION,
+};
 use rne_log::{
     ArtifactRef, BackendMetadata, BuildMetadata, FailureCapsule, FailureMetadata, ReplayArtifact,
     RunMetadata, FAILURE_CAPSULE_KIND as CAPSULE_KIND,
 };
+#[cfg(test)]
+use rne_physics_conformance::{
+    run_external_backend_conformance, ExternalPhysicsBackendConformanceConfig,
+    ExternalPhysicsBackendSubject,
+};
+use rne_physics_conformance::{
+    ExternalPhysicsBackendConformanceReport, EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND,
+    EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -212,6 +247,12 @@ fn build_copy_plans(
             pair[1].relative_path_string
         );
     }
+    validate_hardware_evidence(
+        plans
+            .iter()
+            .filter(|plan| plan.role == "evidence")
+            .map(|plan| (plan.kind.as_str(), plan.bytes.as_slice())),
+    )?;
     Ok(plans)
 }
 
@@ -219,9 +260,23 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return Ok(("evidence".to_string(), 1));
     };
-    if value.get("kind").and_then(serde_json::Value::as_str)
-        != Some(PHYSICS_CONFORMANCE_REPORT_KIND)
-    {
+    let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
+        return Ok(("evidence".to_string(), 1));
+    };
+    let recognized = matches!(
+        kind,
+        PHYSICS_CONFORMANCE_REPORT_KIND
+            | TASK_SPEC_KIND
+            | HARDWARE_SESSION_EVIDENCE_KIND
+            | HARDWARE_WIRE_TRACE_KIND
+            | SHADOW_COMPARISON_REPORT_KIND
+            | MOCK_CONFORMANCE_REPORT_KIND
+            | HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND
+            | EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND
+            | LEKIWI_REFERENCE_SESSION_KIND
+            | super::FLAGSHIP_WORKFLOW_REPORT_KIND
+    );
+    if !recognized {
         return Ok(("evidence".to_string(), 1));
     }
     let schema_version = value
@@ -229,12 +284,211 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
         .and_then(serde_json::Value::as_u64)
         .and_then(|version| u32::try_from(version).ok())
         .filter(|version| *version > 0)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "{PHYSICS_CONFORMANCE_REPORT_KIND} evidence requires a positive u32 schema_version"
-            )
-        })?;
-    Ok((PHYSICS_CONFORMANCE_REPORT_KIND.to_string(), schema_version))
+        .ok_or_else(|| anyhow::anyhow!("{kind} evidence requires a positive u32 schema_version"))?;
+    Ok((kind.to_string(), schema_version))
+}
+
+fn validate_hardware_evidence<'a>(
+    evidence: impl Iterator<Item = (&'a str, &'a [u8])>,
+) -> Result<()> {
+    let evidence = evidence.collect::<Vec<_>>();
+    let evidence_digests = evidence
+        .iter()
+        .map(|(_, bytes)| sha256_hex(bytes))
+        .collect::<BTreeSet<_>>();
+    let mut tasks = BTreeMap::<String, TaskSpec>::new();
+    for (kind, bytes) in &evidence {
+        if *kind != TASK_SPEC_KIND {
+            continue;
+        }
+        let task: TaskSpec = serde_json::from_slice(bytes)
+            .with_context(|| format!("invalid {TASK_SPEC_KIND} hardware evidence"))?;
+        task.validate()
+            .map_err(|error| anyhow::anyhow!("invalid hardware evidence TaskSpec: {error}"))?;
+        anyhow::ensure!(
+            tasks.insert(task.task_id.clone(), task).is_none(),
+            "duplicate hardware evidence TaskSpec identity"
+        );
+    }
+
+    for (kind, bytes) in evidence {
+        match kind {
+            HARDWARE_SESSION_EVIDENCE_KIND => {
+                let session: HardwareSessionEvidence = serde_json::from_slice(bytes)
+                    .context("invalid hardware session evidence JSON")?;
+                let task = tasks.get(&session.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                    "hardware session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                    session.task_id
+                    )
+                })?;
+                session.validate_against(task).map_err(|error| {
+                    anyhow::anyhow!("invalid hardware session evidence: {error}")
+                })?;
+            }
+            LEKIWI_REFERENCE_SESSION_KIND => {
+                let reference: LeKiwiReferenceSessionEvidence = serde_json::from_slice(bytes)
+                    .context("invalid LeKiwi reference-session evidence JSON")?;
+                anyhow::ensure!(
+                    reference.schema_version == LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION,
+                    "unsupported LeKiwi reference-session schema {}",
+                    reference.schema_version
+                );
+                reference.validate().map_err(|error| {
+                    anyhow::anyhow!("invalid LeKiwi reference-session evidence: {error}")
+                })?;
+                let task = tasks.get(&reference.profile.task.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "LeKiwi reference-session evidence requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        reference.profile.task.task_id
+                    )
+                })?;
+                anyhow::ensure!(
+                    task == &reference.profile.task,
+                    "LeKiwi reference-session embedded TaskSpec differs from matching evidence"
+                );
+            }
+            HARDWARE_WIRE_TRACE_KIND => {
+                let trace: HardwareWireTrace =
+                    serde_json::from_slice(bytes).context("invalid hardware wire trace JSON")?;
+                trace
+                    .validate()
+                    .map_err(|error| anyhow::anyhow!("invalid hardware wire trace: {error}"))?;
+                anyhow::ensure!(
+                    tasks.contains_key(&trace.task_id),
+                    "hardware wire trace requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                    trace.task_id
+                );
+            }
+            SHADOW_COMPARISON_REPORT_KIND => {
+                let report: ShadowComparisonReport = serde_json::from_slice(bytes)
+                    .context("invalid hardware shadow comparison JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == SHADOW_COMPARISON_SCHEMA_VERSION,
+                    "unsupported hardware shadow comparison schema {}",
+                    report.schema_version
+                );
+                let task = tasks.get(&report.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "hardware shadow comparison requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        report.task_id
+                    )
+                })?;
+                report.validate_against(task).map_err(|error| {
+                    anyhow::anyhow!("invalid hardware shadow comparison evidence: {error}")
+                })?;
+            }
+            MOCK_CONFORMANCE_REPORT_KIND => {
+                let report: MockConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid hardware mock conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == MOCK_CONFORMANCE_SCHEMA_VERSION,
+                    "unsupported hardware mock conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!("invalid hardware mock conformance evidence: {error}")
+                })?;
+            }
+            HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND => {
+                let report: HardwareAdapterConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid external hardware adapter conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+                    "unsupported external hardware adapter conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid external hardware adapter conformance evidence: {error}"
+                    )
+                })?;
+                anyhow::ensure!(
+                    evidence_digests.contains(&report.subject.task_sha256),
+                    "external hardware adapter conformance requires its exact hashed TaskSpec evidence"
+                );
+                anyhow::ensure!(
+                    evidence_digests.contains(&report.subject.adapter_sha256),
+                    "external hardware adapter conformance requires its exact hashed adapter subject evidence"
+                );
+                if let Some(adapter) = &report.adapter {
+                    anyhow::ensure!(
+                        tasks.contains_key(&adapter.task_id),
+                        "external hardware adapter conformance requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        adapter.task_id
+                    );
+                }
+            }
+            EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND => {
+                let report: ExternalPhysicsBackendConformanceReport = serde_json::from_slice(bytes)
+                    .context("invalid external physics backend conformance JSON")?;
+                anyhow::ensure!(
+                    report.schema_version
+                        == EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION,
+                    "unsupported external physics backend conformance schema {}",
+                    report.schema_version
+                );
+                report.validate().map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid external physics backend conformance evidence: {error}"
+                    )
+                })?;
+                let subject_digest = report
+                    .subject
+                    .sha256
+                    .strip_prefix("sha256:")
+                    .expect("validated report subject has the prefix");
+                anyhow::ensure!(
+                    evidence_digests.contains(subject_digest),
+                    "external physics backend conformance requires its exact hashed implementation subject evidence"
+                );
+            }
+            super::FLAGSHIP_WORKFLOW_REPORT_KIND => {
+                let report: serde_json::Value = serde_json::from_slice(bytes)
+                    .context("invalid flagship workflow report JSON")?;
+                anyhow::ensure!(
+                    report
+                        .get("schema_version")
+                        .and_then(serde_json::Value::as_u64)
+                        == Some(u64::from(super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION)),
+                    "unsupported flagship workflow report schema"
+                );
+                let task_id = report
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .context("flagship workflow report requires task_id")?;
+                anyhow::ensure!(
+                    tasks.contains_key(task_id),
+                    "flagship workflow report requires matching {TASK_SPEC_KIND} evidence for {task_id:?}"
+                );
+                anyhow::ensure!(
+                    report
+                        .pointer("/success/status")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("passed"),
+                    "flagship workflow report requires a passing success run"
+                );
+                anyhow::ensure!(
+                    report
+                        .pointer("/intentional_failure/expected_contract")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("perception_stream_alive")
+                        && report
+                            .pointer("/intentional_failure/active_dimensions_before")
+                            .and_then(serde_json::Value::as_u64)
+                            == Some(3)
+                        && report
+                            .pointer("/intentional_failure/active_dimensions_after")
+                            .and_then(serde_json::Value::as_u64)
+                            == Some(1),
+                    "flagship workflow report requires the minimized perception failure"
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn replay_kind(bytes: &[u8]) -> Result<String> {
@@ -333,7 +587,7 @@ fn read_regular_file(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).with_context(|| format!("could not read artifact `{}`", path.display()))
 }
 
-fn verify_directory(root: &Path) -> Result<()> {
+pub(crate) fn verify_directory(root: &Path) -> Result<()> {
     let root_metadata = fs::symlink_metadata(root)
         .with_context(|| format!("could not inspect capsule directory `{}`", root.display()))?;
     anyhow::ensure!(
@@ -356,9 +610,16 @@ fn verify_directory(root: &Path) -> Result<()> {
         .validate()
         .map_err(|error| anyhow::anyhow!("invalid failure capsule: {error}"))?;
 
+    let mut verified_artifacts = Vec::with_capacity(capsule.artifacts.len());
     for artifact in &capsule.artifacts {
-        verify_artifact_path(&canonical_root, root, artifact)?;
+        let bytes = verify_artifact_path(&canonical_root, root, artifact)?;
+        verified_artifacts.push((artifact.kind.as_str(), bytes));
     }
+    validate_hardware_evidence(
+        verified_artifacts
+            .iter()
+            .map(|(kind, bytes)| (*kind, bytes.as_slice())),
+    )?;
     println!(
         "verified failure capsule {} ({} artifacts)",
         root.display(),
@@ -367,7 +628,11 @@ fn verify_directory(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_artifact_path(canonical_root: &Path, root: &Path, artifact: &ArtifactRef) -> Result<()> {
+fn verify_artifact_path(
+    canonical_root: &Path,
+    root: &Path,
+    artifact: &ArtifactRef,
+) -> Result<Vec<u8>> {
     let normalized = rne_log::normalize_relative_path(&artifact.path)
         .map_err(|error| anyhow::anyhow!("invalid artifact path `{}`: {error}", artifact.path))?;
     anyhow::ensure!(
@@ -428,7 +693,7 @@ fn verify_artifact_path(canonical_root: &Path, root: &Path, artifact: &ArtifactR
             artifact.path
         );
     }
-    Ok(())
+    Ok(bytes)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -718,12 +983,134 @@ mod tests {
         BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayFailure,
         BehaviorReplayFrame, BehaviorViolation,
     };
+    use rne_hardware_gateway::wire::{
+        DeviceWireFrame, DeviceWirePayload, HostWireFrame, HostWirePayload,
+    };
+    use rne_hardware_gateway::HardwareMode;
+    use rne_hardware_lekiwi::lekiwi_base_task_spec;
+    use rne_hardware_lekiwi::session::{
+        LeKiwiMonotonicClock, LeKiwiReferenceSampleOutcome, LeKiwiReferenceSessionConfig,
+        LeKiwiReferenceSessionRunner, LeKiwiTransportError, LeKiwiWireTransport,
+    };
     use rne_log::{
         ReplayAction, ReplayClock, ReplayContact, ReplayControllerKind, ReplayFailureKind,
         ReplayFinalReport, ReplayFrame, ReplayObservation,
     };
+    use rne_physics::{PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability};
+    use rne_physics_analytic::AnalyticBackend;
+
+    #[derive(Debug, Default)]
+    struct FixtureClock(u64);
+
+    impl LeKiwiMonotonicClock for FixtureClock {
+        fn now_ms(&mut self) -> u64 {
+            let now_ms = self.0;
+            self.0 += 1;
+            now_ms
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct FixtureLeKiwiTransport {
+        observation_sequence: u64,
+    }
+
+    impl LeKiwiWireTransport for FixtureLeKiwiTransport {
+        fn exchange(
+            &mut self,
+            request: &HostWireFrame,
+        ) -> Result<DeviceWireFrame, LeKiwiTransportError> {
+            let payload = match &request.payload {
+                HostWirePayload::Open {
+                    task_id,
+                    observation_width,
+                    action_width,
+                    ..
+                } => DeviceWirePayload::Ready {
+                    device_id: rne_hardware_lekiwi::LEKIWI_MOCK_DEVICE_ID.to_string(),
+                    task_id: task_id.clone(),
+                    observation_width: *observation_width,
+                    action_width: *action_width,
+                },
+                HostWirePayload::PollObservation => {
+                    self.observation_sequence += 1;
+                    DeviceWirePayload::Observation {
+                        sequence: self.observation_sequence,
+                        values: vec![0.0; 9],
+                    }
+                }
+                HostWirePayload::Actuate { frame } => DeviceWirePayload::ActuationAccepted {
+                    action_sequence: frame.action_sequence,
+                    safety_stop: frame.safety_stop,
+                },
+                HostWirePayload::Close => DeviceWirePayload::Closed,
+            };
+            Ok(DeviceWireFrame::new(
+                request.session_id.clone(),
+                request.sequence,
+                payload,
+            ))
+        }
+    }
+
+    fn lekiwi_reference_session_fixture() -> LeKiwiReferenceSessionEvidence {
+        let mut runner = LeKiwiReferenceSessionRunner::new(
+            FixtureLeKiwiTransport::default(),
+            FixtureClock::default(),
+            LeKiwiReferenceSessionConfig::new(
+                "rne.lekiwi.capsule.fixture",
+                HardwareMode::Shadow,
+                1,
+            ),
+        )
+        .expect("build reference runner");
+        runner.open().expect("open reference runner");
+        assert!(matches!(
+            runner.sample(vec![0.0; 3]).expect("sample"),
+            LeKiwiReferenceSampleOutcome::Sample(_)
+        ));
+        runner.close().expect("close reference runner")
+    }
     use serde_json::Value;
-    use tempfile::TempDir;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> std::io::Result<Self> {
+            let base = env::temp_dir();
+            for _ in 0..100 {
+                let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+                let path = base.join(format!(
+                    "rne-failure-capsule-unit-{}-{id}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Ok(Self(path)),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate a unique Failure Capsule test directory",
+            ))
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            if self.0.starts_with(env::temp_dir()) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
 
     fn generic_fixture() -> ReplayArtifact {
         ReplayArtifact::new(
@@ -903,6 +1290,312 @@ mod tests {
             .expect("evidence reference");
         assert_eq!(report.kind, PHYSICS_CONFORMANCE_REPORT_KIND);
         assert_eq!(report.schema_version, 2);
+    }
+
+    #[test]
+    fn external_physics_conformance_requires_its_hashed_subject() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("external-physics-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let subject_bytes = b"independently maintained physics backend v1";
+        let subject_path = temp.path().join("external-backend-source.tar.zst");
+        fs::write(&subject_path, subject_bytes).expect("write backend subject");
+        let manifest = PhysicsBackendManifest::new(
+            "external_capsule_fixture",
+            "1.0.0",
+            "independent_ballistic_engine",
+            "1.0.0",
+            [
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::DeterministicStep,
+                PhysicsCapability::KinematicBody,
+            ],
+            PhysicsBackendRepeatability::SameRuntimeExact,
+        )
+        .expect("manifest");
+        let report = run_external_backend_conformance::<AnalyticBackend, _>(
+            ExternalPhysicsBackendConformanceConfig::new(
+                ExternalPhysicsBackendSubject::from_bytes(
+                    "external-backend-source.tar.zst",
+                    subject_bytes,
+                )
+                .expect("subject"),
+                manifest,
+            ),
+            AnalyticBackend::new,
+        )
+        .expect("external conformance report");
+        assert!(report.passed());
+        let report_path = temp.path().join("external-backend-conformance.json");
+        fs::write(&report_path, report.to_json_pretty().unwrap()).expect("write report");
+
+        let output = temp.path().join("external-physics-capsule");
+        invoke_create(&replay_path, &output, &[&subject_path, &report_path])
+            .expect("create subject-bound capsule");
+        invoke_verify(&output).expect("verify subject-bound capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule JSON");
+        let evidence = capsule
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND)
+            .expect("typed external physics evidence");
+        assert_eq!(
+            evidence.schema_version,
+            u32::from(EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION)
+        );
+
+        let missing_subject = temp.path().join("missing-external-subject-capsule");
+        let error = invoke_create(&replay_path, &missing_subject, &[&report_path])
+            .expect_err("report without exact implementation subject must reject");
+        assert!(error
+            .to_string()
+            .contains("requires its exact hashed implementation subject evidence"));
+        assert!(!missing_subject.exists());
+    }
+
+    #[test]
+    fn flagship_report_preserves_schema_and_requires_matching_task() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("flagship-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let task_id = "rne.flagship.mobile_lift_shared_aisle.v1";
+        let mut task: TaskSpec = serde_json::from_slice(include_bytes!(
+            "../../../assets/tasks/diff_drive_goal.task.json"
+        ))
+        .expect("fixture TaskSpec");
+        task.task_id = task_id.to_string();
+        let task_path = temp.path().join("flagship.task.json");
+        fs::write(&task_path, serde_json::to_vec_pretty(&task).unwrap())
+            .expect("write flagship TaskSpec");
+        let report_path = temp.path().join("workflow-report.json");
+        fs::write(
+            &report_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "kind": super::super::FLAGSHIP_WORKFLOW_REPORT_KIND,
+                "schema_version": super::super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION,
+                "task_id": task_id,
+                "success": { "status": "passed" },
+                "intentional_failure": {
+                    "expected_contract": "perception_stream_alive",
+                    "active_dimensions_before": 3,
+                    "active_dimensions_after": 1
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write flagship report");
+
+        let missing_task_output = temp.path().join("missing-task-capsule");
+        let error = invoke_create(&replay_path, &missing_task_output, &[&report_path])
+            .expect_err("flagship report without TaskSpec must reject");
+        assert!(error
+            .to_string()
+            .contains("requires matching rne_task_spec"));
+
+        let output = temp.path().join("flagship-capsule");
+        invoke_create(&replay_path, &output, &[&task_path, &report_path])
+            .expect("create flagship capsule");
+        invoke_verify(&output).expect("verify flagship capsule");
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule json");
+        let report = capsule
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == super::super::FLAGSHIP_WORKFLOW_REPORT_KIND)
+            .expect("typed flagship report");
+        assert_eq!(
+            report.schema_version,
+            super::super::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn hardware_evidence_roundtrips_with_task_bound_validation() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("shadow-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let task_path = temp.path().join("diff-drive-task.json");
+        let task_bytes = include_bytes!("../../../assets/tasks/diff_drive_goal.task.json");
+        fs::write(&task_path, task_bytes).expect("write TaskSpec evidence");
+        let adapter_subject_path = temp.path().join("external-adapter.bin");
+        let adapter_subject = b"external-adapter-subject-v1";
+        fs::write(&adapter_subject_path, adapter_subject).expect("write adapter subject evidence");
+        let adapter_report_path = temp.path().join("adapter-conformance.json");
+        let adapter_report = HardwareAdapterConformanceReport {
+            schema_version: HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            kind: HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND.to_string(),
+            status: "passed".to_string(),
+            subject: HardwareAdapterConformanceSubject {
+                adapter_file: "external-adapter.bin".to_string(),
+                adapter_sha256: sha256_hex(adapter_subject),
+                adapter_size_bytes: adapter_subject.len() as u64,
+                launcher_file: "external-adapter.bin".to_string(),
+                arguments_sha256: sha256_hex(b"[]"),
+                argument_count: 0,
+                task_file: "diff-drive-task.json".to_string(),
+                task_sha256: sha256_hex(task_bytes),
+            },
+            adapter: Some(HardwareAdapterConformanceIdentity {
+                device_id: "external-adapter-v1".to_string(),
+                task_id: "rne.diff_drive.sensor_goal.v1".to_string(),
+                wire_schema_version: HARDWARE_WIRE_SCHEMA_VERSION,
+                observation_width: 9,
+                action_width: 2,
+            }),
+            checks: [
+                "open_identity",
+                "task_binding",
+                "observation_stream",
+                "bounded_actuation",
+                "safe_stop",
+                "shadow_authority",
+                "sequence_rejection",
+                "session_isolation",
+                "width_rejection",
+            ]
+            .map(|id| HardwareAdapterConformanceCheck {
+                id: id.to_string(),
+                status: "passed".to_string(),
+                detail: String::new(),
+            })
+            .to_vec(),
+        };
+        adapter_report.validate().expect("valid adapter report");
+        fs::write(
+            &adapter_report_path,
+            adapter_report.to_json_pretty().unwrap(),
+        )
+        .expect("write adapter conformance evidence");
+        let session_path = temp.path().join("hardware-session.json");
+        fs::write(
+            &session_path,
+            include_bytes!(
+                "../../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+            ),
+        )
+        .expect("write session evidence");
+        let shadow_path = temp.path().join("shadow-comparison.json");
+        fs::write(
+            &shadow_path,
+            include_bytes!("../../../tests/golden/hardware/gateway-shadow-comparison-v1.json"),
+        )
+        .expect("write shadow evidence");
+        let conformance_path = temp.path().join("mock-conformance.json");
+        fs::write(
+            &conformance_path,
+            include_bytes!("../../../tests/golden/hardware/gateway-mock-conformance-v1.json"),
+        )
+        .expect("write mock conformance evidence");
+        let lekiwi_task_path = temp.path().join("lekiwi-task.json");
+        fs::write(
+            &lekiwi_task_path,
+            serde_json::to_vec_pretty(&lekiwi_base_task_spec()).unwrap(),
+        )
+        .expect("write LeKiwi TaskSpec evidence");
+        let lekiwi_session_path = temp.path().join("lekiwi-reference-session.json");
+        fs::write(
+            &lekiwi_session_path,
+            serde_json::to_vec_pretty(&lekiwi_reference_session_fixture()).unwrap(),
+        )
+        .expect("write LeKiwi reference-session evidence");
+        let output = temp.path().join("hardware-capsule");
+
+        invoke_create(
+            &replay_path,
+            &output,
+            &[
+                &task_path,
+                &session_path,
+                &shadow_path,
+                &conformance_path,
+                &adapter_subject_path,
+                &adapter_report_path,
+                &lekiwi_task_path,
+                &lekiwi_session_path,
+            ],
+        )
+        .expect("create hardware evidence capsule");
+        invoke_verify(&output).expect("verify hardware evidence capsule");
+        let missing_adapter_output = temp.path().join("missing-adapter-subject-capsule");
+        let error = invoke_create(
+            &replay_path,
+            &missing_adapter_output,
+            &[&task_path, &adapter_report_path],
+        )
+        .expect_err("adapter report without its hashed subject must reject");
+        assert!(error
+            .to_string()
+            .contains("requires its exact hashed adapter subject evidence"));
+        assert!(!missing_adapter_output.exists());
+        let capsule: FailureCapsule =
+            serde_json::from_str(&fs::read_to_string(output.join("capsule.json")).unwrap())
+                .expect("capsule json");
+        for expected_kind in [
+            TASK_SPEC_KIND,
+            HARDWARE_SESSION_EVIDENCE_KIND,
+            SHADOW_COMPARISON_REPORT_KIND,
+            MOCK_CONFORMANCE_REPORT_KIND,
+            HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND,
+            LEKIWI_REFERENCE_SESSION_KIND,
+        ] {
+            assert!(capsule
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == expected_kind));
+        }
+    }
+
+    #[test]
+    fn hardware_evidence_rejects_missing_task_and_tampered_summary() {
+        let temp = TempDir::new().expect("tempdir");
+        let replay_path = temp.path().join("shadow-failure.rne-replay");
+        behavior_fixture()
+            .write_json(&replay_path)
+            .expect("write behavior replay");
+        let session_path = temp.path().join("hardware-session.json");
+        fs::write(
+            &session_path,
+            include_bytes!(
+                "../../../tests/golden/hardware/gateway-process-disconnect-session-v1.json"
+            ),
+        )
+        .expect("write session evidence");
+        let missing_task_output = temp.path().join("missing-task-capsule");
+        let error = invoke_create(&replay_path, &missing_task_output, &[&session_path])
+            .expect_err("hardware session without TaskSpec must reject");
+        assert!(error
+            .to_string()
+            .contains("requires matching rne_task_spec"));
+        assert!(!missing_task_output.exists());
+
+        let task_path = temp.path().join("diff-drive-task.json");
+        fs::write(
+            &task_path,
+            include_bytes!("../../../assets/tasks/diff_drive_goal.task.json"),
+        )
+        .expect("write TaskSpec evidence");
+        let mut shadow: Value = serde_json::from_slice(include_bytes!(
+            "../../../tests/golden/hardware/gateway-shadow-comparison-v1.json"
+        ))
+        .expect("shadow json");
+        shadow["summary"]["passed"] = Value::Bool(true);
+        let shadow_path = temp.path().join("tampered-shadow.json");
+        fs::write(&shadow_path, serde_json::to_vec_pretty(&shadow).unwrap())
+            .expect("write tampered shadow");
+        let tampered_output = temp.path().join("tampered-capsule");
+        let error = invoke_create(&replay_path, &tampered_output, &[&task_path, &shadow_path])
+            .expect_err("tampered shadow summary must reject");
+        assert!(error.to_string().contains("summary does not match"));
+        assert!(!tampered_output.exists());
     }
 
     #[test]

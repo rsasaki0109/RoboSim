@@ -1,0 +1,16 @@
+{
+  "kind": "rne_github_attestation_verification",
+  "schema_version": 1,
+  "provider": "github_sigstore",
+  "repository": "rsasaki0109/RoboSim",
+  "certificate_identity": "https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v1.0.0",
+  "source_ref": "refs/tags/v1.0.0",
+  "source_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+  "signer_revision": "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "predicate_type": "https://slsa.dev/provenance/v1",
+  "deny_self_hosted_runners": true,
+  "artifact_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "attestation_bundle_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "verified_attestations": 1
+}

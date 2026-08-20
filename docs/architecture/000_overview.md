@@ -14,19 +14,34 @@ Robot Native Engine (RNE) is a robot-native simulation core written in Rust.
 ```
 rne_math → rne_core → rne_ecs → rne_world
                               ↘ rne_robot → rne_physics → rne_physics_rapier
+                                                        ↘ rne_physics_conformance
                               ↘ rne_traffic
                               ↘ rne_data / rne_sensor / rne_render / rne_ai / rne_assets
-runner ↔ rne_plugin (versioned robot-native observation/action boundary)
+rne_plugin_sdk (dependency-free author ABI) → rne_plugin ↔ runner
 runner ↔ rne_data::transport ↔ native frontend (versioned framed sensor boundary)
 adapters/ros2/* (optional)
+tests/compatibility (release-facing typed readers; never a core dependency)
 ```
 
-`rne_plugin` hosts controller policies, not robot entities. Its public control
-schema uses stable robot/joint names, fixed-step integer timestamps, explicit
-units, deterministic ordering, and no renderer, physics-backend, or adapter
-types. The runner owns capability negotiation and the
+`rne_plugin_sdk` owns only dependency-free C-ABI constants, frames, and callback
+signatures. `rne_plugin` hosts controller policies, not robot entities. Its
+public control schema uses stable robot/joint names, fixed-step integer
+timestamps, explicit units, deterministic ordering, and no renderer,
+physics-backend, or adapter types. The runner owns capability negotiation and the
 `created → configured → active → shutdown` lifecycle; C ABI v2-v3 is an
 implementation boundary beneath that typed schema.
+
+`rne_physics_conformance` is downstream of the backend-neutral physics trait
+and ECS component contracts. It may construct canonical test worlds, but it
+does not add behavior or vendor types to `rne_physics`, and no core crate
+depends on it. Independently maintained backend crates use it as authoring and
+certification tooling.
+
+`rne_compatibility_suite` is a downstream release/test aggregator. It may
+depend on public artifact owners and non-publishable conformance runners, but
+no runtime or core crate may depend on it. Its installed binary verifies the
+retained release corpus without changing artifact semantics or migrating
+evidence in place.
 
 `rne_data::transport` owns production frontend framing, capability negotiation,
 typed RGB-D/LiDAR payload codecs, and frame+byte bounded latest-only queues.

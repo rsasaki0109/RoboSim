@@ -1,10 +1,11 @@
 //! Integration tests for loading controller plugins through the C ABI.
 
 use rne_plugin::{
-    load_controller_library, ControllerCapability, ControllerConfiguration, ControllerHost,
-    ControllerJointObservation, ControllerLifecycleState, ControllerObservationFrame,
-    ControllerPlugin, ControllerResetContext, ControllerRobotObservation, LoadedControllerPlugin,
-    PluginLoadError, VelocityServoController, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
+    load_controller_library, run_controller_plugin_conformance, ControllerCapability,
+    ControllerConfiguration, ControllerHost, ControllerJointObservation, ControllerLifecycleState,
+    ControllerObservationFrame, ControllerPlugin, ControllerPluginConformanceConfig,
+    ControllerResetContext, ControllerRobotObservation, LoadedControllerPlugin, PluginLoadError,
+    VelocityServoController, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -407,4 +408,63 @@ fn committed_plugin_manifests_match_their_binary_names() {
         manifest.validate().expect("valid plugin manifest");
         assert_eq!(manifest.name, expected_name);
     }
+}
+
+#[test]
+fn standalone_conformance_report_is_portable_and_repeatable() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let config = ControllerPluginConformanceConfig {
+        joint: "shoulder_joint".to_string(),
+        ..ControllerPluginConformanceConfig::default()
+    };
+    for (package, manifest_relative, expected_abi) in [
+        (
+            "rne_plugin_example_velocity_servo",
+            "crates/rne_plugin_example_velocity_servo/rne-plugin.json",
+            RNE_PLUGIN_ABI_VERSION,
+        ),
+        (
+            "rne_plugin_legacy_v2_fixture",
+            "crates/rne_plugin_legacy_v2_fixture/rne-plugin.json",
+            RNE_PLUGIN_ABI_VERSION_V2,
+        ),
+    ] {
+        let library = find_plugin_library(package);
+        let manifest = root.join(manifest_relative);
+        let first = run_controller_plugin_conformance(&library, &manifest, &config)
+            .expect("first conformance run");
+        let second = run_controller_plugin_conformance(&library, &manifest, &config)
+            .expect("second conformance run");
+
+        first.validate().expect("valid conformance report");
+        assert!(first.passed(), "conformance checks: {:#?}", first.checks);
+        assert_eq!(first, second);
+        assert_eq!(
+            first.controller.as_ref().expect("identity").abi_version,
+            expected_abi
+        );
+        assert_eq!(first.checks.len(), 6);
+    }
+}
+
+#[test]
+fn standalone_conformance_emits_a_valid_failed_identity_report() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let library = find_plugin_library("rne_plugin_example_velocity_servo");
+    let wrong_manifest = root.join("crates/rne_plugin_legacy_v2_fixture/rne-plugin.json");
+    let report = run_controller_plugin_conformance(
+        &library,
+        &wrong_manifest,
+        &ControllerPluginConformanceConfig::default(),
+    )
+    .expect("failed semantic report");
+
+    report.validate().expect("valid failed report");
+    assert!(!report.passed());
+    assert_eq!(report.checks[0].id, "manifest_identity");
+    assert_eq!(report.checks[0].status, "failed");
+    assert_eq!(report.checks[1].status, "passed");
+    assert!(report.checks[2..]
+        .iter()
+        .all(|check| check.status == "passed"));
 }

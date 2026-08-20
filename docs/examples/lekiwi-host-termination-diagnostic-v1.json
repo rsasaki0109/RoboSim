@@ -1,0 +1,13 @@
+{
+  "kind": "rne_lekiwi_host_termination_diagnostic",
+  "schema_version": 1,
+  "run_id": "REPLACE_RUN_ID",
+  "device_id": "rne.lekiwi_so101.physical.v1:REPLACE_ROBOT_ID",
+  "observer_operator_id": "REPLACE_SAFETY_OPERATOR",
+  "terminated_session_id": "REPLACE_TERMINATED_SESSION_ID",
+  "reconnect_session_id": "REPLACE_RECONNECT_SESSION_ID",
+  "safe_stop_observed": false,
+  "stop_latency_ms": 0,
+  "measurement_uncertainty_ms": 0,
+  "observation_method": "REPLACE_OBSERVATION_METHOD"
+}

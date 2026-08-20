@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod cabi;
+pub mod conformance;
 pub mod control;
 pub mod lifecycle;
 pub mod scaffold;
@@ -22,8 +23,15 @@ pub use cabi::{
     controller_capability_bit, discover_controller_plugin, discover_plugin_names,
     load_controller_library, peek_plugin_name, LoadedControllerPlugin, PluginLoadError,
     RneControllerStepResultV3, RneJointObservationV3, RneJointPosition, RneJointVelocity,
-    RneJointVelocityV3, RNE_PLUGIN_ABI_VERSION, RNE_PLUGIN_ABI_VERSION_V2,
-    RNE_PLUGIN_MIN_ABI_VERSION,
+    RneJointVelocityV3, RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION, RNE_PLUGIN_ABI_VERSION,
+    RNE_PLUGIN_ABI_VERSION_V2, RNE_PLUGIN_MIN_ABI_VERSION, RNE_PLUGIN_SDK_VERSION,
+};
+pub use conformance::{
+    run_controller_plugin_conformance, ControllerPluginConformanceCheck,
+    ControllerPluginConformanceConfig, ControllerPluginConformanceError,
+    ControllerPluginConformanceIdentity, ControllerPluginConformanceReport,
+    ControllerPluginConformanceSubject, CONTROLLER_PLUGIN_CONFORMANCE_REPORT_KIND,
+    CONTROLLER_PLUGIN_CONFORMANCE_REPORT_SCHEMA_VERSION,
 };
 pub use control::{
     ControllerActionFrame, ControllerJointObservation, ControllerJointVelocityCommand,
@@ -35,7 +43,13 @@ pub use lifecycle::{
     ControllerLifecycleError, ControllerLifecycleState, ControllerNegotiation,
     ControllerPluginError, ControllerResetContext,
 };
-pub use scaffold::{scaffold_controller_plugin, validate_plugin_name, ScaffoldError};
+pub use scaffold::{
+    controller_plugin_scaffold_contract, controller_plugin_scaffold_contract_for_schema,
+    scaffold_controller_plugin, scaffold_controller_plugin_for_schema, validate_plugin_name,
+    ControllerPluginScaffoldContract, ControllerPluginScaffoldFile, ScaffoldError,
+    CONTROLLER_PLUGIN_SCAFFOLD_CONTRACT_KIND, CONTROLLER_PLUGIN_SCAFFOLD_MIN_SCHEMA_VERSION,
+    CONTROLLER_PLUGIN_SCAFFOLD_SCHEMA_VERSION,
+};
 pub use scheduler::{ControllerScheduleError, ControllerScheduler};
 
 /// Plugin kind used for discovery.

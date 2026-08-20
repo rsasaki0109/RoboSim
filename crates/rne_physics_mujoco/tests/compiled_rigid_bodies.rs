@@ -1,14 +1,14 @@
 #![cfg(feature = "mujoco")]
 
 use rne_core::SimDuration;
-use rne_ecs::{spawn_named, Entity, World};
+use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, JointActuation, JointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, JointActuation, JointMotor, JointState, PhysicsBackend, PhysicsError,
+    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
-use rne_world::Transform3;
+use rne_world::{world_transform_of, Transform3};
 
 fn spawn_body(
     world: &mut World,
@@ -119,6 +119,129 @@ fn preflight_accepts_supported_articulation_before_native_model_creation() {
     backend
         .preflight_world(&world)
         .expect("supported revolute topology passes preflight");
+}
+
+#[test]
+fn changed_legacy_damping_recompiles_dynamics_without_topology_error() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let parent = spawn_body(
+        &mut world,
+        "parent",
+        RigidBodyType::Fixed,
+        Collider::sphere(0.1),
+        Vec3::ZERO,
+    );
+    let child = spawn_body(
+        &mut world,
+        "child",
+        RigidBodyType::Dynamic,
+        Collider::cuboid(Vec3::splat(0.05)),
+        Vec3::Y,
+    );
+    world.entity_mut(child).insert((
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::ZERO,
+            lower_rad: None,
+            upper_rad: None,
+        },
+        JointMotor {
+            velocity_rad_s: 0.5,
+            gain: 10.0,
+            stiffness: 0.0,
+            target_position: 0.0,
+            max_force: 5.0,
+        },
+    ));
+
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .expect("compile first damping");
+    backend.step(physics_world, dt).expect("first step");
+    backend
+        .sync_to_ecs(&mut world, physics_world)
+        .expect("first state");
+    world.get_mut::<JointMotor>(child).unwrap().gain = 5.0;
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .expect("changed damping recompiles native dynamics");
+    backend.step(physics_world, dt).expect("second step");
+    backend
+        .sync_to_ecs(&mut world, physics_world)
+        .expect("second state");
+    assert!(matches!(
+        world.get::<JointState>(child),
+        Some(JointState::Revolute {
+            position_rad,
+            velocity_rad_s,
+        }) if position_rad.is_finite() && velocity_rad_s.is_finite()
+    ));
+}
+
+#[test]
+fn hierarchical_articulation_round_trips_world_pose_as_local_ecs_transform() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let parent = spawn_body(
+        &mut world,
+        "offset_parent",
+        RigidBodyType::Fixed,
+        Collider::sphere(0.1),
+        Vec3::new(2.0, 0.0, 0.0),
+    );
+    let child = spawn_body(
+        &mut world,
+        "local_child",
+        RigidBodyType::Dynamic,
+        Collider::sphere(0.1),
+        -Vec3::Y,
+    );
+    world.entity_mut(child).insert((
+        Parent(parent),
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::Y,
+            lower_rad: None,
+            upper_rad: None,
+        },
+    ));
+
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .expect("compile hierarchical articulation");
+    backend.step(physics_world, dt).expect("fixed step");
+    backend
+        .sync_to_ecs(&mut world, physics_world)
+        .expect("download local state");
+
+    let local = world
+        .get::<Transform3>(child)
+        .expect("local child transform");
+    let world_pose = world_transform_of(&world, child);
+    assert!(local.translation.x.abs() < 1.0e-9, "local={local:?}");
+    assert!(
+        (world_pose.translation.x - 2.0).abs() < 1.0e-9,
+        "world={world_pose:?}"
+    );
 }
 
 #[test]
@@ -355,10 +478,10 @@ fn rejects_wrong_step_and_post_compile_topology_change() {
     backend
         .sync_from_ecs(&mut world, physics_world)
         .expect("compile topology");
-    assert_eq!(
+    assert!(matches!(
         backend.step(physics_world, SimDuration::from_hertz(Hertz::new(120.0))),
         Err(PhysicsError::InitializationFailed)
-    );
+    ));
 
     spawn_body(
         &mut world,
@@ -367,8 +490,8 @@ fn rejects_wrong_step_and_post_compile_topology_change() {
         Collider::sphere(0.1),
         Vec3::new(2.0, 1.0, 0.0),
     );
-    assert_eq!(
+    assert!(matches!(
         backend.sync_from_ecs(&mut world, physics_world),
         Err(PhysicsError::InitializationFailed)
-    );
+    ));
 }

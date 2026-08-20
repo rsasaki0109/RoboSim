@@ -2,7 +2,11 @@ use super::{
     unitree_g1_dynamic_scene_path, unitree_g1_gait_targets, UnitreeG1GaitCommand,
     UrdfJointPositionTarget, UrdfSceneSim,
 };
-use crate::{Episode, EpisodeStep};
+use crate::{
+    ActionSpec, Episode, EpisodeStep, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec,
+    TaskSpec, TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind,
+    TerminationSpec,
+};
 use rne_assets::AssetError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -91,6 +95,69 @@ pub struct UnitreeG1GaitObservation {
     pub gait_phase: f64,
     /// Normalized episode progress in `[0, 1]`.
     pub progress: f64,
+}
+
+/// Returns the portable task contract for the deterministic Unitree G1 gait episode.
+///
+/// Observation tensors flatten to base position XYZ, forward delta,
+/// yaw/pitch/roll, linear velocity XYZ, angular velocity XYZ, relative
+/// yaw/pitch/roll, left/right foot impulse, gait phase, and progress. The action
+/// tensor flattens to stride, foot lift, and yaw correction in that order.
+pub fn unitree_g1_gait_task_spec(max_episode_steps: u64) -> TaskSpec {
+    TaskSpec::new(
+        "rne.unitree_g1.gait.v1",
+        1.0 / 60.0,
+        ObservationSpec::new(vec![
+            TensorSpec::new("base_position_m", TensorDType::F64, vec![3], "m"),
+            TensorSpec::new("forward_delta_m", TensorDType::F64, vec![], "m"),
+            TensorSpec::new("base_orientation_rad", TensorDType::F64, vec![3], "rad"),
+            TensorSpec::new("base_linear_velocity_m_s", TensorDType::F64, vec![3], "m/s"),
+            TensorSpec::new(
+                "base_angular_velocity_rad_s",
+                TensorDType::F64,
+                vec![3],
+                "rad/s",
+            ),
+            TensorSpec::new(
+                "base_relative_orientation_rad",
+                TensorDType::F64,
+                vec![3],
+                "rad",
+            ),
+            TensorSpec::new("foot_contact_impulse_ns", TensorDType::F64, vec![2], "N*s"),
+            TensorSpec::new("gait_phase", TensorDType::F64, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 1.0)),
+            TensorSpec::new("episode_progress", TensorDType::F64, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 1.0)),
+        ]),
+        ActionSpec::new(vec![TensorSpec::new(
+            "gait_control_rad",
+            TensorDType::F64,
+            vec![3],
+            "rad",
+        )
+        .with_bounds(TensorBounds::new(
+            vec![0.0, 0.0, -0.25],
+            vec![0.20, 0.20, 0.25],
+        ))]),
+        RewardSpec::weighted_sum(vec![
+            RewardTermSpec::new("alive", 0.5, "1"),
+            RewardTermSpec::new("forward_delta_m", 100.0, "m"),
+            RewardTermSpec::new("height_error_m", -2.0, "m"),
+            RewardTermSpec::new("relative_yaw_rad", -0.1, "rad"),
+            RewardTermSpec::new("tilt_rad", -0.2, "rad"),
+            RewardTermSpec::new("lateral_position_m", -0.2, "m"),
+            RewardTermSpec::new("fallen", -10.0, "1"),
+        ]),
+        TerminationSpec::new(
+            vec![TerminationConditionSpec::new(
+                "fallen",
+                TerminationKind::Failure,
+            )],
+            Some(max_episode_steps),
+        ),
+        ResetSpec::splitmix64(true),
+    )
 }
 
 /// Deterministic forward-gait episode for the official Unitree G1 model.
@@ -266,6 +333,27 @@ fn target(link_name: &'static str, position: f64) -> UrdfJointPositionTarget<'st
 mod tests {
     use super::super::{UnitreeG1GaitCommand, UrdfJointTorqueTarget};
     use super::*;
+
+    #[test]
+    fn portable_task_spec_matches_g1_flattened_spaces() {
+        let spec = unitree_g1_gait_task_spec(600);
+        spec.validate().expect("G1 TaskSpec");
+        let observation_elements = spec
+            .observation
+            .tensors
+            .iter()
+            .map(|tensor| tensor.shape.iter().product::<usize>())
+            .sum::<usize>();
+        let action_elements = spec
+            .action
+            .tensors
+            .iter()
+            .map(|tensor| tensor.shape.iter().product::<usize>())
+            .sum::<usize>();
+        assert_eq!(observation_elements, 20);
+        assert_eq!(action_elements, 3);
+        assert_eq!(spec.termination.max_episode_steps, Some(600));
+    }
 
     /// Conservative actuator speed ceiling for torque mode.
     const G1_SPEED_LIMIT_RAD_S: f64 = 30.0;

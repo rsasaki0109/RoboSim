@@ -1,0 +1,29 @@
+[package]
+name = "rne_accelerator_contract"
+description = "Backend-neutral public contracts for out-of-process RNE accelerators"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "rne-accelerator-conformance"
+path = "src/bin/rne-accelerator-conformance.rs"
+doc = false
+
+[[bin]]
+name = "rne-accelerator-protocol-mock"
+path = "src/bin/rne-accelerator-protocol-mock.rs"
+doc = false
+
+[dependencies]
+rne_ai = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]

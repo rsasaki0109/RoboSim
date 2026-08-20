@@ -1,0 +1,72 @@
+{
+  "artifact_contract": "failure_capsule",
+  "current_schema_version": 1,
+  "expected_error": null,
+  "expected_outcome": "accepted_and_restored",
+  "expected_replay_digest": null,
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [],
+  "reason_code": "same_schema_validated_artifact",
+  "schema_version": 1,
+  "source_artifact": {
+    "artifacts": [
+      {
+        "kind": "rne_replay",
+        "path": "replays/run-1.rne-replay",
+        "role": "replay",
+        "schema_version": 1,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "backend": {
+      "name": "rapier",
+      "version": "0.22"
+    },
+    "build": {
+      "cargo_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "engine_version": "0.2.0",
+      "git_commit": "0123456789abcdef",
+      "profile": "release",
+      "rustc_version": "rustc 1.88.0",
+      "target_triple": "x86_64-pc-windows-msvc"
+    },
+    "determinism": {
+      "guarantee": {
+        "tier": "exact"
+      },
+      "name": "contact_failure",
+      "schema_version": 1,
+      "scope": {
+        "first_step": 0,
+        "observables": [
+          "world.state"
+        ],
+        "step_count": 3,
+        "subject": "episode"
+      }
+    },
+    "failure": {
+      "contract": "contact_failure",
+      "id": "failure-1",
+      "message": "contact contract violated",
+      "sim_time_ticks": 20,
+      "state_digest": 4660,
+      "step": 2
+    },
+    "kind": "rne_failure_capsule",
+    "run": {
+      "action_count": 2,
+      "fixed_delta_ticks": 10,
+      "id": "run-1",
+      "scenario": "arm_pick",
+      "seed": 7,
+      "step_count": 3
+    },
+    "schema_version": 1
+  },
+  "source_artifact_sha256": "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa",
+  "source_revision": "61d6c813e79d7eac6a8ab212776d620069f98905",
+  "source_schema_version": 1,
+  "source_tree": "5dac12166fe39da5a1207426f3e7520851e415d2",
+  "source_workspace_version": "0.1.0"
+}

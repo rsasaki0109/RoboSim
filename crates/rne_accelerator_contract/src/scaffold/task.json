@@ -1,0 +1,39 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.physics.free_fall.mjx.v1",
+  "control_step_s": 0.016666666,
+  "observation": {
+    "tensors": [
+      { "name": "position_y_m", "dtype": "f64", "shape": [], "layout": "row_major", "unit": "m", "bounds": null },
+      { "name": "velocity_y_m_s", "dtype": "f64", "shape": [], "layout": "row_major", "unit": "m/s", "bounds": null }
+    ]
+  },
+  "action": {
+    "tensors": [
+      { "name": "noop", "dtype": "f64", "shape": [1], "layout": "row_major", "unit": "1", "bounds": { "lower": [0.0], "upper": [0.0] } }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [{ "name": "position_y_m", "unit": "m", "weight": 1.0 }]
+  },
+  "termination": {
+    "max_episode_steps": 60,
+    "conditions": [{ "name": "non_finite_state", "kind": "failure" }]
+  },
+  "reset": {
+    "supports_partial_reset": true,
+    "seed_strategy": "split_mix64_lane_episode_v1"
+  },
+  "randomization": {
+    "parameters": [
+      { "name": "initial_position_y_m", "unit": "m", "distribution": { "type": "constant", "value": 5.0 } }
+    ]
+  },
+  "curriculum": {
+    "stages": [
+      { "name": "baseline", "starts_at_episode": 0, "parameters": { "gravity_m_s2": { "unit": "m/s^2", "value": -9.81 } } }
+    ]
+  }
+}

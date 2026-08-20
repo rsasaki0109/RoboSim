@@ -19,10 +19,11 @@ use rne_data::{
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, ContactEvent, FixedJointDesc, JointMotor, PhysicsBackend,
-    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
+    Collider, ColliderShape, ContactEvent, FixedJointDesc, JointMotor,
+    JointState as PhysicsJointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
+    PhysicsWorldId, RigidBody, RigidBodyType,
 };
-use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_physics_rapier::RapierBackend;
 use rne_render::HeadlessRenderBackend;
 use rne_robot::Link;
 use rne_sensor::{sample_sensors, Sensor, SensorKind, SensorSampleContext, SensorState};
@@ -31,13 +32,246 @@ use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldR
 use serde::{Deserialize, Serialize};
 use std::any::type_name;
 use std::collections::HashMap;
+use std::fmt;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const JOINT_STATE_STREAM: u32 = 300;
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 3;
+/// Current mobile-manipulator simulation snapshot schema.
+pub const MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION: u32 = 3;
 /// Oldest supported mobile-manipulator snapshot schema (v1 had no wrist depth frame;
 /// v2 had no in-progress grasp weld-anchor retarget or finger pinch limits).
-const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
+pub const MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION: u32 = 1;
+
+/// Reusable constructor and integration hooks for a mobile-manipulator physics path.
+///
+/// This adapter keeps [`MobileManipulatorSim`] backend-neutral: an optional backend
+/// crate can construct this value at the application boundary without becoming a
+/// dependency of the publishable `rne_ai` crate. The default hooks preflight any
+/// world successfully and mirror velocity impulses through ECS on the next step.
+pub struct MobileManipulatorPhysicsFactory<B> {
+    backend_id: &'static str,
+    constructor: fn(SimDuration) -> Result<B, String>,
+    preflight: fn(&B, &World) -> Result<(), String>,
+    velocity_impulse: fn(&mut B, PhysicsWorldId, Entity, Vec3) -> bool,
+    marker: PhantomData<fn() -> B>,
+}
+
+impl<B> MobileManipulatorPhysicsFactory<B> {
+    /// Creates a factory with backend-neutral ECS synchronization hooks.
+    pub fn new(
+        backend_id: &'static str,
+        constructor: fn(SimDuration) -> Result<B, String>,
+    ) -> Self {
+        Self {
+            backend_id,
+            constructor,
+            preflight: default_backend_preflight::<B>,
+            velocity_impulse: default_velocity_impulse::<B>,
+            marker: PhantomData,
+        }
+    }
+
+    /// Installs a backend-specific whole-world validation hook.
+    pub fn with_preflight(mut self, preflight: fn(&B, &World) -> Result<(), String>) -> Self {
+        self.preflight = preflight;
+        self
+    }
+
+    /// Installs a backend-specific immediate velocity-impulse hook.
+    pub fn with_velocity_impulse(
+        mut self,
+        velocity_impulse: fn(&mut B, PhysicsWorldId, Entity, Vec3) -> bool,
+    ) -> Self {
+        self.velocity_impulse = velocity_impulse;
+        self
+    }
+
+    /// Returns the stable report identifier for the execution path.
+    pub const fn backend_id(&self) -> &'static str {
+        self.backend_id
+    }
+}
+
+impl<B> fmt::Debug for MobileManipulatorPhysicsFactory<B> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MobileManipulatorPhysicsFactory")
+            .field("backend_id", &self.backend_id)
+            .finish_non_exhaustive()
+    }
+}
+
+fn default_backend_preflight<B>(_: &B, _: &World) -> Result<(), String> {
+    Ok(())
+}
+
+fn default_velocity_impulse<B>(_: &mut B, _: PhysicsWorldId, _: Entity, _: Vec3) -> bool {
+    true
+}
+
+trait MobileManipulatorPhysicsFactoryDyn: Send + Sync {
+    fn backend_id(&self) -> &'static str;
+    fn create(&self, fixed_delta: SimDuration)
+        -> Result<Box<dyn MobileManipulatorPhysics>, String>;
+}
+
+impl<B: PhysicsBackend> MobileManipulatorPhysicsFactoryDyn for MobileManipulatorPhysicsFactory<B> {
+    fn backend_id(&self) -> &'static str {
+        self.backend_id
+    }
+
+    fn create(
+        &self,
+        fixed_delta: SimDuration,
+    ) -> Result<Box<dyn MobileManipulatorPhysics>, String> {
+        let backend = (self.constructor)(fixed_delta)?;
+        Ok(Box::new(MobileManipulatorPhysicsAdapter {
+            backend,
+            preflight: self.preflight,
+            velocity_impulse: self.velocity_impulse,
+        }))
+    }
+}
+
+trait MobileManipulatorPhysics: Send + Sync {
+    fn create_world(&mut self, desc: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError>;
+    fn preflight(&self, world: &World) -> Result<(), String>;
+    fn sync_from_ecs(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+    ) -> Result<(), PhysicsError>;
+    fn step(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+        dt: SimDuration,
+    ) -> Result<(), PhysicsError>;
+    fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError>;
+    fn apply_velocity_impulse(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+        delta_velocity_m_s: Vec3,
+    ) -> bool;
+    #[allow(clippy::too_many_arguments)]
+    fn sample_sensors(
+        &self,
+        world: &mut World,
+        sim_time: SimTime,
+        physics_world: PhysicsWorldId,
+        render_backend: &mut HeadlessRenderBackend,
+        render_scene: &rne_render::RenderScene,
+        data_bus: &mut InMemoryDataBus,
+    );
+}
+
+struct MobileManipulatorPhysicsAdapter<B> {
+    backend: B,
+    preflight: fn(&B, &World) -> Result<(), String>,
+    velocity_impulse: fn(&mut B, PhysicsWorldId, Entity, Vec3) -> bool,
+}
+
+impl<B: PhysicsBackend> MobileManipulatorPhysics for MobileManipulatorPhysicsAdapter<B> {
+    fn create_world(&mut self, desc: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
+        self.backend.create_world(desc)
+    }
+
+    fn preflight(&self, world: &World) -> Result<(), String> {
+        (self.preflight)(&self.backend, world)
+    }
+
+    fn sync_from_ecs(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+    ) -> Result<(), PhysicsError> {
+        self.backend.sync_from_ecs(world, physics_world)
+    }
+
+    fn step(
+        &mut self,
+        world: &mut World,
+        physics_world: PhysicsWorldId,
+        dt: SimDuration,
+    ) -> Result<(), PhysicsError> {
+        step_backend(&mut self.backend, world, physics_world, dt)
+    }
+
+    fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
+        self.backend.contacts(physics_world)
+    }
+
+    fn apply_velocity_impulse(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+        delta_velocity_m_s: Vec3,
+    ) -> bool {
+        (self.velocity_impulse)(&mut self.backend, physics_world, entity, delta_velocity_m_s)
+    }
+
+    fn sample_sensors(
+        &self,
+        world: &mut World,
+        sim_time: SimTime,
+        physics_world: PhysicsWorldId,
+        render_backend: &mut HeadlessRenderBackend,
+        render_scene: &rne_render::RenderScene,
+        data_bus: &mut InMemoryDataBus,
+    ) {
+        sample_mobile_sensors(
+            &self.backend,
+            world,
+            sim_time,
+            physics_world,
+            render_backend,
+            render_scene,
+            data_bus,
+        );
+    }
+}
+
+fn rapier_physics_factory() -> MobileManipulatorPhysicsFactory<RapierBackend> {
+    MobileManipulatorPhysicsFactory::new("rapier_native", |_| Ok(RapierBackend::new()))
+        .with_velocity_impulse(RapierBackend::apply_velocity_impulse)
+}
+
+fn step_backend<B: PhysicsBackend>(
+    backend: &mut B,
+    world: &mut World,
+    physics_world: PhysicsWorldId,
+    dt: SimDuration,
+) -> Result<(), PhysicsError> {
+    backend.sync_from_ecs(world, physics_world)?;
+    backend.step(physics_world, dt)?;
+    backend.sync_to_ecs(world, physics_world)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_mobile_sensors<B: PhysicsBackend>(
+    backend: &B,
+    world: &mut World,
+    sim_time: SimTime,
+    physics_world: PhysicsWorldId,
+    render_backend: &mut HeadlessRenderBackend,
+    render_scene: &rne_render::RenderScene,
+    data_bus: &mut InMemoryDataBus,
+) {
+    sample_sensors(
+        &mut SensorSampleContext {
+            world,
+            sim_time,
+            physics: backend,
+            physics_world,
+            render: Some(render_backend),
+            scene: Some(render_scene),
+        },
+        data_bus,
+    );
+}
 
 /// Error restoring or creating a mobile-manipulator simulation snapshot.
 #[derive(Clone, Debug, PartialEq)]
@@ -202,6 +436,7 @@ impl<T: FramePayload> MobileManipulatorFrameSnapshot<T> {
 /// grasp welds, latest DataBus frames, world random state, simulation time, and
 /// stream sequence state. It does not capture arbitrary user-added resources.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MobileManipulatorSimSnapshot {
     /// Snapshot payload schema version.
     pub schema_version: u32,
@@ -241,60 +476,53 @@ pub struct MobileManipulatorSimSnapshot {
 
 /// Default scene asset for the fixed-base `mm_minimal` robot.
 pub fn mm_minimal_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_minimal.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal.rne.scene.toml")
 }
 
 /// Default scene asset for the diff-drive `mm_mobile` robot.
 pub fn mm_mobile_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_mobile.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile.rne.scene.toml")
 }
 
 /// Default scene asset for the lift-capable `mm_mobile_lift` robot.
 pub fn mm_mobile_lift_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_lift.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_lift.rne.scene.toml")
 }
 
 /// Lift-capable mobile scene with a friction-grasp cube on a low pickup table.
 pub fn mm_mobile_lift_pick_place_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_lift_pick_place.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_lift_pick_place.rne.scene.toml")
 }
 
 /// Default scene asset for the lift-equipped `mm_lift` robot.
 pub fn mm_lift_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenes/mm_lift.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_lift.rne.scene.toml")
 }
 
 /// Scene asset with a cube on the ground under the lift robot's top-down gripper,
 /// for vertical pick-and-lift tests.
 pub fn mm_lift_pick_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_lift_pick.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_lift_pick.rne.scene.toml")
 }
 
 /// Scene asset with a tabletop cube for gripper contact smoke tests.
 pub fn mm_minimal_grasp_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_grasp.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_grasp.rne.scene.toml")
 }
 
 /// Scene asset with a dynamic cube for grasp-and-transport smoke tests.
 pub fn mm_minimal_transport_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_transport.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_transport.rne.scene.toml")
 }
 
 /// Scene asset with three tabletop cubes for clutter pick episodes.
 pub fn mm_minimal_clutter_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_minimal_clutter.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_minimal_clutter.rne.scene.toml")
 }
 
 /// Scene asset with a diff-drive base and three cubes spread along X.
 pub fn mm_mobile_clutter_scene_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenes/mm_mobile_clutter.rne.scene.toml")
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_clutter.rne.scene.toml")
 }
 
 /// How an actuated joint's position is read back and how its command maps to a motor.
@@ -629,7 +857,8 @@ pub struct MobileManipulatorSim {
     scene_path: Option<PathBuf>,
     world_seed: u64,
     world: World,
-    backend: RapierBackend,
+    physics_factory: Arc<dyn MobileManipulatorPhysicsFactoryDyn>,
+    backend: Box<dyn MobileManipulatorPhysics>,
     physics_world: PhysicsWorldId,
     robot: Entity,
     base_link: Entity,
@@ -739,6 +968,26 @@ impl MobileManipulatorSim {
 
     /// Loads a `.rne.scene.toml` with a single URDF mobile-manipulator robot.
     pub fn from_scene_path(scene_path: &Path) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_physics(scene_path, rapier_physics_factory())
+    }
+
+    /// Loads a mobile-manipulator scene through an injected native physics path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an asset error when the scene is invalid, the backend cannot be
+    /// constructed, or its initial world cannot be created or synchronized.
+    pub fn from_scene_path_with_physics<B: PhysicsBackend>(
+        scene_path: &Path,
+        physics_factory: MobileManipulatorPhysicsFactory<B>,
+    ) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_factory(scene_path, Arc::new(physics_factory))
+    }
+
+    fn from_scene_path_with_factory(
+        scene_path: &Path,
+        physics_factory: Arc<dyn MobileManipulatorPhysicsFactoryDyn>,
+    ) -> Result<Self, AssetError> {
         let bundle = load_scene_bundle(scene_path)?;
         if bundle.robots.len() != 1 {
             return Err(AssetError::Invalid {
@@ -801,7 +1050,8 @@ impl MobileManipulatorSim {
             mobile_base,
             world_seed,
             None,
-        );
+            physics_factory,
+        )?;
         sim.scene_path = Some(scene_path.to_path_buf());
         Ok(sim)
     }
@@ -813,6 +1063,7 @@ impl MobileManipulatorSim {
 
     /// Resets the simulation to its initial pose.
     pub fn reset(&mut self) -> MobileManipulatorObservation {
+        let physics_factory = Arc::clone(&self.physics_factory);
         let scene_path = self.scene_path.clone().unwrap_or_else(|| {
             if self.mobile_base {
                 mm_mobile_scene_path()
@@ -820,36 +1071,35 @@ impl MobileManipulatorSim {
                 mm_minimal_scene_path()
             }
         });
-        *self = Self::from_scene_path(&scene_path).expect("reload mobile manipulator scene");
+        *self = Self::from_scene_path_with_factory(&scene_path, physics_factory)
+            .expect("reload mobile manipulator scene");
         self.observe()
+    }
+
+    /// Returns the stable identifier of the active native physics execution path.
+    pub fn physics_backend_id(&self) -> &'static str {
+        self.physics_factory.backend_id()
     }
 
     /// Applies joint velocities and advances one simulation tick.
     pub fn step(&mut self, action: MobileManipulatorAction) -> MobileManipulatorObservation {
         let wrist_before_step_m = world_transform_of(&self.world, self.ee_link).translation;
         self.apply_action(action);
-        step_physics(
-            &mut self.backend,
-            &mut self.world,
-            self.physics_world,
-            self.dt,
-        )
-        .expect("physics step");
+        self.backend
+            .step(&mut self.world, self.physics_world, self.dt)
+            .expect("physics step");
         self.stabilize_mobile_base();
         self.update_grasp(action);
         self.apply_linear_friction_assist(wrist_before_step_m);
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
             let render_scene = build_visual_render_scene(&self.world);
-            sample_sensors(
-                &mut SensorSampleContext {
-                    world: &mut self.world,
-                    sim_time: self.sim_time,
-                    physics: &self.backend,
-                    physics_world: self.physics_world,
-                    render: Some(&mut self.render_backend),
-                    scene: Some(&render_scene),
-                },
+            self.backend.sample_sensors(
+                &mut self.world,
+                self.sim_time,
+                self.physics_world,
+                &mut self.render_backend,
+                &render_scene,
                 &mut self.data_bus,
             );
         }
@@ -969,9 +1219,9 @@ impl MobileManipulatorSim {
             .backend
             .apply_velocity_impulse(self.physics_world, object, delta_v)
         {
-            // `step_physics` synchronises ECS velocities into Rapier before
-            // every integration.  Mirror the one-step impulse into the ECS
-            // component as well so that sync does not erase the pending
+            // The next backend step synchronizes ECS velocities before
+            // integration. Mirror the one-step impulse into the ECS component
+            // as well so that synchronization does not erase the pending
             // friction impulse on the following tick.
             if let Some(mut body) = self.world.get_mut::<RigidBody>(object) {
                 body.linear_velocity_m_s += delta_v;
@@ -1430,8 +1680,15 @@ impl MobileManipulatorSim {
         mobile_base: bool,
         world_seed: u64,
         _base_y_m: Option<f64>,
-    ) -> Self {
-        let mut backend = RapierBackend::new();
+        physics_factory: Arc<dyn MobileManipulatorPhysicsFactoryDyn>,
+    ) -> Result<Self, AssetError> {
+        let dt = SimDuration::from_hertz(Hertz::new(60.0));
+        let mut backend = physics_factory
+            .create(dt)
+            .map_err(|message| AssetError::Invalid {
+                path: "mobile_manipulator physics".to_string(),
+                message,
+            })?;
         // The lift robot's tall jointed chain (lift + shoulder + elbow + gripper) needs
         // more constraint-solver iterations to stay stable, and so does the mobile
         // robot's position-held arm on its floating diff-drive base; fixed-base robots
@@ -1441,7 +1698,10 @@ impl MobileManipulatorSim {
                 solver_iterations: LIFT_SOLVER_ITERATIONS,
                 ..PhysicsWorldDesc::default()
             })
-            .expect("physics world");
+            .map_err(|error| AssetError::Invalid {
+                path: "mobile_manipulator physics".to_string(),
+                message: error.to_string(),
+            })?;
 
         let ee_link = links
             .get("forearm_link")
@@ -1458,6 +1718,7 @@ impl MobileManipulatorSim {
             scene_path: None,
             world_seed,
             world,
+            physics_factory,
             backend,
             physics_world,
             robot,
@@ -1491,7 +1752,7 @@ impl MobileManipulatorSim {
             data_bus: InMemoryDataBus::new(),
             joint_stream: StreamId::new(JOINT_STATE_STREAM as u64),
             sim_time: SimTime::ZERO,
-            dt: SimDuration::from_hertz(Hertz::new(60.0)),
+            dt,
             step_count: 0,
             joint_sequence: 0,
         };
@@ -1499,8 +1760,17 @@ impl MobileManipulatorSim {
         sim.configure_arm_position_motors();
         sim.configure_finger_motors();
         sim.configure_linear_finger_material();
-        sim.warmup_physics();
-        sim
+        sim.backend
+            .preflight(&sim.world)
+            .map_err(|message| AssetError::Invalid {
+                path: "mobile_manipulator physics".to_string(),
+                message,
+            })?;
+        sim.warmup_physics().map_err(|error| AssetError::Invalid {
+            path: "mobile_manipulator physics".to_string(),
+            message: error.to_string(),
+        })?;
+        Ok(sim)
     }
 
     /// Returns contact events produced by the last physics step.
@@ -2101,15 +2371,22 @@ impl MobileManipulatorSim {
 
     fn sample_joint(&self, joint: &ActuatedJoint) -> JointSample {
         let fallback = joint_sample(&self.world, joint);
-        JointSample {
-            position_rad: self
-                .backend
-                .multibody_joint_position(self.physics_world, joint.link)
-                .unwrap_or(fallback.position_rad),
-            velocity_rad_s: self
-                .backend
-                .multibody_joint_velocity(self.physics_world, joint.link)
-                .unwrap_or(fallback.velocity_rad_s),
+        match self.world.get::<PhysicsJointState>(joint.link).copied() {
+            Some(PhysicsJointState::Revolute {
+                position_rad,
+                velocity_rad_s,
+            }) => JointSample {
+                position_rad,
+                velocity_rad_s,
+            },
+            Some(PhysicsJointState::Prismatic {
+                position_m,
+                velocity_m_s,
+            }) => JointSample {
+                position_rad: position_m,
+                velocity_rad_s: velocity_m_s,
+            },
+            Some(PhysicsJointState::Fixed) | None => fallback,
         }
     }
 
@@ -2669,15 +2946,17 @@ impl MobileManipulatorSim {
         }
     }
 
-    fn warmup_physics(&mut self) {
+    fn warmup_physics(&mut self) -> Result<(), PhysicsError> {
         self.zero_joint_motors();
         self.backend
             .sync_from_ecs(&mut self.world, self.physics_world)
-            .expect("physics sync from ECS");
     }
 
     fn rebuild_physics_from_ecs(&mut self) -> Result<(), PhysicsError> {
-        let mut backend = RapierBackend::new();
+        let mut backend = self
+            .physics_factory
+            .create(self.dt)
+            .map_err(|_| PhysicsError::InitializationFailed)?;
         let physics_world = backend.create_world(PhysicsWorldDesc {
             solver_iterations: LIFT_SOLVER_ITERATIONS,
             ..PhysicsWorldDesc::default()
@@ -3077,6 +3356,26 @@ fn link_entity(links: &HashMap<String, Entity>, name: &str) -> Result<Entity, As
 mod tests {
     use super::*;
     use rne_render::{Visual, VisualShape};
+
+    #[test]
+    fn mobile_lift_scene_steps_through_injected_backend_factory() {
+        let factory =
+            MobileManipulatorPhysicsFactory::new("rapier_test", |_| Ok(RapierBackend::new()))
+                .with_velocity_impulse(RapierBackend::apply_velocity_impulse);
+        let mut sim = MobileManipulatorSim::from_scene_path_with_physics(
+            &mm_mobile_lift_pick_place_scene_path(),
+            factory,
+        )
+        .expect("injected mobile-lift backend");
+        assert_eq!(sim.physics_backend_id(), "rapier_test");
+        let initial = sim.observe();
+        let stepped = sim.step(MobileManipulatorAction::default());
+        assert_eq!(sim.step_count(), 1);
+        assert!(stepped.base_x_m.is_finite());
+        assert!(stepped.ee_x_m.is_finite());
+        assert!(stepped.wrist_camera_pixels > 0);
+        assert!((stepped.base_x_m - initial.base_x_m).abs() < 0.1);
+    }
 
     #[test]
     fn physics_init_produces_repeatable_pose() {
@@ -3606,12 +3905,24 @@ mod tests {
             shoulder_velocity_rad_s: 0.5,
             ..MobileManipulatorAction::default()
         });
-        let mut snapshot = sim.snapshot();
-        snapshot.schema_version = MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION;
-        snapshot.wrist_depth_frame = None;
+        let mut value = serde_json::to_value(sim.snapshot()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert(
+            "schema_version".to_string(),
+            MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION.into(),
+        );
+        object.remove("wrist_depth_frame");
+        object.remove("grasp_retarget");
+        let snapshot: MobileManipulatorSimSnapshot = serde_json::from_value(value.clone()).unwrap();
         sim.restore_snapshot(&snapshot).unwrap();
         assert_eq!(sim.step_count(), snapshot.step_count);
         assert_eq!(sim.latest_wrist_depth(), None);
+
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("unknown_future_state".to_string(), true.into());
+        assert!(serde_json::from_value::<MobileManipulatorSimSnapshot>(value).is_err());
     }
 
     #[test]

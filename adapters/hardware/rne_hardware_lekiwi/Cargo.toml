@@ -1,0 +1,16 @@
+[package]
+name = "rne_hardware_lekiwi"
+description = "Fail-closed LeKiwi + SO-101 reference hardware adapter for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_ai = { workspace = true }
+rne_hardware_gateway = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

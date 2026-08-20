@@ -18,7 +18,8 @@ pub use dataset::{
     DatasetNoiseSpec, DatasetRandomizationDecision, DatasetRandomizationValue, DatasetRecord,
     DatasetRecordKind, DatasetRecordReader, DatasetShard, DatasetStreamKind, DatasetStreamSpec,
     DatasetStreamSummary, DatasetTimingSpec, DatasetVerificationReport,
-    DATASET_BUNDLE_SCHEMA_VERSION,
+    RendererDatasetCaptureReport, DATASET_BUNDLE_SCHEMA_VERSION,
+    RENDERER_DATASET_CAPTURE_REPORT_KIND, RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION,
 };
 pub use dataset_payload::{
     decode_dataset_action, decode_dataset_annotation, decode_dataset_imu,

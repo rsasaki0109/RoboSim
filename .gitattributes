@@ -1,6 +1,1 @@
-*.rs text eol=lf
-*.rne.traffic.json text eol=lf
-tests/golden/**/*.json text eol=lf
-assets/tasks/diff_drive_goal.task.json text eol=lf
-assets/robots/dataset_diff_drive.rne.robot.toml text eol=lf
-assets/scenes/dataset_diff_drive.rne.scene.toml text eol=lf
+* text=auto eol=lf

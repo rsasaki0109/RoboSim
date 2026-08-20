@@ -1,0 +1,29 @@
+schema_version = 4
+# External conformance entries must retain their exact tested subjects; a
+# report-only entry is intentionally not representable. Platform releases also
+# require separate archive/install-report attestations and the extracted
+# release report plus SHA256SUMS chain. Schema v4 separately audits external
+# accelerator adapters without letting them satisfy the 1.0 external-system gate.
+release_version = "0.1.0"
+project_owner = "rsasaki0109"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 36
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+accelerator_adapter = []
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:63cd4fe2b774e54a80fad571a5f713af0e86d254b13520dac5592d86967417e9" }
+
+[candidate]
+revision = "804eda6fc4e6423b06dcc6d54d3e42d0a0ec23cc"
+tree = "1fa3646facf095431b014bc394e8a6934a549f20"
+since = "2026-08-15"
+
+# These fields remain intentionally empty until maintainers make and publish
+# a concrete compatibility-support commitment.
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""

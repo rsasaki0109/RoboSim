@@ -27,7 +27,7 @@ jobs:
         run: cargo run --locked -p xtask -- ci-lint
 
   # The episode suites in rne_ai dominate pure test runtime, and caching cannot
-  # shorten execution — so the tests themselves are sharded across parallel jobs
+  # shorten execution  Eso the tests themselves are sharded across parallel jobs
   # with nextest's deterministic hash partitioning. Asset validation runs on the
   # first shard only.
   test:
@@ -91,6 +91,27 @@ jobs:
       - name: Explicit CPU-only headless gate
         run: cargo run --locked -p xtask -- ci-headless
 
+  flagship:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: flagship-${{ matrix.os }}
+      - name: Reproduce flagship success, failure, replay, and capsule
+        run: cargo run --locked -p xtask -- flagship
+      - name: Upload flagship evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagship-evidence-${{ matrix.os }}
+          path: artifacts/flagship-validation/
+
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -106,12 +127,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-contract
+      - name: Compile the C and C++ controller SDK header
+        shell: bash
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c
+          c++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only -x c++ -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c
       - name: Validate version, schemas, blockers, rustdoc, and crate archives
         run: cargo run --locked -p xtask -- release-check
+      - name: Verify the retained compatibility corpus
+        run: cargo run --locked -p rne_compatibility_suite -- --output artifacts/compatibility/report.json
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-fixture-report
+          path: artifacts/compatibility/report.json
 
   semver:
     runs-on: ubuntu-latest
@@ -126,6 +162,7 @@ jobs:
           - "-p rne_data -p rne_log -p rne_plugin -p rne_openscenario -p rne_traffic -p rne_traci -p rne_sumo"
           - "-p rne_core -p rne_ecs -p rne_world -p rne_robot -p rne_physics -p rne_physics_analytic -p rne_deformable"
           - "-p rne_math -p rne_render -p rne_mjcf -p rne_sdf -p rne_adapter_ros2"
+          - "-p rne_plugin_sdk -p rne_physics_conformance -p rne_hardware_gateway -p rne_hardware_lekiwi"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,38 +178,109 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            baseline="origin/${{ github.base_ref }}"
+            registry_guard_ref="origin/${{ github.base_ref }}"
           else
-            baseline="HEAD^"
+            registry_guard_ref="HEAD^"
+          fi
+          if git cat-file -e "$registry_guard_ref:release/rust-api-baseline.toml" 2>/dev/null; then
+            if ! git diff --quiet "$registry_guard_ref" -- release/rust-api-baseline.toml; then
+              echo "Rust API baseline registry is immutable within release 0.1.0" >&2
+              exit 1
+            fi
+          else
+            echo "bootstrap: no Rust API baseline registry exists at $registry_guard_ref"
           fi
 
-          # Collect changed files relative to baseline.
-          changed="$(git diff --name-only "$baseline" HEAD)"
+          mapfile -t baseline_metadata < <(python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
 
-          # Resolve each requested package to its manifest path and check
-          # whether any file under that crate's directory has changed.
-          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          for field in ("baseline_revision", "baseline_tree", "cargo_semver_checks_version"):
+              print(baseline[field])
+          PY
+          )
+          if [[ "${#baseline_metadata[@]}" -ne 3 ]]; then
+            echo "Rust API baseline metadata is incomplete" >&2
+            exit 1
+          fi
+          baseline="${baseline_metadata[0]}"
+          expected_tree="${baseline_metadata[1]}"
+          expected_tool="cargo-semver-checks ${baseline_metadata[2]}"
+          git cat-file -e "$baseline^{commit}"
+          actual_tree="$(git show -s --format=%T "$baseline")"
+          if [[ "$actual_tree" != "$expected_tree" ]]; then
+            echo "Rust API baseline tree mismatch: expected $expected_tree, got $actual_tree" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$baseline" HEAD
+          actual_tool="$(cargo semver-checks --version)"
+          if [[ "$actual_tool" != "$expected_tool" ]]; then
+            echo "cargo-semver-checks mismatch: expected $expected_tool, got $actual_tool" >&2
+            exit 1
+          fi
+
+          declare -A frozen_manifests=()
+          while IFS=$'\t' read -r package manifest; do
+            if [[ -z "$package" || -z "$manifest" || -n "${frozen_manifests[$package]+present}" ]]; then
+              echo "invalid or duplicate Rust API baseline package: $package" >&2
+              exit 1
+            fi
+            frozen_manifests["$package"]="$manifest"
+          done < <(python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          for package in baseline["package"]:
+              print(f'{package["name"]}\t{package["manifest_path"]}')
+          PY
+          )
+
           requested=( ${{ matrix.packages }} )
+          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
           packages=()
           for ((index = 0; index < ${#requested[@]}; index += 2)); do
             package="${requested[index + 1]}"
+            manifest="$(jq -r --arg package "$package" '.packages[] | select(.name == $package) | .manifest_path' <<<"$metadata")"
+            if [[ -z "$manifest" ]]; then
+              echo "unknown current package: $package" >&2
+              exit 1
+            fi
+            relative="${manifest#"$GITHUB_WORKSPACE/"}"
+            frozen_manifest="${frozen_manifests[$package]-}"
+            if [[ -z "$frozen_manifest" ]]; then
+              echo "package is absent from the Rust API baseline: $package" >&2
+              exit 1
+            fi
+            if [[ "$relative" != "$frozen_manifest" ]]; then
+              echo "manifest path changed for $package: expected $frozen_manifest, got $relative" >&2
+              exit 1
+            fi
+            git cat-file -e "$baseline:$frozen_manifest"
+            packages+=("-p" "$package")
+          done
+
+          # Skip unchanged packages in this shard (CI speedup from #179).
+          changed="$(git diff --name-only "$baseline" HEAD)"
+          filtered=()
+          for ((index = 0; index < ${#packages[@]}; index += 2)); do
+            flag="${packages[index]}"
+            package="${packages[index + 1]}"
             manifest="$(jq -r --arg p "$package" \
               '.packages[] | select(.name == $p) | .manifest_path' \
               <<<"$metadata")"
-            if [[ -z "$manifest" ]]; then
-              echo "unknown package: $package" >&2
-              exit 1
-            fi
             crate_dir="${manifest%/Cargo.toml}"
             crate_dir="${crate_dir#"$GITHUB_WORKSPACE/"}"
             if echo "$changed" | grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$"; then
-              packages+=("-p" "$package")
+              filtered+=("$flag" "$package")
             else
               echo "skip $package (no changes under $crate_dir)"
             fi
           done
+          packages=("${filtered[@]}")
 
-          if [[ ${#packages[@]} -eq 0 ]]; then
+          if (( ${#packages[@]} == 0 )); then
             echo "all packages in this shard are unchanged; semver check skipped"
             exit 0
           fi
@@ -229,6 +337,10 @@ jobs:
           cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
           cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
+      - name: Capture and verify the WGPU renderer dataset
+        run: |
+          cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer
+          cargo run --locked -p xtask -- dataset-check artifacts/datasets/unitree-g1-wgpu.rne-dataset
       - name: Upload trust evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -238,6 +350,7 @@ jobs:
             artifacts/evidence/
             artifacts/datasets/diff-drive-reference.rne-dataset/
             artifacts/datasets/diff-drive-depth-evaluation.json
+            artifacts/datasets/unitree-g1-wgpu.rne-dataset/
 
   parity:
     # M5 defines the GitHub-hosted Windows parity runner as its benchmark class.
@@ -310,7 +423,7 @@ jobs:
   # context to point at; it passes only when every stage passes.
   workspace:
     runs-on: ubuntu-latest
-    needs: [lint, test, smoke, rl, headless, msrv, release_contract, semver, behavior_ci, evidence, parity, supply_chain, fuzz_smoke]
+    needs: [lint, test, smoke, rl, headless, flagship, msrv, release_contract, semver, behavior_ci, evidence, parity, supply_chain, fuzz_smoke]
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -326,6 +439,7 @@ jobs:
           --result smoke=${{ needs.smoke.result }}
           --result rl=${{ needs.rl.result }}
           --result headless=${{ needs.headless.result }}
+          --result flagship=${{ needs.flagship.result }}
           --result msrv=${{ needs.msrv.result }}
           --result release_contract=${{ needs.release_contract.result }}
           --result semver=${{ needs.semver.result }}

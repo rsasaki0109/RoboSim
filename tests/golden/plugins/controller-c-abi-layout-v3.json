@@ -1,0 +1,205 @@
+{
+  "kind": "rne_controller_c_abi_layout",
+  "schema_version": 1,
+  "sdk_version": 1,
+  "minimum_abi_version": 2,
+  "current_abi_version": 3,
+  "pointer_width_bits": 64,
+  "capability_bits": [
+    {
+      "name": "joint_position_observation",
+      "value": 1
+    },
+    {
+      "name": "joint_velocity_observation",
+      "value": 2
+    },
+    {
+      "name": "joint_velocity_command",
+      "value": 4
+    },
+    {
+      "name": "multi_robot",
+      "value": 8
+    }
+  ],
+  "structs": [
+    {
+      "name": "RneJointPosition",
+      "size_bytes": 16,
+      "align_bytes": 8,
+      "fields": [
+        {
+          "name": "name",
+          "c_type": "const char *",
+          "offset_bytes": 0,
+          "size_bytes": 8
+        },
+        {
+          "name": "position_rad",
+          "c_type": "double",
+          "offset_bytes": 8,
+          "size_bytes": 8
+        }
+      ]
+    },
+    {
+      "name": "RneJointVelocity",
+      "size_bytes": 16,
+      "align_bytes": 8,
+      "fields": [
+        {
+          "name": "name",
+          "c_type": "const char *",
+          "offset_bytes": 0,
+          "size_bytes": 8
+        },
+        {
+          "name": "velocity_rad_s",
+          "c_type": "double",
+          "offset_bytes": 8,
+          "size_bytes": 8
+        }
+      ]
+    },
+    {
+      "name": "RneJointObservationV3",
+      "size_bytes": 40,
+      "align_bytes": 8,
+      "fields": [
+        {
+          "name": "robot_id",
+          "c_type": "const char *",
+          "offset_bytes": 0,
+          "size_bytes": 8
+        },
+        {
+          "name": "name",
+          "c_type": "const char *",
+          "offset_bytes": 8,
+          "size_bytes": 8
+        },
+        {
+          "name": "position_rad",
+          "c_type": "double",
+          "offset_bytes": 16,
+          "size_bytes": 8
+        },
+        {
+          "name": "velocity_rad_s",
+          "c_type": "double",
+          "offset_bytes": 24,
+          "size_bytes": 8
+        },
+        {
+          "name": "has_velocity",
+          "c_type": "uint8_t",
+          "offset_bytes": 32,
+          "size_bytes": 1
+        },
+        {
+          "name": "reserved",
+          "c_type": "uint8_t[7]",
+          "offset_bytes": 33,
+          "size_bytes": 7
+        }
+      ]
+    },
+    {
+      "name": "RneJointVelocityV3",
+      "size_bytes": 24,
+      "align_bytes": 8,
+      "fields": [
+        {
+          "name": "robot_id",
+          "c_type": "const char *",
+          "offset_bytes": 0,
+          "size_bytes": 8
+        },
+        {
+          "name": "name",
+          "c_type": "const char *",
+          "offset_bytes": 8,
+          "size_bytes": 8
+        },
+        {
+          "name": "velocity_rad_s",
+          "c_type": "double",
+          "offset_bytes": 16,
+          "size_bytes": 8
+        }
+      ]
+    },
+    {
+      "name": "RneControllerStepResultV3",
+      "size_bytes": 16,
+      "align_bytes": 8,
+      "fields": [
+        {
+          "name": "status",
+          "c_type": "int32_t",
+          "offset_bytes": 0,
+          "size_bytes": 4
+        },
+        {
+          "name": "output_count",
+          "c_type": "size_t",
+          "offset_bytes": 8,
+          "size_bytes": 8
+        }
+      ]
+    }
+  ],
+  "symbols": [
+    {
+      "name": "rne_plugin_abi_version",
+      "since_abi": 2,
+      "c_signature": "uint32_t(void)"
+    },
+    {
+      "name": "rne_plugin_name",
+      "since_abi": 2,
+      "c_signature": "const char *(void)"
+    },
+    {
+      "name": "rne_controller_create",
+      "since_abi": 2,
+      "c_signature": "void *(const char *, double, double, double, char *, size_t)"
+    },
+    {
+      "name": "rne_controller_destroy",
+      "since_abi": 2,
+      "c_signature": "void(void *)"
+    },
+    {
+      "name": "rne_controller_step",
+      "since_abi": 2,
+      "c_signature": "size_t(const void *, const RneJointPosition *, size_t, RneJointVelocity *, size_t)"
+    },
+    {
+      "name": "rne_plugin_capabilities",
+      "since_abi": 3,
+      "c_signature": "uint64_t(void)"
+    },
+    {
+      "name": "rne_controller_configure_v3",
+      "since_abi": 3,
+      "c_signature": "int32_t(void *, uint64_t, char *, size_t)"
+    },
+    {
+      "name": "rne_controller_reset_v3",
+      "since_abi": 3,
+      "c_signature": "int32_t(void *, uint64_t, uint64_t, uint64_t, uint64_t, char *, size_t)"
+    },
+    {
+      "name": "rne_controller_step_v3",
+      "since_abi": 3,
+      "c_signature": "RneControllerStepResultV3(void *, uint64_t, uint64_t, const RneJointObservationV3 *, size_t, RneJointVelocityV3 *, size_t, char *, size_t)"
+    },
+    {
+      "name": "rne_controller_shutdown_v3",
+      "since_abi": 3,
+      "c_signature": "int32_t(void *, char *, size_t)"
+    }
+  ]
+}

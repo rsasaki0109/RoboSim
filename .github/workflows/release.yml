@@ -24,6 +24,11 @@ env:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,9 +78,26 @@ jobs:
           mkdir -p artifacts/extracted
           tar -xzf "$archive" -C artifacts/extracted
           cargo run --locked -p xtask -- release-install-smoke \
+            --archive "$archive" \
             --bundle-dir "artifacts/extracted/${name}" \
             --output-dir artifacts/extracted-evidence \
             --python python
+      - name: Sign archive and wheel provenance
+        id: attest
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            artifacts/release/*.tar.gz
+            artifacts/wheels/*.whl
+            artifacts/extracted-evidence/archive-install-rehearsal-report.json
+      - name: Retain the signed attestation bundle
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          mkdir -p artifacts/attestations
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            artifacts/attestations/release-bundle.json
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-linux
@@ -83,10 +105,19 @@ jobs:
           path: |
             artifacts/release/*.tar.gz
             artifacts/wheels/*.whl
-            artifacts/extracted-evidence/install-rehearsal-report.json
+            artifacts/attestations/release-bundle.json
+            artifacts/extracted-evidence/archive-install-rehearsal-report.json
+            artifacts/extracted-evidence/controller-plugin-conformance.json
+            artifacts/extracted-evidence/controller-scaffold-conformance.json
+            artifacts/extracted-evidence/hardware-adapter-conformance.json
 
   windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,9 +174,26 @@ jobs:
           New-Item -ItemType Directory -Force artifacts/extracted | Out-Null
           Expand-Archive -LiteralPath $archive -DestinationPath artifacts/extracted
           cargo run --locked -p xtask -- release-install-smoke `
+            --archive $archive `
             --bundle-dir "artifacts/extracted/$name" `
             --output-dir artifacts/extracted-evidence `
             --python python
+      - name: Sign archive and wheel provenance
+        id: attest
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            artifacts/release/*.zip
+            artifacts/wheels/*.whl
+            artifacts/extracted-evidence/archive-install-rehearsal-report.json
+      - name: Retain the signed attestation bundle
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/attestations | Out-Null
+          Copy-Item -LiteralPath "${{ steps.attest.outputs.bundle-path }}" `
+            -Destination artifacts/attestations/release-bundle.json
       - uses: actions/upload-artifact@v4
         with:
           name: rne-release-windows
@@ -153,7 +201,11 @@ jobs:
           path: |
             artifacts/release/*.zip
             artifacts/wheels/*.whl
-            artifacts/extracted-evidence/install-rehearsal-report.json
+            artifacts/attestations/release-bundle.json
+            artifacts/extracted-evidence/archive-install-rehearsal-report.json
+            artifacts/extracted-evidence/controller-plugin-conformance.json
+            artifacts/extracted-evidence/controller-scaffold-conformance.json
+            artifacts/extracted-evidence/hardware-adapter-conformance.json
 
   release_candidate:
     runs-on: ubuntu-latest
@@ -183,6 +235,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      attestations: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -202,6 +255,38 @@ jobs:
             printf 'expected 4 release assets, found %s\n' "${#assets[@]}" >&2
             exit 1
           fi
+          for platform_dir in dist/rne-release-linux dist/rne-release-windows; do
+            bundle="$platform_dir/attestations/release-bundle.json"
+            report="$platform_dir/extracted-evidence/archive-install-rehearsal-report.json"
+            test -f "$bundle"
+            test -f "$report"
+            while IFS= read -r -d '' asset; do
+              gh attestation verify "$asset" \
+                -R "$GH_REPO" \
+                --bundle "$bundle" \
+                --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@$GITHUB_REF" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --signer-digest "$GITHUB_SHA" \
+                --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+                --predicate-type "https://slsa.dev/provenance/v1" \
+                --deny-self-hosted-runners
+            done < <(
+              find "$platform_dir" -type f \
+                \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) \
+                -print0 | sort -z
+            )
+            gh attestation verify "$report" \
+              -R "$GH_REPO" \
+              --bundle "$bundle" \
+              --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@$GITHUB_REF" \
+              --source-ref "$GITHUB_REF" \
+              --source-digest "$GITHUB_SHA" \
+              --signer-digest "$GITHUB_SHA" \
+              --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --predicate-type "https://slsa.dev/provenance/v1" \
+              --deny-self-hosted-runners
+          done
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
             --prerelease \

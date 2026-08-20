@@ -1,0 +1,159 @@
+{
+  "artifact_contract": "dataset_bundle",
+  "current_schema_version": 1,
+  "expected_error": null,
+  "expected_outcome": "accepted_and_restored",
+  "expected_replay_digest": null,
+  "expected_result_sha256": "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16",
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [],
+  "reason_code": "same_schema_streaming_dataset_bundle",
+  "schema_version": 1,
+  "source_artifact": {
+    "assets": [
+      {
+        "path": "assets/reference-room.rne.json",
+        "role": "scene",
+        "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "content_sha256": "sha256:f16a82b0e9f3159c999afaa4de1be6e32d0ec5c98d8466a447042ab2b2864b14",
+    "dataset_id": "rne.reference.depth-pair.v1",
+    "fixed_step_ticks": 10,
+    "randomization": [
+      {
+        "key": "lighting.intensity",
+        "seed": 9001,
+        "value": {
+          "type": "scalar",
+          "unit": "unitless",
+          "value": 1.25
+        }
+      }
+    ],
+    "schema_version": 1,
+    "shards": [
+      {
+        "byte_len": 736,
+        "dropped_count": 2,
+        "path": "records.rnedata",
+        "record_count": 6,
+        "sample_count": 4,
+        "sha256": "sha256:cdd53532104064a6a971c10170fe05cfc9acb1b4e9be8183ed44a6b3175f17d6",
+        "streams": [
+          {
+            "dropped_count": 1,
+            "first_sequence": 0,
+            "next_sequence": 3,
+            "record_count": 3,
+            "sample_count": 2,
+            "stream_id": 10
+          },
+          {
+            "dropped_count": 1,
+            "first_sequence": 0,
+            "next_sequence": 3,
+            "record_count": 3,
+            "sample_count": 2,
+            "stream_id": 11
+          }
+        ]
+      }
+    ],
+    "streams": [
+      {
+        "calibration": {
+          "model": "pinhole.v1",
+          "parameters": {
+            "cx_px": 0.5,
+            "cy_px": 0.5,
+            "fx_px": 100.0,
+            "fy_px": 100.0
+          },
+          "reference_frame": "camera_optical"
+        },
+        "fields": [
+          {
+            "dtype": "f32[]",
+            "name": "depth_m",
+            "unit": "m"
+          }
+        ],
+        "frame_id": "camera_optical",
+        "kind": "depth_f32",
+        "name": "predicted_depth",
+        "noise": {
+          "model": "none.v1",
+          "parameters": {},
+          "seed": 100
+        },
+        "payload_encoding": "rne.transport.image_depth_f32.v1",
+        "source_entity": "reference_camera",
+        "stream_id": 10,
+        "timing": {
+          "gap_policy": "explicit_records",
+          "latency": {
+            "fixed_ticks": 2,
+            "max_ticks": 2,
+            "model": "fixed"
+          },
+          "nominal_period_ticks": 10
+        }
+      },
+      {
+        "calibration": {
+          "model": "pinhole.v1",
+          "parameters": {
+            "cx_px": 0.5,
+            "cy_px": 0.5,
+            "fx_px": 100.0,
+            "fy_px": 100.0
+          },
+          "reference_frame": "camera_optical"
+        },
+        "fields": [
+          {
+            "dtype": "f32[]",
+            "name": "depth_m",
+            "unit": "m"
+          }
+        ],
+        "frame_id": "camera_optical",
+        "kind": "depth_f32",
+        "name": "ground_truth_depth",
+        "noise": {
+          "model": "none.v1",
+          "parameters": {},
+          "seed": 101
+        },
+        "payload_encoding": "rne.transport.image_depth_f32.v1",
+        "source_entity": "reference_camera",
+        "stream_id": 11,
+        "timing": {
+          "gap_policy": "explicit_records",
+          "latency": {
+            "fixed_ticks": 2,
+            "max_ticks": 2,
+            "model": "fixed"
+          },
+          "nominal_period_ticks": 10
+        }
+      }
+    ],
+    "task_spec_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "world_seed": 42
+  },
+  "source_artifact_sha256": "sha256:e995a3a56a44577cc6b848355f29367a88167570829661b32e32e76eb06f6832",
+  "source_files": [
+    {
+      "contents_hex": "524e454441544131010000001000000002000000000000000a000000000000000000000000000000000000000000000002000000000000003c00000000000000d7ede62cbe40ac5809181a1e9fa89b4931d637e6fa78b25c29ff237f431738700a000000000000000000000000000000000000000000000002000000000000000400000001000000040000000000803f00000040000040400000804002000000000000000b000000000000000000000000000000000000000000000002000000000000003c00000000000000291992786b28268f2372b5bf360de826a5bb5cd99575bde661f1bfd6fee64f5f0b000000000000000000000000000000000000000000000002000000000000000400000001000000040000000000803f66660640000040409a99794000000000000000000a0000000000000001000000000000000a000000000000000c0000000000000008000000000000007c9fa136d4413fa6173637e883b6998d32e1d675f88cddff9dcbcf331820f4b8010000000000000000000000000000000b0000000000000001000000000000000a000000000000000c0000000000000008000000000000007c9fa136d4413fa6173637e883b6998d32e1d675f88cddff9dcbcf331820f4b8010000000000000002000000000000000a000000000000000200000000000000140000000000000016000000000000003400000000000000c41cd57fae0ce1b9e4f850bb33fbad251aa5258157377daee746877f065ff2eb0a000000000000000200000000000000140000000000000016000000000000000200000001000000020000000000a0400000c04002000000000000000b000000000000000200000000000000140000000000000016000000000000003400000000000000f5f897d2e286158be9732ccbd961713df0c44d0fa2807e9e8aa20a23e30325a80b000000000000000200000000000000140000000000000016000000000000000200000001000000020000009a99a1406666be40",
+      "path": "records.rnedata",
+      "sha256": "sha256:cdd53532104064a6a971c10170fe05cfc9acb1b4e9be8183ed44a6b3175f17d6",
+      "size_bytes": 736
+    }
+  ],
+  "source_revision": "aecafb62c99f432b2a76956575f4562c6047a6bc",
+  "source_schema_version": 1,
+  "source_tree": "0bc9d2d48185282da31dc80eb8857d84012a5928",
+  "source_workspace_version": "0.1.0"
+}

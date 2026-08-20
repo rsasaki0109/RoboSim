@@ -4,6 +4,232 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Freeze the current sensor-goal TaskSpec and its process-isolated hardware
+  session as the twenty-eighth and twenty-ninth installed compatibility
+  fixtures. Session validation now replays the complete wire/gateway contract
+  and recomputes observation/action widths from the exact supplied TaskSpec.
+- Separate the current nine-element sensor task as
+  `rne.diff_drive.sensor_goal.v1`; the retained five-element
+  `rne.diff_drive.goal.v1` contract remains immutable instead of sharing an ID
+  with incompatible observation semantics. Dataset v2 evidence is regenerated
+  against the new TaskSpec digest; the older v1 dataset summary is unchanged.
+- Freeze controller-plugin conformance report v1 as the twenty-seventh
+  installed compatibility fixture. The typed reader now rejects non-portable
+  subject names, non-canonical digests, unsupported ABI/schema identities,
+  reordered capabilities, and passing reports without required capabilities or
+  a non-empty library. This synthesized fixture does not count as third-party
+  plugin evidence; readiness still rehashes retained external subject bytes.
+- Freeze all ten frontend protocol-v1 message families as the twenty-sixth
+  installed compatibility fixture. Client/server negotiation, rejection,
+  control command/acknowledgement, status, RGB8, depth, LiDAR, and gap frames
+  now require exact wire re-encoding, typed semantic equality, fixed ordering,
+  and fail-closed truncated/trailing input handling.
+
+- Freeze renderer-backed RGB-D capture report v1 as the twenty-fifth installed
+  compatibility fixture. Producer, independent dataset verifier, and installed
+  compatibility kit now share one strict `rne_data` type; readiness requires
+  the expanded typed-reader corpus while cross-adapter pixel hashes remain outside
+  the compatibility contract.
+
+- Add a portable Unitree G1 gait TaskSpec and connect the real WGPU head-camera
+  path to a streaming, TaskSpec-bound RGB-D dataset with calibration, timing,
+  latency, noise, renderer identity, complete scene/robot/mesh/environment input
+  digests, and mandatory Windows/Linux evidence-job verification. Renderer
+  unavailability and asset overrides now fail explicit capture requests instead
+  of being reported as evidence through the CPU smoke fallback.
+
+- Document the current best-effort 0.x support status and the exact published
+  policy decision required before 1.0, without presenting draft intent as a
+  maintainer commitment.
+
+- Surface the three independent RNE 1.0 validation routes near the top of the
+  README so external task, controller-plugin, and backend/hardware authors can
+  reach the fixed evidence forms without weakening the typed acceptance gate.
+
+### Fixed
+
+- Make the 1.0 readiness manifest reject partially populated uncommitted
+  support claims and incomplete, noncanonical, oversized, or non-HTTPS
+  committed support fields.
+
+- **Fail-closed LeKiwi physical actuation preflight**: physical HIL now
+  requires explicit cutoff-operator and elevated-wheel confirmations, while
+  physical live requires cutoff-operator and clear-work-area confirmations.
+  Mock, shadow, and cross-stage confirmation misuse is rejected; the flags do
+  not replace the typed two-operator physical-evidence attestation.
+
+- **Relocatable built-in scene lookup**: `rne_ai` built-in mobile-manipulator
+  and URDF scene helpers now locate the staged `assets/` tree from the runtime
+  working directory or executable location. Shared Cargo targets can no longer
+  reuse a deleted checkout path that was embedded at compile time; unresolved
+  assets remain relative instead of pointing at a stale build machine path.
+
+- **Bounded release-rehearsal cleanup**: successful native-bundle and
+  independently extracted rehearsals now remove only their validated,
+  tool-owned wheel virtual environment, controller scaffold, internal
+  rehearsal directory, and target-local copied evidence after the retained
+  reports and checksum chain are complete. Failed rehearsals keep all of those
+  diagnostics. Cleanup rejects path escapes, symlinks, and regular files so a
+  user-selected release output cannot widen the deletion boundary.
+
+- **External CI artifact storage**: xtask CI evidence producers accept an
+  absolute `RNE_ARTIFACTS_DIR`, preserving the existing real-directory and
+  bounded-deletion checks while keeping large generated reports, replays, and
+  Failure Capsules off the source disk.
+
+- **Portable WGPU TAA depth reprojection**: temporal anti-aliasing now samples
+  pixel-center depth from a losslessly packed `Rgba8Unorm` scene attachment
+  instead of a depth `textureLoad` that the OpenGL/GLSL backend cannot lower.
+  Off-screen depth readback uses the same portable color path on adapters that
+  do not support depth-texture buffer copies; on-screen non-TAA rendering keeps
+  its original single-color-target path.
+
+### Added
+
+- **Installed external-project evidence authoring**: `rne-asset
+  failure-capsule create|verify` now exposes the same strict, non-overwriting
+  Failure Capsule implementation previously available only through source-tree
+  `xtask`. Native bundles retain `Cargo.lock`, the authoring guides, and a
+  failed replay fixture, and their installed `robot_replay` rehearsal now
+  creates and verifies a content-addressed capsule. Independent projects can
+  therefore produce required task evidence from an extracted release or their
+  own locked Rust checkout without cloning RNE source. The expanded typed-reader
+  reachability is covered by a time-bounded `getrandom 0.4.3` duplicate review;
+  no new registry package is introduced.
+
+- **External evidence intake contract**: a machine-readable three-route
+  registry, public contributor guide, and required GitHub issue forms now cover
+  independent task reproduction, third-party controller plugins, and external
+  physics backends or hardware adapters. `xtask external-intake-check` binds
+  the route thresholds, ownership and author-assistance policy, artifact
+  checklist, form fields, and repository-contained files; lint and release
+  checks fail on drift. Submission remains a review queue and cannot satisfy
+  the typed readiness gate by itself.
+
+- **External readiness-pack authoring**: `xtask readiness-pack init` creates a
+  non-overwriting external-disk copy of the honest 2/9 readiness baseline and
+  its retained compatibility evidence. `readiness-pack stage` then copies one
+  regular file through a temporary name, enforces the audit's 64 MiB limit and
+  forward-slash containment rules, refuses symlinks and overwrites, and emits
+  the canonical SHA-256 TOML reference. It does not certify ownership,
+  independence, or a passing 1.0 gate.
+
+- **README vehicle-dynamics showcase**: the deterministic kinematic-versus-dynamic
+  comparison now renders oriented procedural cars, steerable wheels, continuous road
+  geometry, saturation-colored trails, and live slip/yaw/grip telemetry into a
+  size-gated GIF with a reduced-motion poster, published directly in the README.
+
+- **Evidence-backed 1.0 readiness gate**: `xtask release-readiness` now audits
+  nine fixed promotion conditions from a strict, SHA-256-bound evidence pack
+  using an explicit date instead of wall-clock time. It verifies independent
+  TaskSpec/Failure Capsule use, third-party plugin and backend/adapter reports,
+  LeKiwi physical evidence, same-tag Linux/Windows release rehearsals, the exact
+  compatibility corpus, P0/P1 blockers, and a maintainer support commitment.
+  The committed tracker retains and freshly replays the complete 29-check
+  historical compatibility report, so the honest baseline is now 2/9 and
+  remains ineligible; no tag or 1.0 claim is created.
+- **Fail-closed 1.x promotion interlock**: `release-check`, platform
+  `release-bundle`, and aggregate `release-exit` now require the complete
+  external evidence pack plus an explicit assessment date for any 1.x or later
+  version. Each path reruns the typed audit and writes a promotion report;
+  missing, malformed, tampered, or ineligible evidence stops the release before
+  packaging or publication. Normal 0.x development remains unchanged.
+- **Replayable signed-provenance gate**: release jobs now retain the exact
+  Sigstore bundle emitted by `actions/attest@v4`, and publication verifies each
+  platform's archive and wheel from that bundle. The 1.0 readiness audit reruns
+  `gh attestation verify` with the repository, workflow certificate identity,
+  tag, source and signer commit, issuer, SLSA predicate, runner policy, and
+  archive digest pinned, then requires an exact strict schema-v1 receipt.
+- **Attested archive-install chain**: release jobs now emit and sign a strict
+  schema-v1 archive-install rehearsal report that binds the exact archive
+  name, size, and SHA-256 to the extracted `release-report.json`,
+  `SHA256SUMS`, and all nine installed checks. Readiness manifest v3 requires
+  separate fresh Sigstore receipts for the archive and this report, then
+  reconstructs the complete checksum graph so reports from another archive
+  cannot be substituted.
+- **Subject-bound external certification evidence**: readiness manifest v2
+  requires immutable external revisions and retains the exact controller
+  library/manifest, physics implementation bundle, or hardware adapter,
+  TaskSpec, and normalized launch arguments. The gate rehashes those bytes and
+  matches report file names, sizes, digests, negotiated task identity, and
+  observation/action widths, so a passing report cannot be relabelled onto a
+  different implementation. Installed bundles now carry all three external
+  conformance authoring guides beside the SDKs and runners.
+- **Replayed historical-compatibility evidence**: the 1.0 readiness gate no
+  longer accepts a registry-shaped compatibility report on its pass flags
+  alone. It revalidates ancestor revisions, trees, schema declarations, and
+  golden blobs, executes all 29 fixtures through the current typed readers,
+  and requires the retained report to match that fresh result exactly.
+- **Frontend transport history retention**: protocol v1's introducing commit
+  and first committed full `ClientHello` golden are now bound to exact Git
+  trees and the original blob. The installed compatibility runner decodes and
+  re-encodes those ancestor bytes exactly, reproduces negotiation, and rejects
+  corruption, unsupported versions, unknown kinds, truncation, trailing bytes,
+  future fixture schemas, and unknown fields.
+- **Immutable Rust public-API baseline**: `release/rust-api-baseline.toml`
+  freezes the exact commit, Git tree, `cargo-semver-checks` version, and
+  manifest path for all 31 publishable crates. CI now compares every shard to
+  that fixed revision and fails if the commit disappears, its tree differs, a
+  package moves, or the registry no longer covers the complete release set.
+  Once bootstrapped, same-release registry changes are rejected against the PR
+  base or push parent so the fixed comparison cannot be silently retargeted.
+- **Provenance-bound historical migration matrix**: the installed
+  compatibility corpus retains the original zero-step schema-v1 case and adds
+  nonzero, sensor-bearing schema-v1 and schema-v2 snapshots emitted by their
+  actual ancestor revisions. Each case fixes its source commit/tree, scene,
+  generation steps, source digest, and normalized schema-v3 digest. Source CI
+  verifies that both revisions remain ancestors with the recorded trees;
+  installed bundles restore both artifacts and fail closed on provenance,
+  schema, digest, or unknown-field drift.
+- **Installed Python and C authoring contracts**: release bundles now include a
+  dependency-free C/C++ controller header and a content-addressed 64-bit ABI
+  layout/symbol fixture. The ABI3 wheel freezes all 24 public exports plus
+  constructor, method, and property call shapes in a strict Python API manifest;
+  source CI and extracted bundles emit a deterministic verification report.
+  Installed-rehearsal schema v4 appends the ninth `python_api` check.
+- **Installed compatibility fixture corpus**: `rne-compatibility` now verifies
+  twenty-nine content-addressed TaskSpec, checkpoint, generic/behavior/scenario
+  replay, dataset, renderer capture, all frontend protocol-v1 message families,
+  controller C ABI and plugin-conformance report, historical migration,
+  Failure Capsule, hardware, and physics artifacts through their current typed
+  readers. The frontend and dataset payload fixtures also require byte-exact
+  re-encoding and fail-closed handling of corrupt, truncated, and trailing
+  binary input. Each check proves rejection of a future schema and unknown
+  top-level field. Release bundles retain the registry and fixtures, CI uploads
+  a deterministic schema-v1 report, and installed-rehearsal keeps the corpus a
+  required workflow on Linux and Windows.
+- **Historical checkpoint/replay decision matrix**: real artifacts emitted by
+  ancestor serializers now prove exact restoration of generic vectorized
+  checkpoint v1 and typed required-rerun rejection of scenario replay v2/v3.
+  The scenario cases freeze their missing v4 evidence, exact errors, source
+  commits/trees, unsafe-relabel rejection, and 300-step historical result; no
+  migration fabricates actor, action, ownership, input, or result-digest data.
+- **Historical portable-artifact retention**: TaskSpec v1, Failure Capsule v1,
+  and a complete streaming dataset bundle v1 are now retained from their
+  introducing ancestor revisions. The installed verifier reconstructs the
+  dataset from its exact 736-byte shard, rechecks records, explicit gaps,
+  hashes, and headless depth evaluation, and rejects binary corruption. Source
+  CI binds all three artifacts to their exact commits, trees, schema sources,
+  and original golden blobs.
+- **External physics-backend conformance SDK**: the publishable
+  `rne_physics_conformance` crate runs a fixed, unit-bearing nine-check catalog
+  against any public `PhysicsBackend` factory without engine allowlists or
+  vendor dependencies. Reports bind the implementation and manifest by
+  SHA-256, reject capability overclaims, replay byte-identically, and require
+  the exact implementation subject when packaged in a Failure Capsule.
+- **Controller plugin authoring SDK**: dependency-free `rne_plugin_sdk` owns
+  the versioned C-ABI constants, frames, and callback signatures while the host
+  loader re-exports the existing paths. `rne-asset plugin new` vendors the
+  exact SDK module for an offline warning-free build, and installed release
+  rehearsal conforms both the reference binary and a freshly generated plugin.
+- **External hardware-adapter conformance**: `rne-hardware-conformance` runs a
+  content-addressed nine-case TaskSpec/wire/safety catalog against any child
+  process with explicit sandboxed HIL authorization. The Rust process mock and
+  Python LeKiwi bridge pass the same runner, and installed-rehearsal schema v2
+  adds the required hardware-adapter check on Linux and Windows.
+
 ## [0.1.0] - 2026-08-14
 
 ### Added

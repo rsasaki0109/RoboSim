@@ -1,0 +1,13 @@
+{
+  "kind": "rne_lekiwi_host_termination_diagnostic",
+  "schema_version": 1,
+  "run_id": "rne.lekiwi.physical.fixture",
+  "device_id": "rne.lekiwi_so101.physical.v1:fixture-unit",
+  "observer_operator_id": "operator-b",
+  "terminated_session_id": "rne.lekiwi.host-loss.fixture",
+  "reconnect_session_id": "rne.lekiwi.reconnect.fixture",
+  "safe_stop_observed": true,
+  "stop_latency_ms": 450,
+  "measurement_uncertainty_ms": 25,
+  "observation_method": "frame-counted 60 fps video rounded conservatively"
+}

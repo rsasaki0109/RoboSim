@@ -2,6 +2,7 @@ schema_version = 1
 release_version = "0.1.0"
 locked_graph = "Cargo.lock"
 blocker_registry = "release/blockers.toml"
+artifact_attestation_policy = "release/artifact-attestation.toml"
 required_aggregate_checks = ["CI / workspace", "Release rehearsal / release_candidate"]
 
 [[scope]]
@@ -14,6 +15,7 @@ required_jobs = [
   "smoke",
   "rl",
   "headless",
+  "flagship",
   "msrv",
   "release_contract",
   "semver",
@@ -76,6 +78,15 @@ clean_checkout = true
 commands = ["cargo run --locked -p xtask -- ci-headless"]
 
 [[gate]]
+id = "flagship_validation"
+scope = "ci"
+workflow = ".github/workflows/ci.yml"
+job = "flagship"
+runner = "${{ matrix.os }}"
+clean_checkout = true
+commands = ["cargo run --locked -p xtask -- flagship"]
+
+[[gate]]
 id = "msrv"
 scope = "ci"
 workflow = ".github/workflows/ci.yml"
@@ -91,7 +102,12 @@ workflow = ".github/workflows/ci.yml"
 job = "release_contract"
 runner = "ubuntu-latest"
 clean_checkout = true
-commands = ["cargo run --locked -p xtask -- release-check"]
+commands = [
+  "cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c",
+  "c++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only -x c++ -Icrates/rne_plugin_sdk/include tests/compatibility/c_header_smoke.c",
+  "cargo run --locked -p xtask -- release-check",
+  "cargo run --locked -p rne_compatibility_suite -- --output artifacts/compatibility/report.json",
+]
 
 [[gate]]
 id = "semver"
@@ -100,7 +116,7 @@ workflow = ".github/workflows/ci.yml"
 job = "semver"
 runner = "ubuntu-latest"
 clean_checkout = true
-commands = ["cargo semver-checks check-release ${{ matrix.packages }} --baseline-rev $baseline --release-type patch"]
+commands = ["cargo semver-checks check-release \"${packages[@]}\" --baseline-rev \"$baseline\" --release-type patch"]
 
 [[gate]]
 id = "behavior_ci"
@@ -118,7 +134,14 @@ workflow = ".github/workflows/ci.yml"
 job = "evidence"
 runner = "${{ matrix.os }}"
 clean_checkout = true
-commands = ["cargo run --locked -p xtask -- evidence"]
+commands = [
+  "cargo run --locked -p xtask -- evidence",
+  "cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden",
+  "cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset",
+  "cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json",
+  "cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --dataset artifacts/datasets/unitree-g1-wgpu.rne-dataset --require-renderer",
+  "cargo run --locked -p xtask -- dataset-check artifacts/datasets/unitree-g1-wgpu.rne-dataset",
+]
 
 [[gate]]
 id = "oss_parity"

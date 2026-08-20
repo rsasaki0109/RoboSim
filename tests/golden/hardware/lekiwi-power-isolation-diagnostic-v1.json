@@ -1,0 +1,11 @@
+{
+  "kind": "rne_lekiwi_power_isolation_diagnostic",
+  "schema_version": 1,
+  "run_id": "rne.lekiwi.physical.fixture",
+  "device_id": "rne.lekiwi_so101.physical.v1:fixture-unit",
+  "primary_operator_id": "operator-a",
+  "safety_operator_id": "operator-b",
+  "physical_power_removed": true,
+  "actuator_output_stopped": true,
+  "observation_method": "direct wheel observation with power indicator recording"
+}

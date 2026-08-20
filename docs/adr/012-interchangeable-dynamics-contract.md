@@ -19,8 +19,9 @@ backend and engine identifiers, versions, canonical `PhysicsCapability` values,
 and a same-runtime repeatability class. Native engine handles and types remain
 private to backend crates.
 
-The publish-disabled conformance kit owns catalog execution. Its generic
-`run_backend_conformance` accepts a manifest and any `PhysicsBackend` factory.
+The publish-disabled built-in conformance suite owns comparisons among RNE's
+shipped backends. Its generic `run_backend_conformance` accepts a manifest and
+any `PhysicsBackend` factory.
 Every advertised capability must map to a shared vector and a named,
 unit-bearing tolerance where numeric comparison is required. Missing vectors,
 unregistered profiles, manifest/runtime drift, duplicate capabilities, and
@@ -63,3 +64,13 @@ the first violating fixed step in the existing Behavior replay schema, and
 packages that replay with report schema v2 in a Failure Capsule. Diagnostic
 failure evidence therefore does not weaken or silently replace the production
 conformance contract.
+
+For independently maintained Rust backends, the publishable
+`rne_physics_conformance` authoring crate owns a distinct external report schema
+v1. It keeps nine checks in fixed order, uses a backend-independent tolerance
+registry that authors cannot widen, accepts arbitrary stable backend IDs, and
+fails unsupported GPU/soft-body claims explicitly. Each report hashes the exact
+implementation subject and canonical manifest; Failure Capsule verification
+requires the matching subject bytes. The built-in aggregate package is named
+`rne_physics_conformance_suite` so the public authoring crate has the stable
+`rne_physics_conformance` registry name.

@@ -1,0 +1,30 @@
+{
+  "artifact_contract": "vectorized_episode_checkpoint",
+  "current_schema_version": 1,
+  "expected_error": null,
+  "expected_outcome": "accepted_and_restored",
+  "expected_replay_digest": 17972057113911492359,
+  "kind": "rne_historical_compatibility_decision",
+  "missing_required_fields": [],
+  "reason_code": "same_schema_replay_checkpoint",
+  "schema_version": 1,
+  "source_artifact": {
+    "actions": [
+      [
+        1,
+        2
+      ]
+    ],
+    "auto_reset": true,
+    "has_reset": true,
+    "num_envs": 2,
+    "replay_digest": 17972057113911492359,
+    "schema_version": 1,
+    "seed": 7
+  },
+  "source_artifact_sha256": "sha256:f62660f376eb7d79b3f8bd2b95632780450e295fb480d3db01e567ee9579e0e2",
+  "source_revision": "bd4d44f5bd781fc41fd8305938001f0a858993a5",
+  "source_schema_version": 1,
+  "source_tree": "23482add2c5d1de2978897d894d1ba745787bd06",
+  "source_workspace_version": "0.1.0"
+}

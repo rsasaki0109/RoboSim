@@ -1,6 +1,6 @@
 //! Machine-readable final exit matrix for the 1.0 RC.
 
-use super::{validate_blocker_registry, workspace_root, RELEASE_VERSION};
+use super::{release_readiness, validate_blocker_registry, workspace_root, RELEASE_VERSION};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,17 +11,26 @@ use std::process::Command;
 
 /// Machine-readable final exit report schema.
 pub(crate) const FINAL_EXIT_REPORT_SCHEMA_VERSION: u32 = 1;
+/// Machine-readable release artifact attestation policy schema.
+pub(crate) const ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION: u32 = 1;
 
 const EXIT_MATRIX_PATH: &str = "release/exit-matrix.toml";
+pub(crate) const EXPECTED_ATTESTATION_PROVIDER: &str = "github_sigstore";
+const EXPECTED_ATTESTATION_ACTION: &str = "actions/attest@v4";
+pub(crate) const EXPECTED_ATTESTATION_ISSUER: &str = "https://token.actions.githubusercontent.com";
+pub(crate) const EXPECTED_ATTESTATION_REPOSITORY: &str = "rsasaki0109/RoboSim";
+pub(crate) const EXPECTED_ATTESTATION_WORKFLOW: &str = ".github/workflows/release.yml";
+pub(crate) const EXPECTED_ATTESTATION_PREDICATE: &str = "https://slsa.dev/provenance/v1";
 const EXPECTED_SCOPES: [&str; 2] = ["ci", "release"];
 const EXPECTED_AGGREGATE_CHECKS: [&str; 2] =
     ["CI / workspace", "Release rehearsal / release_candidate"];
-const EXPECTED_CI_JOBS: [&str; 13] = [
+const EXPECTED_CI_JOBS: [&str; 14] = [
     "lint",
     "test",
     "smoke",
     "rl",
     "headless",
+    "flagship",
     "msrv",
     "release_contract",
     "semver",
@@ -39,9 +48,28 @@ struct ExitMatrix {
     release_version: String,
     locked_graph: String,
     blocker_registry: String,
+    artifact_attestation_policy: String,
     required_aggregate_checks: Vec<String>,
     scope: Vec<ExitScope>,
     gate: Vec<ExitGate>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactAttestationPolicy {
+    schema_version: u32,
+    provider: String,
+    action: String,
+    issuer: String,
+    repository: String,
+    workflow: String,
+    predicate_type: String,
+    subjects: Vec<String>,
+    attested_events: Vec<String>,
+    pull_request_attestations: bool,
+    require_source_ref: bool,
+    deny_self_hosted_runners: bool,
+    verify_command: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +137,7 @@ struct ExitGateEvidence {
 pub(crate) fn release_exit(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
     let options = parse_options(args)?;
+    release_readiness::enforce_release_promotion(&root)?;
     let matrix = read_and_validate_matrix(&root)?;
     let scope = matrix
         .scope
@@ -282,6 +311,16 @@ fn read_and_validate_matrix(root: &Path) -> anyhow::Result<ExitMatrix> {
         safe_repo_path(root, &matrix.blocker_registry)?.is_file(),
         "exit matrix blocker registry is missing"
     );
+    let attestation_policy_path = safe_repo_path(root, &matrix.artifact_attestation_policy)?;
+    let attestation_policy: ArtifactAttestationPolicy = toml::from_str(
+        &fs::read_to_string(&attestation_policy_path).with_context(|| {
+            format!(
+                "read artifact attestation policy {}",
+                attestation_policy_path.display()
+            )
+        })?,
+    )?;
+    validate_attestation_policy(&attestation_policy)?;
 
     let scope_ids = matrix
         .scope
@@ -356,7 +395,170 @@ fn read_and_validate_matrix(root: &Path) -> anyhow::Result<ExitMatrix> {
         );
         validate_workflow(root, scope, &matrix.gate)?;
     }
+    let release_scope = matrix
+        .scope
+        .iter()
+        .find(|scope| scope.id == "release")
+        .expect("validated release scope");
+    anyhow::ensure!(
+        attestation_policy.workflow == release_scope.workflow,
+        "artifact attestation policy must protect the release workflow"
+    );
+    validate_release_attestation_workflow(root, release_scope, &attestation_policy)?;
     Ok(matrix)
+}
+
+fn validate_attestation_policy(policy: &ArtifactAttestationPolicy) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        policy.schema_version == ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION,
+        "artifact attestation policy schema_version must be {ARTIFACT_ATTESTATION_POLICY_SCHEMA_VERSION}"
+    );
+    anyhow::ensure!(
+        policy.provider == EXPECTED_ATTESTATION_PROVIDER,
+        "artifact attestation provider must be {EXPECTED_ATTESTATION_PROVIDER}"
+    );
+    anyhow::ensure!(
+        policy.action == EXPECTED_ATTESTATION_ACTION,
+        "artifact attestation action must be {EXPECTED_ATTESTATION_ACTION}"
+    );
+    anyhow::ensure!(
+        policy.issuer == EXPECTED_ATTESTATION_ISSUER,
+        "artifact attestation issuer must be {EXPECTED_ATTESTATION_ISSUER}"
+    );
+    anyhow::ensure!(
+        policy.repository == EXPECTED_ATTESTATION_REPOSITORY,
+        "artifact attestation repository must be {EXPECTED_ATTESTATION_REPOSITORY}"
+    );
+    anyhow::ensure!(
+        policy.predicate_type == EXPECTED_ATTESTATION_PREDICATE,
+        "artifact attestation predicate must be {EXPECTED_ATTESTATION_PREDICATE}"
+    );
+    anyhow::ensure!(
+        policy.subjects == ["native_archive", "python_wheel", "archive_install_report"],
+        "artifact attestation subjects must be native_archive, python_wheel, and archive_install_report"
+    );
+    anyhow::ensure!(
+        policy.attested_events == ["push_tag", "workflow_dispatch"],
+        "artifact attestations must run for tag pushes and manual rehearsals"
+    );
+    anyhow::ensure!(
+        !policy.pull_request_attestations,
+        "pull-request jobs must not mint artifact attestations"
+    );
+    anyhow::ensure!(
+        policy.require_source_ref,
+        "artifact attestation verification must bind the release tag ref"
+    );
+    anyhow::ensure!(
+        policy.deny_self_hosted_runners,
+        "artifact attestation verification must reject self-hosted builders"
+    );
+    anyhow::ensure!(
+        policy.verify_command
+            == format!(
+                "gh attestation verify ARTIFACT -R {repository} --bundle ATTESTATION_BUNDLE --cert-identity https://github.com/{repository}/{workflow}@refs/tags/TAG --source-ref refs/tags/TAG --source-digest REVISION --signer-digest REVISION --cert-oidc-issuer {issuer} --predicate-type {predicate} --deny-self-hosted-runners --format json",
+                repository = EXPECTED_ATTESTATION_REPOSITORY,
+                workflow = EXPECTED_ATTESTATION_WORKFLOW,
+                issuer = EXPECTED_ATTESTATION_ISSUER,
+                predicate = EXPECTED_ATTESTATION_PREDICATE,
+            ),
+        "artifact attestation verifier drifted"
+    );
+    Ok(())
+}
+
+fn validate_release_attestation_workflow(
+    root: &Path,
+    scope: &ExitScope,
+    policy: &ArtifactAttestationPolicy,
+) -> anyhow::Result<()> {
+    let workflow_path = safe_repo_path(root, &scope.workflow)?;
+    let workflow = fs::read_to_string(&workflow_path)?;
+    for (job, archive_glob, retain_bundle) in [
+        (
+            "linux",
+            "artifacts/release/*.tar.gz",
+            "cp ${{ steps.attest.outputs.bundle-path }} artifacts/attestations/release-bundle.json",
+        ),
+        (
+            "windows",
+            "artifacts/release/*.zip",
+            "Copy-Item -LiteralPath ${{ steps.attest.outputs.bundle-path }} -Destination artifacts/attestations/release-bundle.json",
+        ),
+    ] {
+        let block = normalize_workflow(workflow_job_block(&workflow, job)?);
+        for permission in [
+            "contents: read",
+            "id-token: write",
+            "attestations: write",
+            "artifact-metadata: write",
+        ] {
+            anyhow::ensure!(
+                block.contains(permission),
+                "release job {job} omitted attestation permission {permission}"
+            );
+        }
+        anyhow::ensure!(
+            block.contains(&format!("uses: {}", policy.action)),
+            "release job {job} must use {}",
+            policy.action
+        );
+        anyhow::ensure!(
+            block.contains("id: attest") && block.contains(retain_bundle),
+            "release job {job} must retain the exact generated attestation bundle"
+        );
+        anyhow::ensure!(
+            block.contains("if: github.event_name != pull_request"),
+            "release job {job} must not attest pull-request artifacts"
+        );
+        anyhow::ensure!(
+            block.contains(archive_glob) && block.contains("artifacts/wheels/*.whl"),
+            "release job {job} must attest its archive and Python wheel"
+        );
+        let install_report =
+            "artifacts/extracted-evidence/archive-install-rehearsal-report.json";
+        anyhow::ensure!(
+            block.matches(install_report).count() >= 2,
+            "release job {job} must attest and retain its archive-bound install report"
+        );
+    }
+
+    let publish = normalize_workflow(workflow_job_block(&workflow, "publish")?);
+    anyhow::ensure!(
+        publish.contains("attestations: read"),
+        "release publish job must be allowed to read attestations"
+    );
+    let verify = "gh attestation verify $asset";
+    let verify_index = publish
+        .find(verify)
+        .context("release publish job must verify every artifact attestation")?;
+    let report_verify_index = publish
+        .find("gh attestation verify $report")
+        .context("release publish job must verify each archive-install report attestation")?;
+    for requirement in [
+        "-R $GH_REPO",
+        "--bundle $bundle",
+        "--cert-identity https://github.com/$GH_REPO/.github/workflows/release.yml@$GITHUB_REF",
+        "--source-ref $GITHUB_REF",
+        "--source-digest $GITHUB_SHA",
+        "--signer-digest $GITHUB_SHA",
+        "--cert-oidc-issuer https://token.actions.githubusercontent.com",
+        "--predicate-type https://slsa.dev/provenance/v1",
+        "--deny-self-hosted-runners",
+    ] {
+        anyhow::ensure!(
+            publish.contains(requirement),
+            "release publish verifier omitted policy requirement {requirement}"
+        );
+    }
+    let publish_index = publish
+        .find("gh release create")
+        .context("release publish job omitted gh release create")?;
+    anyhow::ensure!(
+        verify_index < publish_index && report_verify_index < publish_index,
+        "release assets and archive-install reports must be attestation-verified before publication"
+    );
+    Ok(())
 }
 
 fn validate_locked_command(gate: &str, command: &str) -> anyhow::Result<()> {
@@ -408,6 +610,12 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
             "gate {} no longer starts from actions/checkout@v4",
             gate.id
         );
+        if gate.id == "release_contract" {
+            anyhow::ensure!(
+                normalized.contains("fetch-depth: 0"),
+                "release contract gate must retain full history for migration provenance"
+            );
+        }
         for command in &gate.commands {
             anyhow::ensure!(
                 normalized.contains(&normalize_workflow(command)),
@@ -415,6 +623,9 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
                 gate.id,
                 command
             );
+        }
+        if gate.id == "semver" {
+            validate_semver_packages(block)?;
         }
     }
 
@@ -446,6 +657,60 @@ fn validate_workflow(root: &Path, scope: &ExitScope, gates: &[ExitGate]) -> anyh
         anyhow::ensure!(
             publish.contains("needs: [release_candidate]"),
             "release publishing must depend on the aggregate release_candidate job"
+        );
+    }
+    Ok(())
+}
+
+fn validate_semver_packages(block: &str) -> anyhow::Result<()> {
+    let mut declared = Vec::new();
+    for (index, _) in block.match_indices("-p ") {
+        let package = block[index + 3..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect::<String>();
+        if package.starts_with("rne_") {
+            declared.push(package);
+        }
+    }
+    let unique = declared.iter().cloned().collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique.len() == declared.len(),
+        "SemVer matrix contains duplicate public packages"
+    );
+    let expected = super::PUBLIC_RELEASE_PACKAGES
+        .iter()
+        .map(|package| (*package).to_string())
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique == expected,
+        "SemVer matrix public packages changed: missing={:?} extra={:?}",
+        expected.difference(&unique).collect::<Vec<_>>(),
+        unique.difference(&expected).collect::<Vec<_>>()
+    );
+    let normalized = normalize_workflow(block);
+    for fixed_baseline_check in [
+        "release/rust-api-baseline.toml",
+        "cargo metadata --locked --no-deps --format-version 1",
+        "git diff --quiet \"$registry_guard_ref\" -- release/rust-api-baseline.toml",
+        "git cat-file -e \"$baseline^{commit}\"",
+        "git merge-base --is-ancestor \"$baseline\" HEAD",
+        "git cat-file -e \"$baseline:$frozen_manifest\"",
+        "cargo semver-checks --version",
+        "packages+=(\"-p\" \"$package\")",
+    ] {
+        anyhow::ensure!(
+            normalized.contains(&normalize_workflow(fixed_baseline_check)),
+            "SemVer matrix omitted fixed baseline check: {fixed_baseline_check}"
+        );
+    }
+    for moving_baseline in [
+        "baseline=\"origin/${{ github.base_ref }}\"",
+        "baseline=\"HEAD^\"",
+    ] {
+        anyhow::ensure!(
+            !normalized.contains(&normalize_workflow(moving_baseline)),
+            "SemVer matrix still uses moving baseline: {moving_baseline}"
         );
     }
     Ok(())
@@ -529,8 +794,8 @@ fn git_output(root: &Path, args: &[&str]) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_workflow, parse_options, validate_exit_matrix, validate_locked_command,
-        workflow_job_block,
+        normalize_workflow, parse_options, validate_attestation_policy, validate_exit_matrix,
+        validate_locked_command, workflow_job_block, ArtifactAttestationPolicy,
     };
 
     #[test]
@@ -562,6 +827,18 @@ mod tests {
         assert!(validate_locked_command("test", "cargo test --workspace").is_err());
         assert!(validate_locked_command("test", "cargo test --locked --workspace").is_ok());
         assert!(validate_locked_command("semver", "cargo semver-checks check-release").is_ok());
+    }
+
+    #[test]
+    fn attestation_policy_rejects_repository_drift() {
+        let root = super::workspace_root().expect("workspace root");
+        let text = std::fs::read_to_string(root.join("release/artifact-attestation.toml"))
+            .expect("attestation policy");
+        let mut policy: ArtifactAttestationPolicy =
+            toml::from_str(&text).expect("parse attestation policy");
+        validate_attestation_policy(&policy).expect("committed policy");
+        policy.repository = "untrusted/fork".to_string();
+        assert!(validate_attestation_policy(&policy).is_err());
     }
 
     #[test]
