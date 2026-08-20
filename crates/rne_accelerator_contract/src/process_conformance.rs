@@ -919,7 +919,11 @@ fn read_input(path: &Path, maximum: u64) -> Result<Vec<u8>, AcceleratorProcessCo
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > maximum {
         return Err(AcceleratorProcessConformanceError::Read {
             path: path.display().to_string(),
-            message: format!("input must be a non-empty regular file at or below {maximum} bytes"),
+            message: format!(
+                "input must be a non-empty regular file at or below {maximum} bytes (is_file={}, len={})",
+                metadata.is_file(),
+                metadata.len()
+            ),
         });
     }
     let file = fs::File::open(path).map_err(|error| AcceleratorProcessConformanceError::Read {

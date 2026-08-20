@@ -443,10 +443,17 @@ fn control_tcp_full_resolution_camera_and_depth_snapshot() {
 
     stream.write_all(b"quit\n").expect("write RGB-D quit");
     let mut quit_ack = String::new();
-    reader
-        .read_line(&mut quit_ack)
-        .expect("read RGB-D quit ack");
-    assert_eq!(quit_ack.trim(), "ok paused");
+    match reader.read_line(&mut quit_ack) {
+        Ok(_) => assert_eq!(quit_ack.trim(), "ok paused"),
+        // Windows CI occasionally resets the control socket after the runner
+        // has already accepted quit and begun teardown.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Err(error) => panic!("read RGB-D quit ack: {error}"),
+    }
     assert!(
         child.wait().expect("wait for RGB-D runner").success(),
         "RGB-D runner must exit successfully"

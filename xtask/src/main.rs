@@ -2454,6 +2454,11 @@ fn ci_test() -> anyhow::Result<()> {
 /// nextest's lack of doctest support loses no coverage; the asset checks run only on
 /// the first partition to avoid duplicating them per shard.
 fn ci_test_partition(partition: Option<&str>) -> anyhow::Result<()> {
+    // rust-cache + nextest can leave CARGO_BIN_EXE paths as empty stubs; the
+    // process-conformance suite hashes those mock binaries as subjects.
+    run_step(
+        "cargo build --locked -p rne_accelerator_contract --bin rne-accelerator-protocol-mock --bin rne-accelerator-conformance",
+    )?;
     match partition {
         None => run_step("cargo test --locked --workspace")?,
         Some(spec) => {

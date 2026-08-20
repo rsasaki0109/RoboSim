@@ -33,6 +33,10 @@ All notable changes to Robot Native Engine are documented in this file.
   repo `rust-toolchain.toml` instead of a partial `stable` install.
 - Keep `~/.cargo/bin` on PATH after `setup-ros` so ROS 2 bridge maturin builds
   do not trigger a conflicting rustup reinstall.
+- Pre-build accelerator mock bins before sharded nextest runs so rust-cache
+  stubs cannot empty `CARGO_BIN_EXE_*` subjects.
+- Tolerate Windows control-socket reset on RGB-D quit ack in the asset CLI
+  parity suite.
 
 ### Added
 
