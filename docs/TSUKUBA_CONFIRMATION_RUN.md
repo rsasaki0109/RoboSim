@@ -48,4 +48,4 @@ cargo run --locked -p tsukuba_confirmation --example 75_tsukuba_confirmation -- 
 - Pedestrian-signal optional task B
 - Unmapped parking A, delivery D1/D2, other-robot plate E
 - RGB-D perception of the cone (the fail condition is geometric contact)
-- Kenkyugakuen PLATEAU scenery
+- Official Kenkyugakuen surveyed PLATEAU tile packaging (visual fixture backdrop is example 83; see TSUKUBA_PLATEAU_BACKDROP.md)

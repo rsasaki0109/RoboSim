@@ -58,7 +58,7 @@ All notable changes to Robot Native Engine are documented in this file.
   the 2.2 km city loop.
 
 - Add an SSL simulation-protocol UDP adapter spike (`rne_adapter_ssl`) for
-  ports 10300 E0302 with prost encode/decode of `RobotControl` and ball-teleport
+  ports 10300–10302 with prost encode/decode of `RobotControl` and ball-teleport
   `SimulatorCommand`. Core crates stay protobuf-free; geometry scoring stays in
   example 76.
 
@@ -87,6 +87,9 @@ All notable changes to Robot Native Engine are documented in this file.
   gains now pin a 480-tick mean yaw-rate sign contract beside the existing
   240-tick final-yaw sign gate (`validated_heading`, example 68).
 
+- Add a visual-only PLATEAU LOD1 fixture backdrop behind the Tsukuba
+  confirmation sidewalk (example 83). Contest scoring stays analytic in
+  example 75; imported meshes do not enter the confirmation judges.
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.
@@ -96,7 +99,7 @@ All notable changes to Robot Native Engine are documented in this file.
   and place (`rne.g1.workbench_mission.v1`). This is not a Nav2 or MoveIt port.
 
 - Add a headless RoboCup SSL Division B 2v2 analog that scores official
-  9 m ÁE6 m field geometry, goal-mouth crossing, out-of-bounds, and the
+  9 m × 6 m field geometry, goal-mouth crossing, out-of-bounds, and the
   6.5 m/s ball-speed cap (`rne.ssl.small_pitch_2v2.v1`) without speaking
   the grSim / SSL simulation protobuf ports.
 

@@ -2633,6 +2633,9 @@ fn run_asset_smokes() -> anyhow::Result<()> {
         "cargo run --locked -p tsukuba_3dgs_depth --example 82_tsukuba_3dgs_depth -- --smoke",
     )?;
     run_step(
+        "cargo run --locked -p tsukuba_plateau_backdrop --example 83_tsukuba_plateau_backdrop -- --smoke",
+    )?;
+    run_step(
         "cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --smoke",
     )?;
     run_step(
