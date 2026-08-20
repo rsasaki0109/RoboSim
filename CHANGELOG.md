@@ -31,6 +31,8 @@ All notable changes to Robot Native Engine are documented in this file.
   ancestry checks can resolve the retargeted Rust API baseline commit.
 - Pin the ROS 2 Python bridge workflow to Rust 1.95.0 so maturin matches the
   repo `rust-toolchain.toml` instead of a partial `stable` install.
+- Keep `~/.cargo/bin` on PATH after `setup-ros` so ROS 2 bridge maturin builds
+  do not trigger a conflicting rustup reinstall.
 
 ### Added
 
