@@ -750,17 +750,17 @@
   "status": "passed",
   "subject": {
     "adapter_file": "server.py",
-    "adapter_sha256": "1d198d00e2a32e0e5bd07806b51f4118dbcacd0d85b0fc16497b27fc442e321f",
-    "adapter_size_bytes": 6751,
+    "adapter_sha256": "71d1ad40d98e9032aebe0b13626598afa17a802688a91e2a24617c92934e7820",
+    "adapter_size_bytes": 6933,
     "argument_count": 5,
     "arguments_sha256": "e8fd88e2683b2eb057b51fce3e1f3ea6249094093d4f35bf0e81f2d43c2f6057",
     "launcher_file": "python",
     "manifest_file": "accelerator.toml",
-    "manifest_sha256": "0779e70e09a5ec033f8ad053be07f811fd2c29213712b3a17161d76299734f75",
+    "manifest_sha256": "cd6670be4327dee20b2a746b3fdadc3d1f0fd7e8e16bd75e54de50c43d59e9d3",
     "runtime_file": "runtime.toml",
-    "runtime_sha256": "6dc8b72f72fcd7d0022c3fa3154ef72a6cbc16b5df805325094f3f9bdf8f2d11",
+    "runtime_sha256": "d8adfe563c37f42974ff900f5ea044330819f5107b0844a38cf1fe6391f5c891",
     "task_file": "free-fall-task-spec-v1.json",
-    "task_sha256": "2ac62f7e5c72bb555196baae5776fc28d62b6f94a7f3d819d480ef1096133fe7"
+    "task_sha256": "21ac71517b35af961de2ddaf084e9ed8d5cfd95f865ff6a1aaf88241115c0ba1"
   },
   "task_id": "rne.physics.free_fall.mjx.v1",
   "task_spec_schema": 1,
