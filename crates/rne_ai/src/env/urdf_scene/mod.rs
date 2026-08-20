@@ -2118,6 +2118,7 @@ mod tests {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 1.0,
                 0.0,
+                0.0,
                 UnitreeG1Dex3HandCommand { closure: 0.0 },
             ));
         }
@@ -2132,6 +2133,7 @@ mod tests {
         for _ in 0..40 {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 1.0,
+                0.0,
                 0.0,
                 UnitreeG1Dex3HandCommand { closure: 1.0 },
             ));

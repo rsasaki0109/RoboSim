@@ -13,7 +13,6 @@ const APPROACH_STEPS: u64 = 12;
 const CLOSE_STEPS: u64 = 36;
 const PINCH_SETTLE_STEPS: u64 = 44;
 const LIFT_STEPS: u64 = 72;
-const HOLD_STEPS: u64 = 8;
 const OPEN_STEPS: u64 = 8;
 const PLACE_SETTLE_STEPS: u64 = 60;
 const THUMB_SENSOR_NAME: &str = "right_dex3_thumb_contact_sensor";
@@ -24,8 +23,9 @@ const THUMB_SENSOR_OFFSET_M: [f64; 3] = [0.0, 0.026, 0.0];
 const INDEX_SENSOR_SIZE_M: [f64; 3] = [0.050, 0.026, 0.026];
 const INDEX_SENSOR_OFFSET_M: [f64; 3] = [0.026, 0.0, 0.0];
 const LIFT_START_STEP: u64 = APPROACH_STEPS + CLOSE_STEPS + PINCH_SETTLE_STEPS;
-const RELEASE_STEP: u64 = LIFT_START_STEP + LIFT_STEPS + HOLD_STEPS;
-const SUCCESS_STEP: u64 = RELEASE_STEP + PLACE_SETTLE_STEPS;
+const DEFAULT_CARRY_STEPS: u64 = 40;
+/// Minimum place-distance reduction (m) while lifted+grasped to count as carry.
+const MIN_CARRY_PROGRESS_M: f64 = 0.04;
 const MIN_GRASP_CLOSURE: f64 = 0.8;
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
 const MIN_PLACED_HEIGHT_M: f64 = 0.75;
@@ -65,10 +65,10 @@ pub enum UnitreeG1Dex3Phase {
     Approach,
     /// Close the articulated thumb and fingers around the part.
     Close,
-    /// Raise and carry a two-sided grasp.
+    /// Raise a two-sided grasp to the carry height.
     Lift,
-    /// Stabilize the arm before release.
-    Hold,
+    /// Sweep the raised grasp toward the place tray (loco-manipulation carry analog).
+    Carry,
     /// Open the hand and let the part settle in the tray.
     Place,
     /// The released part is settled inside the place zone.
@@ -118,6 +118,8 @@ pub struct UnitreeG1Dex3EpisodeConfig {
     pub use_pose_follow_grasp: bool,
     /// End successfully as soon as a stable grasp is acquired.
     pub terminate_on_grasp: bool,
+    /// Skip the horizontal carry sweep and release immediately after lift.
+    pub skip_carry: bool,
 }
 
 impl Default for UnitreeG1Dex3EpisodeConfig {
@@ -129,7 +131,7 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             index_name: "right_hand_index_1_link".into(),
             part_name: "dex3_inspection_part".into(),
             place_marker_name: "dex3_place_zone".into(),
-            max_steps: SUCCESS_STEP + 8,
+            max_steps: LIFT_START_STEP + LIFT_STEPS + DEFAULT_CARRY_STEPS + PLACE_SETTLE_STEPS + 8,
             required_stable_contact_steps: 3,
             max_grasp_pinch_gap_m: 0.075,
             max_grasp_speed_m_s: 0.20,
@@ -143,6 +145,7 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             cartesian_tracking_gain: 0.0,
             use_pose_follow_grasp: false,
             terminate_on_grasp: false,
+            skip_carry: false,
         }
     }
 }
@@ -211,6 +214,8 @@ pub struct UnitreeG1Dex3Observation {
     pub part_position_offset_m: [f64; 3],
     /// Whether the payload reached the required lift height.
     pub lifted: bool,
+    /// Whether a lifted grasp completed the horizontal carry toward the place zone.
+    pub carried: bool,
     /// Whether the released payload is settled inside the place zone.
     pub placed: bool,
     /// Whether any inactive left-hand link contacted a task workcell object.
@@ -235,6 +240,9 @@ pub struct UnitreeG1Dex3Episode {
     rng: DeterministicRng,
     arm_correction_rad: [f64; 4],
     grasp_script_step: Option<u64>,
+    place_distance_at_lift_m: Option<f64>,
+    max_carry_progress_m: f64,
+    carried: bool,
 }
 
 impl UnitreeG1Dex3Episode {
@@ -265,7 +273,26 @@ impl UnitreeG1Dex3Episode {
             rng,
             arm_correction_rad: [0.0; 4],
             grasp_script_step: None,
+            place_distance_at_lift_m: None,
+            max_carry_progress_m: 0.0,
+            carried: false,
         })
+    }
+
+    fn carry_steps(&self) -> u64 {
+        if self.config.skip_carry {
+            0
+        } else {
+            DEFAULT_CARRY_STEPS
+        }
+    }
+
+    fn release_step(&self) -> u64 {
+        LIFT_START_STEP + LIFT_STEPS + self.carry_steps()
+    }
+
+    fn success_step(&self) -> u64 {
+        self.release_step() + PLACE_SETTLE_STEPS
     }
 
     /// Returns the underlying simulation for rendering and diagnostics.
@@ -284,6 +311,7 @@ impl UnitreeG1Dex3Episode {
     }
 
     fn phase(&self) -> UnitreeG1Dex3Phase {
+        let release = self.release_step();
         if self.success() {
             UnitreeG1Dex3Phase::Complete
         } else if self.script_step < APPROACH_STEPS {
@@ -292,8 +320,8 @@ impl UnitreeG1Dex3Episode {
             UnitreeG1Dex3Phase::Close
         } else if self.script_step < LIFT_START_STEP + LIFT_STEPS {
             UnitreeG1Dex3Phase::Lift
-        } else if self.script_step < RELEASE_STEP {
-            UnitreeG1Dex3Phase::Hold
+        } else if self.script_step < release {
+            UnitreeG1Dex3Phase::Carry
         } else {
             UnitreeG1Dex3Phase::Place
         }
@@ -346,6 +374,7 @@ impl UnitreeG1Dex3Episode {
             grasp_attempt: self.grasp_attempt,
             part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
+            carried: self.carried,
             placed,
             inactive_hand_workcell_contact: any_named_contact(
                 &self.sim,
@@ -364,7 +393,7 @@ impl UnitreeG1Dex3Episode {
         if self.config.terminate_on_grasp {
             self.was_grasped && self.grasped
         } else {
-            self.script_step >= SUCCESS_STEP && self.observation_without_phase().placed
+            self.script_step >= self.success_step() && self.observation_without_phase().placed
         }
     }
 
@@ -410,6 +439,7 @@ impl UnitreeG1Dex3Episode {
             grasp_attempt: self.grasp_attempt,
             part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
+            carried: self.carried,
             placed: self.was_grasped
                 && !grasped
                 && place_distance_m <= marker.3
@@ -456,6 +486,9 @@ impl Episode for UnitreeG1Dex3Episode {
         self.grasp_attempt = 1;
         self.arm_correction_rad = [0.0; 4];
         self.grasp_script_step = None;
+        self.place_distance_at_lift_m = None;
+        self.max_carry_progress_m = 0.0;
+        self.carried = false;
         self.max_part_height_m = self
             .sim
             .named_translation_m(&self.config.part_name)
@@ -482,14 +515,15 @@ impl Episode for UnitreeG1Dex3Episode {
                 self.grasp_script_step = None;
             }
             let step = self.script_step;
-            if step == RELEASE_STEP {
+            let release = self.release_step();
+            if step == release {
                 if !self.config.use_pose_follow_grasp {
                     self.sim.release_named_child(&self.config.part_name);
                 }
                 self.grasped = false;
                 self.stable_contact_steps = 0;
             }
-            if step == RELEASE_STEP + OPEN_STEPS {
+            if step == release + OPEN_STEPS {
                 if self.config.use_pose_follow_grasp {
                     assert!(
                         self.sim
@@ -503,7 +537,7 @@ impl Episode for UnitreeG1Dex3Episode {
                     "validated payload collider"
                 );
             }
-            let (approach, lift, closure) = command_at_step(step);
+            let (approach, lift, carry, closure) = command_at_step(step, self.carry_steps());
             if !self.was_grasped && step < LIFT_START_STEP {
                 update_cartesian_arm_correction(
                     &self.sim,
@@ -511,8 +545,12 @@ impl Episode for UnitreeG1Dex3Episode {
                     &mut self.arm_correction_rad,
                 );
             }
-            let mut targets =
-                unitree_g1_dex3_pick_targets(approach, lift, UnitreeG1Dex3HandCommand { closure });
+            let mut targets = unitree_g1_dex3_pick_targets(
+                approach,
+                lift,
+                carry,
+                UnitreeG1Dex3HandCommand { closure },
+            );
             let correction_blend = self.grasp_script_step.map_or(1.0, |grasp_step| {
                 let recenter_steps = LIFT_START_STEP.saturating_sub(grasp_step).max(1);
                 let elapsed = step.saturating_sub(grasp_step).saturating_add(1);
@@ -524,7 +562,7 @@ impl Episode for UnitreeG1Dex3Episode {
                     .map(|value| value * correction_blend),
             );
             self.sim.step_joint_position_targets(&targets);
-            if !self.was_grasped && (APPROACH_STEPS..RELEASE_STEP).contains(&step) {
+            if !self.was_grasped && (APPROACH_STEPS..release).contains(&step) {
                 let contact_geometry = contact_geometry(&self.sim, &self.config);
                 let qualifies = grasp_gate_qualifies(
                     &self.config,
@@ -594,12 +632,30 @@ impl Episode for UnitreeG1Dex3Episode {
             }
             self.script_step += 1;
             self.step_in_episode += 1;
-            let height_m = self
+            let part = self
                 .sim
                 .named_translation_m(&self.config.part_name)
-                .expect("validated part")
-                .1;
-            self.max_part_height_m = self.max_part_height_m.max(height_m);
+                .expect("validated part");
+            self.max_part_height_m = self.max_part_height_m.max(part.1);
+            if self.was_grasped && self.grasped && self.max_part_height_m >= MIN_LIFT_HEIGHT_M {
+                let marker = self
+                    .sim
+                    .task_marker(&self.config.place_marker_name)
+                    .expect("validated marker");
+                let place_distance_m = (part.0 - marker.0).hypot(part.2 - marker.2);
+                if self.place_distance_at_lift_m.is_none() {
+                    self.place_distance_at_lift_m = Some(place_distance_m);
+                }
+                if let Some(start_distance_m) = self.place_distance_at_lift_m {
+                    let progress_m = (start_distance_m - place_distance_m).max(0.0);
+                    self.max_carry_progress_m = self.max_carry_progress_m.max(progress_m);
+                }
+                let carry_complete = self.carry_steps() > 0
+                    && self.script_step >= LIFT_START_STEP + LIFT_STEPS + self.carry_steps();
+                if self.max_carry_progress_m >= MIN_CARRY_PROGRESS_M || carry_complete {
+                    self.carried = true;
+                }
+            }
         }
         let observation = self.observation();
         let success = self.success();
@@ -633,30 +689,39 @@ impl Episode for UnitreeG1Dex3Episode {
     }
 }
 
-fn command_at_step(step: u64) -> (f64, f64, f64) {
+fn command_at_step(step: u64, carry_steps: u64) -> (f64, f64, f64, f64) {
+    let release = LIFT_START_STEP + LIFT_STEPS + carry_steps;
     if step < APPROACH_STEPS {
-        ((step + 1) as f64 / APPROACH_STEPS as f64, 0.0, 0.0)
+        ((step + 1) as f64 / APPROACH_STEPS as f64, 0.0, 0.0, 0.0)
     } else if step < APPROACH_STEPS + CLOSE_STEPS {
         (
             1.0,
             0.0,
+            0.0,
             (step - APPROACH_STEPS + 1) as f64 / CLOSE_STEPS as f64,
         )
     } else if step < LIFT_START_STEP {
-        (1.0, 0.0, 1.0)
+        (1.0, 0.0, 0.0, 1.0)
     } else if step < LIFT_START_STEP + LIFT_STEPS {
         (
             1.0,
             (step - LIFT_START_STEP + 1) as f64 / LIFT_STEPS as f64,
+            0.0,
             1.0,
         )
-    } else if step < RELEASE_STEP {
-        (1.0, 1.0, 1.0)
+    } else if step < release {
+        let carry = if carry_steps == 0 {
+            0.0
+        } else {
+            (step - (LIFT_START_STEP + LIFT_STEPS) + 1) as f64 / carry_steps as f64
+        };
+        (1.0, 1.0, carry.clamp(0.0, 1.0), 1.0)
     } else {
         (
             1.0,
             1.0,
-            1.0 - ((step - RELEASE_STEP + 1) as f64 / OPEN_STEPS as f64).clamp(0.0, 1.0),
+            1.0,
+            1.0 - ((step - release + 1) as f64 / OPEN_STEPS as f64).clamp(0.0, 1.0),
         )
     }
 }
@@ -866,6 +931,7 @@ fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, A
 fn settle(sim: &mut UrdfSceneSim) {
     for _ in 0..SETTLE_STEPS {
         sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
+            0.0,
             0.0,
             0.0,
             UnitreeG1Dex3HandCommand { closure: 0.0 },
@@ -1194,19 +1260,39 @@ mod tests {
     }
 
     #[test]
-    fn command_sequence_has_distinct_approach_close_lift_and_open_phases() {
-        assert_eq!(command_at_step(0), (1.0 / APPROACH_STEPS as f64, 0.0, 0.0));
-        assert_eq!(command_at_step(APPROACH_STEPS - 1), (1.0, 0.0, 0.0));
+    fn command_sequence_has_distinct_approach_close_lift_carry_and_open_phases() {
         assert_eq!(
-            command_at_step(APPROACH_STEPS + CLOSE_STEPS - 1),
-            (1.0, 0.0, 1.0)
+            command_at_step(0, DEFAULT_CARRY_STEPS),
+            (1.0 / APPROACH_STEPS as f64, 0.0, 0.0, 0.0)
         );
-        assert_eq!(command_at_step(LIFT_START_STEP - 1), (1.0, 0.0, 1.0));
         assert_eq!(
-            command_at_step(LIFT_START_STEP + LIFT_STEPS - 1),
-            (1.0, 1.0, 1.0)
+            command_at_step(APPROACH_STEPS - 1, DEFAULT_CARRY_STEPS),
+            (1.0, 0.0, 0.0, 0.0)
         );
-        assert_eq!(command_at_step(RELEASE_STEP + OPEN_STEPS), (1.0, 1.0, 0.0));
+        assert_eq!(
+            command_at_step(APPROACH_STEPS + CLOSE_STEPS - 1, DEFAULT_CARRY_STEPS),
+            (1.0, 0.0, 0.0, 1.0)
+        );
+        assert_eq!(
+            command_at_step(LIFT_START_STEP - 1, DEFAULT_CARRY_STEPS),
+            (1.0, 0.0, 0.0, 1.0)
+        );
+        assert_eq!(
+            command_at_step(LIFT_START_STEP + LIFT_STEPS - 1, DEFAULT_CARRY_STEPS),
+            (1.0, 1.0, 0.0, 1.0)
+        );
+        assert_eq!(
+            command_at_step(
+                LIFT_START_STEP + LIFT_STEPS + DEFAULT_CARRY_STEPS - 1,
+                DEFAULT_CARRY_STEPS
+            ),
+            (1.0, 1.0, 1.0, 1.0)
+        );
+        let release = LIFT_START_STEP + LIFT_STEPS + DEFAULT_CARRY_STEPS;
+        assert_eq!(
+            command_at_step(release + OPEN_STEPS, DEFAULT_CARRY_STEPS),
+            (1.0, 1.0, 1.0, 0.0)
+        );
     }
 
     #[test]
@@ -1271,9 +1357,13 @@ mod tests {
                     first_step.terminated,
                     "episode should complete, not truncate"
                 );
-                assert_eq!(first.step_in_episode(), SUCCESS_STEP);
+                assert_eq!(
+                    first.step_in_episode(),
+                    LIFT_START_STEP + LIFT_STEPS + DEFAULT_CARRY_STEPS + PLACE_SETTLE_STEPS
+                );
                 assert!(observation.was_grasped);
                 assert!(observation.lifted);
+                assert!(observation.carried);
                 assert!(observation.placed);
                 assert!(!observation.grasped);
                 assert_eq!(observation.stable_contact_steps, 0);

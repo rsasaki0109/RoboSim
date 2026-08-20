@@ -84,6 +84,7 @@ impl ClothHandlingDemo {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 0.0,
                 0.0,
+                0.0,
                 UnitreeG1Dex3HandCommand { closure: 0.0 },
             ));
         }
@@ -110,6 +111,7 @@ impl ClothHandlingDemo {
             .step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 approach,
                 lift,
+                0.0,
                 UnitreeG1Dex3HandCommand { closure },
             ));
         if !self.was_attached && closure >= 0.72 {
