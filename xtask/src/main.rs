@@ -2545,6 +2545,9 @@ fn run_media_smokes() -> anyhow::Result<()> {
     )?;
     run_step(
         "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment all",
+    )?;
+    run_step(
+        "cargo run --locked -p real_scan_3dgs_showcase --example 91_real_scan_3dgs_showcase -- --smoke",
     )
 }
 
@@ -2919,7 +2922,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
         "tsukuba",
         "factory",
         "office",
-        "ssl",
+        "real-3dgs",
     ];
     anyhow::ensure!(
         manifest.media.len() == expected_ids.len(),
@@ -4014,7 +4017,7 @@ mod tests {
                 "tsukuba",
                 "factory",
                 "office",
-                "ssl",
+                "real-3dgs",
             ]
         );
     }

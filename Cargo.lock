@@ -3528,6 +3528,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "real_scan_3dgs_showcase"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "png",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

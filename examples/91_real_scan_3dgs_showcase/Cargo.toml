@@ -1,0 +1,22 @@
+[package]
+name = "real_scan_3dgs_showcase"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+png = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_3dgs = { workspace = true }
+rne_render_wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[[example]]
+name = "91_real_scan_3dgs_showcase"
+path = "main.rs"

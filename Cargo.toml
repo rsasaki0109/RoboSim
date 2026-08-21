@@ -127,6 +127,7 @@ members = [
   "examples/88_house_3dgs_hybrid",
   "examples/89_house_mobile_lift_hero",
   "examples/90_showcase_captures",
+  "examples/91_real_scan_3dgs_showcase",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",

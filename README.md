@@ -13,9 +13,10 @@ dependency.
 
 ## Real simulation showcase
 
-Every frame below comes from the simulator state rendered by wgpu. Reduced-motion
-clients receive the matching poster PNG. The quantitative gates and exact
-regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.md).
+Every frame below is rendered by wgpu from deterministic simulation or pinned
+dataset/camera state. Reduced-motion clients receive the matching poster PNG.
+The quantitative gates and exact regeneration commands are in
+[README showcase acceptance](docs/README_SHOWCASE.md).
 
 <table>
   <tr>
@@ -57,11 +58,11 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
     </td>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-ssl.png">
-        <img src="docs/media/showcase-ssl.gif" alt="Blue and yellow RoboCup SSL robots playing a deterministic two-versus-two match" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-real-3dgs.png">
+        <img src="docs/media/showcase-real-3dgs.gif" alt="GPU-rendered orbit around a real Scaniverse 3D Gaussian Splatting capture of cherry blossoms and tree bark" width="460">
       </picture>
-      <br><b>RoboCup SSL 2v2</b><br>
-      <sub>Four synchronized robots, a bounded legal kick, in-field ball motion, and a verified yellow-goal finish. <a href="docs/media/showcase-ssl.json">metadata</a></sub>
+      <br><b>Real-world 3DGS · Sakura</b><br>
+      <sub>59,045 unmodified Gaussian records sampled from a CC0 iPad Pro + Scaniverse capture; no synthetic splats or stand-in data. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/91_real_scan_3dgs_showcase/main.rs">source</a></sub>
     </td>
   </tr>
 </table>
