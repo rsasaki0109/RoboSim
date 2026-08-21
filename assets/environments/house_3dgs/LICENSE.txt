@@ -1,0 +1,10 @@
+House 3DGS procedural fixture
+
+Copyright (c) 2026 RNE contributors
+
+This original procedural fixture and its metadata are dual-licensed under the
+MIT License or the Apache License, Version 2.0, at your option. The repository
+contains the complete license texts in LICENSE-MIT and LICENSE-APACHE.
+
+No third-party capture or asset is bundled in this directory.
+

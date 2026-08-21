@@ -1,0 +1,32 @@
+{
+  "kind": "rne_house_3dgs_fixture_metadata",
+  "schema_version": 1,
+  "environment_id": "house.indoor.fixture.v1",
+  "generator": "tools/generate_house_3dgs.py",
+  "generator_sha256": "fbae9d3076969a995cea0d21f025cb8c82d64402d317b528035e7303598a1d8b",
+  "ply": "house_3dgs_fixture.ply",
+  "ply_sha256": "acf3754d4c2ad9377c7aecd1e53d553a1f63aea9c797eb2015ffb331ee337a79",
+  "ply_bytes": 1692391,
+  "point_count": 24882,
+  "semantic_groups": {
+    "cabinet": 1052,
+    "ceiling": 1681,
+    "coffee_table": 1076,
+    "console": 102,
+    "cushion": 606,
+    "floor": 4761,
+    "kitchen_counter": 1176,
+    "kitchen_island": 1240,
+    "plant_leaves": 432,
+    "plant_pot": 108,
+    "rug": 3008,
+    "sofa": 2168,
+    "stool": 432,
+    "television": 536,
+    "wall": 4000,
+    "window": 432,
+    "window_frame": 2072
+  },
+  "coordinate_system": "right-handed Y-up; metres; camera forward is -Z",
+  "third_party_capture": false
+}
