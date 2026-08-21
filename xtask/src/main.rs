@@ -38,6 +38,8 @@ const CARGO_AUDIT_VERSION: &str = "0.22.2";
 const RUST_API_BASELINE_SCHEMA_VERSION: u32 = 1;
 const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
 const ARTIFACTS_DIR_ENV: &str = "RNE_ARTIFACTS_DIR";
+const SHOWCASE_MEDIA_MANIFEST_PATH: &str = "docs/media/showcase.toml";
+const SHOWCASE_MEDIA_SCHEMA_VERSION: u32 = 1;
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
@@ -76,6 +78,41 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_world",
 ];
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShowcaseMediaManifest {
+    schema_version: u32,
+    min_gif_bytes: u64,
+    max_gif_bytes: u64,
+    min_poster_width: u32,
+    min_poster_height: u32,
+    max_total_gif_bytes: u64,
+    media: Vec<ShowcaseMediaEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShowcaseMediaEntry {
+    id: String,
+    label: String,
+    gif: String,
+    poster: String,
+    readme_gif: String,
+    readme_poster: String,
+    gif_bytes: u64,
+    poster_bytes: u64,
+    gif_sha256: String,
+    poster_sha256: String,
+    poster_width: u32,
+    poster_height: u32,
+    smoke_command: String,
+    capture_command: String,
+    #[serde(default)]
+    metadata: Option<String>,
+    #[serde(default)]
+    regenerate: Option<String>,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -113,6 +150,7 @@ fn run() -> anyhow::Result<()> {
         "scenario-scale" => scenario_scale(&mut args),
         "parity" => parity(&mut args),
         "house-gif-demo" => house_gif_demo(),
+        "showcase-media-check" => showcase_media_check(),
         "hero-media-check" => hero_media_check(),
         "hero-contact-sheet" => hero_contact_sheet(),
         "behavior-ci" => behavior_ci(&mut args),
@@ -2657,32 +2695,231 @@ fn house_gif_demo() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn hero_media_check() -> anyhow::Result<()> {
+fn load_showcase_media_manifest(path: &Path) -> anyhow::Result<ShowcaseMediaManifest> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read showcase media manifest {}", path.display()))?;
+    let manifest: ShowcaseMediaManifest = toml::from_str(&contents)
+        .with_context(|| format!("failed to parse showcase media manifest {}", path.display()))?;
+    validate_showcase_media_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_showcase_media_manifest(manifest: &ShowcaseMediaManifest) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        manifest.schema_version == SHOWCASE_MEDIA_SCHEMA_VERSION,
+        "unsupported showcase media manifest schema_version {}; expected {}",
+        manifest.schema_version,
+        SHOWCASE_MEDIA_SCHEMA_VERSION
+    );
+    anyhow::ensure!(
+        manifest.min_gif_bytes > 0,
+        "showcase media manifest min_gif_bytes must be positive"
+    );
+    anyhow::ensure!(
+        manifest.max_gif_bytes >= manifest.min_gif_bytes,
+        "showcase media manifest max_gif_bytes must be at least min_gif_bytes"
+    );
+    anyhow::ensure!(
+        manifest.min_poster_width > 0 && manifest.min_poster_height > 0,
+        "showcase media manifest poster dimensions must be positive"
+    );
+    anyhow::ensure!(
+        manifest.max_total_gif_bytes >= manifest.max_gif_bytes,
+        "showcase media manifest max_total_gif_bytes must be at least max_gif_bytes"
+    );
+    anyhow::ensure!(
+        !manifest.media.is_empty(),
+        "showcase media manifest must contain at least one media entry"
+    );
+
+    let mut ids = BTreeSet::new();
+    let mut references = BTreeSet::new();
+    for media in &manifest.media {
+        anyhow::ensure!(
+            !media.id.trim().is_empty(),
+            "showcase media entry has an empty id"
+        );
+        anyhow::ensure!(
+            ids.insert(media.id.as_str()),
+            "showcase media manifest contains duplicate id {:?}",
+            media.id
+        );
+        anyhow::ensure!(
+            !media.label.trim().is_empty(),
+            "showcase media entry {} has an empty label",
+            media.id
+        );
+        validate_showcase_media_reference(&media.gif, &media.id, "gif")?;
+        validate_showcase_media_reference(&media.poster, &media.id, "poster")?;
+        validate_showcase_media_reference(&media.readme_gif, &media.id, "readme_gif")?;
+        validate_showcase_media_reference(&media.readme_poster, &media.id, "readme_poster")?;
+        anyhow::ensure!(
+            media.readme_gif == media.gif,
+            "showcase media entry {} readme_gif must match gif",
+            media.id
+        );
+        anyhow::ensure!(
+            media.readme_poster == media.poster,
+            "showcase media entry {} readme_poster must match poster",
+            media.id
+        );
+        anyhow::ensure!(
+            media.gif_bytes > 0 && media.poster_bytes > 0,
+            "showcase media entry {} recorded byte sizes must be positive",
+            media.id
+        );
+        anyhow::ensure!(
+            media.poster_width > 0 && media.poster_height > 0,
+            "showcase media entry {} recorded poster dimensions must be positive",
+            media.id
+        );
+        validate_showcase_media_sha256(&media.gif_sha256, &media.id, "gif_sha256")?;
+        validate_showcase_media_sha256(&media.poster_sha256, &media.id, "poster_sha256")?;
+        anyhow::ensure!(
+            !media.smoke_command.trim().is_empty(),
+            "showcase media entry {} has an empty smoke_command",
+            media.id
+        );
+        anyhow::ensure!(
+            !media.capture_command.trim().is_empty(),
+            "showcase media entry {} has an empty capture_command",
+            media.id
+        );
+        anyhow::ensure!(
+            references.insert(media.gif.as_str()),
+            "showcase media manifest contains duplicate gif reference {:?}",
+            media.gif
+        );
+        anyhow::ensure!(
+            references.insert(media.poster.as_str()),
+            "showcase media manifest contains duplicate poster reference {:?}",
+            media.poster
+        );
+        if let Some(metadata) = media.metadata.as_deref() {
+            validate_showcase_media_reference(metadata, &media.id, "metadata")?;
+            anyhow::ensure!(
+                references.insert(metadata),
+                "showcase media manifest contains duplicate metadata reference {:?}",
+                metadata
+            );
+        }
+        if let Some(regenerate) = media.regenerate.as_deref() {
+            validate_showcase_media_reference(regenerate, &media.id, "regenerate")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_showcase_media_sha256(digest: &str, media_id: &str, field: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        digest.strip_prefix("sha256:").is_some_and(|hex| {
+            hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit())
+        }),
+        "showcase media entry {} {} must be sha256:<64 hex digits>: {:?}",
+        media_id,
+        field,
+        digest
+    );
+    Ok(())
+}
+
+fn validate_showcase_media_reference(
+    reference: &str,
+    media_id: &str,
+    field: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !reference.trim().is_empty(),
+        "showcase media entry {} has an empty {} reference",
+        media_id,
+        field
+    );
+    anyhow::ensure!(
+        !reference.contains('\\'),
+        "showcase media entry {} {} reference must use forward slashes: {:?}",
+        media_id,
+        field,
+        reference
+    );
+    let path = Path::new(reference);
+    anyhow::ensure!(
+        path.components()
+            .all(|component| matches!(component, Component::Normal(_))),
+        "showcase media entry {} {} reference must be a workspace-relative path without . or ..: {:?}",
+        media_id,
+        field,
+        reference
+    );
+    Ok(())
+}
+
+fn resolve_showcase_media_path(
+    root: &Path,
+    reference: &str,
+    media_id: &str,
+    field: &str,
+) -> anyhow::Result<PathBuf> {
+    validate_showcase_media_reference(reference, media_id, field)?;
+    Ok(root.join(reference))
+}
+
+fn sha256_file(path: &Path) -> anyhow::Result<String> {
+    let bytes = fs::read(path)?;
+    let digest = Sha256::digest(bytes);
+    Ok(format!("sha256:{digest:x}"))
+}
+
+/// Checks the README showcase media against the committed media catalog.
+fn showcase_media_check() -> anyhow::Result<()> {
     let root = workspace_root()?;
     let readme_path = root.join("README.md");
-    let gif_path = root.join("docs/media/rne-hero.gif");
-    let png_path = root.join("docs/media/rne-hero.png");
-    let metadata_path = root.join("docs/media/rne-hero.json");
+    let manifest_path = root.join(SHOWCASE_MEDIA_MANIFEST_PATH);
+    let manifest = load_showcase_media_manifest(&manifest_path)?;
+    let hero_media = manifest
+        .media
+        .iter()
+        .find(|media| media.id == "mobile-manipulation")
+        .ok_or_else(|| {
+            anyhow::anyhow!("showcase media manifest is missing required mobile-manipulation entry")
+        })?;
+    let learned_g1_media = manifest
+        .media
+        .iter()
+        .find(|media| media.id == "g1-biped-locomotion")
+        .ok_or_else(|| {
+            anyhow::anyhow!("showcase media manifest is missing required g1-biped-locomotion entry")
+        })?;
+    let gif_path =
+        resolve_showcase_media_path(&root, &hero_media.gif, "mobile-manipulation", "gif")?;
+    let png_path =
+        resolve_showcase_media_path(&root, &hero_media.poster, "mobile-manipulation", "poster")?;
+    let metadata_reference = hero_media.metadata.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("showcase media manifest mobile-manipulation entry is missing metadata")
+    })?;
+    let metadata_path =
+        resolve_showcase_media_path(&root, metadata_reference, "mobile-manipulation", "metadata")?;
     let dex3_gif_path = root.join("docs/media/unitree-g1-dex3.gif");
     let dex3_png_path = root.join("docs/media/unitree-g1-dex3.png");
     let cloth_gif_path = root.join("docs/media/unitree-g1-cloth.gif");
     let cloth_png_path = root.join("docs/media/unitree-g1-cloth.png");
-    let learned_g1_gif_path = root.join("docs/media/unitree-g1-learned-stride.gif");
-    let learned_g1_png_path = root.join("docs/media/unitree-g1-learned-stride.png");
-    let go2_gif_path = root.join("docs/media/go2-torque-turn.gif");
-    let go2_png_path = root.join("docs/media/go2-torque-turn.png");
-    let vehicle_gif_path = root.join("docs/media/plateau-car.gif");
-    let vehicle_png_path = root.join("docs/media/plateau-car.png");
-    let uav_gif_path = root.join("docs/media/plateau-uav.gif");
-    let uav_png_path = root.join("docs/media/plateau-uav.png");
+    let learned_g1_gif_path =
+        resolve_showcase_media_path(&root, &learned_g1_media.gif, &learned_g1_media.id, "gif")?;
+    let learned_g1_png_path = resolve_showcase_media_path(
+        &root,
+        &learned_g1_media.poster,
+        &learned_g1_media.id,
+        "poster",
+    )?;
     let readme = fs::read_to_string(&readme_path)?;
     anyhow::ensure!(
-        readme.contains("srcset=\"docs/media/rne-hero.png\""),
-        "README hero reduced-motion poster does not point at docs/media/rne-hero.png"
+        readme.contains(&format!("srcset=\"{}\"", hero_media.readme_poster)),
+        "README hero reduced-motion poster does not point at {}",
+        hero_media.readme_poster
     );
     anyhow::ensure!(
-        readme.contains("<img src=\"docs/media/rne-hero.gif\""),
-        "README first hero image does not point at docs/media/rne-hero.gif"
+        readme.contains(&format!("<img src=\"{}\"", hero_media.readme_gif)),
+        "README first hero image does not point at {}",
+        hero_media.readme_gif
     );
     anyhow::ensure!(
         readme.contains(
@@ -2692,8 +2929,11 @@ fn hero_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains("Real capture:")
-            && readme.contains("docs/media/rne-hero.json")
-            && readme.contains("docs/media/generate-hero.sh"),
+            && readme.contains(metadata_reference)
+            && hero_media
+                .regenerate
+                .as_deref()
+                .is_some_and(|reference| readme.contains(reference)),
         "README hero caption does not link the 3D generator and metadata"
     );
 
@@ -2744,76 +2984,85 @@ fn hero_media_check() -> anyhow::Result<()> {
         learned_g1_png_path.is_file(),
         "README learned G1 stride PNG is missing"
     );
-    let showcase_media = [
-        (
-            "mobile manipulation",
-            &gif_path,
-            &png_path,
-            "docs/media/rne-hero.gif",
-            "docs/media/rne-hero.png",
-        ),
-        (
-            "G1 biped locomotion",
-            &learned_g1_gif_path,
-            &learned_g1_png_path,
-            "docs/media/unitree-g1-learned-stride.gif",
-            "docs/media/unitree-g1-learned-stride.png",
-        ),
-        (
-            "Go2 quadruped locomotion",
-            &go2_gif_path,
-            &go2_png_path,
-            "docs/media/go2-torque-turn.gif",
-            "docs/media/go2-torque-turn.png",
-        ),
-        (
-            "urban vehicle",
-            &vehicle_gif_path,
-            &vehicle_png_path,
-            "docs/media/plateau-car.gif",
-            "docs/media/plateau-car.png",
-        ),
-        (
-            "urban UAV",
-            &uav_gif_path,
-            &uav_png_path,
-            "docs/media/plateau-uav.gif",
-            "docs/media/plateau-uav.png",
-        ),
-    ];
     let mut showcase_total_bytes = 0_u64;
-    for (label, showcase_gif_path, showcase_png_path, gif_reference, png_reference) in
-        showcase_media
-    {
+    for media in &manifest.media {
+        let showcase_gif_path = resolve_showcase_media_path(&root, &media.gif, &media.id, "gif")?;
+        let showcase_png_path =
+            resolve_showcase_media_path(&root, &media.poster, &media.id, "poster")?;
         anyhow::ensure!(
-            readme.contains(&format!("src=\"{gif_reference}\""))
-                && readme.contains(&format!("srcset=\"{png_reference}\"")),
-            "README {label} media references are missing"
+            readme.contains(&format!("src=\"{}\"", media.readme_gif))
+                && readme.contains(&format!("srcset=\"{}\"", media.readme_poster)),
+            "README {} media references are missing",
+            media.label
         );
-        let showcase_gif = fs::read(showcase_gif_path)?;
+        let showcase_gif = fs::read(&showcase_gif_path)?;
+        let showcase_gif_bytes = u64::try_from(showcase_gif.len())?;
         anyhow::ensure!(
             showcase_gif.starts_with(b"GIF8")
                 && showcase_gif.ends_with(b";")
-                && showcase_gif.len() > 100_000,
-            "README {label} GIF is missing or malformed"
+                && showcase_gif_bytes > manifest.min_gif_bytes,
+            "README {} GIF is missing or malformed or does not exceed the {} byte minimum",
+            media.label,
+            manifest.min_gif_bytes
         );
         anyhow::ensure!(
-            showcase_gif.len() <= 5_000_000,
-            "README {label} GIF exceeds 5 MB: {} bytes",
-            showcase_gif.len()
+            showcase_gif_bytes <= manifest.max_gif_bytes,
+            "README {} GIF exceeds the {} byte budget: {} bytes",
+            media.label,
+            manifest.max_gif_bytes,
+            showcase_gif_bytes
         );
-        showcase_total_bytes += u64::try_from(showcase_gif.len())?;
-        let poster = image::open(showcase_png_path)?;
         anyhow::ensure!(
-            poster.width() >= 960 && poster.height() >= 540,
-            "README {label} poster must be at least 960x540, got {}x{}",
+            showcase_gif_bytes == media.gif_bytes,
+            "README {} GIF byte size drifted: catalog={}, actual={}",
+            media.label,
+            media.gif_bytes,
+            showcase_gif_bytes
+        );
+        anyhow::ensure!(
+            sha256_file(&showcase_gif_path)? == media.gif_sha256,
+            "README {} GIF SHA-256 drifted from catalog",
+            media.label
+        );
+        showcase_total_bytes += showcase_gif_bytes;
+        let poster = image::open(&showcase_png_path)?;
+        anyhow::ensure!(
+            poster.width() >= manifest.min_poster_width
+                && poster.height() >= manifest.min_poster_height,
+            "README {} poster must be at least {}x{}, got {}x{}",
+            media.label,
+            manifest.min_poster_width,
+            manifest.min_poster_height,
+            poster.width(),
+            poster.height()
+        );
+        let poster_bytes = fs::metadata(&showcase_png_path)?.len();
+        anyhow::ensure!(
+            poster_bytes == media.poster_bytes,
+            "README {} poster byte size drifted: catalog={}, actual={}",
+            media.label,
+            media.poster_bytes,
+            poster_bytes
+        );
+        anyhow::ensure!(
+            sha256_file(&showcase_png_path)? == media.poster_sha256,
+            "README {} poster SHA-256 drifted from catalog",
+            media.label
+        );
+        anyhow::ensure!(
+            poster.width() == media.poster_width && poster.height() == media.poster_height,
+            "README {} poster dimensions drifted: catalog={}x{}, actual={}x{}",
+            media.label,
+            media.poster_width,
+            media.poster_height,
             poster.width(),
             poster.height()
         );
     }
     anyhow::ensure!(
-        showcase_total_bytes <= 20_000_000,
-        "README showcase GIFs exceed the 20 MB combined budget: {showcase_total_bytes} bytes"
+        showcase_total_bytes <= manifest.max_total_gif_bytes,
+        "README showcase GIFs exceed the {} byte combined budget: {showcase_total_bytes} bytes",
+        manifest.max_total_gif_bytes
     );
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
     anyhow::ensure!(
@@ -3119,6 +3368,11 @@ fn hero_media_check() -> anyhow::Result<()> {
         metadata_path.display()
     );
     Ok(())
+}
+
+/// Backwards-compatible name for [`showcase_media_check`].
+fn hero_media_check() -> anyhow::Result<()> {
+    showcase_media_check()
 }
 
 fn hero_simulation_smoke_digest() -> anyhow::Result<String> {
@@ -3697,8 +3951,10 @@ mod tests {
         build_cargo_sbom, configured_artifacts_dir, default_behavior_seeds, extract_hero_digest,
         frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
         parse_utc_date_days, validate_blocker_registry, validate_contract_registry,
-        validate_rust_api_baseline, validate_supply_chain_registry, RustApiBaselineRegistry,
-        SmokePartition, SupplyChainExceptionRegistry, SUPPLY_CHAIN_POLICY_DATE,
+        validate_rust_api_baseline, validate_showcase_media_manifest,
+        validate_supply_chain_registry, RustApiBaselineRegistry, ShowcaseMediaEntry,
+        ShowcaseMediaManifest, SmokePartition, SupplyChainExceptionRegistry,
+        SUPPLY_CHAIN_POLICY_DATE,
     };
 
     #[test]
@@ -3727,6 +3983,81 @@ mod tests {
         assert_eq!(extract_hero_digest("3D hero simulation smoke ok"), None);
         assert_eq!(extract_hero_digest("digest=d85cd8fbdbce1cb9"), None);
         assert_eq!(extract_hero_digest("digest=0xd85cd8fbdbce1cb"), None);
+    }
+
+    #[test]
+    fn committed_showcase_media_catalog_is_valid_and_ordered() {
+        let manifest: ShowcaseMediaManifest =
+            toml::from_str(include_str!("../../docs/media/showcase.toml"))
+                .expect("showcase media TOML");
+        validate_showcase_media_manifest(&manifest).expect("showcase media catalog");
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.media.len(), 5);
+        assert_eq!(
+            manifest
+                .media
+                .iter()
+                .map(|media| media.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "mobile-manipulation",
+                "g1-biped-locomotion",
+                "go2-quadruped-locomotion",
+                "urban-vehicle",
+                "urban-uav",
+            ]
+        );
+    }
+
+    #[test]
+    fn showcase_media_catalog_rejects_duplicate_ids_and_escaping_paths() {
+        let manifest = ShowcaseMediaManifest {
+            schema_version: 1,
+            min_gif_bytes: 100,
+            max_gif_bytes: 200,
+            min_poster_width: 1,
+            min_poster_height: 1,
+            max_total_gif_bytes: 200,
+            media: vec![
+                ShowcaseMediaEntry {
+                    id: "same".to_string(),
+                    label: "first".to_string(),
+                    gif: "docs/media/first.gif".to_string(),
+                    poster: "docs/media/first.png".to_string(),
+                    readme_gif: "docs/media/first.gif".to_string(),
+                    readme_poster: "docs/media/first.png".to_string(),
+                    gif_bytes: 101,
+                    poster_bytes: 1,
+                    gif_sha256: format!("sha256:{}", "a".repeat(64)),
+                    poster_sha256: format!("sha256:{}", "b".repeat(64)),
+                    poster_width: 1,
+                    poster_height: 1,
+                    smoke_command: "smoke".to_string(),
+                    capture_command: "capture".to_string(),
+                    metadata: None,
+                    regenerate: None,
+                },
+                ShowcaseMediaEntry {
+                    id: "same".to_string(),
+                    label: "second".to_string(),
+                    gif: "../outside.gif".to_string(),
+                    poster: "docs/media/second.png".to_string(),
+                    readme_gif: "../outside.gif".to_string(),
+                    readme_poster: "docs/media/second.png".to_string(),
+                    gif_bytes: 101,
+                    poster_bytes: 1,
+                    gif_sha256: format!("sha256:{}", "a".repeat(64)),
+                    poster_sha256: format!("sha256:{}", "b".repeat(64)),
+                    poster_width: 1,
+                    poster_height: 1,
+                    smoke_command: "smoke".to_string(),
+                    capture_command: "capture".to_string(),
+                    metadata: None,
+                    regenerate: None,
+                },
+            ],
+        };
+        assert!(validate_showcase_media_manifest(&manifest).is_err());
     }
 
     #[test]

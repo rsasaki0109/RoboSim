@@ -20,6 +20,27 @@ the simulated robot state.
 - Camera motion is smooth, keeps the task subject visible, and shows enough
   environment context to make translation and rotation unambiguous.
 
+## Catalog and tracked bytes
+
+[`docs/media/showcase.toml`](media/showcase.toml) is the catalog for the five
+front-page GIF/poster pairs. It records the exact README locations, current
+byte sizes and SHA-256 values, poster dimensions, and the smoke/capture command
+for each entry. The checked-in snapshot is:
+
+| Showcase | GIF / poster | GIF bytes | poster bytes | poster size | README GIF line |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile manipulation | `rne-hero.gif` / `rne-hero.png` | 3,400,413 | 132,026 | 960 x 540 | 25 |
+| G1 biped locomotion | `unitree-g1-learned-stride.gif` / `.png` | 1,800,144 | 49,092 | 960 x 540 | 33 |
+| Go2 quadruped locomotion | `go2-torque-turn.gif` / `.png` | 3,813,018 | 77,052 | 960 x 540 | 43 |
+| Urban vehicle | `plateau-car.gif` / `.png` | 3,989,457 | 377,902 | 1280 x 720 | 51 (also 203) |
+| Urban UAV | `plateau-uav.gif` / `.png` | 4,439,169 | 488,139 | 1280 x 720 | 61 |
+
+The current GIF total is 17,442,201 bytes (under the 20,000,000-byte combined
+ceiling); every poster is at least 960 x 540. Regeneration must update the
+catalog's observed sizes and hashes in the same change. The PLATEAU vehicle and
+UAV entries intentionally share one capture command because they are produced
+from the same city run.
+
 ## Task gates
 
 | Showcase | Required simulation evidence |

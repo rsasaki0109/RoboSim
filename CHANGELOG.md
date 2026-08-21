@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add `docs/media/showcase.toml`, a versioned catalog of the five README
+  showcase GIF/poster pairs with measured sizes, dimensions, SHA-256 values,
+  README references, budget ceilings, and per-capture regeneration commands;
+  document the catalog in `docs/README_SHOWCASE.md`.
+
 - Couple SSL simulation-protocol UDP commands into the Division B small-pitch
   plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
   map them onto differential-drive stand-ins and ball teleports, and keep geometry
