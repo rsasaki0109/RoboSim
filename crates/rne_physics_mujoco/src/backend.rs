@@ -15,8 +15,8 @@ use rne_physics::{
     RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
 use thiserror::Error;
 
 const FREE_FALL_BODY_NAME: &str = "rne_free_fall_body";
@@ -118,8 +118,9 @@ enum ModelSource {
 
 #[derive(Debug)]
 struct MuJoCoWorld {
-    /// Interior mutability lets `&self` raycasts use MuJoCo's `&mut MjData` API.
-    data: RefCell<Option<MjData<Box<MjModel>>>>,
+    /// Interior mutability lets `&self` raycasts use MuJoCo's `&mut MjData` API
+    /// while keeping [`PhysicsBackend`]'s `Sync` bound.
+    data: Mutex<Option<MjData<Box<MjModel>>>>,
     desc: PhysicsWorldDesc,
     bindings: Vec<BodyBinding>,
     topology: Vec<BodyTopology>,
@@ -129,6 +130,14 @@ struct MuJoCoWorld {
     geom_entities: Vec<Option<Entity>>,
     sensor_geoms: Vec<bool>,
     contacts: Vec<ContactEvent>,
+}
+
+impl MuJoCoWorld {
+    fn lock_data(&self) -> std::sync::MutexGuard<'_, Option<MjData<Box<MjModel>>>> {
+        self.data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -851,7 +860,7 @@ impl PhysicsBackend for MuJoCoBackend {
         self.worlds.insert(
             id,
             MuJoCoWorld {
-                data: RefCell::new(data),
+                data: Mutex::new(data),
                 desc,
                 bindings: Vec::new(),
                 topology: Vec::new(),
@@ -901,7 +910,7 @@ impl PhysicsBackend for MuJoCoBackend {
                 });
             return Err(Self::map_error(MuJoCoError::TopologyChanged { detail }));
         }
-        if world_state.data.borrow().is_none()
+        if world_state.lock_data().is_none()
             || world_state.joint_dynamics != compiled.joint_dynamics
         {
             let model = MjModel::from_xml_string(&compiled.mjcf)
@@ -909,14 +918,14 @@ impl PhysicsBackend for MuJoCoBackend {
             require_compiled_model(&model, &compiled.bindings).map_err(Self::map_error)?;
             let data = MjData::try_new(Box::new(model))
                 .map_err(|_| Self::map_error(MuJoCoError::DataAllocation))?;
-            *world_state.data.borrow_mut() = Some(data);
+            *world_state.lock_data() = Some(data);
         }
         world_state.bindings = compiled.bindings;
         world_state.topology = compiled.topology;
         world_state.joint_dynamics = compiled.joint_dynamics;
         let (geom_entities, sensor_geoms) = {
-            let data_borrow = world_state.data.borrow();
-            let data = data_borrow
+            let data_guard = world_state.lock_data();
+            let data = data_guard
                 .as_ref()
                 .ok_or(PhysicsError::InitializationFailed)?;
             geometry_bindings(data, &world_state.bindings, world).map_err(Self::map_error)?
@@ -924,8 +933,8 @@ impl PhysicsBackend for MuJoCoBackend {
         world_state.geom_entities = geom_entities;
         world_state.sensor_geoms = sensor_geoms;
         {
-            let mut data_borrow = world_state.data.borrow_mut();
-            let data = data_borrow
+            let mut data_guard = world_state.lock_data();
+            let data = data_guard
                 .as_mut()
                 .ok_or(PhysicsError::InitializationFailed)?;
             sync_from_ecs_state(data, &world_state.bindings, world).map_err(Self::map_error)?;
@@ -948,8 +957,8 @@ impl PhysicsBackend for MuJoCoBackend {
             }));
         }
         let contacts = {
-            let mut data_borrow = world_state.data.borrow_mut();
-            let data = data_borrow
+            let mut data_guard = world_state.lock_data();
+            let data = data_guard
                 .as_mut()
                 .ok_or(PhysicsError::InitializationFailed)?;
             data.step();
@@ -979,8 +988,8 @@ impl PhysicsBackend for MuJoCoBackend {
         physics_world: PhysicsWorldId,
     ) -> Result<(), PhysicsError> {
         let world_state = self.world(physics_world)?;
-        let data_borrow = world_state.data.borrow();
-        let data = data_borrow
+        let data_guard = world_state.lock_data();
+        let data = data_guard
             .as_ref()
             .ok_or(PhysicsError::InitializationFailed)?;
         for binding in &world_state.bindings {
@@ -1098,8 +1107,8 @@ impl PhysicsBackend for MuJoCoBackend {
         let geom_entities = world_state.geom_entities.clone();
         let max_hits = geom_entities.len().max(1);
 
-        let mut data_borrow = world_state.data.borrow_mut();
-        let Some(data) = data_borrow.as_mut() else {
+        let mut data_guard = world_state.lock_data();
+        let Some(data) = data_guard.as_mut() else {
             return Ok(Vec::new());
         };
         let geom_bodyid = data.model().geom_bodyid().to_vec();
