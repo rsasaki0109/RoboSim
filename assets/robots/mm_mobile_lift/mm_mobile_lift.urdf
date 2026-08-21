@@ -3,40 +3,39 @@
      vertical-carriage/top-down-claw mechanisms. -->
 <robot name="mm_mobile_lift">
   <link name="base_link">
-    <visual><geometry><box size="0.5 0.3 0.4"/></geometry><material name="hero_blue"><color rgba="0.16 0.38 0.72 1.0"/></material></visual>
-    <visual><origin xyz="0 0.45 0" rpy="0 0 0"/><geometry><box size="0.12 0.7 0.12"/></geometry><material name="lift_column"><color rgba="0.20 0.23 0.28 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/base_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <collision><origin xyz="0 0 -0.05" rpy="0 0 0"/><geometry><box size="0.5 0.2 0.4"/></geometry></collision>
   </link>
   <link name="left_wheel">
-    <visual><geometry><cylinder radius="0.1" length="0.05"/></geometry><material name="wheel_black"><color rgba="0.08 0.08 0.08 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/left_wheel.lod0.glb" scale="1 1 1"/></geometry></visual>
   </link>
   <link name="right_wheel">
-    <visual><geometry><cylinder radius="0.1" length="0.05"/></geometry><material name="wheel_black"><color rgba="0.08 0.08 0.08 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/right_wheel.lod0.glb" scale="1 1 1"/></geometry></visual>
   </link>
   <link name="torso_link">
-    <visual><geometry><box size="0.14 0.14 0.14"/></geometry><material name="lift_carriage"><color rgba="0.72 0.76 0.82 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/torso_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <!-- The carriage link starts inside the protected chassis. Its compact mass
          collider is offset into the hollow lift column so adjacent-link contact
          cannot lock the prismatic joint at zero travel. -->
     <collision><origin xyz="0 0.30 0" rpy="0 0 0"/><geometry><box size="0.08 0.08 0.08"/></geometry></collision>
   </link>
   <link name="upper_arm_link">
-    <visual><origin xyz="0.25 0 0" rpy="0 0 0"/><geometry><box size="0.5 0.07 0.07"/></geometry><material name="hero_arm"><color rgba="0.90 0.42 0.12 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/upper_arm_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <collision><origin xyz="0.24 0 0" rpy="0 0 0"/><geometry><box size="0.42 0.035 0.035"/></geometry></collision>
   </link>
   <link name="forearm_link">
-    <visual><origin xyz="0.2 0 0" rpy="0 0 0"/><geometry><box size="0.4 0.055 0.055"/></geometry><material name="hero_arm"><color rgba="0.90 0.42 0.12 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/forearm_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <!-- A compact dynamics collider keeps the link in the articulation while
          avoiding false self-contact with its adjacent upper-arm collider. -->
     <collision><origin xyz="0.24 0 0" rpy="0 0 0"/><geometry><box size="0.28 0.04 0.04"/></geometry></collision>
   </link>
   <link name="wrist_link">
     <inertial><mass value="0.10"/></inertial>
-    <visual><geometry><cylinder radius="0.035" length="0.04"/></geometry><material name="hero_shell"><color rgba="0.72 0.76 0.82 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/wrist_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <collision><geometry><box size="0.04 0.04 0.04"/></geometry></collision>
   </link>
   <link name="gripper_base_link">
-    <visual><geometry><box size="0.06 0.04 0.12"/></geometry><material name="hero_shell"><color rgba="0.72 0.76 0.82 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/gripper_base_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <!-- Keep the collider inside the two finger hinges. A full visual-width
          collider overlaps both adjacent finger links and continuously torques
          the whole arm away from its commanded pose. -->
@@ -45,13 +44,13 @@
   <link name="left_finger_link">
     <inertial><mass value="0.05"/></inertial>
     <!-- Short pads stay above the pickup-table top while spanning the cube. -->
-    <visual><origin xyz="0 -0.14 0" rpy="0 0 0"/><geometry><box size="0.10 0.07 0.02"/></geometry><material name="hero_gripper"><color rgba="0.10 0.12 0.15 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/left_finger_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <collision><origin xyz="0 -0.14 0" rpy="0 0 0"/><geometry><box size="0.12 0.07 0.02"/></geometry></collision>
   </link>
   <link name="right_finger_link">
     <inertial><mass value="0.05"/></inertial>
     <!-- Short pads stay above the pickup-table top while spanning the cube. -->
-    <visual><origin xyz="0 -0.14 0" rpy="0 0 0"/><geometry><box size="0.10 0.07 0.02"/></geometry><material name="hero_gripper"><color rgba="0.10 0.12 0.15 1.0"/></material></visual>
+    <visual><geometry><mesh filename="meshes/right_finger_link.lod0.glb" scale="1 1 1"/></geometry></visual>
     <collision><origin xyz="0 -0.14 0" rpy="0 0 0"/><geometry><box size="0.12 0.07 0.02"/></geometry></collision>
   </link>
 

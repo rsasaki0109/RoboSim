@@ -646,6 +646,41 @@ mod tests {
     }
 
     #[test]
+    fn shipped_mm_mobile_lift_visual_pack_is_valid() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/robots/mm_mobile_lift/mm_mobile_lift.visual.toml");
+        let manifest = load_visual_manifest(&path).expect("shipped visual pack");
+        assert_eq!(manifest.robot_model, MM_MOBILE_LIFT_MODEL_NAME);
+        assert_eq!(manifest.links.len(), MM_MOBILE_LIFT_REQUIRED_LINKS.len());
+        for link in &manifest.links {
+            let lod0 = path.parent().unwrap().join(&link.mesh);
+            let parts = rne_render::load_mesh_parts(&lod0).expect("load authored GLB");
+            assert!(
+                parts.len() >= 2,
+                "{} should retain multiple materials",
+                link.name
+            );
+            assert!(parts.iter().all(|part| {
+                part.base_color_texture.is_some()
+                    && part.material.normal_texture.is_some()
+                    && part.material.metallic_roughness_texture.is_some()
+                    && part.material.emissive_texture.is_some()
+                    && part.material.occlusion_texture.is_some()
+            }));
+            let lod1 = path
+                .parent()
+                .unwrap()
+                .join(link.lod1_mesh.as_ref().unwrap());
+            assert!(
+                rne_render::load_mesh_parts(&lod1)
+                    .expect("load authored LOD1 GLB")
+                    .len()
+                    >= 2
+            );
+        }
+    }
+
+    #[test]
     fn rejects_unknown_link() {
         let path = fixture_path("mm_mobile_lift.visual.toml");
         let text = fixture_text().replacen("name = \"base_link\"", "name = \"unknown_link\"", 1);

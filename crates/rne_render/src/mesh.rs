@@ -1052,6 +1052,38 @@ endsolid box
     }
 
     #[test]
+    fn shipped_mm_mobile_lift_glbs_load_pbr_parts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/robots/mm_mobile_lift/meshes");
+        let links = [
+            "base_link",
+            "left_wheel",
+            "right_wheel",
+            "torso_link",
+            "upper_arm_link",
+            "forearm_link",
+            "wrist_link",
+            "gripper_base_link",
+            "left_finger_link",
+            "right_finger_link",
+        ];
+        for link in links {
+            for lod in [0, 1] {
+                let path = root.join(format!("{link}.lod{lod}.glb"));
+                let parts = load_mesh_parts(&path).expect("load shipped mm_mobile_lift GLB");
+                assert!(parts.len() >= 2, "{link} LOD{lod} lost material parts");
+                assert!(parts.iter().all(|part| {
+                    part.base_color_texture.is_some()
+                        && part.material.normal_texture.is_some()
+                        && part.material.metallic_roughness_texture.is_some()
+                        && part.material.emissive_texture.is_some()
+                        && part.material.occlusion_texture.is_some()
+                }));
+            }
+        }
+    }
+
+    #[test]
     fn obj_models_merge_and_generate_normals_deterministically() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/two_panels.obj");
         let first = load_mesh(&path).expect("load OBJ fixture");
