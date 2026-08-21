@@ -49,6 +49,8 @@ The Grove-G1 analog is a 0.5 m park then Dex3 pick/place workcell, not a Nav2 or
 
 Optional Tsukuba viewer backgrounds can use committed 3DGS splats without changing confirmation-run scoring. See [TSUKUBA_3DGS_BACKGROUND.md](TSUKUBA_3DGS_BACKGROUND.md).
 
+Optional Tsukuba viewer backgrounds can also composite a PLATEAU LOD1 fixture without changing confirmation-run scoring. See [TSUKUBA_PLATEAU_BACKDROP.md](TSUKUBA_PLATEAU_BACKDROP.md).
+
 The v0.5 track is now in progress. Dataset bundle v1 streams records with
 payload/shard/manifest hashes, preserves capture/availability latency,
 calibration, noise seeds, assets, domain-randomization decisions, and explicit

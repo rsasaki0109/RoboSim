@@ -1,0 +1,24 @@
+[package]
+name = "tsukuba_plateau_backdrop"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png = { workspace = true }
+rne_ai = { workspace = true }
+rne_assets = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_plateau = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+[[example]]
+name = "83_tsukuba_plateau_backdrop"
+path = "main.rs"

@@ -4901,6 +4901,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukuba_plateau_backdrop"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_assets",
+ "rne_ecs",
+ "rne_math",
+ "rne_plateau",
+ "rne_render",
+ "rne_render_wgpu",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
