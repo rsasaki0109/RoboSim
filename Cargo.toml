@@ -191,6 +191,7 @@ bevy_ecs = "0.15"
 glam = { version = "0.29", features = ["serde"] }
 libloading = "0.8"
 petgraph = "0.7"
+prost = "=0.13.5"
 rapier3d = "0.22"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

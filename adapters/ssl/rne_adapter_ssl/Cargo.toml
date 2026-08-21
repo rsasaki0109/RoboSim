@@ -9,7 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-prost = "0.13"
+prost = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

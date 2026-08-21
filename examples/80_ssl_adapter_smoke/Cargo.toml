@@ -7,8 +7,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
-rne_adapter_ssl = { path = "../../adapters/ssl/rne_adapter_ssl" }
-prost = "0.13"
+prost = { workspace = true }
+rne_adapter_ssl = { workspace = true }
 
 [[example]]
 name = "80_ssl_adapter_smoke"
