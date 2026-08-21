@@ -39,7 +39,7 @@ const RUST_API_BASELINE_SCHEMA_VERSION: u32 = 1;
 const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
 const ARTIFACTS_DIR_ENV: &str = "RNE_ARTIFACTS_DIR";
 const SHOWCASE_MEDIA_MANIFEST_PATH: &str = "docs/media/showcase.toml";
-const SHOWCASE_MEDIA_SCHEMA_VERSION: u32 = 1;
+const SHOWCASE_MEDIA_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
@@ -107,10 +107,12 @@ struct ShowcaseMediaEntry {
     poster_height: u32,
     smoke_command: String,
     capture_command: String,
-    #[serde(default)]
-    metadata: Option<String>,
+    metadata: String,
     #[serde(default)]
     regenerate: Option<String>,
+    provenance: Vec<String>,
+    license: String,
+    license_files: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -2522,17 +2524,28 @@ fn ci_smoke(partition: Option<&str>) -> anyhow::Result<()> {
     match parse_smoke_partition(partition)? {
         SmokePartition::All => {
             run_example_smokes()?;
+            run_media_smokes()?;
             house_gif_demo()?;
-            hero_media_check()
+            showcase_media_check()
         }
         SmokePartition::Manipulator => run_manipulator_smokes(),
         SmokePartition::Locomotion => run_locomotion_smokes(),
         SmokePartition::Assets => run_asset_smokes(),
         SmokePartition::Media => {
+            run_media_smokes()?;
             house_gif_demo()?;
-            hero_media_check()
+            showcase_media_check()
         }
     }
+}
+
+fn run_media_smokes() -> anyhow::Result<()> {
+    run_step(
+        "cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke",
+    )?;
+    run_step(
+        "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment all",
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2795,16 +2808,43 @@ fn validate_showcase_media_manifest(manifest: &ShowcaseMediaManifest) -> anyhow:
             "showcase media manifest contains duplicate poster reference {:?}",
             media.poster
         );
-        if let Some(metadata) = media.metadata.as_deref() {
-            validate_showcase_media_reference(metadata, &media.id, "metadata")?;
-            anyhow::ensure!(
-                references.insert(metadata),
-                "showcase media manifest contains duplicate metadata reference {:?}",
-                metadata
-            );
-        }
+        validate_showcase_media_reference(&media.metadata, &media.id, "metadata")?;
+        anyhow::ensure!(
+            references.insert(media.metadata.as_str()),
+            "showcase media manifest contains duplicate metadata reference {:?}",
+            media.metadata
+        );
         if let Some(regenerate) = media.regenerate.as_deref() {
             validate_showcase_media_reference(regenerate, &media.id, "regenerate")?;
+        }
+        anyhow::ensure!(
+            !media.license.trim().is_empty(),
+            "showcase media entry {} has an empty license",
+            media.id
+        );
+        anyhow::ensure!(
+            !media.provenance.is_empty(),
+            "showcase media entry {} must declare provenance",
+            media.id
+        );
+        for (index, provenance) in media.provenance.iter().enumerate() {
+            validate_showcase_media_reference(
+                provenance,
+                &media.id,
+                &format!("provenance[{index}]"),
+            )?;
+        }
+        anyhow::ensure!(
+            !media.license_files.is_empty(),
+            "showcase media entry {} must declare license_files",
+            media.id
+        );
+        for (index, license_file) in media.license_files.iter().enumerate() {
+            validate_showcase_media_reference(
+                license_file,
+                &media.id,
+                &format!("license_files[{index}]"),
+            )?;
         }
     }
     Ok(())
@@ -2872,160 +2912,103 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
 /// Checks the README showcase media against the committed media catalog.
 fn showcase_media_check() -> anyhow::Result<()> {
     let root = workspace_root()?;
-    let readme_path = root.join("README.md");
-    let manifest_path = root.join(SHOWCASE_MEDIA_MANIFEST_PATH);
-    let manifest = load_showcase_media_manifest(&manifest_path)?;
-    let hero_media = manifest
-        .media
-        .iter()
-        .find(|media| media.id == "mobile-manipulation")
-        .ok_or_else(|| {
-            anyhow::anyhow!("showcase media manifest is missing required mobile-manipulation entry")
-        })?;
-    let learned_g1_media = manifest
-        .media
-        .iter()
-        .find(|media| media.id == "g1-biped-locomotion")
-        .ok_or_else(|| {
-            anyhow::anyhow!("showcase media manifest is missing required g1-biped-locomotion entry")
-        })?;
-    let gif_path =
-        resolve_showcase_media_path(&root, &hero_media.gif, "mobile-manipulation", "gif")?;
-    let png_path =
-        resolve_showcase_media_path(&root, &hero_media.poster, "mobile-manipulation", "poster")?;
-    let metadata_reference = hero_media.metadata.as_deref().ok_or_else(|| {
-        anyhow::anyhow!("showcase media manifest mobile-manipulation entry is missing metadata")
-    })?;
-    let metadata_path =
-        resolve_showcase_media_path(&root, metadata_reference, "mobile-manipulation", "metadata")?;
-    let dex3_gif_path = root.join("docs/media/unitree-g1-dex3.gif");
-    let dex3_png_path = root.join("docs/media/unitree-g1-dex3.png");
-    let cloth_gif_path = root.join("docs/media/unitree-g1-cloth.gif");
-    let cloth_png_path = root.join("docs/media/unitree-g1-cloth.png");
-    let learned_g1_gif_path =
-        resolve_showcase_media_path(&root, &learned_g1_media.gif, &learned_g1_media.id, "gif")?;
-    let learned_g1_png_path = resolve_showcase_media_path(
-        &root,
-        &learned_g1_media.poster,
-        &learned_g1_media.id,
-        "poster",
-    )?;
-    let readme = fs::read_to_string(&readme_path)?;
+    let readme = fs::read_to_string(root.join("README.md"))?;
+    let manifest = load_showcase_media_manifest(&root.join(SHOWCASE_MEDIA_MANIFEST_PATH))?;
+    let expected_ids = [
+        "house-mobile-manipulation",
+        "tsukuba",
+        "factory",
+        "office",
+        "ssl",
+    ];
     anyhow::ensure!(
-        readme.contains(&format!("srcset=\"{}\"", hero_media.readme_poster)),
-        "README hero reduced-motion poster does not point at {}",
-        hero_media.readme_poster
+        manifest.media.len() == expected_ids.len(),
+        "showcase media manifest must contain exactly {} entries",
+        expected_ids.len()
     );
+    for expected_id in expected_ids {
+        anyhow::ensure!(
+            manifest.media.iter().any(|media| media.id == expected_id),
+            "showcase media manifest is missing required {} entry",
+            expected_id
+        );
+    }
+
+    let house_media = manifest
+        .media
+        .iter()
+        .find(|media| media.id == "house-mobile-manipulation")
+        .expect("validated house showcase entry");
     anyhow::ensure!(
-        readme.contains(&format!("<img src=\"{}\"", hero_media.readme_gif)),
-        "README first hero image does not point at {}",
-        hero_media.readme_gif
+        readme.contains(&format!("srcset=\"{}\"", house_media.readme_poster))
+            && readme.contains(&format!("<img src=\"{}\"", house_media.readme_gif)),
+        "README House hero media references are missing"
     );
     anyhow::ensure!(
         readme.contains(
-            "3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object"
+            "PBR mobile manipulator navigating, grasping, carrying, and placing an object inside the House 3DGS environment"
         ),
-        "README hero alt text does not describe the 3D mobile manipulator simulation"
+        "README House hero alt text does not describe the 3D mobile manipulator simulation"
     );
     anyhow::ensure!(
-        readme.contains("Real capture:")
-            && readme.contains(metadata_reference)
-            && hero_media
+        readme.contains(&house_media.metadata)
+            && house_media
                 .regenerate
                 .as_deref()
                 .is_some_and(|reference| readme.contains(reference)),
-        "README hero caption does not link the 3D generator and metadata"
+        "README House hero caption does not link the generator and metadata"
     );
 
-    let gif = fs::read(&gif_path)?;
-    anyhow::ensure!(gif.starts_with(b"GIF8"), "README hero GIF header mismatch");
-    anyhow::ensure!(gif.ends_with(b";"), "README hero GIF trailer missing");
-    anyhow::ensure!(
-        gif.len() > 100_000,
-        "README hero GIF is unexpectedly small: {} bytes",
-        gif.len()
-    );
-    anyhow::ensure!(png_path.is_file(), "README hero PNG is missing");
-    anyhow::ensure!(
-        readme.contains("srcset=\"docs/media/unitree-g1-dex3.png\"")
-            && readme.contains("<img src=\"docs/media/unitree-g1-dex3.gif\""),
-        "README G1 Dex3 media references are missing"
-    );
-    let dex3_gif = fs::read(&dex3_gif_path)?;
-    anyhow::ensure!(
-        dex3_gif.starts_with(b"GIF8") && dex3_gif.ends_with(b";") && dex3_gif.len() > 100_000,
-        "README G1 Dex3 GIF is missing or malformed"
-    );
-    anyhow::ensure!(dex3_png_path.is_file(), "README G1 Dex3 PNG is missing");
-    anyhow::ensure!(
-        readme.contains("srcset=\"docs/media/unitree-g1-cloth.png\"")
-            && readme.contains("<img src=\"docs/media/unitree-g1-cloth.gif\""),
-        "README G1 cloth media references are missing"
-    );
-    let cloth_gif = fs::read(&cloth_gif_path)?;
-    anyhow::ensure!(
-        cloth_gif.starts_with(b"GIF8") && cloth_gif.ends_with(b";") && cloth_gif.len() > 100_000,
-        "README G1 cloth GIF is missing or malformed"
-    );
-    anyhow::ensure!(cloth_png_path.is_file(), "README G1 cloth PNG is missing");
-    anyhow::ensure!(
-        readme.contains("srcset=\"docs/media/unitree-g1-learned-stride.png\"")
-            && readme.contains("<img src=\"docs/media/unitree-g1-learned-stride.gif\""),
-        "README learned G1 stride media references are missing"
-    );
-    let learned_g1_gif = fs::read(&learned_g1_gif_path)?;
-    anyhow::ensure!(
-        learned_g1_gif.starts_with(b"GIF8")
-            && learned_g1_gif.ends_with(b";")
-            && learned_g1_gif.len() > 100_000,
-        "README learned G1 stride GIF is missing or malformed"
-    );
-    anyhow::ensure!(
-        learned_g1_png_path.is_file(),
-        "README learned G1 stride PNG is missing"
-    );
+    validate_legacy_readme_media(&root, &readme)?;
+
     let mut showcase_total_bytes = 0_u64;
     for media in &manifest.media {
-        let showcase_gif_path = resolve_showcase_media_path(&root, &media.gif, &media.id, "gif")?;
-        let showcase_png_path =
-            resolve_showcase_media_path(&root, &media.poster, &media.id, "poster")?;
+        for provenance in &media.provenance {
+            ensure_showcase_reference_exists(&root, provenance, &media.id, "provenance")?;
+        }
+        for license_file in &media.license_files {
+            ensure_showcase_reference_exists(&root, license_file, &media.id, "license_files")?;
+        }
+        let gif_path = ensure_showcase_file_exists(&root, &media.gif, &media.id, "gif")?;
+        let poster_path = ensure_showcase_file_exists(&root, &media.poster, &media.id, "poster")?;
+        let metadata_path =
+            ensure_showcase_file_exists(&root, &media.metadata, &media.id, "metadata")?;
         anyhow::ensure!(
             readme.contains(&format!("src=\"{}\"", media.readme_gif))
                 && readme.contains(&format!("srcset=\"{}\"", media.readme_poster)),
             "README {} media references are missing",
             media.label
         );
-        let showcase_gif = fs::read(&showcase_gif_path)?;
-        let showcase_gif_bytes = u64::try_from(showcase_gif.len())?;
+
+        let gif = fs::read(&gif_path)?;
+        let gif_bytes = u64::try_from(gif.len())?;
         anyhow::ensure!(
-            showcase_gif.starts_with(b"GIF8")
-                && showcase_gif.ends_with(b";")
-                && showcase_gif_bytes > manifest.min_gif_bytes,
-            "README {} GIF is missing or malformed or does not exceed the {} byte minimum",
+            gif.starts_with(b"GIF8") && gif.ends_with(b";") && gif_bytes > manifest.min_gif_bytes,
+            "README {} GIF is missing, malformed, or below the {} byte minimum",
             media.label,
             manifest.min_gif_bytes
         );
         anyhow::ensure!(
-            showcase_gif_bytes <= manifest.max_gif_bytes,
+            gif_bytes <= manifest.max_gif_bytes,
             "README {} GIF exceeds the {} byte budget: {} bytes",
             media.label,
             manifest.max_gif_bytes,
-            showcase_gif_bytes
+            gif_bytes
         );
         anyhow::ensure!(
-            showcase_gif_bytes == media.gif_bytes,
+            gif_bytes == media.gif_bytes,
             "README {} GIF byte size drifted: catalog={}, actual={}",
             media.label,
             media.gif_bytes,
-            showcase_gif_bytes
+            gif_bytes
         );
         anyhow::ensure!(
-            sha256_file(&showcase_gif_path)? == media.gif_sha256,
+            sha256_file(&gif_path)? == media.gif_sha256,
             "README {} GIF SHA-256 drifted from catalog",
             media.label
         );
-        showcase_total_bytes += showcase_gif_bytes;
-        let poster = image::open(&showcase_png_path)?;
+
+        let poster = image::open(&poster_path)?;
         anyhow::ensure!(
             poster.width() >= manifest.min_poster_width
                 && poster.height() >= manifest.min_poster_height,
@@ -3036,7 +3019,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
             poster.width(),
             poster.height()
         );
-        let poster_bytes = fs::metadata(&showcase_png_path)?.len();
+        let poster_bytes = fs::metadata(&poster_path)?.len();
         anyhow::ensure!(
             poster_bytes == media.poster_bytes,
             "README {} poster byte size drifted: catalog={}, actual={}",
@@ -3045,7 +3028,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
             poster_bytes
         );
         anyhow::ensure!(
-            sha256_file(&showcase_png_path)? == media.poster_sha256,
+            sha256_file(&poster_path)? == media.poster_sha256,
             "README {} poster SHA-256 drifted from catalog",
             media.label
         );
@@ -3058,329 +3041,398 @@ fn showcase_media_check() -> anyhow::Result<()> {
             poster.width(),
             poster.height()
         );
+
+        let metadata: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&metadata_path)?)
+                .with_context(|| format!("parse showcase metadata {}", metadata_path.display()))?;
+        validate_showcase_metadata(&root, media, &gif_path, &poster_path, &metadata)?;
+        if media.id == "house-mobile-manipulation" {
+            validate_house_showcase_metadata(&root, &metadata)?;
+        } else {
+            anyhow::ensure!(
+                metadata["simulation"]["replay_match"].as_bool() == Some(true),
+                "showcase {} metadata must record replay_match=true",
+                media.id
+            );
+        }
+        showcase_total_bytes += gif_bytes;
     }
     anyhow::ensure!(
         showcase_total_bytes <= manifest.max_total_gif_bytes,
         "README showcase GIFs exceed the {} byte combined budget: {showcase_total_bytes} bytes",
         manifest.max_total_gif_bytes
     );
-    let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path)?)?;
-    anyhow::ensure!(
-        metadata["artifact"].as_str() == Some("rne_3d_mobile_manipulator_pick_place_hero"),
-        "README hero metadata does not describe the 3D pick/place hero"
-    );
-    anyhow::ensure!(
-        metadata["schema_version"].as_u64() == Some(2),
-        "README hero metadata must use schema_version 2"
-    );
-    let encode = metadata
-        .get("encode")
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing encode block"))?;
-    let gif_progression = inspect_gif_frame_progression(
-        &gif_path,
-        usize::try_from(encode["animation_frames"].as_u64().ok_or_else(|| {
-            anyhow::anyhow!("README hero encode block missing animation_frames")
-        })?)?,
-        usize::try_from(
-            encode["hold_frames"]
-                .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("README hero encode block missing hold_frames"))?,
-        )?,
-    )?;
-    anyhow::ensure!(
-        encode["fps"].as_f64() == Some(15.0)
-            && encode["animation_frames"].as_u64() == Some(100)
-            && encode["hold_frames"].as_u64() == Some(10)
-            && encode["max_colors"].as_u64() == Some(128)
-            && encode["scale_width"].as_u64() == Some(800),
-        "README hero encode block does not match the expected hero pipeline"
-    );
-    let max_byte_size = encode["max_byte_size"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("README hero encode block missing max_byte_size"))?;
-    anyhow::ensure!(
-        u64::try_from(gif.len())? <= max_byte_size,
-        "README hero GIF exceeds encode.max_byte_size: {} > {max_byte_size}",
-        gif.len()
-    );
-    let metadata_width = metadata["width"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing width"))?;
-    let metadata_height = metadata["height"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing height"))?;
-    let metadata_frame_count = metadata["frame_count"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing frame_count"))?;
-    anyhow::ensure!(
-        gif_progression.width == u32::try_from(metadata_width)?,
-        "README hero metadata width does not match GIF: metadata={metadata_width}, gif={}",
-        gif_progression.width
-    );
-    anyhow::ensure!(
-        gif_progression.height == u32::try_from(metadata_height)?,
-        "README hero metadata height does not match GIF: metadata={metadata_height}, gif={}",
-        gif_progression.height
-    );
-    anyhow::ensure!(
-        u64::try_from(gif_progression.frame_count)? == metadata_frame_count,
-        "README hero metadata frame_count does not match GIF: metadata={metadata_frame_count}, gif={}",
-        gif_progression.frame_count
-    );
-    anyhow::ensure!(
-        metadata["source"]["kind"].as_str() == Some("wgpu_simulation")
-            && metadata["source"]["generator"].as_str() == Some("examples/32_lift_pick_place_hero")
-            && metadata["source"]["scene"].as_str()
-                == Some("assets/scenes/mm_mobile_hero.rne.scene.toml")
-            && metadata["source"]["policy"].as_str() == Some("MobilePickPlaceHeroPolicy")
-            && metadata["source"]["physics"].as_str() == Some("MobileManipulatorSim/Rapier"),
-        "README hero metadata source is not wgpu_simulation"
-    );
-    let overlays = metadata["overlays"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata overlays must be an array"))?;
-    anyhow::ensure!(
-        overlays
-            .iter()
-            .any(|overlay| overlay.as_str() == Some("house_context"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("base_path"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("object_path"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("pickup_surface"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("task_object"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("drop_tray"))
-            && overlays
-                .iter()
-                .any(|overlay| overlay.as_str() == Some("drop_zone")),
-        "README hero metadata is missing expected 3D overlays"
-    );
-    let base_travel_m = metadata["simulation"]["base_travel_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing base_travel_m"))?;
-    let ee_travel_m = metadata["simulation"]["ee_travel_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing ee_travel_m"))?;
-    let final_ee_target_error_m = metadata["simulation"]["final_ee_target_error_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing final_ee_target_error_m"))?;
-    let object_transport_m = metadata["simulation"]["object_transport_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing object_transport_m"))?;
-    let min_object_transport_m = metadata["simulation"]["min_object_transport_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing min_object_transport_m"))?;
-    let final_object_place_error_m = metadata["simulation"]["final_object_place_error_m"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing final_object_place_error_m")
-        })?;
-    let max_final_object_place_error_m = metadata["simulation"]["max_final_object_place_error_m"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing max_final_object_place_error_m")
-        })?;
-    let grasped_steps = metadata["simulation"]["grasped_steps"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing grasped_steps"))?;
-    let released_after_grasp = metadata["simulation"]["released_after_grasp"]
-        .as_bool()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing released_after_grasp"))?;
-    let max_final_ee_target_error_m = metadata["simulation"]["max_final_ee_target_error_m"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing max_final_ee_target_error_m")
-        })?;
-    let min_consecutive_frame_delta_ratio = metadata["simulation"]
-        ["min_consecutive_frame_delta_ratio"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing min_consecutive_frame_delta_ratio")
-        })?;
-    let first_last_frame_delta_ratio = metadata["simulation"]["first_last_frame_delta_ratio"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing first_last_frame_delta_ratio")
-        })?;
-    let min_consecutive_frame_delta_ratio_threshold = metadata["simulation"]
-        ["min_consecutive_frame_delta_ratio_threshold"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "README hero metadata missing min_consecutive_frame_delta_ratio_threshold"
-            )
-        })?;
-    let min_first_last_frame_delta_ratio_threshold = metadata["simulation"]
-        ["min_first_last_frame_delta_ratio_threshold"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "README hero metadata missing min_first_last_frame_delta_ratio_threshold"
-            )
-        })?;
-    let max_hold_frame_delta_ratio = metadata["simulation"]["max_hold_frame_delta_ratio"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio")
-        })?;
-    let max_hold_frame_delta_ratio_threshold = metadata["simulation"]
-        ["max_hold_frame_delta_ratio_threshold"]
-        .as_f64()
-        .ok_or_else(|| {
-            anyhow::anyhow!("README hero metadata missing max_hold_frame_delta_ratio_threshold")
-        })?;
-    let max_base_height_error_m = metadata["simulation"]["max_base_height_error_m"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing max_base_height_error_m"))?;
-    let min_base_yaw_only_dot = metadata["simulation"]["min_base_yaw_only_dot"]
-        .as_f64()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing min_base_yaw_only_dot"))?;
-    let trajectory_digest = metadata["simulation"]["trajectory_digest"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("README hero metadata missing trajectory_digest"))?;
-    anyhow::ensure!(
-        base_travel_m > 0.20,
-        "README hero simulation base travel is too small: {base_travel_m:.2} m"
-    );
-    anyhow::ensure!(
-        ee_travel_m > 0.15,
-        "README hero simulation end-effector travel is too small: {ee_travel_m:.2} m"
-    );
-    anyhow::ensure!(
-        max_final_ee_target_error_m <= 0.05,
-        "README hero reach target threshold is too loose: {max_final_ee_target_error_m:.3} m"
-    );
-    anyhow::ensure!(
-        final_ee_target_error_m <= max_final_ee_target_error_m,
-        "README hero manipulator does not reach the target: final_ee_target_error={final_ee_target_error_m:.3} m"
-    );
-    anyhow::ensure!(
-        min_object_transport_m >= 0.35,
-        "README hero object transport threshold is too loose: {min_object_transport_m:.2} m"
-    );
-    anyhow::ensure!(
-        object_transport_m >= min_object_transport_m,
-        "README hero object transport is too small: object_transport={object_transport_m:.2} m"
-    );
-    anyhow::ensure!(
-        max_final_object_place_error_m <= 0.20,
-        "README hero object place threshold is too loose: {max_final_object_place_error_m:.3} m"
-    );
-    anyhow::ensure!(
-        final_object_place_error_m <= max_final_object_place_error_m,
-        "README hero object is not near the drop zone: final_object_place_error={final_object_place_error_m:.3} m"
-    );
-    anyhow::ensure!(
-        grasped_steps >= 12 && released_after_grasp,
-        "README hero object was not carried then released: grasped_steps={grasped_steps}, released_after_grasp={released_after_grasp}"
-    );
-    anyhow::ensure!(
-        min_consecutive_frame_delta_ratio_threshold >= 0.0025,
-        "README hero frame-delta threshold is too loose: {min_consecutive_frame_delta_ratio_threshold:.4}"
-    );
-    anyhow::ensure!(
-        min_first_last_frame_delta_ratio_threshold >= 0.08,
-        "README hero first/last frame-delta threshold is too loose: {min_first_last_frame_delta_ratio_threshold:.4}"
-    );
-    anyhow::ensure!(
-        min_consecutive_frame_delta_ratio >= min_consecutive_frame_delta_ratio_threshold,
-        "README hero GIF has nearly frozen adjacent frames: min_consecutive_frame_delta_ratio={min_consecutive_frame_delta_ratio:.4}"
-    );
-    anyhow::ensure!(
-        first_last_frame_delta_ratio >= min_first_last_frame_delta_ratio_threshold,
-        "README hero GIF lacks visible progression: first_last_frame_delta_ratio={first_last_frame_delta_ratio:.4}"
-    );
-    anyhow::ensure!(
-        gif_progression.min_consecutive_frame_delta_ratio
-            >= min_consecutive_frame_delta_ratio_threshold,
-        "README hero GIF bytes have nearly frozen adjacent frames: min_consecutive_frame_delta_ratio={:.4}",
-        gif_progression.min_consecutive_frame_delta_ratio
-    );
-    anyhow::ensure!(
-        gif_progression.first_last_frame_delta_ratio >= min_first_last_frame_delta_ratio_threshold,
-        "README hero GIF bytes lack visible progression: first_last_frame_delta_ratio={:.4}",
-        gif_progression.first_last_frame_delta_ratio
-    );
-    anyhow::ensure!(
-        max_hold_frame_delta_ratio <= max_hold_frame_delta_ratio_threshold,
-        "README hero hold seam is not calm enough: max_hold_frame_delta_ratio={max_hold_frame_delta_ratio:.4}"
-    );
-    anyhow::ensure!(
-        max_base_height_error_m <= 0.01,
-        "README hero mobile base leaves the ground plane: max_base_height_error={max_base_height_error_m:.4} m"
-    );
-    anyhow::ensure!(
-        min_base_yaw_only_dot >= 0.999_999,
-        "README hero mobile base is not upright: min_base_yaw_only_dot={min_base_yaw_only_dot:.9}"
-    );
-    anyhow::ensure!(
-        trajectory_digest.len() == 18
-            && trajectory_digest.starts_with("0x")
-            && trajectory_digest[2..]
-                .chars()
-                .all(|character| character.is_ascii_hexdigit()),
-        "README hero trajectory_digest must be a 64-bit hex string"
-    );
-    // The recorded digest is produced on Windows (docs/media/generate-hero.sh);
-    // the hero smoke passes everywhere, but arm/payload contact dynamics are not
-    // bit-identical across platforms (outcome-stable, not bitwise-stable: even
-    // with the mm_minimal settle physics fixed, contact impulse ordering and libm
-    // differences shift trajectories by millimetres), so only compare the
-    // bit-exact live digest on the generating platform.
-    if cfg!(target_os = "linux") {
-        eprintln!(
-            "skipping README hero live digest comparison on linux (digest is bit-exact and recorded on Windows)"
-        );
-    } else {
-        let live_trajectory_digest = hero_simulation_smoke_digest()?;
-        anyhow::ensure!(
-            live_trajectory_digest == trajectory_digest,
-            "README hero trajectory digest is stale: metadata={trajectory_digest}, live={live_trajectory_digest}"
-        );
-    }
-    anyhow::ensure!(
-        metadata["simulation"]["final_base_m"]
-            .as_array()
-            .is_some_and(|items| items.len() == 3)
-            && metadata["simulation"]["final_ee_m"]
-                .as_array()
-                .is_some_and(|items| items.len() == 3)
-            && metadata["simulation"]["final_object_m"]
-                .as_array()
-                .is_some_and(|items| items.len() == 3),
-        "README hero metadata final simulation positions must be 3D vectors"
-    );
-    anyhow::ensure!(
-        metadata["byte_size"].as_u64() == Some(u64::try_from(gif.len())?),
-        "README hero metadata byte_size does not match GIF bytes"
-    );
     println!(
-        "README 3D hero media ok: gif={} bytes metadata={}",
-        gif.len(),
-        metadata_path.display()
+        "README showcase media ok: entries={} gif_bytes={}",
+        manifest.media.len(),
+        showcase_total_bytes
     );
     Ok(())
+}
+
+fn validate_showcase_metadata(
+    root: &Path,
+    media: &ShowcaseMediaEntry,
+    gif_path: &Path,
+    poster_path: &Path,
+    metadata: &serde_json::Value,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        metadata.is_object(),
+        "showcase {} metadata must be a JSON object",
+        media.id
+    );
+    let capture = metadata
+        .get("capture")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata missing capture object", media.id))?;
+    anyhow::ensure!(
+        capture
+            .get("gpu_rendered")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
+        "showcase {} metadata capture must record gpu_rendered=true",
+        media.id
+    );
+    let width = capture_u64(capture, "width_px", &media.id)?;
+    let height = capture_u64(capture, "height_px", &media.id)?;
+    anyhow::ensure!(
+        width == u64::from(media.poster_width) && height == u64::from(media.poster_height),
+        "showcase {} metadata capture dimensions must match poster dimensions",
+        media.id
+    );
+    let gif_bytes = capture_u64(capture, "gif_bytes", &media.id)?;
+    let poster_bytes = capture_u64(capture, "poster_bytes", &media.id)?;
+    anyhow::ensure!(
+        gif_bytes == fs::metadata(gif_path)?.len() && gif_bytes == media.gif_bytes,
+        "showcase {} metadata GIF bytes do not match the artifact",
+        media.id
+    );
+    anyhow::ensure!(
+        poster_bytes == fs::metadata(poster_path)?.len() && poster_bytes == media.poster_bytes,
+        "showcase {} metadata poster bytes do not match the artifact",
+        media.id
+    );
+    anyhow::ensure!(
+        normalize_showcase_metadata_sha(capture, "gif_sha256", &media.id)? == media.gif_sha256,
+        "showcase {} metadata GIF SHA-256 does not match the artifact",
+        media.id
+    );
+    anyhow::ensure!(
+        normalize_showcase_metadata_sha(capture, "poster_sha256", &media.id)?
+            == media.poster_sha256,
+        "showcase {} metadata poster SHA-256 does not match the artifact",
+        media.id
+    );
+    for field in ["frame_pattern", "gif_path", "poster_path"] {
+        anyhow::ensure!(
+            capture
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty()),
+            "showcase {} metadata capture is missing {}",
+            media.id,
+            field
+        );
+    }
+    let frame_count = usize::try_from(capture_u64(capture, "frame_count", &media.id)?)?;
+    anyhow::ensure!(
+        frame_count > 0,
+        "showcase {} metadata frame_count must be positive",
+        media.id
+    );
+    let poster_frame = usize::try_from(capture_u64(capture, "poster_frame", &media.id)?)?;
+    anyhow::ensure!(
+        poster_frame < frame_count,
+        "showcase {} metadata poster_frame is outside frame_count",
+        media.id
+    );
+    let unique_render_hashes =
+        usize::try_from(capture_u64(capture, "unique_render_hashes", &media.id)?)?;
+    let duplicate_adjacent_frames = usize::try_from(capture_u64(
+        capture,
+        "duplicate_adjacent_frames",
+        &media.id,
+    )?)?;
+    anyhow::ensure!(
+        unique_render_hashes >= frame_count.saturating_sub(1),
+        "showcase {} metadata has too few unique render hashes",
+        media.id
+    );
+    anyhow::ensure!(
+        duplicate_adjacent_frames <= 1,
+        "showcase {} metadata has too many adjacent duplicate frames",
+        media.id
+    );
+    for field in ["sampled_sim_steps", "sampled_phases"] {
+        if let Some(values) = capture.get(field).and_then(serde_json::Value::as_array) {
+            anyhow::ensure!(
+                values.len() == frame_count,
+                "showcase {} metadata {} length does not match frame_count",
+                media.id,
+                field
+            );
+        }
+    }
+    let progression = inspect_gif_frame_progression(gif_path, frame_count)?;
+    anyhow::ensure!(
+        progression.frame_count == frame_count
+            && progression.width == u32::try_from(width)?
+            && progression.height == u32::try_from(height)?,
+        "showcase {} GIF frame evidence does not match metadata",
+        media.id
+    );
+
+    let simulation = metadata
+        .get("simulation")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            anyhow::anyhow!("showcase {} metadata missing simulation object", media.id)
+        })?;
+    anyhow::ensure!(
+        simulation
+            .get("replay_match")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            || simulation
+                .get("deterministic_digest")
+                .and_then(serde_json::Value::as_u64)
+                .is_some(),
+        "showcase {} metadata is missing replay/determinism evidence",
+        media.id
+    );
+    if media.id == "factory" {
+        let outcome = simulation
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let completed_markers = simulation
+            .get("inspection_markers_completed")
+            .and_then(serde_json::Value::as_u64);
+        anyhow::ensure!(
+            outcome.contains("completed_markers=3/3") || completed_markers == Some(3),
+            "factory metadata must record completion of all three inspection markers"
+        );
+    }
+    for (field, expected) in [
+        ("reproduce_smoke", media.smoke_command.as_str()),
+        ("reproduce_capture", media.capture_command.as_str()),
+    ] {
+        anyhow::ensure!(
+            metadata.get(field).and_then(serde_json::Value::as_str) == Some(expected),
+            "showcase {} metadata {} command does not match the manifest",
+            media.id,
+            field
+        );
+    }
+    let provenance = metadata
+        .get("provenance")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata missing provenance", media.id))?;
+    anyhow::ensure!(
+        !provenance.is_empty(),
+        "showcase {} metadata provenance must not be empty",
+        media.id
+    );
+    for value in provenance {
+        let reference = value.as_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "showcase {} metadata provenance must contain strings",
+                media.id
+            )
+        })?;
+        ensure_showcase_reference_exists(root, reference, &media.id, "metadata provenance")?;
+    }
+    Ok(())
+}
+
+fn validate_house_showcase_metadata(
+    root: &Path,
+    metadata: &serde_json::Value,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        metadata["simulation"]["terminated"].as_bool() == Some(true),
+        "House hero metadata must record terminated=true"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["grasped"].as_bool() == Some(true),
+        "House hero metadata must record a successful grasp"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["phases_seen"]
+            .as_array()
+            .is_some_and(|phases| phases.iter().any(|phase| phase.as_str() == Some("Grasp"))),
+        "House hero metadata must include the Grasp phase"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["lift_clearance_m"]
+            .as_f64()
+            .is_some_and(|value| value >= 0.2),
+        "House hero lift clearance must be at least 0.2 m"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["transport_distance_m"]
+            .as_f64()
+            .is_some_and(|value| value >= 2.0),
+        "House hero transport distance must be at least 2.0 m"
+    );
+    anyhow::ensure!(
+        metadata["simulation"]["place_error_m"]
+            .as_f64()
+            .is_some_and(|value| value <= 0.1),
+        "House hero placement error must be at most 0.1 m"
+    );
+    anyhow::ensure!(
+        metadata["visual_link_count"].as_u64() == Some(10)
+            && metadata["visual_manifest_validated"].as_bool() == Some(true),
+        "House hero metadata must validate all 10 visual links"
+    );
+    anyhow::ensure!(
+        metadata["link_transform_sync_max_error_m"].as_f64() == Some(0.0),
+        "House hero visual-link synchronization error must be zero"
+    );
+    let visual_link_count = metadata["visual_link_count"].as_u64().unwrap_or(0);
+    anyhow::ensure!(
+        metadata["foreground_mesh_items"]
+            .as_u64()
+            .is_some_and(|value| value >= visual_link_count)
+            && metadata["foreground_material_items"]
+                .as_u64()
+                .is_some_and(|value| value >= visual_link_count),
+        "House hero metadata is missing PBR foreground evidence"
+    );
+    for field in ["house_ply_path", "visual_manifest_path"] {
+        let reference = metadata[field]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("House hero metadata missing {field}"))?;
+        ensure_showcase_reference_exists(root, reference, "house-mobile-manipulation", field)?;
+    }
+    validate_showcase_metadata_sha_field(
+        metadata,
+        "house_ply_sha256",
+        "house-mobile-manipulation",
+    )?;
+    Ok(())
+}
+
+fn validate_legacy_readme_media(root: &Path, readme: &str) -> anyhow::Result<()> {
+    let checks = [
+        (
+            "docs/media/unitree-g1-dex3.gif",
+            "docs/media/unitree-g1-dex3.png",
+            "README G1 Dex3 media references are missing",
+        ),
+        (
+            "docs/media/unitree-g1-cloth.gif",
+            "docs/media/unitree-g1-cloth.png",
+            "README G1 cloth media references are missing",
+        ),
+    ];
+    for (gif_reference, poster_reference, message) in checks {
+        let gif_is_referenced = readme.contains(&format!("<img src=\"{gif_reference}\""));
+        let poster_is_referenced = readme.contains(&format!("srcset=\"{poster_reference}\""));
+        if !gif_is_referenced && !poster_is_referenced {
+            continue;
+        }
+        anyhow::ensure!(gif_is_referenced && poster_is_referenced, "{message}");
+        let gif = ensure_showcase_file_exists(root, gif_reference, "README", "legacy gif")?;
+        let poster =
+            ensure_showcase_file_exists(root, poster_reference, "README", "legacy poster")?;
+        let bytes = fs::read(gif)?;
+        anyhow::ensure!(
+            bytes.starts_with(b"GIF8") && bytes.ends_with(b";") && bytes.len() > 100_000,
+            "{message}: GIF is missing or malformed"
+        );
+        anyhow::ensure!(poster.is_file(), "{message}: poster is missing");
+    }
+    Ok(())
+}
+
+fn capture_u64(
+    capture: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    media_id: &str,
+) -> anyhow::Result<u64> {
+    capture
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata capture missing {}", media_id, field))
+}
+
+fn normalize_showcase_metadata_sha(
+    capture: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    media_id: &str,
+) -> anyhow::Result<String> {
+    let digest = capture
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            anyhow::anyhow!("showcase {} metadata capture missing {}", media_id, field)
+        })?;
+    normalize_showcase_sha(digest, media_id, field)
+}
+
+fn validate_showcase_metadata_sha_field(
+    metadata: &serde_json::Value,
+    field: &str,
+    media_id: &str,
+) -> anyhow::Result<()> {
+    let digest = metadata
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata missing {}", media_id, field))?;
+    normalize_showcase_sha(digest, media_id, field).map(|_| ())
+}
+
+fn normalize_showcase_sha(value: &str, media_id: &str, field: &str) -> anyhow::Result<String> {
+    let hex = value.strip_prefix("sha256:").unwrap_or(value);
+    anyhow::ensure!(
+        hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "showcase {} {} must be a 64-digit SHA-256",
+        media_id,
+        field
+    );
+    Ok(format!("sha256:{}", hex.to_ascii_lowercase()))
+}
+
+fn ensure_showcase_file_exists(
+    root: &Path,
+    reference: &str,
+    media_id: &str,
+    field: &str,
+) -> anyhow::Result<PathBuf> {
+    let path = ensure_showcase_reference_exists(root, reference, media_id, field)?;
+    anyhow::ensure!(
+        path.is_file(),
+        "showcase {} {} reference is not a file: {}",
+        media_id,
+        field,
+        reference
+    );
+    Ok(path)
+}
+
+fn ensure_showcase_reference_exists(
+    root: &Path,
+    reference: &str,
+    media_id: &str,
+    field: &str,
+) -> anyhow::Result<PathBuf> {
+    let path = resolve_showcase_media_path(root, reference, media_id, field)?;
+    anyhow::ensure!(
+        path.exists(),
+        "showcase {} {} reference does not exist: {}",
+        media_id,
+        field,
+        reference
+    );
+    Ok(path)
 }
 
 /// Backwards-compatible name for [`showcase_media_check`].
 fn hero_media_check() -> anyhow::Result<()> {
     showcase_media_check()
-}
-
-fn hero_simulation_smoke_digest() -> anyhow::Result<String> {
-    let command =
-        "cargo run --locked -p lift_pick_place_hero --example 32_lift_pick_place_hero -- --smoke";
-    let output = run_step_output(command)?;
-    extract_hero_digest(&output)
-        .ok_or_else(|| anyhow::anyhow!("hero smoke output did not include trajectory digest"))
 }
 
 fn hero_contact_sheet() -> anyhow::Result<()> {
@@ -3434,14 +3486,11 @@ struct GifFrameProgression {
     width: u32,
     height: u32,
     frame_count: usize,
-    min_consecutive_frame_delta_ratio: f64,
-    first_last_frame_delta_ratio: f64,
 }
 
 fn inspect_gif_frame_progression(
     path: &Path,
-    animation_frame_count: usize,
-    hold_frame_count: usize,
+    expected_frame_count: usize,
 ) -> anyhow::Result<GifFrameProgression> {
     let file = fs::File::open(path)?;
     let decoder = image::codecs::gif::GifDecoder::new(BufReader::new(file))?;
@@ -3450,22 +3499,15 @@ fn inspect_gif_frame_progression(
     let mut width = 0;
     let mut height = 0;
     let mut frame_count = 0usize;
-    let mut first_frame_rgba8 = Vec::new();
-    let mut previous_frame_rgba8 = Vec::new();
-    let mut min_consecutive_frame_delta_ratio = 1.0_f64;
-    let mut first_last_frame_delta_ratio = 0.0_f64;
-    let animation_pairs_end = animation_frame_count.saturating_sub(1);
 
     for frame in frames {
         let frame = frame?;
         let buffer = frame.into_buffer();
         let (frame_width, frame_height) = buffer.dimensions();
-        let rgba8 = buffer.into_raw();
 
         if frame_count == 0 {
             width = frame_width;
             height = frame_height;
-            first_frame_rgba8.clone_from(&rgba8);
         } else {
             anyhow::ensure!(
                 frame_width == width && frame_height == height,
@@ -3475,40 +3517,27 @@ fn inspect_gif_frame_progression(
                 frame_width,
                 frame_height
             );
-            if frame_count < animation_pairs_end + 1 {
-                let delta_ratio = frame_delta_ratio(&previous_frame_rgba8, &rgba8)?;
-                min_consecutive_frame_delta_ratio =
-                    min_consecutive_frame_delta_ratio.min(delta_ratio);
-            }
-            first_last_frame_delta_ratio = frame_delta_ratio(&first_frame_rgba8, &rgba8)?;
         }
 
-        previous_frame_rgba8 = rgba8;
         frame_count += 1;
     }
 
     anyhow::ensure!(frame_count > 0, "README hero GIF has no decoded frames");
     anyhow::ensure!(
-        animation_frame_count + hold_frame_count == frame_count,
-        "README hero GIF frame count mismatch: expected {} animation + {} hold = {}, got {}",
-        animation_frame_count,
-        hold_frame_count,
-        animation_frame_count + hold_frame_count,
+        expected_frame_count == frame_count,
+        "showcase GIF frame count mismatch: expected {}, got {}",
+        expected_frame_count,
         frame_count
     );
-    if animation_frame_count <= 1 {
-        min_consecutive_frame_delta_ratio = 0.0;
-    }
 
     Ok(GifFrameProgression {
         width,
         height,
         frame_count,
-        min_consecutive_frame_delta_ratio,
-        first_last_frame_delta_ratio,
     })
 }
 
+#[cfg(test)]
 fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> anyhow::Result<f64> {
     anyhow::ensure!(
         previous_rgba8.len() == current_rgba8.len(),
@@ -3530,6 +3559,7 @@ fn frame_delta_ratio(previous_rgba8: &[u8], current_rgba8: &[u8]) -> anyhow::Res
     Ok(changed_pixels as f64 / pixel_count as f64)
 }
 
+#[cfg(test)]
 fn extract_hero_digest(output: &str) -> Option<String> {
     let marker = "digest=";
     let start = output.find(marker)? + marker.len();
@@ -3864,26 +3894,6 @@ fn run_step(command: &str) -> anyhow::Result<()> {
     }
 }
 
-fn run_step_output(command: &str) -> anyhow::Result<String> {
-    println!("$ {command}");
-    let output = if cfg!(windows) {
-        Command::new("cmd").args(["/C", command]).output()?
-    } else {
-        Command::new("sh").arg("-c").arg(command).output()?
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    print!("{stdout}");
-    eprint!("{stderr}");
-
-    if output.status.success() {
-        Ok(format!("{stdout}\n{stderr}"))
-    } else {
-        anyhow::bail!("command failed with status {}", output.status);
-    }
-}
-
 /// Runs a catalog command while retaining its output for a parity report.
 fn run_step_capture(command: &str) -> anyhow::Result<(bool, String)> {
     println!("$ {command}");
@@ -3991,7 +4001,7 @@ mod tests {
             toml::from_str(include_str!("../../docs/media/showcase.toml"))
                 .expect("showcase media TOML");
         validate_showcase_media_manifest(&manifest).expect("showcase media catalog");
-        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.schema_version, 2);
         assert_eq!(manifest.media.len(), 5);
         assert_eq!(
             manifest
@@ -4000,11 +4010,11 @@ mod tests {
                 .map(|media| media.id.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "mobile-manipulation",
-                "g1-biped-locomotion",
-                "go2-quadruped-locomotion",
-                "urban-vehicle",
-                "urban-uav",
+                "house-mobile-manipulation",
+                "tsukuba",
+                "factory",
+                "office",
+                "ssl",
             ]
         );
     }
@@ -4012,7 +4022,7 @@ mod tests {
     #[test]
     fn showcase_media_catalog_rejects_duplicate_ids_and_escaping_paths() {
         let manifest = ShowcaseMediaManifest {
-            schema_version: 1,
+            schema_version: 2,
             min_gif_bytes: 100,
             max_gif_bytes: 200,
             min_poster_width: 1,
@@ -4034,8 +4044,11 @@ mod tests {
                     poster_height: 1,
                     smoke_command: "smoke".to_string(),
                     capture_command: "capture".to_string(),
-                    metadata: None,
+                    metadata: "docs/media/first.json".to_string(),
                     regenerate: None,
+                    provenance: vec!["docs/media/first.json".to_string()],
+                    license: "MIT".to_string(),
+                    license_files: vec!["LICENSE-MIT".to_string()],
                 },
                 ShowcaseMediaEntry {
                     id: "same".to_string(),
@@ -4052,8 +4065,11 @@ mod tests {
                     poster_height: 1,
                     smoke_command: "smoke".to_string(),
                     capture_command: "capture".to_string(),
-                    metadata: None,
+                    metadata: "docs/media/second.json".to_string(),
                     regenerate: None,
+                    provenance: vec!["docs/media/second.json".to_string()],
+                    license: "MIT".to_string(),
+                    license_files: vec!["LICENSE-MIT".to_string()],
                 },
             ],
         };

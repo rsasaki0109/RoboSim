@@ -6,10 +6,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
-- Add `docs/media/showcase.toml`, a versioned catalog of the five README
-  showcase GIF/poster pairs with measured sizes, dimensions, SHA-256 values,
-  README references, budget ceilings, and per-capture regeneration commands;
-  document the catalog in `docs/README_SHOWCASE.md`.
+- Complete the README environment showcase with a full-width House 3DGS
+  mobile-manipulation hero and a 2 x 2 Tsukuba, factory, office AGV, and
+  RoboCup SSL grid. The captures replay real headless scenarios and publish
+  synchronized 960 x 540 GIF, poster, and metadata evidence.
+
+- Upgrade `docs/media/showcase.toml` to a schema-v2 catalog that verifies exact
+  bytes, SHA-256 values, dimensions, README references, deterministic metadata,
+  source provenance, license files, per-file limits, and a 12 MB combined GIF
+  budget through `xtask showcase-media-check`.
 
 - Add a fail-closed `mm_mobile_lift` visual-manifest contract and provenance
   record; pin its 10-link hierarchy, visual-only physics boundary, LOD/PBR

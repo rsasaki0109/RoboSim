@@ -19,49 +19,49 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
 
 <table>
   <tr>
-    <td width="50%" align="center">
-      <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/rne-hero.png">
-        <img src="docs/media/rne-hero.gif" alt="3D RNE mobile manipulator simulation navigating a house-like room while carrying a task object" width="460">
-      </picture>
-      <br><b>Mobile manipulation</b><br>
-      <sub>Real capture: physics contact grasp, 2.42 m payload transport, release, and 0.091 m placement error. <a href="docs/media/rne-hero.json">metadata</a> · <a href="docs/media/generate-hero.sh">regenerate</a></sub>
-    </td>
-    <td width="50%" align="center">
-      <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-learned-stride.png">
-        <img src="docs/media/unitree-g1-learned-stride.gif" alt="Official Unitree G1 dynamically walking under a bounded torque policy" width="460">
-      </picture>
-      <br><b>G1 biped locomotion</b><br>
-      <sub>Official 23-DoF hybrid walk; learned stride, upright, two measured windows. Sustained heading tracking is still outside this envelope.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center">
-      <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-torque-turn.png">
-        <img src="docs/media/go2-torque-turn.gif" alt="Official Unitree Go2 torque-controlled straight and steering locomotion comparison" width="460">
-      </picture>
-      <br><b>Go2 quadruped locomotion</b><br>
-      <sub>All-joint torque walk; the contact-gated overlay turns while preserving transport.</sub>
-    </td>
-    <td width="50%" align="center">
-      <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
-        <img src="docs/media/plateau-car.gif" alt="One hundred deterministic traffic actors driving through an official PLATEAU city" width="460">
-      </picture>
-      <br><b>Urban vehicle simulation</b><br>
-      <sub>100 routed actors, live signals, onboard LiDAR/RGB-D, and zero ownership or double-integration violations.</sub>
-    </td>
-  </tr>
-  <tr>
     <td colspan="2" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-uav.png">
-        <img src="docs/media/plateau-uav.gif" alt="A bounded controlled quadrotor flying through a detailed official PLATEAU city" width="600">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/house-mobile-manipulation.png">
+        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object inside the House 3DGS environment" width="900">
       </picture>
-      <br><b>Urban UAV simulation</b><br>
-      <sub>A rendered quadrotor—not a free camera—with an onboard RGB-D gimbal, bounded flight, building clearance, and exact replay checks.</sub>
+      <br><b>House 3DGS · mobile manipulation</b><br>
+      <sub>Real friction grasp, 0.229 m lift, 2.139 m transport, and 0.0616 m placement error. Ten authored PBR links stay synchronized to the deterministic simulation. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-tsukuba.png">
+        <img src="docs/media/showcase-tsukuba.gif" alt="Mobile robot completing stop-line and signal tasks on a Tsukuba Challenge sidewalk" width="460">
+      </picture>
+      <br><b>Tsukuba Challenge</b><br>
+      <sub>Three stop lines, three signal waits, no roadway entry, and exact replay over 1,253 fixed steps. <a href="docs/media/showcase-tsukuba.json">metadata</a></sub>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-factory.png">
+        <img src="docs/media/showcase-factory.gif" alt="Unitree G1 humanoid completing a three-marker inspection route inside a factory" width="460">
+      </picture>
+      <br><b>Factory inspection</b><br>
+      <sub>Official G1 link meshes, three inspection markers, upright completion, and deterministic replay. <a href="docs/media/showcase-factory.json">metadata</a></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-office.png">
+        <img src="docs/media/showcase-office.gif" alt="Office AGV yielding to an oncoming robot before delivering cargo to a desk" width="460">
+      </picture>
+      <br><b>Office AGV</b><br>
+      <sub>Shared-aisle yield, dock pickup, cargo transport, and desk placement without contact or early drop. <a href="docs/media/showcase-office.json">metadata</a></sub>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-ssl.png">
+        <img src="docs/media/showcase-ssl.gif" alt="Blue and yellow RoboCup SSL robots playing a deterministic two-versus-two match" width="460">
+      </picture>
+      <br><b>RoboCup SSL 2v2</b><br>
+      <sub>Four synchronized robots, a bounded legal kick, in-field ball motion, and a verified yellow-goal finish. <a href="docs/media/showcase-ssl.json">metadata</a></sub>
     </td>
   </tr>
 </table>
@@ -74,7 +74,7 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
 | Vehicle dynamics | Dynamic bicycle model, tire saturation, controller metrics, sensor latency, and deterministic multi-seed evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), examples 49–51 |
 | Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
 | Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
-| Manipulation | URDF arms, grasp/release episodes, articulated Dex3 hands, and task markers | examples 32, 40–42 |
+| Manipulation | Authored PBR mobile manipulator, House 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
 
