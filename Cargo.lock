@@ -4441,6 +4441,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "showcase_captures"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "png",
+ "rne_ai",
+ "rne_assets",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_plateau",
+ "rne_render",
+ "rne_render_wgpu",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "simba"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

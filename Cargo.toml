@@ -126,6 +126,7 @@ members = [
   "examples/87_ssl_physics_coupling",
   "examples/88_house_3dgs_hybrid",
   "examples/89_house_mobile_lift_hero",
+  "examples/90_showcase_captures",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",

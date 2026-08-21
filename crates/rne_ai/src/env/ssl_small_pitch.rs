@@ -303,6 +303,13 @@ impl SslSmallPitchScenario {
         self.observation
     }
 
+    /// Provides read-only access to the four-robot ECS world and ball for
+    /// deterministic render capture and adapter evidence inspection.
+    #[must_use]
+    pub fn simulation(&self) -> &DiffDriveSim {
+        &self.sim
+    }
+
     /// Resolves a bundled robot entity by scene name.
     #[must_use]
     pub fn robot_entity(&self, name: &str) -> Option<Entity> {
