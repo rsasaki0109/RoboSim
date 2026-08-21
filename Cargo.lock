@@ -1840,6 +1840,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "house_3dgs_hybrid"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "humanoid_stand"
 version = "0.1.0"
 dependencies = [

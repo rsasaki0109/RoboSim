@@ -1,0 +1,11 @@
+kind = "rne_gaussian_splat_environment"
+schema_version = 1
+environment_id = "house.indoor.fixture.v1"
+ply_path = "house_3dgs_fixture.ply"
+standin = false
+translation_m = [0.0, 0.0, 0.0]
+rotation_y_rad = 0.0
+scale = 1.0
+renderer_identity = "rne.gaussian_splat.v1"
+coordinate_note = "Deterministic procedural indoor house fixture: right-handed Y-up metres, open front, back window at z=-3.2 m. Semantic point colours are recorded in house_3dgs_fixture.metadata.json."
+
