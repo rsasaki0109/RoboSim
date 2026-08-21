@@ -70,6 +70,7 @@
 | Tsukuba 3DGS background | `cargo run --locked -p tsukuba_3dgs_background --example 78_tsukuba_3dgs_background -- --smoke` | Hybrid splat sidewalk background + mesh overlay; Kenkyugakuen preferred PLY swap with stand-in fixture. Scoring stays in example 75 |
 | Tsukuba full run | `cargo run --locked -p tsukuba_full_run --example 79_tsukuba_full_run -- --smoke` | Headless shortened full-run analog: three official stop-line boxes, signal waits, no roadway entry |
 | G1 head × splat background | `cargo run --locked -p g1_head_splat_background --example 81_g1_head_splat_background -- --smoke` | Official G1 `head_link` camera over Tsukuba 3DGS sidewalk; mesh foreground hybrid capture |
+| Tsukuba 3DGS proxy depth | `cargo run --locked -p tsukuba_3dgs_depth --example 82_tsukuba_3dgs_depth -- --smoke` | CPU Gaussian-mean proxy depth for hybrid RGB-D captures; not true volumetric splat depth |
 | Office AGV delivery | `cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --smoke` | Headless analytic office aisle: stop on pickup dock, then desk delivery box. Not a warehouse twin |
 | Office AGV shared aisle | `cargo run --locked -p office_agv_shared_aisle --example 85_office_agv_shared_aisle -- --smoke` | Yield to a kinematic oncoming AGV, then finish dock-to-desk delivery. Not rne_traffic co-sim |
 | Office AGV desk place | `cargo run --locked -p office_agv_desk_place --example 86_office_agv_desk_place -- --smoke` | Shared-aisle delivery plus kinematic cargo unload into the desk place box. Not friction grasp |

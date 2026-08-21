@@ -4874,6 +4874,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukuba_3dgs_depth"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tsukuba_confirmation"
 version = "0.1.0"
 dependencies = [

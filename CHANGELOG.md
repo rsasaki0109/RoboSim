@@ -74,6 +74,11 @@ All notable changes to Robot Native Engine are documented in this file.
   (example 81). Contest scoring and the full RGB-D DataBus path stay in
   examples 75 and 71.
 
+- Add a CPU Gaussian-mean proxy depth spike for hybrid RGB-D captures
+  (`splat_proxy_depth_from_ply` / `composite_mesh_and_splat_depth`) plus
+  example 82. Contest scoring stays analytic; this does not claim true
+  volumetric splat depth.
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.
