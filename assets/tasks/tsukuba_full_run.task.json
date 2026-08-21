@@ -1,0 +1,139 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.tsukuba.full_run.v1",
+  "control_step_s": 0.016666666666666666,
+  "observation": {
+    "tensors": [
+      {
+        "name": "base_position_m",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "m",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "base_yaw_rad",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "in_roadway",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "stop_line_complete",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "signal_green",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "signal_wait_complete",
+        "dtype": "f64",
+        "shape": [3],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "past_goal",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "wheel_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [2],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [-10.0],
+          "upper": [10.0]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {
+        "name": "forward_progress_m",
+        "weight": 1.0,
+        "unit": "m"
+      },
+      {
+        "name": "step",
+        "weight": -0.001,
+        "unit": "1"
+      },
+      {
+        "name": "full_run_complete",
+        "weight": 10.0,
+        "unit": "1"
+      }
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {
+        "name": "full_run_complete",
+        "kind": "success"
+      },
+      {
+        "name": "stop_line_overshoot",
+        "kind": "failure"
+      },
+      {
+        "name": "roadway_entry",
+        "kind": "failure"
+      }
+    ],
+    "max_episode_steps": 2400
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": true
+  },
+  "curriculum": null,
+  "randomization": null
+}

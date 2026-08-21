@@ -67,6 +67,7 @@
 | SSL small-pitch 2v2 | `cargo run --locked -p ssl_small_pitch --example 76_ssl_small_pitch -- --smoke` | Headless Division B 2v2 analog: yellow-goal, out-of-bounds, and 6.5 m/s ball-speed geometry. Not a grSim protocol clone |
 | G1 workbench mission | `cargo run --locked -p g1_workbench_mission --example 77_g1_workbench_mission -- --smoke` | Headless Grove-G1 analog: park within 0.5 m, then Dex3 pick and place. Not Nav2 or MoveIt |
 | Tsukuba 3DGS background | `cargo run --locked -p tsukuba_3dgs_background --example 78_tsukuba_3dgs_background -- --smoke` | Hybrid splat sidewalk background + mesh overlay for viewer/dataset capture. Scoring stays in example 75 |
+| Tsukuba full run | `cargo run --locked -p tsukuba_full_run --example 79_tsukuba_full_run -- --smoke` | Headless shortened full-run analog: three official stop-line boxes, signal waits, no roadway entry |
 | Office AGV delivery | `cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --smoke` | Headless analytic office aisle: stop on pickup dock, then desk delivery box. Not a warehouse twin |
 | Office AGV shared aisle | `cargo run --locked -p office_agv_shared_aisle --example 85_office_agv_shared_aisle -- --smoke` | Yield to a kinematic oncoming AGV, then finish dock-to-desk delivery. Not rne_traffic co-sim |
 | Office AGV desk place | `cargo run --locked -p office_agv_desk_place --example 86_office_agv_desk_place -- --smoke` | Shared-aisle delivery plus kinematic cargo unload into the desk place box. Not friction grasp |

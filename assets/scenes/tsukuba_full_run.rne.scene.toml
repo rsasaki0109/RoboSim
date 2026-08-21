@@ -1,0 +1,79 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2026
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/tsukuba_confirmation.rne.robot.toml"
+
+[[objects]]
+name = "sidewalk"
+translation_m = [5.5, 0.01, 0.0]
+visual = { shape = "box", size_m = [11.0, 0.02, 2.0], color_rgba = [0.78, 0.76, 0.72, 1.0] }
+
+[[objects]]
+name = "roadway"
+translation_m = [5.5, 0.005, 2.2]
+visual = { shape = "box", size_m = [11.0, 0.01, 2.4], color_rgba = [0.22, 0.22, 0.24, 1.0] }
+
+[[objects]]
+name = "crosswalk_1"
+translation_m = [2.5, 0.015, 0.8]
+visual = { shape = "box", size_m = [0.5, 0.01, 3.6], color_rgba = [0.92, 0.92, 0.90, 1.0] }
+
+[[objects]]
+name = "crosswalk_2"
+translation_m = [5.0, 0.015, 0.8]
+visual = { shape = "box", size_m = [0.5, 0.01, 3.6], color_rgba = [0.92, 0.92, 0.90, 1.0] }
+
+[[objects]]
+name = "crosswalk_3"
+translation_m = [7.5, 0.015, 0.8]
+visual = { shape = "box", size_m = [0.5, 0.01, 3.6], color_rgba = [0.92, 0.92, 0.90, 1.0] }
+
+[[objects]]
+name = "stop_line_1_mark"
+translation_m = [2.5, 0.02, 0.0]
+visual = { shape = "box", size_m = [0.04, 0.01, 2.0], color_rgba = [0.98, 0.98, 0.98, 1.0] }
+
+[[objects]]
+name = "stop_line_2_mark"
+translation_m = [5.0, 0.02, 0.0]
+visual = { shape = "box", size_m = [0.04, 0.01, 2.0], color_rgba = [0.98, 0.98, 0.98, 1.0] }
+
+[[objects]]
+name = "stop_line_3_mark"
+translation_m = [7.5, 0.02, 0.0]
+visual = { shape = "box", size_m = [0.04, 0.01, 2.0], color_rgba = [0.98, 0.98, 0.98, 1.0] }
+
+[[task_markers]]
+name = "start"
+kind = "start"
+translation_m = [0.5, 0.0, 0.0]
+radius_m = 0.3
+
+[[task_markers]]
+name = "stop_line_1"
+kind = "stop_line"
+translation_m = [2.5, 0.0, 0.0]
+radius_m = 1.0
+
+[[task_markers]]
+name = "stop_line_2"
+kind = "stop_line"
+translation_m = [5.0, 0.0, 0.0]
+radius_m = 1.0
+
+[[task_markers]]
+name = "stop_line_3"
+kind = "stop_line"
+translation_m = [7.5, 0.0, 0.0]
+radius_m = 1.0
+
+[[task_markers]]
+name = "full_run_goal"
+kind = "goal"
+translation_m = [10.0, 0.0, 0.0]
+radius_m = 0.4

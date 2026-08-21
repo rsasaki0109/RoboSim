@@ -4825,6 +4825,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukuba_full_run"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

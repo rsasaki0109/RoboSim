@@ -153,9 +153,11 @@ pub use env::{
 };
 pub use env::{
     evaluate_tsukuba_road_edge_stop, evaluate_tsukuba_stop_line, tsukuba_confirmation_scene_path,
-    tsukuba_confirmation_task_spec, TsukubaConfirmationCourse, TsukubaConfirmationFault,
-    TsukubaConfirmationObservation, TsukubaConfirmationScenario, TsukubaPlanarAabb,
-    TsukubaStopJudgement, TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
+    tsukuba_confirmation_task_spec, tsukuba_full_run_scene_path, tsukuba_full_run_task_spec,
+    TsukubaConfirmationCourse, TsukubaConfirmationFault, TsukubaConfirmationObservation,
+    TsukubaConfirmationScenario, TsukubaFullRunCourse, TsukubaFullRunFault,
+    TsukubaFullRunObservation, TsukubaFullRunScenario, TsukubaPlanarAabb, TsukubaStopJudgement,
+    TSUKUBA_CONFIRMATION_TASK_ID, TSUKUBA_FULL_RUN_TASK_ID, TSUKUBA_GREEN_CONE_NAME,
     TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
