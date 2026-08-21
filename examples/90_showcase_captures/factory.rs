@@ -19,7 +19,9 @@ use std::path::Path;
 
 const ENVIRONMENT_ID: &str = "factory";
 const SUBJECT: &str = "Unitree G1 inspection route";
-const CAPTURE_STEPS: u64 = 40;
+const CAPTURE_STEPS: u64 = 270;
+const CAPTURE_FRAME_COUNT: usize = 54;
+const CAPTURE_STRIDE: u64 = CAPTURE_STEPS / CAPTURE_FRAME_COUNT as u64;
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
     yaw_rad: -0.72,
@@ -27,8 +29,9 @@ const CAMERA: CameraEvidence = CameraEvidence {
     distance_m: 2.75,
 };
 
-/// Run the real UnitreeG1InspectionEpisode for the requested forty fixed
-/// steps, then optionally render those exact post-step states with wgpu.
+/// Run the real UnitreeG1InspectionEpisode for the complete three-marker route
+/// (270 fixed steps), then optionally render evenly sampled post-step states
+/// with wgpu.
 pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
     let first = rollout(capture)?;
     let replay = rollout(false)?;
@@ -40,18 +43,32 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
     );
     anyhow::ensure!(
         first.steps == CAPTURE_STEPS,
-        "factory source must run exactly 40 steps"
+        "factory source must run exactly {CAPTURE_STEPS} steps"
     );
+    anyhow::ensure!(
+        first.terminated && !first.truncated,
+        "factory source must terminate successfully without truncation"
+    );
+    anyhow::ensure!(
+        first.completed_markers == 3 && first.marker_count == 3,
+        "factory source must complete 3/3 inspection markers"
+    );
+    if capture {
+        anyhow::ensure!(
+            first.frames.len() == CAPTURE_FRAME_COUNT,
+            "factory capture must contain exactly {CAPTURE_FRAME_COUNT} sampled frames"
+        );
+    }
     let evidence = SimulationEvidence {
-        scenario: "UnitreeG1InspectionEpisode (40 fixed steps)",
+        scenario: "UnitreeG1InspectionEpisode (270 fixed steps; 3 markers)",
         steps: first.steps,
         initial_state_digest: first.initial_digest,
         final_state_digest: first.final_digest,
         replay_final_state_digest: replay.final_digest,
         replay_match: true,
         outcome: format!(
-            "inspection_progress={:.3}; marker={}/{}; official_g1_meshes={}",
-            first.gesture_progress, first.completed_markers, first.marker_count, first.mesh_items
+            "terminated={}; completed_markers={}/{}; official_g1_meshes={}",
+            first.terminated, first.completed_markers, first.marker_count, first.mesh_items
         ),
     };
     let capture_evidence = if capture {
@@ -101,10 +118,11 @@ struct Rollout {
     steps: u64,
     initial_digest: u64,
     final_digest: u64,
-    gesture_progress: f64,
     completed_markers: usize,
     marker_count: usize,
     mesh_items: usize,
+    terminated: bool,
+    truncated: bool,
     frames: Vec<CaptureFrame>,
 }
 
@@ -115,23 +133,33 @@ fn rollout(capture: bool) -> Result<Rollout> {
     let mut frames = Vec::new();
     let mut mesh_cache = MeshRenderCache::new();
     let mut mesh_items = 0;
+    let mut terminal_step = None;
     for step_index in 1..=CAPTURE_STEPS {
         let step = episode.step(UnitreeG1InspectionAction { advance: true });
-        if capture {
+        if capture && (step_index % CAPTURE_STRIDE == 0 || step.terminated || step.truncated) {
             let (scene, current_mesh_items) = render_scene(&episode, &mut mesh_cache)?;
             mesh_items = mesh_items.max(current_mesh_items);
             frames.push(CaptureFrame {
                 step: step_index,
-                phase: if step.observation.gesture_progress > 0.01 {
-                    "point-and-confirm".into()
-                } else {
-                    "factory-approach".into()
-                },
+                phase: capture_phase(step_index, step.observation, step.terminated),
                 scene,
             });
         }
+        if step.terminated || step.truncated {
+            terminal_step = Some(step);
+            break;
+        }
     }
-    let final_observation = episode.current_observation();
+    let terminal_step = terminal_step.context("factory episode did not reach a terminal step")?;
+    let final_observation = terminal_step.observation;
+    anyhow::ensure!(
+        terminal_step.terminated && !terminal_step.truncated,
+        "factory terminal EpisodeStep must be terminated=true and truncated=false"
+    );
+    anyhow::ensure!(
+        final_observation.completed_markers == 3 && final_observation.marker_count == 3,
+        "factory terminal observation must report completed_markers=3 and marker_count=3"
+    );
     if !capture {
         let (_, current_mesh_items) = render_scene(&episode, &mut mesh_cache)?;
         mesh_items = current_mesh_items;
@@ -144,12 +172,32 @@ fn rollout(capture: bool) -> Result<Rollout> {
         steps: episode.step_in_episode(),
         initial_digest,
         final_digest: hash_physics_state(episode.simulation().world()),
-        gesture_progress: final_observation.gesture_progress,
         completed_markers: final_observation.completed_markers,
         marker_count: final_observation.marker_count,
         mesh_items,
+        terminated: terminal_step.terminated,
+        truncated: terminal_step.truncated,
         frames,
     })
+}
+
+fn capture_phase(
+    step_index: u64,
+    observation: rne_ai::UnitreeG1InspectionObservation,
+    terminated: bool,
+) -> String {
+    let marker_count = observation.marker_count.max(1) as u64;
+    let marker_span = (CAPTURE_STEPS / marker_count).max(1);
+    let marker_number = ((step_index.saturating_sub(1) / marker_span) + 1).min(marker_count);
+    let step_in_marker = ((step_index.saturating_sub(1) % marker_span) + 1).min(marker_span);
+    let phase = if terminated || step_in_marker == marker_span {
+        "complete"
+    } else if observation.gesture_progress > 0.01 {
+        "inspect"
+    } else {
+        "approach"
+    };
+    format!("marker-{marker_number}-{phase}")
 }
 
 fn render_scene(
