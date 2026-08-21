@@ -25,7 +25,7 @@ the simulated robot state.
 | Showcase | Required simulation evidence |
 | --- | --- |
 | Mobile manipulation | At least 0.9 m payload transport, at least 12 grasped steps, release after grasp, final placement error at most 0.20 m, end-effector error at most 0.05 m, and no non-planar base motion. |
-| G1 biped locomotion | Dynamic official 23-DoF model, no fall, at least 0.12 m commanded-window progress, bounded height/tilt/torque, and exact replay. The caption must state that sustained long-horizon heading tracking remains outside the current envelope. |
+| G1 biped locomotion | Dynamic official 23-DoF model, no fall, at least 0.12 m commanded-window progress, bounded height/tilt/torque, and exact replay. The caption must state that sustained integrated heading hold remains outside the current envelope (v0.2.1 pins 8 s mean yaw-rate sign only). |
 | Go2 quadruped locomotion | Dynamic official 12-DoF model, all-joint torque walking, two late transport windows, bounded height/tilt/torque, and exact replay. Steering evidence must preserve forward transport rather than pivoting or stalling. |
 | Urban vehicle | The shared PLATEAU city runs 100 actors for 600 or more 60 Hz steps with zero collisions, signal violations, ownership errors, and double integration. The featured vehicle must remain within 2.0 m of its route. |
 | Urban UAV | A rendered quadrotor follows the shared PLATEAU route through bounded acceleration, speed, yaw rate, and tilt; RMS position error is at most 1.0 m, maximum altitude error is at most 0.6 m, minimum building clearance is positive, no collision occurs, and replay digests match. |

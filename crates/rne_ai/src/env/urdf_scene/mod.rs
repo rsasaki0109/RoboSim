@@ -35,10 +35,11 @@ pub use unitree_g1_commanded_gait::{
     run_unitree_g1_commanded_gait, run_unitree_g1_commanded_gait_with_policy,
     step_unitree_g1_hybrid_joint_targets, step_unitree_g1_hybrid_joint_targets_with_limits,
     UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome,
-    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
-    UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
-    UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
-    UNITREE_G1_TORQUE_PD_STIFFNESS,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V02, UNITREE_G1_HEADING_ENVELOPE_STEPS_V021,
+    UNITREE_G1_HEADING_TARGET_CLAMP_RAD, UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE,
+    UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S,
+    UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS,
+    UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
 };
 pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
 pub use unitree_g1_dex3_behavior::{UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario};

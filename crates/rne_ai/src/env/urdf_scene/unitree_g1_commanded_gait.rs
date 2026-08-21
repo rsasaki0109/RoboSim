@@ -35,6 +35,13 @@ pub const UNITREE_G1_TORQUE_LIMIT_NM: f64 = 88.0;
 pub const UNITREE_G1_SPEED_LIMIT_RAD_S: f64 = 30.0;
 /// Fixed simulation interval used by the commanded G1 evaluation in seconds.
 pub const UNITREE_G1_SIM_DT_S: f64 = 1.0 / 60.0;
+/// v0.2 acceptance horizon: final body-yaw sign must match the turn command.
+pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V02: u64 = 240;
+/// v0.2.1 extended horizon: mean yaw-rate sign must match; integrated yaw may
+/// still cross zero because the contact schedule is asymmetric.
+pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V021: u64 = 480;
+/// Bounded absolute heading target used by the v0.2 / v0.2.1 heading contract.
+pub const UNITREE_G1_HEADING_TARGET_CLAMP_RAD: f64 = 0.08;
 
 /// Configuration for one deterministic, headless command-conditioned G1 run.
 #[derive(Clone, Debug, PartialEq)]
@@ -669,20 +676,14 @@ mod tests {
 
     #[test]
     fn v02_heading_candidate_flips_body_yaw_sign_and_reports_turn_metrics() {
-        let candidate = UnitreeG1CommandedTorquePolicy {
-            yaw_rate_kp_nm_per_rad_s: 32.0,
-            max_yaw_torque_nm: 16.0,
-            negative_yaw_rate_gain_scale: 0.5,
-            mirror_yaw_overlay_negative: false,
-            ..UnitreeG1CommandedTorquePolicy::default()
-        };
+        let candidate = UnitreeG1CommandedTorquePolicy::validated_heading();
         let base = UnitreeG1CommandedGaitConfig {
             settle_steps: 60,
-            rollout_steps: 240,
+            rollout_steps: UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
             mirror_negative_yaw: false,
             yaw_hip_yaw_right_sign: -1.0,
             yaw_hip_yaw_target_rad_per_rad_s: 0.0,
-            heading_target_clamp_rad: 0.08,
+            heading_target_clamp_rad: UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
             ..UnitreeG1CommandedGaitConfig::default()
         };
         let left = run_unitree_g1_commanded_gait_with_policy(
@@ -742,5 +743,63 @@ mod tests {
         )
         .expect("deterministic heading replay");
         assert_eq!(left, replay);
+    }
+
+    #[test]
+    fn v021_heading_envelope_keeps_mean_yaw_rate_sign_for_480_ticks() {
+        let candidate = UnitreeG1CommandedTorquePolicy::validated_heading();
+        let base = UnitreeG1CommandedGaitConfig {
+            settle_steps: 60,
+            rollout_steps: UNITREE_G1_HEADING_ENVELOPE_STEPS_V021,
+            mirror_negative_yaw: false,
+            yaw_hip_yaw_right_sign: -1.0,
+            yaw_hip_yaw_target_rad_per_rad_s: 0.0,
+            heading_target_clamp_rad: UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+            ..UnitreeG1CommandedGaitConfig::default()
+        };
+        let left = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: 0.05,
+                },
+                ..base.clone()
+            },
+            candidate,
+        )
+        .expect("left extended heading replay");
+        let right = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: -0.05,
+                },
+                ..base
+            },
+            candidate,
+        )
+        .expect("right extended heading replay");
+
+        for outcome in [left, right] {
+            assert!(!outcome.fell);
+            assert!(outcome.min_height_m > 0.75);
+            assert!(outcome.max_command_nm <= UNITREE_G1_TORQUE_LIMIT_NM);
+            assert!(outcome.mean_yaw_rate_rad_s.is_finite());
+            assert!(outcome.mean_abs_heading_error_rad.is_finite());
+        }
+        assert!(
+            left.mean_yaw_rate_rad_s > 0.005,
+            "left mean yaw rate {:+.4}",
+            left.mean_yaw_rate_rad_s
+        );
+        assert!(
+            right.mean_yaw_rate_rad_s < -0.005,
+            "right mean yaw rate {:+.4}",
+            right.mean_yaw_rate_rad_s
+        );
+        // Integrated yaw may still cross zero on this plant; the extended
+        // contract is the mean-rate sign above, not the final unwrap.
+        assert!(left.total_yaw_rad.is_finite());
+        assert!(right.total_yaw_rad.is_finite());
     }
 }
