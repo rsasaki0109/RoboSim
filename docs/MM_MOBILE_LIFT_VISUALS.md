@@ -23,6 +23,7 @@ Regenerate the pack from the repository root with:
 
 ```text
 python tools/generate_mm_mobile_lift_visuals.py
+python tools/generate_mm_mobile_lift_visuals.py --check
 ```
 
 The generator is standard-library-only and deterministic. The validator

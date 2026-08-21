@@ -609,15 +609,28 @@ LINKS = (
 )
 
 
-def generate(output_dir: Path = OUTPUT_DIR) -> dict[str, tuple[int, str]]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def generate(output_dir: Path = OUTPUT_DIR, *, check: bool = False) -> dict[str, tuple[int, str]]:
+    if not check:
+        output_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[int, str]] = {}
     for link in LINKS:
         for lod in (0, 1):
             filename = f"{link}.lod{lod}.glb"
             payload = make_glb(link, lod)
             path = output_dir / filename
-            path.write_bytes(payload)
+            if check:
+                if not path.is_file():
+                    raise FileNotFoundError(f"generated visual is missing: {path}")
+                committed = path.read_bytes()
+                if committed != payload:
+                    expected = hashlib.sha256(payload).hexdigest()
+                    actual = hashlib.sha256(committed).hexdigest()
+                    raise ValueError(
+                        f"generated visual differs: {path} "
+                        f"(expected sha256:{expected}, actual sha256:{actual})"
+                    )
+            else:
+                path.write_bytes(payload)
             results[filename] = (len(payload), hashlib.sha256(payload).hexdigest())
     return results
 
@@ -625,12 +638,23 @@ def generate(output_dir: Path = OUTPUT_DIR) -> dict[str, tuple[int, str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR, help="output mesh directory")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify existing GLBs are byte-identical without rewriting them",
+    )
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
-    results = generate(output)
+    try:
+        results = generate(output, check=args.check)
+    except (FileNotFoundError, ValueError) as error:
+        print(error, file=sys.stderr)
+        return 1
     for filename in sorted(results):
         size, digest = results[filename]
         print(f"{filename}\t{size}\tsha256:{digest}")
+    if args.check:
+        print(f"verified {len(results)} deterministic GLBs")
     return 0
 
 

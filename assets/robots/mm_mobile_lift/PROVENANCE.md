@@ -28,6 +28,7 @@ Regenerate the complete pack from the repository root with:
 
 ```text
 python tools/generate_mm_mobile_lift_visuals.py
+python tools/generate_mm_mobile_lift_visuals.py --check
 ```
 
 The generator uses only the Python standard library and writes no timestamps,
