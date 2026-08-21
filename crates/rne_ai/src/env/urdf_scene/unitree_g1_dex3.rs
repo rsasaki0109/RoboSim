@@ -14,20 +14,16 @@ pub struct UnitreeG1Dex3HandCommand {
 /// The hand closure is clamped to `[0, 1]` and drives the thumb, index, and
 /// middle finger within their official limits. The inactive left arm and hand
 /// receive explicit neutral targets so contact cannot make them drift.
-///
-/// For the horizontal carry sweep, use
-/// [`unitree_g1_dex3_pick_targets_with_carry`].
 pub fn unitree_g1_dex3_pick_targets(
     approach_blend: f64,
     lift_blend: f64,
     hand: UnitreeG1Dex3HandCommand,
 ) -> Vec<UrdfJointPositionTarget<'static>> {
-    unitree_g1_dex3_pick_targets_with_carry(approach_blend, lift_blend, 0.0, hand)
+    pick_targets_with_carry(approach_blend, lift_blend, 0.0, hand)
 }
 
-/// Like [`unitree_g1_dex3_pick_targets`], with an explicit `carry_blend` sweep
-/// toward the place tray after lift.
-pub fn unitree_g1_dex3_pick_targets_with_carry(
+/// Like [`unitree_g1_dex3_pick_targets`], with an explicit carry sweep after lift.
+pub(crate) fn pick_targets_with_carry(
     approach_blend: f64,
     lift_blend: f64,
     carry_blend: f64,
@@ -132,12 +128,8 @@ mod tests {
     fn inactive_left_arm_stays_in_the_same_neutral_pose() {
         let approach =
             unitree_g1_dex3_pick_targets(0.0, 0.0, UnitreeG1Dex3HandCommand { closure: 0.0 });
-        let carry = unitree_g1_dex3_pick_targets_with_carry(
-            1.0,
-            1.0,
-            1.0,
-            UnitreeG1Dex3HandCommand { closure: 1.0 },
-        );
+        let carry =
+            pick_targets_with_carry(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
         for link_name in [
             "left_shoulder_pitch_link",
             "left_shoulder_roll_link",
@@ -167,18 +159,10 @@ mod tests {
 
     #[test]
     fn carry_blend_sweeps_waist_and_right_arm_toward_the_place_zone() {
-        let lifted = unitree_g1_dex3_pick_targets_with_carry(
-            1.0,
-            1.0,
-            0.0,
-            UnitreeG1Dex3HandCommand { closure: 1.0 },
-        );
-        let carried = unitree_g1_dex3_pick_targets_with_carry(
-            1.0,
-            1.0,
-            1.0,
-            UnitreeG1Dex3HandCommand { closure: 1.0 },
-        );
+        let lifted =
+            pick_targets_with_carry(1.0, 1.0, 0.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+        let carried =
+            pick_targets_with_carry(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
         let position = |targets: &[UrdfJointPositionTarget<'_>], link_name: &str| {
             targets
                 .iter()

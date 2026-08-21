@@ -1,5 +1,5 @@
 use super::{
-    unitree_g1_dex3_pick_targets, unitree_g1_dex3_pick_targets_with_carry,
+    unitree_g1_dex3::pick_targets_with_carry, unitree_g1_dex3_pick_targets,
     unitree_g1_dex3_scene_path, UnitreeG1Dex3HandCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
 use crate::{DeterministicRng, Episode, EpisodeStep};
@@ -58,7 +58,6 @@ const WORKCELL_OBJECTS: [&str; 3] = [
 
 /// Script phase reported by [`UnitreeG1Dex3Episode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum UnitreeG1Dex3Phase {
     /// Move the open hand around the part.
@@ -68,10 +67,8 @@ pub enum UnitreeG1Dex3Phase {
     Close,
     /// Raise a two-sided grasp to the carry height.
     Lift,
-    /// Stabilize the arm before release (legacy name; same window as [`Self::Carry`]).
+    /// Sweep the raised grasp toward the place tray (hold / carry window).
     Hold,
-    /// Sweep the raised grasp toward the place tray (loco-manipulation carry analog).
-    Carry,
     /// Open the hand and let the part settle in the tray.
     Place,
     /// The released part is settled inside the place zone.
@@ -80,7 +77,6 @@ pub enum UnitreeG1Dex3Phase {
 
 /// Configuration for the fixed-base G1 29-DoF + Dex3 task.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
 pub struct UnitreeG1Dex3EpisodeConfig {
     /// Scene containing the official G1, Dex3 hand, part, and tray.
     pub scene_path: PathBuf,
@@ -122,8 +118,6 @@ pub struct UnitreeG1Dex3EpisodeConfig {
     pub use_pose_follow_grasp: bool,
     /// End successfully as soon as a stable grasp is acquired.
     pub terminate_on_grasp: bool,
-    /// Skip the horizontal carry sweep and release immediately after lift.
-    pub skip_carry: bool,
 }
 
 impl Default for UnitreeG1Dex3EpisodeConfig {
@@ -149,7 +143,6 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             cartesian_tracking_gain: 0.0,
             use_pose_follow_grasp: false,
             terminate_on_grasp: false,
-            skip_carry: false,
         }
     }
 }
@@ -180,7 +173,6 @@ pub struct UnitreeG1Dex3Action {
 
 /// Observation emitted by [`UnitreeG1Dex3Episode`].
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct UnitreeG1Dex3Observation {
     /// Current task phase.
@@ -219,8 +211,6 @@ pub struct UnitreeG1Dex3Observation {
     pub part_position_offset_m: [f64; 3],
     /// Whether the payload reached the required lift height.
     pub lifted: bool,
-    /// Whether a lifted grasp completed the horizontal carry toward the place zone.
-    pub carried: bool,
     /// Whether the released payload is settled inside the place zone.
     pub placed: bool,
     /// Whether any inactive left-hand link contacted a task workcell object.
@@ -248,6 +238,7 @@ pub struct UnitreeG1Dex3Episode {
     place_distance_at_lift_m: Option<f64>,
     max_carry_progress_m: f64,
     carried: bool,
+    skip_carry: bool,
 }
 
 impl UnitreeG1Dex3Episode {
@@ -281,11 +272,22 @@ impl UnitreeG1Dex3Episode {
             place_distance_at_lift_m: None,
             max_carry_progress_m: 0.0,
             carried: false,
+            skip_carry: false,
         })
     }
 
+    /// Skip the horizontal carry sweep and release immediately after lift.
+    pub(crate) fn set_skip_carry(&mut self, skip_carry: bool) {
+        self.skip_carry = skip_carry;
+    }
+
+    /// Whether a lifted grasp completed the horizontal carry toward the place zone.
+    pub(crate) fn carried(&self) -> bool {
+        self.carried
+    }
+
     fn carry_steps(&self) -> u64 {
-        if self.config.skip_carry {
+        if self.skip_carry {
             0
         } else {
             DEFAULT_CARRY_STEPS
@@ -326,8 +328,7 @@ impl UnitreeG1Dex3Episode {
         } else if self.script_step < LIFT_START_STEP + LIFT_STEPS {
             UnitreeG1Dex3Phase::Lift
         } else if self.script_step < release {
-            // Prefer Carry; Hold remains as the legacy name for the same window.
-            UnitreeG1Dex3Phase::Carry
+            UnitreeG1Dex3Phase::Hold
         } else {
             UnitreeG1Dex3Phase::Place
         }
@@ -380,7 +381,6 @@ impl UnitreeG1Dex3Episode {
             grasp_attempt: self.grasp_attempt,
             part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
-            carried: self.carried,
             placed,
             inactive_hand_workcell_contact: any_named_contact(
                 &self.sim,
@@ -445,7 +445,6 @@ impl UnitreeG1Dex3Episode {
             grasp_attempt: self.grasp_attempt,
             part_position_offset_m: self.part_position_offset_m,
             lifted: self.max_part_height_m >= MIN_LIFT_HEIGHT_M,
-            carried: self.carried,
             placed: self.was_grasped
                 && !grasped
                 && place_distance_m <= marker.3
@@ -551,7 +550,7 @@ impl Episode for UnitreeG1Dex3Episode {
                     &mut self.arm_correction_rad,
                 );
             }
-            let mut targets = unitree_g1_dex3_pick_targets_with_carry(
+            let mut targets = pick_targets_with_carry(
                 approach,
                 lift,
                 carry,
@@ -1368,7 +1367,7 @@ mod tests {
                 );
                 assert!(observation.was_grasped);
                 assert!(observation.lifted);
-                assert!(observation.carried);
+                assert!(first.carried());
                 assert!(observation.placed);
                 assert!(!observation.grasped);
                 assert_eq!(observation.stable_contact_steps, 0);

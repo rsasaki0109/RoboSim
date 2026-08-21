@@ -10,7 +10,7 @@
 //! v3 adds carry-before-place: the pinned-pelvis Dex3 plant still runs, but the
 //! mission requires an explicit horizontal carry sweep (`observation.carried`)
 //! before place. `SkipCarry` walks the approach normally, then starts Dex3 with
-//! `skip_carry: true`.
+//! the carry window skipped.
 
 use super::{
     unitree_g1_factory_scene_path, UnitreeG1Dex3Action, UnitreeG1Dex3Episode,
@@ -83,7 +83,7 @@ pub enum UnitreeG1WorkbenchFault {
     SkipApproach,
     /// Complete the park, then never start manipulation.
     DropPart,
-    /// Walk the approach normally, then start Dex3 with `skip_carry: true`.
+    /// Walk the approach normally, then start Dex3 with the carry window skipped.
     SkipCarry,
 }
 
@@ -229,11 +229,7 @@ impl UnitreeG1WorkbenchMissionScenario {
                 .hands
                 .as_ref()
                 .is_some_and(|hands| hands.current_observation().was_grasped);
-        let carried = self.carried
-            || self
-                .hands
-                .as_ref()
-                .is_some_and(|hands| hands.current_observation().carried);
+        let carried = self.carried || self.hands.as_ref().is_some_and(|hands| hands.carried());
         let placed = self.placed
             || self
                 .hands
@@ -274,16 +270,12 @@ impl UnitreeG1WorkbenchMissionScenario {
 
     fn start_dex3(&mut self) {
         self.walk = None;
-        let config = if matches!(self.fault, UnitreeG1WorkbenchFault::SkipCarry) {
-            UnitreeG1Dex3EpisodeConfig {
-                skip_carry: true,
-                ..UnitreeG1Dex3EpisodeConfig::default()
-            }
-        } else {
-            UnitreeG1Dex3EpisodeConfig::default()
-        };
-        self.hands =
-            Some(UnitreeG1Dex3Episode::new(config).expect("load Dex3 workcell after approach"));
+        let mut hands = UnitreeG1Dex3Episode::new(UnitreeG1Dex3EpisodeConfig::default())
+            .expect("load Dex3 workcell after approach");
+        if matches!(self.fault, UnitreeG1WorkbenchFault::SkipCarry) {
+            hands.set_skip_carry(true);
+        }
+        self.hands = Some(hands);
     }
 }
 
@@ -462,7 +454,7 @@ impl BehaviorScenario for UnitreeG1WorkbenchMissionScenario {
             if step.observation.was_grasped {
                 self.grasped = true;
             }
-            if step.observation.carried {
+            if hands.carried() {
                 self.carried = true;
             }
             if step.observation.placed {
