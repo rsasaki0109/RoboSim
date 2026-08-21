@@ -26,6 +26,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
     PhysicsCapability::Articulation,
     PhysicsCapability::ContactForce,
+    PhysicsCapability::RaycastBatch,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -100,7 +101,7 @@ pub struct MuJoCoColliderHandle(pub(crate) u32);
 /// bodies use free joints, fixed bodies are welded into the compiled world, and
 /// state crosses the backend boundary through RNE transforms and velocities.
 /// Contact reporting includes canonical pair aggregation and sensor overlaps;
-/// raycasts remain a separate capability.
+/// raycasts advertise `raycast_batch` via repeated native `mj_ray` queries.
 #[derive(Debug)]
 pub struct MuJoCoBackend {
     model_source: ModelSource,
@@ -1078,12 +1079,69 @@ impl PhysicsBackend for MuJoCoBackend {
 
     fn raycast(
         &self,
-        _physics_world: PhysicsWorldId,
-        _query: RaycastQuery,
+        physics_world: PhysicsWorldId,
+        query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError> {
-        Err(PhysicsError::MissingCapabilities {
-            missing: vec![PhysicsCapability::RaycastBatch],
-        })
+        let world_state = self.world(physics_world)?;
+        let Some(data) = world_state.data.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let direction = query.direction;
+        if direction.length_squared() <= f64::EPSILON {
+            return Ok(Vec::new());
+        }
+        let direction = direction.normalize();
+        let origin = query.origin_m;
+        let pnt = [origin.x, origin.y, origin.z];
+        let vec = [direction.x, direction.y, direction.z];
+        let geom_entities = world_state.geom_entities.clone();
+        let geom_bodyid = data.model().geom_bodyid().to_vec();
+        let max_hits = geom_entities.len().max(1);
+
+        // SAFETY: `PhysicsBackend::raycast` is `&self`, but MuJoCo's `mj_ray`
+        // wrapper takes `&mut MjData` for output scratch. This adapter never
+        // shares a world across threads, and no other `&mut MjData` borrow is
+        // live during an immutable backend query.
+        let data = unsafe { &mut *(std::ptr::from_ref(data) as *mut MjData<Box<MjModel>>) };
+
+        // `mj_ray` returns only the nearest hit. Walk farther hits by excluding
+        // each previously hit body so the batch contract matches Rapier.
+        let mut hits = Vec::new();
+        let mut excluded_body: Option<usize> = None;
+        for _ in 0..max_hits {
+            let mut normal = [0.0_f64; 3];
+            let (geom_id, distance_m) =
+                data.ray(&pnt, &vec, None, true, excluded_body, Some(&mut normal));
+            if distance_m < 0.0 || distance_m > query.max_distance_m {
+                break;
+            }
+            let Some(geom_id) = geom_id else {
+                break;
+            };
+            excluded_body = geom_bodyid
+                .get(geom_id)
+                .copied()
+                .and_then(|id| usize::try_from(id).ok());
+            let Some(entity) = geom_entities.get(geom_id).copied().flatten() else {
+                continue;
+            };
+            if !normal.iter().all(|value| value.is_finite()) || !distance_m.is_finite() {
+                return Err(Self::map_error(MuJoCoError::NonFiniteState("raycast hit")));
+            }
+            hits.push(RaycastHit {
+                entity,
+                point_m: origin + direction * distance_m,
+                normal: Vec3::new(normal[0], normal[1], normal[2]),
+                distance_m,
+            });
+        }
+
+        hits.sort_by(|left, right| {
+            left.distance_m
+                .total_cmp(&right.distance_m)
+                .then_with(|| left.entity.index().cmp(&right.entity.index()))
+        });
+        Ok(hits)
     }
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
