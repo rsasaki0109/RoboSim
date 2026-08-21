@@ -8,6 +8,7 @@ pub mod robot;
 pub mod run;
 pub mod scene;
 pub mod spawn;
+pub mod visual;
 
 pub use error::AssetError;
 pub use pipeline::{
@@ -35,4 +36,9 @@ pub use spawn::{
     load_and_spawn_scene, spawn_robot_asset, spawn_robot_asset_with_sources, spawn_scene,
     spawn_scene_bundle, spawn_scene_with_sources, LidarMountSpawned, RobotSensorMounts,
     SpawnSceneOptions, SpawnedRobot, SpawnedScene, UrdfSourceMap, WristCameraMountSpawned,
+};
+pub use visual::{
+    load_visual_manifest, parse_visual_manifest, validate_visual_manifest, VisualBudget,
+    VisualLink, VisualManifest, MM_MOBILE_LIFT_COORDINATE_SYSTEM, MM_MOBILE_LIFT_MODEL_NAME,
+    MM_MOBILE_LIFT_REQUIRED_LINKS, MM_MOBILE_LIFT_VISUAL_MANIFEST_VERSION,
 };
