@@ -2,17 +2,25 @@
 //!
 //! Speaks the official UDP ports from
 //! <https://github.com/RoboCup-SSL/ssl-simulation-protocol> without pulling
-//! protobuf into core crates. This is a wire spike: it does not run physics
-//! or replace the headless geometry scorer in `rne_ai::ssl_small_pitch`.
+//! protobuf into core crates. Field geometry scoring stays in
+//! `rne_ai::ssl_small_pitch`. This adapter owns wire decode/encode plus the
+//! kinematics helpers that map SSL move/teleport commands onto RNE Y-up
+//! planar / differential-drive stand-ins.
 
 #![deny(missing_docs)]
 
+mod kinematics;
 mod ports;
 /// Wire message types matching ssl-simulation-protocol field tags.
 pub mod proto;
 mod robot_control;
 mod udp;
 
+pub use kinematics::{
+    planar_velocity_to_diff_drive, ssl_ball_teleport_to_rne_m, ssl_global_velocity_to_rne_planar,
+    ssl_local_velocity_to_rne_planar, ssl_move_to_diff_drive, SslDiffDriveWheelSpeeds,
+    SSL_STAND_IN_TRACK_WIDTH_M, SSL_STAND_IN_WHEEL_RADIUS_M,
+};
 pub use ports::{
     SslSimulationPorts, SSL_ROBOT_CONTROL_BLUE_PORT, SSL_ROBOT_CONTROL_YELLOW_PORT,
     SSL_SIM_CONTROL_PORT,

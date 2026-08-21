@@ -4,6 +4,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Couple SSL simulation-protocol UDP commands into the Division B small-pitch
+  plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
+  map them onto differential-drive stand-ins and ball teleports, and keep geometry
+  judges in `rne.ssl.small_pitch_2v2.v1`.
+
 ### Fixed
 
 - Repair CI merge blockers from the Tsukuba 3DGS landing: restore

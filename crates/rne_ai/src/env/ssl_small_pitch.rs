@@ -303,6 +303,58 @@ impl SslSmallPitchScenario {
         self.observation
     }
 
+    /// Resolves a bundled robot entity by scene name.
+    #[must_use]
+    pub fn robot_entity(&self, name: &str) -> Option<Entity> {
+        self.sim
+            .robots()
+            .iter()
+            .find(|robot| entity_name(self.sim.world(), robot.robot) == Some(name))
+            .map(|robot| robot.robot)
+    }
+
+    /// Teleports the golf ball in RNE Y-up meters and clears its planar velocity.
+    ///
+    /// Used by the SSL adapter coupling path after decoding a `TeleportBall`
+    /// command. Returns false when the ball entity is missing.
+    pub fn teleport_ball_m(&mut self, translation_m: [f64; 3]) -> bool {
+        let Some(entity) = entity_named(self.sim.world(), SSL_BALL_NAME) else {
+            return false;
+        };
+        if let Some(mut transform) = self.sim.world_mut().get_mut::<Transform3>(entity) {
+            transform.translation = Vec3::new(translation_m[0], translation_m[1], translation_m[2]);
+        } else {
+            return false;
+        }
+        if let Some(mut body) = self.sim.world_mut().get_mut::<RigidBody>(entity) {
+            body.linear_velocity_m_s = Vec3::ZERO;
+            body.angular_velocity_rad_s = Vec3::ZERO;
+        }
+        self.observation = self.observe_world();
+        true
+    }
+
+    /// Applies explicit wheel actions and advances one physics step.
+    ///
+    /// Robots omitted from `actions` receive a zero command for this tick.
+    pub fn step_with_actions(
+        &mut self,
+        actions: &[(Entity, DiffDriveAction)],
+    ) -> SslSmallPitchObservation {
+        let mut queued = Vec::with_capacity(self.sim.robots().len());
+        for robot in self.sim.robots() {
+            let action = actions
+                .iter()
+                .find(|(entity, _)| *entity == robot.robot)
+                .map(|(_, action)| *action)
+                .unwrap_or_else(|| DiffDriveAction::forward(0.0));
+            queued.push((robot.robot, action));
+        }
+        self.sim.step_robots_actions(&queued);
+        self.observation = self.observe_world();
+        self.observation
+    }
+
     fn observe_world(&self) -> SslSmallPitchObservation {
         let ball = named_translation(self.sim.world(), SSL_BALL_NAME).unwrap_or(Vec3::ZERO);
         let ball_speed_m_s = named_planar_speed(self.sim.world(), SSL_BALL_NAME);
@@ -586,6 +638,32 @@ mod tests {
 
         let blue = evaluate_ssl_ball_region(pitch, -4.5 - SSL_BALL_RADIUS_M, 0.0);
         assert_eq!(blue, SslBallRegion::BlueGoal);
+    }
+
+    #[test]
+    fn teleport_ball_updates_geometry_judges() {
+        let mut scenario = SslSmallPitchScenario::success(1).expect("scenario");
+        assert!(scenario.teleport_ball_m([4.6, SSL_BALL_RADIUS_M, 0.0]));
+        let observation = scenario.current_observation();
+        assert_eq!(observation.ball_region, SslBallRegion::YellowGoal);
+        assert!(observation.yellow_goal());
+    }
+
+    #[test]
+    fn coupled_local_velocity_moves_the_attacker() {
+        let mut scenario = SslSmallPitchScenario::success(1).expect("scenario");
+        let attacker = scenario
+            .robot_entity(ATTACKER_NAME)
+            .expect("attacker entity");
+        let start = scenario.current_observation().attacker_x_m;
+        for _ in 0..90 {
+            scenario.step_with_actions(&[(attacker, DiffDriveAction::forward(CRUISE_WHEEL_RAD_S))]);
+        }
+        let now = scenario.current_observation().attacker_x_m;
+        assert!(
+            now > start + 0.3,
+            "coupled forward command should advance attacker, start={start:.3} now={now:.3}"
+        );
     }
 
     #[test]

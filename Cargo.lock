@@ -4553,6 +4553,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssl_physics_coupling"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "rne_adapter_ssl",
+ "rne_ai",
+]
+
+[[package]]
 name = "ssl_small_pitch"
 version = "0.1.0"
 dependencies = [

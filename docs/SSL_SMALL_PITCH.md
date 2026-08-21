@@ -26,8 +26,10 @@ cargo run --locked -p ssl_small_pitch --example 76_ssl_small_pitch -- --smoke
 
 ## Not in this slice
 
-- Full simulator process / physics coupling (see [SSL_ADAPTER.md](SSL_ADAPTER.md) for the UDP wire spike)
+- Full simulator process / multi-client persistence
 - ssl-vision cameras, Game Controller, AutoRef
 - omniwheel kiwi drive (diff-drive stand-ins)
 - 11 vs 11
 - kick / chip / dribbler hardware
+
+UDP protocol coupling into this plant lives in example 87 / [SSL_ADAPTER.md](SSL_ADAPTER.md).

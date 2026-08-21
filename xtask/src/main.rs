@@ -2620,6 +2620,9 @@ fn run_asset_smokes() -> anyhow::Result<()> {
     run_step("cargo run --locked -p ssl_small_pitch --example 76_ssl_small_pitch -- --smoke")?;
     run_step("cargo run --locked -p ssl_adapter_smoke --example 80_ssl_adapter_smoke -- --smoke")?;
     run_step(
+        "cargo run --locked -p ssl_physics_coupling --example 87_ssl_physics_coupling -- --smoke",
+    )?;
+    run_step(
         "cargo run --locked -p g1_workbench_mission --example 77_g1_workbench_mission -- --smoke",
     )?;
     run_step(
