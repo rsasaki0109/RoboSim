@@ -13,5 +13,7 @@ simulation protocol.
 
 ## Crates
 
-- `rne_adapter_ssl`: UDP ports 10300–10302 encode/decode helpers and a
-  loopback spike for `RobotControl` / minimal `SimulatorCommand`
+- `rne_adapter_ssl`: UDP ports 10300–10302 encode/decode helpers, kinematics
+  mapping onto differential-drive stand-ins, and loopback smoke for
+  `RobotControl` / minimal `SimulatorCommand`. Example 87 couples those
+  commands into `ssl_small_pitch`.

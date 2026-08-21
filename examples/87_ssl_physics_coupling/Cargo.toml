@@ -1,0 +1,16 @@
+[package]
+name = "ssl_physics_coupling"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+prost = { workspace = true }
+rne_adapter_ssl = { workspace = true }
+rne_ai = { workspace = true }
+
+[[example]]
+name = "87_ssl_physics_coupling"
+path = "main.rs"
