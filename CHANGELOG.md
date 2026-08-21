@@ -16,6 +16,11 @@ All notable changes to Robot Native Engine are documented in this file.
   budgets, and next-slice mesh-authoring acceptance evidence without claiming
   that a finished mesh is shipped.
 
+- Ship the authored `mm_mobile_lift` visual pack: deterministic standard-
+  library GLB generation for all ten links at LOD0/LOD1, embedded PBR maps and
+  bevel/curved detail, an active visual manifest, and URDF visual replacement
+  that leaves collision, joints, limits, and inertial data unchanged.
+
 - Couple SSL simulation-protocol UDP commands into the Division B small-pitch
   plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
   map them onto differential-drive stand-ins and ball teleports, and keep geometry

@@ -1,0 +1,75 @@
+schema_version = 1
+robot_model = "mm_mobile_lift"
+visual_only = true
+coordinate_system = "rne_y_up_x_forward"
+physics_asset = "mm_mobile_lift.urdf"
+provenance = "PROVENANCE.md"
+
+[budget]
+# Budgets are evaluated over the complete ten-link pack.  Each individual
+# link stays well below the 120k/40k LOD targets documented in provenance.
+max_lod0_triangles = 120000
+max_lod1_triangles = 40000
+max_texture_size_px = 2048
+max_texture_bytes = 16777216
+max_materials = 80
+
+[[links]]
+name = "base_link"
+mesh = "meshes/base_link.lod0.glb"
+lod1_mesh = "meshes/base_link.lod1.glb"
+required = true
+
+[[links]]
+name = "left_wheel"
+mesh = "meshes/left_wheel.lod0.glb"
+lod1_mesh = "meshes/left_wheel.lod1.glb"
+required = true
+
+[[links]]
+name = "right_wheel"
+mesh = "meshes/right_wheel.lod0.glb"
+lod1_mesh = "meshes/right_wheel.lod1.glb"
+required = true
+
+[[links]]
+name = "torso_link"
+mesh = "meshes/torso_link.lod0.glb"
+lod1_mesh = "meshes/torso_link.lod1.glb"
+required = true
+
+[[links]]
+name = "upper_arm_link"
+mesh = "meshes/upper_arm_link.lod0.glb"
+lod1_mesh = "meshes/upper_arm_link.lod1.glb"
+required = true
+
+[[links]]
+name = "forearm_link"
+mesh = "meshes/forearm_link.lod0.glb"
+lod1_mesh = "meshes/forearm_link.lod1.glb"
+required = true
+
+[[links]]
+name = "wrist_link"
+mesh = "meshes/wrist_link.lod0.glb"
+lod1_mesh = "meshes/wrist_link.lod1.glb"
+required = true
+
+[[links]]
+name = "gripper_base_link"
+mesh = "meshes/gripper_base_link.lod0.glb"
+lod1_mesh = "meshes/gripper_base_link.lod1.glb"
+required = true
+
+[[links]]
+name = "left_finger_link"
+mesh = "meshes/left_finger_link.lod0.glb"
+lod1_mesh = "meshes/left_finger_link.lod1.glb"
+required = true
+
+[[links]]
+name = "right_finger_link"
+mesh = "meshes/right_finger_link.lod0.glb"
+lod1_mesh = "meshes/right_finger_link.lod1.glb"
+required = true
