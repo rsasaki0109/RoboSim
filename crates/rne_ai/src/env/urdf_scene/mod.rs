@@ -70,9 +70,9 @@ pub use unitree_g1_parts_episode::{
     UnitreeG1PartsObservation, UnitreeG1PartsPhase,
 };
 pub use unitree_g1_workbench_mission::{
-    unitree_g1_workbench_task_spec, UnitreeG1WorkbenchFault, UnitreeG1WorkbenchMissionScenario,
-    UnitreeG1WorkbenchObservation, G1_WORKBENCH_ARM_WINDOW_M, G1_WORKBENCH_MIN_PELVIS_Y_M,
-    G1_WORKBENCH_MISSION_TASK_ID, G1_WORKBENCH_PARK_RADIUS_M,
+    unitree_g1_workbench_task_spec, UnitreeG1WorkbenchFault, UnitreeG1WorkbenchMissionConfig,
+    UnitreeG1WorkbenchMissionScenario, UnitreeG1WorkbenchObservation, G1_WORKBENCH_ARM_WINDOW_M,
+    G1_WORKBENCH_MIN_PELVIS_Y_M, G1_WORKBENCH_MISSION_TASK_ID, G1_WORKBENCH_PARK_RADIUS_M,
 };
 pub use unitree_go2_episode::{
     unitree_go2_task_spec, UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig,

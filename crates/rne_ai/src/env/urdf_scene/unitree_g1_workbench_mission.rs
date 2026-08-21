@@ -1,8 +1,11 @@
-//! Grove-G1 style workbench mission: walk into the 0.5 m park, then pick and place.
+//! Grove-G1 style workbench mission v2: park, close to the arm window, then Dex3.
 //!
 //! This is not a ROS 2 / Nav2 / MoveIt port. Approach uses the dynamic G1 factory
 //! plant. Manipulation uses the existing pelvis-pinned Dex3 workcell, matching
 //! Grove's split between a navigation world and `pin_pelvis` manipulation.
+//!
+//! v2 tightens the handoff: Dex3 starts only after the geometric 0.2 m arm
+//! window (tunable), and `DropPart` refuses manipulation after a successful park.
 
 use super::{
     unitree_g1_factory_scene_path, UnitreeG1Dex3Action, UnitreeG1Dex3Episode,
@@ -23,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-/// Portable task identity for the G1 workbench mission.
-pub const G1_WORKBENCH_MISSION_TASK_ID: &str = "rne.g1.workbench_mission.v1";
+/// Portable task identity for the G1 workbench mission v2.
+pub const G1_WORKBENCH_MISSION_TASK_ID: &str = "rne.g1.workbench_mission.v2";
 /// Grove Nav2 park radius: stay within 0.5 m of the goal pose.
 pub const G1_WORKBENCH_PARK_RADIUS_M: f64 = 0.5;
 /// Grove arm usable window after the last closed-loop approach.
@@ -34,17 +37,45 @@ pub const G1_WORKBENCH_MIN_PELVIS_Y_M: f64 = 0.55;
 
 const CONTROL_HZ: f64 = 60.0;
 const DEFAULT_MAX_STEPS: u64 = 800;
+const DEFAULT_WALK_MAX_STEPS: u64 = 400;
 const WORKBENCH_MARKER: &str = "inspection_parts_check";
+
+/// Tunable radii and budgets for the workbench mission.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitreeG1WorkbenchMissionConfig {
+    /// Park radius in meters (Grove Nav2 stop).
+    pub park_radius_m: f64,
+    /// Arm-window radius in meters required before Dex3 handoff.
+    pub arm_window_m: f64,
+    /// Maximum approach steps on the walking plant.
+    pub walk_max_steps: u64,
+    /// Maximum total mission steps across both plants.
+    pub max_steps: u64,
+    /// Pelvis height floor in meters during approach.
+    pub min_pelvis_y_m: f64,
+}
+
+impl Default for UnitreeG1WorkbenchMissionConfig {
+    fn default() -> Self {
+        Self {
+            park_radius_m: G1_WORKBENCH_PARK_RADIUS_M,
+            arm_window_m: G1_WORKBENCH_ARM_WINDOW_M,
+            walk_max_steps: DEFAULT_WALK_MAX_STEPS,
+            max_steps: DEFAULT_MAX_STEPS,
+            min_pelvis_y_m: G1_WORKBENCH_MIN_PELVIS_Y_M,
+        }
+    }
+}
 
 /// Injected workbench-mission faults.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UnitreeG1WorkbenchFault {
-    /// Walk into the park radius, then Dex3 pick and place.
+    /// Walk into the park and arm window, then Dex3 pick and place.
     #[default]
     None,
     /// Skip the walking plant and start in the pinned-pelvis workcell.
     SkipApproach,
-    /// Complete the approach, then never start manipulation.
+    /// Complete the park, then never start manipulation.
     DropPart,
 }
 
@@ -55,11 +86,11 @@ pub struct UnitreeG1WorkbenchObservation {
     pub step: u64,
     /// Horizontal distance to the workbench marker in meters.
     pub workbench_distance_m: f64,
-    /// Pelvis height in meters during approach, or the Dex3 base height later.
+    /// Pelvis height in meters during approach, or the Dex3 part height later.
     pub pelvis_y_m: f64,
-    /// Inside Grove's 0.5 m Nav2 park radius.
+    /// Inside Grove's park radius.
     pub parked: bool,
-    /// Object is inside the 0.2 m arm window, or the pinned workcell has started.
+    /// Inside the geometric arm window (required before Dex3 in v2).
     pub in_arm_window: bool,
     /// Walking plant stayed upright.
     pub upright: bool,
@@ -76,13 +107,15 @@ pub struct UnitreeG1WorkbenchMissionScenario {
     walk: Option<UnitreeG1InspectionEpisode>,
     hands: Option<UnitreeG1Dex3Episode>,
     fault: UnitreeG1WorkbenchFault,
-    max_steps: u64,
+    config: UnitreeG1WorkbenchMissionConfig,
     parked: bool,
     in_arm_window: bool,
     upright: bool,
     grasped: bool,
     placed: bool,
     step: u64,
+    last_distance_m: f64,
+    last_pelvis_y_m: f64,
     observation: UnitreeG1WorkbenchObservation,
     scenario_input_digest: u64,
     dimensions: Vec<BehaviorDimension>,
@@ -93,6 +126,7 @@ impl std::fmt::Debug for UnitreeG1WorkbenchMissionScenario {
         formatter
             .debug_struct("UnitreeG1WorkbenchMissionScenario")
             .field("fault", &self.fault)
+            .field("config", &self.config)
             .field("observation", &self.observation)
             .finish_non_exhaustive()
     }
@@ -104,8 +138,17 @@ impl UnitreeG1WorkbenchMissionScenario {
         Self::new(seed, UnitreeG1WorkbenchFault::None)
     }
 
-    /// Loads both plants required by the selected fault.
+    /// Loads both plants required by the selected fault with default radii.
     pub fn new(seed: u64, fault: UnitreeG1WorkbenchFault) -> Result<Self, AssetError> {
+        Self::with_config(seed, fault, UnitreeG1WorkbenchMissionConfig::default())
+    }
+
+    /// Loads the mission with tunable park / arm-window / step budgets.
+    pub fn with_config(
+        seed: u64,
+        fault: UnitreeG1WorkbenchFault,
+        config: UnitreeG1WorkbenchMissionConfig,
+    ) -> Result<Self, AssetError> {
         let _ = seed;
         let factory = unitree_g1_factory_scene_path();
         let dex3 = super::unitree_g1_dex3_scene_path();
@@ -116,7 +159,7 @@ impl UnitreeG1WorkbenchMissionScenario {
             Some(UnitreeG1InspectionEpisode::new(
                 UnitreeG1InspectionEpisodeConfig {
                     marker_names: vec![WORKBENCH_MARKER.into()],
-                    max_steps: 300,
+                    max_steps: config.walk_max_steps,
                     ..UnitreeG1InspectionEpisodeConfig::default()
                 },
             )?)
@@ -132,13 +175,16 @@ impl UnitreeG1WorkbenchMissionScenario {
             walk,
             hands,
             fault,
-            max_steps: DEFAULT_MAX_STEPS,
+            config,
             parked: false,
+            // SkipApproach intentionally synthesizes the arm window so only park fails.
             in_arm_window: matches!(fault, UnitreeG1WorkbenchFault::SkipApproach),
             upright: true,
             grasped: false,
             placed: false,
             step: 0,
+            last_distance_m: f64::INFINITY,
+            last_pelvis_y_m: 0.8,
             observation: placeholder_observation(),
             scenario_input_digest,
             dimensions: fault_dimensions(fault),
@@ -153,15 +199,18 @@ impl UnitreeG1WorkbenchMissionScenario {
         self.observation
     }
 
+    /// Active mission configuration.
+    #[must_use]
+    pub fn config(&self) -> UnitreeG1WorkbenchMissionConfig {
+        self.config
+    }
+
     fn observe(&self) -> UnitreeG1WorkbenchObservation {
         let (workbench_distance_m, pelvis_y_m) = if let Some(walk) = &self.walk {
             let obs = walk.current_observation();
             (obs.marker_distance_m, obs.base_position_m[1])
-        } else if let Some(hands) = &self.hands {
-            let obs = hands.current_observation();
-            (G1_WORKBENCH_ARM_WINDOW_M, obs.part_position_m[1])
         } else {
-            (f64::INFINITY, 0.0)
+            (self.last_distance_m, self.last_pelvis_y_m)
         };
         let grasped = self.grasped
             || self
@@ -201,12 +250,20 @@ impl UnitreeG1WorkbenchMissionScenario {
         SimDuration::from_ticks(
             SimDuration::from_hertz(Hertz::new(CONTROL_HZ))
                 .ticks()
-                .saturating_mul(self.max_steps),
+                .saturating_mul(self.config.max_steps),
         )
+    }
+
+    fn start_dex3(&mut self) {
+        self.walk = None;
+        self.hands = Some(
+            UnitreeG1Dex3Episode::new(UnitreeG1Dex3EpisodeConfig::default())
+                .expect("load Dex3 workcell after approach"),
+        );
     }
 }
 
-/// Portable TaskSpec for the workbench mission.
+/// Portable TaskSpec for the workbench mission v2.
 #[must_use]
 pub fn unitree_g1_workbench_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(
@@ -270,9 +327,12 @@ impl BehaviorScenario for UnitreeG1WorkbenchMissionScenario {
     }
 
     fn scenario_digest(&self) -> u64 {
-        let mut bytes = b"g1_workbench_mission_v1".to_vec();
+        let mut bytes = b"g1_workbench_mission_v2".to_vec();
         bytes.extend_from_slice(&self.scenario_input_digest.to_le_bytes());
-        bytes.extend_from_slice(&self.max_steps.to_le_bytes());
+        bytes.extend_from_slice(&self.config.max_steps.to_le_bytes());
+        bytes.extend_from_slice(&self.config.walk_max_steps.to_le_bytes());
+        bytes.extend_from_slice(&self.config.park_radius_m.to_bits().to_le_bytes());
+        bytes.extend_from_slice(&self.config.arm_window_m.to_bits().to_le_bytes());
         bytes.push(match self.fault {
             UnitreeG1WorkbenchFault::None => 0,
             UnitreeG1WorkbenchFault::SkipApproach => 1,
@@ -330,29 +390,37 @@ impl BehaviorScenario for UnitreeG1WorkbenchMissionScenario {
         if let Some(walk) = &mut self.walk {
             let step = walk.step(UnitreeG1InspectionAction { advance: true });
             self.step += 1;
-            if step.observation.base_position_m[1] < G1_WORKBENCH_MIN_PELVIS_Y_M {
+            self.last_distance_m = step.observation.marker_distance_m;
+            self.last_pelvis_y_m = step.observation.base_position_m[1];
+            if step.observation.base_position_m[1] < self.config.min_pelvis_y_m {
                 self.upright = false;
             }
-            if step.observation.marker_distance_m <= G1_WORKBENCH_PARK_RADIUS_M {
+            if step.observation.marker_distance_m <= self.config.park_radius_m {
                 self.parked = true;
             }
-            if step.observation.marker_distance_m <= G1_WORKBENCH_ARM_WINDOW_M {
+            if step.observation.marker_distance_m <= self.config.arm_window_m {
                 self.in_arm_window = true;
             }
-            if step.terminated && matches!(self.fault, UnitreeG1WorkbenchFault::None) {
+
+            let walk_exhausted = step.truncated
+                || walk.step_in_episode() >= self.config.walk_max_steps
+                || self.step >= self.config.max_steps;
+            let ready_for_dex3 = self.parked && self.in_arm_window;
+
+            if matches!(self.fault, UnitreeG1WorkbenchFault::DropPart) && self.parked {
+                // Parked, then refuse the Dex3 plant.
                 self.walk = None;
-                self.in_arm_window = true;
-                self.hands = Some(
-                    UnitreeG1Dex3Episode::new(UnitreeG1Dex3EpisodeConfig::default())
-                        .expect("load Dex3 workcell after approach"),
-                );
-            } else if step.terminated || step.truncated {
+            } else if matches!(self.fault, UnitreeG1WorkbenchFault::None) && ready_for_dex3 {
+                // v2: geometric arm window required before handoff.
+                self.start_dex3();
+            } else if walk_exhausted {
                 self.walk = None;
             }
+            // Keep stepping after inspection "terminated" so the plant can close
+            // from the 0.5 m park into the 0.2 m arm window.
         } else if let Some(hands) = &mut self.hands {
             let step = hands.step(UnitreeG1Dex3Action { advance: true });
             self.step += 1;
-            self.in_arm_window = true;
             if step.observation.was_grasped {
                 self.grasped = true;
             }
@@ -368,10 +436,8 @@ impl BehaviorScenario for UnitreeG1WorkbenchMissionScenario {
         self.observation = self.observe();
         let done = self.observation.mission_complete
             || !self.observation.upright
-            || self.step >= self.max_steps
-            || (self.walk.is_none()
-                && self.hands.is_none()
-                && !matches!(self.fault, UnitreeG1WorkbenchFault::None));
+            || self.step >= self.config.max_steps
+            || (self.walk.is_none() && self.hands.is_none());
         BehaviorScenarioStep {
             observation: self.observation,
             done,
@@ -473,5 +539,49 @@ mod tests {
             .find(|contract| contract.name == "park_within_0_5_m")
             .expect("park contract");
         assert_eq!(park.status, BehaviorContractStatus::Failed);
+    }
+
+    #[test]
+    fn dropping_the_part_fails_grasp_after_park() {
+        let report = run_behavior_scenarios("g1_workbench_drop_part", [1], |seed| {
+            UnitreeG1WorkbenchMissionScenario::new(seed, UnitreeG1WorkbenchFault::DropPart)
+        });
+        assert_eq!(report.seeds[0].status, BehaviorSeedStatus::Failed);
+        let park = report.seeds[0]
+            .contracts
+            .iter()
+            .find(|contract| contract.name == "park_within_0_5_m")
+            .expect("park contract");
+        let grasped = report.seeds[0]
+            .contracts
+            .iter()
+            .find(|contract| contract.name == "grasped")
+            .expect("grasped contract");
+        assert_eq!(park.status, BehaviorContractStatus::Passed);
+        assert_eq!(grasped.status, BehaviorContractStatus::Failed);
+    }
+
+    #[test]
+    fn tighter_arm_window_is_configurable() {
+        let config = UnitreeG1WorkbenchMissionConfig {
+            arm_window_m: 0.01,
+            walk_max_steps: 120,
+            max_steps: 120,
+            ..UnitreeG1WorkbenchMissionConfig::default()
+        };
+        let report = run_behavior_scenarios("g1_workbench_tight_arm", [1], |seed| {
+            UnitreeG1WorkbenchMissionScenario::with_config(
+                seed,
+                UnitreeG1WorkbenchFault::None,
+                config,
+            )
+        });
+        assert_eq!(report.seeds[0].status, BehaviorSeedStatus::Failed);
+        let arm = report.seeds[0]
+            .contracts
+            .iter()
+            .find(|contract| contract.name == "arm_window_0_2_m")
+            .expect("arm window contract");
+        assert_eq!(arm.status, BehaviorContractStatus::Failed);
     }
 }
