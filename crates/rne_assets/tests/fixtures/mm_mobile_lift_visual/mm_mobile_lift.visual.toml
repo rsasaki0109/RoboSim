@@ -1,0 +1,61 @@
+schema_version = 1
+robot_model = "mm_mobile_lift"
+visual_only = true
+coordinate_system = "rne_y_up_x_forward"
+
+[budget]
+max_lod0_triangles = 2
+max_lod1_triangles = 2
+max_texture_size_px = 1
+max_texture_bytes = 4
+max_materials = 1
+
+[[links]]
+name = "base_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "left_wheel"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "right_wheel"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "torso_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "upper_arm_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "forearm_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "wrist_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "gripper_base_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "left_finger_link"
+mesh = "meshes/tiny.stl"
+required = true
+
+[[links]]
+name = "right_finger_link"
+mesh = "meshes/tiny.stl"
+required = true

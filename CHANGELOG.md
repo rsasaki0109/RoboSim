@@ -11,6 +11,11 @@ All notable changes to Robot Native Engine are documented in this file.
   README references, budget ceilings, and per-capture regeneration commands;
   document the catalog in `docs/README_SHOWCASE.md`.
 
+- Add a fail-closed `mm_mobile_lift` visual-manifest contract and provenance
+  record; pin its 10-link hierarchy, visual-only physics boundary, LOD/PBR
+  budgets, and next-slice mesh-authoring acceptance evidence without claiming
+  that a finished mesh is shipped.
+
 - Couple SSL simulation-protocol UDP commands into the Division B small-pitch
   plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
   map them onto differential-drive stand-ins and ball teleports, and keep geometry
