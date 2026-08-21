@@ -1320,6 +1320,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_head_splat_background"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "rne_world",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "g1_heading_turn"
 version = "0.1.0"
 dependencies = [

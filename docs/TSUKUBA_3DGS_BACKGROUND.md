@@ -47,6 +47,13 @@ Capture reports record `environment_id`, `renderer_identity`, `ply_sha256`, and
 - `assets/environments/tsukuba_kenkyugakuen.rne.splat.toml`
 - `assets/environments/tsukuba_confirmation_fixture.ply` (tiny committed fixture)
 
+Replace the PLY with a real Kenkyugakuen scan later; keep the manifest
+`environment_id` and record `renderer_identity` in dataset manifests.
+
+## Related
+
+- G1 head-camera hybrid capture: [G1_HEAD_SPLAT_BACKGROUND.md](G1_HEAD_SPLAT_BACKGROUND.md)
+
 ## Not in this slice
 
 - Shipping a multi-GB Kenkyugakuen PLY in git

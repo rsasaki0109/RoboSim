@@ -324,6 +324,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [SSL simulation-protocol adapter](docs/SSL_ADAPTER.md)
 - [G1 workbench mission](docs/G1_WORKBENCH_MISSION.md)
 - [Tsukuba 3DGS background](docs/TSUKUBA_3DGS_BACKGROUND.md)
+- [G1 head × splat background](docs/G1_HEAD_SPLAT_BACKGROUND.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)

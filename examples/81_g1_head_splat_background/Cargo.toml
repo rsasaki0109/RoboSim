@@ -1,0 +1,22 @@
+[package]
+name = "g1_head_splat_background"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png = { workspace = true }
+rne_ai = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_3dgs = { workspace = true }
+rne_render_wgpu = { workspace = true }
+rne_world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[example]]
+name = "81_g1_head_splat_background"
+path = "main.rs"
