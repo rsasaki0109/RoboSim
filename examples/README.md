@@ -69,6 +69,7 @@
 | Tsukuba 3DGS background | `cargo run --locked -p tsukuba_3dgs_background --example 78_tsukuba_3dgs_background -- --smoke` | Hybrid splat sidewalk background + mesh overlay for viewer/dataset capture. Scoring stays in example 75 |
 | Office AGV delivery | `cargo run --locked -p office_agv_delivery --example 84_office_agv_delivery -- --smoke` | Headless analytic office aisle: stop on pickup dock, then desk delivery box. Not a warehouse twin |
 | Office AGV shared aisle | `cargo run --locked -p office_agv_shared_aisle --example 85_office_agv_shared_aisle -- --smoke` | Yield to a kinematic oncoming AGV, then finish dock-to-desk delivery. Not rne_traffic co-sim |
+| Office AGV desk place | `cargo run --locked -p office_agv_desk_place --example 86_office_agv_desk_place -- --smoke` | Shared-aisle delivery plus kinematic cargo unload into the desk place box. Not friction grasp |
 | Asset CLI | `cargo run -p rne_asset_cli -- validate assets/scenes/episode_diff_drive.rne.scene.toml --spawn` | Validate, inspect, watch asset files |
 | Headless scene runner | `cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay` | Fixed-step scene execution, typed wheel command, per-step physics hashes, and `.rne-replay` output |
 | Replay artifact | `cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay` | Re-runs the recorded action schedule and verifies every frame |

@@ -134,6 +134,11 @@ pub use env::{
     OFFICE_PICKUP_DOCK_NAME,
 };
 pub use env::{
+    evaluate_office_desk_place, office_agv_desk_place_task_path, office_agv_desk_place_task_spec,
+    OfficeAgvDeskPlaceCourse, OfficeAgvDeskPlaceFault, OfficeAgvDeskPlaceObservation,
+    OfficeAgvDeskPlaceScenario, OFFICE_AGV_DESK_PLACE_TASK_ID, OFFICE_CARGO_NAME,
+};
+pub use env::{
     evaluate_office_shared_aisle_block, office_agv_shared_aisle_task_path,
     office_agv_shared_aisle_task_spec, OfficeAgvSharedAisleCourse, OfficeAgvSharedAisleFault,
     OfficeAgvSharedAisleObservation, OfficeAgvSharedAisleScenario, OFFICE_AGV_SHARED_AISLE_TASK_ID,

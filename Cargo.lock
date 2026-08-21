@@ -2843,6 +2843,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "office_agv_desk_place"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
 name = "office_agv_shared_aisle"
 version = "0.1.0"
 dependencies = [

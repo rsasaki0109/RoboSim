@@ -40,6 +40,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a headless office AGV desk-place mission that unloads kinematic cargo
+  into a desk place box after shared-aisle delivery
+  (`rne.office.agv_desk_place.v1`).
+
 - Add a headless office AGV shared-aisle delivery analog that yields to a
   kinematic oncoming AGV, then completes dock-to-desk scoring
   (`rne.office.agv_shared_aisle.v1`).
