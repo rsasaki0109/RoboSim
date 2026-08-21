@@ -1,0 +1,9 @@
+newmtl blue_metal
+Kd 0.08 0.24 0.72
+Ns 180.0
+d 1.0
+
+newmtl orange_polymer
+Kd 0.92 0.24 0.04
+Ns 18.0
+d 1.0

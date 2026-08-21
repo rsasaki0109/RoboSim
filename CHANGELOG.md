@@ -21,6 +21,10 @@ All notable changes to Robot Native Engine are documented in this file.
   bevel/curved detail, an active visual manifest, and URDF visual replacement
   that leaves collision, joints, limits, and inertial data unchanged.
 
+- Preserve material-homogeneous mesh parts and all decoded PBR maps in
+  `MeshRenderCache`, so animated link scenes can reuse GLBs across capture
+  frames without flattening their authored materials.
+
 - Couple SSL simulation-protocol UDP commands into the Division B small-pitch
   plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
   map them onto differential-drive stand-ins and ball teleports, and keep geometry
