@@ -41,7 +41,9 @@ pub use unitree_g1_commanded_gait::{
     UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS,
     UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
 };
-pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
+pub use unitree_g1_dex3::{
+    unitree_g1_dex3_pick_targets, unitree_g1_dex3_pick_targets_with_carry, UnitreeG1Dex3HandCommand,
+};
 pub use unitree_g1_dex3_behavior::{UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario};
 pub use unitree_g1_dex3_episode::{
     UnitreeG1Dex3Action, UnitreeG1Dex3Episode, UnitreeG1Dex3EpisodeConfig,
@@ -2118,7 +2120,6 @@ mod tests {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 1.0,
                 0.0,
-                0.0,
                 UnitreeG1Dex3HandCommand { closure: 0.0 },
             ));
         }
@@ -2133,7 +2134,6 @@ mod tests {
         for _ in 0..40 {
             sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
                 1.0,
-                0.0,
                 0.0,
                 UnitreeG1Dex3HandCommand { closure: 1.0 },
             ));

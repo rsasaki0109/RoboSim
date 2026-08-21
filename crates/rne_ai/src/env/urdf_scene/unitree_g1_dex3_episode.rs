@@ -1,6 +1,6 @@
 use super::{
-    unitree_g1_dex3_pick_targets, unitree_g1_dex3_scene_path, UnitreeG1Dex3HandCommand,
-    UrdfJointPositionTarget, UrdfSceneSim,
+    unitree_g1_dex3_pick_targets, unitree_g1_dex3_pick_targets_with_carry,
+    unitree_g1_dex3_scene_path, UnitreeG1Dex3HandCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
 use crate::{DeterministicRng, Episode, EpisodeStep};
 use rne_assets::{AssetError, SceneAsset};
@@ -58,6 +58,7 @@ const WORKCELL_OBJECTS: [&str; 3] = [
 
 /// Script phase reported by [`UnitreeG1Dex3Episode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum UnitreeG1Dex3Phase {
     /// Move the open hand around the part.
@@ -67,6 +68,8 @@ pub enum UnitreeG1Dex3Phase {
     Close,
     /// Raise a two-sided grasp to the carry height.
     Lift,
+    /// Stabilize the arm before release (legacy name; same window as [`Self::Carry`]).
+    Hold,
     /// Sweep the raised grasp toward the place tray (loco-manipulation carry analog).
     Carry,
     /// Open the hand and let the part settle in the tray.
@@ -77,6 +80,7 @@ pub enum UnitreeG1Dex3Phase {
 
 /// Configuration for the fixed-base G1 29-DoF + Dex3 task.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct UnitreeG1Dex3EpisodeConfig {
     /// Scene containing the official G1, Dex3 hand, part, and tray.
     pub scene_path: PathBuf,
@@ -176,6 +180,7 @@ pub struct UnitreeG1Dex3Action {
 
 /// Observation emitted by [`UnitreeG1Dex3Episode`].
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct UnitreeG1Dex3Observation {
     /// Current task phase.
@@ -321,6 +326,7 @@ impl UnitreeG1Dex3Episode {
         } else if self.script_step < LIFT_START_STEP + LIFT_STEPS {
             UnitreeG1Dex3Phase::Lift
         } else if self.script_step < release {
+            // Prefer Carry; Hold remains as the legacy name for the same window.
             UnitreeG1Dex3Phase::Carry
         } else {
             UnitreeG1Dex3Phase::Place
@@ -545,7 +551,7 @@ impl Episode for UnitreeG1Dex3Episode {
                     &mut self.arm_correction_rad,
                 );
             }
-            let mut targets = unitree_g1_dex3_pick_targets(
+            let mut targets = unitree_g1_dex3_pick_targets_with_carry(
                 approach,
                 lift,
                 carry,
@@ -931,7 +937,6 @@ fn configured_sim(config: &UnitreeG1Dex3EpisodeConfig) -> Result<UrdfSceneSim, A
 fn settle(sim: &mut UrdfSceneSim) {
     for _ in 0..SETTLE_STEPS {
         sim.step_joint_position_targets(&unitree_g1_dex3_pick_targets(
-            0.0,
             0.0,
             0.0,
             UnitreeG1Dex3HandCommand { closure: 0.0 },

@@ -10,12 +10,24 @@ pub struct UnitreeG1Dex3HandCommand {
 /// Generates a fixed-base G1 29-DoF arm pose and an articulated Dex3 pinch.
 ///
 /// `approach_blend` transitions from a slightly retracted pose to the low work
-/// pose, `lift_blend` raises that work pose to the carry height, and
-/// `carry_blend` sweeps the raised grasp toward the place tray. The hand
-/// closure is clamped to `[0, 1]` and drives the thumb, index, and middle
-/// finger within their official limits. The inactive left arm and hand receive
-/// explicit neutral targets so contact cannot make them drift.
+/// pose, while `lift_blend` transitions that work pose to the raised carry pose.
+/// The hand closure is clamped to `[0, 1]` and drives the thumb, index, and
+/// middle finger within their official limits. The inactive left arm and hand
+/// receive explicit neutral targets so contact cannot make them drift.
+///
+/// For the horizontal carry sweep, use
+/// [`unitree_g1_dex3_pick_targets_with_carry`].
 pub fn unitree_g1_dex3_pick_targets(
+    approach_blend: f64,
+    lift_blend: f64,
+    hand: UnitreeG1Dex3HandCommand,
+) -> Vec<UrdfJointPositionTarget<'static>> {
+    unitree_g1_dex3_pick_targets_with_carry(approach_blend, lift_blend, 0.0, hand)
+}
+
+/// Like [`unitree_g1_dex3_pick_targets`], with an explicit `carry_blend` sweep
+/// toward the place tray after lift.
+pub fn unitree_g1_dex3_pick_targets_with_carry(
     approach_blend: f64,
     lift_blend: f64,
     carry_blend: f64,
@@ -92,10 +104,9 @@ mod tests {
 
     #[test]
     fn dex3_targets_clamp_and_close_all_three_fingers() {
-        let open =
-            unitree_g1_dex3_pick_targets(-1.0, -1.0, 0.0, UnitreeG1Dex3HandCommand::default());
+        let open = unitree_g1_dex3_pick_targets(-1.0, -1.0, UnitreeG1Dex3HandCommand::default());
         let closed =
-            unitree_g1_dex3_pick_targets(2.0, 2.0, 0.0, UnitreeG1Dex3HandCommand { closure: 2.0 });
+            unitree_g1_dex3_pick_targets(2.0, 2.0, UnitreeG1Dex3HandCommand { closure: 2.0 });
         assert_eq!(open.len(), closed.len());
         assert!(open.iter().all(|target| target.position.is_finite()));
         for link_name in [
@@ -120,9 +131,13 @@ mod tests {
     #[test]
     fn inactive_left_arm_stays_in_the_same_neutral_pose() {
         let approach =
-            unitree_g1_dex3_pick_targets(0.0, 0.0, 0.0, UnitreeG1Dex3HandCommand { closure: 0.0 });
-        let carry =
-            unitree_g1_dex3_pick_targets(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+            unitree_g1_dex3_pick_targets(0.0, 0.0, UnitreeG1Dex3HandCommand { closure: 0.0 });
+        let carry = unitree_g1_dex3_pick_targets_with_carry(
+            1.0,
+            1.0,
+            1.0,
+            UnitreeG1Dex3HandCommand { closure: 1.0 },
+        );
         for link_name in [
             "left_shoulder_pitch_link",
             "left_shoulder_roll_link",
@@ -152,10 +167,18 @@ mod tests {
 
     #[test]
     fn carry_blend_sweeps_waist_and_right_arm_toward_the_place_zone() {
-        let lifted =
-            unitree_g1_dex3_pick_targets(1.0, 1.0, 0.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
-        let carried =
-            unitree_g1_dex3_pick_targets(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+        let lifted = unitree_g1_dex3_pick_targets_with_carry(
+            1.0,
+            1.0,
+            0.0,
+            UnitreeG1Dex3HandCommand { closure: 1.0 },
+        );
+        let carried = unitree_g1_dex3_pick_targets_with_carry(
+            1.0,
+            1.0,
+            1.0,
+            UnitreeG1Dex3HandCommand { closure: 1.0 },
+        );
         let position = |targets: &[UrdfJointPositionTarget<'_>], link_name: &str| {
             targets
                 .iter()
