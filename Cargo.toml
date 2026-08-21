@@ -125,6 +125,7 @@ members = [
   "examples/86_office_agv_desk_place",
   "examples/87_ssl_physics_coupling",
   "examples/88_house_3dgs_hybrid",
+  "examples/89_house_mobile_lift_hero",
   "tests/determinism",
   "tests/dynamics",
   "tests/fuzz_smoke",

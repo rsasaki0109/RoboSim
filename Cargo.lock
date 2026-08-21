@@ -1854,6 +1854,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "house_mobile_lift_hero"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "png",
+ "rne_ai",
+ "rne_assets",
+ "rne_math",
+ "rne_physics",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "rne_world",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "humanoid_stand"
 version = "0.1.0"
 dependencies = [
