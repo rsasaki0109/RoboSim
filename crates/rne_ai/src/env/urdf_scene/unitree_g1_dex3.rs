@@ -19,8 +19,19 @@ pub fn unitree_g1_dex3_pick_targets(
     lift_blend: f64,
     hand: UnitreeG1Dex3HandCommand,
 ) -> Vec<UrdfJointPositionTarget<'static>> {
+    pick_targets_with_carry(approach_blend, lift_blend, 0.0, hand)
+}
+
+/// Like [`unitree_g1_dex3_pick_targets`], with an explicit carry sweep after lift.
+pub(crate) fn pick_targets_with_carry(
+    approach_blend: f64,
+    lift_blend: f64,
+    carry_blend: f64,
+    hand: UnitreeG1Dex3HandCommand,
+) -> Vec<UrdfJointPositionTarget<'static>> {
     let approach = smoothstep(approach_blend.clamp(0.0, 1.0));
     let lift = smoothstep(lift_blend.clamp(0.0, 1.0));
+    let carry = smoothstep(carry_blend.clamp(0.0, 1.0));
     let closure = smoothstep(hand.closure.clamp(0.0, 1.0));
     vec![
         target("left_hip_pitch_link", -0.18),
@@ -29,7 +40,7 @@ pub fn unitree_g1_dex3_pick_targets(
         target("right_hip_pitch_link", -0.18),
         target("right_knee_link", 0.36),
         target("right_ankle_pitch_link", -0.18),
-        target("waist_yaw_link", 0.0),
+        target("waist_yaw_link", 0.28 * carry),
         target("waist_roll_link", 0.0),
         target("torso_link", 0.0),
         target("left_shoulder_pitch_link", 0.0),
@@ -48,17 +59,20 @@ pub fn unitree_g1_dex3_pick_targets(
         target("left_hand_index_1_link", 0.0),
         target(
             "right_shoulder_pitch_link",
-            0.18 * (1.0 - approach) * (1.0 - lift) - 0.58 * lift,
+            0.18 * (1.0 - approach) * (1.0 - lift) - 0.58 * lift - 0.08 * carry,
         ),
-        target("right_shoulder_roll_link", -0.20 - 0.09 * lift),
-        target("right_shoulder_yaw_link", -0.15 * lift),
+        target(
+            "right_shoulder_roll_link",
+            -0.20 - 0.09 * lift - 0.06 * carry,
+        ),
+        target("right_shoulder_yaw_link", -0.15 * lift - 0.40 * carry),
         target(
             "right_elbow_link",
-            (0.55 - 0.13 * approach) * (1.0 - lift) + 0.30 * lift,
+            (0.55 - 0.13 * approach) * (1.0 - lift) + 0.30 * lift + 0.05 * carry,
         ),
         target("right_wrist_roll_link", 0.18 * lift),
         target("right_wrist_pitch_link", 0.0),
-        target("right_wrist_yaw_link", 0.0),
+        target("right_wrist_yaw_link", 0.10 * carry),
         target("right_hand_thumb_0_link", 0.0),
         target("right_hand_thumb_1_link", -0.75 * closure),
         target("right_hand_thumb_2_link", -1.15 * closure),
@@ -115,7 +129,7 @@ mod tests {
         let approach =
             unitree_g1_dex3_pick_targets(0.0, 0.0, UnitreeG1Dex3HandCommand { closure: 0.0 });
         let carry =
-            unitree_g1_dex3_pick_targets(1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+            pick_targets_with_carry(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
         for link_name in [
             "left_shoulder_pitch_link",
             "left_shoulder_roll_link",
@@ -141,5 +155,25 @@ mod tests {
             };
             assert_eq!(position(&approach), position(&carry), "{link_name}");
         }
+    }
+
+    #[test]
+    fn carry_blend_sweeps_waist_and_right_arm_toward_the_place_zone() {
+        let lifted =
+            pick_targets_with_carry(1.0, 1.0, 0.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+        let carried =
+            pick_targets_with_carry(1.0, 1.0, 1.0, UnitreeG1Dex3HandCommand { closure: 1.0 });
+        let position = |targets: &[UrdfJointPositionTarget<'_>], link_name: &str| {
+            targets
+                .iter()
+                .find(|target| target.link_name == link_name)
+                .expect(link_name)
+                .position
+        };
+        assert!(position(&carried, "waist_yaw_link") > position(&lifted, "waist_yaw_link"));
+        assert!(
+            position(&carried, "right_shoulder_yaw_link")
+                < position(&lifted, "right_shoulder_yaw_link")
+        );
     }
 }

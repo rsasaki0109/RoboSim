@@ -1,7 +1,7 @@
 {
   "kind": "rne_task_spec",
   "schema_version": 1,
-  "task_id": "rne.g1.workbench_mission.v2",
+  "task_id": "rne.g1.workbench_mission.v3",
   "control_step_s": 0.016666666666666666,
   "observation": {
     "tensors": [
@@ -56,6 +56,17 @@
       },
       {
         "name": "grasped",
+        "dtype": "f64",
+        "shape": [],
+        "unit": "1",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [0.0],
+          "upper": [1.0]
+        }
+      },
+      {
+        "name": "carried",
         "dtype": "f64",
         "shape": [],
         "unit": "1",
@@ -128,7 +139,7 @@
         "kind": "failure"
       }
     ],
-    "max_episode_steps": 800
+    "max_episode_steps": 840
   },
   "reset": {
     "seed_strategy": "split_mix64_lane_episode_v1",

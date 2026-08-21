@@ -62,6 +62,10 @@ All notable changes to Robot Native Engine are documented in this file.
   `SimulatorCommand`. Core crates stay protobuf-free; geometry scoring stays in
   example 76.
 
+- Add an explicit carry-before-place phase to the Grove-G1 workbench mission v3
+  (`observation.carried`, `carry_before_place`, `SkipCarry` / `--skip-carry`)
+  on the pinned Dex3 plant (`rne.g1.workbench_mission.v3`).
+
 - Tighten the Grove-G1 workbench mission to v2: Dex3 starts only after the
   geometric 0.2 m arm window, park/arm/walk budgets are tunable, and `--smoke`
   covers the `DropPart` fault (`rne.g1.workbench_mission.v2`).
