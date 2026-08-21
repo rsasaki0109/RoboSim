@@ -10,6 +10,9 @@ All notable changes to Robot Native Engine are documented in this file.
   plant (example 87): decode `RobotControl` / `TeleportBall` in `rne_adapter_ssl`,
   map them onto differential-drive stand-ins and ball teleports, and keep geometry
   judges in `rne.ssl.small_pitch_2v2.v1`.
+- Advertise MuJoCo `raycast_batch`: walk multi-hit rays through repeated native
+  `mj_ray` queries with body exclusion so ordered distances match the shared
+  external conformance vector used by Rapier.
 
 ### Fixed
 

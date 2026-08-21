@@ -495,3 +495,47 @@ fn rejects_wrong_step_and_post_compile_topology_change() {
         Err(PhysicsError::InitializationFailed)
     ));
 }
+
+#[test]
+fn raycast_returns_ordered_hits_for_stacked_cuboids() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc::default())
+        .expect("physics world");
+    let mut world = World::new();
+    let near = spawn_body(
+        &mut world,
+        "ray_near",
+        RigidBodyType::Fixed,
+        Collider::cuboid(Vec3::splat(0.5)),
+        Vec3::ZERO,
+    );
+    let far = spawn_body(
+        &mut world,
+        "ray_far",
+        RigidBodyType::Fixed,
+        Collider::cuboid(Vec3::splat(0.5)),
+        Vec3::new(0.0, -2.0, 0.0),
+    );
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .expect("compile");
+    let hits = backend
+        .raycast(
+            physics_world,
+            rne_physics::RaycastQuery::downward(Vec3::new(0.0, 5.0, 0.0), 10.0),
+        )
+        .expect("raycast");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].entity, near);
+    assert_eq!(hits[1].entity, far);
+    assert!(hits[0].distance_m < hits[1].distance_m);
+    let miss = backend
+        .raycast(
+            physics_world,
+            rne_physics::RaycastQuery::downward(Vec3::new(10.0, 5.0, 0.0), 10.0),
+        )
+        .expect("miss");
+    assert!(miss.is_empty());
+}

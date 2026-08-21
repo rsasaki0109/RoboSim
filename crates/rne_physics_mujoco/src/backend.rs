@@ -16,6 +16,7 @@ use rne_physics::{
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
 use thiserror::Error;
 
 const FREE_FALL_BODY_NAME: &str = "rne_free_fall_body";
@@ -26,6 +27,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RigidBody,
     PhysicsCapability::Articulation,
     PhysicsCapability::ContactForce,
+    PhysicsCapability::RaycastBatch,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -100,7 +102,7 @@ pub struct MuJoCoColliderHandle(pub(crate) u32);
 /// bodies use free joints, fixed bodies are welded into the compiled world, and
 /// state crosses the backend boundary through RNE transforms and velocities.
 /// Contact reporting includes canonical pair aggregation and sensor overlaps;
-/// raycasts remain a separate capability.
+/// raycasts advertise `raycast_batch` via repeated native `mj_ray` queries.
 #[derive(Debug)]
 pub struct MuJoCoBackend {
     model_source: ModelSource,
@@ -116,7 +118,9 @@ enum ModelSource {
 
 #[derive(Debug)]
 struct MuJoCoWorld {
-    data: Option<MjData<Box<MjModel>>>,
+    /// Interior mutability lets `&self` raycasts use MuJoCo's `&mut MjData` API
+    /// while keeping [`PhysicsBackend`]'s `Sync` bound.
+    data: Mutex<Option<MjData<Box<MjModel>>>>,
     desc: PhysicsWorldDesc,
     bindings: Vec<BodyBinding>,
     topology: Vec<BodyTopology>,
@@ -126,6 +130,14 @@ struct MuJoCoWorld {
     geom_entities: Vec<Option<Entity>>,
     sensor_geoms: Vec<bool>,
     contacts: Vec<ContactEvent>,
+}
+
+impl MuJoCoWorld {
+    fn lock_data(&self) -> std::sync::MutexGuard<'_, Option<MjData<Box<MjModel>>>> {
+        self.data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -848,7 +860,7 @@ impl PhysicsBackend for MuJoCoBackend {
         self.worlds.insert(
             id,
             MuJoCoWorld {
-                data,
+                data: Mutex::new(data),
                 desc,
                 bindings: Vec::new(),
                 topology: Vec::new(),
@@ -898,37 +910,36 @@ impl PhysicsBackend for MuJoCoBackend {
                 });
             return Err(Self::map_error(MuJoCoError::TopologyChanged { detail }));
         }
-        if world_state.data.is_none() || world_state.joint_dynamics != compiled.joint_dynamics {
+        if world_state.lock_data().is_none()
+            || world_state.joint_dynamics != compiled.joint_dynamics
+        {
             let model = MjModel::from_xml_string(&compiled.mjcf)
                 .map_err(|error| Self::map_error(MuJoCoError::ModelLoad(error.to_string())))?;
             require_compiled_model(&model, &compiled.bindings).map_err(Self::map_error)?;
             let data = MjData::try_new(Box::new(model))
                 .map_err(|_| Self::map_error(MuJoCoError::DataAllocation))?;
-            world_state.data = Some(data);
+            *world_state.lock_data() = Some(data);
         }
         world_state.bindings = compiled.bindings;
         world_state.topology = compiled.topology;
         world_state.joint_dynamics = compiled.joint_dynamics;
-        let (geom_entities, sensor_geoms) = geometry_bindings(
-            world_state
-                .data
+        let (geom_entities, sensor_geoms) = {
+            let data_guard = world_state.lock_data();
+            let data = data_guard
                 .as_ref()
-                .ok_or(PhysicsError::InitializationFailed)?,
-            &world_state.bindings,
-            world,
-        )
-        .map_err(Self::map_error)?;
+                .ok_or(PhysicsError::InitializationFailed)?;
+            geometry_bindings(data, &world_state.bindings, world).map_err(Self::map_error)?
+        };
         world_state.geom_entities = geom_entities;
         world_state.sensor_geoms = sensor_geoms;
-        sync_from_ecs_state(
-            world_state
-                .data
+        {
+            let mut data_guard = world_state.lock_data();
+            let data = data_guard
                 .as_mut()
-                .ok_or(PhysicsError::InitializationFailed)?,
-            &world_state.bindings,
-            world,
-        )
-        .map_err(Self::map_error)
+                .ok_or(PhysicsError::InitializationFailed)?;
+            sync_from_ecs_state(data, &world_state.bindings, world).map_err(Self::map_error)?;
+        }
+        Ok(())
     }
 
     fn step(&mut self, physics_world: PhysicsWorldId, dt: SimDuration) -> Result<(), PhysicsError> {
@@ -945,26 +956,29 @@ impl PhysicsBackend for MuJoCoBackend {
                 actual_s,
             }));
         }
-        let data = world_state
-            .data
-            .as_mut()
-            .ok_or(PhysicsError::InitializationFailed)?;
-        data.step();
-        if !data
-            .qpos()
-            .iter()
-            .chain(data.qvel().iter())
-            .all(|value| value.is_finite())
-        {
-            return Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")));
-        }
-        world_state.contacts = collect_contact_events(
-            data,
-            &world_state.geom_entities,
-            &world_state.sensor_geoms,
-            world_state.timestep_s,
-        )
-        .map_err(Self::map_error)?;
+        let contacts = {
+            let mut data_guard = world_state.lock_data();
+            let data = data_guard
+                .as_mut()
+                .ok_or(PhysicsError::InitializationFailed)?;
+            data.step();
+            if !data
+                .qpos()
+                .iter()
+                .chain(data.qvel().iter())
+                .all(|value| value.is_finite())
+            {
+                return Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")));
+            }
+            collect_contact_events(
+                data,
+                &world_state.geom_entities,
+                &world_state.sensor_geoms,
+                world_state.timestep_s,
+            )
+            .map_err(Self::map_error)?
+        };
+        world_state.contacts = contacts;
         Ok(())
     }
 
@@ -974,8 +988,8 @@ impl PhysicsBackend for MuJoCoBackend {
         physics_world: PhysicsWorldId,
     ) -> Result<(), PhysicsError> {
         let world_state = self.world(physics_world)?;
-        let data = world_state
-            .data
+        let data_guard = world_state.lock_data();
+        let data = data_guard
             .as_ref()
             .ok_or(PhysicsError::InitializationFailed)?;
         for binding in &world_state.bindings {
@@ -1078,12 +1092,65 @@ impl PhysicsBackend for MuJoCoBackend {
 
     fn raycast(
         &self,
-        _physics_world: PhysicsWorldId,
-        _query: RaycastQuery,
+        physics_world: PhysicsWorldId,
+        query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError> {
-        Err(PhysicsError::MissingCapabilities {
-            missing: vec![PhysicsCapability::RaycastBatch],
-        })
+        let world_state = self.world(physics_world)?;
+        let direction = query.direction;
+        if direction.length_squared() <= f64::EPSILON {
+            return Ok(Vec::new());
+        }
+        let direction = direction.normalize();
+        let origin = query.origin_m;
+        let pnt = [origin.x, origin.y, origin.z];
+        let vec = [direction.x, direction.y, direction.z];
+        let geom_entities = world_state.geom_entities.clone();
+        let max_hits = geom_entities.len().max(1);
+
+        let mut data_guard = world_state.lock_data();
+        let Some(data) = data_guard.as_mut() else {
+            return Ok(Vec::new());
+        };
+        let geom_bodyid = data.model().geom_bodyid().to_vec();
+
+        // `mj_ray` returns only the nearest hit. Walk farther hits by excluding
+        // each previously hit body so the batch contract matches Rapier.
+        let mut hits = Vec::new();
+        let mut excluded_body: Option<usize> = None;
+        for _ in 0..max_hits {
+            let mut normal = [0.0_f64; 3];
+            let (geom_id, distance_m) =
+                data.ray(&pnt, &vec, None, true, excluded_body, Some(&mut normal));
+            if distance_m < 0.0 || distance_m > query.max_distance_m {
+                break;
+            }
+            let Some(geom_id) = geom_id else {
+                break;
+            };
+            excluded_body = geom_bodyid
+                .get(geom_id)
+                .copied()
+                .and_then(|id| usize::try_from(id).ok());
+            let Some(entity) = geom_entities.get(geom_id).copied().flatten() else {
+                continue;
+            };
+            if !normal.iter().all(|value| value.is_finite()) || !distance_m.is_finite() {
+                return Err(Self::map_error(MuJoCoError::NonFiniteState("raycast hit")));
+            }
+            hits.push(RaycastHit {
+                entity,
+                point_m: origin + direction * distance_m,
+                normal: Vec3::new(normal[0], normal[1], normal[2]),
+                distance_m,
+            });
+        }
+
+        hits.sort_by(|left, right| {
+            left.distance_m
+                .total_cmp(&right.distance_m)
+                .then_with(|| left.entity.index().cmp(&right.entity.index()))
+        });
+        Ok(hits)
     }
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {

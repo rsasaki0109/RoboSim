@@ -64,7 +64,9 @@ entity pair, and emitted with a stable A-to-B normal. Disabled-response sensor
 geometries are checked explicitly and emit zero-normal, zero-impulse overlaps.
 The shared resting-load vector uses the unit-bearing
 `mujoco_resting_impulse_n_s_v1` tolerance and records a canonical snapshot hash.
-Raycasts are not yet advertised by MuJoCo.
+Raycasts advertise `raycast_batch`: the adapter walks farther hits by excluding
+each previously intersected body from native `mj_ray`, matching the Rapier
+multi-hit distance ordering contract.
 
 ## Runtime and provenance
 
