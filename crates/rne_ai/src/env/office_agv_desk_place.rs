@@ -320,6 +320,30 @@ impl OfficeAgvDeskPlaceScenario {
         self.observation
     }
 
+    /// Provides read-only access to the ECS-backed AGV world for render
+    /// capture. The oncoming AGV and cargo proxy are scenario state and are
+    /// exposed in [`OfficeAgvDeskPlaceObservation`].
+    #[must_use]
+    pub fn simulation(&self) -> &DiffDriveSim {
+        &self.sim
+    }
+
+    /// Returns the render-only cargo proxy position in world X/Z meters.
+    ///
+    /// Cargo remains scenario state rather than an ECS body so that the desk
+    /// place judge can model a deterministic unload without coupling it to a
+    /// physics backend.
+    #[must_use]
+    pub fn cargo_translation_m(&self) -> (f64, f64) {
+        (self.cargo_x_m, self.cargo_z_m)
+    }
+
+    /// Returns the render-only oncoming AGV position in world X/Z meters.
+    #[must_use]
+    pub fn other_agv_translation_m(&self) -> (f64, f64) {
+        (self.other_agv_x_m, 0.0)
+    }
+
     fn advance_other_agv(&mut self) {
         let elapsed_s = self.sim.step_count() as f64 * DT_S;
         let step_m = self.course.aisle.other_speed_m_s * DT_S;

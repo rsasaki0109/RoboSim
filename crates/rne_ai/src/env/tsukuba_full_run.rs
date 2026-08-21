@@ -197,6 +197,14 @@ impl TsukubaFullRunScenario {
         self.observation
     }
 
+    /// Provides read-only access to the full-run ECS world for render capture
+    /// and evidence inspection. Advancing the scenario remains the only way
+    /// to change simulation state through this accessor boundary.
+    #[must_use]
+    pub fn simulation(&self) -> &DiffDriveSim {
+        &self.sim
+    }
+
     fn observe_world(&self) -> TsukubaFullRunObservation {
         let drive = self.sim.observe();
         let spawned = &self.sim.robots()[0];
