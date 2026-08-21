@@ -26,7 +26,7 @@ cargo run --locked -p ssl_small_pitch --example 76_ssl_small_pitch -- --smoke
 
 ## Not in this slice
 
-- protobuf / ports 10300–10302 (that belongs in `adapters/ssl`, later)
+- Full simulator process / physics coupling (see [SSL_ADAPTER.md](SSL_ADAPTER.md) for the UDP wire spike)
 - ssl-vision cameras, Game Controller, AutoRef
 - omniwheel kiwi drive (diff-drive stand-ins)
 - 11 vs 11

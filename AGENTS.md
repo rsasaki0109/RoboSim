@@ -42,6 +42,8 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_sumo`: minimal SUMO `.net.xml` road-network import (offline importer → `.rne.traffic.json`)
 - `crates/rne_traci`: minimal TraCI client for live SUMO co-simulation
 - `adapters/ros2`: ROS2 adapter. ROS2 dependencies are allowed here only.
+- `adapters/ssl`: RoboCup SSL simulation-protocol UDP adapter (protobuf). Keep core crates free of SSL protobuf.
+- `adapters/hardware`: process-isolated hardware gateway adapters.
 - `adapters/hardware/rne_hardware_gateway`: bounded TaskSpec-bound playback/shadow/HIL/live gateway contracts
 - `examples`: runnable examples
 - `tests`: integration, determinism, and golden tests

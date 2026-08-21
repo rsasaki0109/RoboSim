@@ -57,6 +57,11 @@ All notable changes to Robot Native Engine are documented in this file.
   entry on a scaled sidewalk segment (`rne.tsukuba.full_run.v1`). This is not
   the 2.2 km city loop.
 
+- Add an SSL simulation-protocol UDP adapter spike (`rne_adapter_ssl`) for
+  ports 10300–10302 with prost encode/decode of `RobotControl` and ball-teleport
+  `SimulatorCommand`. Core crates stay protobuf-free; geometry scoring stays in
+  example 76.
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.

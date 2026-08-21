@@ -43,6 +43,7 @@ official stop-line box on a ~10 m sidewalk segment. See
 [TSUKUBA_FULL_RUN.md](TSUKUBA_FULL_RUN.md).
 
 The next contest analog is RoboCup SSL Division B 2v2 field geometry, not a grSim protocol clone. See [SSL_SMALL_PITCH.md](SSL_SMALL_PITCH.md).
+The UDP wire spike for ports 10300-10302 lives in `adapters/ssl` ([SSL_ADAPTER.md](SSL_ADAPTER.md)).
 
 The Grove-G1 analog is a 0.5 m park then Dex3 pick/place workcell, not a Nav2 or MoveIt port. See [G1_WORKBENCH_MISSION.md](G1_WORKBENCH_MISSION.md).
 
