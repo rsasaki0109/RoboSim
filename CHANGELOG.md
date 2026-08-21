@@ -66,6 +66,10 @@ All notable changes to Robot Native Engine are documented in this file.
   geometric 0.2 m arm window, park/arm/walk budgets are tunable, and `--smoke`
   covers the `DropPart` fault (`rne.g1.workbench_mission.v2`).
 
+- Add a Kenkyugakuen splat environment swap path: preferred PLY auto-select,
+  stand-in fixture fallback, PLY override, and `GaussianSplatCaptureReport`
+  with `ply_sha256` / `standin` for example 78 dataset capture.
+
 - Add optional 3D Gaussian splat backgrounds for Tsukuba confirmation viewer
   capture via `rne_render_3dgs` and example 78. Contest scoring in example 75
   stays headless and analytic; splats are visual-only.

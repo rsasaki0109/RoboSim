@@ -1,0 +1,13 @@
+kind = "rne_gaussian_splat_environment"
+schema_version = 1
+environment_id = "tsukuba.kenkyugakuen.v1"
+# CI / checkout stand-in until a real Kenkyugakuen scan is present.
+ply_path = "tsukuba_confirmation_fixture.ply"
+# Drop a real scan here; the loader prefers it automatically and clears standin.
+preferred_ply_path = "tsukuba_kenkyugakuen.ply"
+standin = true
+translation_m = [0.0, 0.0, 0.0]
+rotation_y_rad = 0.0
+scale = 1.0
+renderer_identity = "rne.gaussian_splat.v1"
+coordinate_note = "Kenkyugakuen visual background for Tsukuba confirmation viewer/dataset capture. Prefer tsukuba_kenkyugakuen.ply when available; otherwise the committed fixture is used with standin=true."

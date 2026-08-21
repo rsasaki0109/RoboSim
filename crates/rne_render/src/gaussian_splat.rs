@@ -5,7 +5,7 @@
 
 use crate::RenderScene;
 use rne_math::{Quat, Transform3, Vec3};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -53,12 +53,17 @@ pub enum GaussianSplatError {
 pub struct GaussianSplatEnvironment {
     /// Stable environment identifier from the manifest.
     pub environment_id: String,
-    /// Absolute or workspace-relative PLY path.
+    /// Absolute or workspace-relative PLY path actually used for capture.
     pub ply_path: PathBuf,
     /// World transform applied before rendering the splat cloud.
     pub transform: Transform3,
     /// Renderer identity string for capture reports.
     pub renderer_identity: String,
+    /// True when the resolved PLY is a CI / stand-in fixture rather than the
+    /// preferred Kenkyugakuen (or other) scan.
+    pub standin: bool,
+    /// Optional authoring note from the manifest.
+    pub coordinate_note: Option<String>,
 }
 
 /// Hybrid scene: optional splat background plus mesh foreground.
@@ -90,6 +95,52 @@ impl HybridRenderScene {
     }
 }
 
+/// Portable capture report for splat / hybrid viewer exports.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GaussianSplatCaptureReport {
+    /// Report schema identity.
+    pub kind: String,
+    /// Report schema version.
+    pub schema_version: u32,
+    /// Environment id from the splat manifest.
+    pub environment_id: String,
+    /// Renderer identity recorded with the capture.
+    pub renderer_identity: String,
+    /// Absolute path of the PLY that was loaded.
+    pub ply_path: String,
+    /// Hex SHA-256 of the PLY bytes.
+    pub ply_sha256: String,
+    /// True when a stand-in fixture was used instead of the preferred scan.
+    pub standin: bool,
+    /// Optional RGBA pixel hash from a GPU capture.
+    pub rgba_hash: Option<u64>,
+    /// Optional PNG output path.
+    pub png_path: Option<String>,
+}
+
+impl GaussianSplatCaptureReport {
+    /// Builds a report for a resolved environment and optional capture hash.
+    #[must_use]
+    pub fn new(
+        environment: &GaussianSplatEnvironment,
+        ply_sha256: String,
+        rgba_hash: Option<u64>,
+        png_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            kind: "rne_gaussian_splat_capture_report".into(),
+            schema_version: 1,
+            environment_id: environment.environment_id.clone(),
+            renderer_identity: environment.renderer_identity.clone(),
+            ply_path: environment.ply_path.display().to_string(),
+            ply_sha256,
+            standin: environment.standin,
+            rgba_hash,
+            png_path: png_path.map(|path| path.display().to_string()),
+        }
+    }
+}
+
 /// Returns the bundled Tsukuba confirmation splat manifest path.
 #[must_use]
 pub fn tsukuba_confirmation_splat_manifest_path() -> PathBuf {
@@ -97,9 +148,24 @@ pub fn tsukuba_confirmation_splat_manifest_path() -> PathBuf {
         .join("../../assets/environments/tsukuba_confirmation.rne.splat.toml")
 }
 
+/// Returns the bundled Kenkyugakuen splat manifest path.
+#[must_use]
+pub fn tsukuba_kenkyugakuen_splat_manifest_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/environments/tsukuba_kenkyugakuen.rne.splat.toml")
+}
+
 /// Loads a Gaussian splat environment manifest from disk.
 pub fn load_gaussian_splat_manifest(
     path: &Path,
+) -> Result<GaussianSplatEnvironment, GaussianSplatError> {
+    load_gaussian_splat_manifest_with_override(path, None)
+}
+
+/// Loads a manifest, optionally forcing a PLY path (for local scan swaps).
+pub fn load_gaussian_splat_manifest_with_override(
+    path: &Path,
+    ply_override: Option<&Path>,
 ) -> Result<GaussianSplatEnvironment, GaussianSplatError> {
     let contents = fs::read_to_string(path).map_err(|error| GaussianSplatError::Io {
         path: path.display().to_string(),
@@ -110,14 +176,22 @@ pub fn load_gaussian_splat_manifest(
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
-    raw.into_environment(path)
+    raw.into_environment(path, ply_override)
 }
 
-/// Validates that the manifest and referenced PLY exist.
+/// Validates that the manifest and resolved PLY exist.
 pub fn validate_gaussian_splat_manifest(
     path: &Path,
 ) -> Result<GaussianSplatEnvironment, GaussianSplatError> {
-    let environment = load_gaussian_splat_manifest(path)?;
+    validate_gaussian_splat_manifest_with_override(path, None)
+}
+
+/// Validates a manifest with an optional PLY override path.
+pub fn validate_gaussian_splat_manifest_with_override(
+    path: &Path,
+    ply_override: Option<&Path>,
+) -> Result<GaussianSplatEnvironment, GaussianSplatError> {
+    let environment = load_gaussian_splat_manifest_with_override(path, ply_override)?;
     if !environment.ply_path.is_file() {
         return Err(GaussianSplatError::MissingPly {
             path: environment.ply_path.display().to_string(),
@@ -133,6 +207,8 @@ struct RawGaussianSplatManifest {
     environment_id: String,
     ply_path: String,
     #[serde(default)]
+    preferred_ply_path: Option<String>,
+    #[serde(default)]
     translation_m: [f64; 3],
     #[serde(default)]
     rotation_y_rad: f64,
@@ -140,6 +216,10 @@ struct RawGaussianSplatManifest {
     scale: f64,
     #[serde(default = "default_renderer_identity")]
     renderer_identity: String,
+    #[serde(default)]
+    standin: bool,
+    #[serde(default)]
+    coordinate_note: Option<String>,
 }
 
 fn default_scale() -> f64 {
@@ -154,6 +234,7 @@ impl RawGaussianSplatManifest {
     fn into_environment(
         self,
         manifest_path: &Path,
+        ply_override: Option<&Path>,
     ) -> Result<GaussianSplatEnvironment, GaussianSplatError> {
         let path = manifest_path.display().to_string();
         if self.kind != "rne_gaussian_splat_environment" {
@@ -180,10 +261,24 @@ impl RawGaussianSplatManifest {
                 message: "scale must be finite and positive".into(),
             });
         }
-        let ply_path = manifest_path.parent().map_or_else(
-            || PathBuf::from(&self.ply_path),
-            |parent| parent.join(&self.ply_path),
-        );
+        let parent = manifest_path.parent();
+        let resolve = |relative: &str| -> PathBuf {
+            parent.map_or_else(|| PathBuf::from(relative), |parent| parent.join(relative))
+        };
+
+        let (ply_path, standin) = if let Some(override_path) = ply_override {
+            (override_path.to_path_buf(), false)
+        } else if let Some(preferred) = self.preferred_ply_path.as_deref() {
+            let preferred_path = resolve(preferred);
+            if preferred_path.is_file() {
+                (preferred_path, false)
+            } else {
+                (resolve(&self.ply_path), self.standin)
+            }
+        } else {
+            (resolve(&self.ply_path), self.standin)
+        };
+
         Ok(GaussianSplatEnvironment {
             environment_id: self.environment_id,
             ply_path,
@@ -193,6 +288,8 @@ impl RawGaussianSplatManifest {
                 scale: Vec3::splat(self.scale),
             },
             renderer_identity: self.renderer_identity,
+            standin,
+            coordinate_note: self.coordinate_note,
         })
     }
 }
@@ -210,5 +307,31 @@ mod tests {
             "tsukuba.confirmation.fixture.v1"
         );
         assert!(environment.ply_path.is_file());
+        assert!(!environment.standin);
+    }
+
+    #[test]
+    fn kenkyugakuen_manifest_falls_back_to_fixture_standin() {
+        let manifest = tsukuba_kenkyugakuen_splat_manifest_path();
+        let environment = validate_gaussian_splat_manifest(&manifest).expect("kenkyugakuen");
+        assert_eq!(environment.environment_id, "tsukuba.kenkyugakuen.v1");
+        assert!(environment.ply_path.is_file());
+        assert!(environment.standin);
+        assert!(environment
+            .ply_path
+            .ends_with("tsukuba_confirmation_fixture.ply"));
+    }
+
+    #[test]
+    fn ply_override_clears_standin_flag() {
+        let manifest = tsukuba_kenkyugakuen_splat_manifest_path();
+        let fixture = validate_gaussian_splat_manifest(&tsukuba_confirmation_splat_manifest_path())
+            .expect("fixture")
+            .ply_path;
+        let environment = validate_gaussian_splat_manifest_with_override(&manifest, Some(&fixture))
+            .expect("override");
+        assert_eq!(environment.environment_id, "tsukuba.kenkyugakuen.v1");
+        assert!(!environment.standin);
+        assert_eq!(environment.ply_path, fixture);
     }
 }
