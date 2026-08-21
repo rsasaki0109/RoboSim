@@ -15,6 +15,7 @@ use rne_physics::{
     RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -117,7 +118,8 @@ enum ModelSource {
 
 #[derive(Debug)]
 struct MuJoCoWorld {
-    data: Option<MjData<Box<MjModel>>>,
+    /// Interior mutability lets `&self` raycasts use MuJoCo's `&mut MjData` API.
+    data: RefCell<Option<MjData<Box<MjModel>>>>,
     desc: PhysicsWorldDesc,
     bindings: Vec<BodyBinding>,
     topology: Vec<BodyTopology>,
@@ -849,7 +851,7 @@ impl PhysicsBackend for MuJoCoBackend {
         self.worlds.insert(
             id,
             MuJoCoWorld {
-                data,
+                data: RefCell::new(data),
                 desc,
                 bindings: Vec::new(),
                 topology: Vec::new(),
@@ -899,37 +901,36 @@ impl PhysicsBackend for MuJoCoBackend {
                 });
             return Err(Self::map_error(MuJoCoError::TopologyChanged { detail }));
         }
-        if world_state.data.is_none() || world_state.joint_dynamics != compiled.joint_dynamics {
+        if world_state.data.borrow().is_none()
+            || world_state.joint_dynamics != compiled.joint_dynamics
+        {
             let model = MjModel::from_xml_string(&compiled.mjcf)
                 .map_err(|error| Self::map_error(MuJoCoError::ModelLoad(error.to_string())))?;
             require_compiled_model(&model, &compiled.bindings).map_err(Self::map_error)?;
             let data = MjData::try_new(Box::new(model))
                 .map_err(|_| Self::map_error(MuJoCoError::DataAllocation))?;
-            world_state.data = Some(data);
+            *world_state.data.borrow_mut() = Some(data);
         }
         world_state.bindings = compiled.bindings;
         world_state.topology = compiled.topology;
         world_state.joint_dynamics = compiled.joint_dynamics;
-        let (geom_entities, sensor_geoms) = geometry_bindings(
-            world_state
-                .data
+        let (geom_entities, sensor_geoms) = {
+            let data_borrow = world_state.data.borrow();
+            let data = data_borrow
                 .as_ref()
-                .ok_or(PhysicsError::InitializationFailed)?,
-            &world_state.bindings,
-            world,
-        )
-        .map_err(Self::map_error)?;
+                .ok_or(PhysicsError::InitializationFailed)?;
+            geometry_bindings(data, &world_state.bindings, world).map_err(Self::map_error)?
+        };
         world_state.geom_entities = geom_entities;
         world_state.sensor_geoms = sensor_geoms;
-        sync_from_ecs_state(
-            world_state
-                .data
+        {
+            let mut data_borrow = world_state.data.borrow_mut();
+            let data = data_borrow
                 .as_mut()
-                .ok_or(PhysicsError::InitializationFailed)?,
-            &world_state.bindings,
-            world,
-        )
-        .map_err(Self::map_error)
+                .ok_or(PhysicsError::InitializationFailed)?;
+            sync_from_ecs_state(data, &world_state.bindings, world).map_err(Self::map_error)?;
+        }
+        Ok(())
     }
 
     fn step(&mut self, physics_world: PhysicsWorldId, dt: SimDuration) -> Result<(), PhysicsError> {
@@ -946,26 +947,29 @@ impl PhysicsBackend for MuJoCoBackend {
                 actual_s,
             }));
         }
-        let data = world_state
-            .data
-            .as_mut()
-            .ok_or(PhysicsError::InitializationFailed)?;
-        data.step();
-        if !data
-            .qpos()
-            .iter()
-            .chain(data.qvel().iter())
-            .all(|value| value.is_finite())
-        {
-            return Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")));
-        }
-        world_state.contacts = collect_contact_events(
-            data,
-            &world_state.geom_entities,
-            &world_state.sensor_geoms,
-            world_state.timestep_s,
-        )
-        .map_err(Self::map_error)?;
+        let contacts = {
+            let mut data_borrow = world_state.data.borrow_mut();
+            let data = data_borrow
+                .as_mut()
+                .ok_or(PhysicsError::InitializationFailed)?;
+            data.step();
+            if !data
+                .qpos()
+                .iter()
+                .chain(data.qvel().iter())
+                .all(|value| value.is_finite())
+            {
+                return Err(Self::map_error(MuJoCoError::NonFiniteState("qpos/qvel")));
+            }
+            collect_contact_events(
+                data,
+                &world_state.geom_entities,
+                &world_state.sensor_geoms,
+                world_state.timestep_s,
+            )
+            .map_err(Self::map_error)?
+        };
+        world_state.contacts = contacts;
         Ok(())
     }
 
@@ -975,8 +979,8 @@ impl PhysicsBackend for MuJoCoBackend {
         physics_world: PhysicsWorldId,
     ) -> Result<(), PhysicsError> {
         let world_state = self.world(physics_world)?;
-        let data = world_state
-            .data
+        let data_borrow = world_state.data.borrow();
+        let data = data_borrow
             .as_ref()
             .ok_or(PhysicsError::InitializationFailed)?;
         for binding in &world_state.bindings {
@@ -1083,9 +1087,6 @@ impl PhysicsBackend for MuJoCoBackend {
         query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError> {
         let world_state = self.world(physics_world)?;
-        let Some(data) = world_state.data.as_ref() else {
-            return Ok(Vec::new());
-        };
         let direction = query.direction;
         if direction.length_squared() <= f64::EPSILON {
             return Ok(Vec::new());
@@ -1095,14 +1096,13 @@ impl PhysicsBackend for MuJoCoBackend {
         let pnt = [origin.x, origin.y, origin.z];
         let vec = [direction.x, direction.y, direction.z];
         let geom_entities = world_state.geom_entities.clone();
-        let geom_bodyid = data.model().geom_bodyid().to_vec();
         let max_hits = geom_entities.len().max(1);
 
-        // SAFETY: `PhysicsBackend::raycast` is `&self`, but MuJoCo's `mj_ray`
-        // wrapper takes `&mut MjData` for output scratch. This adapter never
-        // shares a world across threads, and no other `&mut MjData` borrow is
-        // live during an immutable backend query.
-        let data = unsafe { &mut *(std::ptr::from_ref(data) as *mut MjData<Box<MjModel>>) };
+        let mut data_borrow = world_state.data.borrow_mut();
+        let Some(data) = data_borrow.as_mut() else {
+            return Ok(Vec::new());
+        };
+        let geom_bodyid = data.model().geom_bodyid().to_vec();
 
         // `mj_ray` returns only the nearest hit. Walk farther hits by excluding
         // each previously hit body so the batch contract matches Rapier.
