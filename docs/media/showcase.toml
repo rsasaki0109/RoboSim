@@ -8,24 +8,24 @@ max_total_gif_bytes = 12_000_000
 
 [[media]]
 id = "house-mobile-manipulation"
-label = "House 3DGS mobile manipulation"
+label = "Real indoor 3DGS mobile manipulation"
 gif = "docs/media/house-mobile-manipulation.gif"
 poster = "docs/media/house-mobile-manipulation.png"
 readme_gif = "docs/media/house-mobile-manipulation.gif"
 readme_poster = "docs/media/house-mobile-manipulation.png"
-gif_bytes = 1812372
-poster_bytes = 319602
-gif_sha256 = "sha256:569fdae48d9df5bdafcb725cdfde5d814eb10e0b32224d66fe8beb003ca6f490"
-poster_sha256 = "sha256:68de3a8bc9544c4941539d80a46ed1bd4cf962ab7e1609e0fd5d5b83b2d49819"
+gif_bytes = 2979885
+poster_bytes = 662816
+gif_sha256 = "sha256:f9b2142a77b183818b7dd0264140481401f3a5fc687ec596d84e277916dfa4c0"
+poster_sha256 = "sha256:a81f20965b438b051a9f505e71cefcf95b7f31e3f978e65a147e22162abd6da5"
 poster_width = 960
 poster_height = 540
 smoke_command = "cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke"
 capture_command = "cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture"
 metadata = "docs/media/house-mobile-manipulation.json"
 regenerate = "examples/89_house_mobile_lift_hero/main.rs"
-license = "MIT OR Apache-2.0"
-license_files = ["LICENSE-MIT", "LICENSE-APACHE", "assets/environments/house_3dgs/LICENSE.txt"]
-provenance = ["assets/environments/house_3dgs/PROVENANCE.md", "assets/robots/mm_mobile_lift/PROVENANCE.md"]
+license = "Apache-2.0 AND (MIT OR Apache-2.0)"
+license_files = ["LICENSE-MIT", "LICENSE-APACHE", "assets/environments/voxel51_playroom_3dgs/LICENSE.txt"]
+provenance = ["assets/environments/voxel51_playroom_3dgs/PROVENANCE.md", "assets/environments/voxel51_playroom_3dgs/voxel51_playroom.rne.splat.toml", "tools/prepare_voxel51_playroom_3dgs.py", "assets/scenes/mm_mobile_lift_playroom.rne.scene.toml", "assets/robots/mm_mobile_lift/PROVENANCE.md"]
 
 [[media]]
 id = "tsukuba"
@@ -92,21 +92,21 @@ provenance = ["assets/scenes/office_agv_delivery.rne.scene.toml", "assets/robots
 
 [[media]]
 id = "real-3dgs"
-label = "Real-world 3DGS Sakura"
+label = "Playroom 3DGS robot motion"
 gif = "docs/media/showcase-real-3dgs.gif"
 poster = "docs/media/showcase-real-3dgs.png"
 readme_gif = "docs/media/showcase-real-3dgs.gif"
 readme_poster = "docs/media/showcase-real-3dgs.png"
-gif_bytes = 3983559
-poster_bytes = 363639
-gif_sha256 = "sha256:345be352ea2b34906e3ce67c645c83a0976b8d97a138bd144021d0a0b7e6ecd7"
-poster_sha256 = "sha256:44dfb488ca99fafee3d1757e0b11ab1834fafbd6378af363b78237cc5ee91ef9"
+gif_bytes = 2683588
+poster_bytes = 645947
+gif_sha256 = "sha256:4272f8304fc456bab265dd2a6272ea8d22392ed381d9ddaf9f569a2d5fff6c54"
+poster_sha256 = "sha256:0da87e42c7ec6aada10c3cc0006fa287a2a943d3dcd59a0c5025531bf433a841"
 poster_width = 960
 poster_height = 540
-smoke_command = "cargo run --locked -p real_scan_3dgs_showcase --example 91_real_scan_3dgs_showcase -- --smoke"
-capture_command = "cargo run --release --locked -p real_scan_3dgs_showcase --example 91_real_scan_3dgs_showcase -- --capture"
+smoke_command = "cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke"
+capture_command = "cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture"
 metadata = "docs/media/showcase-real-3dgs.json"
-regenerate = "examples/91_real_scan_3dgs_showcase/main.rs"
-license = "CC0-1.0 AND (MIT OR Apache-2.0)"
-license_files = ["assets/environments/wakufactory_sakura_3dgs/LICENSE.txt", "LICENSE-MIT", "LICENSE-APACHE"]
-provenance = ["assets/environments/wakufactory_sakura_3dgs/PROVENANCE.md", "assets/environments/wakufactory_sakura_3dgs/wakufactory_sakura.rne.splat.toml", "tools/prepare_wakufactory_sakura_3dgs.py", "examples/91_real_scan_3dgs_showcase/main.rs"]
+regenerate = "examples/89_house_mobile_lift_hero/main.rs"
+license = "Apache-2.0 AND (MIT OR Apache-2.0)"
+license_files = ["assets/environments/voxel51_playroom_3dgs/LICENSE.txt", "LICENSE-MIT", "LICENSE-APACHE"]
+provenance = ["assets/environments/voxel51_playroom_3dgs/PROVENANCE.md", "assets/environments/voxel51_playroom_3dgs/voxel51_playroom.rne.splat.toml", "tools/prepare_voxel51_playroom_3dgs.py", "assets/scenes/mm_mobile_lift_playroom.rne.scene.toml", "examples/89_house_mobile_lift_hero/main.rs"]

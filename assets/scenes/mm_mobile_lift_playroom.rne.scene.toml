@@ -1,0 +1,50 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 51
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_mobile_lift.rne.robot.toml"
+
+# Low pickup dock within the clear floor corridor. It is intentionally narrow
+# enough for both gripper pads to reach the payload side faces.
+[[obstacles]]
+name = "mobile_lift_pick_table"
+translation_m = [2.2, 0.10, 0.0]
+half_extents_m = [0.35, 0.10, 0.005]
+body_type = "fixed"
+friction = 0.0
+
+[[obstacles]]
+name = "mobile_lift_cube"
+translation_m = [2.2, 0.235, 0.0]
+half_extents_m = [0.035, 0.035, 0.035]
+body_type = "dynamic"
+mass_kg = 0.05
+friction = 0.8
+
+# Conservative collision proxies authored after the task bodies so the
+# established deterministic grasp episode keeps the same body-handle order.
+# The splats provide appearance; these fixed bodies provide room boundaries.
+[[obstacles]]
+name = "playroom_back_wall"
+translation_m = [1.1, 1.0, -1.45]
+half_extents_m = [1.75, 1.0, 0.05]
+body_type = "fixed"
+friction = 0.7
+
+[[obstacles]]
+name = "playroom_left_shelving"
+translation_m = [-1.80, 0.75, -0.55]
+half_extents_m = [0.20, 0.75, 0.70]
+body_type = "fixed"
+friction = 0.7
+
+[[obstacles]]
+name = "playroom_right_wall"
+translation_m = [2.80, 1.0, -0.45]
+half_extents_m = [0.05, 1.0, 1.05]
+body_type = "fixed"
+friction = 0.7

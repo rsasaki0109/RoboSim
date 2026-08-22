@@ -23,10 +23,10 @@ The quantitative gates and exact regeneration commands are in
     <td colspan="2" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/house-mobile-manipulation.png">
-        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object inside the House 3DGS environment" width="900">
+        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment" width="900">
       </picture>
-      <br><b>House 3DGS · mobile manipulation</b><br>
-      <sub>Real friction grasp, 0.229 m lift, 2.139 m transport, and 0.0616 m placement error. Ten authored PBR links stay synchronized to the deterministic simulation. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <br><b>Real indoor 3DGS · mobile manipulation</b><br>
+      <sub>Voxel51 Playroom is a real photo-derived 3DGS, calibrated into the same metric frame as the floor and room collision proxies. A 10-link PBR robot completes friction grasp, lift, 2.139 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>
@@ -59,10 +59,10 @@ The quantitative gates and exact regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-real-3dgs.png">
-        <img src="docs/media/showcase-real-3dgs.gif" alt="GPU-rendered orbit around a real Scaniverse 3D Gaussian Splatting capture of cherry blossoms and tree bark" width="460">
+        <img src="docs/media/showcase-real-3dgs.gif" alt="Detailed mobile manipulator driving and handling an object inside a real photo-derived Playroom 3D Gaussian Splatting simulation environment" width="460">
       </picture>
-      <br><b>Real-world 3DGS · Sakura</b><br>
-      <sub>59,045 unmodified Gaussian records sampled from a CC0 iPad Pro + Scaniverse capture; no synthetic splats or stand-in data. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/91_real_scan_3dgs_showcase/main.rs">source</a></sub>
+      <br><b>Playroom 3DGS · robot in motion</b><br>
+      <sub>A closer camera follows the same executable grasp-and-carry episode through 319,397 real-capture Gaussians—no synthetic splats and no render-only robot trajectory. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
 </table>
@@ -75,7 +75,7 @@ The quantitative gates and exact regeneration commands are in
 | Vehicle dynamics | Dynamic bicycle model, tire saturation, controller metrics, sensor latency, and deterministic multi-seed evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), examples 49–51 |
 | Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
 | Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
-| Manipulation | Authored PBR mobile manipulator, House 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
+| Manipulation | Authored PBR mobile manipulator, real-capture indoor 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
 

@@ -1,9 +1,0 @@
-CC0 1.0 Universal
-
-The upstream author states that the sample PLY data on the WakuFactory MR
-Gaussian Splat Viewer sample page is CC0 and may be used freely:
-
-https://www.wakufactory.jp/wxr/splats/sample.html
-
-The full legal text is available at:
-https://creativecommons.org/publicdomain/zero/1.0/legalcode
