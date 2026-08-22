@@ -81,8 +81,11 @@ impl BackgroundRenderPass for GaussianSplatBackground {
         view: &Transform3,
         clear_color: [f32; 4],
     ) -> Result<(), RenderError> {
-        let _ = self.environment.transform;
-        let splat_camera = RneSplatCamera::from_rne(camera, view);
+        // The viewer owns Gaussians in the PLY's reconstruction-local frame.
+        // Move the world-space camera into that frame so the manifest transform
+        // affects the colour pass exactly as it does the proxy-depth pass.
+        let splat_view = environment_local_camera(view, &self.environment.transform);
+        let splat_camera = RneSplatCamera::from_rne(camera, &splat_view);
         splat_camera.upload(
             &mut self.viewer,
             queue,
@@ -117,6 +120,15 @@ impl BackgroundRenderPass for GaussianSplatBackground {
         queue.submit(Some(encoder.finish()));
         Ok(())
     }
+}
+
+fn environment_local_camera(world_camera: &Transform3, environment: &Transform3) -> Transform3 {
+    let mut local_camera = environment.inverse().mul_transform(world_camera);
+    // Camera view construction intentionally ignores scale. Keeping it at one
+    // also makes the returned value an ordinary pose rather than an affine
+    // environment transform.
+    local_camera.scale = rne_math::Vec3::ONE;
+    local_camera
 }
 
 /// Loads a [`GaussianSplatBackground`] from a validated environment manifest.
@@ -154,7 +166,30 @@ fn load_gaussians(path: &Path) -> Result<Gaussians, GaussianSplatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rne_math::{Quat, Vec3};
     use rne_render::validate_gaussian_splat_manifest;
+
+    #[test]
+    fn environment_transform_moves_camera_into_ply_frame() {
+        let environment = Transform3 {
+            translation: Vec3::new(4.0, 2.0, -3.0),
+            rotation: Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            scale: Vec3::splat(0.5),
+        };
+        let local_expected = Transform3::from_translation_rotation(
+            Vec3::new(2.0, 1.0, -5.0),
+            Quat::from_rotation_x(-0.3),
+        );
+        let world_camera = environment.mul_transform(&local_expected);
+
+        let actual = environment_local_camera(&world_camera, &environment);
+
+        assert!((actual.translation - local_expected.translation).length() < 1.0e-12);
+        assert!(actual
+            .rotation
+            .abs_diff_eq(local_expected.rotation, 1.0e-12));
+        assert_eq!(actual.scale, Vec3::ONE);
+    }
 
     #[test]
     fn tsukuba_fixture_ply_parses_for_viewer() {

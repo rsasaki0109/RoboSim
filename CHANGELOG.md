@@ -12,10 +12,11 @@ All notable changes to Robot Native Engine are documented in this file.
   evidence and publish synchronized 960 x 540 GIF, poster, and metadata.
 
 - Replace the front-page RoboCup SSL/Sakura viewer tile with a robot actually
-  moving and manipulating inside the real Voxel51 Playroom 3DGS. Ship 319,397
-  selected upstream Gaussians without synthetic additions, published COLMAP
-  calibration, metric room collision proxies, pinned source hashes, Apache-2.0
-  provenance, smoke evidence, and two reproducible camera views.
+  moving and manipulating on the measured floor of the real Voxel51 Dr Johnson
+  interior 3DGS. Ship 317,756 selected upstream Gaussians without synthetic
+  additions, apply the manifest transform in the colour renderer, use published
+  COLMAP calibration, and include pinned hashes, Apache-2.0 provenance, smoke
+  evidence, and two reproducible measured-camera views.
 
 - Upgrade `docs/media/showcase.toml` to a schema-v2 catalog that verifies exact
   bytes, SHA-256 values, dimensions, README references, deterministic metadata,

@@ -26,7 +26,7 @@ The quantitative gates and exact regeneration commands are in
         <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment" width="900">
       </picture>
       <br><b>Real indoor 3DGS · mobile manipulation</b><br>
-      <sub>Voxel51 Playroom is a real photo-derived 3DGS, calibrated into the same metric frame as the floor and room collision proxies. A 10-link PBR robot completes friction grasp, lift, 2.139 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, wood floor, robot bodies, and task furniture now share one metric transform. A 10-link PBR robot completes friction grasp, lift, 2.145 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>
@@ -59,10 +59,10 @@ The quantitative gates and exact regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-real-3dgs.png">
-        <img src="docs/media/showcase-real-3dgs.gif" alt="Detailed mobile manipulator driving and handling an object inside a real photo-derived Playroom 3D Gaussian Splatting simulation environment" width="460">
+        <img src="docs/media/showcase-real-3dgs.gif" alt="Detailed mobile manipulator driving and handling an object on the measured floor of a real photo-derived Dr Johnson 3D Gaussian Splatting interior" width="460">
       </picture>
-      <br><b>Playroom 3DGS · robot in motion</b><br>
-      <sub>A closer camera follows the same executable grasp-and-carry episode through 319,397 real-capture Gaussians—no synthetic splats and no render-only robot trajectory. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <br><b>Dr Johnson 3DGS · robot in motion</b><br>
+      <sub>A measured second camera observes the same executable grasp-and-carry episode through 317,756 real-capture Gaussians—no synthetic splats and no render-only robot trajectory. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
 </table>

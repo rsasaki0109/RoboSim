@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a deterministic, repository-sized derivative of Voxel51 Playroom 3DGS.
+"""Prepare a deterministic, repository-sized derivative of Voxel51 Dr Johnson 3DGS.
 
 The upstream Graphdeco PLY is large. This tool keeps every Nth Gaussian and
 copies its position, DC colour, opacity, scale, and rotation floats byte-for-byte.
@@ -22,16 +22,16 @@ import urllib.request
 
 SOURCE_URL = (
     "https://huggingface.co/datasets/Voxel51/gaussian_splatting/resolve/main/"
-    "FO_dataset/playroom/point_cloud/iteration_30000/point_cloud.ply?download=true"
+    "FO_dataset/drjohnson/point_cloud/iteration_30000/point_cloud.ply?download=true"
 )
-SOURCE_BYTES = 475_263_524
-SOURCE_SHA256 = "c6fddedf6c7b412d078bbbaa1826e7a1b258f75f862c5190dc50a646243d7d9e"
-STRIDE = 6
+SOURCE_BYTES = 788_034_924
+SOURCE_SHA256 = "92f4898839ec4ad7f197cf6c74b89918b35ea712b4e41435593ccb152d22b7f5"
+STRIDE = 10
 SOURCE_RECORD_BYTES = 248
 OUTPUT_RECORD_BYTES = 56
-OUTPUT_RECORDS = 319_397
-OUTPUT_BYTES = 17_886_594
-OUTPUT_SHA256 = "88f4ebffee1fdb1f558625b23fb93ad4c257a1d7dae5dc00443596c390717022"
+OUTPUT_RECORDS = 317_756
+OUTPUT_BYTES = 17_794_698
+OUTPUT_SHA256 = "f357a929801db2be75574c47205479c53a6bf71686af3f4bf8c1641db3688663"
 
 OUTPUT_HEADER = b"""ply
 format binary_little_endian 1.0
@@ -247,13 +247,13 @@ def main() -> None:
     parser.add_argument(
         "--source",
         type=pathlib.Path,
-        default=pathlib.Path("target/rne-real-indoor-source/playroom_30000.ply"),
+        default=pathlib.Path("target/rne-real-indoor-source/drjohnson_30000.ply"),
     )
     parser.add_argument(
         "--output",
         type=pathlib.Path,
         default=pathlib.Path(
-            "assets/environments/voxel51_playroom_3dgs/playroom_dc_every6.ply"
+            "assets/environments/voxel51_drjohnson_3dgs/drjohnson_dc_every10.ply"
         ),
     )
     parser.add_argument("--check", action="store_true")
@@ -261,7 +261,7 @@ def main() -> None:
     parser.add_argument("--preserve-all-properties", action="store_true")
     parser.add_argument("--colmap-cameras", type=pathlib.Path)
     parser.add_argument("--colmap-images", type=pathlib.Path)
-    parser.add_argument("--camera-name", default="DSC05572.jpg")
+    parser.add_argument("--camera-name", default="IMG_6293.jpg")
     args = parser.parse_args()
 
     if args.colmap_cameras or args.colmap_images:

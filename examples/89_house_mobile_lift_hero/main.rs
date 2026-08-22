@@ -1,12 +1,12 @@
-//! Real-capture Playroom 3DGS hero for the authored mobile manipulator.
+//! Real-capture Dr Johnson interior 3DGS hero for the authored mobile manipulator.
 //!
 //! The physics rollout is the same fixed-step, friction-grasp episode used by
 //! the headless examples.  The render-only foreground is rebuilt from the
 //! post-physics world transform of each of the ten URDF links, then resolved
 //! through the visual-only manifest and PBR-aware [`rne_render::MeshRenderCache`].
-//! The Playroom scan is calibrated into the same Y-up metric frame as the
-//! physics rollout. Floor, walls, shelving, and pickup furniture have fixed
-//! collision proxies in the episode scene; 3DGS remains the appearance layer.
+//! The Dr Johnson scan is calibrated into the same Y-up metric frame as the
+//! physics rollout. The measured floor and pickup furniture share that frame;
+//! 3DGS remains the appearance layer.
 //!
 //! Headless evidence (no GPU required):
 //!
@@ -34,7 +34,7 @@ use rne_render::{
     MeshRenderCache, PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
-use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+use rne_render_wgpu::WgpuRenderBackend;
 use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -46,18 +46,15 @@ use std::path::{Path, PathBuf};
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
 const FRAME_COUNT: usize = 45;
-const FOV_Y_RAD: f64 = 0.760_884_951_922_017_9;
+const FOV_Y_RAD: f64 = 0.800_689_935_801_928_9;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.070, 0.085, 1.0];
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
-const TARGET_X_M: f64 = 0.0;
+const TARGET_X_M: f64 = -1.70;
 const TARGET_Y_M: f64 = 0.035;
-const TARGET_Z_M: f64 = 0.0;
-const PLAYROOM_COLLISION_PROXIES: [&str; 4] = [
-    "playroom_back_wall",
-    "playroom_left_shelving",
-    "playroom_right_wall",
-    "mobile_lift_pick_table",
-];
+const TARGET_Z_M: f64 = -3.30;
+const PICKUP_X_M: f64 = 0.50;
+const DRJOHNSON_FLOOR_Z_M: f64 = -3.30;
+const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_table"];
 const LINK_NAMES: [&str; 10] = [
     "base_link",
     "left_wheel",
@@ -161,8 +158,8 @@ fn run() -> Result<()> {
     let probe = args.iter().any(|argument| argument == "--probe");
     let capture = args.iter().any(|argument| argument == "--capture") || (!smoke && !probe);
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let house_manifest_path =
-        repo_root.join("assets/environments/voxel51_playroom_3dgs/voxel51_playroom.rne.splat.toml");
+    let house_manifest_path = repo_root
+        .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
     let ply_override = args
         .windows(2)
         .find(|window| window[0] == "--ply")
@@ -175,9 +172,9 @@ fn run() -> Result<()> {
         &house_manifest_path,
         ply_override.as_deref(),
     )
-    .context("validate real-capture Playroom 3DGS manifest")?;
-    let playroom_scene_path =
-        repo_root.join("assets/scenes/mm_mobile_lift_playroom.rne.scene.toml");
+    .context("validate real-capture Dr Johnson 3DGS manifest")?;
+    let drjohnson_scene_path =
+        repo_root.join("assets/scenes/mm_mobile_lift_drjohnson.rne.scene.toml");
     let visual_manifest_path =
         repo_root.join("assets/robots/mm_mobile_lift/mm_mobile_lift.visual.toml");
     let visual_manifest = load_visual_manifest(&visual_manifest_path)
@@ -192,7 +189,7 @@ fn run() -> Result<()> {
 
     let first = rollout(
         &repo_root,
-        &playroom_scene_path,
+        &drjohnson_scene_path,
         &visual_manifest,
         false,
         None,
@@ -201,7 +198,7 @@ fn run() -> Result<()> {
     if smoke {
         let replay = rollout(
             &repo_root,
-            &playroom_scene_path,
+            &drjohnson_scene_path,
             &visual_manifest,
             false,
             None,
@@ -235,7 +232,7 @@ fn run() -> Result<()> {
     if probe {
         let captured = rollout(
             &repo_root,
-            &playroom_scene_path,
+            &drjohnson_scene_path,
             &visual_manifest,
             true,
             Some(first.evidence.steps),
@@ -264,7 +261,7 @@ fn run() -> Result<()> {
     fs::create_dir_all(&capture_dir).context("create hero frame directory")?;
     let captured = rollout(
         &repo_root,
-        &playroom_scene_path,
+        &drjohnson_scene_path,
         &visual_manifest,
         true,
         Some(first.evidence.steps),
@@ -290,14 +287,14 @@ fn run() -> Result<()> {
         link_transform_sync_max_error_m: captured.link_sync_error_m,
         foreground_mesh_items: captured.foreground_mesh_items,
         foreground_material_items: captured.foreground_material_items,
-        collision_proxy_names: PLAYROOM_COLLISION_PROXIES.to_vec(),
+        collision_proxy_names: DRJOHNSON_COLLISION_PROXIES.to_vec(),
         simulation: captured.evidence,
         capture: Some(capture_evidence),
         reproduce_smoke: "cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke",
         reproduce_capture: "cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture",
         provenance: [
-            "assets/environments/voxel51_playroom_3dgs/PROVENANCE.md",
-            "assets/environments/voxel51_playroom_3dgs/LICENSE.txt",
+            "assets/environments/voxel51_drjohnson_3dgs/PROVENANCE.md",
+            "assets/environments/voxel51_drjohnson_3dgs/LICENSE.txt",
             "assets/robots/mm_mobile_lift/PROVENANCE.md",
         ],
     };
@@ -333,14 +330,19 @@ fn rollout(
 ) -> Result<Rollout> {
     let mut config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
     config.scene_path = scene_path.to_path_buf();
+    config.task = rne_ai::MobileManipulatorTask::Place {
+        object_name: PAYLOAD_NAME.into(),
+        target: rne_ai::ReachTarget::new(TARGET_X_M, TARGET_Y_M, TARGET_Z_M),
+        place_tolerance_m: 0.12,
+    };
     let mut episode = MobileManipulatorEpisode::new(config);
     let mut policy = IkMobileLiftPickPlacePolicy::new();
     let mut step = episode.reset();
     episode.set_grasp_mode(GraspMode::Friction);
-    for proxy in PLAYROOM_COLLISION_PROXIES {
+    for proxy in DRJOHNSON_COLLISION_PROXIES {
         anyhow::ensure!(
             episode.simulation().entity_named(proxy).is_some(),
-            "Playroom collision proxy is missing from the physics scene: {proxy}"
+            "Dr Johnson collision proxy is missing from the physics scene: {proxy}"
         );
     }
     let visual_root = repo_root.join("assets/robots/mm_mobile_lift");
@@ -578,22 +580,22 @@ fn mobile_lift_foreground(
         [0.95, 0.20, 0.035, 1.0],
         PbrMaterial::new([0.95, 0.20, 0.035, 1.0], 0.28, 0.38, [0.03, 0.005, 0.0]),
     ));
-    // Dress the narrow physics pickup rail as a compact wooden side table. The
-    // top surface remains aligned with the task cube while the legs are visual
-    // context only, keeping the established grasp contacts unchanged.
-    let wood = PbrMaterial::new([0.36, 0.15, 0.055, 1.0], 0.08, 0.72, [0.0; 3]);
+    // Dress the narrow physics pickup rail as a dark-wood task trolley that
+    // belongs on the captured Dr Johnson floor. Its top remains aligned with the
+    // physical support; the legs are visual context only.
+    let wood = PbrMaterial::new([0.30, 0.16, 0.07, 1.0], 0.03, 0.76, [0.0; 3]);
     scene.items.push(box_item(
-        Vec3::new(2.2, 0.19, 0.0),
+        Vec3::new(PICKUP_X_M, 0.19, DRJOHNSON_FLOOR_Z_M),
         Vec3::new(0.70, 0.055, 0.34),
-        [0.36, 0.15, 0.055, 1.0],
+        [0.30, 0.16, 0.07, 1.0],
         wood.clone(),
     ));
-    for x in [1.92, 2.48] {
-        for z in [-0.12, 0.12] {
+    for x in [PICKUP_X_M - 0.28, PICKUP_X_M + 0.28] {
+        for z in [DRJOHNSON_FLOOR_Z_M - 0.12, DRJOHNSON_FLOOR_Z_M + 0.12] {
             scene.items.push(box_item(
                 Vec3::new(x, 0.085, z),
                 Vec3::new(0.055, 0.17, 0.055),
-                [0.28, 0.10, 0.035, 1.0],
+                [0.22, 0.11, 0.045, 1.0],
                 wood.clone(),
             ));
         }
@@ -656,14 +658,14 @@ fn render_capture(
     let mut render_hashes = Vec::with_capacity(FRAME_COUNT);
     let mut follow_render_hashes = Vec::with_capacity(FRAME_COUNT);
     let follow_dir = capture_dir.join("follow");
-    fs::create_dir_all(&follow_dir).context("create Playroom follow-camera frame directory")?;
+    fs::create_dir_all(&follow_dir).context("create Dr Johnson follow-camera frame directory")?;
     for (index, frame) in rollout.frames.iter().enumerate() {
         let hybrid = HybridRenderScene::new(house.clone(), frame.foreground.clone());
         let output = render_hybrid_scene_camera(
             &mut backend,
             &mut background,
             &camera,
-            &playroom_camera_transform(index, &house.transform),
+            &drjohnson_camera_transform(index, &house.transform),
             &hybrid,
             CLEAR_COLOR,
         )
@@ -685,11 +687,11 @@ fn render_capture(
             &mut backend,
             &mut background,
             &camera,
-            &playroom_follow_camera_transform(index),
+            &drjohnson_follow_camera_transform(index),
             &hybrid,
             CLEAR_COLOR,
         )
-        .with_context(|| format!("render Playroom follow-camera frame {index}"))?;
+        .with_context(|| format!("render Dr Johnson follow-camera frame {index}"))?;
         write_png(
             &follow_dir.join(format!("frame-{index:03}.png")),
             WIDTH,
@@ -764,7 +766,7 @@ fn render_capture(
     let follow_gif_bytes = fs::metadata(&follow_gif_path)?.len();
     anyhow::ensure!(
         follow_gif_bytes <= 5_000_000,
-        "Playroom follow GIF exceeds 5 MB: {follow_gif_bytes} bytes"
+        "Dr Johnson follow GIF exceeds 5 MB: {follow_gif_bytes} bytes"
     );
     let follow_evidence = CaptureEvidence {
         gpu_rendered: true,
@@ -801,7 +803,7 @@ fn render_probe(
         &mut backend,
         &mut background,
         &camera,
-        &playroom_camera_transform(frame_index, &house.transform),
+        &drjohnson_camera_transform(frame_index, &house.transform),
         &hybrid,
         CLEAR_COLOR,
     )
@@ -811,11 +813,11 @@ fn render_probe(
         &mut backend,
         &mut background,
         &camera,
-        &playroom_follow_camera_transform(frame_index),
+        &drjohnson_follow_camera_transform(frame_index),
         &hybrid,
         CLEAR_COLOR,
     )
-    .context("render Playroom robot-motion probe")?;
+    .context("render Dr Johnson robot-motion probe")?;
     write_png(
         &path.with_file_name("probe-follow.png"),
         WIDTH,
@@ -824,26 +826,27 @@ fn render_probe(
     )
 }
 
-fn playroom_camera_transform(index: usize, _scene_transform: &MathTransform3) -> MathTransform3 {
-    let t = index as f64 / (FRAME_COUNT - 1) as f64;
-    CameraOrbit {
-        focus: Vec3::new(1.10, 0.68, 0.0),
-        yaw_rad: -0.08 + 0.16 * (std::f64::consts::TAU * t).sin(),
-        pitch_rad: 1.15,
-        distance_m: 2.55,
-    }
-    .camera_transform()
+fn drjohnson_camera_transform(_index: usize, _scene_transform: &MathTransform3) -> MathTransform3 {
+    // Exact transformed COLMAP pose for Dr Johnson frame IMG_6293. Keeping the
+    // capture on a measured camera ray preserves the real reconstruction's
+    // geometry instead of inventing a free-view orbit through sparse splats.
+    MathTransform3::from_translation_rotation(
+        Vec3::new(-3.117_781_018, 1.421_316_325, -1.672_926_404),
+        Quat::from_xyzw(0.0, -0.461_148_822_3, 0.0, 0.887_322_806_9) * Quat::from_rotation_x(-0.16),
+    )
 }
 
-fn playroom_follow_camera_transform(index: usize) -> MathTransform3 {
-    let t = index as f64 / (FRAME_COUNT - 1) as f64;
-    CameraOrbit {
-        focus: Vec3::new(1.10, 0.58, 0.0),
-        yaw_rad: 0.36 + 0.10 * (std::f64::consts::TAU * t).sin(),
-        pitch_rad: 1.20,
-        distance_m: 2.25,
-    }
-    .camera_transform()
+fn drjohnson_follow_camera_transform(_index: usize) -> MathTransform3 {
+    // Exact transformed COLMAP pose for Dr Johnson frame IMG_6292.
+    MathTransform3::from_translation_rotation(
+        Vec3::new(-3.093_182_539, 1.852_322_531, -1.670_394_267),
+        Quat::from_xyzw(
+            -0.004_500_635_1,
+            -0.468_533_511_7,
+            -0.017_629_964_0,
+            0.883_258_329_7,
+        ) * Quat::from_rotation_x(-0.30),
+    )
 }
 
 fn choose_poster_frame(rollout: &Rollout) -> usize {

@@ -27,13 +27,13 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 2,979,885 | 662,816 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 293,517 | 907,608 | 960 x 540 |
 | Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
-| Playroom 3DGS robot motion | `showcase-real-3dgs.gif` / `.png` | 2,683,588 | 645,947 | 960 x 540 |
+| Dr Johnson 3DGS robot motion | `showcase-real-3dgs.gif` / `.png` | 300,255 | 941,843 | 960 x 540 |
 
-The current GIF total is **11,692,119 bytes**, below the 12,000,000-byte
+The current GIF total is **6,622,418 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -45,14 +45,15 @@ must update the manifest's sizes and hashes in the same change.
 | Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
-| Playroom 3DGS robot motion | The committed non-stand-in PLY has 319,397 selected records from the pinned real Playroom source; no synthetic splats are added; every visible robot pose comes from the same successful deterministic physics episode as the hero. |
+| Dr Johnson 3DGS robot motion | The committed non-stand-in PLY has 317,756 selected records from the pinned real Dr Johnson source; no synthetic splats are added; every visible robot pose comes from the same successful deterministic physics episode as the hero. |
 
-Both indoor views use the photo-derived Voxel51/Graphdeco Playroom capture under
-Apache-2.0. Its published COLMAP cameras establish the transform into RNE's
-Y-up metric simulation frame; floor, wall, shelving, and pickup-table collision
-proxies make the scan an executable room rather than a viewer backdrop. The
-committed derivative keeps every sixth upstream position, DC colour, opacity,
-scale, and rotation record byte-for-byte. Tsukuba combines the full-run scenario
+Both indoor views use the photo-derived Voxel51/Graphdeco Dr Johnson capture
+under Apache-2.0. Its published COLMAP cameras establish the transform into
+RNE's Y-up metric simulation frame. The colour renderer applies that same
+manifest transform, and the ground and pickup-table colliders share the measured
+floor frame, so the scan is an executable room rather than a viewer backdrop.
+The committed derivative keeps every tenth upstream position, DC colour,
+opacity, scale, and rotation record byte-for-byte. Tsukuba combines the full-run scenario
 with the PLATEAU test fixture. Factory uses Unitree G1 meshes under its bundled
 BSD-3-Clause notice. Office uses a repository-authored scene and synchronized
 render overlays. Exact source, conversion, hashes, and licenses are recorded in
