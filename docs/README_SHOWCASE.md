@@ -27,13 +27,13 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 303,307 | 843,196 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 482,889 | 806,640 | 960 x 540 |
 | Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **10,661,414 bytes**, below the 12,000,000-byte
+The current GIF total is **10,840,996 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -41,7 +41,7 @@ must update the manifest's sizes and hashes in the same change.
 
 | Showcase | Required simulation evidence |
 | --- | --- |
-| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; camera HUD, Navigation/Manipulation phase, telemetry, and live 2D trajectory map are rebuilt from all 45 sampled post-physics states. |
+| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; the calibrated wrist pose renders synchronized real-3DGS RGB, linear depth, and payload projection for all 45 post-physics samples; task telemetry and the 2D trace use the same samples. |
 | Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
@@ -54,9 +54,10 @@ manifest transform, and the ground plus a 3 cm collision-only pickup support
 share the measured rug/floor frame, so the scan is an executable room rather
 than a viewer backdrop. The collision support is never rendered: the robot
 picks directly at rug level without inventing furniture absent from the capture.
-The camera frame, task phase, grasp/transport telemetry, and top-down route are
-deterministic capture annotations derived from the same 45 post-physics rollout
-samples; they do not replace or advance simulation state.
+The wrist RGB-D inset is rendered from each sampled camera pose against that
+same 3DGS and robot foreground; its payload projection, task phase,
+grasp/transport telemetry, and top-down trace all derive from the same 45
+post-physics rollout samples and do not replace or advance simulation state.
 The committed derivative keeps every tenth upstream position, DC colour,
 opacity, scale, and rotation record byte-for-byte. The UAV view uses official
 PLATEAU Sanjo City geometry, a controlled visible airframe, and synchronized

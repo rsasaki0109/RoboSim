@@ -76,12 +76,30 @@ struct RolloutFrame {
     base_z_m: f64,
     base_yaw_rad: f64,
     payload_x_m: f64,
+    payload_y_m: f64,
     payload_z_m: f64,
     start_base_x_m: f64,
     start_base_z_m: f64,
     pick_x_m: f64,
     pick_z_m: f64,
     base_trajectory: Vec<(f64, f64)>,
+    wrist_camera_transform: MathTransform3,
+    wrist_rgbd: WristRgbdFrame,
+}
+
+#[derive(Clone, Debug)]
+struct WristRgbdFrame {
+    width_px: u32,
+    height_px: u32,
+    rgba8: Vec<u8>,
+    depth_m: Vec<f32>,
+    target_u_px: u32,
+    target_v_px: u32,
+    target_depth_m: f64,
+    center_depth_m: f64,
+    min_depth_m: f64,
+    offset_x_m: f64,
+    offset_y_m: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,6 +118,8 @@ struct SimulationEvidence {
     deterministic_digest: u64,
     replay_match: bool,
     steps: u64,
+    wrist_camera_enabled: bool,
+    wrist_rgbd_observed: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -120,6 +140,7 @@ struct CaptureEvidence {
     unique_render_hashes: usize,
     duplicate_adjacent_frames: usize,
     overlay: OverlayEvidence,
+    wrist_rgbd: WristRgbdEvidence,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -130,6 +151,18 @@ struct OverlayEvidence {
     sampled_state_count: usize,
     map_trajectory_points: usize,
     telemetry_fields: [&'static str; 4],
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct WristRgbdEvidence {
+    enabled: bool,
+    source: &'static str,
+    rgb_frame_count: usize,
+    depth_frame_count: usize,
+    target_projection_count: usize,
+    width_px: u32,
+    height_px: u32,
+    target_fields: [&'static str; 5],
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -260,12 +293,8 @@ fn run() -> Result<()> {
         let probe_dir = target_dir(&repo_root).join("rne-house-mobile-lift-hero");
         fs::create_dir_all(&probe_dir).context("create House hero probe directory")?;
         let probe_path = probe_dir.join("probe.png");
-        render_probe(
-            &house,
-            &captured.frames[FRAME_COUNT / 2],
-            FRAME_COUNT / 2,
-            &probe_path,
-        )?;
+        let probe_frame = &captured.frames[FRAME_COUNT / 2];
+        render_probe(&house, probe_frame, FRAME_COUNT / 2, &probe_path)?;
         println!("House mobile-lift hero probe: {}", probe_path.display());
         return Ok(());
     }
@@ -400,6 +429,13 @@ fn rollout(
     let mut mesh_items = 0_usize;
     let mut pbr_items = 0_usize;
     let mut base_trajectory = Vec::new();
+    let wrist_camera_enabled = episode.simulation().wrist_camera_enabled();
+    let mut wrist_rgbd_observed = false;
+
+    anyhow::ensure!(
+        wrist_camera_enabled,
+        "Dr Johnson mobile-lift scene must configure a wrist camera"
+    );
 
     for action_step in 0..total_policy_steps {
         let phase = policy.phase();
@@ -413,6 +449,9 @@ fn rollout(
             .named_translation_m(PAYLOAD_NAME)
             .context("mobile-lift cube during rollout")?;
         max_payload_y = max_payload_y.max(payload.1);
+        wrist_rgbd_observed |= episode.simulation().latest_wrist_camera().is_some()
+            && episode.simulation().latest_wrist_depth().is_some()
+            && episode.simulation().latest_wrist_rgbd_target().is_some();
 
         let should_sample = capture
             && next_sample < sample_targets.len()
@@ -428,6 +467,33 @@ fn rollout(
             mesh_items = mesh_items.max(scene_mesh_items);
             pbr_items = pbr_items.max(scene_pbr_items);
             base_trajectory.push((step.observation.base_x_m, step.observation.base_z_m));
+            let wrist_rgb = episode
+                .simulation()
+                .latest_wrist_camera()
+                .context("sampled wrist RGB frame")?;
+            let wrist_depth = episode
+                .simulation()
+                .latest_wrist_depth()
+                .context("sampled wrist depth frame")?;
+            let wrist_target = episode
+                .simulation()
+                .latest_wrist_rgbd_target()
+                .context("sampled wrist RGB-D target estimate")?;
+            anyhow::ensure!(
+                wrist_rgb.width == wrist_depth.width
+                    && wrist_rgb.height == wrist_depth.height
+                    && wrist_rgb.rgba8.len()
+                        == (wrist_rgb.width as usize)
+                            .saturating_mul(wrist_rgb.height as usize)
+                            .saturating_mul(4)
+                    && wrist_depth.depth_m.len()
+                        == (wrist_depth.width as usize).saturating_mul(wrist_depth.height as usize),
+                "sampled wrist RGB-D payload dimensions are inconsistent"
+            );
+            let wrist_camera_world = episode
+                .simulation()
+                .wrist_camera_transform()
+                .context("sampled wrist camera transform")?;
             frames.push(RolloutFrame {
                 step: action_step + 1,
                 phase: format!("{:?}", policy.phase()),
@@ -437,12 +503,30 @@ fn rollout(
                 base_z_m: step.observation.base_z_m,
                 base_yaw_rad: step.observation.base_yaw_rad,
                 payload_x_m: payload.0,
+                payload_y_m: payload.1,
                 payload_z_m: payload.2,
                 start_base_x_m,
                 start_base_z_m,
                 pick_x_m: payload_initial.0,
                 pick_z_m: payload_initial.2,
                 base_trajectory: base_trajectory.clone(),
+                wrist_camera_transform: MathTransform3::from_translation_rotation(
+                    wrist_camera_world.translation,
+                    wrist_camera_world.rotation,
+                ),
+                wrist_rgbd: WristRgbdFrame {
+                    width_px: wrist_rgb.width,
+                    height_px: wrist_rgb.height,
+                    rgba8: wrist_rgb.rgba8,
+                    depth_m: wrist_depth.depth_m,
+                    target_u_px: wrist_target.pixel_u_px,
+                    target_v_px: wrist_target.pixel_v_px,
+                    target_depth_m: wrist_target.depth_m,
+                    center_depth_m: wrist_target.center_depth_m,
+                    min_depth_m: wrist_target.min_depth_m,
+                    offset_x_m: wrist_target.offset_x_m,
+                    offset_y_m: wrist_target.offset_y_m,
+                },
             });
             next_sample += 1;
         }
@@ -497,6 +581,8 @@ fn rollout(
         deterministic_digest: hash_physics_state(episode.simulation().world()),
         replay_match: true,
         steps: episode.simulation().step_count(),
+        wrist_camera_enabled,
+        wrist_rgbd_observed,
     };
     Ok(Rollout {
         evidence,
@@ -539,6 +625,10 @@ fn assert_success(rollout: &Rollout) -> Result<()> {
         evidence.place_error_m < 0.12,
         "hero payload was not placed: {:.3} m",
         evidence.place_error_m
+    );
+    anyhow::ensure!(
+        evidence.wrist_camera_enabled && evidence.wrist_rgbd_observed,
+        "hero rollout did not publish synchronized wrist RGB-D evidence"
     );
     anyhow::ensure!(
         rollout.foreground_mesh_items >= LINK_NAMES.len(),
@@ -669,12 +759,23 @@ fn render_capture(
     let mut background = load_gaussian_splat_background(backend.device(), house)
         .context("load House Gaussian background")?;
     let camera = Camera::new(WIDTH, HEIGHT, FOV_Y_RAD);
+    let wrist_camera = Camera::new(160, 120, std::f64::consts::FRAC_PI_3);
     let mut render_hashes = Vec::with_capacity(FRAME_COUNT);
     let mut follow_render_hashes = Vec::with_capacity(FRAME_COUNT);
     let follow_dir = capture_dir.join("follow");
     fs::create_dir_all(&follow_dir).context("create Dr Johnson follow-camera frame directory")?;
     for (index, frame) in rollout.frames.iter().enumerate() {
         let hybrid = HybridRenderScene::new(house.clone(), frame.foreground.clone());
+        let wrist_output = render_hybrid_scene_camera(
+            &mut backend,
+            &mut background,
+            &wrist_camera,
+            &frame.wrist_camera_transform,
+            &hybrid,
+            CLEAR_COLOR,
+        )
+        .with_context(|| format!("render wrist RGB-D frame {index}"))?;
+        let wrist_rgbd = wrist_rgbd_from_render(frame, &wrist_camera, wrist_output);
         let output = render_hybrid_scene_camera(
             &mut backend,
             &mut background,
@@ -691,7 +792,7 @@ fn render_capture(
             output.color.height
         );
         let mut hero_rgba = output.color.rgba8;
-        annotate_frame(&mut hero_rgba, frame, index);
+        annotate_frame(&mut hero_rgba, frame, &wrist_rgbd, index);
         write_png(
             &capture_dir.join(format!("frame-{index:03}.png")),
             WIDTH,
@@ -709,7 +810,7 @@ fn render_capture(
         )
         .with_context(|| format!("render Dr Johnson follow-camera frame {index}"))?;
         let mut follow_rgba = follow_output.color.rgba8;
-        annotate_frame(&mut follow_rgba, frame, index);
+        annotate_frame(&mut follow_rgba, frame, &wrist_rgbd, index);
         write_png(
             &follow_dir.join(format!("frame-{index:03}.png")),
             WIDTH,
@@ -761,6 +862,7 @@ fn render_capture(
         unique_render_hashes,
         duplicate_adjacent_frames,
         overlay: overlay_evidence(rollout),
+        wrist_rgbd: wrist_rgbd_evidence(rollout),
     };
     let follow_unique_hashes = follow_render_hashes
         .iter()
@@ -804,6 +906,7 @@ fn render_capture(
         unique_render_hashes: follow_unique_hashes,
         duplicate_adjacent_frames: follow_adjacent_duplicates,
         overlay: overlay_evidence(rollout),
+        wrist_rgbd: wrist_rgbd_evidence(rollout),
     };
     Ok((evidence, follow_evidence, poster_frame))
 }
@@ -822,15 +925,88 @@ fn overlay_evidence(rollout: &Rollout) -> OverlayEvidence {
     }
 }
 
+fn wrist_rgbd_evidence(rollout: &Rollout) -> WristRgbdEvidence {
+    let first = rollout.frames.first().map(|frame| &frame.wrist_rgbd);
+    WristRgbdEvidence {
+        enabled: rollout.evidence.wrist_camera_enabled,
+        source: "post-physics wrist pose rendering of real 3DGS plus robot, synchronized with DataBus RGB-D",
+        rgb_frame_count: rollout.frames.len(),
+        depth_frame_count: rollout.frames.len(),
+        target_projection_count: rollout.frames.len(),
+        width_px: if first.is_some() { 160 } else { 0 },
+        height_px: if first.is_some() { 120 } else { 0 },
+        target_fields: [
+            "payload_pixel_uv",
+            "optical_depth_m",
+            "center_depth_m",
+            "offset_x_m",
+            "offset_y_m",
+        ],
+    }
+}
+
+fn wrist_rgbd_from_render(
+    frame: &RolloutFrame,
+    camera: &Camera,
+    output: rne_render::CameraPassOutput,
+) -> WristRgbdFrame {
+    let local_target = frame.wrist_camera_transform.rotation.conjugate()
+        * (Vec3::new(frame.payload_x_m, frame.payload_y_m, frame.payload_z_m)
+            - frame.wrist_camera_transform.translation);
+    let target_depth_m = (-local_target.z).max(camera.near_m);
+    let focal_y_px = f64::from(camera.height) * 0.5 / (camera.fov_y_rad * 0.5).tan();
+    let center_u_px = (f64::from(camera.width) - 1.0) * 0.5;
+    let center_v_px = (f64::from(camera.height) - 1.0) * 0.5;
+    let target_u_px = (center_u_px + local_target.x * focal_y_px / target_depth_m)
+        .round()
+        .clamp(0.0, f64::from(camera.width.saturating_sub(1))) as u32;
+    let target_v_px = (center_v_px - local_target.y * focal_y_px / target_depth_m)
+        .round()
+        .clamp(0.0, f64::from(camera.height.saturating_sub(1))) as u32;
+    let center_index =
+        (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
+    let center_depth_m = output
+        .depth
+        .depth_m
+        .get(center_index)
+        .copied()
+        .map_or(camera.far_m, f64::from);
+    let min_depth_m = output
+        .depth
+        .depth_m
+        .iter()
+        .copied()
+        .filter(|depth_m| depth_m.is_finite() && *depth_m > 0.0)
+        .reduce(f32::min)
+        .map_or(camera.far_m, f64::from);
+
+    WristRgbdFrame {
+        width_px: output.color.width,
+        height_px: output.color.height,
+        rgba8: output.color.rgba8,
+        depth_m: output.depth.depth_m,
+        target_u_px,
+        target_v_px,
+        target_depth_m,
+        center_depth_m,
+        min_depth_m,
+        offset_x_m: local_target.x,
+        offset_y_m: local_target.y,
+    }
+}
+
 /// Draw the evidence UI directly into the rendered RGBA buffer.
 ///
-/// This helper is intentionally pure with respect to the renderer: every value
-/// shown in the overlay comes from the sampled post-physics [`RolloutFrame`].
-/// Keeping it separate also makes the map/telemetry contract testable without a
-/// GPU capture.
-fn annotate_frame(rgba: &mut [u8], frame: &RolloutFrame, _frame_index: usize) {
+/// The map and mission state come from the sampled post-physics [`RolloutFrame`],
+/// while the wrist inset is the RGB-D pass rendered at that frame's wrist pose.
+fn annotate_frame(
+    rgba: &mut [u8],
+    frame: &RolloutFrame,
+    wrist_rgbd: &WristRgbdFrame,
+    _frame_index: usize,
+) {
     draw_camera_brackets(rgba, WIDTH as i32, HEIGHT as i32);
-    panel(rgba, 18, 18, 282, 76, [8, 18, 28, 220]);
+    panel(rgba, 18, 18, 300, 94, [8, 18, 28, 220]);
     text(rgba, 30, 28, "CAM 3DGS / REC", 2, [104, 235, 240, 255]);
     text(rgba, 30, 48, "PHASE", 1, [155, 173, 186, 255]);
     text(
@@ -853,14 +1029,15 @@ fn annotate_frame(rgba: &mut [u8], frame: &RolloutFrame, _frame_index: usize) {
         1,
         [201, 218, 226, 255],
     );
-
-    panel(rgba, 690, 18, 252, 76, [8, 18, 28, 220]);
-    text(rgba, 704, 28, "TELEMETRY", 1, [104, 235, 240, 255]);
     text(
         rgba,
-        704,
-        46,
-        &format!("GRASP {}", if frame.grasping { "LOCK" } else { "OPEN" }),
+        30,
+        86,
+        &format!(
+            "GRASP {}  TRN {:.2}M",
+            if frame.grasping { "LOCK" } else { "OPEN" },
+            (frame.payload_x_m - frame.pick_x_m).hypot(frame.payload_z_m - frame.pick_z_m)
+        ),
         1,
         if frame.grasping {
             [116, 240, 155, 255]
@@ -868,20 +1045,240 @@ fn annotate_frame(rgba: &mut [u8], frame: &RolloutFrame, _frame_index: usize) {
             [208, 218, 224, 255]
         },
     );
+
+    draw_wrist_rgbd_pip(rgba, wrist_rgbd);
+    draw_map(rgba, frame);
+}
+
+fn draw_wrist_rgbd_pip(rgba: &mut [u8], wrist_rgbd: &WristRgbdFrame) {
+    const PANEL_X: i32 = 632;
+    const PANEL_Y: i32 = 18;
+    const PANEL_W: i32 = 310;
+    const PANEL_H: i32 = 174;
+    const VIEW_Y: i32 = 44;
+    const VIEW_W: i32 = 140;
+    const VIEW_H: i32 = 105;
+    const RGB_X: i32 = 642;
+    const DEPTH_X: i32 = 792;
+
+    panel(rgba, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, [8, 18, 28, 226]);
     text(
         rgba,
-        704,
-        62,
+        PANEL_X + 10,
+        PANEL_Y + 10,
+        "WRIST RGB-D / LIVE",
+        1,
+        [104, 235, 240, 255],
+    );
+    blit_rgba_nearest(
+        rgba,
+        &wrist_rgbd.rgba8,
+        wrist_rgbd.width_px,
+        wrist_rgbd.height_px,
+        RGB_X,
+        VIEW_Y,
+        VIEW_W,
+        VIEW_H,
+    );
+    blit_depth_nearest(
+        rgba,
+        &wrist_rgbd.depth_m,
+        wrist_rgbd.width_px,
+        wrist_rgbd.height_px,
+        DEPTH_X,
+        VIEW_Y,
+        VIEW_W,
+        VIEW_H,
+    );
+    border(rgba, RGB_X, VIEW_Y, VIEW_W, VIEW_H, [201, 218, 226, 255]);
+    border(rgba, DEPTH_X, VIEW_Y, VIEW_W, VIEW_H, [201, 218, 226, 255]);
+    text(rgba, RGB_X + 4, VIEW_Y + 4, "RGB", 1, [255, 255, 255, 255]);
+    text(
+        rgba,
+        DEPTH_X + 4,
+        VIEW_Y + 4,
+        "DEPTH",
+        1,
+        [255, 255, 255, 255],
+    );
+    draw_rgbd_target(rgba, RGB_X, VIEW_Y, VIEW_W, VIEW_H, wrist_rgbd);
+    draw_rgbd_target(rgba, DEPTH_X, VIEW_Y, VIEW_W, VIEW_H, wrist_rgbd);
+    text(
+        rgba,
+        PANEL_X + 10,
+        PANEL_Y + 140,
         &format!(
-            "TRN {:.2}M YAW {:.0}",
-            (frame.payload_x_m - frame.pick_x_m).hypot(frame.payload_z_m - frame.pick_z_m),
-            frame.base_yaw_rad.to_degrees()
+            "TARGET {:.2}M  XY {:+.2} {:+.2}",
+            wrist_rgbd.target_depth_m, wrist_rgbd.offset_x_m, wrist_rgbd.offset_y_m
         ),
         1,
-        [208, 218, 224, 255],
+        [242, 183, 76, 255],
     );
+    text(
+        rgba,
+        PANEL_X + 10,
+        PANEL_Y + 156,
+        &format!(
+            "CENTER {:.2}M  MIN {:.2}M",
+            wrist_rgbd.center_depth_m, wrist_rgbd.min_depth_m
+        ),
+        1,
+        [201, 218, 226, 255],
+    );
+}
 
-    draw_map(rgba, frame);
+#[allow(clippy::too_many_arguments)]
+fn blit_rgba_nearest(
+    destination: &mut [u8],
+    source: &[u8],
+    source_width: u32,
+    source_height: u32,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    if source_width == 0 || source_height == 0 || width <= 0 || height <= 0 {
+        return;
+    }
+    for destination_y in 0..height {
+        let source_y = (destination_y as u32 * source_height / height as u32)
+            .min(source_height.saturating_sub(1));
+        for destination_x in 0..width {
+            let source_x = (destination_x as u32 * source_width / width as u32)
+                .min(source_width.saturating_sub(1));
+            let index = ((source_y * source_width + source_x) * 4) as usize;
+            if let Some(pixel) = source.get(index..index + 4) {
+                blend_pixel(
+                    destination,
+                    WIDTH as i32,
+                    HEIGHT as i32,
+                    x + destination_x,
+                    y + destination_y,
+                    [pixel[0], pixel[1], pixel[2], 255],
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn blit_depth_nearest(
+    destination: &mut [u8],
+    source: &[f32],
+    source_width: u32,
+    source_height: u32,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    if source_width == 0 || source_height == 0 || width <= 0 || height <= 0 {
+        return;
+    }
+    let mut near_m = f32::INFINITY;
+    let mut far_m = 0.0_f32;
+    for depth_m in source
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        near_m = near_m.min(depth_m);
+        far_m = far_m.max(depth_m);
+    }
+    let span_m = (far_m - near_m).max(1.0e-4);
+    for destination_y in 0..height {
+        let source_y = (destination_y as u32 * source_height / height as u32)
+            .min(source_height.saturating_sub(1));
+        for destination_x in 0..width {
+            let source_x = (destination_x as u32 * source_width / width as u32)
+                .min(source_width.saturating_sub(1));
+            let index = (source_y * source_width + source_x) as usize;
+            let color = source
+                .get(index)
+                .copied()
+                .filter(|depth_m| depth_m.is_finite() && *depth_m > 0.0)
+                .map_or([4, 8, 14, 255], |depth_m| {
+                    depth_color(((depth_m - near_m) / span_m).clamp(0.0, 1.0))
+                });
+            blend_pixel(
+                destination,
+                WIDTH as i32,
+                HEIGHT as i32,
+                x + destination_x,
+                y + destination_y,
+                color,
+            );
+        }
+    }
+}
+
+fn depth_color(normalized: f32) -> [u8; 4] {
+    let normalized = normalized.clamp(0.0, 1.0);
+    let red = ((1.0 - normalized) * 255.0) as u8;
+    let green = ((1.0 - (normalized - 0.5).abs() * 2.0) * 220.0) as u8;
+    let blue = (normalized * 255.0) as u8;
+    [red, green, blue, 255]
+}
+
+fn draw_rgbd_target(
+    rgba: &mut [u8],
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    frame: &WristRgbdFrame,
+) {
+    let target_x =
+        x + (frame.target_u_px as i32 * width / frame.width_px.max(1) as i32).clamp(0, width - 1);
+    let target_y = y
+        + (frame.target_v_px as i32 * height / frame.height_px.max(1) as i32).clamp(0, height - 1);
+    let color = [242, 183, 76, 255];
+    let half_width = 12;
+    let half_height = 10;
+    border(
+        rgba,
+        target_x - half_width,
+        target_y - half_height,
+        half_width * 2,
+        half_height * 2,
+        color,
+    );
+    marker(rgba, target_x, target_y, color);
+}
+
+fn border(rgba: &mut [u8], x: i32, y: i32, width: i32, height: i32, color: [u8; 4]) {
+    line(rgba, WIDTH as i32, HEIGHT as i32, x, y, x + width, y, color);
+    line(
+        rgba,
+        WIDTH as i32,
+        HEIGHT as i32,
+        x,
+        y,
+        x,
+        y + height,
+        color,
+    );
+    line(
+        rgba,
+        WIDTH as i32,
+        HEIGHT as i32,
+        x + width,
+        y,
+        x + width,
+        y + height,
+        color,
+    );
+    line(
+        rgba,
+        WIDTH as i32,
+        HEIGHT as i32,
+        x,
+        y + height,
+        x + width,
+        y + height,
+        color,
+    );
 }
 
 fn draw_camera_brackets(rgba: &mut [u8], width: i32, height: i32) {
@@ -1259,7 +1656,7 @@ fn glyph_rows(character: char) -> [u8; 7] {
 
 #[cfg(test)]
 mod overlay_tests {
-    use super::{map_point, short_phase};
+    use super::{blit_rgba_nearest, depth_color, map_point, short_phase, HEIGHT, WIDTH};
 
     #[test]
     fn map_point_keeps_world_markers_inside_inset() {
@@ -1277,6 +1674,22 @@ mod overlay_tests {
     fn phase_label_preserves_real_rollout_phase() {
         assert_eq!(short_phase("NavigateToPick"), "NAV_PICK");
         assert_eq!(short_phase("Transport"), "TRANSPORT");
+    }
+
+    #[test]
+    fn wrist_rgb_nearest_blit_preserves_sensor_pixels() {
+        let source = [255, 0, 0, 255, 0, 0, 255, 255];
+        let mut destination = vec![0; (WIDTH * HEIGHT * 4) as usize];
+        blit_rgba_nearest(&mut destination, &source, 2, 1, 0, 0, 4, 2);
+        assert_eq!(&destination[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&destination[12..16], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn depth_palette_distinguishes_near_and_far_samples() {
+        assert_eq!(depth_color(0.0), [255, 0, 0, 255]);
+        assert_eq!(depth_color(1.0), [0, 0, 255, 255]);
+        assert_ne!(depth_color(0.25), depth_color(0.75));
     }
 }
 

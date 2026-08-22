@@ -23,10 +23,10 @@ The quantitative gates and exact regeneration commands are in
     <td colspan="2" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/house-mobile-manipulation.png">
-        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object in a real captured indoor 3DGS environment with camera telemetry and a live 2D route map" width="900">
+        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator grasping, lifting, carrying, and placing an object in a real captured indoor 3DGS environment with live wrist RGB-D and a 2D task trace" width="900">
       </picture>
       <br><b>Real indoor 3DGS · mobile manipulation</b><br>
-      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, captured rug, and robot bodies share one metric transform without synthetic room furniture. The detailed 10-link PBR robot completes floor-level navigation, friction grasp, lift, 2.128 m transport, and placement while a camera HUD and live 2D map expose sampled simulation state. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, captured rug, and robot bodies share one metric transform without synthetic room furniture. The detailed 10-link PBR robot completes a floor-level friction grasp, lift, 2.128 m transport, and placement. Its post-physics wrist pose drives synchronized 3DGS + robot RGB and linear-depth views with payload tracking; the 2D task trace exposes base motion. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>

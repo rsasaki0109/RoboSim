@@ -12,8 +12,8 @@ self_collisions = false
 use_declared_inertial_masses = true
 
 [wrist_camera]
-mount_link = "gripper_base_link"
-mount_offset_m = [0.05, 0.0, 0.0]
+mount_link = "wrist_camera_link"
+mount_offset_m = [0.0, 0.0, 0.0]
 width = 64
 height = 48
 update_rate_hz = 10.0
