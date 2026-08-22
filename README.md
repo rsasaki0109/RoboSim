@@ -26,7 +26,7 @@ The quantitative gates and exact regeneration commands are in
         <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment" width="900">
       </picture>
       <br><b>Real indoor 3DGS · mobile manipulation</b><br>
-      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, wood floor, robot bodies, and task furniture now share one metric transform. A 10-link PBR robot completes friction grasp, lift, 2.145 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, captured rug, and robot bodies share one metric transform without adding synthetic room furniture. A 10-link PBR robot completes floor-level friction grasp, lift, 2.128 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>

@@ -27,13 +27,13 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 293,517 | 907,608 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 291,944 | 910,890 | 960 x 540 |
 | Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **10,651,624 bytes**, below the 12,000,000-byte
+The current GIF total is **10,650,051 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -41,7 +41,7 @@ must update the manifest's sizes and hashes in the same change.
 
 | Showcase | Required simulation evidence |
 | --- | --- |
-| Real indoor 3DGS mobile manipulation | Real friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error. |
+| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered. |
 | Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
@@ -50,8 +50,10 @@ must update the manifest's sizes and hashes in the same change.
 The indoor hero uses the photo-derived Voxel51/Graphdeco Dr Johnson capture
 under Apache-2.0. Its published COLMAP cameras establish the transform into
 RNE's Y-up metric simulation frame. The colour renderer applies that same
-manifest transform, and the ground and pickup-table colliders share the measured
-floor frame, so the scan is an executable room rather than a viewer backdrop.
+manifest transform, and the ground plus a 3 cm collision-only pickup support
+share the measured rug/floor frame, so the scan is an executable room rather
+than a viewer backdrop. The collision support is never rendered: the robot
+picks directly at rug level without inventing furniture absent from the capture.
 The committed derivative keeps every tenth upstream position, DC colour,
 opacity, scale, and rotation record byte-for-byte. The UAV view uses official
 PLATEAU Sanjo City geometry, a controlled visible airframe, and synchronized
