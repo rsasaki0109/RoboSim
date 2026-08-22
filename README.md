@@ -58,11 +58,11 @@ The quantitative gates and exact regeneration commands are in
     </td>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-real-3dgs.png">
-        <img src="docs/media/showcase-real-3dgs.gif" alt="Detailed mobile manipulator driving and handling an object on the measured floor of a real photo-derived Dr Johnson 3D Gaussian Splatting interior" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-uav.png">
+        <img src="docs/media/showcase-uav.gif" alt="Controlled quadrotor flying over a PLATEAU city model with onboard RGB and depth camera views" width="460">
       </picture>
-      <br><b>Dr Johnson 3DGS · robot in motion</b><br>
-      <sub>A measured second camera observes the same executable grasp-and-carry episode through 317,756 real-capture Gaussians—no synthetic splats and no render-only robot trajectory. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <br><b>PLATEAU UAV · RGB-D flight</b><br>
+      <sub>A visible multirotor flies 76.6 m over imported city geometry with bounded control, 12.21 m building clearance, zero collisions, and synchronized onboard RGB-D. <a href="docs/media/showcase-uav.json">metadata</a> · <a href="examples/46_plateau_drone_gif/main.rs">source</a></sub>
     </td>
   </tr>
 </table>

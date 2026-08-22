@@ -8,7 +8,7 @@ All notable changes to Robot Native Engine are documented in this file.
 
 - Complete the README environment showcase with a full-width real-capture
   indoor 3DGS mobile-manipulation hero and a 2 x 2 Tsukuba, factory, office
-  AGV, and close robot-motion grid. The captures replay deterministic headless
+  AGV, and PLATEAU UAV grid. The captures replay deterministic headless
   evidence and publish synchronized 960 x 540 GIF, poster, and metadata.
 
 - Replace the front-page RoboCup SSL/Sakura viewer tile with a robot actually
@@ -16,7 +16,12 @@ All notable changes to Robot Native Engine are documented in this file.
   interior 3DGS. Ship 317,756 selected upstream Gaussians without synthetic
   additions, apply the manifest transform in the colour renderer, use published
   COLMAP calibration, and include pinned hashes, Apache-2.0 provenance, smoke
-  evidence, and two reproducible measured-camera views.
+  evidence, and a reproducible measured-camera hero view.
+
+- Replace the duplicate close-up Dr Johnson tile with a controlled PLATEAU UAV
+  flight. The visible multirotor follows a 76.6 m route with synchronized
+  onboard RGB-D, bounded tracking, 12.21 m building clearance, zero collisions,
+  and deterministic replay evidence.
 
 - Upgrade `docs/media/showcase.toml` to a schema-v2 catalog that verifies exact
   bytes, SHA-256 values, dimensions, README references, deterministic metadata,

@@ -31,9 +31,9 @@ observation state.
 | Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
-| Dr Johnson 3DGS robot motion | `showcase-real-3dgs.gif` / `.png` | 300,255 | 941,843 | 960 x 540 |
+| PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **6,622,418 bytes**, below the 12,000,000-byte
+The current GIF total is **10,651,624 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -45,15 +45,17 @@ must update the manifest's sizes and hashes in the same change.
 | Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
-| Dr Johnson 3DGS robot motion | The committed non-stand-in PLY has 317,756 selected records from the pinned real Dr Johnson source; no synthetic splats are added; every visible robot pose comes from the same successful deterministic physics episode as the hero. |
+| PLATEAU UAV RGB-D flight | Visible `MultirotorFlight` entity travels at least 60 m; RMS position error at most 1.0 m; altitude error at most 0.6 m; building clearance at least 2.0 m; zero collisions; onboard RGB-D and replay hashes are deterministic. |
 
-Both indoor views use the photo-derived Voxel51/Graphdeco Dr Johnson capture
+The indoor hero uses the photo-derived Voxel51/Graphdeco Dr Johnson capture
 under Apache-2.0. Its published COLMAP cameras establish the transform into
 RNE's Y-up metric simulation frame. The colour renderer applies that same
 manifest transform, and the ground and pickup-table colliders share the measured
 floor frame, so the scan is an executable room rather than a viewer backdrop.
 The committed derivative keeps every tenth upstream position, DC colour,
-opacity, scale, and rotation record byte-for-byte. Tsukuba combines the full-run scenario
+opacity, scale, and rotation record byte-for-byte. The UAV view uses official
+PLATEAU Sanjo City geometry, a controlled visible airframe, and synchronized
+onboard RGB-D rather than a free-flying render camera. Tsukuba combines the full-run scenario
 with the PLATEAU test fixture. Factory uses Unitree G1 meshes under its bundled
 BSD-3-Clause notice. Office uses a repository-authored scene and synchronized
 render overlays. Exact source, conversion, hashes, and licenses are recorded in
@@ -70,6 +72,7 @@ Run the renderer-independent gates first:
 ```bash
 cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke
 cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment all
+cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke
 ```
 
 Then regenerate on a machine with wgpu and ffmpeg:
@@ -77,6 +80,8 @@ Then regenerate on a machine with wgpu and ffmpeg:
 ```bash
 cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture
 cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment all
+cargo run --release --locked -p plateau_drone_gif --example 46_plateau_drone_gif
+python tools/prepare_showcase_uav.py
 cargo run -p xtask -- showcase-media-check
 ```
 
