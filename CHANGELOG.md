@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Evolve the real-indoor 3DGS mobile-manipulation hero into a legible
+  navigation/manipulation demo. The deterministic capture now overlays a camera
+  frame, task phase, grasp and transport telemetry, and a live 2D route rebuilt
+  from 45 post-physics samples. The mobile-lift visual pack gains a layered base,
+  open belt-driven lift tower, denser arm and wrist detail, and higher-resolution
+  deterministic PBR maps without changing its URDF physics or joint contract.
+
 - Complete the README environment showcase with a full-width real-capture
   indoor 3DGS mobile-manipulation hero and a 2 x 2 Tsukuba, factory, office
   AGV, and PLATEAU UAV grid. The captures replay deterministic headless

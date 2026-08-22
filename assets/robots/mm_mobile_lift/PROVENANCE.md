@@ -58,7 +58,7 @@ valid when the visual mesh is absent.
 
 The manifest-wide budgets are LOD0 at 120,000 triangles or fewer, LOD1 at
 40,000 triangles or fewer, 80 material-homogeneous parts, 2K maximum textures,
-and 16 MiB total decoded texture bytes. The generated pack measures 13,188
-LOD0 triangles, 5,132 LOD1 triangles, 38 parts per LOD, 8 px maps, and 97,280
+and 16 MiB total decoded texture bytes. The generated pack measures 22,956
+LOD0 triangles, 8,180 LOD1 triangles, 40 parts per LOD, 16 px maps, and 389,120
 decoded texture bytes. Collision geometry, joint axes/limits, and inertial
 values remain unchanged from the physics asset.

@@ -2947,7 +2947,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains(
-            "PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment"
+            "PBR mobile manipulator navigating, grasping, carrying, and placing an object in a real captured indoor 3DGS environment with camera telemetry and a live 2D route map"
         ),
         "README House hero alt text does not describe the 3D mobile manipulator simulation"
     );
@@ -3302,6 +3302,34 @@ fn validate_house_showcase_metadata(
                 .is_some_and(|value| value >= visual_link_count),
         "House hero metadata is missing PBR foreground evidence"
     );
+    let overlay = &metadata["capture"]["overlay"];
+    anyhow::ensure!(
+        overlay["enabled"].as_bool() == Some(true)
+            && overlay["camera_label"].as_str() == Some("CAM 3DGS / REC"),
+        "House hero metadata must declare the 3DGS camera overlay"
+    );
+    let frame_count = metadata["capture"]["frame_count"].as_u64();
+    anyhow::ensure!(
+        frame_count == Some(45)
+            && overlay["sampled_state_count"].as_u64() == frame_count
+            && overlay["map_trajectory_points"].as_u64() == frame_count,
+        "House hero camera overlay and 2D map must use all 45 capture samples"
+    );
+    anyhow::ensure!(
+        overlay["state_source"]
+            .as_str()
+            .is_some_and(|source| source.contains("post-physics rollout state")),
+        "House hero overlay must identify post-physics rollout state as its source"
+    );
+    let telemetry = overlay["telemetry_fields"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("House hero overlay telemetry must be an array"))?;
+    for field in ["phase", "grasp", "transport_m", "base_yaw_rad"] {
+        anyhow::ensure!(
+            telemetry.iter().any(|value| value.as_str() == Some(field)),
+            "House hero overlay telemetry is missing {field}"
+        );
+    }
     for field in ["house_ply_path", "visual_manifest_path"] {
         let reference = metadata[field]
             .as_str()
