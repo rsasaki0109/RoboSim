@@ -7,9 +7,9 @@ README hero and a lower-cost LOD1 for interactive/runtime use:
 
 | Link group | Authored detail |
 | --- | --- |
-| Base and wheels | Bevelled chassis, lift rails, status light, tire tread, rim and hub rings |
-| Carriage and arm | Rounded covers, actuator gears, bearing collars, cable channels, and fasteners |
-| Wrist and gripper | Joint rings, electronics housing, cyan status lamp, knuckles, friction ribs |
+| Base and wheels | Layered curved chassis shell, continuous elastomer bumper, twin lift rails, status light, tire tread, rim and hub rings |
+| Carriage and arm | Rounded carriage, twin arm rails, actuator housings/gears, bearing collars, cable channels, and fasteners |
+| Wrist and gripper | Stacked joint housings, electronics palm, cyan status lamp, knuckles, replaceable friction pads and ribs |
 
 Every generated GLB has multiple material-homogeneous parts and embedded
 metallic-roughness PBR maps (base color, normal, metallic-roughness, emissive,

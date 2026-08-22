@@ -72,6 +72,16 @@ struct RolloutFrame {
     phase: String,
     foreground: RenderScene,
     grasping: bool,
+    base_x_m: f64,
+    base_z_m: f64,
+    base_yaw_rad: f64,
+    payload_x_m: f64,
+    payload_z_m: f64,
+    start_base_x_m: f64,
+    start_base_z_m: f64,
+    pick_x_m: f64,
+    pick_z_m: f64,
+    base_trajectory: Vec<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -109,6 +119,17 @@ struct CaptureEvidence {
     sampled_sim_steps: Vec<u64>,
     unique_render_hashes: usize,
     duplicate_adjacent_frames: usize,
+    overlay: OverlayEvidence,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct OverlayEvidence {
+    enabled: bool,
+    camera_label: &'static str,
+    state_source: &'static str,
+    sampled_state_count: usize,
+    map_trajectory_points: usize,
+    telemetry_fields: [&'static str; 4],
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -367,6 +388,8 @@ fn rollout(
         .simulation()
         .named_translation_m(PAYLOAD_NAME)
         .context("initial mobile-lift cube")?;
+    let start_base_x_m = step.observation.base_x_m;
+    let start_base_z_m = step.observation.base_z_m;
     let resting_y = payload_initial.1;
     let mut max_payload_y = resting_y;
     let mut grasped = false;
@@ -376,6 +399,7 @@ fn rollout(
     let mut max_sync_error_m = 0.0_f64;
     let mut mesh_items = 0_usize;
     let mut pbr_items = 0_usize;
+    let mut base_trajectory = Vec::new();
 
     for action_step in 0..total_policy_steps {
         let phase = policy.phase();
@@ -403,11 +427,22 @@ fn rollout(
             max_sync_error_m = max_sync_error_m.max(sync_error);
             mesh_items = mesh_items.max(scene_mesh_items);
             pbr_items = pbr_items.max(scene_pbr_items);
+            base_trajectory.push((step.observation.base_x_m, step.observation.base_z_m));
             frames.push(RolloutFrame {
                 step: action_step + 1,
                 phase: format!("{:?}", policy.phase()),
                 foreground: scene,
                 grasping: episode.simulation().is_grasping(),
+                base_x_m: step.observation.base_x_m,
+                base_z_m: step.observation.base_z_m,
+                base_yaw_rad: step.observation.base_yaw_rad,
+                payload_x_m: payload.0,
+                payload_z_m: payload.2,
+                start_base_x_m,
+                start_base_z_m,
+                pick_x_m: payload_initial.0,
+                pick_z_m: payload_initial.2,
+                base_trajectory: base_trajectory.clone(),
             });
             next_sample += 1;
         }
@@ -655,13 +690,15 @@ fn render_capture(
             output.color.width,
             output.color.height
         );
+        let mut hero_rgba = output.color.rgba8;
+        annotate_frame(&mut hero_rgba, frame, index);
         write_png(
             &capture_dir.join(format!("frame-{index:03}.png")),
             WIDTH,
             HEIGHT,
-            &output.color.rgba8,
+            &hero_rgba,
         )?;
-        render_hashes.push(hash_rgba8(&output.color.rgba8));
+        render_hashes.push(hash_rgba8(&hero_rgba));
         let follow_output = render_hybrid_scene_camera(
             &mut backend,
             &mut background,
@@ -671,13 +708,15 @@ fn render_capture(
             CLEAR_COLOR,
         )
         .with_context(|| format!("render Dr Johnson follow-camera frame {index}"))?;
+        let mut follow_rgba = follow_output.color.rgba8;
+        annotate_frame(&mut follow_rgba, frame, index);
         write_png(
             &follow_dir.join(format!("frame-{index:03}.png")),
             WIDTH,
             HEIGHT,
-            &follow_output.color.rgba8,
+            &follow_rgba,
         )?;
-        follow_render_hashes.push(hash_rgba8(&follow_output.color.rgba8));
+        follow_render_hashes.push(hash_rgba8(&follow_rgba));
     }
     let unique_render_hashes = render_hashes.iter().copied().collect::<BTreeSet<_>>().len();
     let duplicate_adjacent_frames = render_hashes
@@ -721,6 +760,7 @@ fn render_capture(
         sampled_sim_steps: rollout.frames.iter().map(|frame| frame.step).collect(),
         unique_render_hashes,
         duplicate_adjacent_frames,
+        overlay: overlay_evidence(rollout),
     };
     let follow_unique_hashes = follow_render_hashes
         .iter()
@@ -763,8 +803,481 @@ fn render_capture(
         sampled_sim_steps: rollout.frames.iter().map(|frame| frame.step).collect(),
         unique_render_hashes: follow_unique_hashes,
         duplicate_adjacent_frames: follow_adjacent_duplicates,
+        overlay: overlay_evidence(rollout),
     };
     Ok((evidence, follow_evidence, poster_frame))
+}
+
+fn overlay_evidence(rollout: &Rollout) -> OverlayEvidence {
+    OverlayEvidence {
+        enabled: true,
+        camera_label: "CAM 3DGS / REC",
+        state_source: "post-physics rollout state sampled at each capture frame",
+        sampled_state_count: rollout.frames.len(),
+        map_trajectory_points: rollout
+            .frames
+            .last()
+            .map_or(0, |frame| frame.base_trajectory.len()),
+        telemetry_fields: ["phase", "grasp", "transport_m", "base_yaw_rad"],
+    }
+}
+
+/// Draw the evidence UI directly into the rendered RGBA buffer.
+///
+/// This helper is intentionally pure with respect to the renderer: every value
+/// shown in the overlay comes from the sampled post-physics [`RolloutFrame`].
+/// Keeping it separate also makes the map/telemetry contract testable without a
+/// GPU capture.
+fn annotate_frame(rgba: &mut [u8], frame: &RolloutFrame, _frame_index: usize) {
+    draw_camera_brackets(rgba, WIDTH as i32, HEIGHT as i32);
+    panel(rgba, 18, 18, 282, 76, [8, 18, 28, 220]);
+    text(rgba, 30, 28, "CAM 3DGS / REC", 2, [104, 235, 240, 255]);
+    text(rgba, 30, 48, "PHASE", 1, [155, 173, 186, 255]);
+    text(
+        rgba,
+        80,
+        48,
+        &short_phase(&frame.phase),
+        2,
+        [242, 183, 76, 255],
+    );
+    text(
+        rgba,
+        30,
+        68,
+        if is_navigation_phase(&frame.phase) {
+            "NAVIGATION"
+        } else {
+            "MANIPULATION"
+        },
+        1,
+        [201, 218, 226, 255],
+    );
+
+    panel(rgba, 690, 18, 252, 76, [8, 18, 28, 220]);
+    text(rgba, 704, 28, "TELEMETRY", 1, [104, 235, 240, 255]);
+    text(
+        rgba,
+        704,
+        46,
+        &format!("GRASP {}", if frame.grasping { "LOCK" } else { "OPEN" }),
+        1,
+        if frame.grasping {
+            [116, 240, 155, 255]
+        } else {
+            [208, 218, 224, 255]
+        },
+    );
+    text(
+        rgba,
+        704,
+        62,
+        &format!(
+            "TRN {:.2}M YAW {:.0}",
+            (frame.payload_x_m - frame.pick_x_m).hypot(frame.payload_z_m - frame.pick_z_m),
+            frame.base_yaw_rad.to_degrees()
+        ),
+        1,
+        [208, 218, 224, 255],
+    );
+
+    draw_map(rgba, frame);
+}
+
+fn draw_camera_brackets(rgba: &mut [u8], width: i32, height: i32) {
+    let color = [104, 235, 240, 255];
+    let inset = 12;
+    let length = 22;
+    line(
+        rgba,
+        width,
+        height,
+        inset,
+        inset,
+        inset + length,
+        inset,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        inset,
+        inset,
+        inset,
+        inset + length,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        width - inset,
+        inset,
+        width - inset - length,
+        inset,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        width - inset,
+        inset,
+        width - inset,
+        inset + length,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        inset,
+        height - inset,
+        inset + length,
+        height - inset,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        inset,
+        height - inset,
+        inset,
+        height - inset - length,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        width - inset,
+        height - inset,
+        width - inset - length,
+        height - inset,
+        color,
+    );
+    line(
+        rgba,
+        width,
+        height,
+        width - inset,
+        height - inset,
+        width - inset,
+        height - inset - length,
+        color,
+    );
+}
+
+fn draw_map(rgba: &mut [u8], frame: &RolloutFrame) {
+    const X: i32 = 18;
+    const Y: i32 = 374;
+    const W: i32 = 282;
+    const H: i32 = 148;
+    panel(rgba, X, Y, W, H, [8, 18, 28, 224]);
+    text(
+        rgba,
+        X + 12,
+        Y + 10,
+        "TOP-DOWN / LIVE PATH",
+        1,
+        [104, 235, 240, 255],
+    );
+    let min_x = frame.start_base_x_m.min(frame.pick_x_m).min(TARGET_X_M) - 0.35;
+    let max_x = frame.start_base_x_m.max(frame.pick_x_m).max(TARGET_X_M) + 0.35;
+    let min_z = frame.start_base_z_m.min(frame.pick_z_m).min(TARGET_Z_M) - 0.35;
+    let max_z = frame.start_base_z_m.max(frame.pick_z_m).max(TARGET_Z_M) + 0.35;
+    let map_x = X + 12;
+    let map_y = Y + 30;
+    let map_w = W - 24;
+    let map_h = H - 42;
+    for pair in frame.base_trajectory.windows(2) {
+        let a = map_point(
+            pair[0], min_x, max_x, min_z, max_z, map_x, map_y, map_w, map_h,
+        );
+        let b = map_point(
+            pair[1], min_x, max_x, min_z, max_z, map_x, map_y, map_w, map_h,
+        );
+        line(
+            rgba,
+            WIDTH as i32,
+            HEIGHT as i32,
+            a.0,
+            a.1,
+            b.0,
+            b.1,
+            [242, 183, 76, 255],
+        );
+    }
+    let start = map_point(
+        (frame.start_base_x_m, frame.start_base_z_m),
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+    );
+    let pick = map_point(
+        (frame.pick_x_m, frame.pick_z_m),
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+    );
+    let goal = map_point(
+        (TARGET_X_M, TARGET_Z_M),
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+    );
+    marker(rgba, start.0, start.1, [190, 200, 208, 255]);
+    marker(rgba, pick.0, pick.1, [242, 183, 76, 255]);
+    marker(rgba, goal.0, goal.1, [116, 240, 155, 255]);
+    let robot = map_point(
+        (frame.base_x_m, frame.base_z_m),
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+    );
+    circle(rgba, robot.0, robot.1, 6, [104, 235, 240, 255]);
+    let heading = (
+        robot.0 + (frame.base_yaw_rad.cos() * 12.0) as i32,
+        robot.1 - (frame.base_yaw_rad.sin() * 12.0) as i32,
+    );
+    line(
+        rgba,
+        WIDTH as i32,
+        HEIGHT as i32,
+        robot.0,
+        robot.1,
+        heading.0,
+        heading.1,
+        [104, 235, 240, 255],
+    );
+    text(
+        rgba,
+        X + 14,
+        Y + H - 12,
+        "START  PICK  GOAL",
+        1,
+        [190, 200, 208, 255],
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn map_point(
+    point: (f64, f64),
+    min_x: f64,
+    max_x: f64,
+    min_z: f64,
+    max_z: f64,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> (i32, i32) {
+    let px = ((point.0 - min_x) / (max_x - min_x)).clamp(0.0, 1.0);
+    let pz = ((max_z - point.1) / (max_z - min_z)).clamp(0.0, 1.0);
+    (
+        x + (px * f64::from(width)) as i32,
+        y + (pz * f64::from(height)) as i32,
+    )
+}
+
+fn is_navigation_phase(phase: &str) -> bool {
+    phase.contains("Navigate") || phase.contains("Approach")
+}
+
+fn short_phase(phase: &str) -> String {
+    phase
+        .replace("NavigateToPick", "NAV_PICK")
+        .replace("NavigateToPlace", "NAV_PLACE")
+        .to_ascii_uppercase()
+}
+
+fn panel(rgba: &mut [u8], x: i32, y: i32, width: i32, height: i32, color: [u8; 4]) {
+    for py in y..y + height {
+        for px in x..x + width {
+            blend_pixel(rgba, WIDTH as i32, HEIGHT as i32, px, py, color);
+        }
+    }
+}
+
+fn marker(rgba: &mut [u8], x: i32, y: i32, color: [u8; 4]) {
+    line(rgba, WIDTH as i32, HEIGHT as i32, x - 5, y, x + 5, y, color);
+    line(rgba, WIDTH as i32, HEIGHT as i32, x, y - 5, x, y + 5, color);
+}
+
+fn circle(rgba: &mut [u8], cx: i32, cy: i32, radius: i32, color: [u8; 4]) {
+    for y in -radius..=radius {
+        for x in -radius..=radius {
+            if x * x + y * y <= radius * radius {
+                blend_pixel(rgba, WIDTH as i32, HEIGHT as i32, cx + x, cy + y, color);
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn line(
+    rgba: &mut [u8],
+    width: i32,
+    height: i32,
+    mut x0: i32,
+    mut y0: i32,
+    x1: i32,
+    y1: i32,
+    color: [u8; 4],
+) {
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut error = dx + dy;
+    loop {
+        blend_pixel(rgba, width, height, x0, y0, color);
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let twice = 2 * error;
+        if twice >= dy {
+            error += dy;
+            x0 += sx;
+        }
+        if twice <= dx {
+            error += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn blend_pixel(rgba: &mut [u8], width: i32, height: i32, x: i32, y: i32, color: [u8; 4]) {
+    if x < 0 || y < 0 || x >= width || y >= height {
+        return;
+    }
+    let index = ((y * width + x) * 4) as usize;
+    let alpha = u16::from(color[3]);
+    let inverse = 255_u16 - alpha;
+    for channel in 0..3 {
+        rgba[index + channel] = ((u16::from(color[channel]) * alpha
+            + u16::from(rgba[index + channel]) * inverse)
+            / 255) as u8;
+    }
+    rgba[index + 3] = 255;
+}
+
+fn text(rgba: &mut [u8], x: i32, y: i32, value: &str, scale: i32, color: [u8; 4]) {
+    let mut cursor = x;
+    for character in value.chars() {
+        let glyph = glyph_rows(character);
+        for (row, bits) in glyph.iter().enumerate() {
+            for column in 0..5 {
+                if bits & (1 << (4 - column)) != 0 {
+                    for sy in 0..scale {
+                        for sx in 0..scale {
+                            blend_pixel(
+                                rgba,
+                                WIDTH as i32,
+                                HEIGHT as i32,
+                                cursor + column * scale + sx,
+                                y + row as i32 * scale + sy,
+                                color,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        cursor += 6 * scale;
+    }
+}
+
+fn glyph_rows(character: char) -> [u8; 7] {
+    match character {
+        'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
+        'C' => [0x0F, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0F],
+        'D' => [0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E],
+        'E' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
+        'F' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10],
+        'G' => [0x0F, 0x10, 0x10, 0x17, 0x11, 0x11, 0x0F],
+        'H' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'I' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F],
+        'J' => [0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E],
+        'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
+        'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
+        'M' => [0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11],
+        'N' => [0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11],
+        'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'P' => [0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10],
+        'Q' => [0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D],
+        'R' => [0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11],
+        'S' => [0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E],
+        'T' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+        'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'V' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04],
+        'W' => [0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11],
+        'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
+        'Y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
+        'Z' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F],
+        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
+        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        '2' => [0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F],
+        '3' => [0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E],
+        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
+        '5' => [0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E],
+        '6' => [0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E],
+        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
+        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E],
+        '/' => [0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10],
+        '_' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
+        '-' => [0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00],
+        ':' => [0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00],
+        _ => [0; 7],
+    }
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::{map_point, short_phase};
+
+    #[test]
+    fn map_point_keeps_world_markers_inside_inset() {
+        assert_eq!(
+            map_point((0.0, 0.0), -1.0, 1.0, -1.0, 1.0, 10, 20, 100, 80),
+            (60, 60)
+        );
+        assert_eq!(
+            map_point((4.0, -4.0), -1.0, 1.0, -1.0, 1.0, 10, 20, 100, 80),
+            (110, 100)
+        );
+    }
+
+    #[test]
+    fn phase_label_preserves_real_rollout_phase() {
+        assert_eq!(short_phase("NavigateToPick"), "NAV_PICK");
+        assert_eq!(short_phase("Transport"), "TRANSPORT");
+    }
 }
 
 fn render_probe(

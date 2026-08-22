@@ -365,12 +365,29 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
     cyan = builders[4]
 
     if name == "base_link":
+        # The outer shell is deliberately layered around the existing URDF
+        # envelope: the visual reads as a fabricated mobile base instead of a
+        # single box, while collision and inertial data remain exclusively in
+        # the physics asset.
         primary.add_rounded_box((0.0, 0.0, 0.0), (0.50, 0.30, 0.40), 0.035, smooth)
+        primary.add_rounded_box((0.0, -0.115, 0.0), (0.47, 0.050, 0.34), 0.018, smooth)
         primary.add_rounded_box((0.0, 0.165, 0.0), (0.43, 0.026, 0.34), 0.008, smooth)
+        rubber.add_rounded_box((0.0, -0.145, 0.0), (0.45, 0.026, 0.29), 0.010, smooth)
+        rubber.add_rounded_box((-0.235, -0.020, 0.0), (0.022, 0.235, 0.29), 0.008, smooth)
+        rubber.add_rounded_box((0.235, -0.020, 0.0), (0.022, 0.235, 0.29), 0.008, smooth)
         orange.add_rounded_box((-0.242, 0.015, 0.0), (0.025, 0.19, 0.35), 0.009, smooth)
-        aluminum.add_rounded_box((0.0, 0.45, 0.0), (0.12, 0.70, 0.12), 0.016, smooth)
-        aluminum.add_box((-0.052, 0.45, 0.0), (0.012, 0.58, 0.085))
-        aluminum.add_box((0.052, 0.45, 0.0), (0.012, 0.58, 0.085))
+        # Open lift tower: two spaced rails in local z, with visible upper
+        # and lower crossmembers.  This keeps the visual mechanism legible in
+        # the 3DGS capture instead of collapsing into one grey slab.
+        for z in (-0.052, 0.052):
+            aluminum.add_rounded_box((0.0, 0.45, z), (0.034, 0.70, 0.022), 0.006, smooth)
+        aluminum.add_rounded_box((0.0, 0.125, 0.0), (0.10, 0.035, 0.14), 0.008, smooth)
+        aluminum.add_rounded_box((0.0, 0.775, 0.0), (0.10, 0.035, 0.14), 0.008, smooth)
+        rubber.add_rounded_box((0.028, 0.45, 0.0), (0.010, 0.62, 0.010), 0.003, smooth)
+        orange.add_cylinder((0.028, 0.145, 0.0), 0.012, 0.030, "y", radial)
+        orange.add_cylinder((0.028, 0.755, 0.0), 0.012, 0.030, "y", radial)
+        aluminum.add_rounded_box((0.0, 0.265, 0.0), (0.16, 0.060, 0.15), 0.014, smooth)
+        orange.add_rounded_box((0.0, 0.235, 0.0), (0.13, 0.018, 0.12), 0.004, smooth)
         cyan.add_rounded_box((-0.258, 0.05, 0.0), (0.008, 0.10, 0.20), 0.002, smooth)
         cyan.add_uv_sphere((-0.18, 0.18, 0.0), 0.018, radial, max(6, radial // 2))
         for z in (-0.13, 0.13):
@@ -398,7 +415,11 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
             orange.add_cylinder((0.0, 0.035, z), 0.010, 0.012, "x", radial)
     elif name == "upper_arm_link":
         orange.add_rounded_box((0.25, 0.0, 0.0), (0.50, 0.070, 0.070), 0.015, smooth)
+        aluminum.add_rounded_box((0.25, 0.0, 0.038), (0.43, 0.022, 0.026), 0.006, smooth)
+        aluminum.add_rounded_box((0.25, 0.0, -0.038), (0.43, 0.022, 0.026), 0.006, smooth)
         orange.add_rounded_box((0.25, 0.0, 0.052), (0.42, 0.016, 0.022), 0.004, smooth)
+        primary.add_rounded_box((0.0, 0.0, 0.0), (0.13, 0.095, 0.105), 0.018, smooth)
+        primary.add_rounded_box((0.50, 0.0, 0.0), (0.11, 0.088, 0.098), 0.016, smooth)
         aluminum.add_cylinder((0.0, 0.0, 0.0), 0.071, 0.10, "y", radial)
         aluminum.add_cylinder((0.50, 0.0, 0.0), 0.054, 0.085, "y", radial)
         add_gear(aluminum, (0.0, 0.0, 0.0), 0.069, 0.09, "y", 2, radial)
@@ -407,7 +428,11 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
             aluminum.add_cylinder((x, 0.0, -0.040), 0.006, 0.008, "z", max(8, radial // 2))
     elif name == "forearm_link":
         orange.add_rounded_box((0.20, 0.0, 0.0), (0.40, 0.055, 0.055), 0.012, smooth)
+        aluminum.add_rounded_box((0.20, 0.0, 0.031), (0.34, 0.018, 0.020), 0.005, smooth)
+        aluminum.add_rounded_box((0.20, 0.0, -0.031), (0.34, 0.018, 0.020), 0.005, smooth)
         orange.add_rounded_box((0.21, 0.0, 0.039), (0.30, 0.012, 0.016), 0.003, smooth)
+        primary.add_rounded_box((0.0, 0.0, 0.0), (0.11, 0.080, 0.090), 0.015, smooth)
+        primary.add_rounded_box((0.40, 0.0, 0.0), (0.10, 0.074, 0.084), 0.014, smooth)
         aluminum.add_cylinder((0.0, 0.0, 0.0), 0.057, 0.080, "y", radial)
         aluminum.add_cylinder((0.40, 0.0, 0.0), 0.047, 0.073, "y", radial)
         add_gear(aluminum, (0.0, 0.0, 0.0), 0.055, 0.075, "y", 2, radial)
@@ -418,11 +443,15 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
         aluminum.add_torus((0.0, 0.0, -0.018), 0.030, 0.004, radial, max(4, radial // 8))
         aluminum.add_torus((0.0, 0.0, 0.018), 0.030, 0.004, radial, max(4, radial // 8))
         primary.add_rounded_box((0.0, 0.0, 0.0), (0.068, 0.058, 0.060), 0.010, smooth)
+        primary.add_rounded_box((0.0, 0.0, 0.040), (0.082, 0.050, 0.032), 0.008, smooth)
+        primary.add_rounded_box((0.0, 0.0, -0.040), (0.082, 0.050, 0.032), 0.008, smooth)
         orange.add_cylinder((0.0, 0.0, 0.0), 0.012, 0.048, "z", radial)
         cyan.add_uv_sphere((0.0, 0.031, 0.0), 0.008, radial, max(6, radial // 2))
     elif name == "gripper_base_link":
         primary.add_rounded_box((0.0, 0.0, 0.0), (0.060, 0.040, 0.120), 0.009, smooth)
+        primary.add_rounded_box((0.0, -0.020, 0.0), (0.086, 0.050, 0.104), 0.012, smooth)
         aluminum.add_rounded_box((0.0, 0.024, 0.0), (0.043, 0.012, 0.094), 0.003, smooth)
+        aluminum.add_rounded_box((0.0, -0.050, 0.0), (0.070, 0.018, 0.090), 0.005, smooth)
         aluminum.add_cylinder((0.0, -0.002, -0.052), 0.013, 0.048, "z", radial)
         aluminum.add_cylinder((0.0, -0.002, 0.052), 0.013, 0.048, "z", radial)
         orange.add_box((0.0, -0.022, 0.0), (0.045, 0.007, 0.076))
@@ -432,6 +461,7 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
         # that offset inside the authored mesh so the manifest can attach the
         # GLB at the identity transform and preserve joint synchronization.
         rubber.add_rounded_box((0.0, -0.14, 0.0), (0.10, 0.070, 0.020), 0.006, smooth)
+        rubber.add_rounded_box((0.0, -0.178, 0.0), (0.086, 0.018, 0.026), 0.006, smooth)
         orange.add_rounded_box((0.0, -0.092, 0.0), (0.075, 0.018, 0.030), 0.005, smooth)
         aluminum.add_cylinder((0.0, -0.067, 0.0), 0.012, 0.052, "z", radial)
         for index in range(4 if coarse else 6):
@@ -465,7 +495,11 @@ def png_rgba(width: int, height: int, pixels: Iterable[tuple[int, int, int, int]
 def texture_maps() -> tuple[bytes, ...]:
     """Return base/metal-rough/normal/emissive/occlusion maps."""
 
-    size = 8
+    # A small authored tile is enough for these link-scale parts while still
+    # giving the renderer useful roughness/normal variation at hero distance.
+    # Keep it deterministic and deliberately neutral: material identity comes
+    # from the per-primitive factors above, not from a hidden link texture.
+    size = 16
     base = []
     metallic_roughness = []
     normal = []
@@ -473,12 +507,12 @@ def texture_maps() -> tuple[bytes, ...]:
     occlusion = []
     for y in range(size):
         for x in range(size):
-            checker = 10 if (x + y) % 2 else 0
+            checker = 5 if (x + y) % 2 else 0
             base.append((245 - checker, 245 - checker, 245 - checker, 255))
-            metallic_roughness.append((0, 165 + ((x * 7 + y * 3) % 20), 185, 255))
-            normal.append((128 + (x % 3) - 1, 128 + (y % 3) - 1, 255, 255))
-            emissive.append((4 + x, 8 + y, 16, 255))
-            occlusion.append((232 - ((x + y) % 4),) * 3 + (255,))
+            metallic_roughness.append((0, 156 + ((x * 11 + y * 5) % 36), 176 + ((x + y) % 16), 255))
+            normal.append((128 + ((x * 3 + y) % 5) - 2, 128 + ((x + y * 3) % 5) - 2, 255, 255))
+            emissive.append((3 + (x % 4), 7 + (y % 5), 14 + ((x + y) % 4), 255))
+            occlusion.append((228 - ((x * 3 + y) % 8),) * 3 + (255,))
     return tuple(
         png_rgba(size, size, pixels)
         for pixels in (base, metallic_roughness, normal, emissive, occlusion)
