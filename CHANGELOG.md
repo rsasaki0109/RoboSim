@@ -6,10 +6,17 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
-- Complete the README environment showcase with a full-width House 3DGS
-  mobile-manipulation hero and a 2 x 2 Tsukuba, factory, office AGV, and
-  RoboCup SSL grid. The captures replay real headless scenarios and publish
-  synchronized 960 x 540 GIF, poster, and metadata evidence.
+- Complete the README environment showcase with a full-width real-capture
+  indoor 3DGS mobile-manipulation hero and a 2 x 2 Tsukuba, factory, office
+  AGV, and close robot-motion grid. The captures replay deterministic headless
+  evidence and publish synchronized 960 x 540 GIF, poster, and metadata.
+
+- Replace the front-page RoboCup SSL/Sakura viewer tile with a robot actually
+  moving and manipulating on the measured floor of the real Voxel51 Dr Johnson
+  interior 3DGS. Ship 317,756 selected upstream Gaussians without synthetic
+  additions, apply the manifest transform in the colour renderer, use published
+  COLMAP calibration, and include pinned hashes, Apache-2.0 provenance, smoke
+  evidence, and two reproducible measured-camera views.
 
 - Upgrade `docs/media/showcase.toml` to a schema-v2 catalog that verifies exact
   bytes, SHA-256 values, dimensions, README references, deterministic metadata,

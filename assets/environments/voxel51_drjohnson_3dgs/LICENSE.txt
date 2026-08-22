@@ -1,0 +1,16 @@
+Voxel51 Gaussian Splats Dataset
+================================
+
+Dataset page:
+https://huggingface.co/datasets/Voxel51/gaussian_splatting
+
+The dataset page identifies the dataset license as Apache License 2.0 and
+credits dataset author Paula Ramos. The Dr Johnson scene is a real-world scene
+created with the official 3D Gaussian Splatting method.
+
+The RNE derivative is distributed under the same Apache-2.0 terms. A copy of
+the license is available at the repository root as LICENSE-APACHE.
+
+The derivative removes normals and view-dependent spherical harmonics, keeps
+every tenth Gaussian, and copies each retained position, DC colour, opacity,
+scale, and rotation float byte-for-byte. No synthetic splats are added.

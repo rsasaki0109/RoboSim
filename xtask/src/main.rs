@@ -2545,7 +2545,8 @@ fn run_media_smokes() -> anyhow::Result<()> {
     )?;
     run_step(
         "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment all",
-    )
+    )?;
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2919,7 +2920,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
         "tsukuba",
         "factory",
         "office",
-        "ssl",
+        "real-3dgs",
     ];
     anyhow::ensure!(
         manifest.media.len() == expected_ids.len(),
@@ -2946,7 +2947,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains(
-            "PBR mobile manipulator navigating, grasping, carrying, and placing an object inside the House 3DGS environment"
+            "PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment"
         ),
         "README House hero alt text does not describe the 3D mobile manipulator simulation"
     );
@@ -4014,7 +4015,7 @@ mod tests {
                 "tsukuba",
                 "factory",
                 "office",
-                "ssl",
+                "real-3dgs",
             ]
         );
     }

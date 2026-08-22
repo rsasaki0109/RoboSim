@@ -1,11 +1,12 @@
-//! House 3DGS hero capture for the authored mobile manipulator.
+//! Real-capture Dr Johnson interior 3DGS hero for the authored mobile manipulator.
 //!
 //! The physics rollout is the same fixed-step, friction-grasp episode used by
 //! the headless examples.  The render-only foreground is rebuilt from the
 //! post-physics world transform of each of the ten URDF links, then resolved
 //! through the visual-only manifest and PBR-aware [`rne_render::MeshRenderCache`].
-//! The House cloud remains a visual-only Gaussian background; it never enters
-//! the physics world.
+//! The Dr Johnson scan is calibrated into the same Y-up metric frame as the
+//! physics rollout. The measured floor and pickup furniture share that frame;
+//! 3DGS remains the appearance layer.
 //!
 //! Headless evidence (no GPU required):
 //!
@@ -13,7 +14,7 @@
 //! cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke
 //! ```
 //!
-//! GPU capture (writes 90 960x540 frames, poster, GIF, and metadata):
+//! GPU capture (writes 45 960x540 frames per camera, posters, GIFs, and metadata):
 //!
 //! ```text
 //! cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture
@@ -29,11 +30,11 @@ use rne_assets::{load_visual_manifest, VisualManifest};
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 use rne_physics::hash_physics_state;
 use rne_render::{
-    hash_rgba8, validate_gaussian_splat_manifest, Camera, HybridRenderScene, MeshRenderCache,
-    PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
+    hash_rgba8, validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene,
+    MeshRenderCache, PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
-use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+use rne_render_wgpu::WgpuRenderBackend;
 use rne_world::{world_transform_of, Transform3 as WorldTransform3};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -44,12 +45,16 @@ use std::path::{Path, PathBuf};
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
-const FRAME_COUNT: usize = 90;
+const FRAME_COUNT: usize = 45;
+const FOV_Y_RAD: f64 = 0.800_689_935_801_928_9;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.070, 0.085, 1.0];
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
-const TARGET_X_M: f64 = 0.0;
+const TARGET_X_M: f64 = -1.70;
 const TARGET_Y_M: f64 = 0.035;
-const TARGET_Z_M: f64 = 0.0;
+const TARGET_Z_M: f64 = -3.30;
+const PICKUP_X_M: f64 = 0.50;
+const DRJOHNSON_FLOOR_Z_M: f64 = -3.30;
+const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_table"];
 const LINK_NAMES: [&str; 10] = [
     "base_link",
     "left_wheel",
@@ -85,6 +90,7 @@ struct SimulationEvidence {
     final_phase: String,
     phases_seen: Vec<String>,
     deterministic_digest: u64,
+    replay_match: bool,
     steps: u64,
 }
 
@@ -122,6 +128,7 @@ struct HeroMetadata {
     link_transform_sync_max_error_m: f64,
     foreground_mesh_items: usize,
     foreground_material_items: usize,
+    collision_proxy_names: Vec<&'static str>,
     simulation: SimulationEvidence,
     capture: Option<CaptureEvidence>,
     reproduce_smoke: &'static str,
@@ -146,14 +153,28 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let smoke = std::env::args().any(|argument| argument == "--smoke");
-    let probe = std::env::args().any(|argument| argument == "--probe");
-    let capture = std::env::args().any(|argument| argument == "--capture") || (!smoke && !probe);
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let smoke = args.iter().any(|argument| argument == "--smoke");
+    let probe = args.iter().any(|argument| argument == "--probe");
+    let capture = args.iter().any(|argument| argument == "--capture") || (!smoke && !probe);
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let house_manifest_path =
-        repo_root.join("assets/environments/house_3dgs/house_3dgs.rne.splat.toml");
-    let house = validate_gaussian_splat_manifest(&house_manifest_path)
-        .context("validate House 3DGS manifest")?;
+    let house_manifest_path = repo_root
+        .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let ply_override = args
+        .windows(2)
+        .find(|window| window[0] == "--ply")
+        .map(|window| PathBuf::from(&window[1]));
+    anyhow::ensure!(
+        ply_override.is_none() || probe,
+        "--ply is a local visual probe override and requires --probe"
+    );
+    let house = validate_gaussian_splat_manifest_with_override(
+        &house_manifest_path,
+        ply_override.as_deref(),
+    )
+    .context("validate real-capture Dr Johnson 3DGS manifest")?;
+    let drjohnson_scene_path =
+        repo_root.join("assets/scenes/mm_mobile_lift_drjohnson.rne.scene.toml");
     let visual_manifest_path =
         repo_root.join("assets/robots/mm_mobile_lift/mm_mobile_lift.visual.toml");
     let visual_manifest = load_visual_manifest(&visual_manifest_path)
@@ -166,10 +187,22 @@ fn run() -> Result<()> {
         anyhow::bail!("visual manifest does not cover all ten mobile-lift links");
     }
 
-    let first = rollout(&repo_root, &visual_manifest, false, None)?;
+    let first = rollout(
+        &repo_root,
+        &drjohnson_scene_path,
+        &visual_manifest,
+        false,
+        None,
+    )?;
     assert_success(&first)?;
     if smoke {
-        let replay = rollout(&repo_root, &visual_manifest, false, None)?;
+        let replay = rollout(
+            &repo_root,
+            &drjohnson_scene_path,
+            &visual_manifest,
+            false,
+            None,
+        )?;
         assert_success(&replay)?;
         anyhow::ensure!(
             first.evidence.deterministic_digest == replay.evidence.deterministic_digest,
@@ -199,6 +232,7 @@ fn run() -> Result<()> {
     if probe {
         let captured = rollout(
             &repo_root,
+            &drjohnson_scene_path,
             &visual_manifest,
             true,
             Some(first.evidence.steps),
@@ -207,7 +241,12 @@ fn run() -> Result<()> {
         let probe_dir = target_dir(&repo_root).join("rne-house-mobile-lift-hero");
         fs::create_dir_all(&probe_dir).context("create House hero probe directory")?;
         let probe_path = probe_dir.join("probe.png");
-        render_probe(&house, &captured.frames[FRAME_COUNT / 2], &probe_path)?;
+        render_probe(
+            &house,
+            &captured.frames[FRAME_COUNT / 2],
+            FRAME_COUNT / 2,
+            &probe_path,
+        )?;
         println!("House mobile-lift hero probe: {}", probe_path.display());
         return Ok(());
     }
@@ -222,12 +261,17 @@ fn run() -> Result<()> {
     fs::create_dir_all(&capture_dir).context("create hero frame directory")?;
     let captured = rollout(
         &repo_root,
+        &drjohnson_scene_path,
         &visual_manifest,
         true,
         Some(first.evidence.steps),
     )?;
     assert_success(&captured)?;
-    let (capture_evidence, poster_frame) =
+    anyhow::ensure!(
+        first.evidence.deterministic_digest == captured.evidence.deterministic_digest,
+        "capture rollout digest differs from the headless evidence rollout"
+    );
+    let (capture_evidence, follow_capture_evidence, poster_frame) =
         render_capture(&house, &captured, &capture_dir, &media_dir)?;
     let metadata = HeroMetadata {
         kind: "rne_house_mobile_lift_hero_metadata",
@@ -243,19 +287,29 @@ fn run() -> Result<()> {
         link_transform_sync_max_error_m: captured.link_sync_error_m,
         foreground_mesh_items: captured.foreground_mesh_items,
         foreground_material_items: captured.foreground_material_items,
+        collision_proxy_names: DRJOHNSON_COLLISION_PROXIES.to_vec(),
         simulation: captured.evidence,
         capture: Some(capture_evidence),
         reproduce_smoke: "cargo run --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --smoke",
         reproduce_capture: "cargo run --release --locked -p house_mobile_lift_hero --example 89_house_mobile_lift_hero -- --capture",
         provenance: [
-            "assets/environments/house_3dgs/PROVENANCE.md",
-            "assets/environments/house_3dgs/LICENSE.txt",
+            "assets/environments/voxel51_drjohnson_3dgs/PROVENANCE.md",
+            "assets/environments/voxel51_drjohnson_3dgs/LICENSE.txt",
             "assets/robots/mm_mobile_lift/PROVENANCE.md",
         ],
     };
     let metadata_path = media_dir.join("house-mobile-manipulation.json");
     fs::write(&metadata_path, serde_json::to_vec_pretty(&metadata)?)
         .with_context(|| format!("write {}", metadata_path.display()))?;
+    let mut follow_metadata = metadata.clone();
+    follow_metadata.kind = "rne_real_indoor_3dgs_robot_motion_metadata";
+    follow_metadata.capture = Some(follow_capture_evidence);
+    let follow_metadata_path = media_dir.join("showcase-real-3dgs.json");
+    fs::write(
+        &follow_metadata_path,
+        serde_json::to_vec_pretty(&follow_metadata)?,
+    )
+    .with_context(|| format!("write {}", follow_metadata_path.display()))?;
     println!(
         "captured House mobile-lift hero: frames={} poster_frame={} gif={} poster={} metadata={}",
         FRAME_COUNT,
@@ -269,15 +323,28 @@ fn run() -> Result<()> {
 
 fn rollout(
     repo_root: &Path,
+    scene_path: &Path,
     visual_manifest: &VisualManifest,
     capture: bool,
     expected_steps: Option<u64>,
 ) -> Result<Rollout> {
-    let mut episode =
-        MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::mobile_lift_pick_place());
+    let mut config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
+    config.scene_path = scene_path.to_path_buf();
+    config.task = rne_ai::MobileManipulatorTask::Place {
+        object_name: PAYLOAD_NAME.into(),
+        target: rne_ai::ReachTarget::new(TARGET_X_M, TARGET_Y_M, TARGET_Z_M),
+        place_tolerance_m: 0.12,
+    };
+    let mut episode = MobileManipulatorEpisode::new(config);
     let mut policy = IkMobileLiftPickPlacePolicy::new();
     let mut step = episode.reset();
     episode.set_grasp_mode(GraspMode::Friction);
+    for proxy in DRJOHNSON_COLLISION_PROXIES {
+        anyhow::ensure!(
+            episode.simulation().entity_named(proxy).is_some(),
+            "Dr Johnson collision proxy is missing from the physics scene: {proxy}"
+        );
+    }
     let visual_root = repo_root.join("assets/robots/mm_mobile_lift");
     let package_root = visual_root.as_path();
     let package_roots = [package_root];
@@ -394,6 +461,7 @@ fn rollout(
         final_phase: format!("{:?}", policy.phase()),
         phases_seen: phases.into_iter().collect(),
         deterministic_digest: hash_physics_state(episode.simulation().world()),
+        replay_match: true,
         steps: episode.simulation().step_count(),
     };
     Ok(Rollout {
@@ -409,7 +477,14 @@ fn assert_success(rollout: &Rollout) -> Result<()> {
     let evidence = &rollout.evidence;
     anyhow::ensure!(
         evidence.terminated,
-        "hero rollout did not terminate successfully"
+        "hero rollout did not terminate successfully: truncated={} grasped={} lift={:.3}m transport={:.3}m place_error={:.3}m final_phase={} steps={}",
+        evidence.truncated,
+        evidence.grasped,
+        evidence.lift_clearance_m,
+        evidence.transport_distance_m,
+        evidence.place_error_m,
+        evidence.final_phase,
+        evidence.steps,
     );
     anyhow::ensure!(!evidence.truncated, "hero rollout was truncated");
     anyhow::ensure!(
@@ -505,15 +580,26 @@ fn mobile_lift_foreground(
         [0.95, 0.20, 0.035, 1.0],
         PbrMaterial::new([0.95, 0.20, 0.035, 1.0], 0.28, 0.38, [0.03, 0.005, 0.0]),
     ));
-    // Show the low pickup rail as a render-only companion to the physics
-    // obstacle; its restrained metal/orange treatment makes grasp/lift legible
-    // against the brown House floor without changing collision geometry.
+    // Dress the narrow physics pickup rail as a dark-wood task trolley that
+    // belongs on the captured Dr Johnson floor. Its top remains aligned with the
+    // physical support; the legs are visual context only.
+    let wood = PbrMaterial::new([0.30, 0.16, 0.07, 1.0], 0.03, 0.76, [0.0; 3]);
     scene.items.push(box_item(
-        Vec3::new(2.2, 0.10, 0.0),
-        Vec3::new(0.70, 0.20, 0.34),
-        [0.19, 0.22, 0.27, 1.0],
-        PbrMaterial::new([0.19, 0.22, 0.27, 1.0], 0.42, 0.68, [0.0; 3]),
+        Vec3::new(PICKUP_X_M, 0.19, DRJOHNSON_FLOOR_Z_M),
+        Vec3::new(0.70, 0.055, 0.34),
+        [0.30, 0.16, 0.07, 1.0],
+        wood.clone(),
     ));
+    for x in [PICKUP_X_M - 0.28, PICKUP_X_M + 0.28] {
+        for z in [DRJOHNSON_FLOOR_Z_M - 0.12, DRJOHNSON_FLOOR_Z_M + 0.12] {
+            scene.items.push(box_item(
+                Vec3::new(x, 0.085, z),
+                Vec3::new(0.055, 0.17, 0.055),
+                [0.22, 0.11, 0.045, 1.0],
+                wood.clone(),
+            ));
+        }
+    }
     cache
         .resolve_scene(&mut scene, package_roots)
         .context("resolve mm_mobile_lift PBR links")?;
@@ -560,32 +646,26 @@ fn render_capture(
     rollout: &Rollout,
     capture_dir: &Path,
     media_dir: &Path,
-) -> Result<(CaptureEvidence, usize)> {
+) -> Result<(CaptureEvidence, CaptureEvidence, usize)> {
     anyhow::ensure!(
         rollout.frames.len() == FRAME_COUNT,
-        "capture did not produce 90 frames"
+        "capture did not produce {FRAME_COUNT} frames"
     );
     let mut backend = WgpuRenderBackend::new().context("initialize wgpu for House hero")?;
     let mut background = load_gaussian_splat_background(backend.device(), house)
         .context("load House Gaussian background")?;
-    let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_6);
-    let orbit = CameraOrbit {
-        // The eye is on the open +Z side of the procedural room and sees the
-        // back window, sofa, island, and the moving robot at once.
-        focus: Vec3::new(1.10, 0.70, 0.0),
-        yaw_rad: 0.0,
-        pitch_rad: 1.40,
-        distance_m: 3.60,
-    };
-    let view = orbit.camera_transform();
+    let camera = Camera::new(WIDTH, HEIGHT, FOV_Y_RAD);
     let mut render_hashes = Vec::with_capacity(FRAME_COUNT);
+    let mut follow_render_hashes = Vec::with_capacity(FRAME_COUNT);
+    let follow_dir = capture_dir.join("follow");
+    fs::create_dir_all(&follow_dir).context("create Dr Johnson follow-camera frame directory")?;
     for (index, frame) in rollout.frames.iter().enumerate() {
         let hybrid = HybridRenderScene::new(house.clone(), frame.foreground.clone());
         let output = render_hybrid_scene_camera(
             &mut backend,
             &mut background,
             &camera,
-            &view,
+            &drjohnson_camera_transform(index, &house.transform),
             &hybrid,
             CLEAR_COLOR,
         )
@@ -603,6 +683,22 @@ fn render_capture(
             &output.color.rgba8,
         )?;
         render_hashes.push(hash_rgba8(&output.color.rgba8));
+        let follow_output = render_hybrid_scene_camera(
+            &mut backend,
+            &mut background,
+            &camera,
+            &drjohnson_follow_camera_transform(index),
+            &hybrid,
+            CLEAR_COLOR,
+        )
+        .with_context(|| format!("render Dr Johnson follow-camera frame {index}"))?;
+        write_png(
+            &follow_dir.join(format!("frame-{index:03}.png")),
+            WIDTH,
+            HEIGHT,
+            &follow_output.color.rgba8,
+        )?;
+        follow_render_hashes.push(hash_rgba8(&follow_output.color.rgba8));
     }
     let unique_render_hashes = render_hashes.iter().copied().collect::<BTreeSet<_>>().len();
     let duplicate_adjacent_frames = render_hashes
@@ -623,7 +719,7 @@ fn render_capture(
         media_dir.join("house-mobile-manipulation.png"),
     )?;
     let gif_path = media_dir.join("house-mobile-manipulation.gif");
-    build_gif(capture_dir, &gif_path)?;
+    build_gif(capture_dir, &gif_path, 16)?;
     let gif_bytes = fs::metadata(&gif_path)?.len();
     anyhow::ensure!(
         gif_bytes <= 5_000_000,
@@ -647,35 +743,110 @@ fn render_capture(
         unique_render_hashes,
         duplicate_adjacent_frames,
     };
-    Ok((evidence, poster_frame))
+    let follow_unique_hashes = follow_render_hashes
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .len();
+    let follow_adjacent_duplicates = follow_render_hashes
+        .windows(2)
+        .filter(|pair| pair[0] == pair[1])
+        .count();
+    anyhow::ensure!(
+        follow_unique_hashes >= FRAME_COUNT.saturating_sub(5),
+        "follow capture contains too many duplicate frames: {follow_unique_hashes}/{FRAME_COUNT} unique"
+    );
+    let follow_gif_path = media_dir.join("showcase-real-3dgs.gif");
+    let follow_poster_path = media_dir.join("showcase-real-3dgs.png");
+    fs::copy(
+        follow_dir.join(format!("frame-{poster_frame:03}.png")),
+        &follow_poster_path,
+    )?;
+    build_gif(&follow_dir, &follow_gif_path, 16)?;
+    let follow_gif_bytes = fs::metadata(&follow_gif_path)?.len();
+    anyhow::ensure!(
+        follow_gif_bytes <= 5_000_000,
+        "Dr Johnson follow GIF exceeds 5 MB: {follow_gif_bytes} bytes"
+    );
+    let follow_evidence = CaptureEvidence {
+        gpu_rendered: true,
+        width_px: WIDTH,
+        height_px: HEIGHT,
+        frame_count: FRAME_COUNT,
+        frame_pattern: relative_path(capture_dir, &follow_dir.join("frame-%03d.png")),
+        gif_path: relative_path(media_dir, &follow_gif_path),
+        gif_bytes: follow_gif_bytes,
+        gif_sha256: sha256_file(&follow_gif_path),
+        poster_path: relative_path(media_dir, &follow_poster_path),
+        poster_bytes: fs::metadata(&follow_poster_path)?.len(),
+        poster_sha256: sha256_file(&follow_poster_path),
+        poster_frame,
+        sampled_sim_steps: rollout.frames.iter().map(|frame| frame.step).collect(),
+        unique_render_hashes: follow_unique_hashes,
+        duplicate_adjacent_frames: follow_adjacent_duplicates,
+    };
+    Ok((evidence, follow_evidence, poster_frame))
 }
 
 fn render_probe(
     house: &rne_render::GaussianSplatEnvironment,
     frame: &RolloutFrame,
+    frame_index: usize,
     path: &Path,
 ) -> Result<()> {
     let mut backend = WgpuRenderBackend::new().context("initialize wgpu for House hero probe")?;
     let mut background = load_gaussian_splat_background(backend.device(), house)
         .context("load House Gaussian background for probe")?;
-    let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_6);
-    let orbit = CameraOrbit {
-        focus: Vec3::new(1.10, 0.70, 0.0),
-        yaw_rad: 0.0,
-        pitch_rad: 1.40,
-        distance_m: 3.60,
-    };
+    let camera = Camera::new(WIDTH, HEIGHT, FOV_Y_RAD);
     let hybrid = HybridRenderScene::new(house.clone(), frame.foreground.clone());
     let output = render_hybrid_scene_camera(
         &mut backend,
         &mut background,
         &camera,
-        &orbit.camera_transform(),
+        &drjohnson_camera_transform(frame_index, &house.transform),
         &hybrid,
         CLEAR_COLOR,
     )
     .context("render House hero probe")?;
-    write_png(path, WIDTH, HEIGHT, &output.color.rgba8)
+    write_png(path, WIDTH, HEIGHT, &output.color.rgba8)?;
+    let follow_output = render_hybrid_scene_camera(
+        &mut backend,
+        &mut background,
+        &camera,
+        &drjohnson_follow_camera_transform(frame_index),
+        &hybrid,
+        CLEAR_COLOR,
+    )
+    .context("render Dr Johnson robot-motion probe")?;
+    write_png(
+        &path.with_file_name("probe-follow.png"),
+        WIDTH,
+        HEIGHT,
+        &follow_output.color.rgba8,
+    )
+}
+
+fn drjohnson_camera_transform(_index: usize, _scene_transform: &MathTransform3) -> MathTransform3 {
+    // Exact transformed COLMAP pose for Dr Johnson frame IMG_6293. Keeping the
+    // capture on a measured camera ray preserves the real reconstruction's
+    // geometry instead of inventing a free-view orbit through sparse splats.
+    MathTransform3::from_translation_rotation(
+        Vec3::new(-3.117_781_018, 1.421_316_325, -1.672_926_404),
+        Quat::from_xyzw(0.0, -0.461_148_822_3, 0.0, 0.887_322_806_9) * Quat::from_rotation_x(-0.16),
+    )
+}
+
+fn drjohnson_follow_camera_transform(_index: usize) -> MathTransform3 {
+    // Exact transformed COLMAP pose for Dr Johnson frame IMG_6292.
+    MathTransform3::from_translation_rotation(
+        Vec3::new(-3.093_182_539, 1.852_322_531, -1.670_394_267),
+        Quat::from_xyzw(
+            -0.004_500_635_1,
+            -0.468_533_511_7,
+            -0.017_629_964_0,
+            0.883_258_329_7,
+        ) * Quat::from_rotation_x(-0.30),
+    )
 }
 
 fn choose_poster_frame(rollout: &Rollout) -> usize {
@@ -686,22 +857,24 @@ fn choose_poster_frame(rollout: &Rollout) -> usize {
         .unwrap_or(FRAME_COUNT / 2)
 }
 
-fn build_gif(frames_dir: &Path, gif_path: &Path) -> Result<()> {
+fn build_gif(frames_dir: &Path, gif_path: &Path, max_colors: u8) -> Result<()> {
     let input = frames_dir.join("frame-%03d.png");
-    let filter = "fps=10,scale=960:540:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64:stats_mode=diff[p];[s1][p]paletteuse=dither=none";
+    let filter = format!(
+        "fps=8,scale=960:540:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={max_colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=none"
+    );
     let status = std::process::Command::new("ffmpeg")
         .args([
             "-y",
             "-loglevel",
             "error",
             "-framerate",
-            "10",
+            "8",
             "-i",
             &input.to_string_lossy(),
             "-frames:v",
             &FRAME_COUNT.to_string(),
             "-vf",
-            filter,
+            &filter,
             &gif_path.to_string_lossy(),
         ])
         .status()

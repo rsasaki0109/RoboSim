@@ -13,19 +13,20 @@ dependency.
 
 ## Real simulation showcase
 
-Every frame below comes from the simulator state rendered by wgpu. Reduced-motion
-clients receive the matching poster PNG. The quantitative gates and exact
-regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.md).
+Every frame below is rendered by wgpu from deterministic simulation or pinned
+dataset/camera state. Reduced-motion clients receive the matching poster PNG.
+The quantitative gates and exact regeneration commands are in
+[README showcase acceptance](docs/README_SHOWCASE.md).
 
 <table>
   <tr>
     <td colspan="2" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/house-mobile-manipulation.png">
-        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object inside the House 3DGS environment" width="900">
+        <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator navigating, grasping, carrying, and placing an object on the floor of a real captured indoor 3DGS environment" width="900">
       </picture>
-      <br><b>House 3DGS · mobile manipulation</b><br>
-      <sub>Real friction grasp, 0.229 m lift, 2.139 m transport, and 0.0616 m placement error. Ten authored PBR links stay synchronized to the deterministic simulation. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <br><b>Real indoor 3DGS · mobile manipulation</b><br>
+      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, wood floor, robot bodies, and task furniture now share one metric transform. A 10-link PBR robot completes friction grasp, lift, 2.145 m transport, and placement. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>
@@ -57,11 +58,11 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
     </td>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-ssl.png">
-        <img src="docs/media/showcase-ssl.gif" alt="Blue and yellow RoboCup SSL robots playing a deterministic two-versus-two match" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-real-3dgs.png">
+        <img src="docs/media/showcase-real-3dgs.gif" alt="Detailed mobile manipulator driving and handling an object on the measured floor of a real photo-derived Dr Johnson 3D Gaussian Splatting interior" width="460">
       </picture>
-      <br><b>RoboCup SSL 2v2</b><br>
-      <sub>Four synchronized robots, a bounded legal kick, in-field ball motion, and a verified yellow-goal finish. <a href="docs/media/showcase-ssl.json">metadata</a></sub>
+      <br><b>Dr Johnson 3DGS · robot in motion</b><br>
+      <sub>A measured second camera observes the same executable grasp-and-carry episode through 317,756 real-capture Gaussians—no synthetic splats and no render-only robot trajectory. <a href="docs/media/showcase-real-3dgs.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
 </table>
@@ -74,7 +75,7 @@ regeneration commands are in [README showcase acceptance](docs/README_SHOWCASE.m
 | Vehicle dynamics | Dynamic bicycle model, tire saturation, controller metrics, sensor latency, and deterministic multi-seed evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), examples 49–51 |
 | Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
 | Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
-| Manipulation | Authored PBR mobile manipulator, House 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
+| Manipulation | Authored PBR mobile manipulator, real-capture indoor 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
 | Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
 
 

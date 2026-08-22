@@ -1,4 +1,4 @@
-//! Reproducible README showcase captures for four independent RNE scenarios.
+//! Reproducible README showcase captures for three independent RNE scenarios.
 //!
 //! Headless evidence:
 //!
@@ -75,7 +75,6 @@ fn parse_environment(value: &str) -> Result<Vec<Environment>> {
             Environment::Tsukuba,
             Environment::Factory,
             Environment::Office,
-            Environment::Ssl,
         ]),
         "tsukuba" => Ok(vec![Environment::Tsukuba]),
         "factory" => Ok(vec![Environment::Factory]),

@@ -212,6 +212,8 @@ struct RawGaussianSplatManifest {
     translation_m: [f64; 3],
     #[serde(default)]
     rotation_y_rad: f64,
+    #[serde(default)]
+    rotation_xyzw: Option<[f64; 4]>,
     #[serde(default = "default_scale")]
     scale: f64,
     #[serde(default = "default_renderer_identity")]
@@ -261,6 +263,31 @@ impl RawGaussianSplatManifest {
                 message: "scale must be finite and positive".into(),
             });
         }
+        if !self.rotation_y_rad.is_finite() {
+            return Err(GaussianSplatError::Invalid {
+                path,
+                message: "rotation_y_rad must be finite".into(),
+            });
+        }
+        let rotation = if let Some([x, y, z, w]) = self.rotation_xyzw {
+            if self.rotation_y_rad != 0.0 {
+                return Err(GaussianSplatError::Invalid {
+                    path,
+                    message: "rotation_xyzw and non-zero rotation_y_rad are mutually exclusive"
+                        .into(),
+                });
+            }
+            let rotation = Quat::from_xyzw(x, y, z, w);
+            if !rotation.is_finite() || rotation.length_squared() <= f64::EPSILON {
+                return Err(GaussianSplatError::Invalid {
+                    path,
+                    message: "rotation_xyzw must be finite and non-zero".into(),
+                });
+            }
+            rotation.normalize()
+        } else {
+            Quat::from_rotation_y(self.rotation_y_rad)
+        };
         let parent = manifest_path.parent();
         let resolve = |relative: &str| -> PathBuf {
             parent.map_or_else(|| PathBuf::from(relative), |parent| parent.join(relative))
@@ -284,7 +311,7 @@ impl RawGaussianSplatManifest {
             ply_path,
             transform: Transform3 {
                 translation: Vec3::from_array(self.translation_m),
-                rotation: Quat::from_rotation_y(self.rotation_y_rad),
+                rotation,
                 scale: Vec3::splat(self.scale),
             },
             renderer_identity: self.renderer_identity,
@@ -333,5 +360,29 @@ mod tests {
         assert_eq!(environment.environment_id, "tsukuba.kenkyugakuen.v1");
         assert!(!environment.standin);
         assert_eq!(environment.ply_path, fixture);
+    }
+
+    #[test]
+    fn manifest_quaternion_rotation_is_normalized_and_applied() {
+        let raw = RawGaussianSplatManifest {
+            kind: "rne_gaussian_splat_environment".into(),
+            schema_version: 1,
+            environment_id: "test.quaternion".into(),
+            ply_path: "fixture.ply".into(),
+            preferred_ply_path: None,
+            translation_m: [0.0; 3],
+            rotation_y_rad: 0.0,
+            rotation_xyzw: Some([2.0, 0.0, 0.0, 2.0]),
+            scale: 1.0,
+            renderer_identity: GAUSSIAN_SPLAT_RENDERER_ID_V1.into(),
+            standin: false,
+            coordinate_note: None,
+        };
+        let environment = raw
+            .into_environment(Path::new("fixture.rne.splat.toml"), None)
+            .expect("quaternion manifest");
+        assert!((environment.transform.rotation.length() - 1.0).abs() < 1.0e-12);
+        let rotated = environment.transform.rotation * Vec3::Y;
+        assert!((rotated - Vec3::Z).length() < 1.0e-12);
     }
 }

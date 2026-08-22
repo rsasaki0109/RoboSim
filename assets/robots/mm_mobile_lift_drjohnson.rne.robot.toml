@@ -1,0 +1,19 @@
+kind = "urdf"
+model_name = "mm_mobile_lift"
+
+# Scene-calibrated spawn on the unobstructed Dr Johnson wood floor, in front of
+# the captured wall furniture. The model and collision geometry share this pose.
+[urdf]
+path = "mm_mobile_lift/mm_mobile_lift.urdf"
+base_body_type = "dynamic"
+initial_translation_m = [-1.70, 0.25, -3.30]
+articulation = true
+self_collisions = false
+use_declared_inertial_masses = true
+
+[wrist_camera]
+mount_link = "gripper_base_link"
+mount_offset_m = [0.05, 0.0, 0.0]
+width = 64
+height = 48
+update_rate_hz = 10.0
