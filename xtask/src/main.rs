@@ -2920,7 +2920,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
         "tsukuba",
         "factory",
         "office",
-        "real-3dgs",
+        "uav",
     ];
     anyhow::ensure!(
         manifest.media.len() == expected_ids.len(),
@@ -4015,7 +4015,7 @@ mod tests {
                 "tsukuba",
                 "factory",
                 "office",
-                "real-3dgs",
+                "uav",
             ]
         );
     }

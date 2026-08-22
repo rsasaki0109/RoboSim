@@ -1,0 +1,50 @@
+{
+  "kind": "rne_showcase_uav_metadata",
+  "schema_version": 1,
+  "environment_id": "plateau.sanjo_2025.uav",
+  "subject": "controlled PLATEAU UAV with onboard RGB-D",
+  "visual_state_sync": "The chase-view airframe, trail, minimap, and onboard RGB-D insets are rebuilt from the same post-step MultirotorFlight replay state.",
+  "simulation": {
+    "scenario": "46_plateau_drone_gif controlled UAV flight",
+    "path_length_m": 76.6,
+    "rms_position_error_m": 0.130,
+    "maximum_altitude_error_m": 0.042,
+    "maximum_horizontal_speed_m_s": 9.63,
+    "maximum_climb_speed_m_s": 1.26,
+    "maximum_acceleration_m_s2": 3.84,
+    "maximum_yaw_rate_rad_s": 0.12,
+    "maximum_tilt_rad": 0.359,
+    "minimum_building_clearance_m": 12.21,
+    "collision_count": 0,
+    "deterministic_digest": 2999954185471022902,
+    "replay_match": true,
+    "outcome": "route_complete=true; onboard_rgbd=true; collisions=0"
+  },
+  "capture": {
+    "gpu_rendered": true,
+    "width_px": 960,
+    "height_px": 540,
+    "frame_count": 72,
+    "frame_pattern": "target/plateau-sanjo-drive-demo/uav-frames/frame-%03d.png (6 fps selection)",
+    "gif_path": "docs/media/showcase-uav.gif",
+    "gif_bytes": 4329461,
+    "gif_sha256": "f78ebe4f843eb61998cd3ac0e70a2b5c127fe0d9f006c605d354a88f245e3a76",
+    "poster_path": "docs/media/showcase-uav.png",
+    "poster_bytes": 439474,
+    "poster_sha256": "9260530e1806efc1f445eb7285a3c434edc0a18abda8f66b50aad719eaf8f282",
+    "poster_frame": 24,
+    "unique_render_hashes": 72,
+    "duplicate_adjacent_frames": 0,
+    "source_gif": "docs/media/plateau-uav.gif",
+    "source_poster": "docs/media/plateau-uav.png",
+    "encoding": "ffmpeg 6 fps, Lanczos 960x540, 32-colour differential palette, Bayer dithering"
+  },
+  "provenance": [
+    "examples/46_plateau_drone_gif/assets/sanjo_2025/README.md",
+    "examples/46_plateau_drone_gif/main.rs",
+    "docs/PLATEAU_IMPORT.md",
+    "tools/prepare_showcase_uav.py"
+  ],
+  "reproduce_smoke": "cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke",
+  "reproduce_capture": "cargo run --release --locked -p plateau_drone_gif --example 46_plateau_drone_gif && python tools/prepare_showcase_uav.py"
+}
