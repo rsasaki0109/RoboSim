@@ -2947,7 +2947,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     );
     anyhow::ensure!(
         readme.contains(
-            "PBR mobile manipulator navigating, grasping, carrying, and placing an object in a real captured indoor 3DGS environment with camera telemetry and a live 2D route map"
+            "PBR mobile manipulator grasping, lifting, carrying, and placing an object in a real captured indoor 3DGS environment with live wrist RGB-D and a 2D task trace"
         ),
         "README House hero alt text does not describe the 3D mobile manipulator simulation"
     );
@@ -3328,6 +3328,46 @@ fn validate_house_showcase_metadata(
         anyhow::ensure!(
             telemetry.iter().any(|value| value.as_str() == Some(field)),
             "House hero overlay telemetry is missing {field}"
+        );
+    }
+    anyhow::ensure!(
+        metadata["simulation"]["wrist_camera_enabled"].as_bool() == Some(true)
+            && metadata["simulation"]["wrist_rgbd_observed"].as_bool() == Some(true),
+        "House hero simulation must observe its configured wrist RGB-D stream"
+    );
+    let wrist_rgbd = &metadata["capture"]["wrist_rgbd"];
+    anyhow::ensure!(
+        wrist_rgbd["enabled"].as_bool() == Some(true)
+            && wrist_rgbd["rgb_frame_count"].as_u64() == frame_count
+            && wrist_rgbd["depth_frame_count"].as_u64() == frame_count
+            && wrist_rgbd["target_projection_count"].as_u64() == frame_count
+            && wrist_rgbd["width_px"].as_u64() == Some(160)
+            && wrist_rgbd["height_px"].as_u64() == Some(120),
+        "House hero wrist RGB-D must render all 45 synchronized 160x120 frames"
+    );
+    anyhow::ensure!(
+        wrist_rgbd["source"].as_str().is_some_and(|source| {
+            source.contains("post-physics wrist pose")
+                && source.contains("real 3DGS")
+                && source.contains("DataBus RGB-D")
+        }),
+        "House hero wrist RGB-D must identify its 3DGS, pose, and DataBus sources"
+    );
+    let target_fields = wrist_rgbd["target_fields"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("House hero wrist target fields must be an array"))?;
+    for field in [
+        "payload_pixel_uv",
+        "optical_depth_m",
+        "center_depth_m",
+        "offset_x_m",
+        "offset_y_m",
+    ] {
+        anyhow::ensure!(
+            target_fields
+                .iter()
+                .any(|value| value.as_str() == Some(field)),
+            "House hero wrist target evidence is missing {field}"
         );
     }
     for field in ["house_ply_path", "visual_manifest_path"] {

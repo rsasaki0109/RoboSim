@@ -41,6 +41,9 @@
          the whole arm away from its commanded pose. -->
     <collision><geometry><box size="0.02 0.02 0.01"/></geometry></collision>
   </link>
+  <!-- Calibrated optical frame for wrist-mounted RGB-D sensors. The camera
+       renderer looks along local -Z; this frame looks down between the fingers. -->
+  <link name="wrist_camera_link"/>
   <link name="left_finger_link">
     <inertial><mass value="0.05"/></inertial>
     <!-- Short pads stay above the pickup-table top while spanning the cube. -->
@@ -64,6 +67,10 @@
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="20.0" velocity="3.0"/>
   </joint>
   <joint name="gripper_base_joint" type="fixed"><parent link="wrist_link"/><child link="gripper_base_link"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+  <joint name="wrist_camera_joint" type="fixed">
+    <parent link="gripper_base_link"/><child link="wrist_camera_link"/>
+    <origin xyz="0.10 0.06 0" rpy="-1.45 -1.5707963267948966 -0.16"/>
+  </joint>
   <joint name="left_finger_joint" type="prismatic">
     <parent link="gripper_base_link"/><child link="left_finger_link"/>
     <origin xyz="0 -0.02 -0.065" rpy="0 0 0"/><axis xyz="0 0 -1"/>

@@ -1359,6 +1359,14 @@ impl MobileManipulatorSim {
         self.wrist_camera.is_some()
     }
 
+    /// Returns the latest world transform of the wrist camera mount.
+    pub fn wrist_camera_transform(&self) -> Option<rne_world::Transform3> {
+        let mount = self.wrist_camera?;
+        self.world
+            .get::<rne_world::Transform3>(mount.camera)
+            .copied()
+    }
+
     /// Returns the latest wrist camera image when configured.
     pub fn latest_wrist_camera(&self) -> Option<ImageRgb8> {
         self.wrist_camera_stream.and_then(|stream| {
