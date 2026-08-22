@@ -27,7 +27,7 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 482,889 | 806,640 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 523,360 | 808,064 | 960 x 540 |
 | Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
@@ -41,7 +41,7 @@ must update the manifest's sizes and hashes in the same change.
 
 | Showcase | Required simulation evidence |
 | --- | --- |
-| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; the calibrated wrist pose renders synchronized real-3DGS RGB, linear depth, and payload projection for all 45 post-physics samples; task telemetry and the 2D trace use the same samples. |
+| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; rendered wrist RGB-D performs known-robot self masking, payload segmentation, depth back-projection, and analytic-IK correction without payload-truth controller inputs; all 45 post-physics samples show the detected reticle; task telemetry and the 2D trace use the same samples. |
 | Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
@@ -55,9 +55,12 @@ share the measured rug/floor frame, so the scan is an executable room rather
 than a viewer backdrop. The collision support is never rendered: the robot
 picks directly at rug level without inventing furniture absent from the capture.
 The wrist RGB-D inset is rendered from each sampled camera pose against that
-same 3DGS and robot foreground; its payload projection, task phase,
-grasp/transport telemetry, and top-down trace all derive from the same 45
-post-physics rollout samples and do not replace or advance simulation state.
+same 3DGS and robot foreground. Its target reticle comes from RGB-D payload
+detection rather than truth projection. During final pickup alignment, the
+controller removes the known robot foreground, back-projects detected depth,
+and feeds the perceived target to analytic IK; truth is retained only for the
+recorded perception error. Task phase, grasp/transport telemetry, and top-down
+trace all derive from the same 45 post-physics rollout samples.
 The committed derivative keeps every tenth upstream position, DC colour,
 opacity, scale, and rotation record byte-for-byte. The UAV view uses official
 PLATEAU Sanjo City geometry, a controlled visible airframe, and synchronized

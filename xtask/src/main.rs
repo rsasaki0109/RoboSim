@@ -3335,6 +3335,23 @@ fn validate_house_showcase_metadata(
             && metadata["simulation"]["wrist_rgbd_observed"].as_bool() == Some(true),
         "House hero simulation must observe its configured wrist RGB-D stream"
     );
+    let closed_loop = &metadata["simulation"]["rgbd_closed_loop"];
+    anyhow::ensure!(
+        closed_loop["enabled"].as_bool() == Some(true)
+            && closed_loop["control_render_count"].as_u64().is_some_and(|count| count > 0)
+            && closed_loop["detection_count"].as_u64().is_some_and(|count| count > 0)
+            && closed_loop["correction_count"].as_u64().is_some_and(|count| count > 0)
+            && closed_loop["controller_truth_inputs"].as_bool() == Some(false),
+        "House hero must drive final pickup alignment from rendered wrist RGB-D without truth inputs"
+    );
+    anyhow::ensure!(
+        closed_loop["source"].as_str().is_some_and(|source| {
+            source.contains("3DGS")
+                && source.contains("depth back-projection")
+                && source.contains("analytic IK")
+        }),
+        "House hero RGB-D closed-loop evidence must identify perception and control sources"
+    );
     let wrist_rgbd = &metadata["capture"]["wrist_rgbd"];
     anyhow::ensure!(
         wrist_rgbd["enabled"].as_bool() == Some(true)

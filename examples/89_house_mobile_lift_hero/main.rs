@@ -23,7 +23,8 @@
 use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    Episode, GraspMode, IkMobileLiftPickPlacePolicy, MobileManipulatorEpisode,
+    Episode, GraspMode, IkMobileLiftPickPlacePolicy, MmLiftGripperTarget, MmLiftJointTarget,
+    MmLiftKinematics, MobileLiftPickPlacePhase, MobileManipulatorAction, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, Policy,
 };
 use rne_assets::{load_visual_manifest, VisualManifest};
@@ -53,6 +54,15 @@ const TARGET_X_M: f64 = -1.70;
 const TARGET_Y_M: f64 = 0.035;
 const TARGET_Z_M: f64 = -3.30;
 const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_support"];
+const WRIST_WIDTH: u32 = 160;
+const WRIST_HEIGHT: u32 = 120;
+const WRIST_FOV_Y_RAD: f64 = std::f64::consts::FRAC_PI_3;
+const RGBD_CONTROL_INTERVAL_STEPS: u64 = 12;
+const RGBD_MIN_TARGET_DEPTH_M: f32 = 0.06;
+const PAYLOAD_HALF_EXTENT_M: f64 = 0.035;
+const GRIPPER_CENTER_CLEARANCE_M: f64 = 0.145;
+const LIFT_TARGET_STEP_M: f64 = 0.00025;
+const ARM_TARGET_STEP_RAD: f64 = 0.015;
 const LINK_NAMES: [&str; 10] = [
     "base_link",
     "left_wheel",
@@ -76,7 +86,6 @@ struct RolloutFrame {
     base_z_m: f64,
     base_yaw_rad: f64,
     payload_x_m: f64,
-    payload_y_m: f64,
     payload_z_m: f64,
     start_base_x_m: f64,
     start_base_z_m: f64,
@@ -120,6 +129,7 @@ struct SimulationEvidence {
     steps: u64,
     wrist_camera_enabled: bool,
     wrist_rgbd_observed: bool,
+    rgbd_closed_loop: RgbdClosedLoopEvidence,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -197,6 +207,29 @@ struct Rollout {
     foreground_material_items: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RgbdDetection {
+    pixel_u_px: u32,
+    pixel_v_px: u32,
+    optical_depth_m: f64,
+    camera_point_m: Vec3,
+    sample_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct RgbdClosedLoopEvidence {
+    enabled: bool,
+    source: &'static str,
+    control_render_count: usize,
+    detection_count: usize,
+    correction_count: usize,
+    controller_truth_inputs: bool,
+    max_target_samples: usize,
+    last_perception_error_m: f64,
+    last_control_gripper_xz_error_m: f64,
+    last_control_gripper_height_error_m: f64,
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("House mobile-lift hero failed: {error:#}");
@@ -239,20 +272,22 @@ fn run() -> Result<()> {
         anyhow::bail!("visual manifest does not cover all ten mobile-lift links");
     }
 
-    let first = rollout(
-        &repo_root,
-        &drjohnson_scene_path,
-        &visual_manifest,
-        false,
-        None,
-    )?;
-    assert_success(&first)?;
     if smoke {
+        let first = rollout(
+            &repo_root,
+            &drjohnson_scene_path,
+            &visual_manifest,
+            false,
+            None,
+            None,
+        )?;
+        assert_success(&first)?;
         let replay = rollout(
             &repo_root,
             &drjohnson_scene_path,
             &visual_manifest,
             false,
+            None,
             None,
         )?;
         assert_success(&replay)?;
@@ -281,6 +316,16 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    let first = rollout(
+        &repo_root,
+        &drjohnson_scene_path,
+        &visual_manifest,
+        false,
+        None,
+        Some(&house),
+    )?;
+    assert_success(&first)?;
+
     if probe {
         let captured = rollout(
             &repo_root,
@@ -288,6 +333,7 @@ fn run() -> Result<()> {
             &visual_manifest,
             true,
             Some(first.evidence.steps),
+            Some(&house),
         )?;
         assert_success(&captured)?;
         let probe_dir = target_dir(&repo_root).join("rne-house-mobile-lift-hero");
@@ -313,6 +359,7 @@ fn run() -> Result<()> {
         &visual_manifest,
         true,
         Some(first.evidence.steps),
+        Some(&house),
     )?;
     assert_success(&captured)?;
     anyhow::ensure!(
@@ -375,6 +422,7 @@ fn rollout(
     visual_manifest: &VisualManifest,
     capture: bool,
     expected_steps: Option<u64>,
+    perception_house: Option<&rne_render::GaussianSplatEnvironment>,
 ) -> Result<Rollout> {
     let mut policy = IkMobileLiftPickPlacePolicy::new();
     let mut config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
@@ -398,6 +446,17 @@ fn rollout(
     let package_root = visual_root.as_path();
     let package_roots = [package_root];
     let mut cache = MeshRenderCache::new();
+    let mut perception_backend = perception_house
+        .map(|_| WgpuRenderBackend::new().context("initialize wgpu for wrist RGB-D control"))
+        .transpose()?;
+    let mut perception_background = match (perception_backend.as_ref(), perception_house) {
+        (Some(backend), Some(house)) => Some(
+            load_gaussian_splat_background(backend.device(), house)
+                .context("load real 3DGS for wrist RGB-D control")?,
+        ),
+        _ => None,
+    };
+    let perception_camera = Camera::new(WRIST_WIDTH, WRIST_HEIGHT, WRIST_FOV_Y_RAD);
     let mut frames = Vec::new();
     let total_policy_steps = policy.total_steps();
     let sample_targets = if capture {
@@ -431,6 +490,14 @@ fn rollout(
     let mut base_trajectory = Vec::new();
     let wrist_camera_enabled = episode.simulation().wrist_camera_enabled();
     let mut wrist_rgbd_observed = false;
+    let mut latest_detection = None;
+    let mut control_render_count = 0_usize;
+    let mut detection_count = 0_usize;
+    let mut correction_count = 0_usize;
+    let mut max_target_samples = 0_usize;
+    let mut last_perception_error_m = 0.0_f64;
+    let mut last_control_gripper_xz_error_m = 0.0_f64;
+    let mut last_control_gripper_height_error_m = 0.0_f64;
 
     anyhow::ensure!(
         wrist_camera_enabled,
@@ -438,9 +505,82 @@ fn rollout(
     );
 
     for action_step in 0..total_policy_steps {
+        let mut action = policy.act(&step.observation);
         let phase = policy.phase();
         phases.insert(format!("{phase:?}"));
-        step = episode.step(policy.act(&step.observation));
+        if let (MobileLiftPickPlacePhase::LowerToPick, Some(perception_house)) =
+            (phase, perception_house)
+        {
+            if action_step % RGBD_CONTROL_INTERVAL_STEPS == 0 {
+                let wrist_camera_world = episode
+                    .simulation()
+                    .wrist_camera_transform()
+                    .context("wrist camera transform for RGB-D control")?;
+                let hybrid = HybridRenderScene::new(
+                    perception_house.clone(),
+                    payload_foreground(episode.simulation())?,
+                );
+                let output = render_hybrid_scene_camera(
+                    perception_backend
+                        .as_mut()
+                        .expect("perception backend initialized"),
+                    perception_background
+                        .as_mut()
+                        .expect("perception background initialized"),
+                    &perception_camera,
+                    &MathTransform3::from_translation_rotation(
+                        wrist_camera_world.translation,
+                        wrist_camera_world.rotation,
+                    ),
+                    &hybrid,
+                    CLEAR_COLOR,
+                )
+                .context("render wrist RGB-D control frame")?;
+                control_render_count += 1;
+                latest_detection = detect_payload_rgbd(&perception_camera, &output);
+                if let Some(detection) = latest_detection {
+                    detection_count += 1;
+                    max_target_samples = max_target_samples.max(detection.sample_count);
+                    let perceived_center_world_m = perceived_payload_center_world(
+                        wrist_camera_world.translation,
+                        wrist_camera_world.rotation,
+                        detection,
+                    )
+                    .context("non-zero RGB-D payload viewing ray")?;
+                    let truth = episode
+                        .simulation()
+                        .named_translation_m(PAYLOAD_NAME)
+                        .context("payload truth for perception evaluation only")?;
+                    last_perception_error_m =
+                        (perceived_center_world_m - Vec3::new(truth.0, truth.1, truth.2)).length();
+                    last_control_gripper_xz_error_m = step
+                        .observation
+                        .gripper_target_dx_m
+                        .hypot(step.observation.gripper_target_dz_m);
+                    last_control_gripper_height_error_m =
+                        (step.observation.gripper_target_dy_m + GRIPPER_CENTER_CLEARANCE_M).abs();
+                }
+            }
+            if let Some(detection) = latest_detection {
+                let wrist_camera_world = episode
+                    .simulation()
+                    .wrist_camera_transform()
+                    .context("wrist camera transform for RGB-D correction")?;
+                if let Some(corrected) = rgbd_lower_to_pick_action(
+                    action,
+                    &step.observation,
+                    wrist_camera_world.translation,
+                    wrist_camera_world.rotation,
+                    detection,
+                ) {
+                    action = corrected;
+                    correction_count += 1;
+                }
+            }
+        } else {
+            latest_detection = None;
+        }
+        step = episode.step(action);
         grasped |= episode.simulation().is_grasping();
         terminated |= step.terminated;
         truncated |= step.truncated;
@@ -503,7 +643,6 @@ fn rollout(
                 base_z_m: step.observation.base_z_m,
                 base_yaw_rad: step.observation.base_yaw_rad,
                 payload_x_m: payload.0,
-                payload_y_m: payload.1,
                 payload_z_m: payload.2,
                 start_base_x_m,
                 start_base_z_m,
@@ -583,6 +722,18 @@ fn rollout(
         steps: episode.simulation().step_count(),
         wrist_camera_enabled,
         wrist_rgbd_observed,
+        rgbd_closed_loop: RgbdClosedLoopEvidence {
+            enabled: perception_house.is_some(),
+            source: "WGPU wrist RGB-D of real 3DGS plus payload after known-robot self masking; orange-payload segmentation, depth back-projection, and analytic IK",
+            control_render_count,
+            detection_count,
+            correction_count,
+            controller_truth_inputs: false,
+            max_target_samples,
+            last_perception_error_m,
+            last_control_gripper_xz_error_m,
+            last_control_gripper_height_error_m,
+        },
     };
     Ok(Rollout {
         evidence,
@@ -593,11 +744,126 @@ fn rollout(
     })
 }
 
+fn detect_payload_rgbd(
+    camera: &Camera,
+    output: &rne_render::CameraPassOutput,
+) -> Option<RgbdDetection> {
+    if output.color.width != output.depth.width
+        || output.color.height != output.depth.height
+        || output.color.rgba8.len() != (output.color.width * output.color.height * 4) as usize
+        || output.depth.depth_m.len() != (output.depth.width * output.depth.height) as usize
+    {
+        return None;
+    }
+    let mut samples = Vec::new();
+    for v in 0..output.color.height {
+        for u in 0..output.color.width {
+            let pixel_index = (v * output.color.width + u) as usize;
+            let rgba_index = pixel_index * 4;
+            let red = output.color.rgba8[rgba_index] as u16;
+            let green = output.color.rgba8[rgba_index + 1] as u16;
+            let blue = output.color.rgba8[rgba_index + 2] as u16;
+            let depth_m = output.depth.depth_m[pixel_index];
+            let payload_color = red >= 50
+                && red >= green.saturating_mul(2)
+                && red >= blue.saturating_mul(3)
+                && blue < 100;
+            if payload_color
+                && depth_m.is_finite()
+                && depth_m >= RGBD_MIN_TARGET_DEPTH_M.max(camera.near_m as f32)
+                && depth_m < camera.far_m.min(1.5) as f32
+            {
+                samples.push((u, v, depth_m));
+            }
+        }
+    }
+    if samples.len() < 6 {
+        return None;
+    }
+    samples.sort_by(|left, right| left.2.total_cmp(&right.2));
+    let median_depth_m = f64::from(samples[samples.len() / 2].2);
+    let (sum_u, sum_v) = samples.iter().fold((0_u64, 0_u64), |sum, sample| {
+        (sum.0 + u64::from(sample.0), sum.1 + u64::from(sample.1))
+    });
+    let pixel_u_px = (sum_u / samples.len() as u64) as u32;
+    let pixel_v_px = (sum_v / samples.len() as u64) as u32;
+    let focal_y_px = f64::from(camera.height) * 0.5 / (camera.fov_y_rad * 0.5).tan();
+    let center_u_px = (f64::from(camera.width) - 1.0) * 0.5;
+    let center_v_px = (f64::from(camera.height) - 1.0) * 0.5;
+    let camera_point_m = Vec3::new(
+        (f64::from(pixel_u_px) - center_u_px) * median_depth_m / focal_y_px,
+        (center_v_px - f64::from(pixel_v_px)) * median_depth_m / focal_y_px,
+        -median_depth_m,
+    );
+    Some(RgbdDetection {
+        pixel_u_px,
+        pixel_v_px,
+        optical_depth_m: median_depth_m,
+        camera_point_m,
+        sample_count: samples.len(),
+    })
+}
+
+fn rgbd_lower_to_pick_action(
+    action: MobileManipulatorAction,
+    observation: &rne_ai::MobileManipulatorObservation,
+    camera_translation: Vec3,
+    camera_rotation: Quat,
+    detection: RgbdDetection,
+) -> Option<MobileManipulatorAction> {
+    let perceived_center_world_m =
+        perceived_payload_center_world(camera_translation, camera_rotation, detection)?;
+    let target = MmLiftKinematics::mm_mobile_lift()
+        .inverse_kinematics_at_base(
+            observation.base_x_m,
+            observation.base_y_m,
+            observation.base_z_m,
+            observation.base_yaw_rad,
+            MmLiftGripperTarget::new(
+                perceived_center_world_m.x,
+                perceived_center_world_m.y + GRIPPER_CENTER_CLEARANCE_M,
+                perceived_center_world_m.z,
+            ),
+        )
+        .ok()?;
+    Some(action.with_lift_joint_target(MmLiftJointTarget {
+        lift_m: rate_limited(
+            observation.lift_position_m,
+            target.lift_m,
+            LIFT_TARGET_STEP_M,
+        ),
+        shoulder_rad: rate_limited(
+            observation.shoulder_position_rad,
+            target.shoulder_rad,
+            ARM_TARGET_STEP_RAD,
+        ),
+        elbow_rad: rate_limited(
+            observation.elbow_position_rad,
+            target.elbow_rad,
+            ARM_TARGET_STEP_RAD,
+        ),
+    }))
+}
+
+fn perceived_payload_center_world(
+    camera_translation: Vec3,
+    camera_rotation: Quat,
+    detection: RgbdDetection,
+) -> Option<Vec3> {
+    let viewing_ray = detection.camera_point_m.try_normalize()?;
+    let perceived_center_camera_m = detection.camera_point_m - viewing_ray * PAYLOAD_HALF_EXTENT_M;
+    Some(camera_translation + camera_rotation * perceived_center_camera_m)
+}
+
+fn rate_limited(current: f64, target: f64, max_step: f64) -> f64 {
+    current + (target - current).clamp(-max_step, max_step)
+}
+
 fn assert_success(rollout: &Rollout) -> Result<()> {
     let evidence = &rollout.evidence;
     anyhow::ensure!(
         evidence.terminated,
-        "hero rollout did not terminate successfully: truncated={} grasped={} lift={:.3}m transport={:.3}m place_error={:.3}m final_phase={} steps={}",
+        "hero rollout did not terminate successfully: truncated={} grasped={} lift={:.3}m transport={:.3}m place_error={:.3}m final_phase={} steps={} rgbd={:?}",
         evidence.truncated,
         evidence.grasped,
         evidence.lift_clearance_m,
@@ -605,6 +871,7 @@ fn assert_success(rollout: &Rollout) -> Result<()> {
         evidence.place_error_m,
         evidence.final_phase,
         evidence.steps,
+        evidence.rgbd_closed_loop,
     );
     anyhow::ensure!(!evidence.truncated, "hero rollout was truncated");
     anyhow::ensure!(
@@ -630,6 +897,16 @@ fn assert_success(rollout: &Rollout) -> Result<()> {
         evidence.wrist_camera_enabled && evidence.wrist_rgbd_observed,
         "hero rollout did not publish synchronized wrist RGB-D evidence"
     );
+    if evidence.rgbd_closed_loop.enabled {
+        anyhow::ensure!(
+            evidence.rgbd_closed_loop.control_render_count > 0
+                && evidence.rgbd_closed_loop.detection_count > 0
+                && evidence.rgbd_closed_loop.correction_count > 0
+                && !evidence.rgbd_closed_loop.controller_truth_inputs,
+            "hero RGB-D closed loop did not render, detect, and correct without truth inputs: {:?}",
+            evidence.rgbd_closed_loop
+        );
+    }
     anyhow::ensure!(
         rollout.foreground_mesh_items >= LINK_NAMES.len(),
         "hero foreground resolved {} mesh parts; expected at least {}",
@@ -723,6 +1000,20 @@ fn mobile_lift_foreground(
         })
         .count();
     Ok((scene, max_sync_error_m, mesh_items, pbr_items))
+}
+
+fn payload_foreground(sim: &rne_ai::MobileManipulatorSim) -> Result<RenderScene> {
+    let payload = sim
+        .named_translation_m(PAYLOAD_NAME)
+        .context("missing mobile-lift cube for self-filtered RGB-D")?;
+    let mut scene = RenderScene::new();
+    scene.items.push(box_item(
+        Vec3::new(payload.0, payload.1, payload.2),
+        Vec3::splat(0.07),
+        [0.95, 0.20, 0.035, 1.0],
+        PbrMaterial::new([0.95, 0.20, 0.035, 1.0], 0.28, 0.38, [0.03, 0.005, 0.0]),
+    ));
+    Ok(scene)
 }
 
 fn box_item(
@@ -929,7 +1220,7 @@ fn wrist_rgbd_evidence(rollout: &Rollout) -> WristRgbdEvidence {
     let first = rollout.frames.first().map(|frame| &frame.wrist_rgbd);
     WristRgbdEvidence {
         enabled: rollout.evidence.wrist_camera_enabled,
-        source: "post-physics wrist pose rendering of real 3DGS plus robot, synchronized with DataBus RGB-D",
+        source: "post-physics wrist pose rendering of real 3DGS plus robot, synchronized with DataBus RGB-D; reticle comes from RGB-D detection",
         rgb_frame_count: rollout.frames.len(),
         depth_frame_count: rollout.frames.len(),
         target_projection_count: rollout.frames.len(),
@@ -946,23 +1237,11 @@ fn wrist_rgbd_evidence(rollout: &Rollout) -> WristRgbdEvidence {
 }
 
 fn wrist_rgbd_from_render(
-    frame: &RolloutFrame,
+    _frame: &RolloutFrame,
     camera: &Camera,
     output: rne_render::CameraPassOutput,
 ) -> WristRgbdFrame {
-    let local_target = frame.wrist_camera_transform.rotation.conjugate()
-        * (Vec3::new(frame.payload_x_m, frame.payload_y_m, frame.payload_z_m)
-            - frame.wrist_camera_transform.translation);
-    let target_depth_m = (-local_target.z).max(camera.near_m);
-    let focal_y_px = f64::from(camera.height) * 0.5 / (camera.fov_y_rad * 0.5).tan();
-    let center_u_px = (f64::from(camera.width) - 1.0) * 0.5;
-    let center_v_px = (f64::from(camera.height) - 1.0) * 0.5;
-    let target_u_px = (center_u_px + local_target.x * focal_y_px / target_depth_m)
-        .round()
-        .clamp(0.0, f64::from(camera.width.saturating_sub(1))) as u32;
-    let target_v_px = (center_v_px - local_target.y * focal_y_px / target_depth_m)
-        .round()
-        .clamp(0.0, f64::from(camera.height.saturating_sub(1))) as u32;
+    let detection = detect_payload_rgbd(camera, &output);
     let center_index =
         (output.depth.height / 2 * output.depth.width + output.depth.width / 2) as usize;
     let center_depth_m = output
@@ -985,13 +1264,13 @@ fn wrist_rgbd_from_render(
         height_px: output.color.height,
         rgba8: output.color.rgba8,
         depth_m: output.depth.depth_m,
-        target_u_px,
-        target_v_px,
-        target_depth_m,
+        target_u_px: detection.map_or(camera.width / 2, |value| value.pixel_u_px),
+        target_v_px: detection.map_or(camera.height / 2, |value| value.pixel_v_px),
+        target_depth_m: detection.map_or(camera.far_m, |value| value.optical_depth_m),
         center_depth_m,
         min_depth_m,
-        offset_x_m: local_target.x,
-        offset_y_m: local_target.y,
+        offset_x_m: detection.map_or(0.0, |value| value.camera_point_m.x),
+        offset_y_m: detection.map_or(0.0, |value| value.camera_point_m.y),
     }
 }
 
@@ -1656,7 +1935,10 @@ fn glyph_rows(character: char) -> [u8; 7] {
 
 #[cfg(test)]
 mod overlay_tests {
-    use super::{blit_rgba_nearest, depth_color, map_point, short_phase, HEIGHT, WIDTH};
+    use super::{
+        blit_rgba_nearest, depth_color, detect_payload_rgbd, map_point, short_phase, HEIGHT, WIDTH,
+    };
+    use rne_render::{Camera, CameraPassOutput, DepthFrame, ImageFrame};
 
     #[test]
     fn map_point_keeps_world_markers_inside_inset() {
@@ -1690,6 +1972,41 @@ mod overlay_tests {
         assert_eq!(depth_color(0.0), [255, 0, 0, 255]);
         assert_eq!(depth_color(1.0), [0, 0, 255, 255]);
         assert_ne!(depth_color(0.25), depth_color(0.75));
+    }
+
+    #[test]
+    fn rgbd_detector_back_projects_rendered_payload_pixels() {
+        let width = 8;
+        let height = 6;
+        let mut rgba8 = vec![12; (width * height * 4) as usize];
+        let mut depth_m = vec![100.0; (width * height) as usize];
+        for v in 2..=3 {
+            for u in 3..=5 {
+                let index = (v * width + u) as usize;
+                rgba8[index * 4..index * 4 + 4].copy_from_slice(&[230, 70, 12, 255]);
+                depth_m[index] = 0.4;
+            }
+        }
+        let camera = Camera::new(width, height, std::f64::consts::FRAC_PI_3);
+        let output = CameraPassOutput {
+            color: ImageFrame::from_rgba8(width, height, rgba8),
+            depth: DepthFrame::new(width, height, depth_m),
+        };
+        let detection = detect_payload_rgbd(&camera, &output).expect("orange RGB-D target");
+        assert_eq!((detection.pixel_u_px, detection.pixel_v_px), (4, 2));
+        assert!((detection.optical_depth_m - 0.4).abs() < 1.0e-6);
+        assert_eq!(detection.sample_count, 6);
+        assert!(detection.camera_point_m.z < 0.0);
+    }
+
+    #[test]
+    fn rgbd_detector_rejects_background_without_payload_color() {
+        let camera = Camera::new(4, 4, std::f64::consts::FRAC_PI_3);
+        let output = CameraPassOutput {
+            color: ImageFrame::from_rgba8(4, 4, vec![80; 4 * 4 * 4]),
+            depth: DepthFrame::new(4, 4, vec![0.4; 4 * 4]),
+        };
+        assert_eq!(detect_payload_rgbd(&camera, &output), None);
     }
 }
 
