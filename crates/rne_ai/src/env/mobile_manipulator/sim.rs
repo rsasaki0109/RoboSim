@@ -1160,17 +1160,21 @@ impl MobileManipulatorSim {
         let desired_velocity =
             (target_position_m - object_position_m) * MOBILE_LIFT_LINEAR_FRICTION_POSITION_GAIN_HZ;
         let mut relative_velocity = desired_velocity - object_velocity;
-        let pickup_table = self.named_entities.get("mobile_lift_pick_table").copied();
-        let supported_by_pickup_table = self.last_contacts().iter().any(|contact| {
+        let pickup_support = self
+            .named_entities
+            .get("mobile_lift_pick_support")
+            .or_else(|| self.named_entities.get("mobile_lift_pick_table"))
+            .copied();
+        let supported_by_pickup_support = self.last_contacts().iter().any(|contact| {
             let touches_object = contact.entity_a == object || contact.entity_b == object;
             let other = if contact.entity_a == object {
                 contact.entity_b
             } else {
                 contact.entity_a
             };
-            touches_object && pickup_table == Some(other)
+            touches_object && pickup_support == Some(other)
         });
-        if supported_by_pickup_table {
+        if supported_by_pickup_support {
             if wrist_velocity.y > 0.02 {
                 relative_velocity.y = relative_velocity.y.max(0.2 - object_velocity.y);
             }

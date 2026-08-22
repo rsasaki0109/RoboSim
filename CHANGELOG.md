@@ -23,6 +23,11 @@ All notable changes to Robot Native Engine are documented in this file.
   onboard RGB-D, bounded tracking, 12.21 m building clearance, zero collisions,
   and deterministic replay evidence.
 
+- Remove the synthetic pickup table from the Dr Johnson 3DGS hero. The payload
+  now rests on a collision-only 3 cm support aligned with the captured rug, and
+  the longer floor-level episode budget preserves deterministic friction grasp,
+  lift, transport, and placement without adding room furniture to the scan.
+
 - Upgrade `docs/media/showcase.toml` to a schema-v2 catalog that verifies exact
   bytes, SHA-256 values, dimensions, README references, deterministic metadata,
   source provenance, license files, per-file limits, and a 12 MB combined GIF

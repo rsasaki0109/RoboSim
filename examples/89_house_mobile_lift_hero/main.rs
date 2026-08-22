@@ -5,7 +5,7 @@
 //! post-physics world transform of each of the ten URDF links, then resolved
 //! through the visual-only manifest and PBR-aware [`rne_render::MeshRenderCache`].
 //! The Dr Johnson scan is calibrated into the same Y-up metric frame as the
-//! physics rollout. The measured floor and pickup furniture share that frame;
+//! physics rollout. The measured floor and invisible pickup support share that frame;
 //! 3DGS remains the appearance layer.
 //!
 //! Headless evidence (no GPU required):
@@ -52,9 +52,7 @@ const PAYLOAD_NAME: &str = "mobile_lift_cube";
 const TARGET_X_M: f64 = -1.70;
 const TARGET_Y_M: f64 = 0.035;
 const TARGET_Z_M: f64 = -3.30;
-const PICKUP_X_M: f64 = 0.50;
-const DRJOHNSON_FLOOR_Z_M: f64 = -3.30;
-const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_table"];
+const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_support"];
 const LINK_NAMES: [&str; 10] = [
     "base_link",
     "left_wheel",
@@ -328,7 +326,9 @@ fn rollout(
     capture: bool,
     expected_steps: Option<u64>,
 ) -> Result<Rollout> {
+    let mut policy = IkMobileLiftPickPlacePolicy::new();
     let mut config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
+    config.max_steps = policy.total_steps();
     config.scene_path = scene_path.to_path_buf();
     config.task = rne_ai::MobileManipulatorTask::Place {
         object_name: PAYLOAD_NAME.into(),
@@ -336,7 +336,6 @@ fn rollout(
         place_tolerance_m: 0.12,
     };
     let mut episode = MobileManipulatorEpisode::new(config);
-    let mut policy = IkMobileLiftPickPlacePolicy::new();
     let mut step = episode.reset();
     episode.set_grasp_mode(GraspMode::Friction);
     for proxy in DRJOHNSON_COLLISION_PROXIES {
@@ -580,26 +579,6 @@ fn mobile_lift_foreground(
         [0.95, 0.20, 0.035, 1.0],
         PbrMaterial::new([0.95, 0.20, 0.035, 1.0], 0.28, 0.38, [0.03, 0.005, 0.0]),
     ));
-    // Dress the narrow physics pickup rail as a dark-wood task trolley that
-    // belongs on the captured Dr Johnson floor. Its top remains aligned with the
-    // physical support; the legs are visual context only.
-    let wood = PbrMaterial::new([0.30, 0.16, 0.07, 1.0], 0.03, 0.76, [0.0; 3]);
-    scene.items.push(box_item(
-        Vec3::new(PICKUP_X_M, 0.19, DRJOHNSON_FLOOR_Z_M),
-        Vec3::new(0.70, 0.055, 0.34),
-        [0.30, 0.16, 0.07, 1.0],
-        wood.clone(),
-    ));
-    for x in [PICKUP_X_M - 0.28, PICKUP_X_M + 0.28] {
-        for z in [DRJOHNSON_FLOOR_Z_M - 0.12, DRJOHNSON_FLOOR_Z_M + 0.12] {
-            scene.items.push(box_item(
-                Vec3::new(x, 0.085, z),
-                Vec3::new(0.055, 0.17, 0.055),
-                [0.22, 0.11, 0.045, 1.0],
-                wood.clone(),
-            ));
-        }
-    }
     cache
         .resolve_scene(&mut scene, package_roots)
         .context("resolve mm_mobile_lift PBR links")?;
