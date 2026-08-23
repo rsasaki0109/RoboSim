@@ -7,10 +7,11 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v2 distinguishes qualifying
-physics/hardware kinds from audited nonqualifying accelerator evidence instead
-of treating every submission as a 1.0 credit. Validate the registry, this guide, and
-all required issue-form fields before publishing a release:
+`release/external-evidence-intake.toml`. Registry v3 adds an independently
+measured, archive-bound installed flagship route while continuing to
+distinguish qualifying physics/hardware kinds from audited nonqualifying
+accelerator evidence. Validate the registry, this guide, and all required
+issue-form fields before publishing a release:
 
 ```bash
 cargo run --locked -p xtask -- external-intake-check
@@ -45,6 +46,50 @@ Get-FileHash -Algorithm SHA256 path/to/file
 ```bash
 sha256sum path/to/file
 ```
+
+## `installed_flagship_reproduction`
+
+Use
+`.github/ISSUE_TEMPLATE/installed-flagship-reproduction.yml` to measure the
+official installed flagship on one named Windows or Linux x86_64 machine. One
+accepted independent run is required for the installed-proof gate. RNE CI,
+repository-author runs, copied reports, and placeholder machine labels do not
+qualify.
+
+Download a clean tagged native archive, verify its published checksum, extract
+it, and run from the extracted bundle root:
+
+```bash
+./bin/rne-flagship-proof flagship-proof --cross-backend \
+  --measure-on "community-lab-desktop-a"
+```
+
+On Windows use `bin\\rne-flagship-proof.exe`. Preserve the archive, the exact
+extracted bundle, and the complete `flagship-proof` directory without editing
+their contents. From a pinned checkout of the same RNE release, generate the
+versioned external report (PowerShell line continuations are shown):
+
+```powershell
+cargo run --locked -p xtask -- external-flagship-check `
+  --archive path/to/rne-RELEASE-TARGET.zip `
+  --bundle-dir path/to/rne-RELEASE-TARGET `
+  --proof-dir path/to/rne-RELEASE-TARGET/flagship-proof `
+  --owner external-github-owner `
+  --repository https://github.com/external-github-owner/rne-reproduction `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --measured-on YYYY-MM-DD `
+  --output external-flagship-reproduction.json
+```
+
+The checker fails closed unless the release is clean, tagged, reproducible,
+and internally checksum-consistent. It records the release source revision and
+rehashes the archive, checksum manifest, and packaged producer executable,
+verifies the proof report and Failure Capsule, requires
+Rapier and bundled MuJoCo success plus intentional failure, checks all named SI
+tolerances and the exact first violation, matches the timing platform to the
+archive, and enforces the 15-minute limit. The emitted schema-v1 report binds
+the independently owned repository revision and all qualifying artifacts.
+`author_assistance=false` is mandatory.
 
 ## `external_project`
 

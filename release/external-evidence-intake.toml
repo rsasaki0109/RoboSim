@@ -1,5 +1,18 @@
-schema_version = 2
+schema_version = 3
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
+
+[[route]]
+id = "installed_flagship_reproduction"
+readiness_check = "installed_flagship_reproduction"
+minimum_accepted = 1
+issue_template = ".github/ISSUE_TEMPLATE/installed-flagship-reproduction.yml"
+independent_owner_required = true
+author_assistance_allowed = false
+qualifying_kinds = []
+audited_nonqualifying_kinds = []
+required_metadata = ["owner", "repository", "revision", "measured_on", "author_assistance"]
+required_artifacts = ["release_archive", "release_bundle", "installed_proof", "time_to_proof", "cross_backend_report", "failure_capsule"]
+form_fields = ["independence", "repository", "revision", "rne_release", "platform", "machine", "measured_on", "release_archive", "proof_bundle", "reproduction_command", "verification"]
 
 [[route]]
 id = "external_project"

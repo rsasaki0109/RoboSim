@@ -29,10 +29,10 @@ The native release bundle now rehearses eleven installed checks. The eleventh
 is `rne-flagship-proof`: one packaged command that reproduces the complete
 indoor mobile-manipulation flagship success, expected failure, first contract
 violation, browser inspector, verified Failure Capsule, and a SHA-256-bound
-installed proof report. The release path is being upgraded to execute the same
-proof on both Rapier and a bundled, pinned MuJoCo runtime. Clean tagged
-Windows/Linux archive evidence and the 15-minute external measurement remain
-the open parts of Gate 1.
+installed proof report. It executes the same proof on Rapier and a bundled,
+pinned MuJoCo runtime. Clean tagged Windows/Linux archive evidence and the
+15-minute external measurement remain the open parts of Gate 1; the public
+intake path now verifies rather than trusts that submission.
 
 ## Flagship product contract
 
@@ -162,14 +162,18 @@ Work proceeds in this order, one mergeable slice at a time:
 4. **Delivered in the rehearsal contract; tagged evidence pending:** add
    Windows and Linux archive-install rehearsals for the proof command.
 5. **Measurement path delivered; independent run pending:** use
-   `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE` to retain a schema-v1,
-   proof-bound timing artifact, then collect it on named external reference
-   machines.
-6. **In progress:** ship the MuJoCo-enabled proof runner and pinned runtime in
+   `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE` to retain a
+   schema-v1, proof-bound timing artifact, then collect it on a named external
+   reference machine.
+6. **Delivered:** ship the MuJoCo-enabled proof runner and pinned runtime in
    both native archives and require the cross-backend result in extracted
    release rehearsal.
-7. Publish a copy-paste external reproduction guide and ask the first external
-   project to run it without maintainer intervention.
+7. **Delivered; first submission pending:** publish a copy-paste external
+   reproduction guide, bind the proof to its producer executable and clean
+   tagged archive, reject CI/placeholder measurements, and expose a validated
+   public issue route.
+8. Ask the first external operator to run the next tagged release without
+   maintainer intervention and audit the retained report.
 
 Each slice includes tests and a short documentation update. No unrelated demo
 or subsystem expansion enters these slices.

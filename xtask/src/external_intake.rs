@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 2;
+const REGISTRY_SCHEMA_VERSION: u32 = 3;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -51,7 +51,45 @@ struct ExpectedRoute {
     form_fields: &'static [&'static str],
 }
 
-const EXPECTED_ROUTES: [ExpectedRoute; 3] = [
+const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
+    ExpectedRoute {
+        id: "installed_flagship_reproduction",
+        readiness_check: "installed_flagship_reproduction",
+        minimum_accepted: 1,
+        author_assistance_allowed: false,
+        qualifying_kinds: &[],
+        audited_nonqualifying_kinds: &[],
+        template: ".github/ISSUE_TEMPLATE/installed-flagship-reproduction.yml",
+        metadata: &[
+            "owner",
+            "repository",
+            "revision",
+            "measured_on",
+            "author_assistance",
+        ],
+        artifacts: &[
+            "release_archive",
+            "release_bundle",
+            "installed_proof",
+            "time_to_proof",
+            "cross_backend_report",
+            "failure_capsule",
+        ],
+        conditional: &[],
+        form_fields: &[
+            "independence",
+            "repository",
+            "revision",
+            "rne_release",
+            "platform",
+            "machine",
+            "measured_on",
+            "release_archive",
+            "proof_bundle",
+            "reproduction_command",
+            "verification",
+        ],
+    },
     ExpectedRoute {
         id: "external_project",
         readiness_check: "external_projects",
@@ -552,7 +590,7 @@ mod tests {
 
     #[test]
     fn registry_and_paths_fail_closed() {
-        let unknown = "schema_version = 2\nguide_path = \"guide.md\"\nunknown = true\n";
+        let unknown = "schema_version = 3\nguide_path = \"guide.md\"\nunknown = true\n";
         assert!(toml::from_str::<IntakeRegistry>(unknown).is_err());
         for path in [
             "",

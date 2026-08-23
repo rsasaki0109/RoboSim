@@ -404,15 +404,15 @@ and shipped file digests are retained in a runtime manifest. Older schema-v6
 reports that list only `rapier_native` remain valid evidence for the narrower
 workflow but do not qualify as the current cross-backend installed proof.
 
-Installed flagship proof report schema v1 is the timing-free index emitted by
-that runner. It fixes the task and outcome identities and binds the TaskSpec,
+Installed flagship proof report schema v2 is the timing-free index emitted by
+that runner. It fixes the task and outcome identities, binds the exact packaged
+producer executable, and binds the TaskSpec,
 Rapier/MuJoCo success and failure reports, both failure replays, unit-bearing
 cross-backend report, browser inspector, workflow report, and capsule manifest
 by byte size and SHA-256. Timing measurements remain a separate hardware-named
-artifact. The schema number is unchanged because the report already represented
-an ordered list of execution paths and content-addressed artifacts;
-qualification now requires the stronger two-path value and complete artifact
-set.
+artifact. Schema v1 remains evidence for its original artifact set but cannot
+qualify as archive-bound external reproduction because it does not identify the
+executable that produced it.
 
 Time-to-proof report schema v1 is that separate artifact. It records a bounded
 operator-supplied machine label, OS and architecture, command elapsed
@@ -421,6 +421,17 @@ installed proof report and verified capsule manifest. The report is deliberately
 excluded from deterministic hashes. CI-generated measurements prove the
 packaged measurement path only; independent acceptance still requires an
 external user and named reference hardware.
+
+External flagship reproduction report schema v1 binds one independently owned
+public repository revision to the exact clean tagged release archive, source
+revision, release report, checksum manifest, packaged producer executable,
+installed proof and timing reports,
+cross-backend report, and Failure Capsule manifest. Its verifier rejects RNE
+repository ownership, CI or placeholder machine labels, target/platform
+mismatches, elapsed time above 900,000 ms, missing SI tolerance evidence, and
+non-identical first violations. The report is reviewable evidence, not proof of
+independence by itself; maintainers still verify ownership and immutable
+downloads before acceptance.
 
 The schema-v6 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v2

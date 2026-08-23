@@ -164,6 +164,7 @@ fn run() -> anyhow::Result<()> {
         "release-check" => release_check(&mut args),
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
+        "external-flagship-check" => release_artifacts::external_flagship_check(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
         "release-readiness" => release_readiness::release_readiness(&mut args),
         "readiness-pack" => readiness_pack::run(&mut args),
@@ -1577,6 +1578,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "evidence",
             "mujoco_runtime_manifest",
             u64::from(release_artifacts::MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "external_flagship_reproduction_report",
+            u64::from(
+                release_artifacts::EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
+            ),
         ),
         (
             "evidence",
