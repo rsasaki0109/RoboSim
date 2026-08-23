@@ -161,6 +161,7 @@ rne_accelerator_contract = { version = "=0.1.0", path = "crates/rne_accelerator_
 rne_hardware_gateway = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_gateway" }
 rne_hardware_lekiwi = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_lekiwi" }
 rne_ai = { version = "=0.1.0", path = "crates/rne_ai" }
+rne_asset_cli = { version = "=0.1.0", path = "tools/rne_asset_cli" }
 rne_assets = { version = "=0.1.0", path = "crates/rne_assets" }
 rne_core = { version = "=0.1.0", path = "crates/rne_core" }
 rne_data = { version = "=0.1.0", path = "crates/rne_data" }

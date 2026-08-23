@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Ship a headless `rne-flagship-proof` binary and its minimum mobile-lift
+  scene/robot/URDF inputs in native release bundles. One installed command now
+  runs the successful indoor manipulation task, injects and minimizes the
+  perception failure, creates and verifies the browser-bearing Failure Capsule,
+  and writes a schema-v1 SHA-256-bound installed proof report. Installed
+  rehearsal schema v6 adds this as the eleventh archive check.
+
 - Reset the forward plan around independently reproducible product evidence:
   an installed indoor mobile-manipulation proof, cross-backend diagnosis,
   recorded/shadow and bounded physical execution, and third-party adoption.

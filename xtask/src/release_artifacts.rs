@@ -19,7 +19,7 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 5;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 6;
 /// Archive-bound independently extracted rehearsal report schema.
 pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API contract schema.
@@ -27,7 +27,7 @@ pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
 pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 8] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
     ("rne_asset_cli", "rne-asset"),
     ("rne_compatibility_suite", "rne-compatibility"),
     ("rne_accelerator_contract", "rne-accelerator-conformance"),
@@ -36,6 +36,7 @@ const RELEASE_BINARY_PACKAGES: [(&str, &str); 8] = [
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
     ("rne_hardware_gateway", "rne-hardware-mock-device"),
+    ("flagship_validation_workflow", "rne-flagship-proof"),
 ];
 const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
@@ -43,8 +44,9 @@ const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT: &str = "archive-install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT_KIND: &str = "rne_archive_install_rehearsal";
-const INSTALL_CHECK_IDS: [&str; 10] = [
+const INSTALL_CHECK_IDS: [&str; 11] = [
     "robot_replay",
+    "flagship_proof",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
@@ -56,7 +58,7 @@ const INSTALL_CHECK_IDS: [&str; 10] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 78] = [
+const BUNDLE_FILES: [(&str, &str); 81] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -177,6 +179,18 @@ const BUNDLE_FILES: [(&str, &str); 78] = [
     (
         "assets/scenes/mm_minimal.rne.scene.toml",
         "assets/scenes/mm_minimal.rne.scene.toml",
+    ),
+    (
+        "assets/scenes/mm_mobile_lift_pick_place.rne.scene.toml",
+        "assets/scenes/mm_mobile_lift_pick_place.rne.scene.toml",
+    ),
+    (
+        "assets/robots/mm_mobile_lift.rne.robot.toml",
+        "assets/robots/mm_mobile_lift.rne.robot.toml",
+    ),
+    (
+        "assets/robots/mm_mobile_lift/mm_mobile_lift.urdf",
+        "assets/robots/mm_mobile_lift/mm_mobile_lift.urdf",
     ),
     (
         "assets/robots/mm_minimal.rne.robot.toml",
@@ -377,6 +391,21 @@ struct InstallRehearsalReport {
     target: String,
     status: String,
     checks: Vec<InstallCheck>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledFlagshipProofReport {
+    kind: String,
+    schema_version: u32,
+    status: String,
+    task_id: String,
+    physics_execution_paths: Vec<String>,
+    success_status: String,
+    expected_failure_contract: String,
+    first_violation_step: u64,
+    capsule_verified: bool,
+    artifacts: Vec<MemberDigest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -662,7 +691,7 @@ pub(crate) fn validate_readiness_release_reports(
                     .get(*id)
                     .is_some_and(|status| status == "passed")
             }),
-        "readiness release report must retain all ten passing installed workflows"
+        "readiness release report must retain all eleven passing installed workflows"
     );
     anyhow::ensure!(
         !release.members.is_empty(),
@@ -718,7 +747,7 @@ pub(crate) fn validate_readiness_release_reports(
     );
     anyhow::ensure!(
         install.all_passed(),
-        "readiness install report must pass all ten canonical checks"
+        "readiness install report must pass all eleven canonical checks"
     );
     anyhow::ensure!(
         release.installed_workflows == install.verdicts(),
@@ -1189,6 +1218,7 @@ fn run_install_rehearsal(
         bin_dir.join(native_binary_name("rne-accelerator-conformance", target));
     let accelerator_mock =
         bin_dir.join(native_binary_name("rne-accelerator-protocol-mock", target));
+    let flagship_proof = bin_dir.join(native_binary_name("rne-flagship-proof", target));
 
     let robot_replay = output_dir.join("robot.rne-replay");
     let robot_run = run_check_command(
@@ -1254,6 +1284,20 @@ fn run_install_rehearsal(
             ],
             &[],
         );
+
+    let flagship_output = output_dir.join("flagship-proof");
+    let flagship_passed = run_check_command(
+        "installed flagship proof",
+        bundle_dir,
+        &flagship_proof,
+        &[flagship_output.clone().into_os_string()],
+        &[],
+    ) && validate_installed_flagship_proof(&flagship_output)
+        .map_err(|error| {
+            eprintln!("installed flagship proof validation failed: {error:#}");
+            error
+        })
+        .is_ok();
 
     let scenario_replay = output_dir.join("scenario.rne-replay");
     let scenario_run = run_check_command(
@@ -1447,6 +1491,7 @@ fn run_install_rehearsal(
         run_python_wheel_smoke(bundle_dir, output_dir, python, target);
     let checks = vec![
         check("robot_replay", robot_verify && capsule_verify),
+        check("flagship_proof", flagship_passed),
         check("scenario_replay", scenario_verify),
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
@@ -1750,6 +1795,90 @@ fn check(id: &str, passed: bool) -> InstallCheck {
         id: id.to_string(),
         status: if passed { "passed" } else { "failed" }.to_string(),
     }
+}
+
+fn validate_installed_flagship_proof(root: &Path) -> anyhow::Result<()> {
+    let report_path = root.join("installed-proof-report.json");
+    let report: InstalledFlagshipProofReport = serde_json::from_slice(
+        &fs::read(&report_path).with_context(|| format!("read {}", report_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", report_path.display()))?;
+    anyhow::ensure!(
+        report.kind == rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
+        "unexpected installed flagship proof kind {}",
+        report.kind
+    );
+    anyhow::ensure!(
+        report.schema_version == rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
+        "unsupported installed flagship proof schema {}",
+        report.schema_version
+    );
+    anyhow::ensure!(report.status == "passed", "installed flagship proof failed");
+    anyhow::ensure!(
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1",
+        "unexpected installed flagship TaskSpec {}",
+        report.task_id
+    );
+    anyhow::ensure!(
+        report.physics_execution_paths == ["rapier_native"],
+        "installed flagship proof must execute the packaged Rapier path"
+    );
+    anyhow::ensure!(
+        report.success_status == "passed"
+            && report.expected_failure_contract == "perception_stream_alive"
+            && report.first_violation_step > 0
+            && report.capsule_verified,
+        "installed flagship proof omitted required success/failure evidence"
+    );
+
+    let expected_paths = [
+        "failure-capsule/capsule.json",
+        "failure-minimized.rne-replay",
+        "failure.behavior-report.json",
+        "flagship.task.json",
+        "replay-inspector.html",
+        "success.behavior-report.json",
+        "workflow-report.json",
+    ];
+    anyhow::ensure!(
+        report
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.path.as_str())
+            .eq(expected_paths),
+        "installed flagship proof artifact set is incomplete or not canonically ordered"
+    );
+    for artifact in &report.artifacts {
+        anyhow::ensure!(
+            !artifact.path.contains('\\'),
+            "installed proof artifact paths must use forward slashes"
+        );
+        let relative = Path::new(&artifact.path);
+        validate_relative_member(relative)?;
+        validate_sha256_hex(
+            &format!("installed proof artifact {}", artifact.path),
+            &artifact.sha256,
+        )?;
+        let path = root.join(relative);
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("inspect installed proof artifact {}", path.display()))?;
+        anyhow::ensure!(
+            metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+            "installed proof artifact must be a regular file: {}",
+            path.display()
+        );
+        anyhow::ensure!(
+            metadata.len() == artifact.size_bytes,
+            "installed proof artifact size mismatch: {}",
+            artifact.path
+        );
+        anyhow::ensure!(
+            sha256_file_hex(&path)? == artifact.sha256,
+            "installed proof artifact SHA-256 mismatch: {}",
+            artifact.path
+        );
+    }
+    Ok(())
 }
 
 fn json_field_matches(path: &Path, field: &str, expected: &serde_json::Value) -> bool {
@@ -2259,6 +2388,56 @@ mod tests {
         )
         .expect("traversal manifest entry");
         assert!(verify_sha256_manifest(directory.path()).is_err());
+    }
+
+    #[test]
+    fn installed_flagship_proof_rehashes_every_declared_artifact() {
+        let directory = tempfile::tempdir().expect("temporary proof");
+        let paths = [
+            "failure-capsule/capsule.json",
+            "failure-minimized.rne-replay",
+            "failure.behavior-report.json",
+            "flagship.task.json",
+            "replay-inspector.html",
+            "success.behavior-report.json",
+            "workflow-report.json",
+        ];
+        let artifacts = paths
+            .into_iter()
+            .map(|relative| {
+                let path = directory.path().join(relative);
+                fs::create_dir_all(path.parent().unwrap()).expect("artifact parent");
+                let bytes = format!("stable:{relative}").into_bytes();
+                fs::write(&path, &bytes).expect("artifact");
+                MemberDigest {
+                    path: relative.to_string(),
+                    size_bytes: bytes.len() as u64,
+                    sha256: sha256_hex(&bytes),
+                }
+            })
+            .collect();
+        let report = InstalledFlagshipProofReport {
+            kind: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_KIND.to_string(),
+            schema_version: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            physics_execution_paths: vec!["rapier_native".to_string()],
+            success_status: "passed".to_string(),
+            expected_failure_contract: "perception_stream_alive".to_string(),
+            first_violation_step: 307,
+            capsule_verified: true,
+            artifacts,
+        };
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &report,
+        )
+        .expect("proof report");
+        validate_installed_flagship_proof(directory.path()).expect("valid proof");
+
+        fs::write(directory.path().join("flagship.task.json"), b"tampered")
+            .expect("tamper artifact");
+        assert!(validate_installed_flagship_proof(directory.path()).is_err());
     }
 
     #[test]

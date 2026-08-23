@@ -121,7 +121,7 @@ cryptographic verification against the exact repository, workflow identity,
 tag, source and signer commit, predicate, issuer, runner class, and archive
 digest before accepting a strict schema-v1 receipt. Each platform now also
 signs a separate archive-install report whose digest chain fixes the archive,
-extracted release report, SHA256SUMS member graph, and ten-check rehearsal;
+extracted release report, SHA256SUMS member graph, and eleven-check rehearsal;
 readiness manifest v4 freshly verifies both signed subjects and audits
 third-party accelerator adapters without weakening the external-system gate.
 The installed accelerator conformance CLI also generates a dependency-free

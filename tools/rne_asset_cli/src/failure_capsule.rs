@@ -55,7 +55,7 @@ use std::process::Command;
 const PHYSICS_CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 
 /// Runs the `failure-capsule create|verify` subcommand.
-pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
+pub fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let command = args.next().ok_or_else(|| {
         anyhow::anyhow!(
             "failure-capsule requires `create` or `verify`; see docs/FAILURE_CAPSULE.md"
@@ -587,7 +587,8 @@ fn read_regular_file(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).with_context(|| format!("could not read artifact `{}`", path.display()))
 }
 
-pub(crate) fn verify_directory(root: &Path) -> Result<()> {
+/// Verifies a Failure Capsule directory and every artifact bound by its manifest.
+pub fn verify_directory(root: &Path) -> Result<()> {
     let root_metadata = fs::symlink_metadata(root)
         .with_context(|| format!("could not inspect capsule directory `{}`", root.display()))?;
     anyhow::ensure!(

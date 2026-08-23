@@ -1,0 +1,12 @@
+//! Reusable implementation behind the `rne-asset` command-line workflows.
+
+/// Stable artifact kind for the flagship workflow report.
+pub const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
+/// Current schema version for the flagship workflow report.
+pub const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
+/// Stable artifact kind for an installed flagship proof report.
+pub const INSTALLED_FLAGSHIP_PROOF_REPORT_KIND: &str = "rne_installed_flagship_proof_report";
+/// Current schema version for an installed flagship proof report.
+pub const INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION: u32 = 1;
+
+pub mod failure_capsule;

@@ -6,14 +6,14 @@ mod capability_report;
 mod dataset;
 mod evidence;
 mod external_intake;
-#[path = "../../tools/rne_asset_cli/src/failure_capsule.rs"]
-mod failure_capsule;
 mod lekiwi_evidence;
 mod readiness_pack;
 mod release_artifacts;
 mod release_exit;
 mod release_readiness;
 mod task_scale;
+
+pub(crate) use rne_asset_cli::failure_capsule;
 
 use anyhow::Context;
 use image::AnimationDecoder;
@@ -40,8 +40,9 @@ const CARGO_SEMVER_CHECKS_VERSION: &str = "0.49.0";
 const ARTIFACTS_DIR_ENV: &str = "RNE_ARTIFACTS_DIR";
 const SHOWCASE_MEDIA_MANIFEST_PATH: &str = "docs/media/showcase.toml";
 const SHOWCASE_MEDIA_SCHEMA_VERSION: u32 = 2;
-pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
-pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = rne_asset_cli::FLAGSHIP_WORKFLOW_REPORT_KIND;
+pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 =
+    rne_asset_cli::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION;
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
 pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
@@ -1572,6 +1573,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "installed_flagship_proof_report",
+            u64::from(rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
             "install_rehearsal_report",
             u64::from(release_artifacts::INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION),
         ),
@@ -2179,48 +2185,10 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     }
 
     run_flagship_workflow(&root, &output, cross_backend)?;
-    let replay = output.join("failure-minimized.rne-replay");
     let report = output.join("workflow-report.json");
-    let success = output.join("success.behavior-report.json");
-    let failure = output.join("failure.behavior-report.json");
     let inspector = output.join("replay-inspector.html");
-    let task_spec = output.join("flagship.task.json");
     let cross_backend_report = output.join("cross-backend-report.json");
-    let mujoco_success = output.join("mujoco-success.behavior-report.json");
     let capsule = output.join("failure-capsule");
-    let mut create_args = vec![
-        "create".to_string(),
-        "--replay".to_string(),
-        replay.display().to_string(),
-        "--evidence".to_string(),
-        report.display().to_string(),
-        "--evidence".to_string(),
-        success.display().to_string(),
-        "--evidence".to_string(),
-        failure.display().to_string(),
-        "--evidence".to_string(),
-        inspector.display().to_string(),
-        "--evidence".to_string(),
-        task_spec.display().to_string(),
-    ];
-    if cross_backend {
-        create_args.extend([
-            "--evidence".to_string(),
-            cross_backend_report.display().to_string(),
-            "--evidence".to_string(),
-            mujoco_success.display().to_string(),
-        ]);
-    }
-    create_args.extend([
-        "--output".to_string(),
-        capsule.display().to_string(),
-        "--backend".to_string(),
-        "rapier-native".to_string(),
-        "--backend-version".to_string(),
-        "0.22".to_string(),
-    ]);
-    let mut create_args = create_args.into_iter();
-    failure_capsule::run(&mut create_args)?;
     let mut verify_args = vec!["verify".to_string(), capsule.display().to_string()].into_iter();
     failure_capsule::run(&mut verify_args)?;
 
