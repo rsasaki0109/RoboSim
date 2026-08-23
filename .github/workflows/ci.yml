@@ -197,17 +197,48 @@ jobs:
               text=True,
           )
           previous = tomllib.loads(text)
+          print(previous["release_version"])
           print(previous["baseline_revision"])
-          PY
+PY
               )
-              previous_baseline="${previous_baseline_metadata[0]-}"
+              previous_release="${previous_baseline_metadata[0]-}"
+              previous_baseline="${previous_baseline_metadata[1]-}"
               if [[ -n "$previous_baseline" ]] \
                 && git cat-file -e "$previous_baseline^{commit}" 2>/dev/null \
                 && git merge-base --is-ancestor "$previous_baseline" HEAD; then
-                echo "Rust API baseline registry is immutable within release 0.1.0" >&2
-                exit 1
+                current_release="$(python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          current = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          print(current["release_version"])
+          PY
+                )"
+                if [[ "$previous_release" == "$current_release" ]]; then
+                  echo "Rust API baseline registry is immutable within release $current_release" >&2
+                  exit 1
+                fi
+                python3 - "$previous_release" "$current_release" <<'PY'
+          import re
+          import sys
+
+          previous, current = sys.argv[1:]
+          pattern = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+          previous_match = pattern.fullmatch(previous)
+          current_match = pattern.fullmatch(current)
+          if previous_match is None or current_match is None:
+              raise SystemExit("Rust API baseline release versions must be canonical x.y.z")
+          previous_parts = tuple(map(int, previous_match.groups()))
+          current_parts = tuple(map(int, current_match.groups()))
+          if current_parts <= previous_parts:
+              raise SystemExit(
+                  f"Rust API baseline release version must increase: {previous} -> {current}"
+              )
+          PY
+                echo "release transition: allowing Rust API baseline registry update $previous_release -> $current_release"
+              else
+                echo "repair: allowing Rust API baseline retarget because the previous baseline is not an ancestor of HEAD"
               fi
-              echo "repair: allowing Rust API baseline retarget because the previous baseline is not an ancestor of HEAD"
             fi
           else
             echo "bootstrap: no Rust API baseline registry exists at $registry_guard_ref"
