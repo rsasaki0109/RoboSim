@@ -53,8 +53,10 @@ sha256sum --check SHA256SUMS
 
 On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 `release-report.json` records the tested commit, Rust/Cargo versions, target,
-Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, and every
-bundle-member digest. `reproducible` is true only for a clean build whose exact
+Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the ten
+generic `installed_workflows` verdicts, and every bundle-member digest. These
+installed checks do not yet claim execution of the indoor mobile-manipulation
+flagship. `reproducible` is true only for a clean build whose exact
 `v0.1.0` tag points to the tested commit.
 The retained `Cargo.lock` also lets the installed Failure Capsule author record
 the exact release graph during bundle rehearsal; when run from an external

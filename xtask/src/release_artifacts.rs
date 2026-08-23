@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
 /// Machine-readable release provenance report schema.
-pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Machine-readable installed-bundle rehearsal report schema.
 pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 5;
 /// Archive-bound independently extracted rehearsal report schema.
@@ -435,7 +435,8 @@ struct ReleaseReport {
     audit: AuditVerdicts,
     fuzz_campaign_digest_sha256: String,
     contracts: serde_json::Value,
-    flagship_workflows: BTreeMap<String, String>,
+    #[serde(alias = "flagship_workflows")]
+    installed_workflows: BTreeMap<String, String>,
     members: Vec<MemberDigest>,
 }
 
@@ -654,10 +655,10 @@ pub(crate) fn validate_readiness_release_reports(
         "readiness release report supply-chain verdicts must all pass"
     );
     anyhow::ensure!(
-        release.flagship_workflows.len() == INSTALL_CHECK_IDS.len()
+        release.installed_workflows.len() == INSTALL_CHECK_IDS.len()
             && INSTALL_CHECK_IDS.iter().all(|id| {
                 release
-                    .flagship_workflows
+                    .installed_workflows
                     .get(*id)
                     .is_some_and(|status| status == "passed")
             }),
@@ -720,7 +721,7 @@ pub(crate) fn validate_readiness_release_reports(
         "readiness install report must pass all ten canonical checks"
     );
     anyhow::ensure!(
-        release.flagship_workflows == install.verdicts(),
+        release.installed_workflows == install.verdicts(),
         "readiness release and independently extracted workflow verdicts differ"
     );
     validate_release_checksum_chain(&release, &release_bytes, &checksum_bytes, install)?;
@@ -850,7 +851,7 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
         },
         fuzz_campaign_digest_sha256: fuzz_digest,
         contracts: serde_json::to_value(contracts)?,
-        flagship_workflows: rehearsal.verdicts(),
+        installed_workflows: rehearsal.verdicts(),
         members,
     };
     write_pretty_json(&bundle_dir.join(RELEASE_REPORT), &report)?;
@@ -955,7 +956,7 @@ fn build_archive_install_report(
     validate_release_members(&release.members)?;
     validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, rehearsal)?;
     anyhow::ensure!(
-        release.flagship_workflows == rehearsal.verdicts(),
+        release.installed_workflows == rehearsal.verdicts(),
         "independent rehearsal verdicts differ from the staged release report"
     );
     let release_report = MemberDigest {
@@ -2277,6 +2278,42 @@ mod tests {
     }
 
     #[test]
+    fn release_report_reads_legacy_workflow_name_and_writes_precise_name() {
+        let legacy = serde_json::json!({
+            "schema_version": 1,
+            "release_version": RELEASE_VERSION,
+            "git_commit": "1".repeat(40),
+            "target": "x86_64-unknown-linux-gnu",
+            "rustc_version": "rustc-test",
+            "cargo_version": "cargo-test",
+            "cargo_lock_sha256": "0".repeat(64),
+            "clean_worktree": true,
+            "expected_tag": "v0.1.0",
+            "tag_matches_commit": true,
+            "reproducible": true,
+            "audit": {
+                "cargo_deny": "passed",
+                "cargo_audit": "passed",
+                "source_policy": "passed",
+                "license_policy": "passed"
+            },
+            "fuzz_campaign_digest_sha256": "0".repeat(64),
+            "contracts": {},
+            "flagship_workflows": { "robot_replay": "passed" },
+            "members": []
+        });
+
+        let report: ReleaseReport = serde_json::from_value(legacy).expect("legacy report");
+        assert_eq!(
+            report.installed_workflows.get("robot_replay"),
+            Some(&"passed".to_string())
+        );
+        let current = serde_json::to_value(report).expect("current report");
+        assert!(current.get("installed_workflows").is_some());
+        assert!(current.get("flagship_workflows").is_none());
+    }
+
+    #[test]
     fn readiness_static_contract_is_staged_in_release_bundles() {
         let root = workspace_root().expect("workspace root");
         let output = tempfile::tempdir().expect("temporary bundle");
@@ -2374,7 +2411,7 @@ mod tests {
             },
             fuzz_campaign_digest_sha256: "0".repeat(64),
             contracts: serde_json::json!({}),
-            flagship_workflows: workflows,
+            installed_workflows: workflows,
             members: Vec::new(),
         };
         release.members =
@@ -2384,8 +2421,8 @@ mod tests {
         let archive_install =
             build_archive_install_report(&archive_path, &bundle_dir, &release, &install).unwrap();
         assert_eq!(
-            pretty_json_bytes(&archive_install).unwrap(),
-            include_bytes!("../../tests/golden/release/archive-install-rehearsal-v1.json")
+            String::from_utf8(pretty_json_bytes(&archive_install).unwrap()).unwrap(),
+            include_str!("../../tests/golden/release/archive-install-rehearsal-v1.json")
         );
         let mut unknown = serde_json::to_value(&archive_install).unwrap();
         unknown
