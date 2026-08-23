@@ -378,6 +378,13 @@ nine-exchange lifecycle, timeout boundary, checkpoint restore, and Rust
 transcript binding. Older reports cannot be relabelled as v5 because they did
 not execute or content-address this process boundary.
 
+Release report schema v2 renames the schema-v1 `flagship_workflows` map to
+`installed_workflows`. The entries are the ten generic installed-bundle checks;
+they did not prove execution of the indoor mobile-manipulation flagship. The v2
+reader accepts the old field spelling for historical inspection, but a schema-v1
+report remains historical evidence and cannot qualify as a current release
+report without rebuilding and rerunning the bundle.
+
 The schema-v5 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v1
 wrapper. It binds the exact archive digest, extracted release report and

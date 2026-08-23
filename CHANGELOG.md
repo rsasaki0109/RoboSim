@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Reset the forward plan around independently reproducible product evidence:
+  an installed indoor mobile-manipulation proof, cross-backend diagnosis,
+  recorded/shadow and bounded physical execution, and third-party adoption.
+  Release report schema v2 also renames the ten generic bundle checks from
+  `flagship_workflows` to the accurate `installed_workflows`, while retaining
+  schema-v1 field-name read compatibility.
+
 - Evolve the real-indoor 3DGS mobile-manipulation hero into a legible
   perception/manipulation demo. Its calibrated wrist mount now renders the real
   3DGS and robot from every sampled post-physics camera pose, pairing RGB with

@@ -1,7 +1,7 @@
 # RNE product strategy, 2026-2029
 
 Status: canonical forward plan
-Last updated: 2026-08-14
+Last updated: 2026-08-23
 
 This document is the source of truth for work after `v0.1.0`. The detailed
 milestone records in [ROADMAP.md](ROADMAP.md) remain useful history, but when a
@@ -48,6 +48,21 @@ without duplicating its entire product:
 The defensible difference is therefore not another importer or renderer. It is
 the combination of task portability, declared determinism, backend conformance,
 and a portable failure artifact.
+
+## 2026-08 product-proof reset
+
+The architectural direction above remains valid, but implementation breadth is
+no longer accepted as product progress by itself. The immediate bottleneck is
+independent reproduction: the source-checkout flagship and internal
+conformance evidence must become one installed outcome that a third party can
+obtain without repository-author assistance.
+
+The active execution plan is
+[External product proof](PLAN_EXTERNAL_PRODUCT_PROOF.md). Until its installed,
+backend-differential, recorded/shadow, physical, and independent-adoption gates
+are satisfied, unrelated demo, importer, robot-catalog, renderer, and physics
+expansion is paused. The milestone labels below describe dependency order, but
+the external proof gates decide what work enters the repository.
 
 ## Product rules
 
@@ -501,9 +516,12 @@ The source metadata check, both platform bundle builders, and the aggregate
 release verdict also rerun that audit automatically for any 1.x or later
 version, so changing version metadata alone cannot bypass the external gates.
 
-## The next 12 weeks
+## Superseded internal-first schedule
 
-The immediate execution order is intentionally narrow:
+The following 12-week schedule recorded the internal v0.2-v0.3 build-out. Its
+technical slices have since landed and it is retained as history; it is not the
+current priority list. Current work follows
+[External product proof](PLAN_EXTERNAL_PRODUCT_PROOF.md).
 
 | Weeks | Work | Demonstrable result |
 |---|---|---|
