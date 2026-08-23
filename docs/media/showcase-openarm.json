@@ -8,10 +8,10 @@
     "scenario": "OpenArm v2 bimanual force-limited position-control cycle",
     "steps": 1400,
     "initial_state_digest": 2539824101460789923,
-    "final_state_digest": 9217052204222568877,
-    "replay_final_state_digest": 9217052204222568877,
+    "final_state_digest": 3397633380677300770,
+    "replay_final_state_digest": 3397633380677300770,
     "replay_match": true,
-    "outcome": "actuators=18; left_ee_travel_m=0.7347; right_ee_travel_m=0.7366; left_gripper_aperture_change_m=0.0918; right_gripper_aperture_change_m=0.0918; max_final_proximal_joint_error_rad=0.10419; visual_mesh_parts=59"
+    "outcome": "actuators=18; left_ee_travel_m=0.7340; right_ee_travel_m=0.7366; left_gripper_aperture_change_m=0.0918; right_gripper_aperture_change_m=0.0918; max_final_proximal_joint_error_rad=0.00000; visual_mesh_parts=59"
   },
   "capture": {
     "gpu_rendered": true,
@@ -20,11 +20,11 @@
     "frame_count": 46,
     "frame_pattern": "target/rne-showcase-openarm/frame-%03d.png",
     "gif_path": "docs/media/showcase-openarm.gif",
-    "gif_bytes": 2471937,
-    "gif_sha256": "6a086dfce4dd5af3fbf0702233a54dc3843cb61124b8104cc47e1c8e92227731",
+    "gif_bytes": 2426451,
+    "gif_sha256": "80f2a170ff79bfa21f16948d7e6d2c00487543ce0aedb617e8142b23616e1db9",
     "poster_path": "docs/media/showcase-openarm.png",
-    "poster_bytes": 26918,
-    "poster_sha256": "4955b44af28d00d63dad4deaaf535a27e644d300adf9b92195fbce65b6007e6d",
+    "poster_bytes": 26777,
+    "poster_sha256": "c8c23fbf53f46da7982b7fbcf3c7c2326c7bc55a5ed24809071a8e2618182ffe",
     "poster_frame": 26,
     "sampled_sim_steps": [
       30,

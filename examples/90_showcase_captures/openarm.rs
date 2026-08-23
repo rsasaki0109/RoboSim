@@ -313,7 +313,17 @@ fn commanded_pose(step: u64) -> BimanualPose {
         201..=360 => interpolate(APPROACH, CLOSE, smooth((step - 200) as f64 / 160.0)),
         361..=580 => interpolate(CLOSE, RAISE, smooth((step - 360) as f64 / 220.0)),
         581..=780 => interpolate(RAISE, PRESENT, smooth((step - 580) as f64 / 200.0)),
-        _ => interpolate(PRESENT, HOME, smooth((step - 780) as f64 / 620.0)),
+        781..=1180 => interpolate(PRESENT, HOME, smooth((step - 780) as f64 / 400.0)),
+        _ => {
+            let mut pose = HOME;
+            let alpha = smooth((step - 1180) as f64 / 220.0);
+            let finger_position = 0.55 + (0.18 - 0.55) * alpha;
+            pose.left[7] = finger_position;
+            pose.left[8] = finger_position;
+            pose.right[7] = -finger_position;
+            pose.right[8] = -finger_position;
+            pose
+        }
     }
 }
 
