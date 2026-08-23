@@ -125,10 +125,11 @@ rehearsal. From its top-level directory:
 ```
 
 The flagship command writes `flagship-proof/installed-proof-report.json`. Its
-schema-v1 report requires both packaged physics paths and indexes the generated
-TaskSpec, Rapier/MuJoCo success and failure reports, both verified failure
-replays, unit-bearing cross-backend comparison, browser inspector, workflow
-report, and verified capsule manifest by relative path, byte size, and SHA-256.
+schema-v2 report requires both packaged physics paths, binds the exact packaged
+producer executable, and indexes the generated TaskSpec, Rapier/MuJoCo success
+and failure reports, both verified failure replays, unit-bearing cross-backend
+comparison, browser inspector, workflow report, and verified capsule manifest
+by relative path, byte size, and SHA-256.
 When `--measure-on MACHINE` is present, the same command also writes
 `time-to-proof-report.json`. This timing-only schema-v1 artifact records the
 operator-supplied machine label, OS, architecture, elapsed milliseconds from

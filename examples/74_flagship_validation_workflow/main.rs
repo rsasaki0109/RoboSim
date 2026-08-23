@@ -690,6 +690,7 @@ struct InstalledFlagshipProofReport {
     expected_failure_contract: &'static str,
     first_violation_step: u64,
     capsule_verified: bool,
+    producer_executable: InstalledProofArtifact,
     artifacts: Vec<InstalledProofArtifact>,
 }
 
@@ -983,6 +984,22 @@ fn installed_proof_artifact(output: &Path, relative: &str) -> Result<InstalledPr
     })
 }
 
+fn installed_proof_producer() -> Result<InstalledProofArtifact> {
+    let executable = std::env::current_exe().context("could not identify proof executable")?;
+    let bytes = fs::read(&executable)
+        .with_context(|| format!("could not read proof executable {}", executable.display()))?;
+    Ok(InstalledProofArtifact {
+        path: if cfg!(windows) {
+            "bin/rne-flagship-proof.exe"
+        } else {
+            "bin/rne-flagship-proof"
+        }
+        .to_string(),
+        size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+    })
+}
+
 fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport) -> Result<()> {
     let mut paths = vec![
         "failure-capsule/capsule.json",
@@ -1017,6 +1034,7 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
         expected_failure_contract: workflow.intentional_failure.expected_contract,
         first_violation_step: workflow.intentional_failure.injected_step,
         capsule_verified: true,
+        producer_executable: installed_proof_producer()?,
         artifacts,
     };
     write_pretty_json(&output.join("installed-proof-report.json"), &report)

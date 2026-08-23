@@ -87,6 +87,7 @@ kits. Native release bundles include the required tools; cloning the RNE
 source tree is not required to submit evidence.
 
 - [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
+- [Measure the installed flagship from an official release archive](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
 - [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
 - [Conform an external physics backend, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
 
@@ -197,12 +198,17 @@ Rapier and the bundled MuJoCo runtime for both a successful episode and the same
 deterministic perception blackout. It compares named SI-unit tolerances and the
 first violation, verifies both replays and the Failure Capsule, and writes a
 self-contained browser inspector plus a SHA-256-bound
-`installed-proof-report.json`. No source checkout, renderer, ROS 2, separate
-MuJoCo installation, or network connection is required after extraction.
+`installed-proof-report.json`. The report also binds the exact packaged
+`rne-flagship-proof` executable that produced it. No source checkout, renderer,
+ROS 2, separate MuJoCo installation, or network connection is required after
+extraction.
 The explicit hardware label also writes a separate
 `time-to-proof-report.json`; it measures command start through verified capsule
 and bound proof report against the 15-minute target without contaminating
 deterministic correctness evidence.
+An independent operator can bind those outputs to the exact clean tagged
+archive with `xtask external-flagship-check`; CI and placeholder machine labels
+are rejected as external evidence.
 
 Third-party controller plugins, physics backends, hardware adapters, and real
 external task reproductions can be submitted through the fixed

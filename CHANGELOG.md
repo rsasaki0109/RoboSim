@@ -6,6 +6,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a fail-closed `external-flagship-check` and public intake route for an
+  independently operated 15-minute installed flagship reproduction. The
+  schema-v1 external report binds a clean tagged release archive, source
+  revision, release/checksum manifests, the exact packaged producer executable,
+  Rapier/MuJoCo success and
+  intentional-failure comparison, timing report, and verified Failure Capsule
+  to a public third-party repository revision. CI and placeholder measurements
+  are explicitly rejected. Installed flagship proof schema v2 now hashes its
+  producer executable.
+
 - Package the official MuJoCo 3.9.0 runtime with native Windows/Linux release
   archives and build the installed `rne-flagship-proof` with both Rapier and
   MuJoCo enabled. Release rehearsal now runs the one-command cross-backend
@@ -32,7 +42,8 @@ All notable changes to Robot Native Engine are documented in this file.
   scene/robot/URDF inputs in native release bundles. One installed command now
   runs the successful indoor manipulation task, injects and minimizes the
   perception failure, creates and verifies the browser-bearing Failure Capsule,
-  and writes a schema-v1 SHA-256-bound installed proof report. Installed
+  and writes a schema-v2 SHA-256-bound installed proof report that also binds
+  the packaged producer executable. Installed
   rehearsal schema v6 adds this as the eleventh archive check.
 
 - Reset the forward plan around independently reproducible product evidence:
@@ -297,10 +308,11 @@ All notable changes to Robot Native Engine are documented in this file.
   reachability is covered by a time-bounded `getrandom 0.4.3` duplicate review;
   no new registry package is introduced.
 
-- **External evidence intake contract**: a machine-readable three-route
+- **External evidence intake contract**: a machine-readable four-route
   registry, public contributor guide, and required GitHub issue forms now cover
-  independent task reproduction, third-party controller plugins, and external
-  physics backends or hardware adapters. `xtask external-intake-check` binds
+  installed flagship measurement, independent task reproduction, third-party
+  controller plugins, and external physics backends or hardware adapters.
+  `xtask external-intake-check` binds
   the route thresholds, ownership and author-assistance policy, artifact
   checklist, form fields, and repository-contained files; lint and release
   checks fail on drift. Submission remains a review queue and cannot satisfy
