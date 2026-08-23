@@ -101,10 +101,14 @@ in archive rehearsal. Gate 2 closes only after both extracted-archive CI jobs
 retain passing evidence.
 
 The versioned, fixed-step external simulator process contract and conformance
-catalog are now implemented outside core. The next spike is a bounded Gazebo
-Harmonic adapter that translates only the flagship observations and actions;
-it must not introduce Gazebo, ROS 2, DDS, or simulator-specific handles into
-core crates.
+catalog are now implemented outside core. A first real Gazebo Harmonic 8.15
+adapter also passes the complete ten-check catalog headlessly with the official
+positive-scale OpenArm v2 right-arm URDF: nine joint targets enter during
+PreUpdate and eighteen position/velocity values leave during PostUpdate. The
+next slice promotes the existing RNE OpenArm pose cycle into the same TaskSpec
+and controller artifact, runs success and intentional tracking failure on both
+Rapier and Gazebo, and packages their first tolerance violation. Gazebo, ROS 2,
+DDS, and simulator-specific handles remain outside core crates.
 
 ### Gate 3: recorded and shadow proof
 

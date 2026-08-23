@@ -1,7 +1,9 @@
 use rne_ai::TaskSpec;
 use rne_hardware_gateway::simulator::conformance::{
     run_simulator_adapter_conformance, SimulatorAdapterConformanceConfig,
+    SimulatorAdapterConformanceReport,
 };
+use rne_hardware_gateway::simulator::SimulatorRuntimeManifest;
 use rne_hardware_gateway::{GatewayConfig, HardwareGateway};
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -15,6 +17,12 @@ fn fixture(relative: &str) -> PathBuf {
 
 fn task_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/tasks/diff_drive_goal.task.json")
+}
+
+fn gazebo_fixture(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../simulator/rne_gazebo_harmonic")
+        .join(relative)
 }
 
 fn config() -> SimulatorAdapterConformanceConfig {
@@ -70,4 +78,51 @@ fn fresh_process_conformance_reports_are_byte_identical() {
         .to_json_pretty()
         .unwrap();
     assert_eq!(first, second);
+}
+
+#[test]
+fn repository_gazebo_openarm_fixture_is_hash_bound_and_task_compatible() {
+    let manifest_bytes = std::fs::read(gazebo_fixture("runtime.json")).unwrap();
+    let manifest: SimulatorRuntimeManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+    manifest.validate().unwrap();
+    assert_eq!(manifest.simulator_id, "gazebo_sim");
+    assert_eq!(manifest.fixed_delta_ticks, 16_666_667);
+    for artifact in &manifest.artifacts {
+        let bytes = std::fs::read(gazebo_fixture(&artifact.file)).unwrap();
+        assert_eq!(bytes.len() as u64, artifact.size_bytes);
+        assert_eq!(format!("{:x}", Sha256::digest(&bytes)), artifact.sha256);
+    }
+
+    let task_bytes =
+        std::fs::read(gazebo_fixture("openarm_right_joint_tracking.task.json")).unwrap();
+    let task: TaskSpec = serde_json::from_slice(&task_bytes).unwrap();
+    task.validate().unwrap();
+    let gateway = HardwareGateway::new(task, GatewayConfig::default()).unwrap();
+    assert_eq!(gateway.observation_width(), 18);
+    assert_eq!(gateway.action_width(), 9);
+    assert!(gazebo_fixture("rne_gazebo_harmonic_adapter.py").is_file());
+    assert!(gazebo_fixture("adapter.manifest.toml").is_file());
+
+    let report: SimulatorAdapterConformanceReport =
+        serde_json::from_slice(&std::fs::read(gazebo_fixture("conformance.report.json")).unwrap())
+            .unwrap();
+    report.validate().unwrap();
+    assert!(report.passed());
+    for (file, expected) in [
+        (
+            "rne_gazebo_harmonic_adapter.py",
+            report.subject.adapter_sha256.as_str(),
+        ),
+        (
+            "openarm_right_joint_tracking.task.json",
+            report.subject.task_sha256.as_str(),
+        ),
+        (
+            "runtime.json",
+            report.subject.runtime_manifest_sha256.as_str(),
+        ),
+    ] {
+        let bytes = std::fs::read(gazebo_fixture(file)).unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(bytes)), expected);
+    }
 }
