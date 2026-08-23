@@ -14,13 +14,14 @@ plugin/physics/hardware/accelerator external-conformance guides, compatibility a
 documentation, locked dependency SBOM,
 artifact-attestation policy, Rust API baseline, Python API manifest, locked
 dependency graph, Failure Capsule authoring guides, replay fixtures, provenance
-report, and `SHA256SUMS`. Installed-rehearsal schema v5 runs ten frozen checks:
-robot replay, scenario replay, physics conformance, external hardware-adapter
-conformance, accelerator protocol conformance, the 100-actor scale case, standalone controller-plugin
-conformance, the installed compatibility corpus, a fresh wheel installation,
-and exact Python public-API verification. Schema v4 remains historical evidence
-for the same set without accelerator process conformance; it cannot be
-relabelled as v5. The hardware check executes nine
+report, and `SHA256SUMS`. Installed-rehearsal schema v6 runs eleven frozen
+checks: robot replay, installed flagship proof, scenario replay, physics
+conformance, external hardware-adapter conformance, accelerator protocol
+conformance, the 100-actor scale case, standalone controller-plugin conformance,
+the installed compatibility corpus, a fresh wheel installation, and exact
+Python public-API verification. Schema v5 remains historical evidence
+for the ten-check set without the installed flagship proof; it cannot be
+relabelled as v6. The hardware check executes nine
 TaskSpec/protocol/safety cases using installed binaries only. The controller
 check runs `rne-asset plugin check` against the
 reference binary and against a fresh scaffold built offline with warnings
@@ -43,11 +44,13 @@ The Python check compares all 24 public exports, constructors, methods,
 properties, constants, and text signatures, then writes a stable schema-v1
 report.
 The independent run additionally emits
-`rne_archive_install_rehearsal` schema v1. This outer report binds the archive
+`rne_archive_install_rehearsal` schema v2. This outer report binds the archive
 file name, byte length, and SHA-256 to the extracted bundle root,
-`release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v5
-rehearsal. Validation reconstructs the checksum graph and requires the staged
-and independently extracted verdict maps to be identical.
+`release-report.json`, canonical `SHA256SUMS`, the hardware-named time-to-proof
+report, and the complete inner schema-v6 rehearsal. Validation reconstructs the
+checksum graph and requires the staged and independently extracted verdict maps
+to be identical. Schema v1 remains historical archive-bound evidence but lacks
+the timing-report identity required by the current gate.
 After all eleven checks pass, including the installed flagship proof, xtask deletes the tool-owned wheel virtual
 environment and controller and accelerator scaffolds. `release-bundle`
 additionally deletes its
@@ -71,6 +74,13 @@ The installed binary must have the bundled mobile-manipulator scene and URDF
 needed to reproduce both historical outcomes without a source checkout. Source
 release CI separately checks the exact source commits, trees, schema constants,
 and ancestry using a full-history checkout.
+The flagship proof is invoked with a CI-specific machine label and emits a
+separate timing-only schema-v1 report. The archive rehearsal independently
+checks its 900,000 ms threshold and rehashes the installed proof report and
+capsule manifest it names. The full proof directory is retained in each Linux
+and Windows workflow artifact. These CI timings validate packaging and the
+measurement path; they do not substitute for an independent external-user run
+on named reference hardware.
 The bundled Rust API registry is audit evidence; source CI performs the actual
 31-crate `cargo-semver-checks` comparison because it requires both source trees.
 

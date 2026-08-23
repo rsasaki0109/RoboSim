@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add `--measure-on MACHINE` to the installed flagship proof. It emits a
+  schema-v1 timing-only report that names the machine, records OS/architecture
+  and elapsed milliseconds, evaluates the 15-minute target, and SHA-256 binds
+  the verified capsule and timing-free proof report. Release rehearsals retain
+  the complete proof directory on Linux and Windows, while archive-install
+  report schema v2 binds its timing report to the exact release archive.
+
 - Ship a headless `rne-flagship-proof` binary and its minimum mobile-lift
   scene/robot/URDF inputs in native release bundles. One installed command now
   runs the successful indoor manipulation task, injects and minimizes the
@@ -16,7 +23,7 @@ All notable changes to Robot Native Engine are documented in this file.
 - Reset the forward plan around independently reproducible product evidence:
   an installed indoor mobile-manipulation proof, cross-backend diagnosis,
   recorded/shadow and bounded physical execution, and third-party adoption.
-  Release report schema v2 also renames the ten generic bundle checks from
+  Release report schema v2 also renames the generic bundle checks from
   `flagship_workflows` to the accurate `installed_workflows`, while retaining
   schema-v1 field-name read compatibility.
 

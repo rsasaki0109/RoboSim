@@ -72,7 +72,7 @@ The bundle includes the fixtures and validation binaries used by the release
 rehearsal. From its top-level directory:
 
 ```bash
-./bin/rne-flagship-proof flagship-proof
+./bin/rne-flagship-proof flagship-proof --measure-on "lab-workstation-a"
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
@@ -124,6 +124,13 @@ The flagship command writes `flagship-proof/installed-proof-report.json`. Its
 schema-v1 report indexes the generated TaskSpec, success and failure reports,
 minimized replay, browser inspector, workflow report, and verified capsule
 manifest by relative path, byte size, and SHA-256.
+When `--measure-on MACHINE` is present, the same command also writes
+`time-to-proof-report.json`. This timing-only schema-v1 artifact records the
+operator-supplied machine label, OS, architecture, elapsed milliseconds from
+process start through the verified capsule and bound proof report, the fixed
+900,000 ms target, and SHA-256 identities for the two proof roots. Use a stable,
+specific inventory label; CI labels are rehearsal diagnostics and do not count
+as independent external-user measurements.
 
 The hardware command's `--allow-hil` is safe here because the target is the
 bundled deterministic process mock; do not reuse it with an unisolated physical
@@ -217,9 +224,9 @@ TaskSpec, minimized replay, browser inspector, and verified Failure Capsule.
 Its accelerator check runs
 both the installed reference mock and a freshly generated dependency-free
 scaffold through process conformance. Separate checks cover the compatibility
-corpus and the exact Python API manifest. Its schema-v1 outer report records the
-exact archive and extracted release/checksum identities; tagged release CI
-attests that report as a separate subject.
+corpus and the exact Python API manifest. Its schema-v2 outer report records the
+exact archive, extracted release/checksum identities, and time-to-proof report
+identity; tagged release CI attests that report as a separate subject.
 
 On success, the command retains the archive-bound report, replays,
 conformance reports, compatibility/Python API reports, and Failure Capsule, but

@@ -398,11 +398,20 @@ success/failure reports, minimized replay, browser inspector, workflow report,
 and capsule manifest by byte size and SHA-256. Timing measurements remain a
 separate hardware-named artifact.
 
-The schema-v5 report remains inside the archive as the staged rehearsal. A
-fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v1
+Time-to-proof report schema v1 is that separate artifact. It records a bounded
+operator-supplied machine label, OS and architecture, command elapsed
+milliseconds, the 900,000 ms acceptance target, and content identities for the
+installed proof report and verified capsule manifest. The report is deliberately
+excluded from deterministic hashes. CI-generated measurements prove the
+packaged measurement path only; independent acceptance still requires an
+external user and named reference hardware.
+
+The schema-v6 report remains inside the archive as the staged rehearsal. A
+fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v2
 wrapper. It binds the exact archive digest, extracted release report and
-checksum manifest, and a second schema-v5 result. The wrapper is a distinct
-signed subject; an older standalone schema-v5 report cannot be presented as
+checksum manifest, hardware-named time-to-proof report, and a second schema-v6
+result. The wrapper is a distinct
+signed subject; an older standalone schema-v6 report cannot be presented as
 archive-bound evidence.
 
 ## Replay migration

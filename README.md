@@ -188,7 +188,7 @@ See [examples/README.md](examples/README.md) for the complete example index.
 The native release archive includes a one-command installed product proof:
 
 ```bash
-./bin/rne-flagship-proof flagship-proof
+./bin/rne-flagship-proof flagship-proof --measure-on "lab-workstation-a"
 ```
 
 It runs the indoor mobile-manipulation TaskSpec through a successful episode
@@ -196,6 +196,10 @@ and a deterministic perception blackout, minimizes the failure, verifies the
 Failure Capsule, and writes a self-contained browser inspector plus a
 SHA-256-bound `installed-proof-report.json`. No source checkout, renderer,
 ROS 2, MuJoCo, or network connection is required for this reference path.
+The explicit hardware label also writes a separate
+`time-to-proof-report.json`; it measures command start through verified capsule
+and bound proof report against the 15-minute target without contaminating
+deterministic correctness evidence.
 
 Third-party controller plugins, physics backends, hardware adapters, and real
 external task reproductions can be submitted through the fixed

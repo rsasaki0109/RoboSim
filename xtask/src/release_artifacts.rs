@@ -21,7 +21,7 @@ pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Machine-readable installed-bundle rehearsal report schema.
 pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 6;
 /// Archive-bound independently extracted rehearsal report schema.
-pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Installed Python public-API contract schema.
 pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
@@ -410,6 +410,24 @@ struct InstalledFlagshipProofReport {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+struct TimeToProofReport {
+    kind: String,
+    schema_version: u32,
+    status: String,
+    task_id: String,
+    machine_label: String,
+    operating_system: String,
+    architecture: String,
+    measurement_scope: String,
+    elapsed_ms: u64,
+    target_ms: u64,
+    within_target: bool,
+    installed_proof_report: MemberDigest,
+    failure_capsule_manifest: MemberDigest,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ArchiveSubject {
     file: String,
     size_bytes: u64,
@@ -425,6 +443,7 @@ struct ArchiveInstallRehearsalReport {
     bundle_root: String,
     release_report: MemberDigest,
     checksum_manifest: MemberDigest,
+    time_to_proof: MemberDigest,
     rehearsal: InstallRehearsalReport,
 }
 
@@ -736,6 +755,15 @@ pub(crate) fn validate_readiness_release_reports(
         SHA256_MANIFEST,
         &checksum_bytes,
     )?;
+    anyhow::ensure!(
+        archive_install.time_to_proof.path == "flagship-proof/time-to-proof-report.json"
+            && archive_install.time_to_proof.size_bytes > 0,
+        "readiness archive-install report omitted time-to-proof evidence"
+    );
+    validate_sha256_hex(
+        "readiness time-to-proof report",
+        &archive_install.time_to_proof.sha256,
+    )?;
     let install = &archive_install.rehearsal;
     anyhow::ensure!(
         install.schema_version == INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
@@ -941,7 +969,13 @@ pub(crate) fn release_install_smoke(args: &mut impl Iterator<Item = String>) -> 
         &release.target,
         true,
     )?;
-    let archive_report = build_archive_install_report(&archive, &bundle_dir, &release, &report)?;
+    let archive_report = build_archive_install_report(
+        &archive,
+        &bundle_dir,
+        &release,
+        &report,
+        &output_dir.join("flagship-proof/time-to-proof-report.json"),
+    )?;
     write_pretty_json(&output_dir.join(ARCHIVE_INSTALL_REPORT), &archive_report)?;
     anyhow::ensure!(
         report.all_passed(),
@@ -961,6 +995,7 @@ fn build_archive_install_report(
     bundle_dir: &Path,
     release: &ReleaseReport,
     rehearsal: &InstallRehearsalReport,
+    time_to_proof_path: &Path,
 ) -> anyhow::Result<ArchiveInstallRehearsalReport> {
     let archive_metadata = fs::symlink_metadata(archive_path)
         .with_context(|| format!("inspect release archive {}", archive_path.display()))?;
@@ -998,6 +1033,13 @@ fn build_archive_install_report(
         size_bytes: u64::try_from(checksum_bytes.len()).unwrap_or(u64::MAX),
         sha256: sha256_hex(&checksum_bytes),
     };
+    let time_to_proof_bytes = fs::read(time_to_proof_path)
+        .with_context(|| format!("read {}", time_to_proof_path.display()))?;
+    let time_to_proof = MemberDigest {
+        path: "flagship-proof/time-to-proof-report.json".to_string(),
+        size_bytes: u64::try_from(time_to_proof_bytes.len()).unwrap_or(u64::MAX),
+        sha256: sha256_hex(&time_to_proof_bytes),
+    };
     Ok(ArchiveInstallRehearsalReport {
         kind: ARCHIVE_INSTALL_REPORT_KIND.to_string(),
         schema_version: ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION,
@@ -1005,6 +1047,7 @@ fn build_archive_install_report(
         bundle_root: bundle_name(&release.target),
         release_report,
         checksum_manifest,
+        time_to_proof,
         rehearsal: rehearsal.clone(),
     })
 }
@@ -1286,18 +1329,29 @@ fn run_install_rehearsal(
         );
 
     let flagship_output = output_dir.join("flagship-proof");
+    let flagship_machine_label = format!("github-hosted-release-rehearsal-{target}");
     let flagship_passed = run_check_command(
         "installed flagship proof",
         bundle_dir,
         &flagship_proof,
-        &[flagship_output.clone().into_os_string()],
+        &[
+            flagship_output.clone().into_os_string(),
+            OsString::from("--measure-on"),
+            OsString::from(&flagship_machine_label),
+        ],
         &[],
     ) && validate_installed_flagship_proof(&flagship_output)
         .map_err(|error| {
             eprintln!("installed flagship proof validation failed: {error:#}");
             error
         })
-        .is_ok();
+        .is_ok()
+        && validate_time_to_proof_report(&flagship_output, &flagship_machine_label)
+            .map_err(|error| {
+                eprintln!("time-to-proof report validation failed: {error:#}");
+                error
+            })
+            .is_ok();
 
     let scenario_replay = output_dir.join("scenario.rne-replay");
     let scenario_run = run_check_command(
@@ -1849,35 +1903,80 @@ fn validate_installed_flagship_proof(root: &Path) -> anyhow::Result<()> {
         "installed flagship proof artifact set is incomplete or not canonically ordered"
     );
     for artifact in &report.artifacts {
-        anyhow::ensure!(
-            !artifact.path.contains('\\'),
-            "installed proof artifact paths must use forward slashes"
-        );
-        let relative = Path::new(&artifact.path);
-        validate_relative_member(relative)?;
-        validate_sha256_hex(
-            &format!("installed proof artifact {}", artifact.path),
-            &artifact.sha256,
-        )?;
-        let path = root.join(relative);
-        let metadata = fs::symlink_metadata(&path)
-            .with_context(|| format!("inspect installed proof artifact {}", path.display()))?;
-        anyhow::ensure!(
-            metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
-            "installed proof artifact must be a regular file: {}",
-            path.display()
-        );
-        anyhow::ensure!(
-            metadata.len() == artifact.size_bytes,
-            "installed proof artifact size mismatch: {}",
-            artifact.path
-        );
-        anyhow::ensure!(
-            sha256_file_hex(&path)? == artifact.sha256,
-            "installed proof artifact SHA-256 mismatch: {}",
-            artifact.path
-        );
+        validate_proof_member(root, artifact, &artifact.path)?;
     }
+    Ok(())
+}
+
+fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow::Result<()> {
+    let report_path = root.join("time-to-proof-report.json");
+    let report: TimeToProofReport = serde_json::from_slice(
+        &fs::read(&report_path).with_context(|| format!("read {}", report_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", report_path.display()))?;
+    anyhow::ensure!(
+        report.kind == rne_asset_cli::TIME_TO_PROOF_REPORT_KIND
+            && report.schema_version == rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+        "unexpected time-to-proof report kind or schema"
+    );
+    anyhow::ensure!(
+        report.status == "passed"
+            && report.within_target
+            && report.elapsed_ms <= report.target_ms
+            && report.target_ms == 15 * 60 * 1_000,
+        "time-to-proof measurement exceeded its 15-minute target"
+    );
+    anyhow::ensure!(
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+            && report.machine_label == expected_machine
+            && !report.operating_system.is_empty()
+            && !report.architecture.is_empty()
+            && report.measurement_scope
+                == "proof_process_start_to_verified_capsule_and_bound_report",
+        "time-to-proof measurement identity does not match the installed rehearsal"
+    );
+    validate_proof_member(
+        root,
+        &report.installed_proof_report,
+        "installed-proof-report.json",
+    )?;
+    validate_proof_member(
+        root,
+        &report.failure_capsule_manifest,
+        "failure-capsule/capsule.json",
+    )?;
+    Ok(())
+}
+
+fn validate_proof_member(root: &Path, member: &MemberDigest, expected: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        member.path == expected && !member.path.contains('\\'),
+        "installed proof artifact path does not match {expected}"
+    );
+    let relative = Path::new(&member.path);
+    validate_relative_member(relative)?;
+    validate_sha256_hex(
+        &format!("installed proof artifact {}", member.path),
+        &member.sha256,
+    )?;
+    let path = root.join(relative);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("inspect installed proof artifact {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "installed proof artifact must be a regular file: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() == member.size_bytes,
+        "installed proof artifact size mismatch: {}",
+        member.path
+    );
+    anyhow::ensure!(
+        sha256_file_hex(&path)? == member.sha256,
+        "installed proof artifact SHA-256 mismatch: {}",
+        member.path
+    );
     Ok(())
 }
 
@@ -2435,6 +2534,47 @@ mod tests {
         .expect("proof report");
         validate_installed_flagship_proof(directory.path()).expect("valid proof");
 
+        let bound_member = |relative: &str| {
+            let bytes = fs::read(directory.path().join(relative)).expect("bound member");
+            MemberDigest {
+                path: relative.to_string(),
+                size_bytes: bytes.len() as u64,
+                sha256: sha256_hex(&bytes),
+            }
+        };
+        let timing = TimeToProofReport {
+            kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
+            schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            machine_label: "test-machine".to_string(),
+            operating_system: "test-os".to_string(),
+            architecture: "test-arch".to_string(),
+            measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report"
+                .to_string(),
+            elapsed_ms: 12_345,
+            target_ms: 15 * 60 * 1_000,
+            within_target: true,
+            installed_proof_report: bound_member("installed-proof-report.json"),
+            failure_capsule_manifest: bound_member("failure-capsule/capsule.json"),
+        };
+        write_pretty_json(&directory.path().join("time-to-proof-report.json"), &timing)
+            .expect("timing report");
+        validate_time_to_proof_report(directory.path(), "test-machine")
+            .expect("valid timing report");
+
+        fs::write(
+            directory.path().join("installed-proof-report.json"),
+            b"tampered",
+        )
+        .expect("tamper proof report");
+        assert!(validate_time_to_proof_report(directory.path(), "test-machine").is_err());
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &report,
+        )
+        .expect("restore proof report");
+
         fs::write(directory.path().join("flagship.task.json"), b"tampered")
             .expect("tamper artifact");
         assert!(validate_installed_flagship_proof(directory.path()).is_err());
@@ -2556,6 +2696,8 @@ mod tests {
         let release_path = bundle_dir.join(RELEASE_REPORT);
         let checksum_path = bundle_dir.join(SHA256_MANIFEST);
         let install_path = directory.path().join(ARCHIVE_INSTALL_REPORT);
+        let time_to_proof_path = directory.path().join("time-to-proof-report.json");
+        fs::write(&time_to_proof_path, b"timing proof\n").unwrap();
         let revision = "1".repeat(40);
         let tag = "v0.1.0-rc.1";
         let workflows = INSTALL_CHECK_IDS
@@ -2597,11 +2739,17 @@ mod tests {
             collect_member_digests(&bundle_dir, &[RELEASE_REPORT, SHA256_MANIFEST]).unwrap();
         write_pretty_json(&release_path, &release).unwrap();
         write_sha256_manifest(&bundle_dir).unwrap();
-        let archive_install =
-            build_archive_install_report(&archive_path, &bundle_dir, &release, &install).unwrap();
+        let archive_install = build_archive_install_report(
+            &archive_path,
+            &bundle_dir,
+            &release,
+            &install,
+            &time_to_proof_path,
+        )
+        .unwrap();
         assert_eq!(
             String::from_utf8(pretty_json_bytes(&archive_install).unwrap()).unwrap(),
-            include_str!("../../tests/golden/release/archive-install-rehearsal-v1.json")
+            include_str!("../../tests/golden/release/archive-install-rehearsal-v2.json")
         );
         let mut unknown = serde_json::to_value(&archive_install).unwrap();
         unknown

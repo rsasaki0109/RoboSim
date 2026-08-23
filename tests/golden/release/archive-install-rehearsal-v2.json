@@ -1,0 +1,77 @@
+{
+  "kind": "rne_archive_install_rehearsal",
+  "schema_version": 2,
+  "archive": {
+    "file": "rne-0.1.0-x86_64-pc-windows-msvc.zip",
+    "size_bytes": 27,
+    "sha256": "sha256:a584daf42486d7c87e4513fdcca9c58d2e2ec897774bafdbd43e6c0696c29979"
+  },
+  "bundle_root": "rne-0.1.0-x86_64-pc-windows-msvc",
+  "release_report": {
+    "path": "release-report.json",
+    "size_bytes": 1416,
+    "sha256": "dbb6f5b87c5a21d15403b5515a108a21f012a3b7aa1026e0a903df307e8f035c"
+  },
+  "checksum_manifest": {
+    "path": "SHA256SUMS",
+    "size_bytes": 258,
+    "sha256": "19c16082d3dca24f1ec3665893b3df1f115febadacf0e9c83c8304507ded4d60"
+  },
+  "time_to_proof": {
+    "path": "flagship-proof/time-to-proof-report.json",
+    "size_bytes": 13,
+    "sha256": "a2e1e13a90bb2b99ee48150f482a54dece08102f7d3cd5ce199da451e7d0218f"
+  },
+  "rehearsal": {
+    "schema_version": 6,
+    "release_version": "0.1.0",
+    "target": "x86_64-pc-windows-msvc",
+    "status": "passed",
+    "checks": [
+      {
+        "id": "robot_replay",
+        "status": "passed"
+      },
+      {
+        "id": "flagship_proof",
+        "status": "passed"
+      },
+      {
+        "id": "scenario_replay",
+        "status": "passed"
+      },
+      {
+        "id": "physics_conformance",
+        "status": "passed"
+      },
+      {
+        "id": "scenario_scale_100",
+        "status": "passed"
+      },
+      {
+        "id": "hardware_adapter",
+        "status": "passed"
+      },
+      {
+        "id": "accelerator_protocol",
+        "status": "passed"
+      },
+      {
+        "id": "controller_plugin",
+        "status": "passed"
+      },
+      {
+        "id": "compatibility_corpus",
+        "status": "passed"
+      },
+      {
+        "id": "python_wheel",
+        "status": "passed"
+      },
+      {
+        "id": "python_api",
+        "status": "passed"
+      }
+    ]
+  }
+}
