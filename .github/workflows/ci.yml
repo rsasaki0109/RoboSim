@@ -199,7 +199,7 @@ jobs:
           previous = tomllib.loads(text)
           print(previous["release_version"])
           print(previous["baseline_revision"])
-PY
+          PY
               )
               previous_release="${previous_baseline_metadata[0]-}"
               previous_baseline="${previous_baseline_metadata[1]-}"
