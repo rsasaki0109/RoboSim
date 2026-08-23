@@ -49,3 +49,26 @@ intentionally qualifies the official positive-scale right-arm URDF only.
 
 This in-repository adapter proves real external-simulator execution but does
 not count as independent third-party adapter evidence.
+
+## Run the same OpenArm controller on Rapier and Gazebo
+
+The portable pose-cycle controller is compiled once into an exact action trace.
+RNE/Rapier and Gazebo then consume those identical bytes; neither backend owns
+a private copy of the trajectory.
+
+```bash
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --actions artifacts/openarm-cross-sim/controller-actions.json \
+  --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_cross_sim_report.py \
+  --output artifacts/openarm-cross-sim
+```
+
+The successful comparison gates both final tracking errors and the final
+cross-backend joint delta with named radian tolerances. Maximum transient
+divergence is retained as a non-gating dynamics diagnostic. The intentional
+controller fault truncates the nine-element action at step 307; both RNE and
+Gazebo identify that exact first violation, and Gazebo proves that rejection
+did not advance state before accepting the corrected action.

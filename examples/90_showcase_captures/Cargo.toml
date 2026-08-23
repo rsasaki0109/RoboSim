@@ -25,3 +25,7 @@ toml = { workspace = true }
 [[example]]
 name = "90_showcase_captures"
 path = "main.rs"
+
+[[bin]]
+name = "rne-openarm-rapier-trace"
+path = "openarm_trace.rs"
