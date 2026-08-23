@@ -1659,7 +1659,30 @@ mod tests {
             &fs::read(root.join("capsule.json")).expect("read retained capsule manifest"),
         )
         .expect("parse retained capsule manifest");
-        assert_eq!(manifest.artifacts.len(), 12);
+        assert_eq!(manifest.artifacts.len(), 20);
+        for required in [
+            "evidence/control-dynamics-report.json",
+            "evidence/control-dynamics-report.html",
+            "evidence/openarm_right.rne_actuation.json",
+            "evidence/openarm_right.adapter.json",
+            "evidence/openarm_v2_right.rne.urdf",
+            "evidence/openarm_v2_right_validation.rne.scene.toml",
+        ] {
+            assert!(
+                manifest
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.path == required),
+                "retained capsule is missing {required}"
+            );
+        }
+        let control_report: Value = serde_json::from_slice(
+            &fs::read(root.join("evidence/control-dynamics-report.json"))
+                .expect("read retained control-dynamics report"),
+        )
+        .expect("parse retained control-dynamics report");
+        assert_eq!(control_report["status"], "needs_tuning");
+        assert!(control_report["first_contract_violation"].is_null());
         assert_eq!(manifest.failure.step, 307);
         assert_eq!(manifest.failure.sim_time_ticks, 5_116_666_769);
     }

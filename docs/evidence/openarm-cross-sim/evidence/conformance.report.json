@@ -10,7 +10,7 @@
     "arguments_sha256": "2e2da1c1ad6027e8ae12e072a595df487f89c3dcca7c8e806da3ea848c5b0bb0",
     "argument_count": 5,
     "task_file": "openarm_right_joint_tracking.task.json",
-    "task_sha256": "1eec1265d657bfc373b181ee96eb7a854bdcd48024c5d2aab6212b4ea8c828e3",
+    "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
     "runtime_manifest_file": "runtime.json",
     "runtime_manifest_sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f",
     "runtime_manifest_size_bytes": 824,
