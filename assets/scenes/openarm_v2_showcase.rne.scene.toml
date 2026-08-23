@@ -1,0 +1,52 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 20260823
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/openarm_v2_left.rne.robot.toml"
+
+[[robots]]
+path = "../robots/openarm_v2_right.rne.robot.toml"
+
+[[objects]]
+name = "openarm_pedestal"
+translation_m = [0.0, 0.0, 0.0]
+rotation_rpy_rad = [-1.5707963267948966, 0.0, 0.0]
+body_type = "fixed"
+visual = { shape = "mesh", path = "../robots/openarm_description/assets/robot/openarm_v2.0/meshes/body/collision/body_link0_symp.stl", scale = [0.001, 0.001, 0.001], color_rgba = [0.10, 0.12, 0.15, 1.0] }
+
+[[objects]]
+name = "openarm_workbench"
+translation_m = [0.0, 0.30, 0.48]
+body_type = "fixed"
+friction = 0.85
+visual = { shape = "box", size_m = [1.45, 0.06, 0.62], color_rgba = [0.16, 0.20, 0.25, 1.0] }
+collision = { shape = "box", size_m = [1.45, 0.06, 0.62] }
+
+[[objects]]
+name = "openarm_part_left"
+translation_m = [-0.27, 0.37, 0.45]
+body_type = "dynamic"
+mass_kg = 0.08
+friction = 1.0
+visual = { shape = "box", size_m = [0.055, 0.10, 0.055], color_rgba = [0.12, 0.68, 0.95, 1.0] }
+collision = { shape = "box", size_m = [0.055, 0.10, 0.055] }
+
+[[objects]]
+name = "openarm_part_right"
+translation_m = [0.27, 0.37, 0.45]
+body_type = "dynamic"
+mass_kg = 0.08
+friction = 1.0
+visual = { shape = "box", size_m = [0.055, 0.10, 0.055], color_rgba = [0.98, 0.48, 0.12, 1.0] }
+collision = { shape = "box", size_m = [0.055, 0.10, 0.055] }
+
+[[objects]]
+name = "openarm_back_wall"
+translation_m = [0.0, 1.05, -0.72]
+body_type = "fixed"
+visual = { shape = "box", size_m = [1.80, 1.90, 0.05], color_rgba = [0.055, 0.075, 0.11, 1.0] }
+collision = { shape = "box", size_m = [1.80, 1.90, 0.05] }

@@ -28,25 +28,25 @@ license_files = ["LICENSE-MIT", "LICENSE-APACHE", "assets/environments/voxel51_d
 provenance = ["assets/environments/voxel51_drjohnson_3dgs/PROVENANCE.md", "assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml", "tools/prepare_voxel51_drjohnson_3dgs.py", "assets/scenes/mm_mobile_lift_drjohnson.rne.scene.toml", "assets/robots/mm_mobile_lift/PROVENANCE.md"]
 
 [[media]]
-id = "tsukuba"
-label = "Tsukuba Challenge"
-gif = "docs/media/showcase-tsukuba.gif"
-poster = "docs/media/showcase-tsukuba.png"
-readme_gif = "docs/media/showcase-tsukuba.gif"
-readme_poster = "docs/media/showcase-tsukuba.png"
-gif_bytes = 2262164
-poster_bytes = 18815
-gif_sha256 = "sha256:827ab3b79ef17446cfc6a77ee02e41729c0bbfc3014eb13e4dab1b01cc2585e1"
-poster_sha256 = "sha256:cf3cda32472952533ba60c0629688c6bcab084fb83cbfede162488350e09eacc"
+id = "openarm"
+label = "OpenArm v2 bimanual control"
+gif = "docs/media/showcase-openarm.gif"
+poster = "docs/media/showcase-openarm.png"
+readme_gif = "docs/media/showcase-openarm.gif"
+readme_poster = "docs/media/showcase-openarm.png"
+gif_bytes = 2471937
+poster_bytes = 26918
+gif_sha256 = "sha256:6a086dfce4dd5af3fbf0702233a54dc3843cb61124b8104cc47e1c8e92227731"
+poster_sha256 = "sha256:4955b44af28d00d63dad4deaaf535a27e644d300adf9b92195fbce65b6007e6d"
 poster_width = 960
 poster_height = 540
-smoke_command = "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment tsukuba"
-capture_command = "cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment tsukuba"
-metadata = "docs/media/showcase-tsukuba.json"
-regenerate = "examples/90_showcase_captures/tsukuba.rs"
-license = "MIT OR Apache-2.0"
-license_files = ["LICENSE-MIT", "LICENSE-APACHE"]
-provenance = ["assets/scenes/tsukuba_full_run.rne.scene.toml", "assets/robots/tsukuba_confirmation.rne.robot.toml", "assets/environments/tsukuba_plateau_backdrop.rne.env.toml", "crates/rne_plateau/tests/fixtures/plateau_lod1_minimal.gml"]
+smoke_command = "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment openarm"
+capture_command = "cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment openarm"
+metadata = "docs/media/showcase-openarm.json"
+regenerate = "examples/90_showcase_captures/openarm.rs"
+license = "Apache-2.0 AND (MIT OR Apache-2.0)"
+license_files = ["assets/robots/openarm_description/LICENSE.openarm_description", "LICENSE-MIT", "LICENSE-APACHE"]
+provenance = ["assets/robots/openarm_description/PROVENANCE.md", "assets/robots/openarm_description/openarm_v2.rne.urdf", "assets/robots/openarm_description/openarm_v2_left.rne.urdf", "assets/robots/openarm_description/openarm_v2_right.rne.urdf", "assets/scenes/openarm_v2_showcase.rne.scene.toml", "examples/90_showcase_captures/openarm.rs"]
 
 [[media]]
 id = "factory"

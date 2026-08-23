@@ -15,6 +15,7 @@
 mod factory;
 mod media;
 mod office;
+mod openarm;
 mod ssl;
 mod tsukuba;
 
@@ -45,6 +46,7 @@ fn run() -> Result<()> {
     for environment in selected {
         let metadata = match environment {
             Environment::Tsukuba => tsukuba::run(&repo_root, capture)?,
+            Environment::OpenArm => openarm::run(&repo_root, capture)?,
             Environment::Factory => factory::run(&repo_root, capture)?,
             Environment::Office => office::run(&repo_root, capture)?,
             Environment::Ssl => ssl::run(&repo_root, capture)?,
@@ -64,6 +66,7 @@ fn run() -> Result<()> {
 #[derive(Clone, Copy, Debug)]
 enum Environment {
     Tsukuba,
+    OpenArm,
     Factory,
     Office,
     Ssl,
@@ -72,14 +75,17 @@ enum Environment {
 fn parse_environment(value: &str) -> Result<Vec<Environment>> {
     match value {
         "all" => Ok(vec![
-            Environment::Tsukuba,
+            Environment::OpenArm,
             Environment::Factory,
             Environment::Office,
         ]),
         "tsukuba" => Ok(vec![Environment::Tsukuba]),
+        "openarm" => Ok(vec![Environment::OpenArm]),
         "factory" => Ok(vec![Environment::Factory]),
         "office" => Ok(vec![Environment::Office]),
         "ssl" => Ok(vec![Environment::Ssl]),
-        other => bail!("unknown --environment {other:?}; expected all|tsukuba|factory|office|ssl"),
+        other => bail!(
+            "unknown --environment {other:?}; expected all|openarm|tsukuba|factory|office|ssl"
+        ),
     }
 }

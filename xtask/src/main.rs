@@ -3005,7 +3005,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     let manifest = load_showcase_media_manifest(&root.join(SHOWCASE_MEDIA_MANIFEST_PATH))?;
     let expected_ids = [
         "house-mobile-manipulation",
-        "tsukuba",
+        "openarm",
         "factory",
         "office",
         "uav",
@@ -4185,7 +4185,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "house-mobile-manipulation",
-                "tsukuba",
+                "openarm",
                 "factory",
                 "office",
                 "uav",

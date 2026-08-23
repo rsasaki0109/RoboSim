@@ -32,11 +32,11 @@ The quantitative gates and exact regeneration commands are in
   <tr>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-tsukuba.png">
-        <img src="docs/media/showcase-tsukuba.gif" alt="Mobile robot completing stop-line and signal tasks on a Tsukuba Challenge sidewalk" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-openarm.png">
+        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot executing synchronized arm and gripper control" width="460">
       </picture>
-      <br><b>Tsukuba Challenge</b><br>
-      <sub>Three stop lines, three signal waits, no roadway entry, and exact replay over 1,253 fixed steps. <a href="docs/media/showcase-tsukuba.json">metadata</a></sub>
+      <br><b>OpenArm v2 · bimanual control</b><br>
+      <sub>Official multi-part geometry, 18 force-limited actuators, synchronized pinch grippers, and exact Rapier replay over 1,400 fixed steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>

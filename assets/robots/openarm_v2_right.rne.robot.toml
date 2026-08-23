@@ -1,0 +1,13 @@
+kind = "urdf"
+model_name = "openarm_v2_right"
+
+[urdf]
+path = "openarm_description/openarm_v2_right.rne.urdf"
+base_body_type = "fixed"
+initial_translation_m = [0.0, 0.698, 0.031]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true
+collisions = true
+mesh_collisions = false
+self_collisions = false
+multibody = true
