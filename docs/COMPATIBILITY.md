@@ -257,6 +257,15 @@ report, the TaskSpec, both behavior reports, the minimized replay, and the
 self-contained browser inspector; `xtask flagship` regenerates and verifies
 the set together.
 
+Flagship cross-backend report schema v2 retains schema v1's two successful
+backend outcomes and nine named SI-unit tolerance checks, then adds the
+controller identity and both intentional-failure outcomes. Rapier and MuJoCo
+must execute the same minimized blackout dimensions, reproduce
+`perception_stream_alive` at the same step and simulation nanosecond with zero
+tolerance, and verify their own replay. Backend-private failure state digests
+remain diagnostic and are never compared. Schema-v1 reports prove only the
+successful cross-backend path and remain historical evidence.
+
 Physics conformance report schema v2 embeds backend-manifest schema v2,
 catalog version, tolerance-registry version, declared/runtime capabilities, and
 coverage verdicts. Its canonical shape lives at

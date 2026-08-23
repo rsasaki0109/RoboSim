@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Upgrade flagship cross-backend evidence to schema v2. The identical TaskSpec
+  and controller now execute both the successful task and the same minimized
+  perception blackout on Rapier and MuJoCo. The report requires the expected
+  contract, first violation step, and simulation timestamp to match exactly,
+  retains both verified failure replays/reports, and binds them into the
+  Failure Capsule alongside the nine SI-unit success tolerances.
+
 - Add `--measure-on MACHINE` to the installed flagship proof. It emits a
   schema-v1 timing-only report that names the machine, records OS/architecture
   and elapsed milliseconds, evaluates the 15-minute target, and SHA-256 binds

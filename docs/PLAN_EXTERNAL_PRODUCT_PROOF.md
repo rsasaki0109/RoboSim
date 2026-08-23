@@ -90,6 +90,12 @@ Acceptance criteria:
 - a future external simulator can implement the same runner contract without
   changing core entity types.
 
+The source/runtime-gated schema-v2 path now covers both successful execution
+and the same minimized intentional blackout on Rapier and MuJoCo, including
+zero-tolerance first-violation comparison and both verified replays. Gate 2 is
+not complete until this two-runtime proof is consumable from the release path;
+the default archive currently ships only the dependency-free Rapier runner.
+
 After this gate, a bounded Gazebo adapter is the preferred external-simulator
 spike. It should translate only the flagship observations and actions; it must
 not introduce Gazebo, ROS 2, DDS, or simulator-specific handles into core

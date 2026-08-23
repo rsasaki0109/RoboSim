@@ -30,11 +30,15 @@ then uploads the portable capsule directory as a short-lived CI artifact.
 The same adapter now executes the v0.7 mobile-lift shared-aisle flagship without
 changing its TaskSpec, policy, behavior contracts, or scene assets. Run
 `cargo run --locked -p xtask -- flagship --cross-backend` after configuring the
-3.9 runtime. The command writes both backend behavior reports plus
+3.9 runtime. The command writes both backend success reports, both intentional
+failure reports and replays, plus
 `artifacts/flagship-validation/cross-backend-report.json`, requires the exact
 inspection/traffic/grasp/place outcome on both engines, and evaluates nine named
-SI-unit tolerances. Final state digests are retained for backend-local diagnosis
-but are deliberately not compared across unlike solvers.
+SI-unit tolerances. Schema v2 also applies the same minimized perception
+blackout to the identical controller on each backend and requires the expected
+contract, first violation step, and simulation timestamp to match exactly.
+Final state digests are retained for backend-local diagnosis but are
+deliberately not compared across unlike solvers.
 
 The publishable `rne_ai` crate accepts a typed backend factory and has no direct
 dependency on this `publish = false` adapter. The non-published flagship example

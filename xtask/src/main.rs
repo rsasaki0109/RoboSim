@@ -43,8 +43,10 @@ const SHOWCASE_MEDIA_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = rne_asset_cli::FLAGSHIP_WORKFLOW_REPORT_KIND;
 pub(crate) const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 =
     rne_asset_cli::FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION;
-pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
-pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_KIND: &str =
+    rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_KIND;
+pub(crate) const FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 =
+    rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION;
 const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_adapter_ros2",
     "rne_ai",
@@ -2263,7 +2265,15 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                 && cross_report
                     .get("task_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("rne.flagship.mobile_lift_shared_aisle.v1"),
+                    == Some("rne.flagship.mobile_lift_shared_aisle.v1")
+                && cross_report
+                    .get("controller_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rne.ai.ik_mobile_lift_pick_place_policy.v1")
+                && cross_report
+                    .get("controller_contract")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("identical_controller_type_and_configuration_per_backend"),
             "flagship cross-backend report kind/schema/task/status mismatch"
         );
         let backends = cross_report
@@ -2296,6 +2306,98 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                 }),
             "flagship cross-backend tolerance registry is incomplete or failed"
         );
+        let failures = cross_report
+            .get("intentional_failures")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted intentional failures")?;
+        anyhow::ensure!(
+            failures.len() == 2
+                && failures[0]
+                    .get("backend_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rapier_native")
+                && failures[0]
+                    .get("behavior_report")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rapier-minimized-failure.behavior-report.json")
+                && failures[0]
+                    .get("replay")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("failure-minimized.rne-replay")
+                && failures[1]
+                    .get("backend_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("mujoco_native")
+                && failures[1]
+                    .get("behavior_report")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("mujoco-failure.behavior-report.json")
+                && failures[1]
+                    .get("replay")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("mujoco-failure.rne-replay")
+                && failures.iter().all(|failure| {
+                    failure.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                        && failure
+                            .get("expected_contract")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("perception_stream_alive")
+                        && failure
+                            .get("matched_replay_frames")
+                            .and_then(serde_json::Value::as_u64)
+                            .is_some_and(|frames| frames > 0)
+                })
+                && failures[0].get("first_violation_step")
+                    == failures[1].get("first_violation_step")
+                && failures[0].get("first_violation_sim_time_ticks")
+                    == failures[1].get("first_violation_sim_time_ticks"),
+            "flagship cross-backend intentional failure was not reproduced exactly"
+        );
+        let failure_checks = cross_report
+            .get("failure_tolerance_checks")
+            .and_then(serde_json::Value::as_array)
+            .context("flagship cross-backend report omitted failure tolerance checks")?;
+        anyhow::ensure!(
+            failure_checks.len() == 2
+                && failure_checks[0]
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("first_violation_step_delta")
+                && failure_checks[0]
+                    .get("unit")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("step")
+                && failure_checks[1]
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("first_violation_time_delta")
+                && failure_checks[1]
+                    .get("unit")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("ns")
+                && failure_checks.iter().all(|check| {
+                    check.get("status").and_then(serde_json::Value::as_str) == Some("passed")
+                        && check
+                            .get("observed_delta")
+                            .and_then(serde_json::Value::as_f64)
+                            == Some(0.0)
+                        && check
+                            .get("maximum_delta")
+                            .and_then(serde_json::Value::as_f64)
+                            == Some(0.0)
+                }),
+            "flagship cross-backend first-violation checks are incomplete or non-exact"
+        );
+        for artifact in [
+            "rapier-minimized-failure.behavior-report.json",
+            "mujoco-failure.behavior-report.json",
+            "mujoco-failure.rne-replay",
+        ] {
+            anyhow::ensure!(
+                output.join(artifact).is_file(),
+                "flagship cross-backend artifact is missing: {artifact}"
+            );
+        }
     }
     let inspector_text = fs::read_to_string(&inspector)?;
     anyhow::ensure!(

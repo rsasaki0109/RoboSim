@@ -11,18 +11,23 @@ use rne_ai::MobileManipulatorPhysicsFactory;
 use rne_ai::{
     minimize_behavior_failure, run_behavior_scenarios_with_replays, stable_behavior_digest,
     verify_behavior_replay, ActionSpec, BehaviorContract, BehaviorContractError, BehaviorDimension,
-    BehaviorDimensionValue, BehaviorFailureCase, BehaviorReport, BehaviorRun, BehaviorScenario,
-    BehaviorScenarioStep, Episode, GraspMode, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass,
-    MobileLiftPickPlacePhase, MobileManipulatorAction, MobileManipulatorEpisode,
-    MobileManipulatorEpisodeConfig, MobileManipulatorObservation, ObservationSpec, Policy,
-    RandomDistributionSpec, RandomizationParameterSpec, RandomizationSpec, ResetSpec, RewardSpec,
-    RewardTermSpec, TaskSpec, TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec,
-    TerminationKind, TerminationSpec,
+    BehaviorDimensionValue, BehaviorFailureCase, BehaviorReplayArtifact, BehaviorReport,
+    BehaviorRun, BehaviorScenario, BehaviorScenarioStep, Episode, GraspMode,
+    IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase,
+    MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    MobileManipulatorObservation, ObservationSpec, Policy, RandomDistributionSpec,
+    RandomizationParameterSpec, RandomizationSpec, ResetSpec, RewardSpec, RewardTermSpec, TaskSpec,
+    TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind,
+    TerminationSpec,
 };
 use rne_asset_cli::{
     failure_capsule, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
     INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION, TIME_TO_PROOF_REPORT_KIND,
     TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+};
+#[cfg(feature = "mujoco")]
+use rne_asset_cli::{
+    FLAGSHIP_CROSS_BACKEND_REPORT_KIND, FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
 };
 use rne_assets::{load_scene_bundle, scene_dependency_paths};
 use rne_core::{SimDuration, SimTime};
@@ -47,10 +52,6 @@ use uuid::Uuid;
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
 const REPORT_KIND: &str = "rne_flagship_workflow_report";
 const REPORT_SCHEMA_VERSION: u32 = 1;
-#[cfg(feature = "mujoco")]
-const CROSS_BACKEND_REPORT_KIND: &str = "rne_flagship_cross_backend_report";
-#[cfg(feature = "mujoco")]
-const CROSS_BACKEND_REPORT_SCHEMA_VERSION: u32 = 1;
 const TASK_ID: &str = "rne.flagship.mobile_lift_shared_aisle.v1";
 const SEED: u64 = 7;
 const SIGNAL_RELEASE_STEP: u64 = 60;
@@ -60,6 +61,8 @@ const BLACKOUT_DIMENSION: &str = "perception_blackout";
 const DEPARTURE_DIMENSION: &str = "traffic_departure_delay_s";
 const SPEED_DIMENSION: &str = "traffic_speed_delta_m_s";
 const EXPECTED_FAILURE_CONTRACT: &str = "perception_stream_alive";
+#[cfg(feature = "mujoco")]
+const CONTROLLER_ID: &str = "rne.ai.ik_mobile_lift_pick_place_policy.v1";
 const TIME_TO_PROOF_TARGET_MS: u64 = 15 * 60 * 1_000;
 const ROBOT_NAME: &str = "mm_mobile_lift";
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
@@ -603,6 +606,20 @@ struct CrossBackendCheck {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(deny_unknown_fields)]
+struct CrossBackendFailureOutcome {
+    backend_id: &'static str,
+    status: &'static str,
+    expected_contract: &'static str,
+    first_violation_step: u64,
+    first_violation_sim_time_ticks: u64,
+    failure_state_digest: u64,
+    matched_replay_frames: usize,
+    behavior_report: String,
+    replay: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CrossBackendReport {
     schema_version: u32,
     kind: &'static str,
@@ -612,12 +629,40 @@ struct CrossBackendReport {
     task_id: &'static str,
     task_spec: &'static str,
     task_spec_digest: u64,
+    controller_id: &'static str,
+    controller_contract: &'static str,
     fixed_delta_ticks: u64,
     comparison_contract: &'static str,
     exact_outcomes: Vec<&'static str>,
     state_digest_contract: &'static str,
     backends: Vec<CrossBackendOutcome>,
     tolerance_checks: Vec<CrossBackendCheck>,
+    failure_exact_outcomes: Vec<&'static str>,
+    intentional_failures: Vec<CrossBackendFailureOutcome>,
+    failure_tolerance_checks: Vec<CrossBackendCheck>,
+}
+
+#[derive(Clone, Debug)]
+struct CrossBackendEvidence {
+    report: CrossBackendReport,
+    mujoco_success_report: BehaviorReport,
+    rapier_failure_report: BehaviorReport,
+    mujoco_failure_report: BehaviorReport,
+    mujoco_failure_replay: BehaviorReplayArtifact,
+}
+
+#[cfg(feature = "mujoco")]
+struct CrossBackendReportInputs<'a> {
+    rapier_report: &'a BehaviorReport,
+    rapier_trace: &'a [FlagshipObservation],
+    mujoco_report: &'a BehaviorReport,
+    mujoco_trace: &'a [FlagshipObservation],
+    rapier_failure: &'a BehaviorReplayArtifact,
+    rapier_matched_replay_frames: usize,
+    rapier_failure_report: &'a BehaviorReport,
+    mujoco_failure_report: &'a BehaviorReport,
+    mujoco_failure: BehaviorReplayArtifact,
+    mujoco_matched_replay_frames: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -688,19 +733,13 @@ fn run(started: Instant) -> Result<()> {
     let (clean_run, success_trace) = run_clean_flagship(FlagshipPhysicsBackend::Rapier)?;
 
     #[cfg(feature = "mujoco")]
-    let cross_backend_evidence = if cli.cross_backend {
-        let (mujoco_run, mujoco_trace) = run_clean_flagship(FlagshipPhysicsBackend::Mujoco)?;
-        Some(build_cross_backend_report(
-            &clean_run.report,
-            &success_trace,
-            &mujoco_run.report,
-            &mujoco_trace,
-        )?)
+    let mujoco_success_evidence = if cli.cross_backend {
+        Some(run_clean_flagship(FlagshipPhysicsBackend::Mujoco)?)
     } else {
         None
     };
     #[cfg(not(feature = "mujoco"))]
-    let cross_backend_evidence: Option<(CrossBackendReport, BehaviorReport)> = {
+    let mujoco_success_evidence: Option<(BehaviorRun, Vec<FlagshipObservation>)> = {
         if cli.cross_backend {
             bail!("--cross-backend requires --features mujoco and a MuJoCo 3.9 runtime");
         }
@@ -740,6 +779,86 @@ fn run(started: Instant) -> Result<()> {
         FlagshipScenario::from_dimensions(seed, dimensions)
     })?;
 
+    #[cfg(feature = "mujoco")]
+    let cross_backend_evidence = if let Some((mujoco_run, mujoco_trace)) = mujoco_success_evidence {
+        let mut rapier_comparison_failure_run =
+            run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+                FlagshipScenario::from_dimensions(seed, &minimized.artifact.dimensions)
+            })?;
+        if rapier_comparison_failure_run.report.passed()
+            || rapier_comparison_failure_run.failure_replays.len() != 1
+        {
+            bail!("Rapier minimized comparison failure did not emit exactly one replay");
+        }
+        let rapier_comparison_failure = rapier_comparison_failure_run
+            .failure_replays
+            .pop()
+            .expect("Rapier comparison failure replay count checked");
+        if rapier_comparison_failure.failure != minimized.artifact.failure {
+            bail!("Rapier minimized comparison failure changed its first violation");
+        }
+        rapier_comparison_failure_run.report.set_failure_artifacts(
+            SEED,
+            Some("failure-minimized.rne-replay".to_string()),
+            None,
+            None,
+        );
+        let mut mujoco_failure_run =
+            run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+                FlagshipScenario::from_dimensions_with_physics(
+                    seed,
+                    &minimized.artifact.dimensions,
+                    FlagshipPhysicsBackend::Mujoco,
+                )
+            })?;
+        if mujoco_failure_run.report.passed() || mujoco_failure_run.failure_replays.len() != 1 {
+            bail!("MuJoCo intentional failure did not emit exactly one replay");
+        }
+        let mujoco_failure_replay = mujoco_failure_run
+            .failure_replays
+            .pop()
+            .expect("MuJoCo failure replay count checked");
+        if mujoco_failure_replay.failure.contract.name != EXPECTED_FAILURE_CONTRACT {
+            bail!(
+                "expected MuJoCo {EXPECTED_FAILURE_CONTRACT}, got {}",
+                mujoco_failure_replay.failure.contract.name
+            );
+        }
+        let mujoco_verification =
+            verify_behavior_replay(&mujoco_failure_replay, |seed, dimensions| {
+                FlagshipScenario::from_dimensions_with_physics(
+                    seed,
+                    dimensions,
+                    FlagshipPhysicsBackend::Mujoco,
+                )
+            })?;
+        mujoco_failure_run.report.set_failure_artifacts(
+            SEED,
+            Some("mujoco-failure.rne-replay".to_string()),
+            None,
+            None,
+        );
+        Some(build_cross_backend_report(CrossBackendReportInputs {
+            rapier_report: &clean_run.report,
+            rapier_trace: &success_trace,
+            mujoco_report: &mujoco_run.report,
+            mujoco_trace: &mujoco_trace,
+            rapier_failure: &minimized.artifact,
+            rapier_matched_replay_frames: verification.matched_frames,
+            rapier_failure_report: &rapier_comparison_failure_run.report,
+            mujoco_failure_report: &mujoco_failure_run.report,
+            mujoco_failure: mujoco_failure_replay,
+            mujoco_matched_replay_frames: mujoco_verification.matched_frames,
+        })?)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "mujoco"))]
+    let cross_backend_evidence: Option<CrossBackendEvidence> = {
+        let _ = mujoco_success_evidence;
+        None
+    };
+
     let success_report_path = output.join("success.behavior-report.json");
     let failure_report_path = output.join("failure.behavior-report.json");
     let original_replay_path = output.join("failure.rne-replay");
@@ -750,6 +869,10 @@ fn run(started: Instant) -> Result<()> {
     let summary_path = output.join("workflow-report.json");
     let cross_backend_path = output.join("cross-backend-report.json");
     let mujoco_success_path = output.join("mujoco-success.behavior-report.json");
+    let rapier_failure_comparison_path =
+        output.join("rapier-minimized-failure.behavior-report.json");
+    let mujoco_failure_report_path = output.join("mujoco-failure.behavior-report.json");
+    let mujoco_failure_replay_path = output.join("mujoco-failure.rne-replay");
 
     original.write_json(&original_replay_path)?;
     minimized.artifact.write_json(&minimized_replay_path)?;
@@ -762,9 +885,17 @@ fn run(started: Instant) -> Result<()> {
     );
     write_pretty_json(&success_report_path, &clean_run.report)?;
     write_pretty_json(&failure_report_path, &failure_run.report)?;
-    if let Some((cross_backend_report, mujoco_report)) = &cross_backend_evidence {
-        write_pretty_json(&cross_backend_path, cross_backend_report)?;
-        write_pretty_json(&mujoco_success_path, mujoco_report)?;
+    if let Some(evidence) = &cross_backend_evidence {
+        write_pretty_json(&cross_backend_path, &evidence.report)?;
+        write_pretty_json(&mujoco_success_path, &evidence.mujoco_success_report)?;
+        write_pretty_json(
+            &rapier_failure_comparison_path,
+            &evidence.rapier_failure_report,
+        )?;
+        write_pretty_json(&mujoco_failure_report_path, &evidence.mujoco_failure_report)?;
+        evidence
+            .mujoco_failure_replay
+            .write_json(&mujoco_failure_replay_path)?;
     }
     write_browser_inspector(&browser_path, &success_trace, &minimized.artifact)?;
     let task_spec = flagship_task_spec(minimized.artifact.fixed_delta_ticks);
@@ -826,7 +957,7 @@ fn run(started: Instant) -> Result<()> {
 
     if cross_backend_evidence
         .as_ref()
-        .is_some_and(|(report, _)| report.status != "passed")
+        .is_some_and(|evidence| evidence.report.status != "passed")
     {
         bail!("Rapier/MuJoCo flagship comparison exceeded its registered contract");
     }
@@ -865,7 +996,10 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
     if workflow.cross_backend_report.is_some() {
         paths.extend([
             "cross-backend-report.json",
+            "mujoco-failure.behavior-report.json",
+            "mujoco-failure.rne-replay",
             "mujoco-success.behavior-report.json",
+            "rapier-minimized-failure.behavior-report.json",
         ]);
     }
     paths.sort_unstable();
@@ -942,6 +1076,9 @@ fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Resu
     if cross_backend {
         for evidence in [
             "cross-backend-report.json",
+            "rapier-minimized-failure.behavior-report.json",
+            "mujoco-failure.behavior-report.json",
+            "mujoco-failure.rne-replay",
             "mujoco-success.behavior-report.json",
         ] {
             create_args.extend([
@@ -1033,11 +1170,20 @@ fn run_clean_flagship(
 
 #[cfg(feature = "mujoco")]
 fn build_cross_backend_report(
-    rapier_report: &BehaviorReport,
-    rapier_trace: &[FlagshipObservation],
-    mujoco_report: &BehaviorReport,
-    mujoco_trace: &[FlagshipObservation],
-) -> Result<(CrossBackendReport, BehaviorReport)> {
+    inputs: CrossBackendReportInputs<'_>,
+) -> Result<CrossBackendEvidence> {
+    let CrossBackendReportInputs {
+        rapier_report,
+        rapier_trace,
+        mujoco_report,
+        mujoco_trace,
+        rapier_failure,
+        rapier_matched_replay_frames,
+        rapier_failure_report,
+        mujoco_failure_report,
+        mujoco_failure,
+        mujoco_matched_replay_frames,
+    } = inputs;
     let rapier_seed = only_seed(rapier_report)?;
     let mujoco_seed = only_seed(mujoco_report)?;
     let rapier_final = rapier_trace
@@ -1164,20 +1310,82 @@ fn build_cross_backend_report(
             final_observation: mujoco_final.clone(),
         },
     ];
+    let rapier_violation = &rapier_failure.failure.violation;
+    let mujoco_violation = &mujoco_failure.failure.violation;
+    let failure_checks = vec![
+        comparison_check(
+            "first_violation_step_delta",
+            "first contract violation step",
+            "step",
+            rapier_violation.step.abs_diff(mujoco_violation.step) as f64,
+            0.0,
+        ),
+        comparison_check(
+            "first_violation_time_delta",
+            "first contract violation simulation time",
+            "ns",
+            rapier_violation
+                .sim_time_ticks
+                .abs_diff(mujoco_violation.sim_time_ticks) as f64,
+            0.0,
+        ),
+    ];
+    let failure_inputs_and_contracts_match = rapier_failure.seed == mujoco_failure.seed
+        && rapier_failure.fixed_delta_ticks == mujoco_failure.fixed_delta_ticks
+        && rapier_failure.contract_digest == mujoco_failure.contract_digest
+        && rapier_failure.dimensions == mujoco_failure.dimensions
+        && rapier_failure.failure.contract.name == EXPECTED_FAILURE_CONTRACT
+        && mujoco_failure.failure.contract.name == EXPECTED_FAILURE_CONTRACT;
+    let intentional_failures = vec![
+        CrossBackendFailureOutcome {
+            backend_id: "rapier_native",
+            status: if failure_inputs_and_contracts_match {
+                "passed"
+            } else {
+                "failed"
+            },
+            expected_contract: EXPECTED_FAILURE_CONTRACT,
+            first_violation_step: rapier_violation.step,
+            first_violation_sim_time_ticks: rapier_violation.sim_time_ticks,
+            failure_state_digest: rapier_violation.state_digest,
+            matched_replay_frames: rapier_matched_replay_frames,
+            behavior_report: "rapier-minimized-failure.behavior-report.json".to_string(),
+            replay: "failure-minimized.rne-replay".to_string(),
+        },
+        CrossBackendFailureOutcome {
+            backend_id: "mujoco_native",
+            status: if failure_inputs_and_contracts_match {
+                "passed"
+            } else {
+                "failed"
+            },
+            expected_contract: EXPECTED_FAILURE_CONTRACT,
+            first_violation_step: mujoco_violation.step,
+            first_violation_sim_time_ticks: mujoco_violation.sim_time_ticks,
+            failure_state_digest: mujoco_violation.state_digest,
+            matched_replay_frames: mujoco_matched_replay_frames,
+            behavior_report: "mujoco-failure.behavior-report.json".to_string(),
+            replay: "mujoco-failure.rne-replay".to_string(),
+        },
+    ];
     let passed = outcomes.iter().all(|outcome| outcome.status == "passed")
-        && checks.iter().all(|check| check.status == "passed");
+        && checks.iter().all(|check| check.status == "passed")
+        && failure_inputs_and_contracts_match
+        && failure_checks.iter().all(|check| check.status == "passed");
     let task_spec = flagship_task_spec(fixed_delta_ticks);
     let task_spec_digest = stable_behavior_digest(&serde_json::to_vec(&task_spec)?);
-    Ok((
-        CrossBackendReport {
-            schema_version: CROSS_BACKEND_REPORT_SCHEMA_VERSION,
-            kind: CROSS_BACKEND_REPORT_KIND,
+    Ok(CrossBackendEvidence {
+        report: CrossBackendReport {
+            schema_version: FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
+            kind: FLAGSHIP_CROSS_BACKEND_REPORT_KIND,
             status: if passed { "passed" } else { "failed" },
             scenario: SCENARIO,
             seed: SEED,
             task_id: TASK_ID,
             task_spec: "flagship.task.json",
             task_spec_digest,
+            controller_id: CONTROLLER_ID,
+            controller_contract: "identical_controller_type_and_configuration_per_backend",
             fixed_delta_ticks,
             comparison_contract: "semantic_outcome_and_named_si_tolerances",
             exact_outcomes: vec![
@@ -1191,9 +1399,21 @@ fn build_cross_backend_report(
             state_digest_contract: "backend_specific_not_compared",
             backends: outcomes,
             tolerance_checks: checks,
+            failure_exact_outcomes: vec![
+                "same_seed_and_minimized_fault_dimensions",
+                "same_expected_contract",
+                "same_first_violation_step",
+                "same_first_violation_sim_time",
+                "both_failure_replays_verified",
+            ],
+            intentional_failures,
+            failure_tolerance_checks: failure_checks,
         },
-        mujoco_report.clone(),
-    ))
+        mujoco_success_report: mujoco_report.clone(),
+        rapier_failure_report: rapier_failure_report.clone(),
+        mujoco_failure_report: mujoco_failure_report.clone(),
+        mujoco_failure_replay: mujoco_failure,
+    })
 }
 
 #[cfg(feature = "mujoco")]
@@ -1648,6 +1868,39 @@ mod tests {
             run.report,
         );
         assert!(run.failure_replays.is_empty());
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn mujoco_reproduces_the_rapier_blackout_violation_exactly() {
+        let dimensions = seeded_dimensions(SEED, true).expect("fault dimensions");
+        let run_failure = |backend| {
+            run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+                FlagshipScenario::from_dimensions_with_physics(seed, &dimensions, backend)
+            })
+            .expect("backend failure run")
+            .failure_replays
+            .into_iter()
+            .next()
+            .expect("backend failure replay")
+        };
+        let rapier = run_failure(FlagshipPhysicsBackend::Rapier);
+        let mujoco = run_failure(FlagshipPhysicsBackend::Mujoco);
+        assert_eq!(rapier.failure.contract.name, EXPECTED_FAILURE_CONTRACT);
+        assert_eq!(mujoco.failure.contract.name, EXPECTED_FAILURE_CONTRACT);
+        assert_eq!(rapier.failure.violation.step, mujoco.failure.violation.step);
+        assert_eq!(
+            rapier.failure.violation.sim_time_ticks,
+            mujoco.failure.violation.sim_time_ticks
+        );
+        verify_behavior_replay(&mujoco, |seed, replay_dimensions| {
+            FlagshipScenario::from_dimensions_with_physics(
+                seed,
+                replay_dimensions,
+                FlagshipPhysicsBackend::Mujoco,
+            )
+        })
+        .expect("MuJoCo failure replay");
     }
 
     #[test]
