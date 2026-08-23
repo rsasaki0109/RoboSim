@@ -110,6 +110,10 @@ Linux run the same command in CI. The runtime-gated `xtask flagship
 and native MuJoCo 3.9, requires exact task/contract outcomes, compares nine
 named unit-bearing tolerances instead of cross-solver hashes, and uploads the
 verified comparison report from the dedicated Windows/Linux MuJoCo job.
+Cross-backend report schema v2 additionally executes the same minimized
+perception blackout on both engines, requires the same first contract violation
+at zero-step and zero-nanosecond delta, verifies both replays, and retains both
+failure reports in the shared Capsule.
 
 The v0.8 ecosystem track starts with signed release provenance. Tag and manual
 release rehearsals now attest each native archive and ABI3 wheel through GitHub
