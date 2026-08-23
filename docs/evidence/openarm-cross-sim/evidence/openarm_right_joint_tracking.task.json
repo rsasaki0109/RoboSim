@@ -1,0 +1,79 @@
+{
+  "kind": "rne_task_spec",
+  "schema_version": 1,
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "control_step_s": 0.016666667,
+  "observation": {
+    "tensors": [
+      {
+        "name": "joint_position_rad",
+        "dtype": "f64",
+        "shape": [9],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": null
+      },
+      {
+        "name": "joint_velocity_rad_s",
+        "dtype": "f64",
+        "shape": [9],
+        "unit": "rad/s",
+        "layout": "row_major",
+        "bounds": null
+      }
+    ]
+  },
+  "action": {
+    "tensors": [
+      {
+        "name": "joint_position_target_rad",
+        "dtype": "f64",
+        "shape": [9],
+        "unit": "rad",
+        "layout": "row_major",
+        "bounds": {
+          "lower": [-3.0],
+          "upper": [3.0]
+        }
+      }
+    ]
+  },
+  "reward": {
+    "aggregation": "weighted_sum",
+    "terms": [
+      {"name": "joint_tracking_error", "weight": -1.0, "unit": "rad"},
+      {"name": "joint_velocity", "weight": -0.01, "unit": "rad/s"}
+    ]
+  },
+  "termination": {
+    "conditions": [
+      {"name": "tracking_complete", "kind": "success"},
+      {"name": "joint_limit_violation", "kind": "failure"}
+    ],
+    "max_episode_steps": 1400
+  },
+  "reset": {
+    "seed_strategy": "split_mix64_lane_episode_v1",
+    "supports_partial_reset": false
+  },
+  "curriculum": {
+    "stages": [
+      {
+        "name": "baseline",
+        "starts_at_episode": 0,
+        "parameters": {
+          "tracking_tolerance_rad": {"value": 0.05, "unit": "rad"}
+        }
+      }
+    ]
+  },
+  "randomization": {
+    "parameters": [
+      {
+        "name": "initial_joint_offset_rad",
+        "unit": "rad",
+        "distribution": {"type": "constant", "value": 0.0}
+      }
+    ]
+  }
+}

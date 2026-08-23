@@ -1,0 +1,20 @@
+{
+  "kind": "rne_controller_contract_failure",
+  "schema_version": 1,
+  "backend_id": "rne_rapier",
+  "backend_version": "0.22",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "task_sha256": "1eec1265d657bfc373b181ee96eb7a854bdcd48024c5d2aab6212b4ea8c828e3",
+  "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
+  "controller_sha256": "ffb68ed8ebfa1ce31fd12ce69362e17ff275b4623edb2d03c7f2d719d721bc31",
+  "action_trace_sha256": "1426663f9a5976ef67de64a2b98ced98b0801ce39fe42bf6fa8078894cdf6250",
+  "injection_kind": "controller_output_truncation",
+  "injected_step": 307,
+  "first_violation": "action_width_mismatch",
+  "first_violation_step": 307,
+  "first_violation_sim_time_ticks": 5116666769,
+  "unit": "missing_action_element_count",
+  "observed_missing_action_elements": 1,
+  "maximum_missing_action_elements": 0,
+  "status": "failed_as_expected"
+}

@@ -1650,6 +1650,20 @@ mod tests {
         assert!(invoke_verify(&output).is_err());
     }
 
+    #[test]
+    fn repository_openarm_cross_sim_capsule_is_portable_and_hash_complete() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/evidence/openarm-cross-sim");
+        verify_directory(&root).expect("verify retained OpenArm cross-simulator capsule");
+        let manifest: FailureCapsule = serde_json::from_slice(
+            &fs::read(root.join("capsule.json")).expect("read retained capsule manifest"),
+        )
+        .expect("parse retained capsule manifest");
+        assert_eq!(manifest.artifacts.len(), 12);
+        assert_eq!(manifest.failure.step, 307);
+        assert_eq!(manifest.failure.sim_time_ticks, 5_116_666_769);
+    }
+
     #[cfg(unix)]
     #[test]
     fn verification_rejects_symlink_escape() {

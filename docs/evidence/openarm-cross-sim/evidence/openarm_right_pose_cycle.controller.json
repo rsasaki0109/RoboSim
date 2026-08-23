@@ -1,0 +1,71 @@
+{
+  "kind": "rne_joint_pose_cycle_controller",
+  "schema_version": 1,
+  "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "interpolation": "smoothstep_v1",
+  "action_joint_order": [
+    "openarm_right_joint1",
+    "openarm_right_joint2",
+    "openarm_right_joint3",
+    "openarm_right_joint4",
+    "openarm_right_joint5",
+    "openarm_right_joint6",
+    "openarm_right_joint7",
+    "openarm_right_finger_joint1",
+    "openarm_right_finger_joint2"
+  ],
+  "rne_actuator_link_order": [
+    "openarm_right_link1",
+    "openarm_right_link2",
+    "openarm_right_link3",
+    "openarm_right_link4",
+    "openarm_right_link5",
+    "openarm_right_link6",
+    "openarm_right_ee_base_link",
+    "openarm_right_ee_link1",
+    "openarm_right_ee_link2"
+  ],
+  "keyframes": [
+    {
+      "step": 0,
+      "phase": "home",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 200,
+      "phase": "approach",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, 0.6, -0.5, -0.4, -0.55, -0.55]
+    },
+    {
+      "step": 360,
+      "phase": "close_gripper",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, 0.6, -0.5, -0.4, -0.08, -0.08]
+    },
+    {
+      "step": 580,
+      "phase": "raise",
+      "joint_position_target_rad": [1.6, 0.8, -0.5, 1.3, 0.5, -0.3, -0.4, -0.08, -0.08]
+    },
+    {
+      "step": 780,
+      "phase": "present",
+      "joint_position_target_rad": [2.4, 1.4, -1.0, 1.0, 1.0, -0.6, -0.8, -0.08, -0.08]
+    },
+    {
+      "step": 1180,
+      "phase": "return_home",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 1400,
+      "phase": "stow_gripper",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.18, -0.18]
+    }
+  ],
+  "intentional_failure": {
+    "kind": "controller_output_truncation",
+    "inject_at_step": 307,
+    "expected_first_violation": "action_width_mismatch"
+  }
+}

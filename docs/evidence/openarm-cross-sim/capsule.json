@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "kind": "rne_failure_capsule",
+  "failure": {
+    "id": "controller_action_width_matches_task-step-307",
+    "contract": "controller_action_width_matches_task",
+    "message": "controller emitted 8 action elements but TaskSpec requires 9; rejected before simulator state advance",
+    "step": 307,
+    "sim_time_ticks": 5116666769,
+    "state_digest": 8144164868935117458
+  },
+  "run": {
+    "id": "rne.openarm.right_joint_tracking.controller_contract.v1-seed-20260824",
+    "scenario": "rne.openarm.right_joint_tracking.controller_contract.v1",
+    "seed": 20260824,
+    "fixed_delta_ticks": 16666667,
+    "step_count": 308,
+    "action_count": 307
+  },
+  "build": {
+    "engine_version": "0.2.0",
+    "git_commit": "361cf0c14cfbf1da57f0de79042b46335ea10839",
+    "profile": "debug",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "rustc_version": "rustc 1.95.0",
+    "cargo_lock_sha256": "af154d478675465c97524328d74f2f3e7bc0b9fe11fb7bc6dce1052a763f8ef3"
+  },
+  "backend": {
+    "name": "rne-rapier+gazebo-sim",
+    "version": "0.22+8.15.0"
+  },
+  "determinism": {
+    "schema_version": 1,
+    "name": "controller_action_width_matches_task",
+    "scope": {
+      "subject": "rne.openarm.right_joint_tracking.controller_contract.v1",
+      "observables": [
+        "behavior.observation",
+        "world.state"
+      ],
+      "first_step": 0,
+      "step_count": 308
+    },
+    "guarantee": {
+      "tier": "outcome",
+      "criterion": "controller_action_width_matches_task"
+    }
+  },
+  "artifacts": [
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/conformance.report.json",
+      "sha256": "b6deef07e993cf3137f4b4e73908ebaeccc8fdf6165a1c1bd44fec195aac6203"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/controller-actions.json",
+      "sha256": "1426663f9a5976ef67de64a2b98ced98b0801ce39fe42bf6fa8078894cdf6250"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/cross-sim-report.json",
+      "sha256": "387fd8527446533202bf0404dfccb1e4dac324c4c07cf7292f3d2f581ee14beb"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-intentional-failure.json",
+      "sha256": "9dcfe5e425c0bd2e6c8e628484b95a88892747c1e010e191f5b5daae648ac381"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-success-trace.json",
+      "sha256": "64a1da508f723b5ffd2f570993631736456544018bcad5091f1581d4d2a4d40f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/intentional-failure.json",
+      "sha256": "6f1ba2481de7b6e3b703f9464c1d93386367edd3c91ee1af6ac6b5322cb20b7a"
+    },
+    {
+      "role": "evidence",
+      "kind": "rne_task_spec",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_joint_tracking.task.json",
+      "sha256": "1eec1265d657bfc373b181ee96eb7a854bdcd48024c5d2aab6212b4ea8c828e3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_pose_cycle.controller.json",
+      "sha256": "ffb68ed8ebfa1ce31fd12ce69362e17ff275b4623edb2d03c7f2d719d721bc31"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rapier-success-trace.json",
+      "sha256": "dfa36c785333a374c3ef2b5000e100f3ea61eec0e065dd22bf59788f3a85b9ff"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/replay-inspector.html",
+      "sha256": "48f695fa8fb7edeba10f5db35e60b2c7eacf0491e58e1885d5faaf9cc9d3ca17"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/runtime.json",
+      "sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f"
+    },
+    {
+      "role": "replay",
+      "kind": "rne_behavior_replay",
+      "schema_version": 1,
+      "path": "replay/controller-failure.rne-replay",
+      "sha256": "8afcb556f744688e621906a4461bfd3062c05ccd4b9a00ec6b9a30eda70ead31"
+    }
+  ]
+}
