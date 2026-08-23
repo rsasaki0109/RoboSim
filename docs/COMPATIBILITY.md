@@ -1,8 +1,9 @@
 # Compatibility and migration policy
 
-This policy applies to Robot Native Engine 0.x. The `0.1.0` release freezes
-the supported surface for this milestone; later 0.x releases may tighten
-validation but must not silently reinterpret accepted input.
+This policy applies to Robot Native Engine 0.x. Release `0.1.0` remains the
+historical compatibility baseline. Release `0.2.0` is the first product-proof
+minor: it may add versioned evidence contracts, but it must not silently
+reinterpret artifacts accepted by their retained 0.1 readers.
 
 ## Supported toolchains and platforms
 
@@ -45,7 +46,7 @@ Patch releases must not retarget the baseline. A deliberate pre-1.0 baseline
 change requires a minor version, migration notes, an ADR, and a final passing
 comparison against the prior baseline before the registry changes. Workspace
 CI rejects changes to an already-present registry relative to the pull-request
-base or push parent while the release remains 0.1.0. Rustdoc runs with warnings
+base or push parent while the release remains 0.2.0. Rustdoc runs with warnings
 denied, and public libraries deny missing documentation.
 
 The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive

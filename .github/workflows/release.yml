@@ -12,7 +12,7 @@ permissions:
 env:
   MATURIN_VERSION: "1.13.3"
   MUJOCO_VERSION: "3.9.0"
-  RELEASE_VERSION: "0.1.0"
+  RELEASE_VERSION: "0.2.0"
 
 jobs:
   linux:

@@ -2,20 +2,20 @@
   "kind": "rne_archive_install_rehearsal",
   "schema_version": 2,
   "archive": {
-    "file": "rne-0.1.0-x86_64-pc-windows-msvc.zip",
+    "file": "rne-0.2.0-x86_64-pc-windows-msvc.zip",
     "size_bytes": 27,
     "sha256": "sha256:a584daf42486d7c87e4513fdcca9c58d2e2ec897774bafdbd43e6c0696c29979"
   },
-  "bundle_root": "rne-0.1.0-x86_64-pc-windows-msvc",
+  "bundle_root": "rne-0.2.0-x86_64-pc-windows-msvc",
   "release_report": {
     "path": "release-report.json",
     "size_bytes": 1416,
-    "sha256": "dbb6f5b87c5a21d15403b5515a108a21f012a3b7aa1026e0a903df307e8f035c"
+    "sha256": "4c7f8444b88320dae9382dcd022d19e5c455a8bbb9cc56148f17ca967d066293"
   },
   "checksum_manifest": {
     "path": "SHA256SUMS",
     "size_bytes": 258,
-    "sha256": "19c16082d3dca24f1ec3665893b3df1f115febadacf0e9c83c8304507ded4d60"
+    "sha256": "bc610e1bb741ac38dc4591bff018a54616422ebc00002ef98974a01210904dbb"
   },
   "time_to_proof": {
     "path": "flagship-proof/time-to-proof-report.json",
@@ -24,7 +24,7 @@
   },
   "rehearsal": {
     "schema_version": 6,
-    "release_version": "0.1.0",
+    "release_version": "0.2.0",
     "target": "x86_64-pc-windows-msvc",
     "status": "passed",
     "checks": [

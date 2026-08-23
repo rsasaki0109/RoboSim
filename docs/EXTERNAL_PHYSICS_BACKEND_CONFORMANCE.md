@@ -17,8 +17,8 @@ Use the exact RNE release shared by the backend:
 
 ```toml
 [dev-dependencies]
-rne_physics = "=0.1.0"
-rne_physics_conformance = "=0.1.0"
+rne_physics = "=0.2.0"
+rne_physics_conformance = "=0.2.0"
 ```
 
 Then bind the exact implementation artifact or deterministic source bundle,

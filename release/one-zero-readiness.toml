@@ -4,7 +4,7 @@ schema_version = 4
 # require separate archive/install-report attestations and the extracted
 # release report plus SHA256SUMS chain. Schema v4 separately audits external
 # accelerator adapters without letting them satisfy the 1.0 external-system gate.
-release_version = "0.1.0"
+release_version = "0.2.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183
 minimum_external_projects = 2
@@ -13,7 +13,7 @@ unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 accelerator_adapter = []
-compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:cecb0f35f2ea48cf9cdf420df054fda0b6a5a43dd7aa23d92e9bef89da910f4d" }
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:62b0f17361b39e16dc63442196aa5ce1388d1044ec8e39c0f4c634fef22a23cf" }
 
 [candidate]
 revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"

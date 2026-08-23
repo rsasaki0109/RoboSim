@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ rne_accelerator_contract = { workspace = true }
 rne_assets = { workspace = true }
 rne_ai = { workspace = true }
 rne_asset_cli = { workspace = true }
-rne_compatibility_suite = { version = "=0.1.0", path = "../tests/compatibility" }
+rne_compatibility_suite = { version = "=0.2.0", path = "../tests/compatibility" }
 rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_fuzz_smoke = { workspace = true }

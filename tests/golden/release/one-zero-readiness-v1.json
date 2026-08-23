@@ -1,8 +1,8 @@
 {
   "kind": "rne_one_zero_readiness_report",
   "schema_version": 1,
-  "manifest_sha256": "sha256:1fc76a808b0cd5b5b56ececfadb253664869cc7aa9369fe754f75c753ec0f095",
-  "release_version": "0.1.0",
+  "manifest_sha256": "sha256:0494ac82956abbc6e14f26f9b3165a99de0186023c6201fb8ce25e2416267df9",
+  "release_version": "0.2.0",
   "as_of": "2026-08-20",
   "candidate_revision": "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4",
   "candidate_tree": "5d888b77e0d4785fa57c9edd10ce1292089fab5a",
@@ -59,6 +59,8 @@
         "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb",
         "sha256:2f6146f794cd7bed1d43f23ba6797ae9d74a58cb146609b2410b47410ffc9281",
         "sha256:4159a061dd1e7f0c695af239c1be3cbe1f6257a655cb6cf3e3f701b640994d9e",
+        "sha256:584f24d739fa087ebfc822b56994fd5a4bb07bff185fec4ba239335415bb44e5",
+        "sha256:62b0f17361b39e16dc63442196aa5ce1388d1044ec8e39c0f4c634fef22a23cf",
         "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd",
         "sha256:6a4c9ee66a7d3fdd4668859a9e3e0455e51c42341bb36e6dbd77f30c76365396",
         "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
@@ -76,13 +78,11 @@
         "sha256:ada9ab8c42d73fe91ffa15d7b982c9af29390ad819f09df1a721ff63156b331c",
         "sha256:be30a0bdc92f8fe099410f166c02abc096fab503d40a32b943f0aae7544ea2a8",
         "sha256:bf66f667d02795b1496481f2dfbc6c609070203d0fd98417494022ae7cda4caa",
-        "sha256:c09def97f7899947b64b98e7894ad21b5d7003424775895e6f006e6f9a7f39be",
         "sha256:c4cffa03ee47dfc92fe748cda9d7f84d5b0283ad20d44a6da1f4bbbe865d4264",
         "sha256:c71158474fe59b24f8cc37fefe54cbd8d7029caf839687f82af14449dd805036",
         "sha256:ca5868832023438150c9f9d73e44ea88437e98a7ab147cb5bdb776a848426647",
         "sha256:cb4108483c0cdd68d5adb4b14c791ed6b6ac8837ef5082ecda2c5df874b2981f",
         "sha256:cc1cc36014ace370b5ee6ad196deb4aa3e386f2ade726cac992e7a27ce1eacc5",
-        "sha256:cecb0f35f2ea48cf9cdf420df054fda0b6a5a43dd7aa23d92e9bef89da910f4d",
         "sha256:d09bf2d9079fe607373b6376c7fa4d0cbde3be4ce1787914702ccf4caa06aa16",
         "sha256:d69d3577146f3c20769b5e74593a32f720553567db6a80acab81e346f4b9f672",
         "sha256:d6e954b5baf91fadae0809dabd54ec67f8ff2a0b3ea05fe4fef73e4dd1d58246",
@@ -97,7 +97,7 @@
       "status": "passed",
       "detail": "release blocker registry has zero open P0/P1 entries",
       "evidence_sha256": [
-        "sha256:abb056299b68221fe201c27b82139fad553d853426128a706911130dee163a34"
+        "sha256:7f74e79edbb24c25cf3ea97ec190826bce3984d17dddcf00cb5d1ee0c44de63d"
       ]
     },
     {

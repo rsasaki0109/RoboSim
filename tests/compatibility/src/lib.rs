@@ -1542,7 +1542,11 @@ fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Resul
         }
         "behavior_replay" => {
             let fixture: BehaviorReplayArtifact = serde_json::from_value(value)?;
-            fixture.validate_compatibility()?;
+            fixture.validate()?;
+            ensure!(
+                fixture.engine_version == "0.1.0",
+                "retained behavior replay producer version changed"
+            );
         }
         "controller_c_abi" => {
             let fixture: ControllerCAbiFixture = serde_json::from_value(value)?;

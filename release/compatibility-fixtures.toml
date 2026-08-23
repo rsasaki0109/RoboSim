@@ -1,5 +1,5 @@
 schema_version = 1
-release_version = "0.1.0"
+release_version = "0.2.0"
 
 [[fixture]]
 id = "accelerator_capability_v1"

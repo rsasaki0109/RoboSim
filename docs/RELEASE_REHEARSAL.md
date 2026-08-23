@@ -94,12 +94,12 @@ maturin build --locked --release --features extension-module \
   --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
 cargo run --locked -p xtask -- release-bundle \
   --target x86_64-unknown-linux-gnu \
-  --wheel artifacts/wheels/rne_py-0.1.0-*.whl \
+  --wheel artifacts/wheels/rne_py-0.2.0-*.whl \
   --python python
 ```
 
 Use target `x86_64-pc-windows-msvc` on Windows. A tag build also passes
-`--expected-tag v0.1.0`; the bundle reports `reproducible = true` only when the
+`--expected-tag v0.2.0`; the bundle reports `reproducible = true` only when the
 worktree is clean and that exact tag identifies `HEAD`. `--allow-dirty` exists
 for local development only and is never used by release CI.
 
@@ -107,8 +107,8 @@ After creating and extracting the deterministic archive, rerun:
 
 ```bash
 cargo run --locked -p xtask -- release-install-smoke \
-  --archive artifacts/release/rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
-  --bundle-dir artifacts/extracted/rne-0.1.0-x86_64-unknown-linux-gnu \
+  --archive artifacts/release/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+  --bundle-dir artifacts/extracted/rne-0.2.0-x86_64-unknown-linux-gnu \
   --output-dir artifacts/extracted-evidence \
   --python python
 ```

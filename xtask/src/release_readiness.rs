@@ -2202,7 +2202,9 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
             ),
         ];
         for (name, source) in &fixtures {
-            fs::copy(source, temp.path().join(name)).unwrap();
+            let text = fs::read_to_string(source).unwrap().replace("\r\n", "\n");
+            assert!(!text.contains('\r'));
+            fs::write(temp.path().join(name), text).unwrap();
         }
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(

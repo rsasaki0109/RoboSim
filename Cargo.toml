@@ -150,48 +150,48 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rsasaki0109/RoboSim"
 rust-version = "1.88.0"
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
 # Internal crates use exact release requirements so packaged manifests resolve the
 # same release set from a registry after Cargo removes local paths.
-rne_adapter_ros2 = { version = "=0.1.0", path = "adapters/ros2/rne_adapter_ros2" }
-rne_adapter_ssl = { version = "=0.1.0", path = "adapters/ssl/rne_adapter_ssl" }
-rne_accelerator_contract = { version = "=0.1.0", path = "crates/rne_accelerator_contract" }
-rne_hardware_gateway = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_gateway" }
-rne_hardware_lekiwi = { version = "=0.1.0", path = "adapters/hardware/rne_hardware_lekiwi" }
-rne_ai = { version = "=0.1.0", path = "crates/rne_ai" }
-rne_asset_cli = { version = "=0.1.0", path = "tools/rne_asset_cli" }
-rne_assets = { version = "=0.1.0", path = "crates/rne_assets" }
-rne_core = { version = "=0.1.0", path = "crates/rne_core" }
-rne_data = { version = "=0.1.0", path = "crates/rne_data" }
-rne_deformable = { version = "=0.1.0", path = "crates/rne_deformable" }
-rne_ecs = { version = "=0.1.0", path = "crates/rne_ecs" }
-rne_fuzz_smoke = { version = "=0.1.0", path = "tests/fuzz_smoke" }
-rne_log = { version = "=0.1.0", path = "crates/rne_log" }
-rne_math = { version = "=0.1.0", path = "crates/rne_math" }
-rne_mjcf = { version = "=0.1.0", path = "crates/rne_mjcf" }
-rne_openscenario = { version = "=0.1.0", path = "crates/rne_openscenario" }
-rne_physics = { version = "=0.1.0", path = "crates/rne_physics" }
-rne_physics_conformance = { version = "=0.1.0", path = "crates/rne_physics_conformance" }
-rne_physics_analytic = { version = "=0.1.0", path = "crates/rne_physics_analytic" }
-rne_physics_mujoco = { version = "=0.1.0", path = "crates/rne_physics_mujoco" }
-rne_physics_rapier = { version = "=0.1.0", path = "crates/rne_physics_rapier" }
-rne_plateau = { version = "=0.1.0", path = "crates/rne_plateau" }
-rne_plugin_sdk = { version = "=0.1.0", path = "crates/rne_plugin_sdk" }
-rne_plugin = { version = "=0.1.0", path = "crates/rne_plugin" }
-rne_py = { version = "=0.1.0", path = "crates/rne_py" }
-rne_render = { version = "=0.1.0", path = "crates/rne_render" }
-rne_render_3dgs = { version = "=0.1.0", path = "crates/rne_render_3dgs" }
-rne_render_wgpu = { version = "=0.1.0", path = "crates/rne_render_wgpu" }
-rne_robot = { version = "=0.1.0", path = "crates/rne_robot" }
-rne_sdf = { version = "=0.1.0", path = "crates/rne_sdf" }
-rne_sensor = { version = "=0.1.0", path = "crates/rne_sensor" }
-rne_sumo = { version = "=0.1.0", path = "crates/rne_sumo" }
-rne_traci = { version = "=0.1.0", path = "crates/rne_traci" }
-rne_traffic = { version = "=0.1.0", path = "crates/rne_traffic" }
-rne_urdf_import = { version = "=0.1.0", path = "crates/rne_urdf_import" }
-rne_world = { version = "=0.1.0", path = "crates/rne_world" }
+rne_adapter_ros2 = { version = "=0.2.0", path = "adapters/ros2/rne_adapter_ros2" }
+rne_adapter_ssl = { version = "=0.2.0", path = "adapters/ssl/rne_adapter_ssl" }
+rne_accelerator_contract = { version = "=0.2.0", path = "crates/rne_accelerator_contract" }
+rne_hardware_gateway = { version = "=0.2.0", path = "adapters/hardware/rne_hardware_gateway" }
+rne_hardware_lekiwi = { version = "=0.2.0", path = "adapters/hardware/rne_hardware_lekiwi" }
+rne_ai = { version = "=0.2.0", path = "crates/rne_ai" }
+rne_asset_cli = { version = "=0.2.0", path = "tools/rne_asset_cli" }
+rne_assets = { version = "=0.2.0", path = "crates/rne_assets" }
+rne_core = { version = "=0.2.0", path = "crates/rne_core" }
+rne_data = { version = "=0.2.0", path = "crates/rne_data" }
+rne_deformable = { version = "=0.2.0", path = "crates/rne_deformable" }
+rne_ecs = { version = "=0.2.0", path = "crates/rne_ecs" }
+rne_fuzz_smoke = { version = "=0.2.0", path = "tests/fuzz_smoke" }
+rne_log = { version = "=0.2.0", path = "crates/rne_log" }
+rne_math = { version = "=0.2.0", path = "crates/rne_math" }
+rne_mjcf = { version = "=0.2.0", path = "crates/rne_mjcf" }
+rne_openscenario = { version = "=0.2.0", path = "crates/rne_openscenario" }
+rne_physics = { version = "=0.2.0", path = "crates/rne_physics" }
+rne_physics_conformance = { version = "=0.2.0", path = "crates/rne_physics_conformance" }
+rne_physics_analytic = { version = "=0.2.0", path = "crates/rne_physics_analytic" }
+rne_physics_mujoco = { version = "=0.2.0", path = "crates/rne_physics_mujoco" }
+rne_physics_rapier = { version = "=0.2.0", path = "crates/rne_physics_rapier" }
+rne_plateau = { version = "=0.2.0", path = "crates/rne_plateau" }
+rne_plugin_sdk = { version = "=0.2.0", path = "crates/rne_plugin_sdk" }
+rne_plugin = { version = "=0.2.0", path = "crates/rne_plugin" }
+rne_py = { version = "=0.2.0", path = "crates/rne_py" }
+rne_render = { version = "=0.2.0", path = "crates/rne_render" }
+rne_render_3dgs = { version = "=0.2.0", path = "crates/rne_render_3dgs" }
+rne_render_wgpu = { version = "=0.2.0", path = "crates/rne_render_wgpu" }
+rne_robot = { version = "=0.2.0", path = "crates/rne_robot" }
+rne_sdf = { version = "=0.2.0", path = "crates/rne_sdf" }
+rne_sensor = { version = "=0.2.0", path = "crates/rne_sensor" }
+rne_sumo = { version = "=0.2.0", path = "crates/rne_sumo" }
+rne_traci = { version = "=0.2.0", path = "crates/rne_traci" }
+rne_traffic = { version = "=0.2.0", path = "crates/rne_traffic" }
+rne_urdf_import = { version = "=0.2.0", path = "crates/rne_urdf_import" }
+rne_world = { version = "=0.2.0", path = "crates/rne_world" }
 
 anyhow = "1"
 base64 = "0.13.1"

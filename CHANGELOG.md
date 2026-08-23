@@ -4,6 +4,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Prepare the `0.2.0` product-proof minor release. All workspace packages and
+  exact internal dependency requirements now use `0.2.0`; release metadata,
+  native archive/wheel names, provenance identities, Python API checks, and
+  installation instructions advance together. Historical `0.1.0` fixtures
+  remain unchanged and readable. The minor bump is required because installed
+  flagship proof schema v2 adds a mandatory producer-executable identity.
+
 ### Added
 
 - Add a fail-closed `external-flagship-check` and public intake route for an
