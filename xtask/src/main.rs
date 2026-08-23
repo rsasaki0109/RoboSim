@@ -1575,6 +1575,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "mujoco_runtime_manifest",
+            u64::from(release_artifacts::MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
             "installed_flagship_proof_report",
             u64::from(rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION),
         ),

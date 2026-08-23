@@ -29,8 +29,10 @@ The native release bundle now rehearses eleven installed checks. The eleventh
 is `rne-flagship-proof`: one packaged command that reproduces the complete
 indoor mobile-manipulation flagship success, expected failure, first contract
 violation, browser inspector, verified Failure Capsule, and a SHA-256-bound
-installed proof report. Clean tagged Windows/Linux archive evidence and the
-15-minute external measurement remain the open parts of Gate 1.
+installed proof report. The release path is being upgraded to execute the same
+proof on both Rapier and a bundled, pinned MuJoCo runtime. Clean tagged
+Windows/Linux archive evidence and the 15-minute external measurement remain
+the open parts of Gate 1.
 
 ## Flagship product contract
 
@@ -65,8 +67,8 @@ Acceptance criteria:
 
 - median time from extracted archive to verified capsule is at most 15 minutes
   on the named reference machine;
-- no Rust toolchain, ROS 2, renderer, MuJoCo, or network access is required for
-  the default reference proof;
+- no Rust toolchain, ROS 2, renderer, separate MuJoCo installation, or network
+  access is required after the archive has been obtained;
 - the command returns a non-zero status if the expected failure, minimization,
   capsule verification, or browser artifact is absent;
 - the release report and independent archive-install rehearsal name this exact
@@ -92,9 +94,11 @@ Acceptance criteria:
 
 The source/runtime-gated schema-v2 path now covers both successful execution
 and the same minimized intentional blackout on Rapier and MuJoCo, including
-zero-tolerance first-violation comparison and both verified replays. Gate 2 is
-not complete until this two-runtime proof is consumable from the release path;
-the default archive currently ships only the dependency-free Rapier runner.
+zero-tolerance first-violation comparison and both verified replays. The active
+release slice builds that path into the installed runner, bundles the pinned
+official MuJoCo runtime and licenses, and makes the two-runtime proof mandatory
+in archive rehearsal. Gate 2 closes only after both extracted-archive CI jobs
+retain passing evidence.
 
 After this gate, a bounded Gazebo adapter is the preferred external-simulator
 spike. It should translate only the flagship observations and actions; it must
@@ -158,10 +162,13 @@ Work proceeds in this order, one mergeable slice at a time:
 4. **Delivered in the rehearsal contract; tagged evidence pending:** add
    Windows and Linux archive-install rehearsals for the proof command.
 5. **Measurement path delivered; independent run pending:** use
-   `rne-flagship-proof OUTPUT --measure-on MACHINE` to retain a schema-v1,
+   `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE` to retain a schema-v1,
    proof-bound timing artifact, then collect it on named external reference
    machines.
-6. Publish a copy-paste external reproduction guide and ask the first external
+6. **In progress:** ship the MuJoCo-enabled proof runner and pinned runtime in
+   both native archives and require the cross-backend result in extracted
+   release rehearsal.
+7. Publish a copy-paste external reproduction guide and ask the first external
    project to run it without maintainer intervention.
 
 Each slice includes tests and a short documentation update. No unrelated demo

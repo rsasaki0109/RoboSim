@@ -56,7 +56,10 @@ On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the eleven
 `installed_workflows` verdicts, and every bundle-member digest. The
 `flagship_proof` verdict is the bundled indoor mobile-manipulation success,
-expected failure, browser inspector, and verified Failure Capsule workflow.
+expected failure, browser inspector, and verified Failure Capsule workflow on
+both Rapier and MuJoCo. `third-party/mujoco/runtime-manifest.json` records the
+pinned official MuJoCo archive URL and SHA-256 plus byte identities for the
+shipped runtime and license files.
 `reproducible` is true only for a clean build whose exact
 `v0.1.0` tag points to the tested commit.
 The retained `Cargo.lock` also lets the installed Failure Capsule author record
@@ -72,7 +75,8 @@ The bundle includes the fixtures and validation binaries used by the release
 rehearsal. From its top-level directory:
 
 ```bash
-./bin/rne-flagship-proof flagship-proof --measure-on "lab-workstation-a"
+./bin/rne-flagship-proof flagship-proof --cross-backend \
+  --measure-on "lab-workstation-a"
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
@@ -121,9 +125,10 @@ rehearsal. From its top-level directory:
 ```
 
 The flagship command writes `flagship-proof/installed-proof-report.json`. Its
-schema-v1 report indexes the generated TaskSpec, success and failure reports,
-minimized replay, browser inspector, workflow report, and verified capsule
-manifest by relative path, byte size, and SHA-256.
+schema-v1 report requires both packaged physics paths and indexes the generated
+TaskSpec, Rapier/MuJoCo success and failure reports, both verified failure
+replays, unit-bearing cross-backend comparison, browser inspector, workflow
+report, and verified capsule manifest by relative path, byte size, and SHA-256.
 When `--measure-on MACHINE` is present, the same command also writes
 `time-to-proof-report.json`. This timing-only schema-v1 artifact records the
 operator-supplied machine label, OS, architecture, elapsed milliseconds from
@@ -137,7 +142,10 @@ bundled deterministic process mock; do not reuse it with an unisolated physical
 robot. The accelerator mock is dependency-free and exercises protocol behavior,
 not GPU availability or promotion performance. Use `.exe` on Windows and
 `lib/rne_plugin_example_velocity_servo.dll` as the controller library. These
-commands are headless and require neither ROS2 nor a renderer. Capsule creation
+commands are headless and require neither ROS2 nor a renderer. The flagship
+binary loads the MuJoCo library shipped beside it (Windows) or under the
+archive's `lib/` directory through its relative loader path (Linux); no system
+installation or runtime download is performed. Capsule creation
 refuses successful replays, existing destinations, symlinks, path escapes,
 malformed known evidence, and digest mismatches.
 The generated accelerator scaffold contains an initially passing fixture
@@ -205,7 +213,10 @@ with PyO3 `abi3-py39`; no Rust toolchain is needed to install it.
 ## Reproduce the release rehearsal
 
 From a clean source checkout with Rust 1.95.0, Python 3.11, maturin 1.13.3,
-cargo-deny 0.20.2, and cargo-audit 0.22.2:
+cargo-deny 0.20.2, cargo-audit 0.22.2, and the verified official MuJoCo 3.9.0
+runtime, set `MUJOCO_RUNTIME_ROOT`, `MUJOCO_DYNAMIC_LINK_DIR`, and the platform
+loader path before assembling the bundle. Set `MUJOCO_ARCHIVE_PATH` to the
+downloaded official archive too; the assembler independently rehashes it:
 
 ```bash
 python3 -m pip install maturin==1.13.3
@@ -219,8 +230,10 @@ cargo run --locked -p xtask -- release-bundle \
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
 reruns all eleven schema-v6 installed-artifact checks. Its flagship check runs
-the packaged mobile-manipulation binary and retains its success/failure reports,
-TaskSpec, minimized replay, browser inspector, and verified Failure Capsule.
+the packaged mobile-manipulation binary with `--cross-backend` and retains the
+Rapier/MuJoCo success and intentional-failure reports, both verified replays,
+TaskSpec, unit-bearing comparison, browser inspector, and verified Failure
+Capsule.
 Its accelerator check runs
 both the installed reference mock and a freshly generated dependency-free
 scaffold through process conformance. Separate checks cover the compatibility
