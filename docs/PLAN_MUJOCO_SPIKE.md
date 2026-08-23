@@ -101,10 +101,15 @@ MuJoCo is Apache-2.0.  `mujoco-rs` is MIT OR Apache-2.0:
 - <https://github.com/davidhozic/mujoco-rs>
 - <https://docs.rs/mujoco-rs/5.0.0%2Bmj-3.9.0>
 
-No runtime archive is vendored.  The dedicated
+No runtime archive is committed to the source repository. The dedicated
 [MuJoCo workflow](../.github/workflows/mujoco.yml) downloads these exact
 official assets, verifies their SHA256 values, sets the dynamic-link and
 platform loader paths, and runs the feature-gated tests on Ubuntu and Windows.
+The release workflow performs the same verified download, builds the installed
+flagship with the feature enabled, then copies only the required shared library,
+upstream license/notice, and a content-addressed provenance manifest into each
+native archive. Linux uses an `$ORIGIN/../lib` loader path; Windows places the
+DLL beside the executable.
 The feature-gated tests must not be replaced with a fake runtime; when the
 native library is unavailable locally, run the default workspace checks and
 report the feature-build blocker.

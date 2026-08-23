@@ -396,16 +396,23 @@ report without rebuilding and rerunning the bundle.
 
 Installed-rehearsal report schema v6 appends `flagship_proof`. The release
 archive now runs the indoor mobile-manipulation TaskSpec through the bundled
-Rapier proof runner, verifies the successful behavior, deterministic minimized
-perception failure, browser inspector, and six-artifact Failure Capsule. Older
-schema-v5 reports remain valid historical evidence for their ten checks but do
-not prove this installed product workflow.
+Rapier and MuJoCo proof runner, verifies both successful behaviors, the same
+deterministic minimized perception failure and first violation, both replays,
+browser inspector, and eleven-artifact Failure Capsule. The official MuJoCo
+3.9.0 runtime and licenses are archive members; their upstream archive identity
+and shipped file digests are retained in a runtime manifest. Older schema-v6
+reports that list only `rapier_native` remain valid evidence for the narrower
+workflow but do not qualify as the current cross-backend installed proof.
 
 Installed flagship proof report schema v1 is the timing-free index emitted by
 that runner. It fixes the task and outcome identities and binds the TaskSpec,
-success/failure reports, minimized replay, browser inspector, workflow report,
-and capsule manifest by byte size and SHA-256. Timing measurements remain a
-separate hardware-named artifact.
+Rapier/MuJoCo success and failure reports, both failure replays, unit-bearing
+cross-backend report, browser inspector, workflow report, and capsule manifest
+by byte size and SHA-256. Timing measurements remain a separate hardware-named
+artifact. The schema number is unchanged because the report already represented
+an ordered list of execution paths and content-addressed artifacts;
+qualification now requires the stronger two-path value and complete artifact
+set.
 
 Time-to-proof report schema v1 is that separate artifact. It records a bounded
 operator-supplied machine label, OS and architecture, command elapsed

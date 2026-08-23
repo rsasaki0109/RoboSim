@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Package the official MuJoCo 3.9.0 runtime with native Windows/Linux release
+  archives and build the installed `rne-flagship-proof` with both Rapier and
+  MuJoCo enabled. Release rehearsal now runs the one-command cross-backend
+  success and intentional-failure proof, verifies both replays and the exact
+  first contract violation, and retains the complete Failure Capsule. A bundled
+  runtime manifest records the pinned upstream archive URL/SHA-256 plus each
+  shipped runtime and license member digest.
+
 - Upgrade flagship cross-backend evidence to schema v2. The identical TaskSpec
   and controller now execute both the successful task and the same minimized
   perception blackout on Rapier and MuJoCo. The report requires the expected

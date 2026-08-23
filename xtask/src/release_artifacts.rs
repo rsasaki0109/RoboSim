@@ -10,6 +10,7 @@ use rne_plugin::ControllerPluginScaffoldContract;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;
@@ -26,6 +27,8 @@ pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
 pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
+/// Bundled MuJoCo runtime provenance manifest schema.
+pub(crate) const MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
     ("rne_asset_cli", "rne-asset"),
@@ -39,6 +42,28 @@ const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
     ("flagship_validation_workflow", "rne-flagship-proof"),
 ];
 const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
+const MUJOCO_VERSION: &str = "3.9.0";
+const MUJOCO_ARCHIVE_PATH_ENV: &str = "MUJOCO_ARCHIVE_PATH";
+const MUJOCO_RUNTIME_ROOT_ENV: &str = "MUJOCO_RUNTIME_ROOT";
+const MUJOCO_DYNAMIC_LINK_DIR_ENV: &str = "MUJOCO_DYNAMIC_LINK_DIR";
+const MUJOCO_LINUX_ARCHIVE: &str = "mujoco-3.9.0-linux-x86_64.tar.gz";
+const MUJOCO_LINUX_ARCHIVE_SHA256: &str =
+    "d11f281540d0d1844e2923bf43b6fff5ad186ec55927a8dae0eb26b9e579eed2";
+const MUJOCO_LINUX_RUNTIME_SHA256: &str =
+    "526773636a795dad11e094c8655d2375984a5cd7090f254d86bb71074651b852";
+const MUJOCO_LINUX_LICENSE_SHA256: &str =
+    "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30";
+const MUJOCO_LINUX_NOTICES_SHA256: &str =
+    "0fa07f5d8fb8d19ca6d383fabdc0af86052df48f952b0e370e89d4018c36afdf";
+const MUJOCO_WINDOWS_ARCHIVE: &str = "mujoco-3.9.0-windows-x86_64.zip";
+const MUJOCO_WINDOWS_ARCHIVE_SHA256: &str =
+    "544f44a8a7df3e94648a7eaf41500f4456eb59f9f01df3ec2cfb03bdbf5c2bb9";
+const MUJOCO_WINDOWS_RUNTIME_SHA256: &str =
+    "d2119d435ef68ceb114d01bc3658eff42ac23ebcc08adca94d9b1ff0b9eb0d0e";
+const MUJOCO_WINDOWS_LICENSE_SHA256: &str =
+    "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5";
+const MUJOCO_WINDOWS_NOTICES_SHA256: &str =
+    "5ac8b2055ea0f52d37738cbb1086c9d44c73a5470f6c93e6ed31c47953e1cf0d";
 const SHA256_MANIFEST: &str = "SHA256SUMS";
 const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
@@ -406,6 +431,19 @@ struct InstalledFlagshipProofReport {
     first_violation_step: u64,
     capsule_verified: bool,
     artifacts: Vec<MemberDigest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MujocoRuntimeManifest {
+    kind: String,
+    schema_version: u32,
+    version: String,
+    source_url: String,
+    archive_file: String,
+    archive_sha256: String,
+    runtime_members: Vec<MemberDigest>,
+    license_members: Vec<MemberDigest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -829,6 +867,7 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
     build_native_artifacts(&root, &options.target)?;
     stage_static_files(&root, &bundle_dir)?;
     stage_native_artifacts(&metadata, &bundle_dir, &options.target)?;
+    stage_mujoco_runtime(&bundle_dir, &options.target)?;
     copy_file(
         &wheel,
         &bundle_dir
@@ -1152,7 +1191,7 @@ fn ensure_native_target(root: &Path, target: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_native_artifacts(root: &Path, _target: &str) -> anyhow::Result<()> {
+fn build_native_artifacts(root: &Path, target: &str) -> anyhow::Result<()> {
     let mut args = vec![
         OsString::from("build"),
         OsString::from("--locked"),
@@ -1161,6 +1200,7 @@ fn build_native_artifacts(root: &Path, _target: &str) -> anyhow::Result<()> {
     for package in RELEASE_BINARY_PACKAGES
         .iter()
         .map(|(package, _)| *package)
+        .filter(|package| *package != "flagship_validation_workflow")
         .collect::<BTreeSet<_>>()
     {
         args.push(OsString::from("-p"));
@@ -1170,7 +1210,29 @@ fn build_native_artifacts(root: &Path, _target: &str) -> anyhow::Result<()> {
     args.push(OsString::from(RELEASE_PLUGIN_PACKAGE));
     let output = command_output(root, Path::new("cargo"), &args, &[])?;
     print_output(&output);
-    ensure_success("cargo build release artifacts", &output)
+    ensure_success("cargo build release artifacts", &output)?;
+
+    let mut flagship_args = vec![
+        OsString::from("rustc"),
+        OsString::from("--locked"),
+        OsString::from("--release"),
+        OsString::from("-p"),
+        OsString::from("flagship_validation_workflow"),
+        OsString::from("--features"),
+        OsString::from("mujoco"),
+        OsString::from("--bin"),
+        OsString::from("rne-flagship-proof"),
+    ];
+    if target.contains("linux") {
+        flagship_args.extend([
+            OsString::from("--"),
+            OsString::from("-C"),
+            OsString::from("link-arg=-Wl,-rpath,$ORIGIN/../lib"),
+        ]);
+    }
+    let output = command_output(root, Path::new("cargo"), &flagship_args, &[])?;
+    print_output(&output);
+    ensure_success("cargo build cross-backend flagship proof", &output)
 }
 
 fn stage_static_files(root: &Path, bundle_dir: &Path) -> anyhow::Result<()> {
@@ -1205,6 +1267,217 @@ fn stage_native_artifacts(
         &root.join("crates/rne_plugin_example_velocity_servo/rne-plugin.json"),
         &bundle_dir.join("lib/rne-plugin.json"),
     )?;
+    Ok(())
+}
+
+fn mujoco_runtime_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = env::var_os(MUJOCO_RUNTIME_ROOT_ENV) {
+        let root = PathBuf::from(root);
+        anyhow::ensure!(
+            root.is_dir(),
+            "{MUJOCO_RUNTIME_ROOT_ENV} is not a directory: {}",
+            root.display()
+        );
+        return Ok(root);
+    }
+    let link_dir = env::var_os(MUJOCO_DYNAMIC_LINK_DIR_ENV)
+        .map(PathBuf::from)
+        .context("release bundle requires MUJOCO_RUNTIME_ROOT or MUJOCO_DYNAMIC_LINK_DIR")?;
+    let root = link_dir
+        .parent()
+        .context("MUJOCO_DYNAMIC_LINK_DIR has no runtime root")?;
+    anyhow::ensure!(
+        root.is_dir(),
+        "inferred MuJoCo runtime root is not a directory: {}",
+        root.display()
+    );
+    Ok(root.to_path_buf())
+}
+
+fn digest_member(root: &Path, relative: &str) -> anyhow::Result<MemberDigest> {
+    let path = root.join(relative);
+    let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+    Ok(MemberDigest {
+        path: relative.to_string(),
+        size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256: sha256_hex(&bytes),
+    })
+}
+
+fn stage_mujoco_runtime(bundle_dir: &Path, target: &str) -> anyhow::Result<()> {
+    let runtime_root = mujoco_runtime_root()?;
+    let (archive_file, archive_sha256, runtime_sources) = mujoco_archive_contract(target);
+    let archive_path = env::var_os(MUJOCO_ARCHIVE_PATH_ENV)
+        .map(PathBuf::from)
+        .context("release bundle requires MUJOCO_ARCHIVE_PATH for provenance verification")?;
+    anyhow::ensure!(
+        archive_path.file_name() == Some(OsStr::new(archive_file)),
+        "MuJoCo archive must be named {archive_file}: {}",
+        archive_path.display()
+    );
+    anyhow::ensure!(
+        archive_path.is_file() && sha256_file_hex(&archive_path)? == archive_sha256,
+        "MuJoCo archive failed the pinned SHA-256 check: {}",
+        archive_path.display()
+    );
+    for (source, destination, expected_sha256) in runtime_sources {
+        anyhow::ensure!(
+            sha256_file_hex(&runtime_root.join(source))? == *expected_sha256,
+            "MuJoCo runtime member does not match the pinned archive: {source}"
+        );
+        copy_file(&runtime_root.join(source), &bundle_dir.join(destination))?;
+    }
+    let license_sources = mujoco_license_contract(target);
+    for (source, destination, expected_sha256) in license_sources {
+        anyhow::ensure!(
+            sha256_file_hex(&runtime_root.join(source))? == *expected_sha256,
+            "MuJoCo license member does not match the pinned archive: {source}"
+        );
+        copy_file(&runtime_root.join(source), &bundle_dir.join(destination))?;
+    }
+
+    let runtime_members = runtime_sources
+        .iter()
+        .map(|(_, destination, _)| digest_member(bundle_dir, destination))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let license_members = license_sources
+        .iter()
+        .map(|(_, destination, _)| digest_member(bundle_dir, destination))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let manifest = MujocoRuntimeManifest {
+        kind: "rne_mujoco_runtime".to_string(),
+        schema_version: MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION,
+        version: MUJOCO_VERSION.to_string(),
+        source_url: format!(
+            "https://github.com/google-deepmind/mujoco/releases/download/{MUJOCO_VERSION}/{archive_file}"
+        ),
+        archive_file: archive_file.to_string(),
+        archive_sha256: archive_sha256.to_string(),
+        runtime_members,
+        license_members,
+    };
+    write_pretty_json(
+        &bundle_dir.join("third-party/mujoco/runtime-manifest.json"),
+        &manifest,
+    )
+}
+
+fn mujoco_archive_contract(
+    target: &str,
+) -> (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str, &'static str)],
+) {
+    if target.contains("windows") {
+        (
+            MUJOCO_WINDOWS_ARCHIVE,
+            MUJOCO_WINDOWS_ARCHIVE_SHA256,
+            &[(
+                "bin/mujoco.dll",
+                "bin/mujoco.dll",
+                MUJOCO_WINDOWS_RUNTIME_SHA256,
+            )],
+        )
+    } else {
+        (
+            MUJOCO_LINUX_ARCHIVE,
+            MUJOCO_LINUX_ARCHIVE_SHA256,
+            &[
+                (
+                    "lib/libmujoco.so",
+                    "lib/libmujoco.so",
+                    MUJOCO_LINUX_RUNTIME_SHA256,
+                ),
+                (
+                    "lib/libmujoco.so",
+                    "lib/libmujoco.so.3.9.0",
+                    MUJOCO_LINUX_RUNTIME_SHA256,
+                ),
+            ],
+        )
+    }
+}
+
+fn mujoco_license_contract(target: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+    if target.contains("windows") {
+        &[
+            (
+                "LICENSE",
+                "third-party/mujoco/LICENSE",
+                MUJOCO_WINDOWS_LICENSE_SHA256,
+            ),
+            (
+                "THIRD_PARTY_NOTICES.txt",
+                "third-party/mujoco/THIRD_PARTY_NOTICES.txt",
+                MUJOCO_WINDOWS_NOTICES_SHA256,
+            ),
+        ]
+    } else {
+        &[
+            (
+                "LICENSE",
+                "third-party/mujoco/LICENSE",
+                MUJOCO_LINUX_LICENSE_SHA256,
+            ),
+            (
+                "THIRD_PARTY_NOTICES",
+                "third-party/mujoco/THIRD_PARTY_NOTICES.txt",
+                MUJOCO_LINUX_NOTICES_SHA256,
+            ),
+        ]
+    }
+}
+
+fn validate_mujoco_runtime(bundle_dir: &Path, target: &str) -> anyhow::Result<()> {
+    let manifest_path = bundle_dir.join("third-party/mujoco/runtime-manifest.json");
+    let manifest: MujocoRuntimeManifest = serde_json::from_slice(
+        &fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", manifest_path.display()))?;
+    let (archive_file, archive_sha256, runtime_sources) = mujoco_archive_contract(target);
+    anyhow::ensure!(
+        manifest.kind == "rne_mujoco_runtime"
+            && manifest.schema_version == MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION
+            && manifest.version == MUJOCO_VERSION
+            && manifest.archive_file == archive_file
+            && manifest.archive_sha256 == archive_sha256
+            && manifest.source_url
+                == format!(
+                    "https://github.com/google-deepmind/mujoco/releases/download/{MUJOCO_VERSION}/{archive_file}"
+                ),
+        "bundled MuJoCo runtime provenance is not the pinned target contract"
+    );
+    let expected_runtime_paths = runtime_sources
+        .iter()
+        .map(|(_, destination, _)| *destination)
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        manifest
+            .runtime_members
+            .iter()
+            .map(|member| member.path.as_str())
+            .eq(expected_runtime_paths),
+        "bundled MuJoCo runtime member set is incomplete or unordered"
+    );
+    let expected_license_paths = mujoco_license_contract(target)
+        .iter()
+        .map(|(_, destination, _)| *destination);
+    anyhow::ensure!(
+        manifest
+            .license_members
+            .iter()
+            .map(|member| member.path.as_str())
+            .eq(expected_license_paths),
+        "bundled MuJoCo license member set is incomplete or unordered"
+    );
+    for member in manifest
+        .runtime_members
+        .iter()
+        .chain(&manifest.license_members)
+    {
+        validate_proof_member(bundle_dir, member, &member.path)?;
+    }
     Ok(())
 }
 
@@ -1249,6 +1522,7 @@ fn run_install_rehearsal(
     if verify_checksums {
         verify_sha256_manifest(bundle_dir)?;
     }
+    validate_mujoco_runtime(bundle_dir, target)?;
     fs::create_dir_all(output_dir)?;
     let bin_dir = bundle_dir.join("bin");
     let asset_cli = bin_dir.join(native_binary_name("rne-asset", target));
@@ -1336,6 +1610,7 @@ fn run_install_rehearsal(
         &flagship_proof,
         &[
             flagship_output.clone().into_os_string(),
+            OsString::from("--cross-backend"),
             OsString::from("--measure-on"),
             OsString::from(&flagship_machine_label),
         ],
@@ -1874,8 +2149,8 @@ fn validate_installed_flagship_proof(root: &Path) -> anyhow::Result<()> {
         report.task_id
     );
     anyhow::ensure!(
-        report.physics_execution_paths == ["rapier_native"],
-        "installed flagship proof must execute the packaged Rapier path"
+        report.physics_execution_paths == ["rapier_native", "mujoco_native"],
+        "installed flagship proof must execute the packaged Rapier and MuJoCo paths"
     );
     anyhow::ensure!(
         report.success_status == "passed"
@@ -1886,10 +2161,15 @@ fn validate_installed_flagship_proof(root: &Path) -> anyhow::Result<()> {
     );
 
     let expected_paths = [
+        "cross-backend-report.json",
         "failure-capsule/capsule.json",
         "failure-minimized.rne-replay",
         "failure.behavior-report.json",
         "flagship.task.json",
+        "mujoco-failure.behavior-report.json",
+        "mujoco-failure.rne-replay",
+        "mujoco-success.behavior-report.json",
+        "rapier-minimized-failure.behavior-report.json",
         "replay-inspector.html",
         "success.behavior-report.json",
         "workflow-report.json",
@@ -2493,10 +2773,15 @@ mod tests {
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
         let paths = [
+            "cross-backend-report.json",
             "failure-capsule/capsule.json",
             "failure-minimized.rne-replay",
             "failure.behavior-report.json",
             "flagship.task.json",
+            "mujoco-failure.behavior-report.json",
+            "mujoco-failure.rne-replay",
+            "mujoco-success.behavior-report.json",
+            "rapier-minimized-failure.behavior-report.json",
             "replay-inspector.html",
             "success.behavior-report.json",
             "workflow-report.json",
@@ -2520,7 +2805,7 @@ mod tests {
             schema_version: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
             task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
-            physics_execution_paths: vec!["rapier_native".to_string()],
+            physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
             success_status: "passed".to_string(),
             expected_failure_contract: "perception_stream_alive".to_string(),
             first_violation_step: 307,
@@ -2578,6 +2863,53 @@ mod tests {
         fs::write(directory.path().join("flagship.task.json"), b"tampered")
             .expect("tamper artifact");
         assert!(validate_installed_flagship_proof(directory.path()).is_err());
+    }
+
+    #[test]
+    fn bundled_mujoco_runtime_manifest_rehashes_runtime_and_licenses() {
+        let directory = tempfile::tempdir().expect("temporary bundle");
+        for (relative, bytes) in [
+            ("bin/mujoco.dll", b"runtime".as_slice()),
+            ("third-party/mujoco/LICENSE", b"license".as_slice()),
+            (
+                "third-party/mujoco/THIRD_PARTY_NOTICES.txt",
+                b"notices".as_slice(),
+            ),
+        ] {
+            let path = directory.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).expect("member parent");
+            fs::write(path, bytes).expect("member");
+        }
+        let manifest = MujocoRuntimeManifest {
+            kind: "rne_mujoco_runtime".to_string(),
+            schema_version: MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION,
+            version: MUJOCO_VERSION.to_string(),
+            source_url: format!(
+                "https://github.com/google-deepmind/mujoco/releases/download/{MUJOCO_VERSION}/{MUJOCO_WINDOWS_ARCHIVE}"
+            ),
+            archive_file: MUJOCO_WINDOWS_ARCHIVE.to_string(),
+            archive_sha256: MUJOCO_WINDOWS_ARCHIVE_SHA256.to_string(),
+            runtime_members: vec![
+                digest_member(directory.path(), "bin/mujoco.dll").expect("runtime digest"),
+            ],
+            license_members: [
+                "third-party/mujoco/LICENSE",
+                "third-party/mujoco/THIRD_PARTY_NOTICES.txt",
+            ]
+            .map(|relative| digest_member(directory.path(), relative).expect("license digest"))
+            .to_vec(),
+        };
+        write_pretty_json(
+            &directory
+                .path()
+                .join("third-party/mujoco/runtime-manifest.json"),
+            &manifest,
+        )
+        .expect("runtime manifest");
+
+        validate_mujoco_runtime(directory.path(), "x86_64-pc-windows-msvc").expect("valid runtime");
+        fs::write(directory.path().join("bin/mujoco.dll"), b"tampered").expect("tamper runtime");
+        assert!(validate_mujoco_runtime(directory.path(), "x86_64-pc-windows-msvc").is_err());
     }
 
     #[test]
