@@ -1200,6 +1200,7 @@ dependencies = [
  "anyhow",
  "bevy_ecs",
  "rne_ai",
+ "rne_asset_cli",
  "rne_assets",
  "rne_core",
  "rne_ecs",
@@ -1208,6 +1209,7 @@ dependencies = [
  "rne_traffic",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
 ]
 
@@ -5838,6 +5840,7 @@ dependencies = [
  "image",
  "rne_accelerator_contract",
  "rne_ai",
+ "rne_asset_cli",
  "rne_assets",
  "rne_compatibility_suite",
  "rne_core",

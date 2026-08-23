@@ -14,6 +14,7 @@ mujoco = ["dep:rne_physics_mujoco", "rne_physics_mujoco/mujoco"]
 anyhow = { workspace = true }
 bevy_ecs = { workspace = true }
 rne_ai = { workspace = true }
+rne_asset_cli = { workspace = true }
 rne_assets = { workspace = true }
 rne_core = { workspace = true }
 rne_ecs = { workspace = true }
@@ -22,8 +23,13 @@ rne_physics_mujoco = { workspace = true, optional = true }
 rne_traffic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 uuid = { workspace = true }
 
 [[example]]
 name = "74_flagship_validation_workflow"
 path = "main.rs"
+
+[[bin]]
+name = "rne-flagship-proof"
+path = "installed_main.rs"

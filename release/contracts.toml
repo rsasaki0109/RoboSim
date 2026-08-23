@@ -92,7 +92,8 @@ lekiwi_host_termination_diagnostic = 1
 [evidence]
 fuzz_smoke_report = 1
 release_report = 2
-install_rehearsal_report = 5
+installed_flagship_proof_report = 1
+install_rehearsal_report = 6
 archive_install_rehearsal_report = 1
 final_exit_report = 1
 one_zero_readiness_report = 1

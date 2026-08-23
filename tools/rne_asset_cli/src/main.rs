@@ -1,6 +1,5 @@
 //! Command-line tools for RNE scene and robot assets.
 
-mod failure_capsule;
 mod frontend_transport;
 
 use anyhow::{Context as _, Result};
@@ -73,8 +72,6 @@ const LIVE_CAMERA_TRANSPORT_MAX_WIDTH: u32 = 1920;
 const LIVE_CAMERA_TRANSPORT_MAX_HEIGHT: u32 = 1080;
 const LIVE_LIDAR_MAX_POINTS: usize = 256;
 const RUNNER_DATA_BUS_RETAINED_FRAMES_PER_STREAM: usize = 2;
-const FLAGSHIP_WORKFLOW_REPORT_KIND: &str = "rne_flagship_workflow_report";
-const FLAGSHIP_WORKFLOW_REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LiveSnapshotOptions {
@@ -464,7 +461,7 @@ fn failure_capsule_command(command: FailureCapsuleCommand) -> Result<()> {
             vec!["verify".to_string(), path.to_string_lossy().into_owned()]
         }
     };
-    failure_capsule::run(&mut arguments.into_iter())
+    rne_asset_cli::failure_capsule::run(&mut arguments.into_iter())
 }
 
 fn validate_command(path: &Path, spawn: bool) -> Result<()> {

@@ -385,6 +385,19 @@ reader accepts the old field spelling for historical inspection, but a schema-v1
 report remains historical evidence and cannot qualify as a current release
 report without rebuilding and rerunning the bundle.
 
+Installed-rehearsal report schema v6 appends `flagship_proof`. The release
+archive now runs the indoor mobile-manipulation TaskSpec through the bundled
+Rapier proof runner, verifies the successful behavior, deterministic minimized
+perception failure, browser inspector, and six-artifact Failure Capsule. Older
+schema-v5 reports remain valid historical evidence for their ten checks but do
+not prove this installed product workflow.
+
+Installed flagship proof report schema v1 is the timing-free index emitted by
+that runner. It fixes the task and outcome identities and binds the TaskSpec,
+success/failure reports, minimized replay, browser inspector, workflow report,
+and capsule manifest by byte size and SHA-256. Timing measurements remain a
+separate hardware-named artifact.
+
 The schema-v5 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v1
 wrapper. It binds the exact archive digest, extracted release report and

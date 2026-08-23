@@ -25,12 +25,12 @@ minimization, and Failure Capsules. Those are necessary foundations, but they
 do not yet prove that a user outside this repository can obtain the product
 outcome.
 
-The native release bundle currently rehearses ten installed checks, including
-robot and scenario replay, conformance tools, compatibility, and Python. It
-does not yet ship a single installed command that reproduces the complete
+The native release bundle now rehearses eleven installed checks. The eleventh
+is `rne-flagship-proof`: one packaged command that reproduces the complete
 indoor mobile-manipulation flagship success, expected failure, first contract
-violation, browser inspector, and verified Failure Capsule. Closing that gap
-is the first slice.
+violation, browser inspector, verified Failure Capsule, and a SHA-256-bound
+installed proof report. Clean tagged Windows/Linux archive evidence and the
+15-minute external measurement remain the open parts of Gate 1.
 
 ## Flagship product contract
 
@@ -142,12 +142,15 @@ Acceptance criteria:
 
 Work proceeds in this order, one mergeable slice at a time:
 
-1. Rename the installed release report's generic check collection so it no
-   longer implies that the indoor flagship is shipped.
-2. Define a versioned installed-flagship proof report and one archive command
-   that produces success, expected failure, browser inspector, and capsule.
-3. Stage the minimum flagship assets and runner in the native release bundle.
-4. Add Windows and Linux archive-install rehearsals for the proof command.
+1. **Delivered:** rename the installed release report's generic check
+   collection so it no longer implies that the indoor flagship is shipped.
+2. **Delivered:** define a versioned installed-flagship proof report and one
+   archive command that produces success, expected failure, browser inspector,
+   and capsule.
+3. **Delivered:** stage the minimum flagship assets and runner in the native
+   release bundle.
+4. **Delivered in the rehearsal contract; tagged evidence pending:** add
+   Windows and Linux archive-install rehearsals for the proof command.
 5. Measure time to proof on named reference machines and retain the result as
    timing-only evidence.
 6. Publish a copy-paste external reproduction guide and ask the first external

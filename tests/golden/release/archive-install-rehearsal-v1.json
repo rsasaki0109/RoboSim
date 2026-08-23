@@ -9,22 +9,26 @@
   "bundle_root": "rne-0.1.0-x86_64-pc-windows-msvc",
   "release_report": {
     "path": "release-report.json",
-    "size_bytes": 1384,
-    "sha256": "1f1afd246d5de0a8d84c3d440b4c1741e44165e50ce7487701453ab65cbb2abf"
+    "size_bytes": 1416,
+    "sha256": "dbb6f5b87c5a21d15403b5515a108a21f012a3b7aa1026e0a903df307e8f035c"
   },
   "checksum_manifest": {
     "path": "SHA256SUMS",
     "size_bytes": 258,
-    "sha256": "c6ceb6ffbd980d13e3b2f438d063ba662ab35857c8a9e511ee470fdb9c5ec625"
+    "sha256": "19c16082d3dca24f1ec3665893b3df1f115febadacf0e9c83c8304507ded4d60"
   },
   "rehearsal": {
-    "schema_version": 5,
+    "schema_version": 6,
     "release_version": "0.1.0",
     "target": "x86_64-pc-windows-msvc",
     "status": "passed",
     "checks": [
       {
         "id": "robot_replay",
+        "status": "passed"
+      },
+      {
+        "id": "flagship_proof",
         "status": "passed"
       },
       {

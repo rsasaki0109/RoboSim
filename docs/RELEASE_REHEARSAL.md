@@ -48,7 +48,7 @@ file name, byte length, and SHA-256 to the extracted bundle root,
 `release-report.json`, canonical `SHA256SUMS`, and the complete inner schema-v5
 rehearsal. Validation reconstructs the checksum graph and requires the staged
 and independently extracted verdict maps to be identical.
-After all ten checks pass, xtask deletes the tool-owned wheel virtual
+After all eleven checks pass, including the installed flagship proof, xtask deletes the tool-owned wheel virtual
 environment and controller and accelerator scaffolds. `release-bundle`
 additionally deletes its
 internal `.rehearsal-<target>` directory and target-local copied supply-chain

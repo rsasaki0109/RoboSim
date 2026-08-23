@@ -53,10 +53,11 @@ sha256sum --check SHA256SUMS
 
 On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 `release-report.json` records the tested commit, Rust/Cargo versions, target,
-Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the ten
-generic `installed_workflows` verdicts, and every bundle-member digest. These
-installed checks do not yet claim execution of the indoor mobile-manipulation
-flagship. `reproducible` is true only for a clean build whose exact
+Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the eleven
+`installed_workflows` verdicts, and every bundle-member digest. The
+`flagship_proof` verdict is the bundled indoor mobile-manipulation success,
+expected failure, browser inspector, and verified Failure Capsule workflow.
+`reproducible` is true only for a clean build whose exact
 `v0.1.0` tag points to the tested commit.
 The retained `Cargo.lock` also lets the installed Failure Capsule author record
 the exact release graph during bundle rehearsal; when run from an external
@@ -71,6 +72,7 @@ The bundle includes the fixtures and validation binaries used by the release
 rehearsal. From its top-level directory:
 
 ```bash
+./bin/rne-flagship-proof flagship-proof
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
@@ -117,6 +119,11 @@ rehearsal. From its top-level directory:
   --output controller-plugin-conformance.json
 ./bin/rne-compatibility --root . --output compatibility-fixture-report.json
 ```
+
+The flagship command writes `flagship-proof/installed-proof-report.json`. Its
+schema-v1 report indexes the generated TaskSpec, success and failure reports,
+minimized replay, browser inspector, workflow report, and verified capsule
+manifest by relative path, byte size, and SHA-256.
 
 The hardware command's `--allow-hil` is safe here because the target is the
 bundled deterministic process mock; do not reuse it with an unisolated physical
@@ -204,7 +211,10 @@ cargo run --locked -p xtask -- release-bundle \
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
-reruns all ten schema-v5 installed-artifact checks. Its accelerator check runs
+reruns all eleven schema-v6 installed-artifact checks. Its flagship check runs
+the packaged mobile-manipulation binary and retains its success/failure reports,
+TaskSpec, minimized replay, browser inspector, and verified Failure Capsule.
+Its accelerator check runs
 both the installed reference mock and a freshly generated dependency-free
 scaffold through process conformance. Separate checks cover the compatibility
 corpus and the exact Python API manifest. Its schema-v1 outer report records the

@@ -1,8 +1,8 @@
-//! One headless v0.7 workflow: inspect, yield to traffic, navigate, and place.
-//!
-//! The workflow intentionally keeps orchestration at the example boundary. The
-//! robot episode and traffic runtime remain independently testable, while typed
-//! behavior contracts observe their shared, fixed-step task state.
+// One headless v0.7 workflow: inspect, yield to traffic, navigate, and place.
+//
+// The workflow intentionally keeps orchestration at the example boundary. The
+// robot episode and traffic runtime remain independently testable, while typed
+// behavior contracts observe their shared, fixed-step task state.
 
 use anyhow::{bail, Context, Result};
 use bevy_ecs::prelude::{Entity, World};
@@ -19,6 +19,10 @@ use rne_ai::{
     RewardTermSpec, TaskSpec, TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec,
     TerminationKind, TerminationSpec,
 };
+use rne_asset_cli::{
+    failure_capsule, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
+    INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
+};
 use rne_assets::{load_scene_bundle, scene_dependency_paths};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::EntityUuid;
@@ -31,6 +35,7 @@ use rne_traffic::{
     TrafficRouteFollower, TrafficRuntime, TrafficSignalControl, TrafficSignalControls,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -618,6 +623,27 @@ struct Cli {
     cross_backend: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct InstalledProofArtifact {
+    path: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct InstalledFlagshipProofReport {
+    kind: &'static str,
+    schema_version: u32,
+    status: &'static str,
+    task_id: &'static str,
+    physics_execution_paths: Vec<&'static str>,
+    success_status: &'static str,
+    expected_failure_contract: &'static str,
+    first_violation_step: u64,
+    capsule_verified: bool,
+    artifacts: Vec<InstalledProofArtifact>,
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("flagship validation failed: {error:#}");
@@ -628,6 +654,12 @@ fn main() {
 fn run() -> Result<()> {
     let cli = parse_cli()?;
     let output = cli.output;
+    if output.exists() {
+        bail!(
+            "refusing to replace existing flagship output {}",
+            output.display()
+        );
+    }
     fs::create_dir_all(&output)
         .with_context(|| format!("could not create {}", output.display()))?;
 
@@ -764,6 +796,8 @@ fn run() -> Result<()> {
             .map(|_| "cross-backend-report.json".to_string()),
     };
     write_pretty_json(&summary_path, &report)?;
+    create_and_verify_failure_capsule(&output, cli.cross_backend)?;
+    write_installed_proof_report(&output, &report)?;
 
     if cross_backend_evidence
         .as_ref()
@@ -781,6 +815,97 @@ fn run() -> Result<()> {
         output.display()
     );
     Ok(())
+}
+
+fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport) -> Result<()> {
+    let mut paths = vec![
+        "failure-capsule/capsule.json",
+        "failure-minimized.rne-replay",
+        "failure.behavior-report.json",
+        "flagship.task.json",
+        "replay-inspector.html",
+        "success.behavior-report.json",
+        "workflow-report.json",
+    ];
+    if workflow.cross_backend_report.is_some() {
+        paths.extend([
+            "cross-backend-report.json",
+            "mujoco-success.behavior-report.json",
+        ]);
+    }
+    paths.sort_unstable();
+    let artifacts = paths
+        .into_iter()
+        .map(|relative| {
+            let bytes = fs::read(output.join(relative))
+                .with_context(|| format!("could not read installed proof artifact {relative}"))?;
+            Ok(InstalledProofArtifact {
+                path: relative.to_string(),
+                size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                sha256: Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let report = InstalledFlagshipProofReport {
+        kind: INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
+        schema_version: INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
+        status: "passed",
+        task_id: TASK_ID,
+        physics_execution_paths: workflow.physics_execution_paths.clone(),
+        success_status: workflow.success.status,
+        expected_failure_contract: workflow.intentional_failure.expected_contract,
+        first_violation_step: workflow.intentional_failure.injected_step,
+        capsule_verified: true,
+        artifacts,
+    };
+    write_pretty_json(&output.join("installed-proof-report.json"), &report)
+}
+
+fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Result<()> {
+    let mut create_args = vec![
+        "create".to_string(),
+        "--replay".to_string(),
+        output
+            .join("failure-minimized.rne-replay")
+            .display()
+            .to_string(),
+    ];
+    for evidence in [
+        "workflow-report.json",
+        "success.behavior-report.json",
+        "failure.behavior-report.json",
+        "replay-inspector.html",
+        "flagship.task.json",
+    ] {
+        create_args.extend([
+            "--evidence".to_string(),
+            output.join(evidence).display().to_string(),
+        ]);
+    }
+    if cross_backend {
+        for evidence in [
+            "cross-backend-report.json",
+            "mujoco-success.behavior-report.json",
+        ] {
+            create_args.extend([
+                "--evidence".to_string(),
+                output.join(evidence).display().to_string(),
+            ]);
+        }
+    }
+    create_args.extend([
+        "--output".to_string(),
+        output.join("failure-capsule").display().to_string(),
+        "--backend".to_string(),
+        "rapier-native".to_string(),
+        "--backend-version".to_string(),
+        "0.22".to_string(),
+    ]);
+    failure_capsule::run(&mut create_args.into_iter())?;
+    failure_capsule::verify_directory(&output.join("failure-capsule"))
 }
 
 fn parse_cli() -> Result<Cli> {
