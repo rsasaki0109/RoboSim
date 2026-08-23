@@ -125,7 +125,7 @@ cryptographic verification against the exact repository, workflow identity,
 tag, source and signer commit, predicate, issuer, runner class, and archive
 digest before accepting a strict schema-v1 receipt. Each platform now also
 signs a separate archive-install report whose digest chain fixes the archive,
-extracted release report, SHA256SUMS member graph, and eleven-check rehearsal;
+extracted release report, SHA256SUMS member graph, and twelve-check rehearsal;
 readiness manifest v4 freshly verifies both signed subjects and audits
 third-party accelerator adapters without weakening the external-system gate.
 The installed accelerator conformance CLI also generates a dependency-free
@@ -157,7 +157,8 @@ certification remains a v0.9 exit gate.
 Readiness manifest v2 now requires that future independent certification retain
 the exact tested subjects rather than only a passing JSON report. It binds
 controller libraries and manifests, physics implementation/source bundles, and
-hardware adapter bytes plus TaskSpec and normalized launch contract back to the
+simulator adapter bytes plus TaskSpec, runtime manifest, and world/model/config
+files, or hardware adapter bytes plus TaskSpec and normalized launch contract back to the
 report's content identity and external source revision.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
 corpus for thirty-six historical/current fixtures spanning TaskSpec identities,

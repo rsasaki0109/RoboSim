@@ -1,0 +1,5 @@
+schema_version = 1
+task_id = "rne.diff_drive.sensor_goal.v1"
+base_entity = "base_link"
+observation_order = ["base_position_m", "base_yaw_rad", "wheel_velocity_rad_s", "goal_distance_m", "minimum_lidar_range_m"]
+action_order = ["left_wheel_velocity_rad_s", "right_wheel_velocity_rad_s"]

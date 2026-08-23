@@ -14,7 +14,7 @@ plugin/physics/hardware/accelerator external-conformance guides, compatibility a
 documentation, locked dependency SBOM,
 artifact-attestation policy, Rust API baseline, Python API manifest, locked
 dependency graph, Failure Capsule authoring guides, replay fixtures, provenance
-report, and `SHA256SUMS`. Installed-rehearsal schema v6 runs eleven frozen
+report, and `SHA256SUMS`. Installed-rehearsal schema v7 runs twelve frozen
 checks: robot replay, installed flagship proof, scenario replay, physics
 conformance, external hardware-adapter conformance, accelerator protocol
 conformance, the 100-actor scale case, standalone controller-plugin conformance,
@@ -29,7 +29,7 @@ denied; the scaffold SDK must match the bundled SDK byte-for-byte and its
 canonical schema-v1 `rne-scaffold.json` must validate the exact author file set.
 The accelerator check executes all nine JSONL exchanges against the bundled
 mock, then generates a dependency-free adapter scaffold from the installed CLI
-and runs the same process kit against it. Both eleven-check content-addressed
+and runs the same process kit against it. Both twelve-check content-addressed
 reports must bind the exact manifest, runtime contract, TaskSpec, checkpoint,
 and clean shutdown. The scaffold README must retain its explicit warning that
 the fixture is authoring-path evidence, not independent accelerator evidence;
@@ -47,11 +47,11 @@ The independent run additionally emits
 `rne_archive_install_rehearsal` schema v2. This outer report binds the archive
 file name, byte length, and SHA-256 to the extracted bundle root,
 `release-report.json`, canonical `SHA256SUMS`, the hardware-named time-to-proof
-report, and the complete inner schema-v6 rehearsal. Validation reconstructs the
+report, and the complete inner schema-v7 rehearsal. Validation reconstructs the
 checksum graph and requires the staged and independently extracted verdict maps
 to be identical. Schema v1 remains historical archive-bound evidence but lacks
 the timing-report identity required by the current gate.
-After all eleven checks pass, including the installed flagship proof, xtask deletes the tool-owned wheel virtual
+After all twelve checks pass, including the installed flagship and external simulator proofs, xtask deletes the tool-owned wheel virtual
 environment and controller and accelerator scaffolds. `release-bundle`
 additionally deletes its
 internal `.rehearsal-<target>` directory and target-local copied supply-chain

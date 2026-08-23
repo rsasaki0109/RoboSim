@@ -1529,6 +1529,27 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             ),
         ),
         (
+            "simulators",
+            "runtime_manifest",
+            u64::from(
+                rne_hardware_gateway::simulator::SIMULATOR_RUNTIME_MANIFEST_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "simulators",
+            "wire_protocol",
+            u64::from(
+                rne_hardware_gateway::simulator::wire::SIMULATOR_WIRE_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "simulators",
+            "adapter_conformance",
+            u64::from(
+                rne_hardware_gateway::simulator::conformance::SIMULATOR_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
             "hardware",
             "reference_profile",
             u64::from(rne_hardware_lekiwi::LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION),

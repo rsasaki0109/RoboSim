@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 3;
+const REGISTRY_SCHEMA_VERSION: u32 = 4;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -150,7 +150,7 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
         readiness_check: "external_system",
         minimum_accepted: 1,
         author_assistance_allowed: true,
-        qualifying_kinds: &["physics_backend", "hardware_adapter"],
+        qualifying_kinds: &["physics_backend", "hardware_adapter", "simulator_adapter"],
         audited_nonqualifying_kinds: &["accelerator_adapter"],
         template: ".github/ISSUE_TEMPLATE/external-system-evidence.yml",
         metadata: &["owner", "repository", "revision", "kind"],
@@ -159,6 +159,10 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "hardware_adapter.task_spec",
             "hardware_adapter.adapter_arguments",
             "hardware_adapter.safety_authorization",
+            "simulator_adapter.task_spec",
+            "simulator_adapter.adapter_arguments",
+            "simulator_adapter.runtime_manifest",
+            "simulator_adapter.runtime_artifacts",
             "accelerator_adapter.task_spec",
             "accelerator_adapter.adapter_arguments",
             "accelerator_adapter.accelerator_manifest",
@@ -174,6 +178,8 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "subject",
             "task_spec",
             "adapter_arguments",
+            "simulator_runtime_manifest",
+            "simulator_runtime_artifacts",
             "accelerator_manifest",
             "runtime_contract",
             "report",
@@ -500,11 +506,14 @@ fn validate_issue_form(text: &str, route: &IntakeRoute) -> Result<()> {
         let hardware = text
             .find("        - hardware_adapter\n")
             .context("external system form omitted hardware_adapter")?;
+        let simulator = text
+            .find("        - simulator_adapter\n")
+            .context("external system form omitted simulator_adapter")?;
         let accelerator = text
             .find("        - accelerator_adapter\n")
             .context("external system form omitted accelerator_adapter")?;
         anyhow::ensure!(
-            physics < hardware && hardware < accelerator,
+            physics < hardware && hardware < simulator && simulator < accelerator,
             "external system kind options are not canonical"
         );
     }
@@ -532,7 +541,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             route.qualifying_kinds,
-            ["physics_backend", "hardware_adapter"]
+            ["physics_backend", "hardware_adapter", "simulator_adapter"]
         );
         assert_eq!(route.audited_nonqualifying_kinds, ["accelerator_adapter"]);
         let form = fs::read_to_string(root.join(&route.issue_template)).unwrap();
@@ -540,6 +549,9 @@ mod tests {
         assert!(
             validate_issue_form(&form.replace("        - accelerator_adapter\n", ""), route)
                 .is_err()
+        );
+        assert!(
+            validate_issue_form(&form.replace("        - simulator_adapter\n", ""), route).is_err()
         );
     }
 

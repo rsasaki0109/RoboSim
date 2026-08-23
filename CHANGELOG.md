@@ -15,6 +15,15 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a process-isolated external simulator adapter protocol and standalone
+  `rne-simulator-conformance` kit. It binds an exact TaskSpec, fixed simulation
+  delta, seeded reset, ordered observations/actions, simulator identity, world,
+  robot model, adapter configuration, launch arguments, and SHA-256 identities.
+  Ten fail-closed checks cover deterministic fixed-step execution. External
+  evidence intake and readiness schema now recognize `simulator_adapter`
+  without misclassifying Gazebo as hardware, and installed rehearsal schema v7
+  adds the kit as the twelfth archive check.
+
 - Add a fail-closed `external-flagship-check` and public intake route for an
   independently operated 15-minute installed flagship reproduction. The
   schema-v1 external report binds a clean tagged release archive, source

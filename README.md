@@ -89,7 +89,7 @@ source tree is not required to submit evidence.
 - [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
 - [Measure the installed flagship from an official release archive](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
 - [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
-- [Conform an external physics backend, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+- [Conform an external physics backend, simulator adapter, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
 
 Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
 before running a qualifying test. Opening an issue is only the start of review:
@@ -210,7 +210,7 @@ An independent operator can bind those outputs to the exact clean tagged
 archive with `xtask external-flagship-check`; CI and placeholder machine labels
 are rejected as external evidence.
 
-Third-party controller plugins, physics backends, hardware adapters, and real
+Third-party controller plugins, physics backends, simulator adapters, hardware adapters, and real
 external task reproductions can be submitted through the fixed
 [external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
 validates all required issue-form fields with `xtask external-intake-check`;
@@ -339,6 +339,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Controller plugin SDK](docs/PLUGIN_SDK.md)
 - [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
 - [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
+- [External simulator adapter conformance](docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md)
 - [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
 - [Support policy and 1.0 commitment](docs/SUPPORT.md)
 - [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)

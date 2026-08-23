@@ -18,6 +18,10 @@ use rne_hardware_gateway::{
         HardwareAdapterConformanceIdentity, HardwareAdapterConformanceReport,
         HardwareAdapterConformanceSubject,
     },
+    simulator::{
+        conformance::{SimulatorAdapterConformanceIdentity, SimulatorAdapterConformanceReport},
+        SimulatorRuntimeManifest,
+    },
     GatewayConfig, HardwareGateway,
 };
 use rne_log::FailureCapsule;
@@ -31,7 +35,12 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 4;
+#[cfg(test)]
+use rne_hardware_gateway::simulator::conformance::{
+    SimulatorAdapterConformanceCheck, SimulatorAdapterConformanceSubject,
+};
+
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 5;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -146,6 +155,7 @@ struct ThirdPartyPluginEvidence {
 enum ExternalSystemKind {
     PhysicsBackend,
     HardwareAdapter,
+    SimulatorAdapter,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -161,6 +171,10 @@ struct ExternalSystemEvidence {
     task_spec: Option<EvidenceRef>,
     #[serde(default)]
     adapter_arguments: Vec<String>,
+    #[serde(default)]
+    runtime_manifest: Option<EvidenceRef>,
+    #[serde(default)]
+    runtime_artifacts: Vec<EvidenceRef>,
     report: EvidenceRef,
 }
 
@@ -1066,7 +1080,10 @@ fn verify_external_systems(
         match entry.kind {
             ExternalSystemKind::PhysicsBackend => {
                 anyhow::ensure!(
-                    entry.task_spec.is_none() && entry.adapter_arguments.is_empty(),
+                    entry.task_spec.is_none()
+                        && entry.adapter_arguments.is_empty()
+                        && entry.runtime_manifest.is_none()
+                        && entry.runtime_artifacts.is_empty(),
                     "external physics backend {} must not declare adapter-only evidence",
                     entry.id
                 );
@@ -1091,6 +1108,11 @@ fn verify_external_systems(
                 digests.extend([subject.sha256.clone(), report_evidence.sha256.clone()]);
             }
             ExternalSystemKind::HardwareAdapter => {
+                anyhow::ensure!(
+                    entry.runtime_manifest.is_none() && entry.runtime_artifacts.is_empty(),
+                    "external hardware adapter {} must not declare simulator runtime evidence",
+                    entry.id
+                );
                 let task_reference = entry.task_spec.as_ref().with_context(|| {
                     format!(
                         "external hardware adapter {} omitted its exact TaskSpec",
@@ -1142,6 +1164,116 @@ fn verify_external_systems(
                     task.sha256,
                     report_evidence.sha256.clone(),
                 ]);
+            }
+            ExternalSystemKind::SimulatorAdapter => {
+                let task_reference = entry.task_spec.as_ref().with_context(|| {
+                    format!(
+                        "external simulator adapter {} omitted its exact TaskSpec",
+                        entry.id
+                    )
+                })?;
+                let runtime_reference = entry.runtime_manifest.as_ref().with_context(|| {
+                    format!(
+                        "external simulator adapter {} omitted its runtime manifest",
+                        entry.id
+                    )
+                })?;
+                let task = verify_evidence(evidence_root, task_reference)?;
+                let runtime_evidence = verify_evidence(evidence_root, runtime_reference)?;
+                let task_spec: TaskSpec =
+                    serde_json::from_slice(&task.bytes).with_context(|| {
+                        format!("parse external simulator adapter {} TaskSpec", entry.id)
+                    })?;
+                task_spec.validate().with_context(|| {
+                    format!("validate external simulator adapter {} TaskSpec", entry.id)
+                })?;
+                let runtime: SimulatorRuntimeManifest =
+                    serde_json::from_slice(&runtime_evidence.bytes).with_context(|| {
+                        format!(
+                            "parse external simulator adapter {} runtime manifest",
+                            entry.id
+                        )
+                    })?;
+                runtime.validate().with_context(|| {
+                    format!(
+                        "validate external simulator adapter {} runtime manifest",
+                        entry.id
+                    )
+                })?;
+                let report: SimulatorAdapterConformanceReport =
+                    serde_json::from_slice(&report_evidence.bytes).with_context(|| {
+                        format!("parse external simulator adapter {} report", entry.id)
+                    })?;
+                report.validate().with_context(|| {
+                    format!("validate external simulator adapter {} report", entry.id)
+                })?;
+                anyhow::ensure!(
+                    report.passed(),
+                    "external simulator adapter {} did not pass conformance",
+                    entry.id
+                );
+                verify_unprefixed_subject(
+                    "external simulator adapter subject",
+                    &subject,
+                    &report.subject.adapter_file,
+                    &report.subject.adapter_sha256,
+                    Some(report.subject.adapter_size_bytes),
+                )?;
+                verify_unprefixed_subject(
+                    "external simulator adapter TaskSpec",
+                    &task,
+                    &report.subject.task_file,
+                    &report.subject.task_sha256,
+                    None,
+                )?;
+                verify_unprefixed_subject(
+                    "external simulator runtime manifest",
+                    &runtime_evidence,
+                    &report.subject.runtime_manifest_file,
+                    &report.subject.runtime_manifest_sha256,
+                    Some(report.subject.runtime_manifest_size_bytes),
+                )?;
+                verify_normalized_arguments(
+                    "external simulator adapter",
+                    &entry.adapter_arguments,
+                    report.subject.argument_count,
+                    &report.subject.arguments_sha256,
+                )?;
+                let identity = report
+                    .adapter
+                    .as_ref()
+                    .context("passing simulator adapter report omitted its identity")?;
+                verify_simulator_task_identity(&entry.id, &task_spec, &runtime, identity)?;
+                anyhow::ensure!(
+                    entry.runtime_artifacts.len() == runtime.artifacts.len(),
+                    "external simulator adapter {} retained the wrong runtime artifact count",
+                    entry.id
+                );
+                anyhow::ensure!(
+                    report.subject.runtime_artifacts == runtime.artifacts,
+                    "external simulator adapter {} report and runtime manifest artifacts differ",
+                    entry.id
+                );
+                let mut retained = Vec::with_capacity(entry.runtime_artifacts.len());
+                for (reference, artifact) in entry.runtime_artifacts.iter().zip(&runtime.artifacts)
+                {
+                    let evidence = verify_evidence(evidence_root, reference)?;
+                    verify_unprefixed_subject(
+                        "external simulator runtime artifact",
+                        &evidence,
+                        &artifact.file,
+                        &artifact.sha256,
+                        Some(artifact.size_bytes),
+                    )?;
+                    retained.push(evidence.sha256);
+                }
+                digests.extend([
+                    subject.sha256.clone(),
+                    task.sha256,
+                    runtime_evidence.sha256,
+                    report_evidence.sha256.clone(),
+                ]);
+                digests.extend(retained);
             }
         }
         anyhow::ensure!(
@@ -1363,6 +1495,37 @@ fn verify_hardware_task_identity(
         identity.observation_width == gateway.observation_width()
             && identity.action_width == gateway.action_width(),
         "external hardware adapter {id} negotiated TaskSpec widths that do not match the retained TaskSpec"
+    );
+    Ok(())
+}
+
+fn verify_simulator_task_identity(
+    id: &str,
+    task_spec: &TaskSpec,
+    runtime: &SimulatorRuntimeManifest,
+    identity: &SimulatorAdapterConformanceIdentity,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        identity.task_id == task_spec.task_id,
+        "external simulator adapter {id} negotiated the wrong TaskSpec identity"
+    );
+    let gateway = HardwareGateway::new(task_spec.clone(), GatewayConfig::default())
+        .with_context(|| format!("construct external simulator adapter {id} TaskSpec"))?;
+    anyhow::ensure!(
+        identity.observation_width == gateway.observation_width()
+            && identity.action_width == gateway.action_width(),
+        "external simulator adapter {id} negotiated TaskSpec widths that do not match the retained TaskSpec"
+    );
+    let fixed_delta_ticks = (task_spec.control_step_s * 1_000_000_000.0).round() as u64;
+    anyhow::ensure!(
+        identity.fixed_delta_ticks == fixed_delta_ticks
+            && runtime.fixed_delta_ticks == fixed_delta_ticks,
+        "external simulator adapter {id} fixed step differs from the retained TaskSpec"
+    );
+    anyhow::ensure!(
+        identity.simulator_id == runtime.simulator_id
+            && identity.simulator_version == runtime.simulator_version,
+        "external simulator adapter {id} handshake differs from the retained runtime manifest"
     );
     Ok(())
 }
@@ -2129,7 +2292,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 4
+schema_version = 5
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2179,6 +2342,153 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
     }
 
     #[test]
+    fn external_simulator_report_rebinds_task_runtime_and_every_artifact() {
+        let root = workspace_root().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let task_source = root.join("assets/tasks/diff_drive_goal.task.json");
+        let fixture_root =
+            root.join("adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator");
+        let retained = [
+            ("task.json", task_source),
+            ("runtime.json", fixture_root.join("runtime.json")),
+            ("world.sdf", fixture_root.join("world.sdf")),
+            ("robot.urdf", fixture_root.join("robot.urdf")),
+            ("adapter.toml", fixture_root.join("adapter.toml")),
+        ];
+        for (name, source) in &retained {
+            fs::copy(source, temp.path().join(name)).unwrap();
+        }
+        fs::write(
+            temp.path().join("gazebo-adapter.bin"),
+            b"external gazebo adapter v1",
+        )
+        .unwrap();
+        let bytes = |name: &str| fs::read(temp.path().join(name)).unwrap();
+        let digest = |name: &str| sha256_prefixed(&bytes(name));
+        let hex = |name: &str| digest(name)["sha256:".len()..].to_string();
+        let runtime: SimulatorRuntimeManifest =
+            serde_json::from_slice(&bytes("runtime.json")).unwrap();
+        let arguments = vec![
+            "--runtime-manifest".to_string(),
+            "<runtime-manifest>".to_string(),
+        ];
+        let arguments_sha256 = sha256_prefixed(&serde_json::to_vec(&arguments).unwrap())
+            ["sha256:".len()..]
+            .to_string();
+        let report = SimulatorAdapterConformanceReport {
+            schema_version: 1,
+            kind: "rne_simulator_adapter_conformance_report".to_string(),
+            status: "passed".to_string(),
+            subject: SimulatorAdapterConformanceSubject {
+                adapter_file: "gazebo-adapter.bin".to_string(),
+                adapter_sha256: hex("gazebo-adapter.bin"),
+                adapter_size_bytes: bytes("gazebo-adapter.bin").len() as u64,
+                launcher_file: "gazebo-adapter.bin".to_string(),
+                arguments_sha256,
+                argument_count: arguments.len(),
+                task_file: "task.json".to_string(),
+                task_sha256: hex("task.json"),
+                runtime_manifest_file: "runtime.json".to_string(),
+                runtime_manifest_sha256: hex("runtime.json"),
+                runtime_manifest_size_bytes: bytes("runtime.json").len() as u64,
+                runtime_artifacts: runtime.artifacts.clone(),
+            },
+            adapter: Some(SimulatorAdapterConformanceIdentity {
+                simulator_id: runtime.simulator_id.clone(),
+                simulator_version: runtime.simulator_version.clone(),
+                adapter_id: "external_gazebo_adapter".to_string(),
+                task_id: "rne.diff_drive.sensor_goal.v1".to_string(),
+                wire_schema_version: 1,
+                observation_width: 9,
+                action_width: 2,
+                fixed_delta_ticks: 16_666_667,
+            }),
+            checks: [
+                "open_identity",
+                "task_binding",
+                "fixed_delta_binding",
+                "reset_origin",
+                "bounded_step",
+                "fixed_step_progression",
+                "deterministic_replay",
+                "action_sequence_rejection",
+                "session_isolation",
+                "width_rejection",
+            ]
+            .into_iter()
+            .map(|id| SimulatorAdapterConformanceCheck {
+                id: id.to_string(),
+                status: "passed".to_string(),
+                detail: "independent fixture passed".to_string(),
+            })
+            .collect(),
+        };
+        report.validate().unwrap();
+        fs::write(
+            temp.path().join("simulator-report.json"),
+            report.to_json_pretty().unwrap(),
+        )
+        .unwrap();
+
+        let manifest_text = format!(
+            r#"
+schema_version = 5
+release_version = "0.2.0"
+project_owner = "project-owner"
+minimum_stability_days = 183
+minimum_external_projects = 2
+minimum_compatibility_checks = 36
+unplanned_breaking_changes = 0
+blocker_registry = "release/blockers.toml"
+required_platforms = ["linux_x86_64", "windows_x86_64"]
+accelerator_adapter = []
+
+[candidate]
+revision = "0000000000000000000000000000000000000000"
+tree = "0000000000000000000000000000000000000000"
+since = "2026-08-15"
+
+[support]
+committed = false
+maintainer = ""
+support_period = ""
+policy_url = ""
+
+[[external_system]]
+id = "external-gazebo"
+owner = "external-owner"
+repository = "https://example.invalid/gazebo"
+revision = "1111111111111111111111111111111111111111"
+kind = "simulator_adapter"
+subject = {{ path = "gazebo-adapter.bin", sha256 = "{}" }}
+task_spec = {{ path = "task.json", sha256 = "{}" }}
+adapter_arguments = ["--runtime-manifest", "<runtime-manifest>"]
+runtime_manifest = {{ path = "runtime.json", sha256 = "{}" }}
+runtime_artifacts = [
+  {{ path = "world.sdf", sha256 = "{}" }},
+  {{ path = "robot.urdf", sha256 = "{}" }},
+  {{ path = "adapter.toml", sha256 = "{}" }},
+]
+report = {{ path = "simulator-report.json", sha256 = "{}" }}
+"#,
+            digest("gazebo-adapter.bin"),
+            digest("task.json"),
+            digest("runtime.json"),
+            digest("world.sdf"),
+            digest("robot.urdf"),
+            digest("adapter.toml"),
+            digest("simulator-report.json"),
+        );
+        let mut manifest: ReadinessManifest = toml::from_str(&manifest_text).unwrap();
+        let verified = verify_external_systems(temp.path(), &manifest).unwrap();
+        assert_eq!(verified.len(), 7);
+
+        fs::write(temp.path().join("robot.urdf"), b"tampered robot").unwrap();
+        manifest.external_system[0].runtime_artifacts[1].sha256 = digest("robot.urdf");
+        assert!(verify_external_systems(temp.path(), &manifest).is_err());
+    }
+
+    #[test]
     fn external_accelerator_report_is_rebound_without_satisfying_external_system() {
         let root = workspace_root().unwrap();
         let temp = tempfile::tempdir().unwrap();
@@ -2209,7 +2519,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(
             r#"
-schema_version = 4
+schema_version = 5
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2496,7 +2806,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 4
+schema_version = 5
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2523,9 +2833,9 @@ policy_url = ""
     }
 
     #[test]
-    fn platform_release_manifest_v4_requires_the_complete_archive_chain() {
+    fn platform_release_manifest_v5_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 4
+schema_version = 5
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2578,9 +2888,9 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     }
 
     #[test]
-    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v4() {
+    fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v5() {
         let manifest = r#"
-schema_version = 4
+schema_version = 5
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

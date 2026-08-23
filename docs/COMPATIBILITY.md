@@ -405,6 +405,13 @@ and shipped file digests are retained in a runtime manifest. Older schema-v6
 reports that list only `rapier_native` remain valid evidence for the narrower
 workflow but do not qualify as the current cross-backend installed proof.
 
+Installed-rehearsal report schema v7 appends `simulator_adapter`. The installed
+kit launches the process-isolated reference adapter and requires all ten
+fixed-step checks to pass while hashing the TaskSpec, runtime manifest, world,
+robot model, adapter configuration, subject, and normalized launch arguments.
+Schema-v6 reports remain valid historical eleven-check rehearsals but do not
+prove that the external simulator authoring path shipped in the archive.
+
 Installed flagship proof report schema v2 is the timing-free index emitted by
 that runner. It fixes the task and outcome identities, binds the exact packaged
 producer executable, and binds the TaskSpec,
@@ -434,12 +441,12 @@ non-identical first violations. The report is reviewable evidence, not proof of
 independence by itself; maintainers still verify ownership and immutable
 downloads before acceptance.
 
-The schema-v6 report remains inside the archive as the staged rehearsal. A
+The schema-v7 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v2
 wrapper. It binds the exact archive digest, extracted release report and
-checksum manifest, hardware-named time-to-proof report, and a second schema-v6
+checksum manifest, hardware-named time-to-proof report, and a second schema-v7
 result. The wrapper is a distinct
-signed subject; an older standalone schema-v6 report cannot be presented as
+signed subject; an older standalone schema-v6 or schema-v7 report cannot be presented as
 archive-bound evidence.
 
 ## Replay migration

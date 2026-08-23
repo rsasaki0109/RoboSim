@@ -25,8 +25,8 @@ minimization, and Failure Capsules. Those are necessary foundations, but they
 do not yet prove that a user outside this repository can obtain the product
 outcome.
 
-The native release bundle now rehearses eleven installed checks. The eleventh
-is `rne-flagship-proof`: one packaged command that reproduces the complete
+The native release bundle now rehearses twelve installed checks. The flagship
+check uses `rne-flagship-proof`: one packaged command that reproduces the complete
 indoor mobile-manipulation flagship success, expected failure, first contract
 violation, browser inspector, verified Failure Capsule, and a SHA-256-bound
 installed proof report. It executes the same proof on Rapier and a bundled,
@@ -100,10 +100,11 @@ official MuJoCo runtime and licenses, and makes the two-runtime proof mandatory
 in archive rehearsal. Gate 2 closes only after both extracted-archive CI jobs
 retain passing evidence.
 
-After this gate, a bounded Gazebo adapter is the preferred external-simulator
-spike. It should translate only the flagship observations and actions; it must
-not introduce Gazebo, ROS 2, DDS, or simulator-specific handles into core
-crates.
+The versioned, fixed-step external simulator process contract and conformance
+catalog are now implemented outside core. The next spike is a bounded Gazebo
+Harmonic adapter that translates only the flagship observations and actions;
+it must not introduce Gazebo, ROS 2, DDS, or simulator-specific handles into
+core crates.
 
 ### Gate 3: recorded and shadow proof
 
@@ -177,6 +178,82 @@ Work proceeds in this order, one mergeable slice at a time:
 
 Each slice includes tests and a short documentation update. No unrelated demo
 or subsystem expansion enters these slices.
+
+## Sensor and control-dynamics hardening track
+
+This track starts after the external simulator contract is shipped and remains
+subordinate to the product-proof gates. It strengthens the existing indoor
+mobile-lift and OpenArm validation fixtures; it does not justify adding unrelated
+robots, scenes, sensor types, or engine-specific physics features.
+
+### Sensor evidence
+
+The sensor target is a reproducible measurement contract, not a larger catalog.
+For camera, depth, lidar, IMU, and joint/actuator feedback already required by
+the flagship, retain:
+
+- simulation timestamp, sampling phase, rate, latency, jitter, drop policy, and
+  queue capacity;
+- explicit SI units, coordinate frame, intrinsics, extrinsics, distortion, and
+  metric calibration identity;
+- seeded bias, white noise, quantization, saturation, dropout, and stuck-value
+  models with an explicit order of application;
+- ground-truth alignment and named error metrics for simulation, recorded data,
+  shadow, and bounded physical observations;
+- deterministic fault injection whose first violated TaskSpec contract enters
+  the same replay, browser inspector, and Failure Capsule path;
+- observability-oriented coverage: each controller-required state names the
+  sensor fields and calibration evidence from which it is estimated.
+
+Acceptance requires a headless `sensor-validation-report` that binds TaskSpec,
+sensor specs, calibration, model/config hashes, seed, latency/drop trace, named
+unit-bearing tolerances, and the first failed field. At least one nominal and
+one injected-failure case must compare Rapier, MuJoCo, recorded observations,
+and later Gazebo without claiming renderer-private pixels are byte-identical.
+
+### Control-engineering dynamics
+
+Dynamics work targets closed-loop verification and system understanding rather
+than novel solver features. The portable contract will cover:
+
+- continuous and discrete plant identity, state/input/output ordering, sample
+  time, operating point, SI units, and model provenance;
+- actuator saturation, rate limit, deadband, delay, bandwidth, torque/force
+  limits, and declared failure behavior;
+- analytic or deterministic finite-difference linearization around a named
+  operating point, with validity-range evidence;
+- controllability and observability rank, poles/eigenvalues, damping, natural
+  frequency, and closed-loop stability diagnostics;
+- deterministic step, impulse, ramp, and chirp experiments with rise time,
+  settling time, overshoot, steady-state error, IAE/ISE, gain margin, and phase
+  margin where mathematically applicable;
+- rollout-based plant identification with training/validation split hashes and
+  residual metrics, never silently replacing the declared physical model;
+- reference PID/state-feedback/LQR evaluations and controller-plugin results
+  through the same action limits, delay, disturbance, replay, and Failure
+  Capsule contracts;
+- cross-backend and sim/recorded/shadow comparison at named unit-bearing
+  tolerances, with the first control-contract divergence retained.
+
+Acceptance requires a browser-readable `control-dynamics-report` that binds the
+plant, operating point, controller, actuator/sensor contracts, experiment input,
+backend/runtime, metrics, tolerance registry, state hashes, and replay. Every
+analysis must run headless and from `SimClock`; rendering is never required.
+
+### Ordered implementation slices
+
+1. Define versioned sensor-validation and control-dynamics report schemas plus
+   unit-bearing tolerance registries.
+2. Make sensor sample phase, latency, noise, calibration, and fault order
+   explicit for the existing flagship observation set.
+3. Add actuator dynamics and deterministic plant experiment inputs without
+   exposing backend-specific handles through `rne_robot` or `rne_physics`.
+4. Add linearization, controllability/observability, time-domain, and
+   frequency-domain analysis over recorded deterministic trajectories.
+5. Evaluate the unchanged mobile-lift controller on Rapier and MuJoCo, then the
+   Gazebo adapter, and package the first divergence into a Failure Capsule.
+6. Reuse the same reports for recorded playback, shadow, and the bounded
+   physical path before expanding to another robot or sensor family.
 
 ## Stop conditions
 

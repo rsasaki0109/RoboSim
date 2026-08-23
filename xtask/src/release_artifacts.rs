@@ -20,7 +20,7 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 6;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 7;
 /// Archive-bound independently extracted rehearsal report schema.
 pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Installed Python public-API contract schema.
@@ -32,7 +32,7 @@ pub(crate) const MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Independently produced installed flagship reproduction report schema.
 pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 1;
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 11] = [
     ("rne_asset_cli", "rne-asset"),
     ("rne_compatibility_suite", "rne-compatibility"),
     ("rne_accelerator_contract", "rne-accelerator-conformance"),
@@ -41,6 +41,8 @@ const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
     ("rne_hardware_gateway", "rne-hardware-mock-device"),
+    ("rne_hardware_gateway", "rne-simulator-conformance"),
+    ("rne_hardware_gateway", "rne-simulator-mock-adapter"),
     ("flagship_validation_workflow", "rne-flagship-proof"),
 ];
 const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
@@ -71,13 +73,14 @@ const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT: &str = "archive-install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT_KIND: &str = "rne_archive_install_rehearsal";
-const INSTALL_CHECK_IDS: [&str; 11] = [
+const INSTALL_CHECK_IDS: [&str; 12] = [
     "robot_replay",
     "flagship_proof",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
     "hardware_adapter",
+    "simulator_adapter",
     "accelerator_protocol",
     "controller_plugin",
     "compatibility_corpus",
@@ -85,7 +88,7 @@ const INSTALL_CHECK_IDS: [&str; 11] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 81] = [
+const BUNDLE_FILES: [(&str, &str); 86] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -109,6 +112,10 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
     (
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
+    ),
+    (
+        "docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md",
+        "docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md",
     ),
     (
         "docs/ACCELERATOR_PROTOCOL.md",
@@ -161,6 +168,22 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
     (
         "assets/tasks/diff_drive_goal.task.json",
         "assets/tasks/diff_drive_goal.task.json",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/runtime.json",
+        "adapters/simulator/reference/runtime.json",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/world.sdf",
+        "adapters/simulator/reference/world.sdf",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/robot.urdf",
+        "adapters/simulator/reference/robot.urdf",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/adapter.toml",
+        "adapters/simulator/reference/adapter.toml",
     ),
     (
         "adapters/mjx/accelerator.toml",
@@ -796,7 +819,7 @@ pub(crate) fn validate_readiness_release_reports(
                     .get(*id)
                     .is_some_and(|status| status == "passed")
             }),
-        "readiness release report must retain all eleven passing installed workflows"
+        "readiness release report must retain all twelve passing installed workflows"
     );
     anyhow::ensure!(
         !release.members.is_empty(),
@@ -861,7 +884,7 @@ pub(crate) fn validate_readiness_release_reports(
     );
     anyhow::ensure!(
         install.all_passed(),
-        "readiness install report must pass all eleven canonical checks"
+        "readiness install report must pass all twelve canonical checks"
     );
     anyhow::ensure!(
         release.installed_workflows == install.verdicts(),
@@ -2051,6 +2074,9 @@ fn run_install_rehearsal(
     let scale = bin_dir.join(native_binary_name("rne-scenario-scale", target));
     let hardware_conformance = bin_dir.join(native_binary_name("rne-hardware-conformance", target));
     let hardware_mock = bin_dir.join(native_binary_name("rne-hardware-mock-device", target));
+    let simulator_conformance =
+        bin_dir.join(native_binary_name("rne-simulator-conformance", target));
+    let simulator_mock = bin_dir.join(native_binary_name("rne-simulator-mock-adapter", target));
     let accelerator_conformance =
         bin_dir.join(native_binary_name("rne-accelerator-conformance", target));
     let accelerator_mock =
@@ -2246,6 +2272,60 @@ fn run_install_rehearsal(
         &serde_json::Value::String("passed".to_string()),
     );
 
+    let simulator_report = output_dir.join("simulator-adapter-conformance.json");
+    let simulator_passed = run_check_command(
+        "external simulator adapter conformance",
+        bundle_dir,
+        &simulator_conformance,
+        &[
+            OsString::from("--adapter"),
+            simulator_mock.into_os_string(),
+            OsString::from("--adapter-arg"),
+            OsString::from("--simulator-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("gazebo_sim_fixture"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--simulator-version"),
+            OsString::from("--adapter-arg"),
+            OsString::from("8.9.0"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--task-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("rne.diff_drive.sensor_goal.v1"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--task-sha256"),
+            OsString::from("--adapter-arg"),
+            OsString::from("532d2e76854cecbc09e5f8d985486c2f9548a3f39a17865a59f10d86dd08e3ca"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--observation-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("9"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--action-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("2"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--fixed-delta-ticks"),
+            OsString::from("--adapter-arg"),
+            OsString::from("16666667"),
+            OsString::from("--runtime-manifest"),
+            bundle_dir
+                .join("adapters/simulator/reference/runtime.json")
+                .into_os_string(),
+            OsString::from("--task"),
+            bundle_dir
+                .join("assets/tasks/diff_drive_goal.task.json")
+                .into_os_string(),
+            OsString::from("--output"),
+            simulator_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &simulator_report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    );
+
     let accelerator_report = output_dir.join("accelerator-protocol-conformance.json");
     let reference_accelerator_passed = run_check_command(
         "external accelerator protocol conformance",
@@ -2345,6 +2425,7 @@ fn run_install_rehearsal(
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
         check("hardware_adapter", hardware_passed),
+        check("simulator_adapter", simulator_passed),
         check("accelerator_protocol", accelerator_passed),
         check("controller_plugin", plugin_passed),
         check("compatibility_corpus", compatibility_passed),

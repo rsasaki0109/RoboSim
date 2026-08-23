@@ -1,4 +1,4 @@
-schema_version = 3
+schema_version = 4
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 
 [[route]]
@@ -47,9 +47,9 @@ minimum_accepted = 1
 issue_template = ".github/ISSUE_TEMPLATE/external-system-evidence.yml"
 independent_owner_required = true
 author_assistance_allowed = true
-qualifying_kinds = ["physics_backend", "hardware_adapter"]
+qualifying_kinds = ["physics_backend", "hardware_adapter", "simulator_adapter"]
 audited_nonqualifying_kinds = ["accelerator_adapter"]
 required_metadata = ["owner", "repository", "revision", "kind"]
 required_artifacts = ["subject", "report"]
-conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization", "accelerator_adapter.task_spec", "accelerator_adapter.adapter_arguments", "accelerator_adapter.accelerator_manifest", "accelerator_adapter.runtime_contract"]
-form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "accelerator_manifest", "runtime_contract", "report", "conformance_command", "safety", "verification"]
+conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization", "simulator_adapter.task_spec", "simulator_adapter.adapter_arguments", "simulator_adapter.runtime_manifest", "simulator_adapter.runtime_artifacts", "accelerator_adapter.task_spec", "accelerator_adapter.adapter_arguments", "accelerator_adapter.accelerator_manifest", "accelerator_adapter.runtime_contract"]
+form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "simulator_runtime_manifest", "simulator_runtime_artifacts", "accelerator_manifest", "runtime_contract", "report", "conformance_command", "safety", "verification"]

@@ -413,7 +413,8 @@ than rewriting the installed authoring surface.
 The readiness tracker's v2 external-certification contract closes the final
 report-substitution gap before real outreach: each independent source revision
 must retain the exact controller library and manifest, physics implementation
-or source bundle, or hardware adapter plus TaskSpec and normalized launch
+or source bundle, simulator adapter plus TaskSpec and content-addressed runtime
+files, or hardware adapter plus TaskSpec and normalized launch
 arguments. The gate rehashes those subjects and compares file identity, size,
 task identity, and dimensions to the passing report. Human review still proves
 ownership and independence; the machine gate proves the accepted report belongs
@@ -430,7 +431,7 @@ The companion external-intake registry fixes three public submission routes
 for task reproductions, controller plugins, and backend/hardware/accelerator
 systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
 manifests, runtime contracts, arguments, and process reports separately; these
-do not count as the external physics backend or hardware adapter required for
+do not count as the external physics backend, simulator adapter, or hardware adapter required for
 1.0.
 Required GitHub forms collect immutable revisions, subject bytes, typed
 reports, commands, dates, and safety/independence declarations; CI validates
@@ -491,7 +492,7 @@ RNE 1.0 is allowed only when all of the following are true:
   without an unplanned breaking change;
 - at least two external projects reproduce a task and Failure Capsule without
   repository-author assistance;
-- at least one third-party plugin and one external backend or hardware adapter
+- at least one third-party plugin and one external backend, simulator adapter, or hardware adapter
   pass the published conformance kit;
 - the flagship workflow installs from release artifacts and passes on Windows
   and Linux;

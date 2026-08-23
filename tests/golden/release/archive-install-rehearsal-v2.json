@@ -9,13 +9,13 @@
   "bundle_root": "rne-0.2.0-x86_64-pc-windows-msvc",
   "release_report": {
     "path": "release-report.json",
-    "size_bytes": 1416,
-    "sha256": "4c7f8444b88320dae9382dcd022d19e5c455a8bbb9cc56148f17ca967d066293"
+    "size_bytes": 1451,
+    "sha256": "b4bf87ee1d3feead7bed2688828d4b88280ccf4b5a4e8675e19a47a9f0b84bfe"
   },
   "checksum_manifest": {
     "path": "SHA256SUMS",
     "size_bytes": 258,
-    "sha256": "bc610e1bb741ac38dc4591bff018a54616422ebc00002ef98974a01210904dbb"
+    "sha256": "d3325e9ef8983bb4bcd5a1053dcf64c692ddaa2c11a2e57a091eaf9b32484f49"
   },
   "time_to_proof": {
     "path": "flagship-proof/time-to-proof-report.json",
@@ -23,7 +23,7 @@
     "sha256": "a2e1e13a90bb2b99ee48150f482a54dece08102f7d3cd5ce199da451e7d0218f"
   },
   "rehearsal": {
-    "schema_version": 6,
+    "schema_version": 7,
     "release_version": "0.2.0",
     "target": "x86_64-pc-windows-msvc",
     "status": "passed",
@@ -50,6 +50,10 @@
       },
       {
         "id": "hardware_adapter",
+        "status": "passed"
+      },
+      {
+        "id": "simulator_adapter",
         "status": "passed"
       },
       {

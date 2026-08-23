@@ -7,9 +7,10 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v3 adds an independently
-measured, archive-bound installed flagship route while continuing to
-distinguish qualifying physics/hardware kinds from audited nonqualifying
+`release/external-evidence-intake.toml`. Registry v4 adds a qualifying,
+content-addressed simulator-adapter route without relabelling simulators as
+hardware. It retains the independently measured installed flagship route and
+continues to distinguish qualifying systems from audited nonqualifying
 accelerator evidence. Validate the registry, this guide, and all required
 issue-form fields before publishing a release:
 
@@ -156,8 +157,9 @@ to match the manifest. See [Controller plugin SDK](PLUGIN_SDK.md).
 
 Use
 `.github/ISSUE_TEMPLATE/external-system-evidence.yml` for an independently
-maintained `physics_backend`, `hardware_adapter`, or `accelerator_adapter`.
-Exactly one passing physics backend or hardware adapter is required for 1.0;
+maintained `physics_backend`, `hardware_adapter`, `simulator_adapter`, or
+`accelerator_adapter`. Exactly one passing physics backend, hardware adapter,
+or simulator adapter is required for 1.0;
 an accelerator adapter is audited ecosystem evidence but cannot satisfy that
 gate.
 
@@ -185,6 +187,24 @@ rne-hardware-conformance \
 
 This process-protocol pass is not physical safety certification. See
 [External hardware adapter conformance](HARDWARE_ADAPTER_CONFORMANCE.md).
+
+Simulator submissions include the exact TaskSpec, normalized adapter argument
+list, runtime manifest, and the world, robot-model, and adapter-config bytes in
+manifest order. Run the installed fixed-step kit:
+
+```bash
+rne-simulator-conformance \
+  --adapter path/to/adapter \
+  --subject path/to/tested-subject \
+  --runtime-manifest path/to/runtime.json \
+  --task path/to/task.json \
+  --output path/to/simulator-conformance.json
+```
+
+The readiness audit rehashes every retained file, binds the handshake simulator
+identity and exact fixed step to the TaskSpec and runtime manifest, and reruns
+report validation. See
+[External simulator adapter conformance](EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md).
 
 Accelerator submissions retain the exact adapter subject, TaskSpec,
 `accelerator.toml`, `runtime.toml`, normalized ordered argument list, and the

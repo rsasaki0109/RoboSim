@@ -53,7 +53,7 @@ sha256sum --check SHA256SUMS
 
 On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 `release-report.json` records the tested commit, Rust/Cargo versions, target,
-Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the eleven
+Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the twelve
 `installed_workflows` verdicts, and every bundle-member digest. The
 `flagship_proof` verdict is the bundled indoor mobile-manipulation success,
 expected failure, browser inspector, and verified Failure Capsule workflow on
@@ -105,6 +105,25 @@ rehearsal. From its top-level directory:
   --task assets/tasks/diff_drive_goal.task.json \
   --allow-hil \
   --output hardware-adapter-conformance.json
+./bin/rne-simulator-conformance \
+  --adapter ./bin/rne-simulator-mock-adapter \
+  --runtime-manifest adapters/simulator/reference/runtime.json \
+  --task assets/tasks/diff_drive_goal.task.json \
+  --output simulator-adapter-conformance.json \
+  --adapter-arg --simulator-id \
+  --adapter-arg gazebo_sim_fixture \
+  --adapter-arg --simulator-version \
+  --adapter-arg 8.9.0 \
+  --adapter-arg --task-id \
+  --adapter-arg rne.diff_drive.sensor_goal.v1 \
+  --adapter-arg --task-sha256 \
+  --adapter-arg 532d2e76854cecbc09e5f8d985486c2f9548a3f39a17865a59f10d86dd08e3ca \
+  --adapter-arg --observation-width \
+  --adapter-arg 9 \
+  --adapter-arg --action-width \
+  --adapter-arg 2 \
+  --adapter-arg --fixed-delta-ticks \
+  --adapter-arg 16666667
 ./bin/rne-accelerator-conformance \
   --adapter ./bin/rne-accelerator-protocol-mock \
   --adapter-arg --transcript \
@@ -230,7 +249,7 @@ cargo run --locked -p xtask -- release-bundle \
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
-reruns all eleven schema-v6 installed-artifact checks. Its flagship check runs
+reruns all twelve schema-v7 installed-artifact checks. Its flagship check runs
 the packaged mobile-manipulation binary with `--cross-backend` and retains the
 Rapier/MuJoCo success and intentional-failure reports, both verified replays,
 TaskSpec, unit-bearing comparison, browser inspector, and verified Failure
