@@ -21,7 +21,8 @@ use rne_ai::{
 };
 use rne_asset_cli::{
     failure_capsule, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
-    INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
+    INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION, TIME_TO_PROOF_REPORT_KIND,
+    TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
 };
 use rne_assets::{load_scene_bundle, scene_dependency_paths};
 use rne_core::{SimDuration, SimTime};
@@ -40,6 +41,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use uuid::Uuid;
 
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
@@ -58,6 +60,7 @@ const BLACKOUT_DIMENSION: &str = "perception_blackout";
 const DEPARTURE_DIMENSION: &str = "traffic_departure_delay_s";
 const SPEED_DIMENSION: &str = "traffic_speed_delta_m_s";
 const EXPECTED_FAILURE_CONTRACT: &str = "perception_stream_alive";
+const TIME_TO_PROOF_TARGET_MS: u64 = 15 * 60 * 1_000;
 const ROBOT_NAME: &str = "mm_mobile_lift";
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
 const TRAFFIC_NAME: &str = "aisle_vehicle_1";
@@ -621,6 +624,7 @@ struct CrossBackendReport {
 struct Cli {
     output: PathBuf,
     cross_backend: bool,
+    machine_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -644,14 +648,32 @@ struct InstalledFlagshipProofReport {
     artifacts: Vec<InstalledProofArtifact>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct TimeToProofReport {
+    kind: &'static str,
+    schema_version: u32,
+    status: &'static str,
+    task_id: &'static str,
+    machine_label: String,
+    operating_system: &'static str,
+    architecture: &'static str,
+    measurement_scope: &'static str,
+    elapsed_ms: u64,
+    target_ms: u64,
+    within_target: bool,
+    installed_proof_report: InstalledProofArtifact,
+    failure_capsule_manifest: InstalledProofArtifact,
+}
+
 fn main() {
-    if let Err(error) = run() {
+    let started = Instant::now();
+    if let Err(error) = run(started) {
         eprintln!("flagship validation failed: {error:#}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<()> {
+fn run(started: Instant) -> Result<()> {
     let cli = parse_cli()?;
     let output = cli.output;
     if output.exists() {
@@ -798,6 +820,9 @@ fn run() -> Result<()> {
     write_pretty_json(&summary_path, &report)?;
     create_and_verify_failure_capsule(&output, cli.cross_backend)?;
     write_installed_proof_report(&output, &report)?;
+    if let Some(machine_label) = cli.machine_label {
+        write_time_to_proof_report(&output, machine_label, started.elapsed())?;
+    }
 
     if cross_backend_evidence
         .as_ref()
@@ -815,6 +840,16 @@ fn run() -> Result<()> {
         output.display()
     );
     Ok(())
+}
+
+fn installed_proof_artifact(output: &Path, relative: &str) -> Result<InstalledProofArtifact> {
+    let bytes = fs::read(output.join(relative))
+        .with_context(|| format!("could not read installed proof artifact {relative}"))?;
+    Ok(InstalledProofArtifact {
+        path: relative.to_string(),
+        size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+    })
 }
 
 fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport) -> Result<()> {
@@ -836,18 +871,7 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
     paths.sort_unstable();
     let artifacts = paths
         .into_iter()
-        .map(|relative| {
-            let bytes = fs::read(output.join(relative))
-                .with_context(|| format!("could not read installed proof artifact {relative}"))?;
-            Ok(InstalledProofArtifact {
-                path: relative.to_string(),
-                size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-                sha256: Sha256::digest(&bytes)
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect(),
-            })
-        })
+        .map(|relative| installed_proof_artifact(output, relative))
         .collect::<Result<Vec<_>>>()?;
     let report = InstalledFlagshipProofReport {
         kind: INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
@@ -862,6 +886,36 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
         artifacts,
     };
     write_pretty_json(&output.join("installed-proof-report.json"), &report)
+}
+
+fn write_time_to_proof_report(
+    output: &Path,
+    machine_label: String,
+    elapsed: std::time::Duration,
+) -> Result<()> {
+    let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    let within_target = elapsed_ms <= TIME_TO_PROOF_TARGET_MS;
+    let report = TimeToProofReport {
+        kind: TIME_TO_PROOF_REPORT_KIND,
+        schema_version: TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+        status: if within_target { "passed" } else { "failed" },
+        task_id: TASK_ID,
+        machine_label,
+        operating_system: std::env::consts::OS,
+        architecture: std::env::consts::ARCH,
+        measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report",
+        elapsed_ms,
+        target_ms: TIME_TO_PROOF_TARGET_MS,
+        within_target,
+        installed_proof_report: installed_proof_artifact(output, "installed-proof-report.json")?,
+        failure_capsule_manifest: installed_proof_artifact(output, "failure-capsule/capsule.json")?,
+    };
+    write_pretty_json(&output.join("time-to-proof-report.json"), &report)?;
+    anyhow::ensure!(
+        within_target,
+        "installed flagship proof took {elapsed_ms} ms, exceeding the {TIME_TO_PROOF_TARGET_MS} ms target"
+    );
+    Ok(())
 }
 
 fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Result<()> {
@@ -909,20 +963,43 @@ fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Resu
 }
 
 fn parse_cli() -> Result<Cli> {
+    parse_cli_args(std::env::args().skip(1))
+}
+
+fn parse_cli_args(mut arguments: impl Iterator<Item = String>) -> Result<Cli> {
     let mut output = None;
     let mut cross_backend = false;
-    for argument in std::env::args().skip(1) {
-        if argument == "--cross-backend" {
-            cross_backend = true;
-        } else if argument.starts_with('-') {
-            bail!("unknown flagship argument `{argument}`");
-        } else if output.replace(PathBuf::from(argument)).is_some() {
-            bail!("expected at most one output-directory argument");
+    let mut machine_label = None;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--cross-backend" => cross_backend = true,
+            "--measure-on" => {
+                let label = arguments
+                    .next()
+                    .context("--measure-on requires a non-empty machine label")?;
+                anyhow::ensure!(
+                    !label.trim().is_empty() && label.chars().count() <= 160,
+                    "--measure-on machine label must contain 1 to 160 characters"
+                );
+                anyhow::ensure!(
+                    machine_label.replace(label).is_none(),
+                    "--measure-on may be specified only once"
+                );
+            }
+            other if other.starts_with('-') => {
+                bail!("unknown flagship argument `{other}`");
+            }
+            other => {
+                if output.replace(PathBuf::from(other)).is_some() {
+                    bail!("expected at most one output-directory argument");
+                }
+            }
         }
     }
     Ok(Cli {
         output: output.unwrap_or_else(|| PathBuf::from("artifacts/flagship-validation")),
         cross_backend,
+        machine_label,
     })
 }
 
@@ -1498,6 +1575,34 @@ run.onchange=()=>{slider.value=0;draw()};slider.oninput=draw;draw();
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measurement_cli_requires_one_bounded_machine_label() {
+        let cli = parse_cli_args(
+            [
+                "proof".to_string(),
+                "--measure-on".to_string(),
+                "lab-workstation-a".to_string(),
+            ]
+            .into_iter(),
+        )
+        .expect("measurement CLI");
+        assert_eq!(cli.output, PathBuf::from("proof"));
+        assert_eq!(cli.machine_label.as_deref(), Some("lab-workstation-a"));
+
+        assert!(parse_cli_args(["--measure-on".to_string()].into_iter()).is_err());
+        assert!(parse_cli_args(["--measure-on".to_string(), " ".to_string()].into_iter()).is_err());
+        assert!(parse_cli_args(
+            [
+                "--measure-on".to_string(),
+                "a".to_string(),
+                "--measure-on".to_string(),
+                "b".to_string(),
+            ]
+            .into_iter(),
+        )
+        .is_err());
+    }
 
     #[test]
     fn seeded_dimensions_round_trip_and_reject_unknown_names() {

@@ -1578,6 +1578,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "time_to_proof_report",
+            u64::from(rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
             "install_rehearsal_report",
             u64::from(release_artifacts::INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION),
         ),

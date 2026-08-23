@@ -107,7 +107,7 @@ The manifest, report, and attestation receipt schemas are registered as
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The archive-bound install result is separately registered as
-`evidence.archive_install_rehearsal_report = 1`.
+`evidence.archive_install_rehearsal_report = 2`.
 The report check order is fixed and a committed golden captures the current
 honest baseline. `manifest_sha256` binds the complete normalized input,
 including external identities and support fields. The retained 36-check
@@ -230,9 +230,10 @@ references `archive`, `attestation`, `archive_attestation_verification`,
 retained tag and commit. The release report must say the checkout was clean,
 tag-matched, reproducible, supply-chain clean, and passing all eleven installed
 workflows. `install_report` is the strict
-`rne_archive_install_rehearsal` schema-v1 wrapper: it fixes the archive file,
-size, digest, extracted bundle root, release report, checksum manifest, and
-schema-v6 eleven-check rehearsal. `attestation` is the exact JSON Sigstore bundle
+`rne_archive_install_rehearsal` schema-v2 wrapper: it fixes the archive file,
+size, digest, extracted bundle root, release report, checksum manifest,
+hardware-named time-to-proof report, and schema-v6 eleven-check rehearsal.
+`attestation` is the exact JSON Sigstore bundle
 emitted by `actions/attest@v4`; both verification fields are strict
 `rne_github_attestation_verification` schema-v1 receipts, not raw CLI output.
 

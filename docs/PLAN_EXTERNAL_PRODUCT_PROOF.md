@@ -151,8 +151,10 @@ Work proceeds in this order, one mergeable slice at a time:
    release bundle.
 4. **Delivered in the rehearsal contract; tagged evidence pending:** add
    Windows and Linux archive-install rehearsals for the proof command.
-5. Measure time to proof on named reference machines and retain the result as
-   timing-only evidence.
+5. **Measurement path delivered; independent run pending:** use
+   `rne-flagship-proof OUTPUT --measure-on MACHINE` to retain a schema-v1,
+   proof-bound timing artifact, then collect it on named external reference
+   machines.
 6. Publish a copy-paste external reproduction guide and ask the first external
    project to run it without maintainer intervention.
 
