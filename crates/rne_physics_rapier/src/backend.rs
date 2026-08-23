@@ -13,10 +13,10 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointState, MultibodyLink,
-    PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability,
-    PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
-    RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointMotorGainModel,
+    JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
+    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -878,6 +878,17 @@ fn apply_motor_command(
             JointActuation::RevoluteEffort { .. } | JointActuation::PrismaticEffort { .. } => None,
         };
         if let Some((position, velocity, stiffness, damping, max_force)) = motor {
+            let gain_model = world
+                .get::<JointMotorGainModel>(entity)
+                .copied()
+                .unwrap_or_default();
+            joint.set_motor_model(
+                axis,
+                match gain_model {
+                    JointMotorGainModel::AccelerationBased => MotorModel::AccelerationBased,
+                    JointMotorGainModel::ForceBased => MotorModel::ForceBased,
+                },
+            );
             joint.set_motor(
                 axis,
                 position as f32,
@@ -1517,6 +1528,14 @@ mod tests {
     }
 
     fn run_revolute_actuation(command: JointActuation) -> JointState {
+        run_revolute_actuation_with_model(command, 1.0, None)
+    }
+
+    fn run_revolute_actuation_with_model(
+        command: JointActuation,
+        mass_kg: f64,
+        gain_model: Option<JointMotorGainModel>,
+    ) -> JointState {
         let mut backend = RapierBackend::new();
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
@@ -1537,7 +1556,10 @@ mod tests {
         ));
         let child = spawn_named(&mut world, "actuation_child");
         world.entity_mut(child).insert((
-            RigidBody::default(),
+            RigidBody {
+                mass_kg,
+                ..RigidBody::default()
+            },
             Collider::sphere(0.05),
             MultibodyLink,
             Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
@@ -1551,10 +1573,43 @@ mod tests {
             },
             command,
         ));
+        if let Some(gain_model) = gain_model {
+            world.entity_mut(child).insert(gain_model);
+        }
         for _ in 0..30 {
             step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
         }
         *world.get::<JointState>(child).expect("joint state")
+    }
+
+    #[test]
+    fn explicit_gain_model_reaches_the_backend_joint() {
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "gain_parent");
+        let child = spawn_named(&mut world, "gain_child");
+        world.entity_mut(child).insert((
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::X,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                lower_rad: Some(-1.0),
+                upper_rad: Some(1.0),
+            },
+            JointActuation::RevolutePosition {
+                target_position_rad: 0.4,
+                stiffness_nm_per_rad: 5.0,
+                damping_nm_s_per_rad: 1.0,
+                max_effort_nm: 10.0,
+            },
+            JointMotorGainModel::ForceBased,
+        ));
+        let mut joint = GenericJoint::from(RevoluteJointBuilder::new(Vector3::x_axis()).build());
+        apply_motor_command(&world, child, JointAxis::AngX, &mut joint).unwrap();
+        assert_eq!(
+            joint.motor_model(JointAxis::AngX),
+            Some(MotorModel::ForceBased)
+        );
     }
 
     #[test]

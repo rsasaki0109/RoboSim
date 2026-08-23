@@ -20,6 +20,7 @@ const TRACE_KIND: &str = "rne_controller_action_trace";
 const RAPIER_TRACE_KIND: &str = "rne_openarm_backend_trace";
 const FAILURE_KIND: &str = "rne_controller_contract_failure";
 const FIXED_DELTA_TICKS: u64 = 16_666_667;
+const ACTUATION_CONFIG_KIND: &str = "rne_revolute_position_actuation_config";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +50,28 @@ struct IntentionalFailure {
     kind: String,
     inject_at_step: u64,
     expected_first_violation: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActuationConfig {
+    kind: String,
+    schema_version: u32,
+    backend_id: String,
+    motor_model: String,
+    solver_iterations: usize,
+    fixed_delta_ticks: u64,
+    joints: Vec<JointActuationConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JointActuationConfig {
+    joint_name: String,
+    link_name: String,
+    stiffness_nm_per_rad: f64,
+    damping_nm_s_per_rad: f64,
+    max_effort_nm: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,6 +117,7 @@ struct BackendTrace<'a> {
     controller_id: &'a str,
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
+    actuation_config_sha256: &'a str,
     fixed_delta_ticks: u64,
     initial_state_digest: u64,
     final_state_digest: u64,
@@ -115,6 +139,7 @@ struct FailureReport<'a> {
     controller_id: &'a str,
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
+    actuation_config_sha256: &'a str,
     injection_kind: &'a str,
     injected_step: u64,
     first_violation: &'a str,
@@ -145,12 +170,17 @@ fn run() -> Result<()> {
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json");
     let mut task_path = repo_root
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json");
+    let mut actuation_config_path =
+        repo_root.join("adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json");
     let mut output = repo_root.join("artifacts/openarm-cross-sim");
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--controller" => controller_path = required_path(&mut args, "--controller")?,
             "--task" => task_path = required_path(&mut args, "--task")?,
+            "--actuation-config" => {
+                actuation_config_path = required_path(&mut args, "--actuation-config")?
+            }
             "--output" => output = required_path(&mut args, "--output")?,
             other => bail!("unknown argument {other:?}"),
         }
@@ -160,14 +190,19 @@ fn run() -> Result<()> {
         .with_context(|| format!("read {}", controller_path.display()))?;
     let task_bytes =
         fs::read(&task_path).with_context(|| format!("read {}", task_path.display()))?;
+    let actuation_config_bytes = fs::read(&actuation_config_path)
+        .with_context(|| format!("read {}", actuation_config_path.display()))?;
     let controller: ControllerSpec = serde_json::from_slice(&controller_bytes)
         .with_context(|| format!("parse {}", controller_path.display()))?;
     let task: TaskSpec = serde_json::from_slice(&task_bytes)
         .with_context(|| format!("parse {}", task_path.display()))?;
-    validate(&controller, &task)?;
+    let actuation_config: ActuationConfig = serde_json::from_slice(&actuation_config_bytes)
+        .with_context(|| format!("parse {}", actuation_config_path.display()))?;
+    validate(&controller, &task, &actuation_config)?;
 
     let controller_sha256 = sha256(&controller_bytes);
     let task_sha256 = sha256(&task_bytes);
+    let actuation_config_sha256 = sha256(&actuation_config_bytes);
     let actions = compile_actions(&controller);
     fs::create_dir_all(&output)?;
     let action_path = output.join("controller-actions.json");
@@ -188,8 +223,8 @@ fn run() -> Result<()> {
 
     let action_trace_sha256 = sha256(&fs::read(&action_path)?);
 
-    let first = rollout(&repo_root, &controller, &actions)?;
-    let replay = rollout(&repo_root, &controller, &actions)?;
+    let first = rollout(&repo_root, &controller, &actuation_config, &actions)?;
+    let replay = rollout(&repo_root, &controller, &actuation_config, &actions)?;
     anyhow::ensure!(
         first.final_digest == replay.final_digest && first.observations == replay.observations,
         "Rapier replay differed for the exact same controller trace"
@@ -222,6 +257,7 @@ fn run() -> Result<()> {
             controller_id: &controller.controller_id,
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
+            actuation_config_sha256: &actuation_config_sha256,
             fixed_delta_ticks: FIXED_DELTA_TICKS,
             initial_state_digest: first.initial_digest,
             final_state_digest: first.final_digest,
@@ -246,6 +282,7 @@ fn run() -> Result<()> {
             controller_id: &controller.controller_id,
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
+            actuation_config_sha256: &actuation_config_sha256,
             injection_kind: &failure.kind,
             injected_step: failure.inject_at_step,
             first_violation: &failure.expected_first_violation,
@@ -264,7 +301,11 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn validate(controller: &ControllerSpec, task: &TaskSpec) -> Result<()> {
+fn validate(
+    controller: &ControllerSpec,
+    task: &TaskSpec,
+    actuation_config: &ActuationConfig,
+) -> Result<()> {
     task.validate()?;
     anyhow::ensure!(
         controller.kind == KIND && controller.schema_version == SCHEMA_VERSION,
@@ -355,6 +396,40 @@ fn validate(controller: &ControllerSpec, task: &TaskSpec) -> Result<()> {
             && controller.intentional_failure.expected_first_violation == "action_width_mismatch",
         "intentional failure contract is unsupported"
     );
+    anyhow::ensure!(
+        actuation_config.kind == ACTUATION_CONFIG_KIND
+            && actuation_config.schema_version == 1
+            && actuation_config.backend_id == "rne_rapier"
+            && actuation_config.motor_model == "force_based_v1"
+            && actuation_config.solver_iterations > 0
+            && actuation_config.fixed_delta_ticks == FIXED_DELTA_TICKS,
+        "unsupported or invalid RNE actuation configuration"
+    );
+    anyhow::ensure!(
+        actuation_config
+            .joints
+            .iter()
+            .map(|joint| &joint.joint_name)
+            .eq(&controller.action_joint_order)
+            && actuation_config
+                .joints
+                .iter()
+                .map(|joint| &joint.link_name)
+                .eq(&controller.rne_actuator_link_order),
+        "RNE actuation configuration order differs from controller"
+    );
+    anyhow::ensure!(
+        actuation_config.joints.iter().all(|joint| {
+            [
+                joint.stiffness_nm_per_rad,
+                joint.damping_nm_s_per_rad,
+                joint.max_effort_nm,
+            ]
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+        }),
+        "RNE actuation configuration has invalid gains or effort limits"
+    );
     Ok(())
 }
 
@@ -391,12 +466,16 @@ fn compile_actions(controller: &ControllerSpec) -> Vec<ActionFrame> {
 fn rollout(
     repo_root: &Path,
     controller: &ControllerSpec,
+    actuation_config: &ActuationConfig,
     actions: &[ActionFrame],
 ) -> Result<Rollout> {
     let scene = repo_root.join("assets/scenes/openarm_v2_right_validation.rne.scene.toml");
-    let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations(&scene, 16)
-        .context("load OpenArm right-arm validation scene")?;
-    configure_motors(&mut sim, &controller.rne_actuator_link_order)?;
+    let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations(
+        &scene,
+        actuation_config.solver_iterations,
+    )
+    .context("load OpenArm right-arm validation scene")?;
+    configure_actuators(&mut sim, actuation_config)?;
     let initial_digest = hash_physics_state(sim.world());
     let mut observations = Vec::with_capacity(actions.len());
     for action in actions {
@@ -409,7 +488,7 @@ fn rollout(
                 position: *position,
             })
             .collect::<Vec<_>>();
-        sim.step_joint_position_targets(&targets);
+        sim.step_joint_position_actuation_targets(&targets);
         let positions = controller
             .rne_actuator_link_order
             .iter()
@@ -533,17 +612,17 @@ fn write_failure_replay(
     Ok(())
 }
 
-fn configure_motors(sim: &mut UrdfSceneSim, links: &[String]) -> Result<()> {
-    for (index, link) in links.iter().enumerate() {
-        let (stiffness, damping, max_force_nm) = match index {
-            0 | 1 => (230.0, 2.7, 40.0),
-            2 | 3 => (190.0, 2.2, 27.0),
-            4..=6 => (30.0, 1.5, 7.0),
-            _ => (30.0, 0.2, 7.0),
-        };
+fn configure_actuators(sim: &mut UrdfSceneSim, config: &ActuationConfig) -> Result<()> {
+    for joint in &config.joints {
         anyhow::ensure!(
-            sim.configure_named_position_motor(link, stiffness, damping, max_force_nm),
-            "missing OpenArm actuator {link}"
+            sim.configure_named_revolute_position_actuation(
+                &joint.link_name,
+                joint.stiffness_nm_per_rad,
+                joint.damping_nm_s_per_rad,
+                joint.max_effort_nm,
+            ),
+            "missing OpenArm actuator {}",
+            joint.link_name
         );
     }
     Ok(())
@@ -592,12 +671,19 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        validate(&controller, &task).unwrap();
+        let actuation_config: ActuationConfig = serde_json::from_slice(
+            &fs::read(fixture(
+                "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&controller, &task, &actuation_config).unwrap();
         let actions = compile_actions(&controller);
-        assert_eq!(actions.len(), 1_400);
+        assert_eq!(actions.len(), 1_800);
         assert_eq!(actions[0].action_sequence, 0);
         assert_eq!(actions[306].step, 307);
-        assert_eq!(actions.last().unwrap().sim_time_ticks, 23_333_333_800);
+        assert_eq!(actions.last().unwrap().sim_time_ticks, 30_000_000_600);
         assert_eq!(
             actions.last().unwrap().joint_position_target_rad,
             controller

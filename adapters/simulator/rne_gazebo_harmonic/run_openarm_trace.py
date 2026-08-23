@@ -54,6 +54,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def runtime_artifact_path(runtime_path: Path, role: str) -> Path:
+    runtime = load_json(runtime_path)
+    matches = [entry for entry in runtime["artifacts"] if entry["role"] == role]
+    if len(matches) != 1:
+        raise ValueError(f"runtime manifest must contain one {role} artifact")
+    path = runtime_path.parent / matches[0]["file"]
+    if path.stat().st_size != matches[0]["size_bytes"] or sha256(path) != matches[0]["sha256"]:
+        raise ValueError(f"runtime artifact {path.name} differs from manifest")
+    return path
+
+
 class AdapterProcess:
     def __init__(self, adapter: Path, runtime: Path, task: Path) -> None:
         self.process = subprocess.Popen(
@@ -208,6 +219,8 @@ def run_intentional_failure(
     controller: dict[str, Any],
     action_artifact: dict[str, Any],
     clean_observations: list[dict[str, Any]],
+    runtime_manifest_sha256: str,
+    adapter_config_sha256: str,
 ) -> dict[str, Any]:
     injection = controller["intentional_failure"]
     inject_step = injection["inject_at_step"]
@@ -281,6 +294,8 @@ def run_intentional_failure(
         "controller_id": controller["controller_id"],
         "controller_sha256": sha256(args.controller),
         "action_trace_sha256": sha256(args.actions),
+        "runtime_manifest_sha256": runtime_manifest_sha256,
+        "adapter_config_sha256": adapter_config_sha256,
         "injection_kind": injection["kind"],
         "injected_step": inject_step,
         "first_violation": injection["expected_first_violation"],
@@ -307,6 +322,10 @@ def main() -> int:
     actions = load_json(args.actions)
     task_sha256 = sha256(args.task)
     controller_sha256 = sha256(args.controller)
+    runtime_manifest_sha256 = sha256(args.runtime_manifest)
+    adapter_config_sha256 = sha256(
+        runtime_artifact_path(args.runtime_manifest, "adapter_config")
+    )
     if (
         actions.get("kind") != "rne_controller_action_trace"
         or actions.get("task_id") != task.get("task_id")
@@ -325,7 +344,16 @@ def main() -> int:
     )
     if first != replay or first_digest != replay_digest:
         raise RuntimeError("Gazebo replay differed for the exact same controller trace")
-    failure = run_intentional_failure(args, task, task_sha256, controller, actions, first)
+    failure = run_intentional_failure(
+        args,
+        task,
+        task_sha256,
+        controller,
+        actions,
+        first,
+        runtime_manifest_sha256,
+        adapter_config_sha256,
+    )
     write_json(
         args.output / "gazebo-success-trace.json",
         {
@@ -338,6 +366,8 @@ def main() -> int:
             "controller_id": controller["controller_id"],
             "controller_sha256": controller_sha256,
             "action_trace_sha256": sha256(args.actions),
+            "runtime_manifest_sha256": runtime_manifest_sha256,
+            "adapter_config_sha256": adapter_config_sha256,
             "fixed_delta_ticks": FIXED_DELTA_TICKS,
             "final_state_digest": first_digest,
             "replay_final_state_digest": replay_digest,

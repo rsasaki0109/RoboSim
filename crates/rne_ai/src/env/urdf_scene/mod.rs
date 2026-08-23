@@ -105,9 +105,9 @@ use rne_deformable::{
 use rne_ecs::{Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,
-    PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc,
-    RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
+    JointMotorGainModel, MultibodyLink, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId,
+    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{Joint, JointKind, Link};
@@ -1369,6 +1369,42 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Applies targets to explicitly configured, unit-bearing revolute position
+    /// actuators and steps one simulation tick.
+    ///
+    /// Only links carrying [`JointActuation::RevolutePosition`] are updated.
+    /// Unknown links and other actuation modes are ignored, so changing mode is
+    /// always an explicit operation. Gains and the effort ceiling configured by
+    /// [`Self::configure_named_revolute_position_actuation`] are retained.
+    pub fn step_joint_position_actuation_targets(
+        &mut self,
+        targets: &[UrdfJointPositionTarget<'_>],
+    ) {
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            let Some(JointActuation::RevolutePosition {
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+                ..
+            }) = self.world.get::<JointActuation>(entity).copied()
+            else {
+                continue;
+            };
+            self.world
+                .entity_mut(entity)
+                .insert(JointActuation::RevolutePosition {
+                    target_position_rad: target.position,
+                    stiffness_nm_per_rad,
+                    damping_nm_s_per_rad,
+                    max_effort_nm,
+                });
+        }
+        self.step_physics();
+    }
+
     /// Updates named joint position targets **without stepping** the
     /// simulation.
     ///
@@ -1516,6 +1552,56 @@ impl UrdfSceneSim {
         motor.stiffness = stiffness;
         motor.gain = damping;
         motor.max_force = max_force;
+        true
+    }
+
+    /// Configures one named revolute link with a unit-explicit position servo.
+    ///
+    /// Stiffness is expressed in N·m/rad, damping in N·m·s/rad, and maximum
+    /// effort in N·m. The initial target is the measured joint position, falling
+    /// back to the authored joint state before the first physics step. This
+    /// prevents configuration itself from commanding a discontinuous move.
+    /// Returns false for a missing/non-revolute link or invalid parameters.
+    pub fn configure_named_revolute_position_actuation(
+        &mut self,
+        link_name: &str,
+        stiffness_nm_per_rad: f64,
+        damping_nm_s_per_rad: f64,
+        max_effort_nm: f64,
+    ) -> bool {
+        if [stiffness_nm_per_rad, damping_nm_s_per_rad, max_effort_nm]
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return false;
+        }
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        if self.world.get::<RevoluteJointDesc>(entity).is_none() {
+            return false;
+        }
+        let target_position_rad = self
+            .backend
+            .multibody_joint_position(self.physics_world, entity)
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.position)
+                })
+            });
+        let Some(target_position_rad) = target_position_rad else {
+            return false;
+        };
+        self.world.entity_mut(entity).insert((
+            JointActuation::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            },
+            JointMotorGainModel::ForceBased,
+        ));
         true
     }
 
@@ -1797,6 +1883,37 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.target_position, 0.35);
         assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn unit_explicit_position_actuation_retains_gains_and_updates_target() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        assert!(sim.configure_named_revolute_position_actuation("shoulder_link", 12.0, 3.0, 4.0,));
+        sim.step_joint_position_actuation_targets(&[UrdfJointPositionTarget {
+            link_name: "shoulder_link",
+            position: 0.35,
+        }]);
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        assert_eq!(
+            sim.world().get::<JointActuation>(shoulder),
+            Some(&JointActuation::RevolutePosition {
+                target_position_rad: 0.35,
+                stiffness_nm_per_rad: 12.0,
+                damping_nm_s_per_rad: 3.0,
+                max_effort_nm: 4.0,
+            })
+        );
+        assert_eq!(
+            sim.world().get::<JointMotorGainModel>(shoulder),
+            Some(&JointMotorGainModel::ForceBased)
+        );
+        assert!(!sim.configure_named_revolute_position_actuation(
+            "shoulder_link",
+            f64::NAN,
+            3.0,
+            4.0,
+        ));
     }
 
     #[test]

@@ -269,6 +269,21 @@ pub struct JointMotor {
     pub max_force: f64,
 }
 
+/// Selects how a backend interprets position/velocity servo gains.
+///
+/// The default preserves the historical mass-normalized response. Controllers
+/// that declare gains in force or torque units must opt into [`Self::ForceBased`]
+/// and retain that choice as part of their configuration evidence.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JointMotorGainModel {
+    /// Gains produce a target acceleration and are normalized by body inertia.
+    #[default]
+    AccelerationBased,
+    /// Gains produce force/torque directly in the units declared by actuation.
+    ForceBased,
+}
+
 /// Unit-explicit actuation command for a one-degree-of-freedom joint.
 ///
 /// Physics backends apply this component before each fixed step. Commands with

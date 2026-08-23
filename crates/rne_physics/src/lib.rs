@@ -16,8 +16,8 @@ pub use backend::{
 };
 pub use components::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
-    JointState, MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    JointMotorGainModel, JointState, MultibodyLink, PhysicsMaterial, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
 pub use hash::hash_physics_state;

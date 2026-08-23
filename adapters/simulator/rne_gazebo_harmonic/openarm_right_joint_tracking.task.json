@@ -50,7 +50,7 @@
       {"name": "tracking_complete", "kind": "success"},
       {"name": "joint_limit_violation", "kind": "failure"}
     ],
-    "max_episode_steps": 1400
+    "max_episode_steps": 1800
   },
   "reset": {
     "seed_strategy": "split_mix64_lane_episode_v1",

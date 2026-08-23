@@ -64,6 +64,9 @@ python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
   --output artifacts/openarm-cross-sim
 python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_cross_sim_report.py \
   --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_control_dynamics_report.py \
+  --trace-root artifacts/openarm-cross-sim \
+  --output artifacts/openarm-cross-sim
 ```
 
 The successful comparison gates both final tracking errors and the final
@@ -72,3 +75,10 @@ divergence is retained as a non-gating dynamics diagnostic. The intentional
 controller fault truncates the nine-element action at step 307; both RNE and
 Gazebo identify that exact first violation, and Gazebo proves that rejection
 did not advance state before accepting the corrected action.
+
+The control-dynamics report evaluates the complete trajectory rather than only
+the final pose. It binds the RNE force-based actuation configuration and Gazebo
+runtime/configuration hashes, then records per-joint RMSE, IAE, ISE, terminal
+bias, position range, peak velocity, and the first URDF position/velocity-limit
+violation. `needs_tuning` is a valid diagnostic result and must not be converted
+to `passed` by widening a tolerance.

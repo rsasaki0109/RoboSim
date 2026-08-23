@@ -248,10 +248,20 @@ plant, operating point, controller, actuator/sensor contracts, experiment input,
 backend/runtime, metrics, tolerance registry, state hashes, and replay. Every
 analysis must run headless and from `SimClock`; rendering is never required.
 
+The first OpenArm report is intentionally stricter than the existing final-pose
+proof. It evaluates the complete trajectory with RMSE, IAE, ISE, terminal bias,
+peak velocity, and measured position range for every joint. URDF position and
+velocity limits are hard contracts with explicit SI-unit epsilon values. A run
+that eventually reaches the goal still needs tuning when its transient response
+overshoots a hard limit or exceeds the registered tracking bound; the threshold
+must not be widened merely to make a backend pass.
+
 ### Ordered implementation slices
 
 1. Define versioned sensor-validation and control-dynamics report schemas plus
-   unit-bearing tolerance registries.
+   unit-bearing tolerance registries. The OpenArm time-domain report is the
+   first concrete control artifact; it must expose the first URDF position or
+   velocity violation rather than relying on final-pose error.
 2. Make sensor sample phase, latency, noise, calibration, and fault order
    explicit for the existing flagship observation set.
 3. Add actuator dynamics and deterministic plant experiment inputs without

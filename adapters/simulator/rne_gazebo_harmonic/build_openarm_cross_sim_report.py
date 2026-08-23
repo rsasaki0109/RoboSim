@@ -71,6 +71,9 @@ def main() -> int:
     actions = load(output / "controller-actions.json")
     task_path = root / "adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json"
     controller_path = root / "adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json"
+    rapier_actuation_path = root / "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json"
+    gazebo_runtime_path = root / "adapters/simulator/rne_gazebo_harmonic/runtime.json"
+    gazebo_adapter_config_path = root / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json"
     task = load(task_path)
     controller = load(controller_path)
 
@@ -84,6 +87,15 @@ def main() -> int:
             or value.get("action_trace_sha256") != sha256(output / "controller-actions.json")
         ):
             raise ValueError("backend evidence is not bound to the same inputs")
+    for value in (rapier, rapier_failure):
+        if value.get("actuation_config_sha256") != sha256(rapier_actuation_path):
+            raise ValueError("Rapier evidence is not bound to its actuation configuration")
+    for value in (gazebo, gazebo_failure):
+        if (
+            value.get("runtime_manifest_sha256") != sha256(gazebo_runtime_path)
+            or value.get("adapter_config_sha256") != sha256(gazebo_adapter_config_path)
+        ):
+            raise ValueError("Gazebo evidence is not bound to its runtime/configuration")
     if len(rapier["observations"]) != len(gazebo["observations"]):
         raise ValueError("backend traces differ in length")
 
@@ -226,8 +238,18 @@ def main() -> int:
         ),
         artifact(
             root,
+            "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
+            "rapier_actuation_config",
+        ),
+        artifact(
+            root,
             "adapters/simulator/rne_gazebo_harmonic/runtime.json",
             "gazebo_runtime_manifest",
+        ),
+        artifact(
+            root,
+            "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json",
+            "gazebo_adapter_config",
         ),
         artifact(
             root,

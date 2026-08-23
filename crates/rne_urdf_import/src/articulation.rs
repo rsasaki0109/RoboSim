@@ -155,8 +155,9 @@ fn attach_joint_actuator(world: &mut World, robot: Entity, joint_entity: Entity)
     let limits = ActuatorLimits {
         min_velocity_rad_s: finite_or_default(-joint.limits.max_velocity, -20.0),
         max_velocity_rad_s: finite_or_default(joint.limits.max_velocity, 20.0),
+        min_position_rad: finite_or_default_allow_zero(joint.limits.lower, -f64::INFINITY),
+        max_position_rad: finite_or_default_allow_zero(joint.limits.upper, f64::INFINITY),
         max_effort_nm: finite_or_default(joint.limits.max_effort, 100.0),
-        ..ActuatorLimits::default()
     };
     world.entity_mut(joint_entity).insert(Actuator {
         robot,
@@ -170,6 +171,14 @@ fn attach_joint_actuator(world: &mut World, robot: Entity, joint_entity: Entity)
 
 fn finite_or_default(value: f64, default: f64) -> f64 {
     if value.is_finite() && value.abs() > f64::EPSILON {
+        value
+    } else {
+        default
+    }
+}
+
+fn finite_or_default_allow_zero(value: f64, default: f64) -> f64 {
+    if value.is_finite() {
         value
     } else {
         default
@@ -311,6 +320,14 @@ mod tests {
         assert_eq!(joint.lower_m, Some(0.0));
         assert_eq!(joint.upper_m, Some(0.15));
         assert!(world.get::<JointMotor>(slider).is_some());
+        let actuator = world
+            .get::<Actuator>(spawned.joints["slider_joint"])
+            .expect("prismatic actuator");
+        assert_eq!(actuator.limits.min_position_rad, 0.0);
+        assert_eq!(actuator.limits.max_position_rad, 0.15);
+        assert_eq!(actuator.limits.min_velocity_rad_s, -0.5);
+        assert_eq!(actuator.limits.max_velocity_rad_s, 0.5);
+        assert_eq!(actuator.limits.max_effort_nm, 20.0);
     }
 
     #[test]
