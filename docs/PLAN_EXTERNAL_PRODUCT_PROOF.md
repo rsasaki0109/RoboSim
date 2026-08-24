@@ -279,6 +279,21 @@ plant, operating point, controller, actuator/sensor contracts, experiment input,
 backend/runtime, metrics, tolerance registry, state hashes, and replay. Every
 analysis must run headless and from `SimClock`; rendering is never required.
 
+This is a sustained investment area rather than a one-off OpenArm demo. RNE
+will treat the complete sampled-data loop as the product surface: physical
+plant, sensor sampling and transport, estimator, controller, actuator
+realization, and safety limits. Controller algorithms remain plugins or
+reference evidence; the engine owns the typed timing, units, constraints,
+experiments, comparison, and replay contracts that make those algorithms
+auditable.
+
+The control track must also distinguish model classes honestly. Frequency-domain
+margins are reported only for a declared linear operating model and validity
+range. Nonlinear, saturated, hybrid, or time-varying behavior is evaluated with
+bounded rollouts and explicit counterexamples rather than being summarized by
+an invalid single margin. Solver-internal state may never stand in for a
+controller-visible measurement or estimator output.
+
 ### Engineering quality gates
 
 Sensor and dynamics work is promoted by measured gates rather than feature
@@ -346,6 +361,44 @@ milestones, in dependency order:
    payload, friction, inertia, sensor delay/drop, and actuator degradation. A
    selected failing point opens its exact trace, first violated requirement,
    replay, and model/config hashes rather than only an aggregate heat map.
+
+### Committed sensor and dynamics expansion
+
+After the existing bias boundaries, work proceeds in the following order. Each
+stage ends in a versioned experiment, fixed requirements, a passing case, a
+smallest failing case, and portable evidence before the next stage starts.
+
+1. **Sensor timing and availability:** sweep consecutive dropout length,
+   latency, jitter, stale age, and recovery timing. Define fail-closed and
+   bounded hold/predict policies explicitly, and prove that raw publication,
+   controller-visible observation, and estimator state remain distinguishable.
+2. **Actuator realization dynamics:** add measured command/position/velocity/
+   effort provenance, authority loss, rate limiting, deadband, saturation,
+   transport delay, and anti-windup evidence. A requested torque or position is
+   never reported as realized effort without a qualifying measurement.
+3. **Physical-plant uncertainty:** sweep payload mass and center of mass,
+   inertia, joint friction/damping, transmission efficiency, and cross-axis
+   coupling. Preserve the exact modified parameters in every trace and classify
+   divergence as plant error rather than controller or sensor error.
+4. **Identification and frequency response:** expand the isolated joint-5 lab
+   into declared per-joint and coupled MIMO operating regions. Retain excitation
+   sufficiency, coherence, residual whiteness, confidence bounds, and disjoint
+   validation data; reject a model outside its evidenced range.
+5. **State estimation:** evaluate velocity, disturbance, and IMU-derived state
+   estimates using innovation/residual statistics, convergence and recovery
+   time, and consistency measures such as NIS/NEES where their assumptions hold.
+   No estimator may read privileged backend truth in its execution path.
+6. **Constrained closed-loop control:** compare cascaded PID and justified
+   state-space/LQR baselines first, then consider feed-forward, disturbance
+   observers, or MPC only when the plant and estimator evidence supports them.
+   Comparisons use identical observations, actuator limits, references, and
+   perturbations and report tracking, effort, saturation, and robustness—not
+   only terminal pose.
+
+The immediate execution queue is sensor dropout/recovery, payload/inertia/
+friction uncertainty, and actuator-authority degradation. Camera/depth and 3DGS
+calibration remain the next geometric-sensor stage; they do not displace the
+joint-feedback and control-loop work above.
 
 The labs use one versioned experiment manifest and one requirements registry.
 The registry owns hard limits and engineering targets; report builders may not
