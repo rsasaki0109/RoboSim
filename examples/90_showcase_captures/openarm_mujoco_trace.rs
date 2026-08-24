@@ -498,7 +498,7 @@ fn run() -> Result<()> {
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json");
     let task_path = repo_root
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json");
-    let actuation_path =
+    let mut actuation_path =
         repo_root.join("adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json");
     let mut robot_asset_path = repo_root.join("assets/robots/openarm_v2_right.rne.robot.toml");
     let mut model_urdf_path =
@@ -513,6 +513,9 @@ fn run() -> Result<()> {
         match argument.as_str() {
             "--controller" => controller_path = required_path(&mut args, "--controller")?,
             "--actions" => actions_path = required_path(&mut args, "--actions")?,
+            "--actuation-config" => {
+                actuation_path = required_path(&mut args, "--actuation-config")?
+            }
             "--robot-asset" => robot_asset_path = required_path(&mut args, "--robot-asset")?,
             "--model-urdf" => model_urdf_path = required_path(&mut args, "--model-urdf")?,
             "--scene" => scene = required_path(&mut args, "--scene")?,

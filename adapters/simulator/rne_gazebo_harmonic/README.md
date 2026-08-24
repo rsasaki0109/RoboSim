@@ -53,6 +53,26 @@ python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_report.py \
   --output artifacts/openarm-payload/report
 ```
 
+Compile the joint-5 actuator-authority envelope from the zero-payload physical
+fixture with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_authority_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-authority/fixtures
+```
+
+The suite scales only the controlled joint's `max_effort_nm`, writes matching
+native and Gazebo actuation artifacts, and binds every model/config/runtime
+hash. After collecting the three backend traces, build the portable report:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_authority_report.py \
+  --fixture-root artifacts/openarm-authority/fixtures \
+  --trace-root artifacts/openarm-authority \
+  --output artifacts/openarm-authority/report
+```
+
 ## Run conformance
 
 From the repository root on Ubuntu:

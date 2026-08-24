@@ -649,6 +649,19 @@ outer state-feedback controller, requirements, and URDF effort limits remain
 unchanged. Two clean report builds produced the same SHA-256
 `bc7796627627708034ca623d899fbd08d7a201be6d23584a97d1d4ee30602d88`.
 
+The actuator-authority dimension now compiles the zero-payload fixture into a
+fixed `[1.0, 0.8, 0.6, 0.4, 0.2]` joint-5 effort-scale grid. Each case emits a
+strict native actuation config and matching Gazebo adapter/runtime manifest;
+MuJoCo now accepts the same explicit `--actuation-config` boundary as Rapier.
+All three backends pass the declared `0.6` supported minimum. At `0.2`
+(`1.4 N*m`), MuJoCo is the first backend to cross the unchanged `0.02 rad` RMSE
+gate at `0.02101 rad`; Rapier remains below the gate and Gazebo remains at
+`0.00570 rad` while its substep saturation rises from `0.128%` to `5.125%`.
+The report distinguishes the declared out-of-envelope status from the first
+actual tracking failure instead of forcing the backends to share an invented
+failure point. All 15 outcomes replay exactly and the deterministic report hash
+is `7f48895bcd5f74afc1d5edd4b0acf0849810dd263a9c32a78cd9ec26072a476a`.
+
 ### Track definition of done
 
 The hardening track is complete only when:
