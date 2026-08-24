@@ -47,7 +47,45 @@ class OpenArmControllerSuiteTests(unittest.TestCase):
         )
         self.assertEqual(self.pid["keyframes"], self.state["keyframes"])
         self.assertEqual(self.pid["intentional_failure"], self.state["intentional_failure"])
+        self.assertEqual(
+            self.pid["disturbance_contract"], self.state["disturbance_contract"]
+        )
+        self.assertEqual(
+            self.pid["disturbance_contract"],
+            self.suite["shared_disturbance_contract"],
+        )
         self.assertEqual(self.suite["observation_latency_samples"], 1)
+
+    def test_disturbance_is_a_bounded_unknown_actuator_realization_bias(self) -> None:
+        disturbance = self.suite["shared_disturbance_contract"]
+        self.assertEqual(disturbance["joint"], MODULE.JOINT)
+        self.assertEqual(disturbance["classification"], "actuator_realization_error")
+        self.assertEqual(disturbance["start_step"], 3241)
+        self.assertEqual(disturbance["end_step"], 3300)
+        self.assertEqual(disturbance["offset_rad"], 0.03)
+        self.assertEqual(
+            disturbance["controller_visibility"],
+            "unobserved_except_through_typed_joint_feedback",
+        )
+        target = [0.0] * len(self.order)
+        before, before_delta = RUNNER.apply_actuator_disturbance(
+            self.state, disturbance["start_step"] - 1, target
+        )
+        during, during_delta = RUNNER.apply_actuator_disturbance(
+            self.state, disturbance["start_step"], target
+        )
+        after, after_delta = RUNNER.apply_actuator_disturbance(
+            self.state, disturbance["end_step"] + 1, target
+        )
+        self.assertEqual(before, target)
+        self.assertEqual(after, target)
+        self.assertEqual(before_delta, after_delta)
+        self.assertEqual(during[self.joint_index], 0.03)
+        self.assertEqual(during_delta[self.joint_index], 0.03)
+        self.assertEqual(
+            [index for index, value in enumerate(during_delta) if value != 0.0],
+            [self.joint_index],
+        )
 
     def test_pid_controls_only_joint5_under_shared_limits(self) -> None:
         law = self.pid["feedback_law"]

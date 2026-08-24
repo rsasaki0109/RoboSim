@@ -416,8 +416,8 @@ increased.
    versioned experiment manifest. Generate frequency-response data where
    applicable, time-domain metrics, coupling matrices, and train/validation
    datasets for the OpenArm joints and gripper.
-6. **In progress -- model and controller suite:** add deterministic linearization and
-   controllability/observability checks, validate the current ARX path, and
+6. **Complete -- model and controller suite:** add deterministic linearization
+   and controllability/observability checks, validate the current ARX path, and
    compare PID plus one justified state-space baseline under identical limits,
    delay, and disturbance conditions.
 7. **Robustness envelope:** execute seeded sweeps over payload, inertia,
@@ -505,6 +505,19 @@ recorded above without changing the TaskSpec tolerance or actuator effort
 limits. The retained Rapier run contains 1800 typed observations with zero
 sample-phase error and an exact one-period (`16,666,667 ticks`) observation age
 for every frame.
+
+Slice 6 retains the Rapier-identified ARX model without refitting, proves the
+declared augmented system controllable and its dynamic output state observable
+with known input history, and places four stable discrete poles. PID and
+state-feedback use identical reference, observation latency, correction and
+integral bounds, actuator limits, and a one-second `+0.03 rad` actuator-target
+bias applied after controller limits. The controller sees that realization
+error only through typed delayed feedback. Across Rapier, MuJoCo, and Gazebo,
+state feedback limits the disturbance peak to `0.0111-0.0125 rad`, recovers
+inside the fixed `0.005 rad` band in `0.20-0.233 s`, and holds IAE to
+`0.00448-0.00576 rad*s`; each is inside the predeclared requirements. The
+report independently reproduces controller output, disturbance, and applied
+plant target for all 21,600 decisions with no realization mismatch.
 
 ### Track definition of done
 

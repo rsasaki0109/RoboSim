@@ -137,8 +137,15 @@ def reproduce_decisions(
             delayed,
             (action["step"] - 1) * controller["observation_contract"]["sample_period_ticks"],
         )
+        applied_target, disturbance = runner.apply_actuator_disturbance(
+            controller, action["step"], decision["target"]
+        )
         delta = max(
-            maximum_delta(decision["target"], actual["joint_position_target_rad"]),
+            maximum_delta(decision["target"], actual["joint_controller_target_rad"]),
+            maximum_delta(applied_target, actual["joint_position_target_rad"]),
+            maximum_delta(
+                disturbance, actual["joint_actuator_disturbance_rad"]
+            ),
             maximum_delta(decision["correction"], actual["joint_feedback_correction_rad"]),
             maximum_delta(
                 decision["integral_correction"], actual["joint_integral_correction_rad"]
@@ -167,6 +174,74 @@ def reproduce_decisions(
 
 def rms(values: list[float]) -> float:
     return math.sqrt(sum(value * value for value in values) / len(values))
+
+
+def disturbance_metrics(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    joint_index: int,
+    sample_rate_hz: float,
+) -> dict[str, Any]:
+    contract = controller["disturbance_contract"]
+    start_step = contract["start_step"]
+    end_step = contract["end_step"]
+    offset_rad = contract["offset_rad"]
+    recovery_band_rad = 0.005
+    recovery_hold_samples = 30
+    evaluation_end_step = min(len(observations), end_step + 120)
+    first_realization_mismatch = None
+    for frame in observations:
+        expected = offset_rad if start_step <= frame["step"] <= end_step else 0.0
+        actual = frame["joint_actuator_disturbance_rad"][joint_index]
+        active = frame["actuator_disturbance_active"]
+        if first_realization_mismatch is None and (
+            abs(actual - expected) > 1e-14 or active != (expected != 0.0)
+        ):
+            first_realization_mismatch = {
+                "step": frame["step"],
+                "expected_offset_rad": expected,
+                "observed_offset_rad": actual,
+                "observed_active": active,
+            }
+    errors = [
+        frame["joint_position_rad"][joint_index]
+        - frame["joint_reference_position_rad"][joint_index]
+        for frame in observations
+    ]
+    pulse_errors = errors[start_step - 1 : end_step]
+    evaluation_errors = errors[start_step - 1 : evaluation_end_step]
+    recovery_step = next(
+        (
+            step
+            for step in range(end_step + 1, evaluation_end_step - recovery_hold_samples + 2)
+            if all(
+                abs(errors[index]) <= recovery_band_rad
+                for index in range(step - 1, step - 1 + recovery_hold_samples)
+            )
+        ),
+        None,
+    )
+    recovery_time_s = (
+        None if recovery_step is None else (recovery_step - end_step) / sample_rate_hz
+    )
+    recovery_check_value_s = (
+        recovery_time_s
+        if recovery_time_s is not None
+        else (evaluation_end_step - end_step + 1) / sample_rate_hz
+    )
+    return {
+        "contract": contract,
+        "first_realization_mismatch": first_realization_mismatch,
+        "peak_tracking_error_rad": max(abs(value) for value in pulse_errors),
+        "iae_rad_s": sum(abs(value) for value in evaluation_errors) / sample_rate_hz,
+        "recovery_band_rad": recovery_band_rad,
+        "recovery_hold_samples": recovery_hold_samples,
+        "evaluation_end_step": evaluation_end_step,
+        "recovered": recovery_step is not None,
+        "recovery_step": recovery_step,
+        "recovery_time_s": recovery_time_s,
+        "recovery_check_value_s": recovery_check_value_s,
+    }
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -214,6 +289,10 @@ def main() -> int:
             or controller.get("action_joint_order") != order
         ):
             raise ValueError(f"{role} controller identity drifted")
+        if controller.get("disturbance_contract") != suite.get(
+            "shared_disturbance_contract"
+        ):
+            raise ValueError(f"{role} disturbance contract drifted")
         controller_artifacts[role] = controller
         role_root = root / role
         action_path = role_root / "controller-actions.json"
@@ -273,6 +352,9 @@ def main() -> int:
             ):
                 raise ValueError(f"{role}/{backend} trace or failure identity drifted")
             reproduction = reproduce_decisions(runner, controller, actions, observations)
+            disturbance = disturbance_metrics(
+                controller, observations, joint_index, manifest["sample_rate_hz"]
+            )
             step = plant.step_metrics(
                 actions,
                 observations,
@@ -314,6 +396,7 @@ def main() -> int:
                 "maximum_integral_correction_rad": maximum_integral,
                 "actuator_saturated_sample_fraction": saturation_fraction,
                 "controller_reproduction": reproduction,
+                "disturbance_rejection": disturbance,
                 "intentional_failure": {
                     "step": failure["first_violation_step"],
                     "kind": failure["first_violation"],
@@ -343,6 +426,8 @@ def main() -> int:
                     ),
                 ]
             )
+            if disturbance["first_realization_mismatch"] is not None:
+                raise ValueError(f"{role}/{backend} disturbance realization drifted")
             if role == "state_feedback":
                 all_checks.extend(
                     [
@@ -359,6 +444,29 @@ def main() -> int:
                         check(
                             requirements["controller.state.maximum_ramp_tracking_rmse_rad"],
                             ramp_rmse,
+                            f".{backend}",
+                        ),
+                        check(
+                            requirements[
+                                "controller.state.maximum_disturbance_peak_error_rad"
+                            ],
+                            disturbance["peak_tracking_error_rad"],
+                            f".{backend}",
+                        ),
+                        check(
+                            requirements[
+                                "controller.state.maximum_disturbance_recovery_time_s"
+                            ],
+                            disturbance["recovery_check_value_s"],
+                            f".{backend}",
+                            recovered=disturbance["recovered"],
+                            recovery_step=disturbance["recovery_step"],
+                        ),
+                        check(
+                            requirements[
+                                "controller.state.maximum_disturbance_iae_rad_s"
+                            ],
+                            disturbance["iae_rad_s"],
                             f".{backend}",
                         ),
                     ]
@@ -388,6 +496,20 @@ def main() -> int:
         check(
             requirements["controller.state.maximum_cross_backend_settling_delta_s"],
             max(state_settling) - min(state_settling),
+        )
+    )
+    state_recovery = [
+        metrics["state_feedback"][backend]["disturbance_rejection"][
+            "recovery_check_value_s"
+        ]
+        for backend in BACKENDS
+    ]
+    all_checks.append(
+        check(
+            requirements[
+                "controller.state.maximum_cross_backend_disturbance_recovery_delta_s"
+            ],
+            max(state_recovery) - min(state_recovery),
         )
     )
     pid_rapier_settling = metrics["pid"]["rne_rapier"]["step_response"]["settling_time_s"]
@@ -440,6 +562,7 @@ def main() -> int:
             "experiment_manifest_sha256": sha256(args.experiment_manifest.resolve()),
         },
         "model_design": state_law,
+        "disturbance_contract": suite["shared_disturbance_contract"],
         "backend_results": reports,
         "baseline_first_failure": baseline_failure,
         "first_failed_requirement": next(
@@ -463,8 +586,8 @@ def write_html(path: Path, report: dict[str, Any]) -> None:
     document = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenArm controller comparison</title><style>
 body{margin:0;background:#09121f;color:#eef5ff;font:14px system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.card{background:#132238;border:1px solid #2a4667;border-radius:10px;padding:14px}table{width:100%;border-collapse:collapse;margin:14px 0}th,td{border:1px solid #2a4667;padding:6px;text-align:right}th:first-child,td:first-child{text-align:left}canvas{width:100%;height:280px;background:#fff;border-radius:8px}.passed{color:#6ee7aa}.failed{color:#ff8b78}code{color:#b9ddff}</style></head><body><main><h1>OpenArm PID / state-space comparison</h1><div id="verdict"></div><div id="plots"></div><h2>Results</h2><div id="results" class="grid"></div><h2>Fixed checks</h2><div id="checks"></div><script>
 const r=__REPORT__,f=x=>x==null?'n/a':Number(x).toFixed(6),colors={rne_rapier:'#1261a0',mujoco_native:'#c2410c',gazebo_sim:'#15803d'};document.querySelector('#verdict').innerHTML=`<section class=card><p>Status: <b class=${r.status}>${r.status}</b></p><p>PID baseline first failure: <code>${r.baseline_first_failure.id}</code> (${f(r.baseline_first_failure.observed)} s)</p><p>First gating failure: <code>${r.first_failed_requirement?r.first_failed_requirement.id:'none'}</code></p></section>`;
-function plot(role){const d=r.plot_data.controllers[role],c=document.createElement('canvas');c.width=1160;c.height=280;const x=c.getContext('2d'),n=d.reference_rad.length;function line(v,color,w=1.3){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.25)/.65*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(d.reference_rad,'#111',1.7);Object.entries(d.backends).forEach(([k,v])=>line(v,colors[k]));const section=document.createElement('section');section.innerHTML=`<h2>${role}</h2>`;section.appendChild(c);return section}const plots=document.querySelector('#plots');plots.appendChild(plot('pid'));plots.appendChild(plot('state_feedback'));
-document.querySelector('#results').innerHTML=r.backend_results.map(b=>`<section class=card><h3>${b.role} / ${b.backend_id}</h3><p>settle: ${f(b.step_response.settling_time_s)} s</p><p>rise: ${f(b.step_response.rise_time_s)} s</p><p>overshoot: ${f(b.step_response.overshoot_fraction)}</p><p>ramp RMSE: ${f(b.ramp_tracking_rmse_rad)} rad</p><p>decision delta: ${f(b.controller_reproduction.maximum_numeric_delta_rad)} rad</p></section>`).join('');document.querySelector('#checks').innerHTML=`<table><tr><th>requirement</th><th>gate</th><th>observed</th><th>limit</th><th>status</th></tr>${r.checks.map(q=>`<tr><td>${q.id}</td><td>${q.gate}</td><td>${f(q.observed)} ${q.unit}</td><td>${q.maximum!=null?'≤ '+f(q.maximum):'≥ '+f(q.minimum)} ${q.unit}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`;
+function plot(role){const d=r.plot_data.controllers[role],c=document.createElement('canvas');c.width=1160;c.height=280;const x=c.getContext('2d'),n=d.reference_rad.length,dc=r.disturbance_contract;x.fillStyle='#ef444422';x.fillRect((dc.start_step-1)/(n-1)*c.width,0,(dc.end_step-dc.start_step+1)/(n-1)*c.width,c.height);function line(v,color,w=1.3){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.25)/.65*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(d.reference_rad,'#111',1.7);Object.entries(d.backends).forEach(([k,v])=>line(v,colors[k]));const section=document.createElement('section');section.innerHTML=`<h2>${role}</h2><p>Red band: unobserved +${dc.offset_rad} rad actuator-target bias pulse.</p>`;section.appendChild(c);return section}const plots=document.querySelector('#plots');plots.appendChild(plot('pid'));plots.appendChild(plot('state_feedback'));
+document.querySelector('#results').innerHTML=r.backend_results.map(b=>`<section class=card><h3>${b.role} / ${b.backend_id}</h3><p>settle: ${f(b.step_response.settling_time_s)} s</p><p>rise: ${f(b.step_response.rise_time_s)} s</p><p>overshoot: ${f(b.step_response.overshoot_fraction)}</p><p>ramp RMSE: ${f(b.ramp_tracking_rmse_rad)} rad</p><p>disturbance peak: ${f(b.disturbance_rejection.peak_tracking_error_rad)} rad</p><p>recovery: ${b.disturbance_rejection.recovery_time_s==null?'not recovered':f(b.disturbance_rejection.recovery_time_s)+' s'}</p><p>disturbance IAE: ${f(b.disturbance_rejection.iae_rad_s)} rad·s</p><p>decision delta: ${f(b.controller_reproduction.maximum_numeric_delta_rad)} rad</p></section>`).join('');document.querySelector('#checks').innerHTML=`<table><tr><th>requirement</th><th>gate</th><th>observed</th><th>limit</th><th>status</th></tr>${r.checks.map(q=>`<tr><td>${q.id}</td><td>${q.gate}</td><td>${f(q.observed)} ${q.unit}</td><td>${q.maximum!=null?'≤ '+f(q.maximum):'≥ '+f(q.minimum)} ${q.unit}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`;
 </script></main></body></html>""".replace("__REPORT__", payload)
     path.write_text(document, encoding="utf-8")
 

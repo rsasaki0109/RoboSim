@@ -206,7 +206,10 @@ checks controllability, and places four declared stable poles. A one-sample ARX
 predictor compensates the exact typed-observation latency. PID and state-space
 artifacts control only right joint 5 and share the same reference, sample time,
 latency, +/-0.04 rad feedback-correction bound, +/-0.015 rad integral-correction
-bound, target limits, actuator configuration, and intentional failure.
+bound, target limits, actuator configuration, intentional failure, and a
+declared one-second `+0.03 rad` actuator-target bias pulse. The pulse is applied
+after controller limits and is invisible to the controller except through the
+same delayed typed joint feedback.
 
 ```bash
 python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_controller_suite.py \
@@ -237,6 +240,13 @@ approximately 0.567 s, 0.550 s, and 0.467 s respectively. Its largest
 cross-backend settling delta is approximately 0.10 s, and every declared pole
 lies inside the unit circle. The PID replay distinguishes the 3.5 s deadline at
 step 571 from the first subsequent band exit at step 577.
+
+Under the shared actuator-realization disturbance, state-space control limits
+joint-5 peak error to approximately `0.0111-0.0125 rad`, recovers into the fixed
+`0.005 rad` band in `0.20-0.233 s`, and records `0.00448-0.00576 rad*s` IAE
+across Rapier, MuJoCo, and Gazebo. Every trace separately records reference,
+controller output, injected offset, and actual backend target; the report
+reproduces all four values rather than treating the pulse as a reference move.
 
 The committed 43-artifact controller proof verifies without loading Rapier,
 MuJoCo, or Gazebo:

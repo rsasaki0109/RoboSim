@@ -45,6 +45,8 @@ struct ControllerSpec {
     observation_contract: Option<ObservationContract>,
     #[serde(default)]
     feedback_law: Option<FeedbackLaw>,
+    #[serde(default)]
+    disturbance_contract: Option<DisturbanceContract>,
     keyframes: Vec<serde_json::Value>,
     intentional_failure: IntentionalFailure,
 }
@@ -60,6 +62,19 @@ struct ObservationContract {
     maximum_age_ticks: u64,
     required_status: JointFeedbackStatus,
     bootstrap_policy: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DisturbanceContract {
+    kind: String,
+    classification: String,
+    joint: String,
+    start_step: u64,
+    end_step: u64,
+    offset_rad: f64,
+    controller_visibility: String,
+    application_order: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -190,7 +205,10 @@ struct ObservationFrame {
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
     joint_reference_position_rad: Vec<f64>,
+    joint_controller_target_rad: Vec<f64>,
+    joint_actuator_disturbance_rad: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
+    actuator_disturbance_active: bool,
     joint_feedback_correction_rad: Vec<f64>,
     joint_integral_correction_rad: Vec<f64>,
     limited_effort_command_nm: Vec<f64>,
@@ -601,6 +619,26 @@ fn validate(
             && controller.rne_actuator_link_order.len() == width,
         "controller TaskSpec or joint order mismatch"
     );
+    if let Some(disturbance) = &controller.disturbance_contract {
+        anyhow::ensure!(
+            disturbance.kind == "additive_actuator_target_bias_pulse_v1"
+                && disturbance.classification == "actuator_realization_error"
+                && controller
+                    .action_joint_order
+                    .iter()
+                    .any(|joint| joint == &disturbance.joint)
+                && disturbance.start_step >= 1
+                && disturbance.start_step <= disturbance.end_step
+                && disturbance.end_step <= actions.actions.len() as u64
+                && disturbance.offset_rad.is_finite()
+                && disturbance.offset_rad != 0.0
+                && disturbance.controller_visibility
+                    == "unobserved_except_through_typed_joint_feedback"
+                && disturbance.application_order
+                    == "after_controller_limits_before_backend_actuation",
+            "invalid OpenArm actuator disturbance contract"
+        );
+    }
     match (&controller.observation_contract, &controller.feedback_law) {
         (Some(contract), Some(law)) => {
             anyhow::ensure!(
@@ -794,10 +832,9 @@ fn rollout(
             latest_controller_observation.as_ref(),
             sim.sim_time.ticks(),
         )?;
-        sim.step_targets(
-            &controller.rne_actuator_link_order,
-            &decision.target_position_rad,
-        )?;
+        let (applied_target, _) =
+            apply_actuator_disturbance(controller, action.step, &decision.target_position_rad)?;
+        sim.step_targets(&controller.rne_actuator_link_order, &applied_target)?;
         decisions.push(decision);
         state_hashes.push(hash_physics_state_v2(&sim.world));
         sim.sample(&mut bus)?;
@@ -1008,6 +1045,33 @@ fn controller_decision(
     })
 }
 
+fn apply_actuator_disturbance(
+    controller: &ControllerSpec,
+    step: u64,
+    controller_target: &[f64],
+) -> Result<(Vec<f64>, Vec<f64>)> {
+    let mut applied = controller_target.to_vec();
+    let mut disturbance = vec![0.0; controller_target.len()];
+    if let Some(contract) = &controller.disturbance_contract {
+        if (contract.start_step..=contract.end_step).contains(&step) {
+            let index = controller
+                .action_joint_order
+                .iter()
+                .position(|joint| joint == &contract.joint)
+                .context("disturbance joint is absent from the action order")?;
+            disturbance[index] = contract.offset_rad;
+            applied[index] += contract.offset_rad;
+        }
+    }
+    anyhow::ensure!(
+        applied
+            .iter()
+            .all(|value| value.is_finite() && (-3.0..=3.0).contains(value)),
+        "disturbed OpenArm target violates TaskSpec bounds"
+    );
+    Ok((applied, disturbance))
+}
+
 fn state_feedback_decision(
     controller: &ControllerSpec,
     law: &FeedbackLaw,
@@ -1186,7 +1250,25 @@ fn observation_frame(
         joint_position_rad: positions,
         joint_velocity_rad_s: velocities,
         joint_reference_position_rad: decision.reference_position_rad.clone(),
+        joint_controller_target_rad: decision.target_position_rad.clone(),
+        joint_actuator_disturbance_rad: targets
+            .iter()
+            .zip(&decision.target_position_rad)
+            .map(|(applied, commanded)| applied - commanded)
+            .collect(),
         joint_position_target_rad: targets,
+        actuator_disturbance_active: frame
+            .payload
+            .joints
+            .iter()
+            .zip(&decision.target_position_rad)
+            .any(|(joint, commanded)| match joint.command {
+                rne_data::JointCommandFeedback::Revolute {
+                    target_position_rad: Some(applied),
+                    ..
+                } => (applied - commanded).abs() > 0.0,
+                _ => false,
+            }),
         joint_feedback_correction_rad: decision.correction_rad.clone(),
         joint_integral_correction_rad: decision.integral_correction_rad.clone(),
         limited_effort_command_nm: efforts,
