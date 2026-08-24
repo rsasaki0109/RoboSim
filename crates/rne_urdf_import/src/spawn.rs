@@ -81,9 +81,6 @@ pub enum UrdfSpawnError {
     /// Referenced parent/child relationship is invalid.
     #[error("invalid joint graph: {0}")]
     InvalidGraph(String),
-    /// A declared inertial tensor is not physically valid.
-    #[error("invalid inertial properties for link {0}")]
-    InvalidInertia(String),
 }
 
 /// Spawns Robot, Link, and Joint entities from a parsed URDF model.
@@ -366,7 +363,9 @@ fn exact_link_inertia(
         izz_kg_m2: rotated[2][2],
     };
     if !inertia.is_valid() || !source.mass_kg.is_finite() || source.mass_kg <= 0.0 {
-        return Err(UrdfSpawnError::InvalidInertia(link_name.to_owned()));
+        return Err(UrdfSpawnError::InvalidGraph(format!(
+            "invalid inertial properties for link {link_name}"
+        )));
     }
     Ok(Some(inertia))
 }
@@ -504,6 +503,38 @@ mod tests {
         assert!((inertia.ixx_kg_m2 - 2.0).abs() < 1.0e-12);
         assert!((inertia.iyy_kg_m2 - 1.0).abs() < 1.0e-12);
         assert!((inertia.izz_kg_m2 - 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn invalid_declared_inertia_uses_the_compatible_graph_error() {
+        let document = parse_urdf_document(
+            r#"
+            <robot name="invalid_inertia">
+              <link name="base_link">
+                <inertial>
+                  <mass value="2.5"/>
+                  <inertia ixx="10" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+                </inertial>
+                <collision><geometry><box size="1 1 1"/></geometry></collision>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let error = spawn_urdf_document_with_config(
+            &mut World::new(),
+            &document,
+            UrdfSpawnConfig {
+                use_declared_inertial_masses: true,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            UrdfSpawnError::InvalidGraph(message)
+                if message == "invalid inertial properties for link base_link"
+        ));
     }
 
     #[test]
