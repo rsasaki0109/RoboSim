@@ -14,6 +14,7 @@
     {"id": "controller.state.maximum_disturbance_iae_rad_s", "gate": "closed_loop_performance", "unit": "rad*s", "maximum": 0.02},
     {"id": "controller.actuator.maximum_command_transport_delay_steps", "gate": "actuator_realization", "unit": "control_period_count", "maximum": 2},
     {"id": "controller.actuator.minimum_command_slew_rate_rad_s", "gate": "actuator_realization", "unit": "rad/s", "minimum": 0.15},
+    {"id": "controller.actuator.maximum_command_deadband_rad", "gate": "actuator_realization", "unit": "rad", "maximum": 0.001},
     {"id": "controller.state.maximum_cross_backend_disturbance_recovery_delta_s", "gate": "portability", "unit": "s", "maximum": 0.25},
     {"id": "controller.sensor.maximum_bias_realization_delta_rad", "gate": "measurement_integrity", "unit": "rad", "maximum": 0.000000000001},
     {"id": "controller.sensor.maximum_consecutive_dropout_frames", "gate": "measurement_integrity", "unit": "consecutive_frame_count", "maximum": 2},

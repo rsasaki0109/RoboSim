@@ -210,6 +210,7 @@ def disturbance_metrics(
     maximum_realization_delta_rad = 0.0
     realized_active_step_count = 0
     maximum_recomputed_applied_rate_rad_s = 0.0
+    maximum_recomputed_held_command_gap_rad = 0.0
     previous_expected_applied: list[float] | None = None
     for frame in observations:
         step = frame["step"]
@@ -237,6 +238,17 @@ def disturbance_metrics(
                     maximum_recomputed_applied_rate_rad_s,
                     abs(expected_applied[joint_index] - previous) * sample_rate_hz,
                 )
+            elif contract["kind"] == "actuator_command_deadband_pulse_v1":
+                if previous_expected_applied is None:
+                    raise ValueError("deadband has no previous expected applied target")
+                previous = previous_expected_applied[joint_index]
+                command_gap_rad = abs(controller_target[joint_index] - previous)
+                if command_gap_rad <= contract["deadband_rad"]:
+                    expected_applied[joint_index] = previous
+                    if command_gap_rad != 0.0:
+                        maximum_recomputed_held_command_gap_rad = max(
+                            maximum_recomputed_held_command_gap_rad, command_gap_rad
+                        )
             else:
                 raise ValueError("unsupported actuator disturbance contract")
         expected_disturbance = [
@@ -305,7 +317,11 @@ def disturbance_metrics(
                 else (
                     "applied_target_delta_is_clamped_to_declared_rate_times_fixed_delta"
                     if contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1"
-                    else "applied_target_equals_controller_target_plus_declared_bias"
+                    else (
+                        "applied_target_holds_previous_value_within_declared_deadband"
+                        if contract["kind"] == "actuator_command_deadband_pulse_v1"
+                        else "applied_target_equals_controller_target_plus_declared_bias"
+                    )
                 )
             ),
             "maximum_delta_rad": maximum_realization_delta_rad,
@@ -319,7 +335,16 @@ def disturbance_metrics(
                 else None
             ),
             "previous_applied_target_recomputed_from_trace": (
-                contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1"
+                contract["kind"]
+                in {
+                    "actuator_command_slew_rate_limit_pulse_v1",
+                    "actuator_command_deadband_pulse_v1",
+                }
+            ),
+            "maximum_recomputed_held_command_gap_rad": (
+                maximum_recomputed_held_command_gap_rad
+                if contract["kind"] == "actuator_command_deadband_pulse_v1"
+                else None
             ),
         },
         "peak_tracking_error_rad": max(abs(value) for value in pulse_errors),

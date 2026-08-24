@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
             "actuator_target_bias",
             "actuator_command_delay",
             "actuator_command_rate_limit",
+            "actuator_command_deadband",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         ),
@@ -110,6 +111,13 @@ def rate_limit_case_id(maximum_rate_rad_s: float) -> str:
     return f"rate-{milliradians_per_second:03d}mrad-s"
 
 
+def deadband_case_id(deadband_rad: float) -> str:
+    microradians = round(deadband_rad * 1_000_000.0)
+    if not math.isclose(deadband_rad, microradians / 1_000_000.0, abs_tol=1e-12):
+        raise ValueError("deadbands must resolve to whole microradians")
+    return f"deadband-{microradians:04d}urad"
+
+
 def compile_robustness_suite(
     compiler: Any,
     robustness_path: Path,
@@ -136,6 +144,7 @@ def compile_robustness_suite(
         "actuator_target_bias",
         "actuator_command_delay",
         "actuator_command_rate_limit",
+        "actuator_command_deadband",
         "joint_position_measurement_bias",
         "joint_feedback_publication_dropout",
     }
@@ -189,6 +198,10 @@ def compile_robustness_suite(
             "actuator_command_slew_rate_limit_pulse_v1",
             "actuator_rate_limit",
         ),
+        "actuator_command_deadband": (
+            "actuator_command_deadband_pulse_v1",
+            "actuator_deadband",
+        ),
         "joint_position_measurement_bias": (
             "additive_joint_position_bias_pulse_v1",
             "measurement_error",
@@ -208,6 +221,7 @@ def compile_robustness_suite(
     evaluation_key = {
         "actuator_command_delay": "delay_evaluation",
         "actuator_command_rate_limit": "rate_limit_evaluation",
+        "actuator_command_deadband": "deadband_evaluation",
         "joint_feedback_publication_dropout": "availability_evaluation",
     }.get(dimension_id, "evaluation")
     evaluation = manifest[evaluation_key]
@@ -225,6 +239,8 @@ def compile_robustness_suite(
             identifier = delay_case_id(value)
         elif dimension_id == "actuator_command_rate_limit":
             identifier = rate_limit_case_id(value)
+        elif dimension_id == "actuator_command_deadband":
+            identifier = deadband_case_id(value)
         elif dimension_id == "joint_position_measurement_bias":
             identifier = sensor_case_id(value)
         else:
@@ -269,6 +285,21 @@ def compile_robustness_suite(
                 if key not in {"unit", "values", "severity_order"}
             }
             contract["maximum_rate_rad_s"] = value
+            controller["disturbance_contract"] = contract
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_step",
+                "end_step",
+                "application_order",
+                "controller_visibility",
+            )
+        elif dimension_id == "actuator_command_deadband":
+            contract = {
+                key: item for key, item in dimension.items() if key not in {"unit", "values"}
+            }
+            contract["deadband_rad"] = value
             controller["disturbance_contract"] = contract
             fields = (
                 "kind",
@@ -380,6 +411,8 @@ def main() -> int:
             dimension_value = controller["disturbance_contract"]["delay_steps"]
         elif args.dimension == "actuator_command_rate_limit":
             dimension_value = controller["disturbance_contract"]["maximum_rate_rad_s"]
+        elif args.dimension == "actuator_command_deadband":
+            dimension_value = controller["disturbance_contract"]["deadband_rad"]
         elif args.dimension == "joint_position_measurement_bias":
             dimension_value = controller["measurement_fault_contract"]["offset_rad"]
         else:
@@ -399,6 +432,8 @@ def main() -> int:
             declaration["delay_steps"] = dimension_value
         elif args.dimension == "actuator_command_rate_limit":
             declaration["maximum_rate_rad_s"] = dimension_value
+        elif args.dimension == "actuator_command_deadband":
+            declaration["deadband_rad"] = dimension_value
         else:
             declaration["offset_rad"] = dimension_value
         suite["cases"].append(declaration)

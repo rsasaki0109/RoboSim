@@ -545,6 +545,16 @@ def apply_actuator_disturbance(
             and contract["maximum_rate_rad_s"] > 0.0
             and contract["start_step"] > 1
         )
+    elif kind == "actuator_command_deadband_pulse_v1":
+        valid_specific = (
+            set(contract) == common_keys | {"deadband_rad"}
+            and contract["classification"] == "actuator_deadband"
+            and isinstance(contract["deadband_rad"], (int, float))
+            and not isinstance(contract["deadband_rad"], bool)
+            and math.isfinite(contract["deadband_rad"])
+            and contract["deadband_rad"] >= 0.0
+            and contract["start_step"] > 1
+        )
     else:
         valid_specific = False
     if not valid_specific:
@@ -563,7 +573,7 @@ def apply_actuator_disturbance(
                     "actuator command delay source step is absent from history"
                 ) from error
             disturbance[index] = applied[index] - controller_target[index]
-        else:
+        elif kind == "actuator_command_slew_rate_limit_pulse_v1":
             if not applied_target_history:
                 raise RuntimeError(
                     "actuator command rate limit has no previous applied target"
@@ -576,6 +586,15 @@ def apply_actuator_disturbance(
                 max(controller_target[index], previous - maximum_delta_rad),
                 previous + maximum_delta_rad,
             )
+            disturbance[index] = applied[index] - controller_target[index]
+        else:
+            if not applied_target_history:
+                raise RuntimeError(
+                    "actuator command deadband has no previous applied target"
+                )
+            previous = applied_target_history[-1][index]
+            if abs(controller_target[index] - previous) <= contract["deadband_rad"]:
+                applied[index] = previous
             disturbance[index] = applied[index] - controller_target[index]
     if not all(math.isfinite(value) and -3.0 <= value <= 3.0 for value in applied):
         raise RuntimeError("disturbed OpenArm target violates TaskSpec bounds")

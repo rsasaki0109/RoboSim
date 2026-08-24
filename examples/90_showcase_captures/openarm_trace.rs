@@ -103,6 +103,16 @@ enum DisturbanceContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "actuator_command_deadband_pulse_v1")]
+    ActuatorCommandDeadbandPulseV1 {
+        classification: String,
+        joint: String,
+        start_step: u64,
+        end_step: u64,
+        deadband_rad: f64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1092,6 +1102,25 @@ fn apply_actuator_disturbance(
                     .clamp(previous - maximum_delta_rad, previous + maximum_delta_rad);
                 disturbance[index] = applied[index] - controller_target[index];
             }
+            DisturbanceContract::ActuatorCommandDeadbandPulseV1 {
+                joint,
+                start_step,
+                end_step,
+                deadband_rad,
+                ..
+            } if (*start_step..=*end_step).contains(&step) => {
+                let index = disturbance_joint_index(controller, joint)?;
+                let previous_target = applied_target_history
+                    .last()
+                    .context("actuator command deadband has no previous applied target")?;
+                let previous = *previous_target
+                    .get(index)
+                    .context("actuator command deadband previous target width drifted")?;
+                if (controller_target[index] - previous).abs() <= *deadband_rad {
+                    applied[index] = previous;
+                }
+                disturbance[index] = applied[index] - controller_target[index];
+            }
             _ => {}
         }
     }
@@ -1187,6 +1216,28 @@ fn validate_actuator_disturbance(
             classification == "actuator_rate_limit"
                 && maximum_rate_rad_s.is_finite()
                 && *maximum_rate_rad_s > 0.0
+                && *start_step > 1
+                && common_valid(
+                    classification,
+                    joint,
+                    *start_step,
+                    *end_step,
+                    controller_visibility,
+                    application_order,
+                )
+        }
+        DisturbanceContract::ActuatorCommandDeadbandPulseV1 {
+            classification,
+            joint,
+            start_step,
+            end_step,
+            deadband_rad,
+            controller_visibility,
+            application_order,
+        } => {
+            classification == "actuator_deadband"
+                && deadband_rad.is_finite()
+                && *deadband_rad >= 0.0
                 && *start_step > 1
                 && common_valid(
                     classification,

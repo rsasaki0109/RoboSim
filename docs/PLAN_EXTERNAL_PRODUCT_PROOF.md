@@ -409,10 +409,10 @@ actuator-authority envelope. The next slices are:
 1. **Complete:** add a source-step-verifiable actuator command-transport delay across
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
-2. **In progress:** the physical command slew-rate boundary is complete; continue the
-   actuator envelope with deadband, friction/damping,
-   inertia, and transmission-efficiency sweeps, retaining the smallest failing
-   value for each mechanism;
+2. **In progress:** the physical command slew-rate and command-deadband
+   boundaries are complete; continue the actuator and plant envelope with
+   friction/damping, inertia, and transmission-efficiency sweeps, retaining the
+   smallest failing value for each mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
@@ -629,9 +629,9 @@ drops and first fail three. At the failing boundary they reject exactly decision
 zero delta, and recover in one decision on fresh sequence 3243. The earliest
 violation is still capture sequence 3242, where the third consecutive
 publication is absent; the minimum replay stops there. Physical parameter
-sweeps, actuator-authority degradation, command delay, and command slew-rate
-limits are recorded below; deadband, friction/damping, and inertia boundaries
-remain open.
+sweeps, actuator-authority degradation, command delay, command slew-rate limits,
+and command deadband are recorded below; friction/damping, inertia, and
+transmission-efficiency boundaries remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending
@@ -642,6 +642,19 @@ Rapier, native MuJoCo, and Gazebo with 43/42/38 limited applications, while
 limited applications. All six boundary traces have zero independently
 recomputed realization delta. The deterministic browser-report SHA-256 is
 `d4efb1cd9214420e24445a7804b2bb32532d6c8fa6ebfa0c7a5683e1a6f5f540`.
+
+The command-deadband fixture recursively holds the previous applied joint-5
+target whenever the controller-command gap is inside a declared physical
+deadband. Its fixed `[0, 0.00025, 0.0005, 0.001, 0.002] rad` grid uses steps
+882 through 941, where all three backends physically approach both sides of
+the requirement boundary. Rapier, native MuJoCo, and Gazebo pass at `0.001 rad`
+with 28/31/29 held applications and first fail only the fixed actuator
+requirement at `0.002 rad` with 38/40/40 held applications. The maximum held
+command gaps span `0.982-0.999 mrad` at the passing boundary and
+`1.787-1.962 mrad` at the failing boundary. All six traces have zero
+independently recomputed realization delta, while peak error, IAE, and recovery
+remain green. The deterministic browser-report SHA-256 is
+`258a62ac880a6d9c5d6c22fbae9a577cdc0b6934b7351640ee4449c3fb097475`.
 
 The payload dimension now has a deterministic model-fixture compiler. It emits
 the same per-case URDF, robot asset, scene, and Gazebo runtime manifest for a

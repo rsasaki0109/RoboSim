@@ -40,6 +40,17 @@
       "application_order": "after_controller_limits_before_backend_actuation",
       "controller_visibility": "unobserved_except_through_typed_joint_feedback"
     },
+    "actuator_command_deadband": {
+      "kind": "actuator_command_deadband_pulse_v1",
+      "classification": "actuator_deadband",
+      "joint": "openarm_right_joint5",
+      "unit": "rad",
+      "values": [0.0, 0.00025, 0.0005, 0.001, 0.002],
+      "start_step": 882,
+      "end_step": 941,
+      "application_order": "after_controller_limits_before_backend_actuation",
+      "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+    },
     "joint_position_measurement_bias": {
       "kind": "additive_joint_position_bias_pulse_v1",
       "classification": "measurement_error",
@@ -95,6 +106,16 @@
       "controller.actuator.minimum_command_slew_rate_rad_s"
     ],
     "boundary_rule": "first_descending_grid_value_below_minimum_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "deadband_evaluation": {
+    "requirement_ids": [
+      "controller.state.maximum_disturbance_peak_error_rad",
+      "controller.state.maximum_disturbance_recovery_time_s",
+      "controller.state.maximum_disturbance_iae_rad_s",
+      "controller.actuator.maximum_command_deadband_rad"
+    ],
+    "boundary_rule": "smallest_grid_value_above_maximum_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
   },
   "availability_evaluation": {

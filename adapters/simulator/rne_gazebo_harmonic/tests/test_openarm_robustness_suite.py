@@ -62,6 +62,9 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertEqual(MODULE.rate_limit_case_id(0.15), "rate-150mrad-s")
         with self.assertRaisesRegex(ValueError, "milliradians per second"):
             MODULE.rate_limit_case_id(0.0005)
+        self.assertEqual(MODULE.deadband_case_id(0.001), "deadband-1000urad")
+        with self.assertRaisesRegex(ValueError, "whole microradians"):
+            MODULE.deadband_case_id(0.0000005)
 
     def test_sensor_bias_grid_preserves_raw_sensor_and_disables_actuator_bias(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
@@ -214,6 +217,48 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertAlmostEqual(
             disturbance[joint_index], maximum_delta_rad - current[joint_index]
         )
+        self.assertTrue(
+            all(
+                applied[index] == current[index]
+                for index in range(width)
+                if index != joint_index
+            )
+        )
+
+    def test_command_deadband_holds_previous_applied_target_inside_band(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "actuator_command_deadband",
+        )
+        self.assertEqual(suite["dimension_id"], "actuator_command_deadband")
+        self.assertEqual(
+            [
+                controller["disturbance_contract"]["deadband_rad"]
+                for controller in controllers.values()
+            ],
+            [0.0, 0.00025, 0.0005, 0.001, 0.002],
+        )
+        controller = controllers["deadband-2000urad"]
+        width = len(controller["action_joint_order"])
+        joint_index = controller["action_joint_order"].index("openarm_right_joint5")
+        start_step = controller["disturbance_contract"]["start_step"]
+        previous = [0.0] * width
+        current = [0.0] * width
+        current[joint_index] = 0.001
+        applied, disturbance = RUNNER.apply_actuator_disturbance(
+            controller,
+            start_step,
+            current,
+            [current] * start_step,
+            [previous] * (start_step - 1),
+        )
+        self.assertEqual(applied[joint_index], 0.0)
+        self.assertEqual(disturbance[joint_index], -0.001)
         self.assertTrue(
             all(
                 applied[index] == current[index]

@@ -106,10 +106,12 @@ fn run() -> Result<()> {
     let availability_failure = dimension_id == "joint_feedback_publication_dropout";
     let command_delay_failure = dimension_id == "actuator_command_delay";
     let command_rate_limit_failure = dimension_id == "actuator_command_rate_limit";
+    let command_deadband_failure = dimension_id == "actuator_command_deadband";
     let disturbance_start_step = match dimension_id {
-        "actuator_target_bias" | "actuator_command_delay" | "actuator_command_rate_limit" => {
-            required_u64(&report["dimension"], "start_step")?
-        }
+        "actuator_target_bias"
+        | "actuator_command_delay"
+        | "actuator_command_rate_limit"
+        | "actuator_command_deadband" => required_u64(&report["dimension"], "start_step")?,
         "joint_position_measurement_bias" => {
             required_u64(&report["dimension"], "start_controller_step")?
         }
@@ -158,6 +160,7 @@ fn run() -> Result<()> {
             }
         } else if !command_delay_failure
             && !command_rate_limit_failure
+            && !command_deadband_failure
             && observation.step >= disturbance_start_step
         {
             cumulative_iae_rad_s += (observation.joint_position_rad[JOINT_INDEX]
@@ -179,7 +182,7 @@ fn run() -> Result<()> {
             .map(|source| source.joint_controller_target_rad[JOINT_INDEX]);
         let source_relationship_delta_rad = expected_source_target_rad
             .map(|expected| (observation.joint_position_target_rad[JOINT_INDEX] - expected).abs());
-        let previous_applied_target_rad = command_rate_limit_failure
+        let previous_applied_target_rad = (command_rate_limit_failure || command_deadband_failure)
             .then(|| observation_index.checked_sub(1))
             .flatten()
             .and_then(|index| trace.observations.get(index))
@@ -195,6 +198,22 @@ fn run() -> Result<()> {
                     .clamp(previous - maximum_delta, previous + maximum_delta)
             });
         let rate_relationship_delta_rad = expected_rate_limited_target_rad
+            .map(|expected| (observation.joint_position_target_rad[JOINT_INDEX] - expected).abs());
+        let deadband_rad = command_deadband_failure
+            .then(|| dimension_value(failure))
+            .transpose()?;
+        let expected_deadband_target_rad =
+            previous_applied_target_rad
+                .zip(deadband_rad)
+                .map(|(previous, deadband)| {
+                    let commanded = observation.joint_controller_target_rad[JOINT_INDEX];
+                    if (commanded - previous).abs() <= deadband {
+                        previous
+                    } else {
+                        commanded
+                    }
+                });
+        let deadband_relationship_delta_rad = expected_deadband_target_rad
             .map(|expected| (observation.joint_position_target_rad[JOINT_INDEX] - expected).abs());
         frames.push(BehaviorReplayFrame {
             step: observation.step,
@@ -217,7 +236,7 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure && !command_delay_failure && !command_rate_limit_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
                 "actuator_delay_steps": delay_steps,
                 "actuator_source_step": source_step,
@@ -228,6 +247,9 @@ fn run() -> Result<()> {
                 "maximum_delta_rad": maximum_delta_rad,
                 "expected_rate_limited_target_rad": expected_rate_limited_target_rad,
                 "rate_relationship_delta_rad": rate_relationship_delta_rad,
+                "actuator_deadband_rad": deadband_rad,
+                "expected_deadband_target_rad": expected_deadband_target_rad,
+                "deadband_relationship_delta_rad": deadband_relationship_delta_rad,
                 "maximum": (!command_rate_limit_failure).then_some(requirement_limit),
                 "minimum": command_rate_limit_failure.then_some(requirement_limit),
                 "requirement_id": requirement_id,
@@ -280,6 +302,31 @@ fn run() -> Result<()> {
         format!(
             "OpenArm joint 5 command slew was limited to {observed:.6} rad/s at step {failure_step}, below the fixed {requirement_limit:.6} rad/s minimum"
         )
+    } else if command_deadband_failure {
+        let previous = trace
+            .observations
+            .get(
+                failure_index
+                    .checked_sub(1)
+                    .context("deadband failure has no predecessor")?,
+            )
+            .context("deadband predecessor is absent")?
+            .joint_position_target_rad[JOINT_INDEX];
+        let commanded = failure_observation.joint_controller_target_rad[JOINT_INDEX];
+        let expected = if (commanded - previous).abs() <= observed {
+            previous
+        } else {
+            commanded
+        };
+        anyhow::ensure!(
+            observed == dimension_value(failure)?
+                && (failure_observation.joint_position_target_rad[JOINT_INDEX] - expected).abs()
+                    <= 1e-14,
+            "replayed actuator command deadband relationship differs from the report"
+        );
+        format!(
+            "OpenArm joint 5 command deadband reached {observed:.6} rad at step {failure_step}, exceeding the fixed {requirement_limit:.6} rad maximum"
+        )
     } else {
         anyhow::ensure!(
             (cumulative_iae_rad_s - observed).abs() <= 1e-12,
@@ -331,6 +378,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
             "actuator_target_bias"
                 | "actuator_command_delay"
                 | "actuator_command_rate_limit"
+                | "actuator_command_deadband"
                 | "joint_position_measurement_bias"
                 | "joint_feedback_publication_dropout"
         ),
@@ -343,6 +391,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
         }
         "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
         "actuator_command_rate_limit" => "controller.actuator.minimum_command_slew_rate_rad_s",
+        "actuator_command_deadband" => "controller.actuator.maximum_command_deadband_rad",
         _ => "controller.state.maximum_disturbance_iae_rad_s",
     };
     anyhow::ensure!(

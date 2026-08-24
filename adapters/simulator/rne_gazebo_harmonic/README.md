@@ -469,3 +469,39 @@ cargo run --locked -p showcase_captures \
   --trace artifacts/openarm-command-rate-limit-robustness-lab/rate-100mrad-s/rne_rapier/rapier-success-trace.json \
   --output artifacts/openarm-command-rate-limit-robustness-lab/report/minimum-command-rate-limit-failure.rne-replay
 ```
+
+## Sweep the OpenArm actuator command deadband
+
+The sixth robustness dimension applies a physical command deadband to right
+joint 5 after controller limits and before backend actuation. During the pulse,
+the backend-facing target holds its previous applied value whenever the new
+controller command differs by no more than the declared deadband. The
+controller observes the result only through typed, one-period-latent joint
+feedback:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_deadband \
+  --output artifacts/openarm-command-deadband-robustness-lab
+```
+
+The fixed `[0, 0.00025, 0.0005, 0.001, 0.002] rad` grid exercises steps 882
+through 941. `0.001 rad` is the last supported case: Rapier, native MuJoCo,
+and Gazebo hold 28, 31, and 29 changing commands while passing every control
+performance gate. `0.002 rad` is the first unsupported case and produces 38,
+40, and 40 holds. The largest independently recomputed held gaps are
+`0.982-0.999 mrad` and `1.787-1.962 mrad` at the two boundary values, with
+zero realization delta on all six traces. Every backend therefore fails only
+the fixed `0.001 rad` actuator requirement at step 882; the browser report
+keeps peak error, IAE, and recovery as separate passing checks.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-deadband-robustness-lab \
+  --output artifacts/openarm-command-deadband-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-deadband-robustness-lab/report/openarm-command-deadband-robustness-report.json \
+  --trace artifacts/openarm-command-deadband-robustness-lab/deadband-2000urad/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-deadband-robustness-lab/report/minimum-command-deadband-failure.rne-replay
+```
