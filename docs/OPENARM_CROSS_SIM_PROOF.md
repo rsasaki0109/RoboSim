@@ -267,3 +267,10 @@ decisions with exact replay and produces mass-sensitive trajectories. It is not
 yet a passing portability result: the best evaluated declared gain mapping has
 `0.2125 rad` final maximum error without payload, so controller/actuator tuning
 and the fixed payload requirements report remain in progress.
+
+The first complete development matrix contains 15 traces. Rapier and MuJoCo
+pass the controlled joint-5 RMSE/final-error requirements for `0` through
+`0.50 kg`; `0.75 kg` is classified `failed_as_expected` against the fixed
+payload-capacity contract. Gazebo completes and exactly replays all five cases,
+but its baseline RMSE is outside the same `0.02 rad` requirement, so the
+cross-backend report correctly remains `needs_tuning`.

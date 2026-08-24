@@ -88,7 +88,7 @@ class GazeboOpenArmAdapter:
             raise ValueError("observation width must be joint positions followed by velocities")
         if self.action_width != len(self.joint_names):
             raise ValueError("action width must equal configured joint count")
-        self.actuation_mode, self.physics_substeps, self.effort_joint_count = (
+        self.actuation_mode, self.physics_substeps, self.effort_joint_indices = (
             validate_actuation(self.config, len(self.joint_names))
         )
         if self.runtime["fixed_delta_ticks"] != self.fixed_delta_ticks:
@@ -235,7 +235,7 @@ class GazeboOpenArmAdapter:
             command_kind, command = realize_joint_command(
                 self.config,
                 self.actuation_mode,
-                self.effort_joint_count,
+                self.effort_joint_indices,
                 index,
                 target,
                 current,

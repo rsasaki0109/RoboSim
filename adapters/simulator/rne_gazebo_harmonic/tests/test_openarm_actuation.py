@@ -14,7 +14,7 @@ def effort_config() -> dict:
     return {
         "actuation_mode": "effort_pd",
         "physics_substeps_per_control_step": 10,
-        "effort_joint_count": 2,
+        "effort_joint_indices": [0, 1],
         "position_gain_s_inv": 8.0,
         "maximum_velocity_rad_s": 2.0,
         "stiffness_nm_per_rad": [10.0, 20.0, 30.0],
@@ -27,7 +27,10 @@ def effort_config() -> dict:
 
 class OpenArmActuationTests(unittest.TestCase):
     def test_effort_pd_declares_limits_failure_behavior_and_substeps(self) -> None:
-        self.assertEqual(validate_actuation(effort_config(), 3), ("effort_pd", 10, 2))
+        self.assertEqual(
+            validate_actuation(effort_config(), 3),
+            ("effort_pd", 10, frozenset({0, 1})),
+        )
         config = effort_config()
         config["failure_behavior"] = "continue"
         with self.assertRaisesRegex(ValueError, "failure behavior"):
@@ -36,18 +39,24 @@ class OpenArmActuationTests(unittest.TestCase):
     def test_effort_is_damped_and_saturated_per_joint(self) -> None:
         config = effort_config()
         self.assertEqual(
-            realize_joint_command(config, "effort_pd", 2, 0, 1.0, 0.0, 0.0),
+            realize_joint_command(
+                config, "effort_pd", frozenset({0, 1}), 0, 1.0, 0.0, 0.0
+            ),
             ("effort_nm", 4.0),
         )
         self.assertEqual(
-            realize_joint_command(config, "effort_pd", 2, 1, 0.0, 0.0, 3.0),
+            realize_joint_command(
+                config, "effort_pd", frozenset({0, 1}), 1, 0.0, 0.0, 3.0
+            ),
             ("effort_nm", -5.0),
         )
 
     def test_non_effort_joints_retain_bounded_velocity_servo(self) -> None:
         config = effort_config()
         self.assertEqual(
-            realize_joint_command(config, "effort_pd", 2, 2, 1.0, 0.0, 0.0),
+            realize_joint_command(
+                config, "effort_pd", frozenset({0, 1}), 2, 1.0, 0.0, 0.0
+            ),
             ("velocity_rad_s", 2.0),
         )
 

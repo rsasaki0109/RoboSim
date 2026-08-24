@@ -616,6 +616,13 @@ mass-insensitive velocity-servo result. The current portable state-feedback
 controller still misses the Gazebo nominal tracking gate (`0.2125 rad` final
 maximum error at the best evaluated declared gain mapping), so tuning and a
 closed pass/fail boundary remain open rather than being hidden as agreement.
+The complete 15-trace development matrix confirms the distinction: Rapier and
+MuJoCo pass the fixed joint-5 `0.02 rad` RMSE and `0.005 rad` final-error gates
+from zero through the declared `0.50 kg` capacity, then reject `0.75 kg` only
+as the expected capacity failure. Gazebo is deterministic and mass-sensitive
+but fails the RMSE gate at baseline. The report status is therefore
+`needs_tuning`, not `passed`; the report builder retains each backend/case check
+and the first failed requirement.
 
 ### Track definition of done
 

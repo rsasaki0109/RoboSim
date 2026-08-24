@@ -35,6 +35,16 @@ scene, and runtime hashes. Their Gazebo world fixes the robot base and selects
 bounded effort-PD actuation over ten physics substeps, so payload mass affects
 the measured trajectory. Invalid actuator declarations fail before startup.
 
+After collecting the three backend traces, independently recompute the model
+and control requirements and write the browser report with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_report.py \
+  --fixture-root artifacts/openarm-payload/fixtures \
+  --trace-root artifacts/openarm-payload \
+  --output artifacts/openarm-payload/report
+```
+
 ## Run conformance
 
 From the repository root on Ubuntu:

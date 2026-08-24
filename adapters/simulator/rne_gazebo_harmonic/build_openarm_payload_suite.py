@@ -227,7 +227,7 @@ def compile_suite(
     adapter_config.update(
         {
             "actuation_mode": "effort_pd",
-            "effort_joint_count": 7,
+            "effort_joint_indices": list(range(7)),
             "physics_substeps_per_control_step": substeps,
             "stiffness_nm_per_rad": [
                 item["stiffness_nm_per_rad"] * stiffness_scale
@@ -350,6 +350,8 @@ path = "openarm_payload.rne.robot.toml"
         "schema_version": 1,
         "experiment_id": manifest["experiment_id"],
         "backend_order": manifest["backend_order"],
+        "controlled_joint": manifest["controlled_joint"],
+        "requirements": manifest["requirements"],
         "declared_supported_payload_mass_kg": manifest["declared_supported_payload_mass_kg"],
         "inputs": {
             "experiment_manifest_sha256": sha256(manifest_path),

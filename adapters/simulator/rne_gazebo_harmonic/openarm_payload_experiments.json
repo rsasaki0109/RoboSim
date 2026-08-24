@@ -12,6 +12,14 @@
   "gazebo_effort_stiffness_scale": 8.0,
   "gazebo_effort_damping_scale": 4.0,
   "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "controlled_joint": "openarm_right_joint5",
+  "requirements": [
+    {"id": "payload.maximum_model_parameter_realization_delta", "unit": "SI", "maximum": 0.000000000001},
+    {"id": "payload.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
+    {"id": "payload.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
+    {"id": "payload.maximum_supported_mass_kg", "unit": "kg", "maximum": 0.5},
+    {"id": "payload.requires_exact_replay", "unit": "bool", "required": true}
+  ],
   "model_semantics": "rigidly_attached_payload_lumped_into_end_effector_inertial_with_parallel_axis_theorem",
   "gazebo_actuation_scope": "fixed_base_effort_pd_with_ten_physics_substeps_per_control_step",
   "boundary_rule": "smallest_mass_with_any_predeclared_requirement_failure"
