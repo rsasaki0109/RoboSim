@@ -1,0 +1,91 @@
+{
+  "kind": "rne_openarm_robustness_suite",
+  "schema_version": 1,
+  "suite_id": "rne.openarm.right.state_feedback.robustness.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "controller_role": "state_feedback",
+  "dimension_id": "joint_feedback_publication_dropout",
+  "primary_sweep_backend": "rne_rapier",
+  "backend_order": [
+    "rne_rapier",
+    "mujoco_native",
+    "gazebo_sim"
+  ],
+  "dimension": {
+    "kind": "joint_feedback_publication_dropout_burst_v1",
+    "classification": "measurement_unavailability",
+    "unit": "consecutive_frame_count",
+    "values": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "start_capture_sequence": 3240,
+    "controller_visibility": "missing_publication_only",
+    "application_order": "after_typed_sensor_capture_before_controller_ingress",
+    "maximum_age_ticks": 50000001,
+    "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
+    "recovery_policy": "resume_on_fresh_nominal_observation"
+  },
+  "evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_consecutive_dropout_frames",
+      "controller.sensor.maximum_observation_age_ticks",
+      "controller.sensor.maximum_fail_safe_target_delta_rad",
+      "controller.sensor.maximum_recovery_decisions"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "inputs": {
+    "robustness_manifest_sha256": "1deb3362203de113e4136af2a0261efd2f06a95b4a6ff37d50efd5a4160dc255",
+    "plant_report_sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4",
+    "plant_experiment_manifest_sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5",
+    "limits_controller_sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4",
+    "requirements_sha256": "ff2b572a61691f817641a341e8ff3be9c18e59bce80221a79439c6771987792e"
+  },
+  "cases": [
+    {
+      "case_id": "dropout-000frames",
+      "dimension_value": 0,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-000frames.v1",
+      "controller_path": "openarm-state-feedback-dropout-000frames.controller.json",
+      "controller_sha256": "5df1ba2693a637cf632a276a20f90eaf7bfcc89e1e6252c003cc2dafc8ff4268",
+      "consecutive_dropped_frames": 0
+    },
+    {
+      "case_id": "dropout-001frames",
+      "dimension_value": 1,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-001frames.v1",
+      "controller_path": "openarm-state-feedback-dropout-001frames.controller.json",
+      "controller_sha256": "71324d3267955c100fb99350951b9fd34555edb80e4b229d617676fd0d9b2828",
+      "consecutive_dropped_frames": 1
+    },
+    {
+      "case_id": "dropout-002frames",
+      "dimension_value": 2,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-002frames.v1",
+      "controller_path": "openarm-state-feedback-dropout-002frames.controller.json",
+      "controller_sha256": "cc5dc029c79c2523e90be632254f7a1901cfd309d9802cd867bf6aa05685b043",
+      "consecutive_dropped_frames": 2
+    },
+    {
+      "case_id": "dropout-003frames",
+      "dimension_value": 3,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-003frames.v1",
+      "controller_path": "openarm-state-feedback-dropout-003frames.controller.json",
+      "controller_sha256": "daad4f6db22518a21489723733c46f2b04790d3d91f2f46440cf2102f87f91fb",
+      "consecutive_dropped_frames": 3
+    },
+    {
+      "case_id": "dropout-004frames",
+      "dimension_value": 4,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-004frames.v1",
+      "controller_path": "openarm-state-feedback-dropout-004frames.controller.json",
+      "controller_sha256": "6a49c0d51601dc64c75ec1af368c41baaead3cb03144ead9ec027a19aa11d956",
+      "consecutive_dropped_frames": 4
+    }
+  ]
+}

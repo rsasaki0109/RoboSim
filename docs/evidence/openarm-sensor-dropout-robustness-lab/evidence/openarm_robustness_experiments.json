@@ -1,0 +1,67 @@
+{
+  "kind": "rne_openarm_robustness_experiment_manifest",
+  "schema_version": 2,
+  "experiment_id": "rne.openarm.right.state_feedback.robustness.v1",
+  "controller_role": "state_feedback",
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "primary_sweep_backend": "rne_rapier",
+  "dimensions": {
+    "actuator_target_bias": {
+      "kind": "additive_actuator_target_bias_pulse_v1",
+      "classification": "actuator_realization_error",
+      "joint": "openarm_right_joint5",
+      "unit": "rad",
+      "values": [0.0, 0.03, 0.06, 0.09, 0.12],
+      "start_step": 3241,
+      "end_step": 3300,
+      "application_order": "after_controller_limits_before_backend_actuation",
+      "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+    },
+    "joint_position_measurement_bias": {
+      "kind": "additive_joint_position_bias_pulse_v1",
+      "classification": "measurement_error",
+      "joint": "openarm_right_joint5",
+      "unit": "rad",
+      "values": [0.0, 0.01, 0.02, 0.04, 0.06],
+      "start_controller_step": 3241,
+      "end_controller_step": 3300,
+      "sensor_status": "nominal",
+      "controller_visibility": "biased_position_as_nominal",
+      "application_order": "after_typed_feedback_availability_before_controller_law"
+    },
+    "joint_feedback_publication_dropout": {
+      "kind": "joint_feedback_publication_dropout_burst_v1",
+      "classification": "measurement_unavailability",
+      "unit": "consecutive_frame_count",
+      "values": [0, 1, 2, 3, 4],
+      "start_capture_sequence": 3240,
+      "controller_visibility": "missing_publication_only",
+      "application_order": "after_typed_sensor_capture_before_controller_ingress",
+      "maximum_age_ticks": 50000001,
+      "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
+      "recovery_policy": "resume_on_fresh_nominal_observation"
+    }
+  },
+  "evaluation": {
+    "recovery_band_rad": 0.005,
+    "recovery_hold_samples": 30,
+    "evaluation_steps_after_pulse": 120,
+    "requirement_ids": [
+      "controller.state.maximum_disturbance_peak_error_rad",
+      "controller.state.maximum_disturbance_recovery_time_s",
+      "controller.state.maximum_disturbance_iae_rad_s"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "availability_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_consecutive_dropout_frames",
+      "controller.sensor.maximum_observation_age_ticks",
+      "controller.sensor.maximum_fail_safe_target_delta_rad",
+      "controller.sensor.maximum_recovery_decisions"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  }
+}
