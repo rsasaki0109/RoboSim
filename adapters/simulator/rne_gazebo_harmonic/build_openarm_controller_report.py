@@ -146,6 +146,14 @@ def reproduce_decisions(
             maximum_delta(
                 disturbance, actual["joint_actuator_disturbance_rad"]
             ),
+            maximum_delta(
+                decision["controller_observation_position_rad"],
+                actual["joint_controller_observation_position_rad"],
+            ),
+            maximum_delta(
+                decision["joint_measurement_bias_rad"],
+                actual["joint_measurement_bias_rad"],
+            ),
             maximum_delta(decision["correction"], actual["joint_feedback_correction_rad"]),
             maximum_delta(
                 decision["integral_correction"], actual["joint_integral_correction_rad"]
@@ -158,6 +166,8 @@ def reproduce_decisions(
             and decision["observation_age_ticks"]
             == actual["controller_observation_age_ticks"]
             and decision["bootstrap"] == actual["controller_bootstrap"]
+            and actual["measurement_bias_active"]
+            == any(value != 0.0 for value in decision["joint_measurement_bias_rad"])
         )
         if first_mismatch is None and (delta > 1e-12 or not metadata_matches):
             first_mismatch = {

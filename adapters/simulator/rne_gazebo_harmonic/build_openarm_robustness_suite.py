@@ -18,6 +18,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
+        "--dimension",
+        choices=("actuator_target_bias", "joint_position_measurement_bias"),
+        default="actuator_target_bias",
+    )
+    parser.add_argument(
         "--robustness-manifest",
         type=Path,
         default=root
@@ -78,6 +83,10 @@ def case_id(offset_rad: float) -> str:
     return f"bias-{milliradians:03d}mrad"
 
 
+def sensor_case_id(offset_rad: float) -> str:
+    return "sensor-" + case_id(offset_rad)
+
+
 def compile_robustness_suite(
     compiler: Any,
     robustness_path: Path,
@@ -85,30 +94,45 @@ def compile_robustness_suite(
     plant_manifest_path: Path,
     limits_controller_path: Path,
     requirements_path: Path,
+    dimension_id: str = "actuator_target_bias",
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     manifest = load(robustness_path)
     requirements = load(requirements_path)
     if (
         manifest.get("kind") != "rne_openarm_robustness_experiment_manifest"
-        or manifest.get("schema_version") != 1
+        or manifest.get("schema_version") != 2
         or manifest.get("controller_role") != "state_feedback"
         or manifest.get("primary_sweep_backend") != "rne_rapier"
         or manifest.get("backend_order")
         != ["rne_rapier", "mujoco_native", "gazebo_sim"]
     ):
         raise ValueError("unsupported OpenArm robustness manifest")
-    dimension = manifest.get("dimension", {})
+    dimension = manifest.get("dimensions", {}).get(dimension_id, {})
     values = dimension.get("values")
     if (
-        dimension.get("kind") != "additive_actuator_target_bias_pulse_v1"
-        or dimension.get("classification") != "actuator_realization_error"
+        dimension_id not in {"actuator_target_bias", "joint_position_measurement_bias"}
         or not isinstance(values, list)
         or len(values) < 3
         or values != sorted(set(values))
         or values[0] != 0.0
         or not all(isinstance(value, float) and math.isfinite(value) for value in values)
     ):
-        raise ValueError("invalid actuator-bias robustness grid")
+        raise ValueError("invalid robustness grid")
+    expected_kind = (
+        "additive_actuator_target_bias_pulse_v1"
+        if dimension_id == "actuator_target_bias"
+        else "additive_joint_position_bias_pulse_v1"
+    )
+    expected_classification = (
+        "actuator_realization_error"
+        if dimension_id == "actuator_target_bias"
+        else "measurement_error"
+    )
+    if (
+        dimension.get("kind") != expected_kind
+        or dimension.get("classification") != expected_classification
+    ):
+        raise ValueError("robustness dimension identity drifted")
     requirement_ids = {item["id"] for item in requirements.get("requirements", [])}
     if not set(manifest["evaluation"]["requirement_ids"]).issubset(requirement_ids):
         raise ValueError("robustness manifest names an unknown requirement")
@@ -118,24 +142,45 @@ def compile_robustness_suite(
     base = base_controllers["state_feedback"]
     controllers: dict[str, dict[str, Any]] = {}
     for offset_rad in values:
-        identifier = case_id(offset_rad)
+        identifier = (
+            case_id(offset_rad)
+            if dimension_id == "actuator_target_bias"
+            else sensor_case_id(offset_rad)
+        )
         controller = copy.deepcopy(base)
         controller["controller_id"] = (
             f"rne.controller.openarm_right.plant_state_feedback_integral.{identifier}.v1"
         )
-        contract = controller["disturbance_contract"]
-        contract["offset_rad"] = offset_rad
-        for field in (
-            "kind",
-            "classification",
-            "joint",
-            "start_step",
-            "end_step",
-            "application_order",
-            "controller_visibility",
-        ):
+        if dimension_id == "actuator_target_bias":
+            contract = controller["disturbance_contract"]
+            contract["offset_rad"] = offset_rad
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_step",
+                "end_step",
+                "application_order",
+                "controller_visibility",
+            )
+        else:
+            controller["disturbance_contract"]["offset_rad"] = 0.0
+            contract = {key: value for key, value in dimension.items() if key not in {"unit", "values"}}
+            contract["offset_rad"] = offset_rad
+            controller["measurement_fault_contract"] = contract
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_controller_step",
+                "end_controller_step",
+                "sensor_status",
+                "application_order",
+                "controller_visibility",
+            )
+        for field in fields:
             if contract[field] != dimension[field]:
-                raise ValueError(f"robustness disturbance field {field} drifted")
+                raise ValueError(f"robustness contract field {field} drifted")
         controllers[identifier] = controller
     suite = {
         "kind": "rne_openarm_robustness_suite",
@@ -143,6 +188,7 @@ def compile_robustness_suite(
         "suite_id": manifest["experiment_id"],
         "task_id": base["task_id"],
         "controller_role": manifest["controller_role"],
+        "dimension_id": dimension_id,
         "primary_sweep_backend": manifest["primary_sweep_backend"],
         "backend_order": manifest["backend_order"],
         "dimension": dimension,
@@ -175,6 +221,7 @@ def main() -> int:
         args.plant_experiment_manifest.resolve(),
         args.limits_controller.resolve(),
         args.requirements.resolve(),
+        args.dimension,
     )
     for identifier, controller in controllers.items():
         path = output / f"openarm-state-feedback-{identifier}.controller.json"
@@ -182,7 +229,11 @@ def main() -> int:
         suite["cases"].append(
             {
                 "case_id": identifier,
-                "offset_rad": controller["disturbance_contract"]["offset_rad"],
+                "offset_rad": (
+                    controller["disturbance_contract"]["offset_rad"]
+                    if args.dimension == "actuator_target_bias"
+                    else controller["measurement_fault_contract"]["offset_rad"]
+                ),
                 "controller_id": controller["controller_id"],
                 "controller_path": path.name,
                 "controller_sha256": sha256(path),

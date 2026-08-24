@@ -54,6 +54,35 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(failure["step"], 20)
         self.assertGreater(failure["observed"], 0.02)
 
+    def test_measurement_bias_is_checked_against_delayed_raw_observation(self) -> None:
+        observations = []
+        for step in range(1, 6):
+            active = step == 4
+            observations.append(
+                {
+                    "step": step,
+                    "joint_position_rad": [step / 100.0],
+                    "controller_observation_sequence": None if step < 3 else step - 2,
+                    "joint_controller_observation_position_rad": (
+                        [] if step < 3 else [(step - 2) / 100.0 + (0.02 if active else 0.0)]
+                    ),
+                    "joint_measurement_bias_rad": [0.02 if active else 0.0],
+                    "measurement_bias_active": active,
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "start_controller_step": 4,
+                "end_controller_step": 4,
+                "offset_rad": 0.02,
+            }
+        }
+        metrics = MODULE.measurement_bias_metrics(controller, observations, 0)
+        self.assertIsNotNone(metrics)
+        self.assertEqual(metrics["maximum_realization_delta_rad"], 0.0)
+        self.assertEqual(metrics["active_decision_count"], 1)
+        self.assertIsNone(metrics["first_realization_mismatch"])
+
 
 if __name__ == "__main__":
     unittest.main()

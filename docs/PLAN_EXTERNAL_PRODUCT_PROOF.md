@@ -532,6 +532,16 @@ Capsule. Slice 7 remains in progress until
 payload, inertia, friction, sensor bias/drop, and actuator-authority dimensions
 are evaluated under the same boundary rules.
 
+The joint-position sensor-bias dimension now preserves raw typed feedback and
+records the separate delayed position consumed by the controller. A fixed
+`[0.00, 0.01, 0.02, 0.04, 0.06] rad` nominal-status bias grid yields
+`0.01 rad` as the last pass and `0.02 rad` as the first failure on Rapier,
+MuJoCo, and Gazebo. All three first fail the same `0.02 rad*s` IAE requirement;
+the first crossing occurs at step 3303 on Rapier and step 3304 on MuJoCo and
+Gazebo. Each boundary trace proves exactly 60 biased controller decisions and
+at most `3.47e-18 rad` realization error. Sensor dropout, physical parameter
+sweeps, and actuator-authority degradation remain open.
+
 ### Track definition of done
 
 The hardening track is complete only when:

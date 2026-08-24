@@ -47,6 +47,8 @@ struct ControllerSpec {
     feedback_law: Option<FeedbackLaw>,
     #[serde(default)]
     disturbance_contract: Option<DisturbanceContract>,
+    #[serde(default)]
+    measurement_fault_contract: Option<MeasurementFaultContract>,
     keyframes: Vec<Keyframe>,
     intentional_failure: IntentionalFailure,
 }
@@ -73,6 +75,20 @@ struct DisturbanceContract {
     start_step: u64,
     end_step: u64,
     offset_rad: f64,
+    controller_visibility: String,
+    application_order: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MeasurementFaultContract {
+    kind: String,
+    classification: String,
+    joint: String,
+    start_controller_step: u64,
+    end_controller_step: u64,
+    offset_rad: f64,
+    sensor_status: JointFeedbackStatus,
     controller_visibility: String,
     application_order: String,
 }
@@ -211,6 +227,9 @@ struct ObservationFrame {
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
     joint_reference_position_rad: Vec<f64>,
+    joint_controller_observation_position_rad: Vec<f64>,
+    joint_measurement_bias_rad: Vec<f64>,
+    measurement_bias_active: bool,
     joint_controller_target_rad: Vec<f64>,
     joint_actuator_disturbance_rad: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
@@ -304,6 +323,8 @@ struct ControllerDecision {
     target_position_rad: Vec<f64>,
     correction_rad: Vec<f64>,
     integral_correction_rad: Vec<f64>,
+    controller_observation_position_rad: Vec<f64>,
+    measurement_bias_rad: Vec<f64>,
     observation_sequence: Option<u64>,
     observation_age_ticks: Option<u64>,
     bootstrap: bool,
@@ -709,6 +730,25 @@ fn validate(
             "invalid OpenArm actuator disturbance contract"
         );
     }
+    if let Some(fault) = &controller.measurement_fault_contract {
+        anyhow::ensure!(
+            fault.kind == "additive_joint_position_bias_pulse_v1"
+                && fault.classification == "measurement_error"
+                && controller
+                    .action_joint_order
+                    .iter()
+                    .any(|joint| joint == &fault.joint)
+                && fault.start_controller_step >= 1
+                && fault.start_controller_step <= fault.end_controller_step
+                && fault.end_controller_step <= final_step
+                && fault.offset_rad.is_finite()
+                && fault.sensor_status == JointFeedbackStatus::Nominal
+                && fault.controller_visibility == "biased_position_as_nominal"
+                && fault.application_order
+                    == "after_typed_feedback_availability_before_controller_law",
+            "invalid OpenArm measurement-bias contract"
+        );
+    }
     anyhow::ensure!(
         (1..=final_step).contains(&controller.intentional_failure.inject_at_step),
         "intentional failure step is outside rollout"
@@ -923,6 +963,42 @@ fn apply_actuator_disturbance(
     Ok((applied, disturbance))
 }
 
+fn apply_measurement_bias(
+    controller: &ControllerSpec,
+    observation: &ControllerObservation,
+    consumed_at_ticks: u64,
+) -> Result<(Vec<f64>, Vec<f64>)> {
+    let mut positions = observation.joint_position_rad.clone();
+    let mut bias = vec![0.0; positions.len()];
+    let Some(contract) = &controller.measurement_fault_contract else {
+        return Ok((positions, bias));
+    };
+    let sample_period_ticks = controller
+        .observation_contract
+        .as_ref()
+        .context("measurement bias has no observation contract")?
+        .sample_period_ticks;
+    anyhow::ensure!(
+        consumed_at_ticks.is_multiple_of(sample_period_ticks),
+        "measurement-bias consumption time is off the control grid"
+    );
+    let controller_step = consumed_at_ticks / sample_period_ticks + 1;
+    if (contract.start_controller_step..=contract.end_controller_step).contains(&controller_step) {
+        let index = controller
+            .action_joint_order
+            .iter()
+            .position(|joint| joint == &contract.joint)
+            .context("measurement-bias joint is absent from the action order")?;
+        bias[index] = contract.offset_rad;
+        positions[index] += contract.offset_rad;
+    }
+    anyhow::ensure!(
+        positions.iter().all(|value| value.is_finite()),
+        "measurement bias produced a non-finite observation"
+    );
+    Ok((positions, bias))
+}
+
 fn controller_decision(
     controller: &ControllerSpec,
     reference: &[f64],
@@ -946,6 +1022,8 @@ fn controller_decision(
                 target_position_rad: reference.to_vec(),
                 correction_rad: vec![0.0; reference.len()],
                 integral_correction_rad: state.integral_correction_rad.clone(),
+                controller_observation_position_rad: Vec::new(),
+                measurement_bias_rad: vec![0.0; reference.len()],
                 observation_sequence: None,
                 observation_age_ticks: None,
                 bootstrap: false,
@@ -973,6 +1051,8 @@ fn controller_decision(
             target_position_rad: reference.to_vec(),
             correction_rad: vec![0.0; reference.len()],
             integral_correction_rad: state.integral_correction_rad.clone(),
+            controller_observation_position_rad: Vec::new(),
+            measurement_bias_rad: vec![0.0; reference.len()],
             observation_sequence: None,
             observation_age_ticks: None,
             bootstrap: true,
@@ -997,8 +1077,24 @@ fn controller_decision(
             && observation.joint_velocity_rad_s.len() == reference.len(),
         "OpenArm controller observation width mismatch"
     );
+    let (controller_positions, measurement_bias_rad) =
+        apply_measurement_bias(controller, observation, consumed_at_ticks)?;
+    let visible_observation = ControllerObservation {
+        joint_position_rad: controller_positions.clone(),
+        ..observation.clone()
+    };
     if law.kind == "joint_position_state_feedback_integral_v1" {
-        return state_feedback_decision(controller, law, reference, state, observation, age_ticks);
+        let mut decision = state_feedback_decision(
+            controller,
+            law,
+            reference,
+            state,
+            &visible_observation,
+            age_ticks,
+        )?;
+        decision.controller_observation_position_rad = controller_positions;
+        decision.measurement_bias_rad = measurement_bias_rad;
+        return Ok(decision);
     }
     anyhow::ensure!(
         law.kind == "joint_position_reference_pid_v1",
@@ -1015,15 +1111,19 @@ fn controller_decision(
         .iter_mut()
         .zip(&law.integral_error_gain_s_inv)
         .zip(&law.maximum_integral_correction_rad)
-        .zip(reference.iter().zip(&observation.joint_position_rad))
+        .zip(
+            reference
+                .iter()
+                .zip(&visible_observation.joint_position_rad),
+        )
     {
         *integral =
             (*integral + gain * (reference - position) * sample_period_s).clamp(-maximum, *maximum);
     }
     let correction_rad = reference
         .iter()
-        .zip(&observation.joint_position_rad)
-        .zip(&observation.joint_velocity_rad_s)
+        .zip(&visible_observation.joint_position_rad)
+        .zip(&visible_observation.joint_velocity_rad_s)
         .zip(&law.position_error_gain)
         .zip(&law.velocity_damping_s)
         .zip(&state.integral_correction_rad)
@@ -1052,6 +1152,8 @@ fn controller_decision(
         target_position_rad,
         correction_rad,
         integral_correction_rad: state.integral_correction_rad.clone(),
+        controller_observation_position_rad: controller_positions,
+        measurement_bias_rad,
         observation_sequence: Some(observation.sequence),
         observation_age_ticks: Some(age_ticks),
         bootstrap: false,
@@ -1144,6 +1246,8 @@ fn state_feedback_decision(
         target_position_rad,
         correction_rad,
         integral_correction_rad: state.integral_correction_rad.clone(),
+        controller_observation_position_rad: Vec::new(),
+        measurement_bias_rad: vec![0.0; reference.len()],
         observation_sequence: Some(observation.sequence),
         observation_age_ticks: Some(age_ticks),
         bootstrap: false,
@@ -1848,6 +1952,14 @@ fn observation_from_feedback(
         joint_position_rad: positions,
         joint_velocity_rad_s: velocities,
         joint_reference_position_rad: decision.reference_position_rad.clone(),
+        joint_controller_observation_position_rad: decision
+            .controller_observation_position_rad
+            .clone(),
+        joint_measurement_bias_rad: decision.measurement_bias_rad.clone(),
+        measurement_bias_active: decision
+            .measurement_bias_rad
+            .iter()
+            .any(|value| *value != 0.0),
         joint_controller_target_rad: decision.target_position_rad.clone(),
         joint_actuator_disturbance_rad: targets
             .iter()
@@ -2041,6 +2153,9 @@ mod tests {
             joint_position_rad: Vec::new(),
             joint_velocity_rad_s: Vec::new(),
             joint_reference_position_rad: Vec::new(),
+            joint_controller_observation_position_rad: Vec::new(),
+            joint_measurement_bias_rad: Vec::new(),
+            measurement_bias_active: false,
             joint_controller_target_rad: Vec::new(),
             joint_actuator_disturbance_rad: Vec::new(),
             joint_position_target_rad: Vec::new(),

@@ -1,20 +1,34 @@
 {
   "kind": "rne_openarm_robustness_experiment_manifest",
-  "schema_version": 1,
+  "schema_version": 2,
   "experiment_id": "rne.openarm.right.state_feedback.robustness.v1",
   "controller_role": "state_feedback",
   "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
   "primary_sweep_backend": "rne_rapier",
-  "dimension": {
-    "kind": "additive_actuator_target_bias_pulse_v1",
-    "classification": "actuator_realization_error",
-    "joint": "openarm_right_joint5",
-    "unit": "rad",
-    "values": [0.0, 0.03, 0.06, 0.09, 0.12],
-    "start_step": 3241,
-    "end_step": 3300,
-    "application_order": "after_controller_limits_before_backend_actuation",
-    "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+  "dimensions": {
+    "actuator_target_bias": {
+      "kind": "additive_actuator_target_bias_pulse_v1",
+      "classification": "actuator_realization_error",
+      "joint": "openarm_right_joint5",
+      "unit": "rad",
+      "values": [0.0, 0.03, 0.06, 0.09, 0.12],
+      "start_step": 3241,
+      "end_step": 3300,
+      "application_order": "after_controller_limits_before_backend_actuation",
+      "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+    },
+    "joint_position_measurement_bias": {
+      "kind": "additive_joint_position_bias_pulse_v1",
+      "classification": "measurement_error",
+      "joint": "openarm_right_joint5",
+      "unit": "rad",
+      "values": [0.0, 0.01, 0.02, 0.04, 0.06],
+      "start_controller_step": 3241,
+      "end_controller_step": 3300,
+      "sensor_status": "nominal",
+      "controller_visibility": "biased_position_as_nominal",
+      "application_order": "after_typed_feedback_availability_before_controller_law"
+    }
   },
   "evaluation": {
     "recovery_band_rad": 0.005,

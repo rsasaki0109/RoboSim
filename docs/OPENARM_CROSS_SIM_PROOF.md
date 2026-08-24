@@ -196,3 +196,27 @@ complete Rapier grid plus both portable boundary cases:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-robustness-lab
 ```
+
+## Controller-visible sensor-bias boundary
+
+The second robustness dimension adds a nominal-status position bias only after
+typed feedback becomes available and before the controller law. Raw joint
+feedback, delayed controller-visible position, injected bias, controller
+target, and applied plant target remain separate fields. The physical backend
+state and raw sensor payload are never rewritten to manufacture the fault.
+
+Rapier sweeps `[0.00, 0.01, 0.02, 0.04, 0.06] rad`; MuJoCo and Gazebo repeat
+the `0.01 rad` last-pass and `0.02 rad` first-fail cases. Every backend applies
+the bias to exactly 60 decisions with at most `3.47e-18 rad` realization error.
+All pass at `0.01 rad` and first fail the unchanged `0.02 rad*s` IAE gate at
+`0.02 rad`. Rapier first crosses at step 3303; MuJoCo and Gazebo cross at step
+3304.
+
+The retained [sensor-bias report](evidence/openarm-sensor-robustness-lab/evidence/openarm-sensor-bias-robustness-report.html)
+and [Failure Capsule](evidence/openarm-sensor-robustness-lab/capsule.json) retain
+the raw/visible observation boundary and the minimum-failure replay:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-robustness-lab
+```

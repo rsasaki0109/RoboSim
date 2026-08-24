@@ -127,6 +127,64 @@ def first_requirement_violation(
     return min(candidates, key=lambda item: (item["step"], item["requirement_id"])) if candidates else None
 
 
+def measurement_bias_metrics(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    joint_index: int,
+) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if contract is None:
+        return None
+    maximum_realization_delta_rad = 0.0
+    first_realization_mismatch = None
+    active_decision_count = 0
+    for frame in observations:
+        step = frame["step"]
+        expected_bias = (
+            contract["offset_rad"]
+            if contract["start_controller_step"] <= step <= contract["end_controller_step"]
+            else 0.0
+        )
+        actual_bias = frame["joint_measurement_bias_rad"][joint_index]
+        active = frame["measurement_bias_active"]
+        observation_sequence = frame["controller_observation_sequence"]
+        controller_positions = frame["joint_controller_observation_position_rad"]
+        realization_delta = abs(actual_bias - expected_bias)
+        if observation_sequence is None:
+            relationship_delta = 0.0 if not controller_positions else math.inf
+        else:
+            source = observations[observation_sequence - 1]
+            relationship_delta = max(
+                abs(
+                    visible
+                    - raw
+                    - (expected_bias if index == joint_index else 0.0)
+                )
+                for index, (visible, raw) in enumerate(
+                    zip(controller_positions, source["joint_position_rad"])
+                )
+            )
+        delta = max(realization_delta, relationship_delta)
+        maximum_realization_delta_rad = max(maximum_realization_delta_rad, delta)
+        if expected_bias != 0.0:
+            active_decision_count += 1
+        metadata_matches = active == (expected_bias != 0.0)
+        if first_realization_mismatch is None and (delta > 1e-12 or not metadata_matches):
+            first_realization_mismatch = {
+                "step": step,
+                "expected_bias_rad": expected_bias,
+                "actual_bias_rad": actual_bias,
+                "relationship_delta_rad": relationship_delta,
+                "metadata_matches": metadata_matches,
+            }
+    return {
+        "contract": contract,
+        "maximum_realization_delta_rad": maximum_realization_delta_rad,
+        "first_realization_mismatch": first_realization_mismatch,
+        "active_decision_count": active_decision_count,
+    }
+
+
 def evaluate_trace(
     report_module: Any,
     controller: dict[str, Any],
@@ -156,6 +214,7 @@ def evaluate_trace(
     metrics = report_module.disturbance_metrics(
         controller, observations, joint_index, sample_rate_hz
     )
+    sensor_metrics = measurement_bias_metrics(controller, observations, joint_index)
     if metrics["first_realization_mismatch"] is not None:
         raise ValueError(f"{backend_id} robustness disturbance realization drifted")
     checks = [
@@ -173,6 +232,15 @@ def evaluate_trace(
             metrics["iae_rad_s"],
         ),
     ]
+    if sensor_metrics is not None:
+        checks.append(
+            report_module.check(
+                requirements["controller.sensor.maximum_bias_realization_delta_rad"],
+                sensor_metrics["maximum_realization_delta_rad"],
+            )
+        )
+        if sensor_metrics["first_realization_mismatch"] is not None:
+            raise ValueError(f"{backend_id} measurement-bias realization drifted")
     first_violation = first_requirement_violation(
         observations, metrics, joint_index, sample_rate_hz, requirements
     )
@@ -186,6 +254,7 @@ def evaluate_trace(
         "action_trace_sha256": sha256(action_path),
         "replay_match": True,
         "metrics": metrics,
+        "measurement_bias": sensor_metrics,
         "checks": checks,
         "first_violation": first_violation,
         "plot": {
@@ -223,6 +292,8 @@ def main() -> int:
     if (
         suite.get("kind") != "rne_openarm_robustness_suite"
         or suite.get("schema_version") != 1
+        or suite.get("dimension_id")
+        not in {"actuator_target_bias", "joint_position_measurement_bias"}
         or suite.get("primary_sweep_backend") != "rne_rapier"
         or suite.get("inputs", {}).get("requirements_sha256")
         != sha256(args.requirements.resolve())
@@ -239,7 +310,11 @@ def main() -> int:
         if (
             sha256(controller_path) != declaration["controller_sha256"]
             or controller.get("controller_id") != declaration["controller_id"]
-            or controller.get("disturbance_contract", {}).get("offset_rad")
+            or (
+                controller.get("disturbance_contract", {}).get("offset_rad")
+                if suite["dimension_id"] == "actuator_target_bias"
+                else controller.get("measurement_fault_contract", {}).get("offset_rad")
+            )
             != declaration["offset_rad"]
         ):
             raise ValueError(f"{case_id} controller identity drifted")
@@ -325,6 +400,7 @@ def main() -> int:
         "suite_id": suite["suite_id"],
         "task_id": suite["task_id"],
         "controller_role": suite["controller_role"],
+        "dimension_id": suite["dimension_id"],
         "dimension": suite["dimension"],
         "evaluation": suite["evaluation"],
         "inputs": {
@@ -342,8 +418,13 @@ def main() -> int:
         "cross_backend_boundary_results": cross_backend,
         "first_failure": first_failure,
     }
-    write_json(output / "openarm-robustness-report.json", report)
-    write_html(output / "openarm-robustness-report.html", report)
+    stem = (
+        "openarm-robustness-report"
+        if suite["dimension_id"] == "actuator_target_bias"
+        else "openarm-sensor-bias-robustness-report"
+    )
+    write_json(output / f"{stem}.json", report)
+    write_html(output / f"{stem}.html", report)
     print(
         "OpenArm robustness report: "
         f"last_pass={last_passing['offset_rad']:.3f}rad "
@@ -359,7 +440,7 @@ def write_html(path: Path, report: dict[str, Any]) -> None:
 body{margin:0;background:#09121f;color:#eef5ff;font:14px system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{background:#132238;border:1px solid #2a4667;border-radius:10px;padding:14px}.passed{color:#6ee7aa}.failed{color:#ff8b78}table{width:100%;border-collapse:collapse}th,td{border:1px solid #2a4667;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}canvas{width:100%;height:260px;background:#fff;border-radius:8px}</style></head><body><main><h1>OpenArm actuator-bias robustness envelope</h1><div id="summary"></div><h2>Rapier sweep</h2><div id="sweep"></div><h2>Portable boundary</h2><div id="boundary" class="grid"></div><h2>Boundary traces</h2><div id="plots"></div><script>
 const r=__REPORT__,f=x=>x==null?'n/a':Number(x).toFixed(6),colors={rne_rapier:'#1261a0',mujoco_native:'#c2410c',gazebo_sim:'#15803d'};document.querySelector('#summary').innerHTML=`<section class=card><p>Status: <b class=${r.status}>${r.status}</b></p><p>Last passing bias: ${f(r.boundary.last_passing_offset_rad)} rad</p><p>First failing bias: ${f(r.boundary.first_failing_offset_rad)} rad</p><p>Portable first failure: <code>${r.boundary.portable_first_failed_requirement}</code></p><p>First violation: step ${r.first_failure.step}, ${f(r.first_failure.observed)} ${r.first_failure.unit}</p></section>`;
 document.querySelector('#sweep').innerHTML=`<table><tr><th>case</th><th>bias rad</th><th>peak rad</th><th>recovery s</th><th>IAE rad·s</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${f(q.offset_rad)}</td><td>${f(q.metrics.peak_tracking_error_rad)}</td><td>${f(q.metrics.recovery_time_s)}</td><td>${f(q.metrics.iae_rad_s)}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`;
-document.querySelector('#boundary').innerHTML=r.cross_backend_boundary_results.map(q=>`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>peak ${f(q.metrics.peak_tracking_error_rad)} rad</p><p>recovery ${f(q.metrics.recovery_time_s)} s</p><p>IAE ${f(q.metrics.iae_rad_s)} rad·s</p></section>`).join('');function plot(caseId){const rows=r.cross_backend_boundary_results.filter(q=>q.case_id===caseId),c=document.createElement('canvas');c.width=1160;c.height=260;const x=c.getContext('2d'),n=rows[0].plot.reference_rad.length,start=r.dimension.start_step-1,end=r.dimension.end_step;x.fillStyle='#ef444422';x.fillRect(start/(n-1)*c.width,0,(end-start)/(n-1)*c.width,c.height);function line(v,color,w=1.4){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.16)/.34*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(rows[0].plot.reference_rad,'#111',1.8);rows.forEach(q=>line(q.plot.position_rad,colors[q.backend_id]));const s=document.createElement('section');s.innerHTML=`<h3>${caseId}</h3>`;s.appendChild(c);return s}const plots=document.querySelector('#plots');plots.appendChild(plot(r.boundary.last_passing_case_id));plots.appendChild(plot(r.boundary.first_failing_case_id));
+document.querySelector('h1').textContent=`OpenArm ${r.dimension_id.replaceAll('_',' ')} robustness envelope`;document.querySelector('#boundary').innerHTML=r.cross_backend_boundary_results.map(q=>`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>peak ${f(q.metrics.peak_tracking_error_rad)} rad</p><p>recovery ${f(q.metrics.recovery_time_s)} s</p><p>IAE ${f(q.metrics.iae_rad_s)} rad·s</p></section>`).join('');function plot(caseId){const rows=r.cross_backend_boundary_results.filter(q=>q.case_id===caseId),c=document.createElement('canvas');c.width=1160;c.height=260;const x=c.getContext('2d'),n=rows[0].plot.reference_rad.length,start=(r.dimension.start_step??r.dimension.start_controller_step)-1,end=r.dimension.end_step??r.dimension.end_controller_step;x.fillStyle='#ef444422';x.fillRect(start/(n-1)*c.width,0,(end-start)/(n-1)*c.width,c.height);function line(v,color,w=1.4){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.16)/.34*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(rows[0].plot.reference_rad,'#111',1.8);rows.forEach(q=>line(q.plot.position_rad,colors[q.backend_id]));const s=document.createElement('section');s.innerHTML=`<h3>${caseId}</h3>`;s.appendChild(c);return s}const plots=document.querySelector('#plots');plots.appendChild(plot(r.boundary.last_passing_case_id));plots.appendChild(plot(r.boundary.first_failing_case_id));
 </script></main></body></html>'''.replace("__REPORT__", payload)
     path.write_text(document, encoding="utf-8")
 

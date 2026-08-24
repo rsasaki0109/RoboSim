@@ -31,6 +31,8 @@ struct TraceObservation {
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
     joint_reference_position_rad: Vec<f64>,
+    joint_controller_observation_position_rad: Vec<f64>,
+    joint_measurement_bias_rad: Vec<f64>,
     joint_controller_target_rad: Vec<f64>,
     joint_actuator_disturbance_rad: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
@@ -84,7 +86,12 @@ fn run() -> Result<()> {
     };
     let report_sha256 = sha256(&report_bytes);
     let trace_sha256 = sha256(&trace_bytes);
-    let disturbance_start_step = required_u64(&report["dimension"], "start_step")?;
+    let dimension_id = required_str(&report, "dimension_id")?;
+    let disturbance_start_step = if dimension_id == "actuator_target_bias" {
+        required_u64(&report["dimension"], "start_step")?
+    } else {
+        required_u64(&report["dimension"], "start_controller_step")?
+    };
     let maximum_iae_rad_s = required_f64(failure, "maximum")?;
     let sample_period_s = trace.fixed_delta_ticks as f64 / 1_000_000_000.0;
     let mut cumulative_iae_rad_s = 0.0;
@@ -101,7 +108,7 @@ fn run() -> Result<()> {
             "case_id": required_str(failure, "case_id")?,
             "disturbance_offset_rad": required_f64(failure, "offset_rad")?,
             "requirement_id": requirement_id,
-            "classification": "smallest_failed_actuator_bias_grid_case",
+            "classification": format!("smallest_failed_{dimension_id}_grid_case"),
             "contract_status": "initial"
         }),
         state_digest: trace.initial_state_digest,
@@ -122,6 +129,8 @@ fn run() -> Result<()> {
                 "joint5_reference_rad": observation.joint_reference_position_rad[JOINT_INDEX],
                 "joint5_position_rad": observation.joint_position_rad[JOINT_INDEX],
                 "joint5_velocity_rad_s": observation.joint_velocity_rad_s[JOINT_INDEX],
+                "joint5_controller_observation_rad": observation.joint_controller_observation_position_rad.get(JOINT_INDEX).copied(),
+                "joint5_measurement_bias_rad": observation.joint_measurement_bias_rad[JOINT_INDEX],
                 "joint5_controller_target_rad": observation.joint_controller_target_rad[JOINT_INDEX],
                 "joint5_disturbance_rad": observation.joint_actuator_disturbance_rad[JOINT_INDEX],
                 "joint5_applied_target_rad": observation.joint_position_target_rad[JOINT_INDEX],
@@ -139,7 +148,7 @@ fn run() -> Result<()> {
         "replayed cumulative IAE differs from the report"
     );
     let message = format!(
-        "OpenArm joint 5 cumulative disturbance IAE reached {observed_iae_rad_s:.9} rad*s at step {failure_step}, exceeding the fixed {maximum_iae_rad_s:.9} rad*s requirement under a {:.6} rad actuator bias",
+        "OpenArm joint 5 cumulative disturbance IAE reached {observed_iae_rad_s:.9} rad*s at step {failure_step}, exceeding the fixed {maximum_iae_rad_s:.9} rad*s requirement under a {:.6} rad {dimension_id}",
         required_f64(failure, "offset_rad")?
     );
     let scenario = required_str(&report, "suite_id")?.to_string();
@@ -178,6 +187,13 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
     );
     let failure = &report["first_failure"];
     anyhow::ensure!(
+        matches!(
+            required_str(report, "dimension_id")?,
+            "actuator_target_bias" | "joint_position_measurement_bias"
+        ),
+        "unsupported robustness dimension"
+    );
+    anyhow::ensure!(
         required_str(failure, "backend_id")? == "rne_rapier"
             && required_str(failure, "requirement_id")?
                 == "controller.state.maximum_disturbance_iae_rad_s"
@@ -215,12 +231,17 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
                             observation.joint_position_rad.len(),
                             observation.joint_velocity_rad_s.len(),
                             observation.joint_reference_position_rad.len(),
+                            observation.joint_measurement_bias_rad.len(),
                             observation.joint_controller_target_rad.len(),
                             observation.joint_actuator_disturbance_rad.len(),
                             observation.joint_position_target_rad.len(),
                         ]
                         .iter()
                         .all(|width| *width == 9)
+                        && matches!(
+                            observation.joint_controller_observation_position_rad.len(),
+                            0 | 9
+                        )
                 }),
         "Rapier robustness observations are not contiguous nine-joint evidence"
     );

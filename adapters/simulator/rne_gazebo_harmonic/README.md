@@ -295,3 +295,24 @@ model/configuration inputs, and the 3,293-frame minimum-failure replay:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-robustness-lab
 ```
+
+The same manifest also defines a controller-visible joint-position bias sweep:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_bias \
+  --output artifacts/openarm-sensor-robustness-lab
+```
+
+This path preserves the raw typed feedback, then separately records the
+nominal-status bias and the exact delayed position consumed by the controller.
+The fixed `[0.00, 0.01, 0.02, 0.04, 0.06] rad` grid brackets the boundary at
+`0.01 rad` passing and `0.02 rad` failing. All three backends first fail the
+same `0.02 rad*s` IAE requirement; Rapier crosses at step 3303 and MuJoCo plus
+Gazebo at step 3304. The bias is active for exactly 60 controller decisions on
+every run, with at most `3.47e-18 rad` realization error.
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-robustness-lab
+```

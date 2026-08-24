@@ -170,6 +170,8 @@ def controller_decision(
             "target": reference.copy(),
             "correction": [0.0] * len(reference),
             "integral_correction": integral_correction.copy(),
+            "controller_observation_position_rad": [],
+            "joint_measurement_bias_rad": [0.0] * len(reference),
             "observation_sequence": None,
             "observation_age_ticks": None,
             "bootstrap": False,
@@ -184,6 +186,8 @@ def controller_decision(
             "target": reference.copy(),
             "correction": [0.0] * len(reference),
             "integral_correction": integral_correction.copy(),
+            "controller_observation_position_rad": [],
+            "joint_measurement_bias_rad": [0.0] * len(reference),
             "observation_sequence": None,
             "observation_age_ticks": None,
             "bootstrap": True,
@@ -196,9 +200,12 @@ def controller_decision(
         raise RuntimeError("OpenArm controller rejected stale or future joint feedback")
     law = controller["feedback_law"]
     sample_period_s = contract["sample_period_ticks"] / 1_000_000_000.0
+    controller_positions, measurement_bias = apply_measurement_bias(
+        controller, observation, consumed_at_ticks
+    )
     if law["kind"] == "joint_position_state_feedback_integral_v1":
         index = controller["action_joint_order"].index(law["controlled_joint"])
-        position = observation["joint_position_rad"][index]
+        position = controller_positions[index]
         previous_position = previous_observation_position[index]
         if previous_position is None:
             previous_position = position
@@ -258,6 +265,8 @@ def controller_decision(
             "target": target,
             "correction": correction,
             "integral_correction": integral_correction.copy(),
+            "controller_observation_position_rad": controller_positions,
+            "joint_measurement_bias_rad": measurement_bias,
             "observation_sequence": observation["step"],
             "observation_age_ticks": age_ticks,
             "bootstrap": False,
@@ -267,7 +276,7 @@ def controller_decision(
     for index, (desired, position, gain, maximum) in enumerate(
         zip(
             reference,
-            observation["joint_position_rad"],
+            controller_positions,
             law["integral_error_gain_s_inv"],
             law["maximum_integral_correction_rad"],
         )
@@ -287,7 +296,7 @@ def controller_decision(
         )
         for desired, position, velocity, gain, damping, integral, limit in zip(
             reference,
-            observation["joint_position_rad"],
+            controller_positions,
             observation["joint_velocity_rad_s"],
             law["position_error_gain"],
             law["velocity_damping_s"],
@@ -308,10 +317,59 @@ def controller_decision(
         "target": target,
         "correction": correction,
         "integral_correction": integral_correction.copy(),
+        "controller_observation_position_rad": controller_positions,
+        "joint_measurement_bias_rad": measurement_bias,
         "observation_sequence": observation["step"],
         "observation_age_ticks": age_ticks,
         "bootstrap": False,
     }
+
+
+def apply_measurement_bias(
+    controller: dict[str, Any],
+    observation: dict[str, Any],
+    consumed_at_ticks: int,
+) -> tuple[list[float], list[float]]:
+    positions = observation["joint_position_rad"].copy()
+    bias = [0.0] * len(positions)
+    contract = controller.get("measurement_fault_contract")
+    if contract is None:
+        return positions, bias
+    expected_keys = {
+        "kind",
+        "classification",
+        "joint",
+        "start_controller_step",
+        "end_controller_step",
+        "offset_rad",
+        "sensor_status",
+        "controller_visibility",
+        "application_order",
+    }
+    sample_period_ticks = controller["observation_contract"]["sample_period_ticks"]
+    if consumed_at_ticks % sample_period_ticks != 0:
+        raise RuntimeError("measurement-bias consumption time is off the control grid")
+    controller_step = consumed_at_ticks // sample_period_ticks + 1
+    if (
+        set(contract) != expected_keys
+        or contract["kind"] != "additive_joint_position_bias_pulse_v1"
+        or contract["classification"] != "measurement_error"
+        or contract["joint"] not in controller["action_joint_order"]
+        or not 1 <= contract["start_controller_step"] <= contract["end_controller_step"]
+        or not math.isfinite(contract["offset_rad"])
+        or contract["sensor_status"] != "nominal"
+        or contract["controller_visibility"] != "biased_position_as_nominal"
+        or contract["application_order"]
+        != "after_typed_feedback_availability_before_controller_law"
+    ):
+        raise RuntimeError("invalid OpenArm measurement-bias contract")
+    if contract["start_controller_step"] <= controller_step <= contract["end_controller_step"]:
+        index = controller["action_joint_order"].index(contract["joint"])
+        bias[index] = contract["offset_rad"]
+        positions[index] += bias[index]
+    if not all(math.isfinite(value) for value in positions):
+        raise RuntimeError("measurement bias produced a non-finite observation")
+    return positions, bias
 
 
 def apply_actuator_disturbance(
@@ -441,6 +499,13 @@ def run_success(
                 "joint_reference_position_rad": action[
                     "joint_position_target_rad"
                 ],
+                "joint_controller_observation_position_rad": decision[
+                    "controller_observation_position_rad"
+                ],
+                "joint_measurement_bias_rad": decision["joint_measurement_bias_rad"],
+                "measurement_bias_active": any(
+                    value != 0.0 for value in decision["joint_measurement_bias_rad"]
+                ),
                 "joint_controller_target_rad": decision["target"],
                 "joint_actuator_disturbance_rad": disturbance,
                 "joint_position_target_rad": applied_target,
