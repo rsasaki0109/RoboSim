@@ -210,6 +210,11 @@ pub enum JointFeedbackFault {
 pub struct JointFeedbackSensor {
     /// Update rate in hertz.
     pub update_rate_hz: f64,
+    /// Exact sampling period in simulation ticks, overriding `update_rate_hz`.
+    ///
+    /// Use this when a TaskSpec declares an integer control period that cannot
+    /// be represented exactly by conversion from hertz.
+    pub sample_period_ticks: Option<u64>,
     /// First scheduled capture time in simulation nanosecond ticks.
     pub phase_offset_ticks: u64,
     /// Capture-to-availability latency in simulation nanosecond ticks.
@@ -227,13 +232,17 @@ pub struct JointFeedbackSensor {
 impl JointFeedbackSensor {
     /// Sample period derived from the declared update rate.
     pub fn period(&self) -> SimDuration {
-        SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz))
+        self.sample_period_ticks.map_or_else(
+            || SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz)),
+            SimDuration::from_ticks,
+        )
     }
 
     /// Returns true when rate, channel identities, and fault sequence are valid.
     pub fn is_valid(&self) -> bool {
         if !self.update_rate_hz.is_finite()
             || self.update_rate_hz <= 0.0
+            || self.sample_period_ticks == Some(0)
             || self.channels.is_empty()
         {
             return false;

@@ -4,9 +4,11 @@ use anyhow::{bail, Context, Result};
 use rne_ai::{
     BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayAction, BehaviorReplayArtifact,
     BehaviorReplayFailure, BehaviorReplayFrame, BehaviorViolation, TaskSpec,
-    UrdfJointPositionTarget, UrdfSceneSim,
+    UrdfJointFeedbackSensorConfig, UrdfJointPositionTarget, UrdfSceneSim,
 };
+use rne_data::{DataBus, Frame, InMemoryDataBus, JointFeedback, StreamId};
 use rne_physics::hash_physics_state;
+use rne_sensor::JointFeedbackFault;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -21,6 +23,7 @@ const RAPIER_TRACE_KIND: &str = "rne_openarm_backend_trace";
 const FAILURE_KIND: &str = "rne_controller_contract_failure";
 const FIXED_DELTA_TICKS: u64 = 16_666_667;
 const ACTUATION_CONFIG_KIND: &str = "rne_revolute_position_actuation_config";
+const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_001);
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -100,8 +103,16 @@ struct ActionFrame {
 struct ObservationFrame {
     step: u64,
     sim_time_ticks: u64,
+    scheduled_capture_ticks: u64,
+    sample_phase_error_ticks: u64,
+    available_time_ticks: u64,
+    consumed_at_ticks: u64,
+    observation_age_ticks: u64,
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
+    joint_position_target_rad: Vec<f64>,
+    limited_effort_command_nm: Vec<f64>,
+    effort_saturated: Vec<bool>,
     maximum_tracking_error_rad: f64,
     physics_hash: u64,
 }
@@ -120,10 +131,15 @@ struct BackendTrace<'a> {
     robot_asset_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     fixed_delta_ticks: u64,
+    joint_feedback_schema_version: u32,
+    joint_feedback_latency_ticks: u64,
+    observation_source: &'static str,
     initial_state_digest: u64,
     final_state_digest: u64,
     replay_final_state_digest: u64,
     replay_match: bool,
+    maximum_sensor_backend_position_delta_rad: f64,
+    maximum_sensor_backend_velocity_delta_rad_s: f64,
     final_maximum_tracking_error_rad: f64,
     maximum_tracking_error_rad: f64,
     observations: Vec<ObservationFrame>,
@@ -157,6 +173,8 @@ struct Rollout {
     initial_digest: u64,
     final_digest: u64,
     observations: Vec<ObservationFrame>,
+    maximum_sensor_backend_position_delta_rad: f64,
+    maximum_sensor_backend_velocity_delta_rad_s: f64,
 }
 
 fn main() {
@@ -266,10 +284,17 @@ fn run() -> Result<()> {
             robot_asset_config_sha256: &robot_asset_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             fixed_delta_ticks: FIXED_DELTA_TICKS,
+            joint_feedback_schema_version: JointFeedback::SCHEMA_VERSION,
+            joint_feedback_latency_ticks: FIXED_DELTA_TICKS,
+            observation_source: "databus_latest_available",
             initial_state_digest: first.initial_digest,
             final_state_digest: first.final_digest,
             replay_final_state_digest: replay.final_digest,
             replay_match: true,
+            maximum_sensor_backend_position_delta_rad: first
+                .maximum_sensor_backend_position_delta_rad,
+            maximum_sensor_backend_velocity_delta_rad_s: first
+                .maximum_sensor_backend_velocity_delta_rad_s,
             final_maximum_tracking_error_rad: final_error,
             maximum_tracking_error_rad: maximum_error,
             observations: first.observations,
@@ -478,14 +503,31 @@ fn rollout(
     actions: &[ActionFrame],
 ) -> Result<Rollout> {
     let scene = repo_root.join("assets/scenes/openarm_v2_right_validation.rne.scene.toml");
-    let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations(
+    let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
         &scene,
         actuation_config.solver_iterations,
+        rne_core::SimDuration::from_ticks(FIXED_DELTA_TICKS),
     )
     .context("load OpenArm right-arm validation scene")?;
     configure_actuators(&mut sim, actuation_config)?;
+    sim.install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
+        sensor_name: "openarm_right_joint_feedback".into(),
+        link_names: controller.rne_actuator_link_order.clone(),
+        update_rate_hz: 60.0,
+        sample_period_ticks: Some(sim.fixed_delta().ticks()),
+        phase_offset_ticks: sim.fixed_delta().ticks(),
+        latency_ticks: sim.fixed_delta().ticks(),
+        stream_id: JOINT_FEEDBACK_STREAM,
+        fault: JointFeedbackFault::None,
+    })
+    .context("install OpenArm joint-feedback sensor")?;
     let initial_digest = hash_physics_state(sim.world());
     let mut observations = Vec::with_capacity(actions.len());
+    let mut state_hashes = Vec::with_capacity(actions.len());
+    let mut bus = InMemoryDataBus::new();
+    let mut last_observation_sequence = 0;
+    let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
+    let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
     for action in actions {
         let targets = controller
             .rne_actuator_link_order
@@ -497,40 +539,143 @@ fn rollout(
             })
             .collect::<Vec<_>>();
         sim.step_joint_position_actuation_targets(&targets);
-        let positions = controller
+        state_hashes.push(hash_physics_state(sim.world()));
+        sim.sample_joint_feedback(&mut bus)
+            .context("sample OpenArm joint feedback")?;
+        let captured = bus
+            .latest::<JointFeedback>(JOINT_FEEDBACK_STREAM)
+            .context("OpenArm feedback sensor emitted no current frame")?;
+        for (link_name, joint) in controller
             .rne_actuator_link_order
             .iter()
-            .map(|link| {
-                sim.named_joint_position(link)
-                    .with_context(|| format!("missing {link}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let velocities = controller
-            .rne_actuator_link_order
-            .iter()
-            .map(|link| {
-                sim.named_joint_velocity(link)
-                    .with_context(|| format!("missing {link}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let error = positions
-            .iter()
-            .zip(&action.joint_position_target_rad)
-            .map(|(actual, expected)| (actual - expected).abs())
-            .fold(0.0_f64, f64::max);
-        observations.push(ObservationFrame {
-            step: action.step,
-            sim_time_ticks: action.sim_time_ticks,
-            joint_position_rad: positions,
-            joint_velocity_rad_s: velocities,
-            maximum_tracking_error_rad: error,
-            physics_hash: hash_physics_state(sim.world()),
-        });
+            .zip(&captured.payload.joints)
+        {
+            let (sensor_position_rad, sensor_velocity_rad_s) = match joint.coordinate {
+                rne_data::JointCoordinateFeedback::Revolute {
+                    position_rad,
+                    velocity_rad_s,
+                } => (position_rad, velocity_rad_s),
+                _ => bail!("OpenArm feedback channel {link_name} is not revolute"),
+            };
+            let backend_position_rad = sim
+                .named_joint_position(link_name)
+                .with_context(|| format!("missing backend position for {link_name}"))?;
+            let backend_velocity_rad_s = sim
+                .named_joint_velocity(link_name)
+                .with_context(|| format!("missing backend velocity for {link_name}"))?;
+            maximum_sensor_backend_position_delta_rad = maximum_sensor_backend_position_delta_rad
+                .max((sensor_position_rad - backend_position_rad).abs());
+            maximum_sensor_backend_velocity_delta_rad_s =
+                maximum_sensor_backend_velocity_delta_rad_s
+                    .max((sensor_velocity_rad_s - backend_velocity_rad_s).abs());
+        }
+        let now = sim.sim_time();
+        if let Some(frame) = bus.latest_available::<JointFeedback>(JOINT_FEEDBACK_STREAM, now) {
+            if frame.sequence > last_observation_sequence {
+                observations.push(observation_from_feedback(
+                    frame,
+                    now.ticks(),
+                    &state_hashes,
+                )?);
+                last_observation_sequence = observations.last().unwrap().step;
+            }
+        }
     }
+    let final_time_ticks = sim
+        .sim_time()
+        .ticks()
+        .checked_add(FIXED_DELTA_TICKS)
+        .context("OpenArm feedback availability time overflow")?;
+    let final_frame = bus
+        .latest_available::<JointFeedback>(
+            JOINT_FEEDBACK_STREAM,
+            rne_core::SimTime::from_ticks(final_time_ticks),
+        )
+        .context("final OpenArm joint feedback did not become available")?;
+    if final_frame.sequence > last_observation_sequence {
+        observations.push(observation_from_feedback(
+            final_frame,
+            final_time_ticks,
+            &state_hashes,
+        )?);
+    }
+    anyhow::ensure!(
+        observations.len() == actions.len(),
+        "OpenArm typed feedback emitted {} observations for {} actions",
+        observations.len(),
+        actions.len()
+    );
     Ok(Rollout {
         initial_digest,
         final_digest: hash_physics_state(sim.world()),
         observations,
+        maximum_sensor_backend_position_delta_rad,
+        maximum_sensor_backend_velocity_delta_rad_s,
+    })
+}
+
+fn observation_from_feedback(
+    frame: Frame<JointFeedback>,
+    consumed_at_ticks: u64,
+    state_hashes: &[u64],
+) -> Result<ObservationFrame> {
+    anyhow::ensure!(
+        frame.payload.schema_version == JointFeedback::SCHEMA_VERSION,
+        "unsupported OpenArm joint-feedback schema"
+    );
+    let mut positions = Vec::with_capacity(frame.payload.joints.len());
+    let mut velocities = Vec::with_capacity(frame.payload.joints.len());
+    let mut targets = Vec::with_capacity(frame.payload.joints.len());
+    let mut limited_efforts = Vec::with_capacity(frame.payload.joints.len());
+    let mut saturated = Vec::with_capacity(frame.payload.joints.len());
+    let mut maximum_tracking_error_rad = 0.0_f64;
+    for joint in &frame.payload.joints {
+        let (position_rad, velocity_rad_s) = match joint.coordinate {
+            rne_data::JointCoordinateFeedback::Revolute {
+                position_rad,
+                velocity_rad_s,
+            } => (position_rad, velocity_rad_s),
+            _ => bail!("OpenArm feedback channel {} is not revolute", joint.name),
+        };
+        let (target_position_rad, limited_effort_command_nm, effort_saturated) = match joint.command
+        {
+            rne_data::JointCommandFeedback::Revolute {
+                target_position_rad: Some(target_position_rad),
+                limited_effort_command_nm,
+                saturated,
+                ..
+            } => (target_position_rad, limited_effort_command_nm, saturated),
+            _ => bail!(
+                "OpenArm feedback channel {} has no revolute position command",
+                joint.name
+            ),
+        };
+        positions.push(position_rad);
+        velocities.push(velocity_rad_s);
+        targets.push(target_position_rad);
+        limited_efforts.push(limited_effort_command_nm);
+        saturated.push(effort_saturated);
+        maximum_tracking_error_rad =
+            maximum_tracking_error_rad.max((position_rad - target_position_rad).abs());
+    }
+    let physics_hash = *state_hashes
+        .get(frame.sequence.saturating_sub(1) as usize)
+        .context("OpenArm feedback sequence has no matching state hash")?;
+    Ok(ObservationFrame {
+        step: frame.sequence,
+        sim_time_ticks: frame.capture_time.ticks(),
+        scheduled_capture_ticks: frame.payload.scheduled_capture_ticks,
+        sample_phase_error_ticks: frame.payload.sample_phase_error_ticks,
+        available_time_ticks: frame.available_time.ticks(),
+        consumed_at_ticks,
+        observation_age_ticks: consumed_at_ticks.saturating_sub(frame.capture_time.ticks()),
+        joint_position_rad: positions,
+        joint_velocity_rad_s: velocities,
+        joint_position_target_rad: targets,
+        limited_effort_command_nm: limited_efforts,
+        effort_saturated: saturated,
+        maximum_tracking_error_rad,
+        physics_hash,
     })
 }
 

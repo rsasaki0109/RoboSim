@@ -942,6 +942,7 @@ mod tests {
         world.entity_mut(sensor_entity).insert((
             JointFeedbackSensor {
                 update_rate_hz: 1_000.0,
+                sample_period_ticks: None,
                 phase_offset_ticks: 5,
                 latency_ticks: 7,
                 enabled: true,

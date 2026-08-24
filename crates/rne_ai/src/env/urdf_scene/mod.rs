@@ -97,12 +97,13 @@ use rne_assets::{
     SpawnSceneOptions,
 };
 use rne_core::{SimDuration, SimTime};
+use rne_data::{DataBus, StreamId};
 use rne_deformable::{
     release_deformable_attachment, step_deformable_world, try_attach_deformable_at_colliders,
     try_attach_deformable_at_points, DeformableAttachment, DeformableBody, DeformableCollider,
     DeformableSolverConfig, DeformableStepError,
 };
-use rne_ecs::{Entity, Name, Parent, World};
+use rne_ecs::{spawn_named, Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
@@ -111,8 +112,13 @@ use rne_physics::{
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{Joint, JointKind, Link};
+use rne_sensor::{
+    sample_joint_feedback_sensors, JointFeedbackChannelSpec, JointFeedbackError,
+    JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
+};
 use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3, WorldEntity};
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 /// Observation for a generic URDF scene simulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -174,6 +180,47 @@ pub struct UrdfJointPositionTarget<'a> {
     pub link_name: &'a str,
     /// Desired revolute angle in radians or prismatic displacement in meters.
     pub position: f64,
+}
+
+/// Configuration for a typed joint-feedback stream attached to a URDF scene.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UrdfJointFeedbackSensorConfig {
+    /// Unique ECS name assigned to the sensor entity.
+    pub sensor_name: String,
+    /// Child-link names whose articulation coordinates are sampled, in stream order.
+    pub link_names: Vec<String>,
+    /// Sampling frequency in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in ticks, overriding the hertz-derived period.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// DataBus stream identifier.
+    pub stream_id: StreamId,
+    /// Optional deterministic sensor fault.
+    pub fault: JointFeedbackFault,
+}
+
+/// Failure while attaching a typed joint-feedback stream to a URDF scene.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum UrdfJointFeedbackInstallError {
+    /// The sensor name is empty or already belongs to an entity in the scene.
+    #[error("joint-feedback sensor name is empty or already exists: {sensor_name}")]
+    InvalidSensorName {
+        /// Rejected sensor name.
+        sensor_name: String,
+    },
+    /// A declared child link does not exist in the loaded articulation.
+    #[error("joint-feedback link does not exist: {link_name}")]
+    MissingLink {
+        /// Missing child-link name.
+        link_name: String,
+    },
+    /// The resulting sampling, channel, or fault configuration is invalid.
+    #[error("joint-feedback sensor configuration is invalid")]
+    InvalidConfiguration,
 }
 
 /// Feed-forward torque command for a named actuated URDF child link.
@@ -257,6 +304,26 @@ impl UrdfSceneSim {
         solver_iterations: usize,
     ) -> Result<Self, AssetError> {
         Self::from_scene_path_with_options(scene_path, solver_iterations, &[])
+    }
+
+    /// Loads a URDF scene with explicit solver iterations and fixed-step duration.
+    ///
+    /// This constructor is intended for versioned TaskSpecs whose integer tick
+    /// duration must match the physics clock exactly. A zero duration is rejected.
+    pub fn from_scene_path_with_solver_iterations_and_fixed_delta(
+        scene_path: &Path,
+        solver_iterations: usize,
+        fixed_delta: SimDuration,
+    ) -> Result<Self, AssetError> {
+        if fixed_delta.ticks() == 0 {
+            return Err(AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: "fixed simulation delta must be greater than zero ticks".into(),
+            });
+        }
+        let mut sim = Self::from_scene_path_with_options(scene_path, solver_iterations, &[])?;
+        sim.dt = fixed_delta;
+        Ok(sim)
     }
 
     /// Loads a URDF scene with selected links fixed before physics initialization.
@@ -482,6 +549,74 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Returns the completed simulation time used to timestamp sensor samples.
+    pub fn sim_time(&self) -> SimTime {
+        self.sim_time
+    }
+
+    /// Returns the exact fixed-step duration used by the physics clock.
+    pub fn fixed_delta(&self) -> SimDuration {
+        self.dt
+    }
+
+    /// Attaches a typed joint-feedback sensor by resolving URDF child-link names.
+    ///
+    /// Resolution is atomic: no sensor entity is created when any name or
+    /// sampling parameter is invalid. The resulting channel order exactly
+    /// matches [`UrdfJointFeedbackSensorConfig::link_names`].
+    pub fn install_joint_feedback_sensor(
+        &mut self,
+        config: UrdfJointFeedbackSensorConfig,
+    ) -> Result<Entity, UrdfJointFeedbackInstallError> {
+        if config.sensor_name.trim().is_empty()
+            || find_entity_by_name(&self.world, &config.sensor_name).is_some()
+        {
+            return Err(UrdfJointFeedbackInstallError::InvalidSensorName {
+                sensor_name: config.sensor_name,
+            });
+        }
+        let channels = config
+            .link_names
+            .iter()
+            .map(|link_name| {
+                find_link_by_name(&self.world, link_name)
+                    .map(|joint_entity| JointFeedbackChannelSpec {
+                        name: link_name.clone(),
+                        joint_entity,
+                    })
+                    .ok_or_else(|| UrdfJointFeedbackInstallError::MissingLink {
+                        link_name: link_name.clone(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let sensor = JointFeedbackSensor {
+            update_rate_hz: config.update_rate_hz,
+            sample_period_ticks: config.sample_period_ticks,
+            phase_offset_ticks: config.phase_offset_ticks,
+            latency_ticks: config.latency_ticks,
+            enabled: true,
+            stream_id: config.stream_id,
+            channels,
+            fault: config.fault,
+        };
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(UrdfJointFeedbackInstallError::InvalidConfiguration);
+        }
+        let sensor_entity = spawn_named(&mut self.world, config.sensor_name);
+        self.world
+            .entity_mut(sensor_entity)
+            .insert((sensor, JointFeedbackSensorState::default()));
+        Ok(sensor_entity)
+    }
+
+    /// Samples all installed joint-feedback sensors at the completed simulation time.
+    pub fn sample_joint_feedback(
+        &mut self,
+        bus: &mut impl DataBus,
+    ) -> Result<usize, JointFeedbackError> {
+        sample_joint_feedback_sensors(&mut self.world, self.sim_time, bus)
     }
 
     /// Attaches distinct deformable particles near named contact frames to a named target frame.
@@ -1914,6 +2049,68 @@ mod tests {
             3.0,
             4.0,
         ));
+    }
+
+    #[test]
+    fn exact_task_delta_and_feedback_installation_are_preserved() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let fixed_delta = SimDuration::from_ticks(12_345);
+        let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+            &scene_path,
+            0,
+            fixed_delta,
+        )
+        .expect("spawn SO-101 with exact TaskSpec delta");
+        assert_eq!(sim.fixed_delta(), fixed_delta);
+        assert!(sim.configure_named_revolute_position_actuation("shoulder_link", 12.0, 3.0, 4.0,));
+        let stream = StreamId::new(404);
+        sim.install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
+            sensor_name: "controller_feedback".into(),
+            link_names: vec!["shoulder_link".into()],
+            update_rate_hz: 1_000.0,
+            sample_period_ticks: Some(fixed_delta.ticks()),
+            phase_offset_ticks: fixed_delta.ticks(),
+            latency_ticks: 7,
+            stream_id: stream,
+            fault: JointFeedbackFault::None,
+        })
+        .expect("install feedback sensor");
+        sim.step_joint_position_targets(&[]);
+        assert_eq!(sim.sim_time().ticks(), fixed_delta.ticks());
+        let sensor_entity = find_entity_by_name(sim.world(), "controller_feedback")
+            .expect("installed sensor entity");
+        let sensor = sim
+            .world()
+            .get::<JointFeedbackSensor>(sensor_entity)
+            .expect("installed sensor component");
+        assert_eq!(sensor.stream_id, stream);
+        assert_eq!(sensor.channels.len(), 1);
+        assert_eq!(sensor.channels[0].name, "shoulder_link");
+    }
+
+    #[test]
+    fn missing_feedback_link_leaves_no_partial_sensor() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&UrdfSceneSim::so101_scene_path()).expect("spawn SO-101");
+        let error = sim
+            .install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
+                sensor_name: "invalid_feedback".into(),
+                link_names: vec!["shoulder_link".into(), "missing_link".into()],
+                update_rate_hz: 60.0,
+                sample_period_ticks: None,
+                phase_offset_ticks: 0,
+                latency_ticks: 0,
+                stream_id: StreamId::new(405),
+                fault: JointFeedbackFault::None,
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            UrdfJointFeedbackInstallError::MissingLink {
+                link_name: "missing_link".into()
+            }
+        );
+        assert!(find_entity_by_name(sim.world(), "invalid_feedback").is_none());
     }
 
     #[test]

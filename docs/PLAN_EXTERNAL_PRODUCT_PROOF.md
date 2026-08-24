@@ -379,6 +379,27 @@ work is the versioned golden streams and `sensor-validation-report`, followed by
 making the OpenArm controller consume only `latest_available` observations in
 slice 3.
 
+The Rapier OpenArm trace now exercises the slice-3 observation boundary with a
+one-control-period latency: scoring consumes only `latest_available` frames and
+records capture, availability, consumption, and observation-age ticks. Each
+frame also retains its position target, limited effort command, and saturation
+state. A zero-delta calibration check against the backend reference is retained
+separately from the controller-visible signal. The trace now passes the
+TaskSpec's exact integer fixed-step duration into the plant instead of claiming
+`16,666,667` ticks while running the generic 60 Hz integer-divided
+`16,666,666`-tick default. Remaining slice-3 work is to make the controller law,
+not only the evaluator, consume the delayed stream and to carry the same schema
+through MuJoCo and Gazebo.
+
+Honoring the exact TaskSpec period exposed a real terminal tracking failure
+(`0.0150 rad` against `0.01 rad`). The controller now reaches its unchanged
+return-home target at step 1500 instead of 1580, leaving 300 steps for settling
+inside the unchanged 1800-step episode. Without increasing tolerance, gain, or
+effort limits, the resulting Rapier/Gazebo final errors are `0.005588 rad` and
+`0.001070 rad`, and the final cross-backend delta is `0.006075 rad`. The retained
+Rapier run contains 1800 typed observations with zero sample-phase error and an
+exact one-period (`16,666,667 ticks`) observation age for every frame.
+
 ### Track definition of done
 
 The hardening track is complete only when:
