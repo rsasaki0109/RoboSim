@@ -9,8 +9,9 @@
   "payload_mass_grid_kg": [0.0, 0.1, 0.25, 0.5, 0.75],
   "declared_supported_payload_mass_kg": 0.5,
   "gazebo_physics_substeps_per_control_step": 10,
-  "gazebo_effort_stiffness_scale_by_joint": [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 1.0, 1.0],
+  "gazebo_effort_stiffness_scale_by_joint": [8.0, 8.0, 8.0, 8.0, 1.0, 8.0, 8.0, 1.0, 1.0],
   "gazebo_effort_damping_scale_by_joint": [4.0, 4.0, 0.25, 0.25, 0.25, 0.25, 0.25, 1.0, 1.0],
+  "gazebo_effort_derivative_filter_time_constant_s": 0.02,
   "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
   "controlled_joint": "openarm_right_joint5",
   "requirements": [

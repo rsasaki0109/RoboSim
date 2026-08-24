@@ -18,6 +18,7 @@ import gz.sim8 as gz_sim
 
 from openarm_actuation import (
     ActuationDiagnosticAccumulator,
+    low_pass_velocity,
     realize_joint_command_diagnostic,
     validate_actuation,
 )
@@ -117,6 +118,10 @@ class GazeboOpenArmAdapter:
         self.actuation_diagnostics_output = actuation_diagnostics_output
         self.actuation_diagnostics: list[dict[str, Any]] = []
         self.current_actuation_diagnostic: ActuationDiagnosticAccumulator | None = None
+        self.derivative_feedback_velocity_rad_s = [0.0] * self.action_width
+        self.physics_substep_period_s = (
+            self.fixed_delta_ticks / 1_000_000_000.0 / self.physics_substeps
+        )
 
         resource_paths = [str(self.world_path.parent), str(self.robot_path.parent)]
         repo_assets = Path(__file__).resolve().parents[3] / "assets" / "robots"
@@ -210,6 +215,7 @@ class GazeboOpenArmAdapter:
         self.observation = [0.0] * self.observation_width
         self.actuation_diagnostics = []
         self.current_actuation_diagnostic = None
+        self.derivative_feedback_velocity_rad_s = [0.0] * self.action_width
         self._create_fixture()
         return self.response(
             request,
@@ -247,6 +253,19 @@ class GazeboOpenArmAdapter:
             current = position[0] if position else 0.0
             measured_velocity = joint.velocity(ecm)
             current_velocity = measured_velocity[0] if measured_velocity else 0.0
+            feedback_velocity = current_velocity
+            if (
+                self.actuation_mode == "effort_pd"
+                and index in self.effort_joint_indices
+                and self.config.get("derivative_filter_kind") is not None
+            ):
+                feedback_velocity = low_pass_velocity(
+                    self.derivative_feedback_velocity_rad_s[index],
+                    current_velocity,
+                    self.physics_substep_period_s,
+                    self.config["derivative_filter_time_constant_s"],
+                )
+                self.derivative_feedback_velocity_rad_s[index] = feedback_velocity
             realized = realize_joint_command_diagnostic(
                 self.config,
                 self.actuation_mode,
@@ -254,11 +273,15 @@ class GazeboOpenArmAdapter:
                 index,
                 target,
                 current,
-                current_velocity,
+                feedback_velocity,
             )
             if self.current_actuation_diagnostic is not None:
                 self.current_actuation_diagnostic.record(
-                    index, realized, target - current
+                    index,
+                    realized,
+                    target - current,
+                    current_velocity,
+                    feedback_velocity,
                 )
             if realized.kind == "effort_nm":
                 joint.set_force(ecm, [realized.applied])
@@ -334,6 +357,10 @@ class GazeboOpenArmAdapter:
                 "joint_order": self.joint_names,
                 "actuation_mode": self.actuation_mode,
                 "physics_substeps_per_control_step": self.physics_substeps,
+                "derivative_filter_kind": self.config.get("derivative_filter_kind"),
+                "derivative_filter_time_constant_s": self.config.get(
+                    "derivative_filter_time_constant_s"
+                ),
                 "steps": self.actuation_diagnostics,
             }
             self.actuation_diagnostics_output.parent.mkdir(parents=True, exist_ok=True)

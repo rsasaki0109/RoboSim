@@ -89,12 +89,17 @@ class OpenArmPayloadSuiteTests(unittest.TestCase):
                 self.assertEqual(config["effort_joint_indices"], list(range(7)))
                 self.assertEqual(config["stiffness_nm_per_rad"][0], 1840.0)
                 self.assertEqual(config["damping_nm_s_per_rad"][0], 10.8)
-                self.assertEqual(config["stiffness_nm_per_rad"][4], 960.0)
+                self.assertEqual(config["stiffness_nm_per_rad"][4], 120.0)
                 self.assertEqual(config["damping_nm_s_per_rad"][4], 5.0)
                 self.assertEqual(
                     config["source_actuation_stiffness_scale_by_joint"][:5],
-                    [8.0, 8.0, 8.0, 8.0, 8.0],
+                    [8.0, 8.0, 8.0, 8.0, 1.0],
                 )
+                self.assertEqual(
+                    config["derivative_filter_kind"],
+                    "first_order_low_pass_backward_euler_v1",
+                )
+                self.assertEqual(config["derivative_filter_time_constant_s"], 0.02)
                 self.assertEqual(config["maximum_effort_nm"][0], 40.0)
                 world = ET.parse(case_dir / "openarm_payload.world.sdf").getroot()
                 fixed_joint = world.find("./world/joint[@name='openarm_right_world_fixed_joint']")

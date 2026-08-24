@@ -231,6 +231,15 @@ def compile_suite(
         for values in (stiffness_scales, damping_scales)
     ):
         raise ValueError("invalid per-joint Gazebo effort gain scale")
+    derivative_filter_time_constant_s = manifest.get(
+        "gazebo_effort_derivative_filter_time_constant_s"
+    )
+    if (
+        not isinstance(derivative_filter_time_constant_s, (int, float))
+        or not math.isfinite(derivative_filter_time_constant_s)
+        or derivative_filter_time_constant_s <= 0.0
+    ):
+        raise ValueError("invalid Gazebo effort derivative-filter time constant")
     adapter_config.update(
         {
             "actuation_mode": "effort_pd",
@@ -249,6 +258,8 @@ def compile_suite(
             ],
             "source_actuation_stiffness_scale_by_joint": stiffness_scales,
             "source_actuation_damping_scale_by_joint": damping_scales,
+            "derivative_filter_kind": "first_order_low_pass_backward_euler_v1",
+            "derivative_filter_time_constant_s": derivative_filter_time_constant_s,
             "saturation_behavior": "clamp_each_joint_effort_before_pre_update",
             "failure_behavior": "reject_invalid_configuration_before_simulator_start",
         }

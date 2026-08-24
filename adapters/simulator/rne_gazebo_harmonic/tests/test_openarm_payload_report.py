@@ -107,6 +107,8 @@ class OpenArmPayloadReportTests(unittest.TestCase):
                 "substep_count": 2,
                 "joint_saturation_substep_count": [1],
                 "joint_raw_command_peak_abs": [4.0],
+                "joint_measured_velocity_peak_abs_rad_s": [3.0],
+                "joint_derivative_feedback_velocity_peak_abs_rad_s": [1.0],
             }
             sidecar = {
                 "kind": "rne_gazebo_actuation_diagnostics",
@@ -128,6 +130,13 @@ class OpenArmPayloadReportTests(unittest.TestCase):
             )
             self.assertEqual(metrics["actuator_saturation_fraction"], 0.5)
             self.assertEqual(metrics["actuator_raw_command_peak_abs"], 4.0)
+            self.assertEqual(
+                metrics["actuator_measured_velocity_peak_abs_rad_s"], 3.0
+            )
+            self.assertEqual(
+                metrics["actuator_derivative_feedback_velocity_peak_abs_rad_s"],
+                1.0,
+            )
             replay.write_text(payload + " ", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "replay hash"):
                 REPORT.gazebo_actuation_metrics(

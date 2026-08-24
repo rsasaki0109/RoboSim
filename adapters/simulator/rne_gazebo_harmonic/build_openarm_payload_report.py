@@ -138,6 +138,14 @@ def gazebo_actuation_metrics(
         "actuator_raw_command_peak_abs": max(
             step["joint_raw_command_peak_abs"][joint_index] for step in steps
         ),
+        "actuator_measured_velocity_peak_abs_rad_s": max(
+            step["joint_measured_velocity_peak_abs_rad_s"][joint_index]
+            for step in steps
+        ),
+        "actuator_derivative_feedback_velocity_peak_abs_rad_s": max(
+            step["joint_derivative_feedback_velocity_peak_abs_rad_s"][joint_index]
+            for step in steps
+        ),
     }
 
 

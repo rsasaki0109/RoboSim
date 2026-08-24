@@ -614,9 +614,7 @@ deterministic responses to these model hashes. The payload runtime now also
 fixes the Gazebo base to the world and uses bounded effort-PD realization over
 ten physics substeps per control period. It runs the complete 3,600-decision
 trace deterministically and responds to payload mass, replacing the previous
-mass-insensitive velocity-servo result. The current portable state-feedback
-controller still misses the Gazebo nominal tracking gate, so tuning and a
-closed pass/fail boundary remain open rather than being hidden as agreement.
+mass-insensitive velocity-servo result.
 The adapter now records the command actually issued on every physics substep,
 including raw/applied value, command kind, position error, and saturation count,
 in a deterministic sidecar without extending the strict external-simulator wire
@@ -626,28 +624,30 @@ single global PD scale with an explicit per-joint gain map reduced the best
 evaluated baseline joint-5 RMSE from `0.36322 rad` to `0.03276 rad`, final
 joint-5 error to `0.01283 rad`, and overall final maximum error from `0.2125 rad`
 to `0.06687 rad`, while keeping the URDF `7 N*m` wrist effort limit unchanged.
-This is a measured improvement but still fails the fixed `0.02 rad` RMSE and
-`0.005 rad` final-error requirements. An evaluated target-velocity feed-forward
-variant regressed both metrics and was rejected rather than retained.
-The regenerated 15-trace matrix confirms the distinction: Rapier and
-MuJoCo pass the fixed joint-5 `0.02 rad` RMSE and `0.005 rad` final-error gates
-from zero through the declared `0.50 kg` capacity, then reject `0.75 kg` only
-as the expected capacity failure. With the per-joint Gazebo map, `0.25 kg` and
-`0.50 kg` pass both tracking gates, `0.10 kg` passes RMSE but misses final error
-at `0.01006 rad`, and the zero-payload baseline misses both. This non-monotonic
-improvement with added inertia is evidence of an under-robust inner loop, not a
-capacity claim. Gazebo remains deterministic and mass-sensitive, but fails at
-baseline. The report status is therefore
-`needs_tuning`, not `passed`; the report builder retains each backend/case check
-and the first failed requirement. Two clean report builds produced the same
-SHA-256 `e7c635417690944c231240bddb1c018b1d076cd7614c45e2c6a9c444ff589a5a`.
+That intermediate candidate was still rejected by the fixed requirements; an
+evaluated target-velocity feed-forward variant also regressed and was rejected.
 
-The next dynamics slice uses these substep diagnostics to identify Gazebo joint
-5 over separate excitation and validation windows. It must quantify saturation,
-delay, bandwidth, residuals, and coupling before changing the inner-loop law.
-The resulting controller candidate is accepted only if the complete payload
-grid improves under the unchanged TaskSpec, outer controller, effort limits,
-and requirements; a baseline-only gain win is insufficient.
+Substep evidence then identified the mechanism rather than treating gain search
+as sufficient. Across step, ramp, chirp, multisine, and coupling windows, joint
+5 alternated at the `+/-7 N*m` limit while its control-period mean remained only
+about `0.32--0.36 N*m`; measured velocity repeatedly reached the URDF
+`20.944 rad/s` limit. A declared `0.02 s` backward-Euler first-order low-pass in
+the derivative path reduced the derivative feedback peak to about `2.5 rad/s`.
+With the same filter and a joint-5 stiffness of `120 N*m/rad`, the chirp window
+saturation fell from `92.725%` to zero and RMSE from `0.02197 rad` to
+`0.01175 rad`. Step-doublet saturation remains measurable at `0.1%`, preserving
+a bounded nonlinear excitation case. The adapter records measured and filtered
+velocity separately so this improvement cannot be mistaken for a sensor change.
+
+The regenerated 15-trace matrix now passes. Rapier, MuJoCo, and Gazebo pass the
+fixed joint-5 `0.02 rad` RMSE and `0.005 rad` final-error gates from zero through
+the declared `0.50 kg` capacity. For Gazebo, RMSE spans `0.00504--0.00604 rad`,
+final error stays at or below `0.00431 rad`, and saturation stays at or below
+`0.128%`. The `0.75 kg` case passes every non-capacity requirement on all three
+backends and is classified only as the expected capacity failure. The TaskSpec,
+outer state-feedback controller, requirements, and URDF effort limits remain
+unchanged. Two clean report builds produced the same SHA-256
+`bc7796627627708034ca623d899fbd08d7a201be6d23584a97d1d4ee30602d88`.
 
 ### Track definition of done
 

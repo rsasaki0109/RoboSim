@@ -38,8 +38,10 @@ parallel-axis theorem and retain explicit mass, center-of-mass, inertia, model,
 scene, and runtime hashes. Their Gazebo world fixes the robot base and selects
 bounded effort-PD actuation over ten physics substeps, so payload mass affects
 the measured trajectory. Gain scaling is declared per joint so shoulder and
-wrist authority are not conflated; the URDF effort limits remain unchanged.
-Invalid actuator declarations fail before startup.
+wrist authority are not conflated. The derivative path declares a deterministic
+first-order low-pass time constant and records both measured and filtered
+velocity; the URDF effort limits remain unchanged. Invalid actuator declarations
+fail before startup.
 
 After collecting the three backend traces, independently recompute the model
 and control requirements and write the browser report with:

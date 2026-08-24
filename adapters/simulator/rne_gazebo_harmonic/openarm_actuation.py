@@ -22,6 +22,19 @@ def validate_actuation(
         raise ValueError("effort-PD saturation behavior is not declared")
     if config.get("failure_behavior") != "reject_invalid_configuration_before_simulator_start":
         raise ValueError("effort-PD failure behavior is not declared")
+    if config.get("derivative_filter_kind") not in {
+        None,
+        "first_order_low_pass_backward_euler_v1",
+    }:
+        raise ValueError("unsupported effort derivative filter")
+    if config.get("derivative_filter_kind") is not None:
+        time_constant_s = config.get("derivative_filter_time_constant_s")
+        if (
+            not isinstance(time_constant_s, (int, float))
+            or not math.isfinite(time_constant_s)
+            or time_constant_s <= 0.0
+        ):
+            raise ValueError("invalid effort derivative-filter time constant")
     for key in ("stiffness_nm_per_rad", "damping_nm_s_per_rad", "maximum_effort_nm"):
         values = config.get(key)
         if (
@@ -81,6 +94,31 @@ class RealizedJointCommand:
     saturated: bool
 
 
+def low_pass_velocity(
+    previous_rad_s: float,
+    measured_rad_s: float,
+    substep_period_s: float,
+    time_constant_s: float,
+) -> float:
+    """Applies a deterministic backward-Euler first-order low-pass filter."""
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (
+                previous_rad_s,
+                measured_rad_s,
+                substep_period_s,
+                time_constant_s,
+            )
+        )
+        or substep_period_s <= 0.0
+        or time_constant_s <= 0.0
+    ):
+        raise ValueError("invalid derivative-filter input")
+    measurement_weight = substep_period_s / (time_constant_s + substep_period_s)
+    return previous_rad_s + measurement_weight * (measured_rad_s - previous_rad_s)
+
+
 def realize_joint_command_diagnostic(
     config: dict[str, Any],
     mode: str,
@@ -121,6 +159,8 @@ class ActuationDiagnosticAccumulator:
     applied_commands: list[list[float]] = field(init=False)
     saturation_counts: list[int] = field(init=False)
     initial_position_error_rad: list[float | None] = field(init=False)
+    measured_velocities_rad_s: list[list[float]] = field(init=False)
+    feedback_velocities_rad_s: list[list[float]] = field(init=False)
 
     def __post_init__(self) -> None:
         self.kinds = [None] * self.joint_count
@@ -128,12 +168,16 @@ class ActuationDiagnosticAccumulator:
         self.applied_commands = [[] for _ in range(self.joint_count)]
         self.saturation_counts = [0] * self.joint_count
         self.initial_position_error_rad = [None] * self.joint_count
+        self.measured_velocities_rad_s = [[] for _ in range(self.joint_count)]
+        self.feedback_velocities_rad_s = [[] for _ in range(self.joint_count)]
 
     def record(
         self,
         index: int,
         command: RealizedJointCommand,
         position_error_rad: float,
+        measured_velocity_rad_s: float,
+        feedback_velocity_rad_s: float,
     ) -> None:
         """Records one pre-update realization for one joint."""
         if not 0 <= index < self.joint_count:
@@ -145,6 +189,8 @@ class ActuationDiagnosticAccumulator:
         self.raw_commands[index].append(command.raw)
         self.applied_commands[index].append(command.applied)
         self.saturation_counts[index] += int(command.saturated)
+        self.measured_velocities_rad_s[index].append(measured_velocity_rad_s)
+        self.feedback_velocities_rad_s[index].append(feedback_velocity_rad_s)
         if self.initial_position_error_rad[index] is None:
             self.initial_position_error_rad[index] = position_error_rad
 
@@ -177,5 +223,13 @@ class ActuationDiagnosticAccumulator:
             "joint_saturation_substep_count": self.saturation_counts,
             "joint_saturation_fraction": [
                 count / expected_substeps for count in self.saturation_counts
+            ],
+            "joint_measured_velocity_peak_abs_rad_s": [
+                max(abs(value) for value in values)
+                for values in self.measured_velocities_rad_s
+            ],
+            "joint_derivative_feedback_velocity_peak_abs_rad_s": [
+                max(abs(value) for value in values)
+                for values in self.feedback_velocities_rad_s
             ],
         }
