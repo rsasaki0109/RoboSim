@@ -539,7 +539,9 @@ records the separate delayed position consumed by the controller. A fixed
 MuJoCo, and Gazebo. All three first fail the same `0.02 rad*s` IAE requirement;
 the first crossing occurs at step 3303 on Rapier and step 3304 on MuJoCo and
 Gazebo. Each boundary trace proves exactly 60 biased controller decisions and
-at most `3.47e-18 rad` realization error. Sensor dropout, physical parameter
+at most `3.47e-18 rad` realization error. The retained 43-artifact Capsule is
+bound to its producer and stops its replay at the first failed measurement.
+Sensor dropout, physical parameter
 sweeps, and actuator-authority degradation remain open.
 
 ### Track definition of done

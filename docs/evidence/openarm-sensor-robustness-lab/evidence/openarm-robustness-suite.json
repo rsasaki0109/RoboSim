@@ -1,0 +1,88 @@
+{
+  "kind": "rne_openarm_robustness_suite",
+  "schema_version": 1,
+  "suite_id": "rne.openarm.right.state_feedback.robustness.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "controller_role": "state_feedback",
+  "dimension_id": "joint_position_measurement_bias",
+  "primary_sweep_backend": "rne_rapier",
+  "backend_order": [
+    "rne_rapier",
+    "mujoco_native",
+    "gazebo_sim"
+  ],
+  "dimension": {
+    "kind": "additive_joint_position_bias_pulse_v1",
+    "classification": "measurement_error",
+    "joint": "openarm_right_joint5",
+    "unit": "rad",
+    "values": [
+      0.0,
+      0.01,
+      0.02,
+      0.04,
+      0.06
+    ],
+    "start_controller_step": 3241,
+    "end_controller_step": 3300,
+    "sensor_status": "nominal",
+    "controller_visibility": "biased_position_as_nominal",
+    "application_order": "after_typed_feedback_availability_before_controller_law"
+  },
+  "evaluation": {
+    "recovery_band_rad": 0.005,
+    "recovery_hold_samples": 30,
+    "evaluation_steps_after_pulse": 120,
+    "requirement_ids": [
+      "controller.state.maximum_disturbance_peak_error_rad",
+      "controller.state.maximum_disturbance_recovery_time_s",
+      "controller.state.maximum_disturbance_iae_rad_s"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "inputs": {
+    "robustness_manifest_sha256": "c679d0b4f54b080817b1a2051d907375142e865e1459fa9210691fe99985cffa",
+    "plant_report_sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4",
+    "plant_experiment_manifest_sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5",
+    "limits_controller_sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4",
+    "requirements_sha256": "c5c2af3d5611fbf08ad957e0b847d70ddcd0c60342f4c8a604623b6fa86592f5"
+  },
+  "cases": [
+    {
+      "case_id": "sensor-bias-000mrad",
+      "offset_rad": 0.0,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.sensor-bias-000mrad.v1",
+      "controller_path": "openarm-state-feedback-sensor-bias-000mrad.controller.json",
+      "controller_sha256": "1d3e7e92454535bb50a57e5d446b5d10091e8c1af32bd3503fe2969d6fcf19e3"
+    },
+    {
+      "case_id": "sensor-bias-010mrad",
+      "offset_rad": 0.01,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.sensor-bias-010mrad.v1",
+      "controller_path": "openarm-state-feedback-sensor-bias-010mrad.controller.json",
+      "controller_sha256": "4394aae70afdccae0064f44d9bd6ef23283eb5d24db91a9fee255e734a439aa5"
+    },
+    {
+      "case_id": "sensor-bias-020mrad",
+      "offset_rad": 0.02,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.sensor-bias-020mrad.v1",
+      "controller_path": "openarm-state-feedback-sensor-bias-020mrad.controller.json",
+      "controller_sha256": "753a7e041979248b3792522d6dcd305121f2c29bc6a399689f9bc026f34ef755"
+    },
+    {
+      "case_id": "sensor-bias-040mrad",
+      "offset_rad": 0.04,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.sensor-bias-040mrad.v1",
+      "controller_path": "openarm-state-feedback-sensor-bias-040mrad.controller.json",
+      "controller_sha256": "984c87b1aadc26839ff12b8c7d415cc2ac9b089bcfb16e81a90cc62c8eac06e3"
+    },
+    {
+      "case_id": "sensor-bias-060mrad",
+      "offset_rad": 0.06,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.sensor-bias-060mrad.v1",
+      "controller_path": "openarm-state-feedback-sensor-bias-060mrad.controller.json",
+      "controller_sha256": "547c4f3cab26f4764681fa3d28814feb9a53ac58aa7b2d5470db396d9c56e231"
+    }
+  ]
+}

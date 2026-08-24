@@ -312,6 +312,10 @@ same `0.02 rad*s` IAE requirement; Rapier crosses at step 3303 and MuJoCo plus
 Gazebo at step 3304. The bias is active for exactly 60 controller decisions on
 every run, with at most `3.47e-18 rad` realization error.
 
+The retained 43-artifact capsule is bound to producer commit `a730cce` and
+contains both portable boundary cases, all five controller variants, the exact
+raw/visible observation report, and the 3,304-frame first-failure replay.
+
 ```bash
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-robustness-lab

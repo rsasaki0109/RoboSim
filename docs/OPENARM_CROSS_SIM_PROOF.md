@@ -214,7 +214,9 @@ All pass at `0.01 rad` and first fail the unchanged `0.02 rad*s` IAE gate at
 
 The retained [sensor-bias report](evidence/openarm-sensor-robustness-lab/evidence/openarm-sensor-bias-robustness-report.html)
 and [Failure Capsule](evidence/openarm-sensor-robustness-lab/capsule.json) retain
-the raw/visible observation boundary and the minimum-failure replay:
+the raw/visible observation boundary and the minimum-failure replay. Its 43
+artifacts are bound to producer commit
+`a730ccee59bfca6d63cf05ec94d96d587cb691cf`:
 
 ```bash
 cargo run --locked -p xtask -- failure-capsule verify \
