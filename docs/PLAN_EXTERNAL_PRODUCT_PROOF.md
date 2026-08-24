@@ -12,6 +12,13 @@ product wedge is a CI-native robot verification runtime:
 > hardware paths, then package the first contract violation as portable,
 > independently reproducible evidence.
 
+Within that wedge, sensor evidence and control-engineering dynamics are the
+two sustained technical investments. RNE should become unusually good at
+explaining the complete sampled-data loop -- measurement, estimation,
+controller decision, actuator realization, and physical response -- rather
+than accumulating loosely validated sensor or controller features. This work
+is part of the product definition and continues beyond the first OpenArm proof.
+
 The next product gate is external reproduction, not broader simulation
 coverage. New robots, environments, importers, render features, and physics
 features remain out of scope unless they are required to close one of the
@@ -395,12 +402,31 @@ smallest failing case, and portable evidence before the next stage starts.
    perturbations and report tracking, effort, saturation, and robustness—not
    only terminal pose.
 
-The immediate execution queue is now actuator realization diagnostics and
-Gazebo plant matching, then payload/inertia/friction uncertainty and
-actuator-authority degradation. Sensor dropout/recovery is complete at the
-typed controller boundary. Camera/depth and 3DGS calibration remain the next
-geometric-sensor stage; they do not displace the joint-feedback and control-loop
-work above.
+The immediate execution queue starts from the already retained actuator
+realization diagnostics, Gazebo plant matching, payload sweep, and
+actuator-authority envelope. The next slices are:
+
+1. add a source-step-verifiable actuator command-transport delay across
+   Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
+   and before backend actuation;
+2. complete the actuator envelope with rate limit, deadband, friction/damping,
+   inertia, and transmission-efficiency sweeps, retaining the smallest failing
+   value for each mechanism;
+3. expand sensor timing evidence from the completed fixed dropout case to
+   latency, deterministic jitter, stale age, burst dropout, recovery policy,
+   quantization, saturation, and stuck-value envelopes;
+4. turn the joint-5 plant lab into per-joint and coupled operating-region
+   identification with uncertainty, coherence, residual, and held-out
+   prediction evidence;
+5. compare constrained PID and justified state-space control using identical
+   typed observations, limits, references, and perturbations;
+6. then advance camera/depth and metric 3DGS calibration, followed by lidar
+   only when a retained navigation task consumes it.
+
+Sensor dropout/recovery at the typed controller boundary, actuator realization
+diagnostics, payload robustness, and actuator-authority degradation are already
+complete. Camera/depth and 3DGS calibration remain the next geometric-sensor
+stage; they do not displace the joint-feedback and control-loop work above.
 
 The labs use one versioned experiment manifest and one requirements registry.
 The registry owns hard limits and engineering targets; report builders may not
