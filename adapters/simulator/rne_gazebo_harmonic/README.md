@@ -286,3 +286,12 @@ failing. At `0.06 rad`, all three backends first fail the unchanged
 `0.02 rad*s` IAE requirement while still passing peak-error and recovery-time
 requirements. Rapier localizes the first cumulative IAE crossing to step 3292
 at `0.020305 rad*s`; the replay ends at that first violation.
+
+The retained 49-artifact capsule includes all five Rapier sweep traces, both
+boundary cases on MuJoCo and Gazebo, the exact controllers/actions, report,
+model/configuration inputs, and the 3,293-frame minimum-failure replay:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-robustness-lab
+```

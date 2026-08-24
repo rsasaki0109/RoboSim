@@ -527,7 +527,8 @@ failure. MuJoCo and Gazebo reproduce that boundary: all three pass at
 `0.03 rad`, then first fail only the unchanged `0.02 rad*s` IAE requirement at
 `0.06 rad` while peak-error and recovery gates remain green. The Rapier trace
 localizes the first cumulative crossing to step 3292 at `0.020305 rad*s` and
-retains it as a dedicated behavior replay. Slice 7 remains in progress until
+retains it as a dedicated behavior replay and verified 49-artifact Failure
+Capsule. Slice 7 remains in progress until
 payload, inertia, friction, sensor bias/drop, and actuator-authority dimensions
 are evaluated under the same boundary rules.
 

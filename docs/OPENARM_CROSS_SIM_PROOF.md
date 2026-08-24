@@ -188,7 +188,9 @@ Rapier first crosses the fixed `0.02 rad*s` IAE limit at step 3292 with
 
 The retained [robustness report](evidence/openarm-robustness-lab/evidence/openarm-robustness-report.html)
 and [minimum-failure Capsule](evidence/openarm-robustness-lab/capsule.json) can
-be verified without loading a simulator:
+be verified without loading a simulator. Its 49 artifacts are bound to
+producer commit `4860baca1cffb91c5872f6aecfaaa73dcd2fa55a` and contain the
+complete Rapier grid plus both portable boundary cases:
 
 ```bash
 cargo run --locked -p xtask -- failure-capsule verify \

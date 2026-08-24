@@ -1,0 +1,23 @@
+{
+  "kind": "rne_openarm_controller_requirements_registry",
+  "schema_version": 1,
+  "registry_id": "rne.openarm.right.controller_lab.requirements.v1",
+  "requirements": [
+    {"id": "controller.pid.maximum_settling_time_s", "gate": "closed_loop_performance", "unit": "s", "maximum": 3.5},
+    {"id": "controller.state.maximum_settling_time_s", "gate": "closed_loop_performance", "unit": "s", "maximum": 3.5},
+    {"id": "controller.state.maximum_overshoot_fraction", "gate": "closed_loop_performance", "unit": "1", "maximum": 0.25},
+    {"id": "controller.state.maximum_ramp_tracking_rmse_rad", "gate": "closed_loop_performance", "unit": "rad", "maximum": 0.08},
+    {"id": "controller.state.maximum_cross_backend_settling_delta_s", "gate": "portability", "unit": "s", "maximum": 0.2},
+    {"id": "controller.state.minimum_rapier_settling_improvement_s", "gate": "closed_loop_performance", "unit": "s", "minimum": 2.0},
+    {"id": "controller.state.maximum_disturbance_peak_error_rad", "gate": "closed_loop_performance", "unit": "rad", "maximum": 0.05},
+    {"id": "controller.state.maximum_disturbance_recovery_time_s", "gate": "closed_loop_performance", "unit": "s", "maximum": 1.0},
+    {"id": "controller.state.maximum_disturbance_iae_rad_s", "gate": "closed_loop_performance", "unit": "rad*s", "maximum": 0.02},
+    {"id": "controller.state.maximum_cross_backend_disturbance_recovery_delta_s", "gate": "portability", "unit": "s", "maximum": 0.25},
+    {"id": "controller.model.minimum_absolute_controllability_determinant", "gate": "identification_validity", "unit": "1", "minimum": 0.0000000001},
+    {"id": "controller.model.minimum_absolute_observability_determinant", "gate": "identification_validity", "unit": "1", "minimum": 0.0000000001},
+    {"id": "controller.model.maximum_declared_pole_magnitude", "gate": "identification_validity", "unit": "1", "maximum": 0.95},
+    {"id": "controller.maximum_decision_reproduction_delta_rad", "gate": "portability", "unit": "rad", "maximum": 0.000000000001},
+    {"id": "controller.maximum_correction_rad", "gate": "closed_loop_performance", "unit": "rad", "maximum": 0.04},
+    {"id": "controller.maximum_integral_correction_rad", "gate": "closed_loop_performance", "unit": "rad", "maximum": 0.015}
+  ]
+}
