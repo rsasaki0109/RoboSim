@@ -2,17 +2,19 @@
 
 use crate::camera::sample_camera_rgbd_keyed;
 use crate::components::{
-    ImuState, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState, Sensor,
-    SensorKind, SensorState,
+    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuMount, ImuState,
+    JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState, Sensor, SensorKind,
+    SensorState,
 };
-use crate::imu::sample_imu_stateful;
+use crate::imu::{sample_imu_stateful, sample_imu_stateful_diagnostic, ImuSampleError};
 use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
-    DataBus, Frame, FramePayload, JointCommandFeedback, JointCommandMode, JointCoordinateFeedback,
-    JointEffortFeedback, JointFeedback, JointFeedbackChannel, JointFeedbackStatus,
+    DataBus, Frame, FramePayload, ImuFeedback, ImuFeedbackStatus, JointCommandFeedback,
+    JointCommandMode, JointCoordinateFeedback, JointEffortFeedback, JointFeedback,
+    JointFeedbackChannel, JointFeedbackStatus,
 };
 use rne_ecs::{Entity, World};
 use rne_physics::{JointActuation, JointState, PhysicsBackend, PhysicsWorldId};
@@ -240,6 +242,183 @@ fn should_sample(sensor: &Sensor, state: &SensorState, sim_time: SimTime) -> boo
     }
 
     sim_time.ticks().saturating_sub(state.last_sample_ticks) >= period.ticks()
+}
+
+/// Typed IMU-feedback sampling error.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum ImuFeedbackError {
+    /// Sensor configuration is invalid or its exact period is zero.
+    #[error("invalid IMU feedback sensor on entity {sensor_entity_index}")]
+    InvalidSensor {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The sensor entity has no explicit mount calibration.
+    #[error("IMU feedback sensor {sensor_entity_index} has no ImuMount")]
+    MissingMount {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The sample schedule overflowed simulation ticks.
+    #[error("IMU feedback schedule overflow on entity {sensor_entity_index}")]
+    ScheduleOverflow {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// Mount or body kinematics failed validation before publication.
+    #[error("IMU feedback sensor {sensor_entity_index} cannot sample: {source}")]
+    Sampling {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+        /// Precise mount/kinematics failure.
+        source: ImuSampleError,
+    },
+    /// A stuck-value fault has no prior emitted value to hold.
+    #[error("IMU stuck-value fault on entity {sensor_entity_index} has no prior sample")]
+    StuckWithoutPrevious {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+}
+
+/// Samples every typed IMU-feedback sensor in deterministic entity order.
+///
+/// Processing order is fixed: schedule, mount-aware truth and raw measurement,
+/// range saturation, quantization/noise, stuck substitution, frame dropout,
+/// then availability latency. Every due sensor is validated before any state or
+/// frame is published, so an invalid mount fails the complete sampling call
+/// closed. Truth returned by the diagnostic sampler is deliberately discarded;
+/// it belongs in validation evidence, never in the raw sensor payload.
+pub fn sample_imu_feedback_sensors(
+    world: &mut World,
+    sim_time: SimTime,
+    bus: &mut impl DataBus,
+) -> Result<usize, ImuFeedbackError> {
+    let mut sensors: Vec<(Entity, ImuFeedbackSensor)> = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            entity_ref
+                .get::<ImuFeedbackSensor>()
+                .cloned()
+                .map(|sensor| (entity_ref.id(), sensor))
+        })
+        .collect();
+    sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+    let world_seed = world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
+
+    let mut pending = Vec::new();
+    for (sensor_entity, sensor) in sensors {
+        if !sensor.enabled {
+            continue;
+        }
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(ImuFeedbackError::InvalidSensor {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        if world.get::<ImuMount>(sensor_entity).is_none() {
+            return Err(ImuFeedbackError::MissingMount {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        let mut state = world
+            .get::<ImuFeedbackSensorState>(sensor_entity)
+            .cloned()
+            .unwrap_or_default();
+        let scheduled_capture_ticks = sensor
+            .period()
+            .ticks()
+            .checked_mul(state.attempted_sequence)
+            .and_then(|ticks| sensor.phase_offset_ticks.checked_add(ticks))
+            .ok_or(ImuFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < scheduled_capture_ticks {
+            continue;
+        }
+        let sequence =
+            state
+                .attempted_sequence
+                .checked_add(1)
+                .ok_or(ImuFeedbackError::ScheduleOverflow {
+                    sensor_entity_index: sensor_entity.index(),
+                })?;
+        let diagnostic = sample_imu_stateful_diagnostic(
+            world,
+            sensor_entity,
+            &sensor.spec,
+            SensorNoiseKey::new(world_seed, sensor.spec.seed, sensor.stream_id.0, sequence),
+            sim_time,
+            &mut state.imu_state,
+        )
+        .map_err(|source| ImuFeedbackError::Sampling {
+            sensor_entity_index: sensor_entity.index(),
+            source,
+        })?;
+        let saturated = diagnostic.gyro_saturated.into_iter().any(|value| value)
+            || diagnostic.accel_saturated.into_iter().any(|value| value);
+        let mut payload = ImuFeedback {
+            schema_version: ImuFeedback::SCHEMA_VERSION,
+            scheduled_capture_ticks,
+            sample_phase_error_ticks: sim_time.ticks() - scheduled_capture_ticks,
+            status: if saturated {
+                ImuFeedbackStatus::Saturated
+            } else {
+                ImuFeedbackStatus::Nominal
+            },
+            angular_velocity_rad_s: diagnostic.measurement.angular_velocity_rad_s,
+            specific_force_m_s2: diagnostic.measurement.linear_acceleration_m_s2,
+            gyro_saturated: diagnostic.gyro_saturated,
+            accel_saturated: diagnostic.accel_saturated,
+        };
+        if matches!(
+            sensor.fault,
+            ImuFeedbackFault::StuckFromSequence { sequence: start } if sequence >= start
+        ) {
+            let previous =
+                state
+                    .last_emitted
+                    .as_ref()
+                    .ok_or(ImuFeedbackError::StuckWithoutPrevious {
+                        sensor_entity_index: sensor_entity.index(),
+                    })?;
+            payload.angular_velocity_rad_s = previous.angular_velocity_rad_s;
+            payload.specific_force_m_s2 = previous.specific_force_m_s2;
+            payload.gyro_saturated = previous.gyro_saturated;
+            payload.accel_saturated = previous.accel_saturated;
+            payload.status = ImuFeedbackStatus::StuckValue;
+        }
+
+        state.attempted_sequence = sequence;
+        let dropped = matches!(
+            sensor.fault,
+            ImuFeedbackFault::DropSequence { sequence: dropped } if sequence == dropped
+        );
+        let frame = if dropped {
+            None
+        } else {
+            state.emitted_frames += 1;
+            state.last_emitted = Some(payload);
+            Some(
+                Frame::new(sensor.stream_id, sensor_entity, sequence, sim_time, payload)
+                    .with_latency(SimDuration::from_ticks(sensor.latency_ticks)),
+            )
+        };
+        pending.push((sensor_entity, state, frame));
+    }
+
+    let mut published = 0;
+    for (sensor_entity, state, frame) in pending {
+        world.entity_mut(sensor_entity).insert(state);
+        if let Some(frame) = frame {
+            bus.publish(frame);
+            published += 1;
+        }
+    }
+    Ok(published)
 }
 
 /// Joint-feedback sampling error.
@@ -621,10 +800,10 @@ mod tests {
     use crate::Sensor;
     use rne_data::{InMemoryDataBus, StreamId};
     use rne_ecs::spawn_named;
-    use rne_math::Seconds;
+    use rne_math::{Quat, Seconds, Vec3};
     use rne_physics::{
         ContactEvent, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-        PhysicsWorldId, RaycastHit, RaycastQuery,
+        PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody,
     };
 
     struct NullPhysics;
@@ -917,6 +1096,173 @@ mod tests {
         assert_ne!(
             first.payload.linear_acceleration_m_s2,
             second.payload.linear_acceleration_m_s2
+        );
+    }
+
+    fn imu_feedback_fixture(
+        fault: ImuFeedbackFault,
+    ) -> (World, Entity, Entity, StreamId, InMemoryDataBus) {
+        let mut world = World::new();
+        world.insert_resource(WorldRandom::new(123));
+        let body = spawn_named(&mut world, "imu_body");
+        world.entity_mut(body).insert((
+            Transform3::IDENTITY,
+            RigidBody {
+                angular_velocity_rad_s: Vec3::new(0.0, 0.0, 0.5),
+                ..RigidBody::default()
+            },
+        ));
+        let sensor = spawn_named(&mut world, "typed_imu");
+        let stream = StreamId::new(79);
+        world.entity_mut(sensor).insert((
+            ImuMount {
+                body_entity: body,
+                body_from_sensor: Transform3::from_translation_rotation(
+                    Vec3::new(0.1, 0.0, 0.0),
+                    Quat::IDENTITY,
+                ),
+            },
+            ImuFeedbackSensor {
+                spec: ImuSpec::default(),
+                update_rate_hz: 1_000_000.0,
+                sample_period_ticks: Some(1_000),
+                phase_offset_ticks: 5,
+                latency_ticks: 7,
+                enabled: true,
+                stream_id: stream,
+                fault,
+            },
+            ImuFeedbackSensorState::default(),
+        ));
+        (world, body, sensor, stream, InMemoryDataBus::new())
+    }
+
+    #[test]
+    fn imu_feedback_exposes_mount_schedule_latency_units_and_status() {
+        let (mut world, _, _, stream, mut bus) = imu_feedback_fixture(ImuFeedbackFault::None);
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(4), &mut bus).unwrap(),
+            0
+        );
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap(),
+            1
+        );
+
+        let frame = bus.latest::<ImuFeedback>(stream).expect("IMU feedback");
+        assert_eq!(frame.sequence, 1);
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+        assert_eq!(frame.payload.schema_version, ImuFeedback::SCHEMA_VERSION);
+        assert_eq!(frame.payload.scheduled_capture_ticks, 5);
+        assert_eq!(frame.payload.sample_phase_error_ticks, 0);
+        assert_eq!(frame.payload.status, ImuFeedbackStatus::Nominal);
+        assert_eq!(
+            frame.payload.angular_velocity_rad_s,
+            Vec3::new(0.0, 0.0, 0.5)
+        );
+        assert_eq!(
+            frame.payload.specific_force_m_s2,
+            Vec3::new(-0.025, 9.81, 0.0)
+        );
+        assert!(bus
+            .latest_available::<ImuFeedback>(stream, SimTime::from_ticks(11))
+            .is_none());
+        assert!(bus
+            .latest_available::<ImuFeedback>(stream, SimTime::from_ticks(12))
+            .is_some());
+    }
+
+    #[test]
+    fn imu_feedback_drop_creates_a_gap_but_advances_physical_state() {
+        let (mut world, body, sensor, stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::DropSequence { sequence: 2 });
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        world
+            .get_mut::<RigidBody>(body)
+            .unwrap()
+            .linear_velocity_m_s = Vec3::X;
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(1_005), &mut bus).unwrap(),
+            0
+        );
+        let state_after_drop = world
+            .get::<ImuFeedbackSensorState>(sensor)
+            .expect("IMU sensor state");
+        assert_eq!(state_after_drop.attempted_sequence, 2);
+        assert_eq!(state_after_drop.emitted_frames, 1);
+        assert_eq!(
+            state_after_drop.imu_state.previous_linear_velocity_m_s,
+            Vec3::X
+        );
+
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(2_005), &mut bus).unwrap(),
+            1
+        );
+        assert_eq!(bus.frame_count(stream), 2);
+        assert_eq!(bus.latest::<ImuFeedback>(stream).unwrap().sequence, 3);
+    }
+
+    #[test]
+    fn imu_feedback_stuck_fault_holds_values_but_advances_kinematics() {
+        let (mut world, body, sensor, stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::StuckFromSequence { sequence: 2 });
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        world
+            .get_mut::<RigidBody>(body)
+            .unwrap()
+            .angular_velocity_rad_s = Vec3::Z;
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(1_005), &mut bus).unwrap();
+
+        let frame = bus.latest::<ImuFeedback>(stream).expect("stuck IMU frame");
+        assert_eq!(frame.sequence, 2);
+        assert_eq!(frame.payload.status, ImuFeedbackStatus::StuckValue);
+        assert_eq!(
+            frame.payload.angular_velocity_rad_s,
+            Vec3::new(0.0, 0.0, 0.5)
+        );
+        assert_eq!(
+            world
+                .get::<ImuFeedbackSensorState>(sensor)
+                .unwrap()
+                .imu_state
+                .previous_angular_velocity_rad_s,
+            Vec3::Z
+        );
+    }
+
+    #[test]
+    fn missing_imu_mount_fails_all_due_publication_and_state_closed() {
+        let (mut world, _, valid_sensor, valid_stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::None);
+        let invalid_sensor = spawn_named(&mut world, "unmounted_imu");
+        world.entity_mut(invalid_sensor).insert(ImuFeedbackSensor {
+            spec: ImuSpec::default(),
+            update_rate_hz: 1_000_000.0,
+            sample_period_ticks: Some(1_000),
+            phase_offset_ticks: 5,
+            latency_ticks: 0,
+            enabled: true,
+            stream_id: StreamId::new(80),
+            fault: ImuFeedbackFault::None,
+        });
+
+        let error = sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus)
+            .expect_err("missing mount must fail closed");
+        assert_eq!(
+            error,
+            ImuFeedbackError::MissingMount {
+                sensor_entity_index: invalid_sensor.index()
+            }
+        );
+        assert_eq!(bus.frame_count(valid_stream), 0);
+        assert_eq!(
+            world
+                .get::<ImuFeedbackSensorState>(valid_sensor)
+                .unwrap()
+                .attempted_sequence,
+            0
         );
     }
 

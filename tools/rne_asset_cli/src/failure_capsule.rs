@@ -1659,11 +1659,14 @@ mod tests {
             &fs::read(root.join("capsule.json")).expect("read retained capsule manifest"),
         )
         .expect("parse retained capsule manifest");
-        assert_eq!(manifest.artifacts.len(), 21);
+        assert_eq!(manifest.artifacts.len(), 31);
         assert_ne!(manifest.build.git_commit, "unknown");
         for required in [
             "evidence/control-dynamics-report.json",
             "evidence/control-dynamics-report.html",
+            "evidence/cross-sim-report.json",
+            "evidence/mujoco-success-trace.json",
+            "evidence/mujoco-intentional-failure.json",
             "evidence/openarm_right.rne_actuation.json",
             "evidence/openarm_right.adapter.json",
             "evidence/openarm_v2_right.rne.robot.toml",

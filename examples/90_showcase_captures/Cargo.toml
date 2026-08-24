@@ -43,3 +43,7 @@ path = "openarm_trace.rs"
 name = "rne-openarm-mujoco-trace"
 path = "openarm_mujoco_trace.rs"
 required-features = ["mujoco"]
+
+[[bin]]
+name = "rne-imu-validation"
+path = "imu_validation.rs"

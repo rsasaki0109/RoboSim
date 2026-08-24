@@ -387,10 +387,11 @@ increased.
    Gazebo, retaining each backend-derived command stream and the first
    measurement, realization, or plant divergence. All three runners now pass
    the same final-pose, controller-reproduction, and hard-dynamics contracts.
-4. **IMU contract and estimator fixture:** implement stationary and prescribed
-   motion tests, seeded bias/noise/random walk, mount-frame validation, latency
-   and dropout cases, then add a deterministic complementary or Kalman-filter
-   reference estimator with innovation and consistency metrics.
+4. **Complete -- IMU contract and estimator fixture:** implement stationary and
+   prescribed motion tests, seeded bias/noise/random walk, physical mount-frame
+   and lever-arm validation, latency, saturation, dropout, and stuck-value cases,
+   then add a deterministic complementary-filter reference estimator with
+   innovation and consistency metrics.
 5. **Open-loop plant suite:** add bounded step/ramp/chirp experiments and a
    versioned experiment manifest. Generate frequency-response data where
    applicable, time-domain metrics, coupling matrices, and train/validation
@@ -454,6 +455,24 @@ articulated joint coordinates/velocities and rigid-body pose/velocity. Each
 1,800-step run produces 1,800 distinct step digests and an exact replay-final
 match; the report rejects a constant articulated-state hash and does not claim
 that solver-private state is equal across backends.
+
+Slice 4 adds a versioned `ImuFeedback` observation that names raw gyroscope and
+specific-force units, scheduled capture, phase error, availability latency,
+per-axis saturation, and stuck-value status without mislabeling truth
+orientation as measurement. `ImuMount` binds the sensor axes and physical
+lever arm to a rigid body; tangential and centripetal acceleration are included,
+and invalid or missing calibration fails all due publication atomically.
+Dropped and stuck observations advance the physical IMU state while affecting
+only the declared output boundary.
+
+The headless `rne-imu-validation` lab runs stationary and prescribed-roll
+fixtures at 100 Hz through a complementary reference estimator. Its deterministic
+JSON/HTML report records timing checks, phase-specific RMSE, maximum error,
+normalized innovation squared, three-sigma coverage, complete trace hashes, and
+the first sensor failure. The nominal stationary and motion RMSE values are
+`0.000461 rad` and `0.001580 rad`, inside registered `0.01 rad` and `0.025 rad`
+limits. Nominal reruns are hash-identical, while dropout and stuck-value cases
+both localize the intended first violation at sequence 650.
 
 Honoring the exact TaskSpec period exposed a real terminal tracking failure
 (`0.0150 rad` against `0.01 rad`). The controller now reaches its unchanged

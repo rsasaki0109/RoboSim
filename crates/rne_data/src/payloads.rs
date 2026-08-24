@@ -12,6 +12,67 @@ pub struct ImuSample {
     pub linear_acceleration_m_s2: Vec3,
 }
 
+/// Timestamp-contract IMU feedback for validation and closed-loop estimation.
+///
+/// Capture and availability timestamps remain on [`crate::Frame`]. This
+/// payload adds the scheduled time, phase error, measurement status, and
+/// saturation visibility that the legacy [`ImuSample`] intentionally lacks.
+/// Orientation is not included because a raw gyroscope/accelerometer does not
+/// measure it; estimator orientation and simulation truth remain separate
+/// evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImuFeedback {
+    /// Version of this serialized observation schema.
+    pub schema_version: u32,
+    /// Scheduled sample time in simulation nanosecond ticks.
+    pub scheduled_capture_ticks: u64,
+    /// Non-negative delay from scheduled to actual capture, in ticks.
+    pub sample_phase_error_ticks: u64,
+    /// Whether the measurement is nominal, saturated, or fault-held.
+    pub status: ImuFeedbackStatus,
+    /// Raw gyroscope measurement in radians per second, sensor frame.
+    pub angular_velocity_rad_s: Vec3,
+    /// Raw accelerometer specific force in meters per second squared, sensor frame.
+    pub specific_force_m_s2: Vec3,
+    /// Per-axis gyroscope saturation flags before quantization.
+    pub gyro_saturated: [bool; 3],
+    /// Per-axis accelerometer saturation flags before quantization.
+    pub accel_saturated: [bool; 3],
+}
+
+impl ImuFeedback {
+    /// Current serialized IMU-feedback schema version.
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
+impl Default for ImuFeedback {
+    fn default() -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            scheduled_capture_ticks: 0,
+            sample_phase_error_ticks: 0,
+            status: ImuFeedbackStatus::default(),
+            angular_velocity_rad_s: Vec3::ZERO,
+            specific_force_m_s2: Vec3::ZERO,
+            gyro_saturated: [false; 3],
+            accel_saturated: [false; 3],
+        }
+    }
+}
+
+/// Sample-level status for typed IMU feedback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImuFeedbackStatus {
+    /// Current sample is fresh and no axis saturated.
+    #[default]
+    Nominal,
+    /// Current sample is fresh but at least one declared measurement range clipped.
+    Saturated,
+    /// Values were held from an earlier emitted sample by a declared fault.
+    StuckValue,
+}
+
 /// LiDAR point cloud payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointCloud {
@@ -467,5 +528,28 @@ mod tests {
         assert_eq!(value["joints"][0]["coordinate"]["kind"], "revolute");
         assert_eq!(value["joints"][0]["coordinate"]["position_rad"], 0.25);
         assert_eq!(value["joints"][0]["effort"]["kind"], "unavailable");
+    }
+
+    #[test]
+    fn imu_feedback_schema_names_physical_units_and_status() {
+        let feedback = ImuFeedback {
+            scheduled_capture_ticks: 10,
+            sample_phase_error_ticks: 2,
+            status: ImuFeedbackStatus::Saturated,
+            angular_velocity_rad_s: Vec3::new(0.1, 0.2, 0.3),
+            specific_force_m_s2: Vec3::new(1.0, 2.0, 3.0),
+            gyro_saturated: [false, false, true],
+            accel_saturated: [true, false, false],
+            ..ImuFeedback::default()
+        };
+
+        let value = serde_json::to_value(feedback).expect("IMU feedback JSON");
+        assert_eq!(value["schema_version"], ImuFeedback::SCHEMA_VERSION);
+        assert_eq!(value["scheduled_capture_ticks"], 10);
+        assert_eq!(value["sample_phase_error_ticks"], 2);
+        assert_eq!(value["status"], "saturated");
+        assert_eq!(value["angular_velocity_rad_s"][2], 0.3);
+        assert_eq!(value["specific_force_m_s2"][1], 2.0);
+        assert!(value.get("orientation").is_none());
     }
 }
