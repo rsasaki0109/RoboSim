@@ -1,0 +1,18 @@
+{
+  "kind": "rne_openarm_plant_requirements_registry",
+  "schema_version": 1,
+  "registry_id": "rne.openarm.right.plant_lab.requirements.v1",
+  "requirements": [
+    {"id": "plant.input.maximum_offset_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.2},
+    {"id": "plant.input.minimum_excitation_rms_rad", "gate": "identification_validity", "unit": "rad", "minimum": 0.01},
+    {"id": "plant.step.maximum_overshoot_fraction", "gate": "closed_loop_performance", "unit": "1", "maximum": 0.25},
+    {"id": "plant.step.maximum_settling_time_s", "gate": "closed_loop_performance", "unit": "s", "maximum": 3.5},
+    {"id": "plant.ramp.maximum_tracking_rmse_rad", "gate": "closed_loop_performance", "unit": "rad", "maximum": 0.08},
+    {"id": "plant.model.maximum_validation_rmse_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.05},
+    {"id": "plant.frequency.minimum_projection_amplitude_rad", "gate": "identification_validity", "unit": "rad", "minimum": 0.005},
+    {"id": "plant.actuator.maximum_saturated_sample_fraction", "gate": "closed_loop_performance", "unit": "1", "maximum": 0.25},
+    {"id": "plant.cross_backend.maximum_joint5_rmse_delta_rad", "gate": "portability", "unit": "rad", "maximum": 0.04},
+    {"id": "plant.hard_position_limit_epsilon_rad", "gate": "plant_integrity", "unit": "rad", "maximum": 0.000001},
+    {"id": "plant.hard_velocity_limit_epsilon_rad_s", "gate": "plant_integrity", "unit": "rad/s", "maximum": 0.000001}
+  ]
+}

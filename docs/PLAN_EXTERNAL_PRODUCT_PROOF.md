@@ -279,6 +279,26 @@ plant, operating point, controller, actuator/sensor contracts, experiment input,
 backend/runtime, metrics, tolerance registry, state hashes, and replay. Every
 analysis must run headless and from `SimClock`; rendering is never required.
 
+### Engineering quality gates
+
+Sensor and dynamics work is promoted by measured gates rather than feature
+presence. The requirements registry must assign each check to one of the
+following gates and report the first failing gate:
+
+| Gate | Required evidence |
+|---|---|
+| Measurement integrity | Timestamp/phase, units, frame and calibration provenance, latency distribution, saturation/drop/stuck behavior, and truth-aligned bias/RMSE are within named limits. Controller-visible samples remain separate from privileged truth. |
+| Estimation validity | Required states have an observability argument, innovation and residual statistics, convergence/recovery time, and a deterministic sensor-fault case. An estimator may not silently substitute backend state. |
+| Plant integrity | Mass, center of mass, inertia, friction/damping, transmission, limits, actuator realization, timestep, and operating point are retained from source to trace without an undocumented fallback. |
+| Identification validity | Excitation is bounded and sufficiently informative; training and validation windows are disjoint; model order and delay are explicit; residual/prediction metrics and the valid operating region are reported. |
+| Closed-loop performance | Stability evidence, tracking and disturbance-rejection metrics, margins where applicable, saturation/anti-windup exposure, and the smallest failing robustness case all satisfy fixed requirements. |
+| Portability | The same observation/action/controller artifacts run through the advertised backends and recorded/shadow paths; differences are classified as measurement, estimation, realization, or plant divergence. |
+
+A new sensor family cannot pass on clean truth-only fixtures, and a new
+controller cannot pass on terminal pose alone. Promotion requires both a
+nominal case and a deliberately failing case whose first violated requirement
+is reproducible from retained artifacts.
+
 Dynamics work follows a control-engineering model stack:
 
 1. **Parameter integrity:** preserve mass, center of mass, inertia tensor,
@@ -392,7 +412,7 @@ increased.
    and lever-arm validation, latency, saturation, dropout, and stuck-value cases,
    then add a deterministic complementary-filter reference estimator with
    innovation and consistency metrics.
-5. **Open-loop plant suite:** add bounded step/ramp/chirp experiments and a
+5. **Complete -- open-loop plant suite:** add bounded step/ramp/chirp experiments and a
    versioned experiment manifest. Generate frequency-response data where
    applicable, time-domain metrics, coupling matrices, and train/validation
    datasets for the OpenArm joints and gripper.

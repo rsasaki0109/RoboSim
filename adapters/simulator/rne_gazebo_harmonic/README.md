@@ -148,3 +148,52 @@ URDF-declared mass, centre of mass, and complete inertia tensor, while the robot
 asset configuration, actuation configuration, and model remain independently
 content-addressed. The coupled and hard-limit checks turned green without
 changing their registered tolerances or URDF effort limits.
+
+## Run the OpenArm plant and control-engineering lab
+
+Compile the versioned experiment manifest once, then supply the exact controller
+and generated action trace to all three backends:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_controller.py \
+  --output artifacts/openarm-plant-lab/controller.json
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --output artifacts/openarm-plant-lab
+MUJOCO_DYNAMIC_LINK_DIR=/path/to/mujoco-3.9.0/lib \
+LD_LIBRARY_PATH=/path/to/mujoco-3.9.0/lib \
+cargo run --locked -p showcase_captures --features mujoco \
+  --bin rne-openarm-mujoco-trace -- \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --actions artifacts/openarm-plant-lab/controller-actions.json \
+  --output artifacts/openarm-plant-lab
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --actions artifacts/openarm-plant-lab/controller-actions.json \
+  --output artifacts/openarm-plant-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_report.py \
+  --trace-root artifacts/openarm-plant-lab \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --output artifacts/openarm-plant-lab
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-plant-failure-replay -- \
+  --report artifacts/openarm-plant-lab/openarm-plant-lab-report.json \
+  --trace artifacts/openarm-plant-lab/rapier-success-trace.json \
+  --output artifacts/openarm-plant-lab/plant-settling-failure.rne-replay
+```
+
+The report independently recompiles the manifest and rejects controller/action
+drift. It checks time response, saturation, empirical frequency response,
+frequency-separated coupling, disjoint ARX training/validation windows, exact
+same-runtime replay, URDF limits, and cross-backend differences against fixed
+SI-unit requirements. `needs_tuning` is a valid diagnostic: the retained
+baseline localizes Rapier's joint-5 settling-time failure at step 571 instead
+of widening the 3.5 s requirement or the +/-0.0024 rad settling band.
+
+The committed 34-artifact proof, including complete traces and the derived
+failure replay, verifies without loading any simulator:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-plant-lab
+```

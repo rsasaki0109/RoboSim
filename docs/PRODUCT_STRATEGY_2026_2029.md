@@ -191,6 +191,10 @@ Exit evidence:
 - same-runtime fresh runs are exact where declared;
 - Analytic/Rapier/MuJoCo comparisons pass named, unit-bearing tolerances;
 - one articulated robot fixture executes unchanged on Rapier and MuJoCo;
+- the OpenArm control-engineering fixture runs the same bounded excitation on
+  every advertised articulated backend and retains time response, empirical
+  frequency response, coupling, saturation, model-validation, and first-failed
+  requirement evidence;
 - no MuJoCo type appears in `rne_physics`, `rne_robot`, or `rne_world` public
   APIs;
 - unsupported geometry or actuation fails before the first step with a precise
@@ -262,6 +266,9 @@ Exit evidence:
   and timestamps;
 - the same seeded capture reproduces its declared exact or tolerance contract;
 - delayed and dropped sensor frames remain distinguishable from absent data;
+- joint feedback and IMU validation bind calibration, sample phase, latency,
+  noise/bias, saturation, dropout, stuck-value behavior, estimator residuals,
+  and the first failed measurement or estimation requirement;
 - an offline evaluator reproduces the committed perception metrics headlessly.
 
 ### v0.6: sim-to-real and hardware in the loop

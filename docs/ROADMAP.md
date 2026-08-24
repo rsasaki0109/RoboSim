@@ -38,6 +38,12 @@ The concrete sensor and control-engineering sequence, report contents, and
 definition of done are tracked in the
 [External product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#sensor-and-control-dynamics-hardening-track).
 
+The promotion gates are measurement integrity, estimation validity, plant
+integrity, identification validity, closed-loop performance, and portability.
+This keeps sensor work focused on calibrated controller-visible observations
+and dynamics work focused on identifiable plants, stability, saturation, and
+robustness—not on adding catalog breadth or accepting terminal-pose-only demos.
+
 Contest scoring starts with the Tsukuba Challenge 2026 confirmation run, not a
 city-scale photoreal clone. See [TSUKUBA_CONFIRMATION_RUN.md](TSUKUBA_CONFIRMATION_RUN.md):
 the first exit is the official stop/cone/e-stop geometry, headless.

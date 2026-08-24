@@ -45,5 +45,9 @@ path = "openarm_mujoco_trace.rs"
 required-features = ["mujoco"]
 
 [[bin]]
+name = "rne-openarm-plant-failure-replay"
+path = "openarm_plant_failure_replay.rs"
+
+[[bin]]
 name = "rne-imu-validation"
 path = "imu_validation.rs"
