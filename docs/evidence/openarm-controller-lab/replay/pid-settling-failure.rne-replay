@@ -5,7 +5,7 @@
   "contract_schema_version": 2,
   "contract_digest": 7082075232955938215,
   "scenario": "rne.openarm.right.plant_controller_comparison.v1",
-  "scenario_digest": 13467886373004780563,
+  "scenario_digest": 6962512373786038482,
   "seed": 20260824,
   "fixed_delta_ticks": 16666667,
   "observation_numeric_tolerance": 1e-12,
@@ -32,9 +32,9 @@
         "classification": "non_gating_baseline",
         "contract_status": "initial",
         "controller_id": "rne.controller.openarm_right.plant_pid.v1",
-        "report_sha256": "132446e24c8be7bab6aa4c97ec722e4ef89d6bff2fc57363ebccaf3244437188",
+        "report_sha256": "d250c76f1dd09f60972f8b3e3f7bb536e5fec056175c14012a5b44a5a44fcc75",
         "requirement_id": "controller.pid.maximum_settling_time_s.pid.rne_rapier.baseline_diagnostic",
-        "trace_sha256": "93c7c63ebc9afeda2e371984a4760cb3a91a9a7e91d831462e51abf36932acf5"
+        "trace_sha256": "6b9adafeb7a409c1d4fa6f4ef543753cfc2ff958fcbbaea6903e3b007e275ede"
       },
       "state_digest": 804109334272766370
     },

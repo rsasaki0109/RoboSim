@@ -4,7 +4,7 @@
   "task_id": "rne.openarm.right_joint_tracking.v1",
   "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
   "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.v1",
-  "controller_sha256": "b9bcada4b4180bf593269f6d651b830a3137e09dc850d37afa18bef16210faa9",
+  "controller_sha256": "07c5a8ec848831b36803c3a24d6ae0277cef6b88477f1e0fdd8475f4afe9a803",
   "fixed_delta_ticks": 16666667,
   "action_semantics": "reference_trajectory_before_sensor_feedback",
   "action_joint_order": [

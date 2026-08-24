@@ -19,7 +19,7 @@
   },
   "build": {
     "engine_version": "0.2.0",
-    "git_commit": "aebaacf7829aa112c24d7c0ff390475f5d44f3d7",
+    "git_commit": "6ed02b94595144b9497350a170cc18256eee1531",
     "profile": "debug",
     "target_triple": "x86_64-unknown-linux-gnu",
     "rustc_version": "rustc 1.95.0",
@@ -59,14 +59,14 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/build_openarm_controller_report.py",
-      "sha256": "92b398b68f0e9efc59b96b60f03934b49b4713d1707ff62d159de45d35913b79"
+      "sha256": "51ece2a1aa87c6c6472a9e9cdc6c1459a7fb46e5145292a5f9c6949624467576"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/build_openarm_controller_suite.py",
-      "sha256": "734f98a3d94349a7604460f9272aaf9a65284582729e7559591cc0cdd807b829"
+      "sha256": "8bd151fc4c27aa4ed60d978be16ae0956859aa91033a2238a1495b741315038f"
     },
     {
       "role": "evidence",
@@ -94,21 +94,21 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm-controller-comparison-report.html",
-      "sha256": "466d934054fc31555cad70c5e15a96cac6d6f154800864037a24d89e5bcc09a4"
+      "sha256": "a69172dfb6b1fe3a6975bae57c4c3298d6e7e1c68e2945c5eff27f0fa9d8e8e2"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm-controller-comparison-report.json",
-      "sha256": "132446e24c8be7bab6aa4c97ec722e4ef89d6bff2fc57363ebccaf3244437188"
+      "sha256": "d250c76f1dd09f60972f8b3e3f7bb536e5fec056175c14012a5b44a5a44fcc75"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm-controller-suite.json",
-      "sha256": "8be2f409b2c32a2817a4cee97027f0d568163e23081e6986361b0611df4328c4"
+      "sha256": "baa2e8357bfdc27a71c143fb80cf07acaa19a34d3c1b9ad33aaecd5441008003"
     },
     {
       "role": "evidence",
@@ -122,14 +122,14 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm-plant-pid.controller.json",
-      "sha256": "c2a25af70142cfa8ccb3739ae4369199ef48645fa60109d23e958f5c58610443"
+      "sha256": "67ef98372bee75c033530ebccc3af98d8bf17ace776b5cf5ce5cf1fa4fe68873"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm-plant-state-feedback.controller.json",
-      "sha256": "b9bcada4b4180bf593269f6d651b830a3137e09dc850d37afa18bef16210faa9"
+      "sha256": "07c5a8ec848831b36803c3a24d6ae0277cef6b88477f1e0fdd8475f4afe9a803"
     },
     {
       "role": "evidence",
@@ -143,14 +143,14 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm_controller_requirements.json",
-      "sha256": "89e1afe5eb2152ec9f3e249a0346902311254ae384fa3b0fb8c5b3b2f2c08531"
+      "sha256": "ed30ad920000da9beab6e11bf3c3d10f904e2c9f29f7df402c293ad952b34a44"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm_mujoco_trace.rs",
-      "sha256": "bbee98a7119ae0b29e6bcc4bd6405c61023ed561729d094e22907b64a35fb1d1"
+      "sha256": "3ae3054ec75c476e818cc6a04a9d58d608cf8fd1ab9d186aec4ff151b1be86fb"
     },
     {
       "role": "evidence",
@@ -199,7 +199,7 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/openarm_trace.rs",
-      "sha256": "69b24ccb3fe336d9081d4dafc6ae9e2b8f44dd346226730351f0169b1b739afd"
+      "sha256": "6cd1ad131e2420417f482a0fc71910c2ccf1c307844dbcd8f00afb4274d37d33"
     },
     {
       "role": "evidence",
@@ -227,49 +227,49 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-controller-actions.json",
-      "sha256": "99de78c0623e648c8776191876469a94bd2c5d296fb1802a92c9dc63b0c7faed"
+      "sha256": "1c1a09791b511064ecf8bc5bd3c174b938abfb5c0cc3a4a3e7db6ec81a4dfde0"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-gazebo-intentional-failure.json",
-      "sha256": "38cfb18d5e60e348aa6aa842bf4bf32e8483c6e9395952cf360110612e91d0dd"
+      "sha256": "dadb848c6546360ca67da651b6f6fd7e52b75c670f114cf6ae957feef36b529f"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-gazebo-success-trace.json",
-      "sha256": "9b4c9c30918783bfa8a7f428f38ae3e1b57f5a1595aee549cf1181b3a5adafc4"
+      "sha256": "65e5c77bdc69088e7a431165779d0f4037545274ef380781b66eb11007b8d610"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-mujoco-intentional-failure.json",
-      "sha256": "1989eabec083f047c10f52b416e10d317456735b4d81c7d421ccc3321708572d"
+      "sha256": "e2ebc866982f4ea5f9fb75c7f6b094d9754b2443265cea47a20bc0ece325e767"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-mujoco-success-trace.json",
-      "sha256": "1edf14f7286ee5a0f002af18070b802e56c9c2d4de8ab3d30e4ade7ca39b4ec5"
+      "sha256": "e5d915f0c77d0cab7532e8303e004a380308a360fdb2d7a5bf41e1cb9e03cf3b"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-rapier-intentional-failure.json",
-      "sha256": "66d5df9d7d6050acabf8cb3de3b10f557fa799be2043447fa8e1d5774f4b84dd"
+      "sha256": "7ead3a102e5b7ed8a4e3e32aaa7bd2d177822827eeb587da7ee3e160170090d6"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/pid-rapier-success-trace.json",
-      "sha256": "93c7c63ebc9afeda2e371984a4760cb3a91a9a7e91d831462e51abf36932acf5"
+      "sha256": "6b9adafeb7a409c1d4fa6f4ef543753cfc2ff958fcbbaea6903e3b007e275ede"
     },
     {
       "role": "evidence",
@@ -283,7 +283,7 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/run_openarm_trace.py",
-      "sha256": "0cd407a1572c4af5090a61c232826f5cdf5d36437724d7354a01877c161bdd4d"
+      "sha256": "d0053e4ff4ec9c4cc52e34a3c37b46c890d94478a570bbd4b81a066b8ed12f80"
     },
     {
       "role": "evidence",
@@ -297,56 +297,56 @@
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-controller-actions.json",
-      "sha256": "a4ea28771b81106a413e9584eb682c5d31c90a1e68766ee0b5e57be55281aa7d"
+      "sha256": "3b5b3f0826c6f763c2aaf793bc6dee88610bd577742539628e484985a74d19d4"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-gazebo-intentional-failure.json",
-      "sha256": "0d88f5c9ed5c9cf01bb64bceae1400bf7b04db1f75172d879414a165633bde40"
+      "sha256": "787b614b84249cbac01467e2a4fd0420eecfc49fb2f1408d20d5667029aeb98b"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-gazebo-success-trace.json",
-      "sha256": "94a52cbb68c6b41fbb240adda53a74fa6b88b1aab4d0ac8654099031c4f6a1aa"
+      "sha256": "ddaa0118f643f83dc8acdca6eb4f98bdeee37caa64e75ae80bf3d81f4d2b2335"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-mujoco-intentional-failure.json",
-      "sha256": "e5c0f035bff2c0c2e1a1c81b6625817d2621117bf9434400bf11baea6b649a0a"
+      "sha256": "dff635919244ca5ea7a0d532778c35d4f9610e19b8ab01c8d66231cd8fce74be"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-mujoco-success-trace.json",
-      "sha256": "3cabe5e5a447182965f77834e1cd7b42ce5902e3be6aa336f5a03e19b5cc0eaf"
+      "sha256": "1851809a2a49198a2dd1f1e3f90d970dbfa65ea99542838610e3e7b6340036c6"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-rapier-intentional-failure.json",
-      "sha256": "1d647b6b0801a5c4054844c35c7a2c93a636e94a49cc31874521f95d716045cd"
+      "sha256": "dd31073206f8afa0247786056498ca3f854b9879e0fc2aa78096ffff14ac1dd0"
     },
     {
       "role": "evidence",
       "kind": "evidence",
       "schema_version": 1,
       "path": "evidence/state-feedback-rapier-success-trace.json",
-      "sha256": "982eaee4462b7a80e73caa7cbf0752c4bd4b33e480db8c7f254f1350164b98bc"
+      "sha256": "2b751d7e9ca12c193a7b528464dd616e1bcf9e60dfd2d9f4bc6578d09497576d"
     },
     {
       "role": "replay",
       "kind": "rne_behavior_replay",
       "schema_version": 1,
       "path": "replay/pid-settling-failure.rne-replay",
-      "sha256": "403d841c99ec14f14c32aa704f09cf9efcae55f40b5f8c8ca23f33d10c82bf13"
+      "sha256": "a42013a076062582ab658817d51bf106f09629ff8738b907ecd4737635d49f6c"
     }
   ]
 }

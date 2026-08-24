@@ -144,6 +144,15 @@ state-space runs pass the fixed 3.5 s, 25% overshoot, and 0.08 rad ramp-RMSE
 requirements. The maximum decision reproduction delta across all 21,600
 decisions is below `9.8e-17 rad`.
 
+The same six runs now include a declared actuator-realization disturbance:
+steps 3241 through 3300 add `+0.03 rad` to joint 5 after controller limits. It
+is not folded into the reference or exposed directly to the controller. The
+state-space controller holds peak tracking error to `0.0111-0.0125 rad`,
+recovers into the fixed `0.005 rad` band in `0.20-0.233 s`, and records
+`0.00448-0.00576 rad*s` IAE across Rapier, MuJoCo, and Gazebo. Each retained
+frame separates reference, controller target, disturbance, and applied plant
+target, and the report finds no disturbance-realization mismatch.
+
 The PID baseline is retained as a real, non-gating failure. It is briefly inside
 the +/-0.0024 rad band at the step-571 deadline, then first exits at step 577;
 the dedicated behavior replay therefore ends at step 577 rather than claiming
@@ -154,7 +163,8 @@ and [Failure Capsule](evidence/openarm-controller-lab/capsule.json) contain 43
 content-addressed artifacts, including both controllers, both action traces, all
 six successful backend traces, all six intentional action-width failures, the
 model/requirements/configuration inputs, and the 578-frame PID replay. Verify
-them without loading a simulator:
+them without loading a simulator. The capsule is bound to producer commit
+`6ed02b94595144b9497350a170cc18256eee1531`:
 
 ```bash
 cargo run --locked -p xtask -- failure-capsule verify \

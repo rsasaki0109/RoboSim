@@ -1,10 +1,10 @@
 {
-  "action_trace_sha256": "a4ea28771b81106a413e9584eb682c5d31c90a1e68766ee0b5e57be55281aa7d",
+  "action_trace_sha256": "3b5b3f0826c6f763c2aaf793bc6dee88610bd577742539628e484985a74d19d4",
   "actuation_config_sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4",
   "backend_id": "mujoco_native",
   "backend_version": "3.9.0",
   "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.v1",
-  "controller_sha256": "b9bcada4b4180bf593269f6d651b830a3137e09dc850d37afa18bef16210faa9",
+  "controller_sha256": "07c5a8ec848831b36803c3a24d6ae0277cef6b88477f1e0fdd8475f4afe9a803",
   "first_violation": "action_width_mismatch",
   "first_violation_sim_time_ticks": 5116666769,
   "first_violation_step": 307,

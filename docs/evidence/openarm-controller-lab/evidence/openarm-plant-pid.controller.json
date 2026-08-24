@@ -54058,6 +54058,16 @@
     "required_status": "nominal",
     "bootstrap_policy": "reference_until_first_available"
   },
+  "disturbance_contract": {
+    "kind": "additive_actuator_target_bias_pulse_v1",
+    "classification": "actuator_realization_error",
+    "joint": "openarm_right_joint5",
+    "start_step": 3241,
+    "end_step": 3300,
+    "offset_rad": 0.03,
+    "controller_visibility": "unobserved_except_through_typed_joint_feedback",
+    "application_order": "after_controller_limits_before_backend_actuation"
+  },
   "feedback_law": {
     "kind": "joint_position_reference_pid_v1",
     "position_error_gain": [

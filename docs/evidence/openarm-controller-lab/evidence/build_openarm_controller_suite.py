@@ -17,6 +17,9 @@ NOMINAL_BACKEND = "rne_rapier"
 DESIRED_POLES = [0.5, 0.65, 0.75, 0.85]
 MAXIMUM_CORRECTION_RAD = 0.04
 MAXIMUM_INTEGRAL_CORRECTION_RAD = 0.015
+DISTURBANCE_START_STEP = 3241
+DISTURBANCE_END_STEP = 3300
+DISTURBANCE_OFFSET_RAD = 0.03
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,6 +217,19 @@ def observation_contract(fixed_delta_ticks: int) -> dict[str, Any]:
     }
 
 
+def disturbance_contract() -> dict[str, Any]:
+    return {
+        "kind": "additive_actuator_target_bias_pulse_v1",
+        "classification": "actuator_realization_error",
+        "joint": JOINT,
+        "start_step": DISTURBANCE_START_STEP,
+        "end_step": DISTURBANCE_END_STEP,
+        "offset_rad": DISTURBANCE_OFFSET_RAD,
+        "controller_visibility": "unobserved_except_through_typed_joint_feedback",
+        "application_order": "after_controller_limits_before_backend_actuation",
+    }
+
+
 def compile_suite(
     report_path: Path, manifest_path: Path, limits_controller_path: Path
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -280,6 +296,7 @@ def compile_suite(
     pid = dict(base)
     pid["controller_id"] = "rne.controller.openarm_right.plant_pid.v1"
     pid["observation_contract"] = contract
+    pid["disturbance_contract"] = disturbance_contract()
     pid["feedback_law"] = {
         "kind": "joint_position_reference_pid_v1",
         "position_error_gain": pid_position,
@@ -295,6 +312,7 @@ def compile_suite(
         "rne.controller.openarm_right.plant_state_feedback_integral.v1"
     )
     state_feedback["observation_contract"] = contract
+    state_feedback["disturbance_contract"] = disturbance_contract()
     state_feedback["feedback_law"] = {
         "kind": "joint_position_state_feedback_integral_v1",
         "controlled_joint": JOINT,
@@ -346,6 +364,7 @@ def compile_suite(
         "observation_latency_samples": 1,
         "shared_maximum_correction_rad": MAXIMUM_CORRECTION_RAD,
         "shared_maximum_integral_correction_rad": MAXIMUM_INTEGRAL_CORRECTION_RAD,
+        "shared_disturbance_contract": disturbance_contract(),
         "controllers": [],
     }
     return suite, {"pid": pid, "state_feedback": state_feedback}
