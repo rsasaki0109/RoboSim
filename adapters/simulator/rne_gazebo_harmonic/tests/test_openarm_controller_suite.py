@@ -69,13 +69,13 @@ class OpenArmControllerSuiteTests(unittest.TestCase):
         )
         target = [0.0] * len(self.order)
         before, before_delta = RUNNER.apply_actuator_disturbance(
-            self.state, disturbance["start_step"] - 1, target
+            self.state, disturbance["start_step"] - 1, target, []
         )
         during, during_delta = RUNNER.apply_actuator_disturbance(
-            self.state, disturbance["start_step"], target
+            self.state, disturbance["start_step"], target, []
         )
         after, after_delta = RUNNER.apply_actuator_disturbance(
-            self.state, disturbance["end_step"] + 1, target
+            self.state, disturbance["end_step"] + 1, target, []
         )
         self.assertEqual(before, target)
         self.assertEqual(after, target)

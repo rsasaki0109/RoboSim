@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
         "--dimension",
         choices=(
             "actuator_target_bias",
+            "actuator_command_delay",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         ),
@@ -95,6 +96,10 @@ def dropout_case_id(consecutive_frames: int) -> str:
     return f"dropout-{consecutive_frames:03d}frames"
 
 
+def delay_case_id(delay_steps: int) -> str:
+    return f"delay-{delay_steps:03d}steps"
+
+
 def compile_robustness_suite(
     compiler: Any,
     robustness_path: Path,
@@ -121,6 +126,7 @@ def compile_robustness_suite(
         dimension_id
         not in {
             "actuator_target_bias",
+            "actuator_command_delay",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         }
@@ -130,7 +136,8 @@ def compile_robustness_suite(
         or values[0] != 0
         or not all(
             isinstance(value, int) and value >= 0
-            if dimension_id == "joint_feedback_publication_dropout"
+            if dimension_id
+            in {"actuator_command_delay", "joint_feedback_publication_dropout"}
             else isinstance(value, float) and math.isfinite(value)
             for value in values
         )
@@ -140,6 +147,10 @@ def compile_robustness_suite(
         "actuator_target_bias": (
             "additive_actuator_target_bias_pulse_v1",
             "actuator_realization_error",
+        ),
+        "actuator_command_delay": (
+            "actuator_command_transport_delay_pulse_v1",
+            "actuator_transport_delay",
         ),
         "joint_position_measurement_bias": (
             "additive_joint_position_bias_pulse_v1",
@@ -157,11 +168,10 @@ def compile_robustness_suite(
     ):
         raise ValueError("robustness dimension identity drifted")
     requirement_ids = {item["id"] for item in requirements.get("requirements", [])}
-    evaluation_key = (
-        "availability_evaluation"
-        if dimension_id == "joint_feedback_publication_dropout"
-        else "evaluation"
-    )
+    evaluation_key = {
+        "actuator_command_delay": "delay_evaluation",
+        "joint_feedback_publication_dropout": "availability_evaluation",
+    }.get(dimension_id, "evaluation")
     evaluation = manifest[evaluation_key]
     if not set(evaluation["requirement_ids"]).issubset(requirement_ids):
         raise ValueError("robustness manifest names an unknown requirement")
@@ -173,6 +183,8 @@ def compile_robustness_suite(
     for value in values:
         if dimension_id == "actuator_target_bias":
             identifier = case_id(value)
+        elif dimension_id == "actuator_command_delay":
+            identifier = delay_case_id(value)
         elif dimension_id == "joint_position_measurement_bias":
             identifier = sensor_case_id(value)
         else:
@@ -184,6 +196,23 @@ def compile_robustness_suite(
         if dimension_id == "actuator_target_bias":
             contract = controller["disturbance_contract"]
             contract["offset_rad"] = value
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_step",
+                "end_step",
+                "application_order",
+                "controller_visibility",
+            )
+        elif dimension_id == "actuator_command_delay":
+            contract = {
+                key: item
+                for key, item in dimension.items()
+                if key not in {"unit", "values"}
+            }
+            contract["delay_steps"] = value
+            controller["disturbance_contract"] = contract
             fields = (
                 "kind",
                 "classification",
@@ -290,6 +319,8 @@ def main() -> int:
         write_json(path, controller)
         if args.dimension == "actuator_target_bias":
             dimension_value = controller["disturbance_contract"]["offset_rad"]
+        elif args.dimension == "actuator_command_delay":
+            dimension_value = controller["disturbance_contract"]["delay_steps"]
         elif args.dimension == "joint_position_measurement_bias":
             dimension_value = controller["measurement_fault_contract"]["offset_rad"]
         else:
@@ -305,6 +336,8 @@ def main() -> int:
         }
         if args.dimension == "joint_feedback_publication_dropout":
             declaration["consecutive_dropped_frames"] = dimension_value
+        elif args.dimension == "actuator_command_delay":
+            declaration["delay_steps"] = dimension_value
         else:
             declaration["offset_rad"] = dimension_value
         suite["cases"].append(declaration)

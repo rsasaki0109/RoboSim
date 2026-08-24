@@ -135,6 +135,45 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertFalse(RUNNER.sensor_sample_published(controller, 3242))
         self.assertTrue(RUNNER.sensor_sample_published(controller, 3243))
 
+    def test_command_delay_uses_the_declared_controller_source_step(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "actuator_command_delay",
+        )
+        self.assertEqual(suite["dimension_id"], "actuator_command_delay")
+        self.assertEqual(
+            [
+                controller["disturbance_contract"]["delay_steps"]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["delay-002steps"]
+        width = len(controller["action_joint_order"])
+        joint_index = controller["action_joint_order"].index("openarm_right_joint5")
+        start_step = controller["disturbance_contract"]["start_step"]
+        history = [[step / start_step] * width for step in range(1, start_step + 1)]
+        current = history[-1]
+        applied, disturbance = RUNNER.apply_actuator_disturbance(
+            controller, start_step, current, history
+        )
+        self.assertEqual(applied[joint_index], (start_step - 2) / start_step)
+        self.assertEqual(
+            disturbance[joint_index], (start_step - 2) / start_step - 1.0
+        )
+        self.assertTrue(
+            all(
+                applied[index] == current[index]
+                for index in range(width)
+                if index != joint_index
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

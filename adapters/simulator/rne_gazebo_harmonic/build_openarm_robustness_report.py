@@ -45,6 +45,20 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def controller_dimension_value(controller: dict[str, Any], dimension_id: str) -> Any:
+    if dimension_id == "actuator_target_bias":
+        return controller.get("disturbance_contract", {}).get("offset_rad")
+    if dimension_id == "actuator_command_delay":
+        return controller.get("disturbance_contract", {}).get("delay_steps")
+    if dimension_id == "joint_position_measurement_bias":
+        return controller.get("measurement_fault_contract", {}).get("offset_rad")
+    if dimension_id == "joint_feedback_publication_dropout":
+        return controller.get("measurement_fault_contract", {}).get(
+            "consecutive_dropped_frames"
+        )
+    raise ValueError(f"unsupported robustness dimension {dimension_id}")
+
+
 def load_controller_report_module(script_dir: Path) -> Any:
     path = script_dir / "build_openarm_controller_report.py"
     spec = importlib.util.spec_from_file_location("rne_openarm_controller_report", path)
@@ -125,6 +139,30 @@ def first_requirement_violation(
             }
         )
     return min(candidates, key=lambda item: (item["step"], item["requirement_id"])) if candidates else None
+
+
+def command_delay_violation(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    requirement: dict[str, Any],
+) -> dict[str, Any] | None:
+    contract = controller.get("disturbance_contract", {})
+    if contract.get("kind") != "actuator_command_transport_delay_pulse_v1":
+        return None
+    delay_steps = contract["delay_steps"]
+    if delay_steps <= requirement["maximum"]:
+        return None
+    step = contract["start_step"]
+    frame = observations[step - 1]
+    return {
+        "requirement_id": requirement["id"],
+        "step": step,
+        "sim_time_ticks": frame["sim_time_ticks"],
+        "observed": delay_steps,
+        "maximum": requirement["maximum"],
+        "unit": requirement["unit"],
+        "source_step": step - delay_steps,
+    }
 
 
 def measurement_bias_metrics(
@@ -430,9 +468,32 @@ def evaluate_trace(
                 metrics["iae_rad_s"],
             ),
         ]
-        first_violation = first_requirement_violation(
+        performance_violation = first_requirement_violation(
             observations, metrics, joint_index, sample_rate_hz, requirements
         )
+        delay_contract = controller.get("disturbance_contract", {})
+        if delay_contract.get("kind") == "actuator_command_transport_delay_pulse_v1":
+            delay_requirement = requirements[
+                "controller.actuator.maximum_command_transport_delay_steps"
+            ]
+            checks.append(
+                report_module.check(delay_requirement, delay_contract["delay_steps"])
+            )
+            delay_violation = command_delay_violation(
+                controller, observations, delay_requirement
+            )
+            candidates = [
+                candidate
+                for candidate in (performance_violation, delay_violation)
+                if candidate is not None
+            ]
+            first_violation = (
+                min(candidates, key=lambda item: (item["step"], item["requirement_id"]))
+                if candidates
+                else None
+            )
+        else:
+            first_violation = performance_violation
     if sensor_metrics is not None:
         checks.append(
             report_module.check(
@@ -494,6 +555,7 @@ def main() -> int:
         or suite.get("dimension_id")
         not in {
             "actuator_target_bias",
+            "actuator_command_delay",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         }
@@ -514,17 +576,7 @@ def main() -> int:
         if (
             sha256(controller_path) != declaration["controller_sha256"]
             or controller.get("controller_id") != declaration["controller_id"]
-            or (
-                controller.get("disturbance_contract", {}).get("offset_rad")
-                if suite["dimension_id"] == "actuator_target_bias"
-                else (
-                    controller.get("measurement_fault_contract", {}).get("offset_rad")
-                    if suite["dimension_id"] == "joint_position_measurement_bias"
-                    else controller.get("measurement_fault_contract", {}).get(
-                        "consecutive_dropped_frames"
-                    )
-                )
-            )
+            or controller_dimension_value(controller, suite["dimension_id"])
             != dimension_value
         ):
             raise ValueError(f"{case_id} controller identity drifted")
@@ -632,7 +684,10 @@ def main() -> int:
         "cross_backend_boundary_results": cross_backend,
         "first_failure": first_failure,
     }
-    if suite["dimension_id"] != "joint_feedback_publication_dropout":
+    if suite["dimension_id"] in {
+        "actuator_target_bias",
+        "joint_position_measurement_bias",
+    }:
         for result in report["primary_backend_results"]:
             result["offset_rad"] = result["dimension_value"]
         for result in report["cross_backend_boundary_results"]:
@@ -648,6 +703,7 @@ def main() -> int:
         ]
     stems = {
         "actuator_target_bias": "openarm-robustness-report",
+        "actuator_command_delay": "openarm-command-delay-robustness-report",
         "joint_position_measurement_bias": "openarm-sensor-bias-robustness-report",
         "joint_feedback_publication_dropout": "openarm-sensor-dropout-robustness-report",
     }

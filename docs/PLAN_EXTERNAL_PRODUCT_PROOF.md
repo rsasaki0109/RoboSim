@@ -406,10 +406,10 @@ The immediate execution queue starts from the already retained actuator
 realization diagnostics, Gazebo plant matching, payload sweep, and
 actuator-authority envelope. The next slices are:
 
-1. add a source-step-verifiable actuator command-transport delay across
+1. **Complete:** add a source-step-verifiable actuator command-transport delay across
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
-2. complete the actuator envelope with rate limit, deadband, friction/damping,
+2. **Next:** complete the actuator envelope with rate limit, deadband, friction/damping,
    inertia, and transmission-efficiency sweeps, retaining the smallest failing
    value for each mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
@@ -628,7 +628,8 @@ drops and first fail three. At the failing boundary they reject exactly decision
 zero delta, and recover in one decision on fresh sequence 3243. The earliest
 violation is still capture sequence 3242, where the third consecutive
 publication is absent; the minimum replay stops there. Physical parameter
-sweeps and actuator-authority degradation remain open.
+sweeps and actuator-authority degradation are recorded below; rate limit,
+deadband, friction/damping, and inertia boundaries remain open.
 
 The payload dimension now has a deterministic model-fixture compiler. It emits
 the same per-case URDF, robot asset, scene, and Gazebo runtime manifest for a
@@ -687,6 +688,18 @@ The report distinguishes the declared out-of-envelope status from the first
 actual tracking failure instead of forcing the backends to share an invented
 failure point. All 15 outcomes replay exactly and the deterministic report hash
 is `7f48895bcd5f74afc1d5edd4b0acf0849810dd263a9c32a78cd9ec26072a476a`.
+
+The actuator command-transport dimension now applies a fixed `[0, 1, 2, 3, 4]`
+control-period delay to right joint 5 after controller limits and before each
+backend's actuation boundary. The declared supported maximum is two periods;
+three is the first out-of-envelope case on Rapier, native MuJoCo, and Gazebo at
+step 3241, selecting controller source step 3238. The report independently
+recomputes the source relationship from retained controller targets for all
+six boundary traces. Every delayed application covers exactly 60 steps with
+zero realization delta, while the performance peak, IAE, and recovery gates
+remain green and distinct from the transport-contract result. All backend
+rollouts replay exactly, and two clean report builds produced SHA-256
+`ba623928997ffddf081538e622ee3882d2fb9363d7b3c210482d302c6068f7dd`.
 
 ### Track definition of done
 

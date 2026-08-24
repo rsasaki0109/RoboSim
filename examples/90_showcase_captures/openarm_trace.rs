@@ -71,16 +71,28 @@ struct ObservationContract {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DisturbanceContract {
-    kind: String,
-    classification: String,
-    joint: String,
-    start_step: u64,
-    end_step: u64,
-    offset_rad: f64,
-    controller_visibility: String,
-    application_order: String,
+#[serde(tag = "kind", deny_unknown_fields)]
+enum DisturbanceContract {
+    #[serde(rename = "additive_actuator_target_bias_pulse_v1")]
+    AdditiveActuatorTargetBiasPulseV1 {
+        classification: String,
+        joint: String,
+        start_step: u64,
+        end_step: u64,
+        offset_rad: f64,
+        controller_visibility: String,
+        application_order: String,
+    },
+    #[serde(rename = "actuator_command_transport_delay_pulse_v1")]
+    ActuatorCommandTransportDelayPulseV1 {
+        classification: String,
+        joint: String,
+        start_step: u64,
+        end_step: u64,
+        delay_steps: u64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -775,23 +787,7 @@ fn validate(
     }
     let final_step = controller.keyframes.last().unwrap().step;
     if let Some(disturbance) = &controller.disturbance_contract {
-        anyhow::ensure!(
-            disturbance.kind == "additive_actuator_target_bias_pulse_v1"
-                && disturbance.classification == "actuator_realization_error"
-                && controller
-                    .action_joint_order
-                    .iter()
-                    .any(|joint| joint == &disturbance.joint)
-                && disturbance.start_step >= 1
-                && disturbance.start_step <= disturbance.end_step
-                && disturbance.end_step <= final_step
-                && disturbance.offset_rad.is_finite()
-                && disturbance.controller_visibility
-                    == "unobserved_except_through_typed_joint_feedback"
-                && disturbance.application_order
-                    == "after_controller_limits_before_backend_actuation",
-            "invalid OpenArm actuator disturbance contract"
-        );
+        validate_actuator_disturbance(controller, disturbance, final_step)?;
     }
     if let Some(fault) = &controller.measurement_fault_contract {
         match fault {
@@ -1028,18 +1024,44 @@ fn apply_actuator_disturbance(
     controller: &ControllerSpec,
     step: u64,
     controller_target: &[f64],
+    controller_target_history: &[Vec<f64>],
 ) -> Result<(Vec<f64>, Vec<f64>)> {
     let mut applied = controller_target.to_vec();
     let mut disturbance = vec![0.0; controller_target.len()];
     if let Some(contract) = &controller.disturbance_contract {
-        if (contract.start_step..=contract.end_step).contains(&step) {
-            let index = controller
-                .action_joint_order
-                .iter()
-                .position(|joint| joint == &contract.joint)
-                .context("disturbance joint is absent from the action order")?;
-            disturbance[index] = contract.offset_rad;
-            applied[index] += contract.offset_rad;
+        match contract {
+            DisturbanceContract::AdditiveActuatorTargetBiasPulseV1 {
+                joint,
+                start_step,
+                end_step,
+                offset_rad,
+                ..
+            } if (*start_step..=*end_step).contains(&step) => {
+                let index = disturbance_joint_index(controller, joint)?;
+                disturbance[index] = *offset_rad;
+                applied[index] += *offset_rad;
+            }
+            DisturbanceContract::ActuatorCommandTransportDelayPulseV1 {
+                joint,
+                start_step,
+                end_step,
+                delay_steps,
+                ..
+            } if (*start_step..=*end_step).contains(&step) => {
+                let index = disturbance_joint_index(controller, joint)?;
+                let source_step = step
+                    .checked_sub(*delay_steps)
+                    .context("actuator command delay precedes the rollout")?;
+                let source_index = usize::try_from(source_step.saturating_sub(1))?;
+                let source_target = controller_target_history
+                    .get(source_index)
+                    .context("actuator command delay source step is absent from history")?;
+                applied[index] = *source_target
+                    .get(index)
+                    .context("actuator command delay source width drifted")?;
+                disturbance[index] = applied[index] - controller_target[index];
+            }
+            _ => {}
         }
     }
     anyhow::ensure!(
@@ -1049,6 +1071,82 @@ fn apply_actuator_disturbance(
         "disturbed OpenArm target violates TaskSpec bounds"
     );
     Ok((applied, disturbance))
+}
+
+fn disturbance_joint_index(controller: &ControllerSpec, joint: &str) -> Result<usize> {
+    controller
+        .action_joint_order
+        .iter()
+        .position(|candidate| candidate == joint)
+        .context("disturbance joint is absent from the action order")
+}
+
+fn validate_actuator_disturbance(
+    controller: &ControllerSpec,
+    disturbance: &DisturbanceContract,
+    final_step: u64,
+) -> Result<()> {
+    let common_valid = |classification: &str,
+                        joint: &str,
+                        start_step: u64,
+                        end_step: u64,
+                        visibility: &str,
+                        order: &str| {
+        controller
+            .action_joint_order
+            .iter()
+            .any(|name| name == joint)
+            && start_step >= 1
+            && start_step <= end_step
+            && end_step <= final_step
+            && visibility == "unobserved_except_through_typed_joint_feedback"
+            && order == "after_controller_limits_before_backend_actuation"
+            && !classification.is_empty()
+    };
+    let valid = match disturbance {
+        DisturbanceContract::AdditiveActuatorTargetBiasPulseV1 {
+            classification,
+            joint,
+            start_step,
+            end_step,
+            offset_rad,
+            controller_visibility,
+            application_order,
+        } => {
+            classification == "actuator_realization_error"
+                && offset_rad.is_finite()
+                && common_valid(
+                    classification,
+                    joint,
+                    *start_step,
+                    *end_step,
+                    controller_visibility,
+                    application_order,
+                )
+        }
+        DisturbanceContract::ActuatorCommandTransportDelayPulseV1 {
+            classification,
+            joint,
+            start_step,
+            end_step,
+            delay_steps,
+            controller_visibility,
+            application_order,
+        } => {
+            classification == "actuator_transport_delay"
+                && *start_step > *delay_steps
+                && common_valid(
+                    classification,
+                    joint,
+                    *start_step,
+                    *end_step,
+                    controller_visibility,
+                    application_order,
+                )
+        }
+    };
+    anyhow::ensure!(valid, "invalid OpenArm actuator disturbance contract");
+    Ok(())
 }
 
 fn apply_measurement_bias(
@@ -1563,6 +1661,7 @@ fn rollout(
     let mut bus = InMemoryDataBus::new();
     let mut latest_controller_observation = None;
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
+    let mut controller_target_history = Vec::with_capacity(actions.len());
     let mut last_accepted_target_rad = actions
         .first()
         .context("OpenArm rollout has no actions")?
@@ -1590,8 +1689,13 @@ fn rollout(
             last_accepted_target_rad.clone_from(&decision.target_position_rad);
         }
         recovering_from_rejection = decision.rejected;
-        let (applied_target, _) =
-            apply_actuator_disturbance(controller, action.step, &decision.target_position_rad)?;
+        controller_target_history.push(decision.target_position_rad.clone());
+        let (applied_target, _) = apply_actuator_disturbance(
+            controller,
+            action.step,
+            &decision.target_position_rad,
+            &controller_target_history,
+        )?;
         let targets = controller
             .rne_actuator_link_order
             .iter()

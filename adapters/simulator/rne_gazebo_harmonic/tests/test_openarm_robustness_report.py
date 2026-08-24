@@ -14,6 +14,79 @@ SPEC.loader.exec_module(MODULE)
 
 
 class OpenArmRobustnessReportTests(unittest.TestCase):
+    def test_command_delay_contract_fails_at_first_delayed_application(self) -> None:
+        controller = {
+            "disturbance_contract": {
+                "kind": "actuator_command_transport_delay_pulse_v1",
+                "start_step": 10,
+                "end_step": 20,
+                "delay_steps": 3,
+            }
+        }
+        observations = [
+            {"step": step, "sim_time_ticks": step * 100}
+            for step in range(1, 21)
+        ]
+        requirement = {
+            "id": "controller.actuator.maximum_command_transport_delay_steps",
+            "unit": "control_period_count",
+            "maximum": 2,
+        }
+        violation = MODULE.command_delay_violation(
+            controller, observations, requirement
+        )
+        self.assertEqual(violation["step"], 10)
+        self.assertEqual(violation["source_step"], 7)
+        self.assertEqual(violation["observed"], 3)
+        controller["disturbance_contract"]["delay_steps"] = 2
+        self.assertIsNone(
+            MODULE.command_delay_violation(controller, observations, requirement)
+        )
+
+    def test_command_delay_source_step_is_recomputed_from_retained_targets(self) -> None:
+        report_module = MODULE.load_controller_report_module(SCRIPT.parent)
+        controller = {
+            "disturbance_contract": {
+                "kind": "actuator_command_transport_delay_pulse_v1",
+                "joint": "openarm_right_joint5",
+                "start_step": 3,
+                "end_step": 4,
+                "delay_steps": 2,
+            }
+        }
+        observations = []
+        for step in range(1, 8):
+            commanded = step / 100.0
+            applied = (step - 2) / 100.0 if 3 <= step <= 4 else commanded
+            observations.append(
+                {
+                    "step": step,
+                    "joint_controller_target_rad": [commanded],
+                    "joint_position_target_rad": [applied],
+                    "joint_actuator_disturbance_rad": [applied - commanded],
+                    "actuator_disturbance_active": applied != commanded,
+                    "joint_position_rad": [0.0],
+                    "joint_reference_position_rad": [0.0],
+                }
+            )
+        metrics = report_module.disturbance_metrics(
+            controller, observations, 0, 60.0
+        )
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        self.assertEqual(
+            metrics["realization_verification"]["relationship"],
+            "applied_target_at_step_equals_controller_target_at_step_minus_delay_steps",
+        )
+        self.assertEqual(
+            metrics["realization_verification"]["maximum_delta_rad"], 0.0
+        )
+        observations[2]["joint_position_target_rad"][0] += 0.001
+        mismatch = report_module.disturbance_metrics(
+            controller, observations, 0, 60.0
+        )["first_realization_mismatch"]
+        self.assertEqual(mismatch["step"], 3)
+        self.assertEqual(mismatch["expected_source_step"], 1)
+
     def test_first_violation_is_the_first_cumulative_iae_crossing(self) -> None:
         observations = [
             {

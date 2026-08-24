@@ -50,6 +50,8 @@ class OpenArmControllerReportTests(unittest.TestCase):
                     "step": step,
                     "joint_position_rad": [error],
                     "joint_reference_position_rad": [0.0],
+                    "joint_controller_target_rad": [0.0],
+                    "joint_position_target_rad": [0.03 if active else 0.0],
                     "joint_actuator_disturbance_rad": [0.03 if active else 0.0],
                     "actuator_disturbance_active": active,
                 }

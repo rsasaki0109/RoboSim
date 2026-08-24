@@ -398,3 +398,38 @@ two/three-frame boundary on all backends:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-dropout-robustness-lab
 ```
+
+## Sweep the OpenArm actuator command-transport delay
+
+The fourth robustness dimension delays only right joint 5 after controller
+limits and before backend actuation. The controller continues to receive only
+the typed, one-period-latent joint feedback; it does not read the delay history
+or backend state:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_delay \
+  --output artifacts/openarm-command-delay-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` control-period grid passes the declared supported
+maximum of two periods and first leaves the supported envelope at three. The
+same two/three-period boundary is executed on Rapier, native MuJoCo, and
+Gazebo. For all six boundary traces, the report independently recomputes the
+source step and proves with zero realization delta that the applied joint-5
+target at step `k` equals the retained controller target at `k-delay_steps`;
+the other eight targets remain current. The first failing case is localized to
+step 3241, where three periods selects source step 3238. Tracking peak, IAE,
+and recovery requirements remain green and are reported separately from the
+declared transport envelope.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-delay-robustness-lab \
+  --output artifacts/openarm-command-delay-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-delay-robustness-lab/report/openarm-command-delay-robustness-report.json \
+  --trace artifacts/openarm-command-delay-robustness-lab/delay-003steps/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-delay-robustness-lab/report/minimum-command-delay-failure.rne-replay
+```

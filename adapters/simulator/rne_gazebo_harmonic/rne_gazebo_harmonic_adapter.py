@@ -12,6 +12,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import traceback
 from typing import Any
 
 import gz.sim8 as gz_sim
@@ -364,10 +365,11 @@ class GazeboOpenArmAdapter:
                 "steps": self.actuation_diagnostics,
             }
             self.actuation_diagnostics_output.parent.mkdir(parents=True, exist_ok=True)
-            self.actuation_diagnostics_output.write_text(
-                json.dumps(output, indent=2, allow_nan=False) + "\n",
-                encoding="utf-8",
-            )
+            # Stream multi-megabyte diagnostics instead of issuing one large
+            # write, which is unreliable on some WSL DrvFS mounts.
+            with self.actuation_diagnostics_output.open("w", encoding="utf-8") as sink:
+                json.dump(output, sink, indent=2, allow_nan=False)
+                sink.write("\n")
         return self.response(request, {"type": "closed"})
 
 
@@ -410,4 +412,5 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as error:  # The adapter must never contaminate stdout.
         print(f"rne Gazebo adapter failed: {error}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         raise SystemExit(2)

@@ -123,6 +123,7 @@ def reproduce_decisions(
     previous_position: list[float | None] = [None] * width
     previous_input: list[float | None] = [None] * width
     previous_previous_input: list[float | None] = [None] * width
+    controller_target_history: list[list[float]] = []
     maximum = 0.0
     first_mismatch = None
     for index, (action, actual) in enumerate(zip(actions, observations)):
@@ -137,8 +138,12 @@ def reproduce_decisions(
             delayed,
             (action["step"] - 1) * controller["observation_contract"]["sample_period_ticks"],
         )
+        controller_target_history.append(decision["target"].copy())
         applied_target, disturbance = runner.apply_actuator_disturbance(
-            controller, action["step"], decision["target"]
+            controller,
+            action["step"],
+            decision["target"],
+            controller_target_history,
         )
         delta = max(
             maximum_delta(decision["target"], actual["joint_controller_target_rad"]),
@@ -195,22 +200,54 @@ def disturbance_metrics(
     contract = controller["disturbance_contract"]
     start_step = contract["start_step"]
     end_step = contract["end_step"]
-    offset_rad = contract["offset_rad"]
     recovery_band_rad = 0.005
     recovery_hold_samples = 30
     evaluation_end_step = min(len(observations), end_step + 120)
     first_realization_mismatch = None
+    maximum_realization_delta_rad = 0.0
+    realized_active_step_count = 0
     for frame in observations:
-        expected = offset_rad if start_step <= frame["step"] <= end_step else 0.0
-        actual = frame["joint_actuator_disturbance_rad"][joint_index]
+        step = frame["step"]
+        controller_target = frame["joint_controller_target_rad"]
+        expected_applied = controller_target.copy()
+        expected_source_step = step
+        if start_step <= step <= end_step:
+            if contract["kind"] == "additive_actuator_target_bias_pulse_v1":
+                expected_applied[joint_index] += contract["offset_rad"]
+            elif contract["kind"] == "actuator_command_transport_delay_pulse_v1":
+                expected_source_step = step - contract["delay_steps"]
+                expected_applied[joint_index] = observations[expected_source_step - 1][
+                    "joint_controller_target_rad"
+                ][joint_index]
+            else:
+                raise ValueError("unsupported actuator disturbance contract")
+        expected_disturbance = [
+            applied - commanded
+            for applied, commanded in zip(expected_applied, controller_target)
+        ]
+        actual_applied = frame["joint_position_target_rad"]
+        actual_disturbance = frame["joint_actuator_disturbance_rad"]
+        realization_delta = max(
+            maximum_delta(expected_applied, actual_applied),
+            maximum_delta(expected_disturbance, actual_disturbance),
+        )
+        expected_active = any(value != 0.0 for value in expected_disturbance)
         active = frame["actuator_disturbance_active"]
+        maximum_realization_delta_rad = max(
+            maximum_realization_delta_rad, realization_delta
+        )
+        if expected_active:
+            realized_active_step_count += 1
         if first_realization_mismatch is None and (
-            abs(actual - expected) > 1e-14 or active != (expected != 0.0)
+            realization_delta > 1e-14 or active != expected_active
         ):
             first_realization_mismatch = {
-                "step": frame["step"],
-                "expected_offset_rad": expected,
-                "observed_offset_rad": actual,
+                "step": step,
+                "expected_source_step": expected_source_step,
+                "expected_applied_target_rad": expected_applied[joint_index],
+                "observed_applied_target_rad": actual_applied[joint_index],
+                "realization_delta_rad": realization_delta,
+                "expected_active": expected_active,
                 "observed_active": active,
             }
     errors = [
@@ -242,6 +279,16 @@ def disturbance_metrics(
     return {
         "contract": contract,
         "first_realization_mismatch": first_realization_mismatch,
+        "realization_verification": {
+            "relationship": (
+                "applied_target_at_step_equals_controller_target_at_step_minus_delay_steps"
+                if contract["kind"] == "actuator_command_transport_delay_pulse_v1"
+                else "applied_target_equals_controller_target_plus_declared_bias"
+            ),
+            "maximum_delta_rad": maximum_realization_delta_rad,
+            "realized_active_step_count": realized_active_step_count,
+            "source_step_recomputed_from_trace": True,
+        },
         "peak_tracking_error_rad": max(abs(value) for value in pulse_errors),
         "iae_rad_s": sum(abs(value) for value in evaluation_errors) / sample_rate_hz,
         "recovery_band_rad": recovery_band_rad,

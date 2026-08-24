@@ -104,8 +104,11 @@ fn run() -> Result<()> {
     let trace_sha256 = sha256(&trace_bytes);
     let dimension_id = required_str(&report, "dimension_id")?;
     let availability_failure = dimension_id == "joint_feedback_publication_dropout";
+    let command_delay_failure = dimension_id == "actuator_command_delay";
     let disturbance_start_step = match dimension_id {
-        "actuator_target_bias" => required_u64(&report["dimension"], "start_step")?,
+        "actuator_target_bias" | "actuator_command_delay" => {
+            required_u64(&report["dimension"], "start_step")?
+        }
         "joint_position_measurement_bias" => {
             required_u64(&report["dimension"], "start_controller_step")?
         }
@@ -144,13 +147,26 @@ fn run() -> Result<()> {
             } else if observation.step >= disturbance_start_step {
                 consecutive_dropout_frames = 0;
             }
-        } else if observation.step >= disturbance_start_step {
+        } else if !command_delay_failure && observation.step >= disturbance_start_step {
             cumulative_iae_rad_s += (observation.joint_position_rad[JOINT_INDEX]
                 - observation.joint_reference_position_rad[JOINT_INDEX])
                 .abs()
                 * sample_period_s;
         }
         let failed = observation.step == failure_step;
+        let delay_steps = command_delay_failure
+            .then(|| dimension_value(failure))
+            .transpose()?;
+        let source_step = delay_steps
+            .map(|delay| observation.step.saturating_sub(delay as u64))
+            .filter(|_| observation.step >= disturbance_start_step);
+        let expected_source_target_rad = source_step
+            .and_then(|step| step.checked_sub(1))
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| trace.observations.get(index))
+            .map(|source| source.joint_controller_target_rad[JOINT_INDEX]);
+        let source_relationship_delta_rad = expected_source_target_rad
+            .map(|expected| (observation.joint_position_target_rad[JOINT_INDEX] - expected).abs());
         frames.push(BehaviorReplayFrame {
             step: observation.step,
             sim_time_ticks: observation.sim_time_ticks,
@@ -172,8 +188,12 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !command_delay_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
+                "actuator_delay_steps": delay_steps,
+                "actuator_source_step": source_step,
+                "expected_source_controller_target_rad": expected_source_target_rad,
+                "source_relationship_delta_rad": source_relationship_delta_rad,
                 "maximum": maximum,
                 "requirement_id": requirement_id,
                 "contract_status": if failed { "failed" } else { "pending" }
@@ -189,6 +209,19 @@ fn run() -> Result<()> {
         );
         format!(
             "OpenArm joint-feedback publication reached {observed:.0} consecutive dropped frames at step {failure_step}, exceeding the fixed {maximum:.0}-frame requirement"
+        )
+    } else if command_delay_failure {
+        let source_step = required_u64(failure, "source_step")?;
+        anyhow::ensure!(
+            observed == dimension_value(failure)?
+                && source_step == failure_step - observed as u64
+                && failure_observation.joint_position_target_rad[JOINT_INDEX]
+                    == trace.observations[usize::try_from(source_step - 1)?]
+                        .joint_controller_target_rad[JOINT_INDEX],
+            "replayed actuator command source differs from the report"
+        );
+        format!(
+            "OpenArm joint 5 command transport reached {observed:.0} control periods at step {failure_step}, selecting source step {source_step} and exceeding the fixed {maximum:.0}-period requirement"
         )
     } else {
         anyhow::ensure!(
@@ -239,16 +272,19 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
         matches!(
             required_str(report, "dimension_id")?,
             "actuator_target_bias"
+                | "actuator_command_delay"
                 | "joint_position_measurement_bias"
                 | "joint_feedback_publication_dropout"
         ),
         "unsupported robustness dimension"
     );
     let dimension_id = required_str(report, "dimension_id")?;
-    let expected_requirement = if dimension_id == "joint_feedback_publication_dropout" {
-        "controller.sensor.maximum_consecutive_dropout_frames"
-    } else {
-        "controller.state.maximum_disturbance_iae_rad_s"
+    let expected_requirement = match dimension_id {
+        "joint_feedback_publication_dropout" => {
+            "controller.sensor.maximum_consecutive_dropout_frames"
+        }
+        "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
+        _ => "controller.state.maximum_disturbance_iae_rad_s",
     };
     anyhow::ensure!(
         required_str(failure, "backend_id")? == "rne_rapier"

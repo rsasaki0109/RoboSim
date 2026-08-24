@@ -488,7 +488,10 @@ def apply_measurement_bias(
 
 
 def apply_actuator_disturbance(
-    controller: dict[str, Any], step: int, controller_target: list[float]
+    controller: dict[str, Any],
+    step: int,
+    controller_target: list[float],
+    controller_target_history: list[list[float]],
 ) -> tuple[list[float], list[float]]:
     """Apply a declared plant-input disturbance after the controller boundary."""
     disturbance = [0.0] * len(controller_target)
@@ -496,33 +499,59 @@ def apply_actuator_disturbance(
     contract = controller.get("disturbance_contract")
     if contract is None:
         return applied, disturbance
-    expected_keys = {
+    common_keys = {
         "kind",
         "classification",
         "joint",
         "start_step",
         "end_step",
-        "offset_rad",
         "controller_visibility",
         "application_order",
     }
     if (
-        set(contract) != expected_keys
-        or contract["kind"] != "additive_actuator_target_bias_pulse_v1"
-        or contract["classification"] != "actuator_realization_error"
-        or contract["joint"] not in controller["action_joint_order"]
+        contract["joint"] not in controller["action_joint_order"]
         or not 1 <= contract["start_step"] <= contract["end_step"]
-        or not math.isfinite(contract["offset_rad"])
         or contract["controller_visibility"]
         != "unobserved_except_through_typed_joint_feedback"
         or contract["application_order"]
         != "after_controller_limits_before_backend_actuation"
     ):
         raise RuntimeError("invalid OpenArm actuator disturbance contract")
+    kind = contract["kind"]
+    if kind == "additive_actuator_target_bias_pulse_v1":
+        valid_specific = (
+            set(contract) == common_keys | {"offset_rad"}
+            and contract["classification"] == "actuator_realization_error"
+            and isinstance(contract["offset_rad"], (int, float))
+            and math.isfinite(contract["offset_rad"])
+        )
+    elif kind == "actuator_command_transport_delay_pulse_v1":
+        valid_specific = (
+            set(contract) == common_keys | {"delay_steps"}
+            and contract["classification"] == "actuator_transport_delay"
+            and isinstance(contract["delay_steps"], int)
+            and not isinstance(contract["delay_steps"], bool)
+            and contract["delay_steps"] >= 0
+            and contract["start_step"] > contract["delay_steps"]
+        )
+    else:
+        valid_specific = False
+    if not valid_specific:
+        raise RuntimeError("invalid OpenArm actuator disturbance contract")
     if contract["start_step"] <= step <= contract["end_step"]:
         index = controller["action_joint_order"].index(contract["joint"])
-        disturbance[index] = contract["offset_rad"]
-        applied[index] += disturbance[index]
+        if kind == "additive_actuator_target_bias_pulse_v1":
+            disturbance[index] = contract["offset_rad"]
+            applied[index] += disturbance[index]
+        else:
+            source_step = step - contract["delay_steps"]
+            try:
+                applied[index] = controller_target_history[source_step - 1][index]
+            except IndexError as error:
+                raise RuntimeError(
+                    "actuator command delay source step is absent from history"
+                ) from error
+            disturbance[index] = applied[index] - controller_target[index]
     if not all(math.isfinite(value) and -3.0 <= value <= 3.0 for value in applied):
         raise RuntimeError("disturbed OpenArm target violates TaskSpec bounds")
     return applied, disturbance
@@ -553,6 +582,7 @@ def run_success(
     previous_observation_position: list[float | None] = [None] * joint_count
     previous_input_target: list[float | None] = [None] * joint_count
     previous_previous_input_target: list[float | None] = [None] * joint_count
+    controller_target_history: list[list[float]] = []
     last_accepted_target = action_artifact["actions"][0]["joint_position_target_rad"].copy()
     recovering_from_rejection = False
     for action in action_artifact["actions"]:
@@ -581,8 +611,12 @@ def run_success(
         if not decision["controller_rejected"]:
             last_accepted_target = decision["target"].copy()
         recovering_from_rejection = decision["controller_rejected"]
+        controller_target_history.append(decision["target"].copy())
         applied_target, disturbance = apply_actuator_disturbance(
-            controller, action["step"], decision["target"]
+            controller,
+            action["step"],
+            decision["target"],
+            controller_target_history,
         )
         actuator_command_saturated = [
             abs(
