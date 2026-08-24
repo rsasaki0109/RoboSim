@@ -26,6 +26,15 @@ RMSE against the registered 0.10 rad bound, while Gazebo passes and neither
 backend crosses a URDF position or velocity hard limit. This retained weakness
 is the next controller/plant-identification target; the tolerance is not widened.
 
+The follow-up identification controller first excites joint 5 alone and then
+moves the remaining arm joints while holding the joint-5 target at -0.3 rad. In
+the measured baseline, Rapier passes isolated tracking at approximately 0.0156
+rad RMSE but reaches approximately 1.280 rad RMSE in the coupled window and
+first crosses the 1.5708 rad URDF upper limit at step 1642. Gazebo passes both
+windows. The generated report fits an ARX(2,2) model on the isolated window and
+retains its coupled-window residual, localizing the next fix to articulation
+coupling/constraint enforcement rather than the portable reference trajectory.
+
 The intentional truncation first violates the action-width contract at step
 307 (5,116,666,769 ns) on both paths. Gazebo rejects the malformed action before
 state advance; accepting the corrected action afterward reproduces the clean

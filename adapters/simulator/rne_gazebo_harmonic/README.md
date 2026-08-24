@@ -82,3 +82,29 @@ runtime/configuration hashes, then records per-joint RMSE, IAE, ISE, terminal
 bias, position range, peak velocity, and the first URDF position/velocity-limit
 violation. `needs_tuning` is a valid diagnostic result and must not be converted
 to `passed` by widening a tolerance.
+
+## Identify the OpenArm joint-5 coupled response
+
+The identification controller uses the same TaskSpec, robot model, actuator
+configuration, and trace runners. It first excites joint 5 in isolation, then
+holds its target while moving the rest of the arm. Generate both traces and the
+self-contained report with:
+
+```bash
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller adapters/simulator/rne_gazebo_harmonic/openarm_joint5_identification.controller.json \
+  --output artifacts/openarm-joint5-identification
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --controller adapters/simulator/rne_gazebo_harmonic/openarm_joint5_identification.controller.json \
+  --actions artifacts/openarm-joint5-identification/controller-actions.json \
+  --output artifacts/openarm-joint5-identification
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_joint5_identification_report.py \
+  --trace-root artifacts/openarm-joint5-identification \
+  --output artifacts/openarm-joint5-identification
+```
+
+The report fits a SISO ARX(2,2) model only on the isolated window, validates it
+on the coupled window, and records the first URDF position-limit violation. Its
+expected diagnostic status is `expected_coupling_failure_reproduced` until the
+Rapier coupled response is corrected; a future fix must turn the coupled and
+hard-limit checks green rather than changing the registered tolerances.

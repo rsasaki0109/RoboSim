@@ -1,0 +1,81 @@
+{
+  "kind": "rne_joint_pose_cycle_controller",
+  "schema_version": 1,
+  "controller_id": "rne.controller.openarm_right_joint5_identification.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "interpolation": "smoothstep_v1",
+  "action_joint_order": [
+    "openarm_right_joint1",
+    "openarm_right_joint2",
+    "openarm_right_joint3",
+    "openarm_right_joint4",
+    "openarm_right_joint5",
+    "openarm_right_joint6",
+    "openarm_right_joint7",
+    "openarm_right_finger_joint1",
+    "openarm_right_finger_joint2"
+  ],
+  "rne_actuator_link_order": [
+    "openarm_right_link1",
+    "openarm_right_link2",
+    "openarm_right_link3",
+    "openarm_right_link4",
+    "openarm_right_link5",
+    "openarm_right_link6",
+    "openarm_right_ee_base_link",
+    "openarm_right_ee_link1",
+    "openarm_right_ee_link2"
+  ],
+  "keyframes": [
+    {
+      "step": 0,
+      "phase": "reset",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "step": 200,
+      "phase": "home",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 400,
+      "phase": "isolated_hold_zero",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 600,
+      "phase": "isolated_positive_ramp",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.3, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 800,
+      "phase": "isolated_positive_hold",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.3, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 1000,
+      "phase": "isolated_negative_ramp",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, -0.3, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 1200,
+      "phase": "isolated_negative_hold",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, -0.3, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 1600,
+      "phase": "coupled_arm_motion",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, -0.3, -0.5, -0.4, -0.55, -0.55]
+    },
+    {
+      "step": 1800,
+      "phase": "coupled_hold",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, -0.3, -0.5, -0.4, -0.55, -0.55]
+    }
+  ],
+  "intentional_failure": {
+    "kind": "controller_output_truncation",
+    "inject_at_step": 307,
+    "expected_first_violation": "action_width_mismatch"
+  }
+}

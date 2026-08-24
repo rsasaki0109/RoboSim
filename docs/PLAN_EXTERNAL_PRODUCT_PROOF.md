@@ -256,21 +256,42 @@ that eventually reaches the goal still needs tuning when its transient response
 overshoots a hard limit or exceeds the registered tracking bound; the threshold
 must not be widened merely to make a backend pass.
 
+The first plant-identification fixture isolates OpenArm right joint 5 before
+moving the remaining arm joints with the joint-5 reference held constant. An
+ARX(2,2) model is fitted only to the isolated, deterministic training window and
+is evaluated without refitting on the coupled validation window. The baseline
+evidence localizes the current Rapier discrepancy: isolated tracking passes,
+but coupled motion amplifies joint-5 error and eventually crosses its URDF hard
+position limit, while Gazebo remains within the same contracts. This is a
+diagnostic acceptance result, not permission to weaken the tolerance or exceed
+the declared actuator effort.
+
 ### Ordered implementation slices
 
 1. Define versioned sensor-validation and control-dynamics report schemas plus
-   unit-bearing tolerance registries. The OpenArm time-domain report is the
-   first concrete control artifact; it must expose the first URDF position or
-   velocity violation rather than relying on final-pose error.
-2. Make sensor sample phase, latency, noise, calibration, and fault order
-   explicit for the existing flagship observation set.
-3. Add actuator dynamics and deterministic plant experiment inputs without
-   exposing backend-specific handles through `rne_robot` or `rne_physics`.
-4. Add linearization, controllability/observability, time-domain, and
-   frequency-domain analysis over recorded deterministic trajectories.
-5. Evaluate the unchanged mobile-lift controller on Rapier and MuJoCo, then the
-   Gazebo adapter, and package the first divergence into a Failure Capsule.
-6. Reuse the same reports for recorded playback, shadow, and the bounded
+   unit-bearing tolerance registries. The OpenArm time-domain report and joint-5
+   identification experiment are the first concrete control artifacts; both
+   expose the first URDF hard-contract violation instead of relying on final
+   pose error.
+2. Correct the Rapier joint-5 coupled response using an actuator-aware,
+   backend-neutral control/constraint contract. Gate isolated and coupled
+   validation separately, retain actuator saturation, and require joint 5 to
+   remain inside its URDF position and effort limits without regressing the
+   other joints or compatibility fixtures.
+3. Make sensor sample phase, latency, noise, calibration, and fault order
+   explicit for joint/actuator feedback, IMU, and the existing flagship camera
+   and depth observations. Emit the first headless `sensor-validation-report`
+   with nominal and deterministic latency/dropout cases.
+4. Close the loop through the declared sensor stream rather than privileged
+   backend state. Bind sensor delay/noise and actuator saturation to the same
+   replay, then compare the unchanged controller/plant experiment across
+   Rapier, MuJoCo, and Gazebo.
+5. Add linearization, controllability/observability, time-domain, and
+   frequency-domain analysis over recorded deterministic trajectories. Add
+   reference PID/state-feedback/LQR baselines only where the identified model
+   and operating range support them.
+6. Package the first sensor or control divergence into a Failure Capsule and
+   reuse the same reports for recorded playback, shadow, and the bounded
    physical path before expanding to another robot or sensor family.
 
 ## Stop conditions
