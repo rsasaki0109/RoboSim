@@ -56,6 +56,15 @@ The portable pose-cycle controller is compiled once into an exact action trace.
 RNE/Rapier and Gazebo then consume those identical bytes; neither backend owns
 a private copy of the trajectory.
 
+The Rapier command also writes `sensor-validation-report.json` and a
+self-contained `sensor-validation-report.html`, plus the complete
+`sensor-dropout-trace.json` and `sensor-stuck-trace.json` golden streams. That
+gate reruns the real OpenArm plant for nominal replay, sequence-307 dropout, and
+sequence-307 stuck-value cases; it verifies exact one-period DataBus latency,
+zero sampling phase error, backend calibration, explicit unavailable effort
+measurements, and observable actuator saturation. A failed check is written to
+both reports before the command exits non-zero.
+
 ```bash
 cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
   --output artifacts/openarm-cross-sim

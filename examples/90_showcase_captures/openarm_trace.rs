@@ -6,7 +6,10 @@ use rne_ai::{
     BehaviorReplayFailure, BehaviorReplayFrame, BehaviorViolation, TaskSpec,
     UrdfJointFeedbackSensorConfig, UrdfJointPositionTarget, UrdfSceneSim,
 };
-use rne_data::{DataBus, Frame, InMemoryDataBus, JointFeedback, StreamId};
+use rne_data::{
+    DataBus, Frame, InMemoryDataBus, JointEffortFeedback, JointFeedback, JointFeedbackStatus,
+    StreamId,
+};
 use rne_physics::hash_physics_state;
 use rne_sensor::JointFeedbackFault;
 use serde::{Deserialize, Serialize};
@@ -24,6 +27,8 @@ const FAILURE_KIND: &str = "rne_controller_contract_failure";
 const FIXED_DELTA_TICKS: u64 = 16_666_667;
 const ACTUATION_CONFIG_KIND: &str = "rne_revolute_position_actuation_config";
 const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_001);
+const SENSOR_REPORT_KIND: &str = "rne_sensor_validation_report";
+const SENSOR_FAULT_SEQUENCE: u64 = 307;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -108,11 +113,13 @@ struct ObservationFrame {
     available_time_ticks: u64,
     consumed_at_ticks: u64,
     observation_age_ticks: u64,
+    sensor_status: JointFeedbackStatus,
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
     limited_effort_command_nm: Vec<f64>,
     effort_saturated: Vec<bool>,
+    effort_measurement_available: Vec<bool>,
     maximum_tracking_error_rad: f64,
     physics_hash: u64,
 }
@@ -170,11 +177,26 @@ struct FailureReport<'a> {
 }
 
 struct Rollout {
+    world_seed: u64,
     initial_digest: u64,
     final_digest: u64,
     observations: Vec<ObservationFrame>,
     maximum_sensor_backend_position_delta_rad: f64,
     maximum_sensor_backend_velocity_delta_rad_s: f64,
+}
+
+struct InputHashes<'a> {
+    task_sha256: &'a str,
+    controller_sha256: &'a str,
+    action_trace_sha256: &'a str,
+    robot_asset_config_sha256: &'a str,
+    actuation_config_sha256: &'a str,
+}
+
+struct SensorValidationArtifacts {
+    report: serde_json::Value,
+    dropout_trace: serde_json::Value,
+    stuck_trace: serde_json::Value,
 }
 
 fn main() {
@@ -247,11 +269,59 @@ fn run() -> Result<()> {
 
     let action_trace_sha256 = sha256(&fs::read(&action_path)?);
 
-    let first = rollout(&repo_root, &controller, &actuation_config, &actions)?;
-    let replay = rollout(&repo_root, &controller, &actuation_config, &actions)?;
+    let first = rollout(
+        &repo_root,
+        &controller,
+        &actuation_config,
+        &actions,
+        JointFeedbackFault::None,
+    )?;
+    let replay = rollout(
+        &repo_root,
+        &controller,
+        &actuation_config,
+        &actions,
+        JointFeedbackFault::None,
+    )?;
     anyhow::ensure!(
         first.final_digest == replay.final_digest && first.observations == replay.observations,
         "Rapier replay differed for the exact same controller trace"
+    );
+    let sensor_artifacts = build_sensor_validation_report(
+        &repo_root,
+        &controller,
+        &actuation_config,
+        &actions,
+        &first,
+        &replay,
+        &InputHashes {
+            task_sha256: &task_sha256,
+            controller_sha256: &controller_sha256,
+            action_trace_sha256: &action_trace_sha256,
+            robot_asset_config_sha256: &robot_asset_config_sha256,
+            actuation_config_sha256: &actuation_config_sha256,
+        },
+    )?;
+    write_json(
+        &output.join("sensor-validation-report.json"),
+        &sensor_artifacts.report,
+    )?;
+    write_json(
+        &output.join("sensor-dropout-trace.json"),
+        &sensor_artifacts.dropout_trace,
+    )?;
+    write_json(
+        &output.join("sensor-stuck-trace.json"),
+        &sensor_artifacts.stuck_trace,
+    )?;
+    write_html_report(
+        &output.join("sensor-validation-report.html"),
+        "OpenArm Joint Feedback Validation",
+        &sensor_artifacts.report,
+    )?;
+    anyhow::ensure!(
+        sensor_artifacts.report["status"] == "passed",
+        "OpenArm joint-feedback sensor validation did not pass"
     );
     write_failure_replay(
         &output.join("controller-failure.rne-replay"),
@@ -501,6 +571,7 @@ fn rollout(
     controller: &ControllerSpec,
     actuation_config: &ActuationConfig,
     actions: &[ActionFrame],
+    fault: JointFeedbackFault,
 ) -> Result<Rollout> {
     let scene = repo_root.join("assets/scenes/openarm_v2_right_validation.rne.scene.toml");
     let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
@@ -518,7 +589,7 @@ fn rollout(
         phase_offset_ticks: sim.fixed_delta().ticks(),
         latency_ticks: sim.fixed_delta().ticks(),
         stream_id: JOINT_FEEDBACK_STREAM,
-        fault: JointFeedbackFault::None,
+        fault,
     })
     .context("install OpenArm joint-feedback sensor")?;
     let initial_digest = hash_physics_state(sim.world());
@@ -542,32 +613,35 @@ fn rollout(
         state_hashes.push(hash_physics_state(sim.world()));
         sim.sample_joint_feedback(&mut bus)
             .context("sample OpenArm joint feedback")?;
-        let captured = bus
-            .latest::<JointFeedback>(JOINT_FEEDBACK_STREAM)
-            .context("OpenArm feedback sensor emitted no current frame")?;
-        for (link_name, joint) in controller
-            .rne_actuator_link_order
-            .iter()
-            .zip(&captured.payload.joints)
-        {
-            let (sensor_position_rad, sensor_velocity_rad_s) = match joint.coordinate {
-                rne_data::JointCoordinateFeedback::Revolute {
-                    position_rad,
-                    velocity_rad_s,
-                } => (position_rad, velocity_rad_s),
-                _ => bail!("OpenArm feedback channel {link_name} is not revolute"),
-            };
-            let backend_position_rad = sim
-                .named_joint_position(link_name)
-                .with_context(|| format!("missing backend position for {link_name}"))?;
-            let backend_velocity_rad_s = sim
-                .named_joint_velocity(link_name)
-                .with_context(|| format!("missing backend velocity for {link_name}"))?;
-            maximum_sensor_backend_position_delta_rad = maximum_sensor_backend_position_delta_rad
-                .max((sensor_position_rad - backend_position_rad).abs());
-            maximum_sensor_backend_velocity_delta_rad_s =
-                maximum_sensor_backend_velocity_delta_rad_s
-                    .max((sensor_velocity_rad_s - backend_velocity_rad_s).abs());
+        if fault == JointFeedbackFault::None {
+            let captured = bus
+                .latest::<JointFeedback>(JOINT_FEEDBACK_STREAM)
+                .context("OpenArm feedback sensor emitted no current frame")?;
+            for (link_name, joint) in controller
+                .rne_actuator_link_order
+                .iter()
+                .zip(&captured.payload.joints)
+            {
+                let (sensor_position_rad, sensor_velocity_rad_s) = match joint.coordinate {
+                    rne_data::JointCoordinateFeedback::Revolute {
+                        position_rad,
+                        velocity_rad_s,
+                    } => (position_rad, velocity_rad_s),
+                    _ => bail!("OpenArm feedback channel {link_name} is not revolute"),
+                };
+                let backend_position_rad = sim
+                    .named_joint_position(link_name)
+                    .with_context(|| format!("missing backend position for {link_name}"))?;
+                let backend_velocity_rad_s = sim
+                    .named_joint_velocity(link_name)
+                    .with_context(|| format!("missing backend velocity for {link_name}"))?;
+                maximum_sensor_backend_position_delta_rad =
+                    maximum_sensor_backend_position_delta_rad
+                        .max((sensor_position_rad - backend_position_rad).abs());
+                maximum_sensor_backend_velocity_delta_rad_s =
+                    maximum_sensor_backend_velocity_delta_rad_s
+                        .max((sensor_velocity_rad_s - backend_velocity_rad_s).abs());
+            }
         }
         let now = sim.sim_time();
         if let Some(frame) = bus.latest_available::<JointFeedback>(JOINT_FEEDBACK_STREAM, now) {
@@ -599,19 +673,266 @@ fn rollout(
             &state_hashes,
         )?);
     }
-    anyhow::ensure!(
-        observations.len() == actions.len(),
-        "OpenArm typed feedback emitted {} observations for {} actions",
-        observations.len(),
-        actions.len()
-    );
+    if fault == JointFeedbackFault::None {
+        anyhow::ensure!(
+            observations.len() == actions.len(),
+            "OpenArm typed feedback emitted {} observations for {} actions",
+            observations.len(),
+            actions.len()
+        );
+    }
     Ok(Rollout {
+        world_seed: sim.world_seed(),
         initial_digest,
         final_digest: hash_physics_state(sim.world()),
         observations,
         maximum_sensor_backend_position_delta_rad,
         maximum_sensor_backend_velocity_delta_rad_s,
     })
+}
+
+fn build_sensor_validation_report(
+    repo_root: &Path,
+    controller: &ControllerSpec,
+    actuation_config: &ActuationConfig,
+    actions: &[ActionFrame],
+    nominal: &Rollout,
+    replay: &Rollout,
+    hashes: &InputHashes<'_>,
+) -> Result<SensorValidationArtifacts> {
+    let fault_window_end = usize::try_from(SENSOR_FAULT_SEQUENCE + 2)
+        .context("sensor fault sequence does not fit usize")?
+        .min(actions.len());
+    let fault_actions = &actions[..fault_window_end];
+    let dropout = rollout(
+        repo_root,
+        controller,
+        actuation_config,
+        fault_actions,
+        JointFeedbackFault::DropSequence {
+            sequence: SENSOR_FAULT_SEQUENCE,
+        },
+    )?;
+    let stuck = rollout(
+        repo_root,
+        controller,
+        actuation_config,
+        fault_actions,
+        JointFeedbackFault::StuckFromSequence {
+            sequence: SENSOR_FAULT_SEQUENCE,
+        },
+    )?;
+
+    let nominal_hash = sha256_json(&nominal.observations)?;
+    let replay_hash = sha256_json(&replay.observations)?;
+    let dropout_hash = sha256_json(&dropout.observations)?;
+    let stuck_hash = sha256_json(&stuck.observations)?;
+    let maximum_phase_error_ticks = nominal
+        .observations
+        .iter()
+        .map(|frame| frame.sample_phase_error_ticks)
+        .max()
+        .unwrap_or(u64::MAX);
+    let minimum_observation_age_ticks = nominal
+        .observations
+        .iter()
+        .map(|frame| frame.observation_age_ticks)
+        .min()
+        .unwrap_or(u64::MAX);
+    let maximum_observation_age_ticks = nominal
+        .observations
+        .iter()
+        .map(|frame| frame.observation_age_ticks)
+        .max()
+        .unwrap_or(u64::MAX);
+    let unavailable_effort_measurements = nominal
+        .observations
+        .iter()
+        .flat_map(|frame| &frame.effort_measurement_available)
+        .filter(|available| !**available)
+        .count();
+    let expected_effort_measurements =
+        nominal.observations.len() * controller.rne_actuator_link_order.len();
+    let saturation_count = nominal
+        .observations
+        .iter()
+        .flat_map(|frame| &frame.effort_saturated)
+        .filter(|saturated| **saturated)
+        .count();
+    let first_saturation = nominal.observations.iter().find_map(|frame| {
+        frame
+            .effort_saturated
+            .iter()
+            .position(|saturated| *saturated)
+            .map(|joint_index| {
+                (
+                    frame.step,
+                    joint_index,
+                    controller.action_joint_order[joint_index].as_str(),
+                )
+            })
+    });
+    let sequence_gap = first_sequence_gap(&dropout.observations);
+    let first_stuck = stuck
+        .observations
+        .iter()
+        .find(|frame| frame.sensor_status == JointFeedbackStatus::StuckValue);
+    let expected_dropout_detection_ticks = (SENSOR_FAULT_SEQUENCE + 2) * FIXED_DELTA_TICKS;
+    let expected_stuck_detection_ticks = (SENSOR_FAULT_SEQUENCE + 1) * FIXED_DELTA_TICKS;
+
+    let check_results = [
+        nominal.observations.len() == actions.len(),
+        nominal_hash == replay_hash,
+        maximum_phase_error_ticks == 0,
+        minimum_observation_age_ticks == FIXED_DELTA_TICKS,
+        maximum_observation_age_ticks == FIXED_DELTA_TICKS,
+        nominal.maximum_sensor_backend_position_delta_rad == 0.0,
+        nominal.maximum_sensor_backend_velocity_delta_rad_s == 0.0,
+        unavailable_effort_measurements == expected_effort_measurements,
+        saturation_count > 0,
+        sequence_gap.is_some_and(|(missing, next, detected)| {
+            missing == SENSOR_FAULT_SEQUENCE
+                && next == SENSOR_FAULT_SEQUENCE + 1
+                && detected == expected_dropout_detection_ticks
+        }),
+        first_stuck.is_some_and(|frame| {
+            frame.step == SENSOR_FAULT_SEQUENCE
+                && frame.consumed_at_ticks == expected_stuck_detection_ticks
+        }),
+        nominal.world_seed == replay.world_seed
+            && nominal.world_seed == dropout.world_seed
+            && nominal.world_seed == stuck.world_seed,
+    ];
+    let passed = check_results.iter().all(|result| *result);
+    let (missing_sequence, next_sequence, dropout_detected_at_ticks) =
+        sequence_gap.unwrap_or((0, 0, 0));
+    let (first_saturation_sequence, first_saturation_joint_index, first_saturation_joint_name) =
+        first_saturation.unwrap_or((0, 0, "none"));
+    let (first_stuck_sequence, stuck_detected_at_ticks) = first_stuck
+        .map(|frame| (frame.step, frame.consumed_at_ticks))
+        .unwrap_or((0, 0));
+
+    let report = json!({
+        "kind": SENSOR_REPORT_KIND,
+        "schema_version": 1,
+        "status": if passed { "passed" } else { "failed" },
+        "backend": { "id": "rne_rapier", "version": "0.22" },
+        "task_id": controller.task_id,
+        "controller_id": controller.controller_id,
+        "world_seed": nominal.world_seed,
+        "input_hashes": {
+            "task_sha256": hashes.task_sha256,
+            "controller_sha256": hashes.controller_sha256,
+            "action_trace_sha256": hashes.action_trace_sha256,
+            "robot_asset_config_sha256": hashes.robot_asset_config_sha256,
+            "actuation_config_sha256": hashes.actuation_config_sha256,
+        },
+        "sensor_contract": {
+            "payload": "JointFeedback",
+            "schema_version": JointFeedback::SCHEMA_VERSION,
+            "stream_id": JOINT_FEEDBACK_STREAM.0,
+            "channel_order": controller.rne_actuator_link_order,
+            "sample_period_ticks": FIXED_DELTA_TICKS,
+            "phase_offset_ticks": FIXED_DELTA_TICKS,
+            "latency_ticks": FIXED_DELTA_TICKS,
+            "consumption": "databus_latest_available",
+            "effort_semantics": "backend_measurement_or_explicit_unavailable",
+        },
+        "stream_hashes": {
+            "nominal_sha256": nominal_hash,
+            "replay_sha256": replay_hash,
+            "dropout_sha256": dropout_hash,
+            "stuck_value_sha256": stuck_hash,
+        },
+        "artifacts": {
+            "nominal": "rapier-success-trace.json",
+            "dropout": "sensor-dropout-trace.json",
+            "stuck_value": "sensor-stuck-trace.json",
+            "browser_report": "sensor-validation-report.html",
+        },
+        "checks": [
+            { "id": "nominal_frame_count_v1", "classification": "measurement", "unit": "frame", "observed": nominal.observations.len(), "expected": actions.len(), "status": pass_fail(check_results[0]) },
+            { "id": "deterministic_replay_hash_v1", "classification": "measurement", "unit": "sha256_match", "observed": nominal_hash == replay_hash, "expected": true, "status": pass_fail(check_results[1]) },
+            { "id": "sample_phase_error_v1", "classification": "measurement", "unit": "tick", "observed": maximum_phase_error_ticks, "maximum": 0, "status": pass_fail(check_results[2]) },
+            { "id": "observation_age_min_v1", "classification": "measurement", "unit": "tick", "observed": minimum_observation_age_ticks, "expected": FIXED_DELTA_TICKS, "status": pass_fail(check_results[3]) },
+            { "id": "observation_age_max_v1", "classification": "measurement", "unit": "tick", "observed": maximum_observation_age_ticks, "expected": FIXED_DELTA_TICKS, "status": pass_fail(check_results[4]) },
+            { "id": "sensor_backend_position_calibration_v1", "classification": "measurement", "unit": "rad", "observed_delta": nominal.maximum_sensor_backend_position_delta_rad, "maximum_delta": 0.0, "status": pass_fail(check_results[5]) },
+            { "id": "sensor_backend_velocity_calibration_v1", "classification": "measurement", "unit": "rad/s", "observed_delta": nominal.maximum_sensor_backend_velocity_delta_rad_s, "maximum_delta": 0.0, "status": pass_fail(check_results[6]) },
+            { "id": "unavailable_effort_is_explicit_v1", "classification": "measurement", "unit": "channel_sample", "observed": unavailable_effort_measurements, "expected": expected_effort_measurements, "status": pass_fail(check_results[7]) },
+            { "id": "effort_saturation_is_observable_v1", "classification": "actuator", "unit": "channel_sample", "observed": saturation_count, "minimum": 1, "status": pass_fail(check_results[8]) },
+            { "id": "dropout_first_sequence_gap_v1", "classification": "measurement", "unit": "sequence", "observed": missing_sequence, "expected": SENSOR_FAULT_SEQUENCE, "status": pass_fail(check_results[9]) },
+            { "id": "stuck_value_first_status_v1", "classification": "measurement", "unit": "sequence", "observed": first_stuck_sequence, "expected": SENSOR_FAULT_SEQUENCE, "status": pass_fail(check_results[10]) },
+            { "id": "world_seed_consistency_v1", "classification": "input", "unit": "seed_match", "observed": check_results[11], "expected": true, "status": pass_fail(check_results[11]) },
+        ],
+        "fault_evidence": {
+            "dropout": {
+                "injected_sequence": SENSOR_FAULT_SEQUENCE,
+                "first_missing_sequence": missing_sequence,
+                "next_observed_sequence": next_sequence,
+                "first_contract_deviation": "sequence_gap",
+                "detected_at_consumption_ticks": dropout_detected_at_ticks,
+                "expected_detection_ticks": expected_dropout_detection_ticks,
+                "emitted_frames": dropout.observations.len(),
+                "attempted_frames": fault_actions.len(),
+            },
+            "stuck_value": {
+                "injected_from_sequence": SENSOR_FAULT_SEQUENCE,
+                "first_status_sequence": first_stuck_sequence,
+                "first_contract_deviation": "stuck_value_status",
+                "detected_at_consumption_ticks": stuck_detected_at_ticks,
+                "expected_detection_ticks": expected_stuck_detection_ticks,
+            },
+        },
+        "actuator_evidence": {
+            "saturated_channel_samples": saturation_count,
+            "first_saturation_sequence": first_saturation_sequence,
+            "first_saturation_joint_index": first_saturation_joint_index,
+            "first_saturation_joint_name": first_saturation_joint_name,
+            "measured_effort_available": false,
+        },
+    });
+    let dropout_trace = json!({
+        "kind": "rne_joint_feedback_fault_trace",
+        "schema_version": 1,
+        "task_id": controller.task_id,
+        "controller_id": controller.controller_id,
+        "action_trace_sha256": hashes.action_trace_sha256,
+        "fault": { "kind": "drop_sequence", "sequence": SENSOR_FAULT_SEQUENCE },
+        "observations": dropout.observations,
+    });
+    let stuck_trace = json!({
+        "kind": "rne_joint_feedback_fault_trace",
+        "schema_version": 1,
+        "task_id": controller.task_id,
+        "controller_id": controller.controller_id,
+        "action_trace_sha256": hashes.action_trace_sha256,
+        "fault": { "kind": "stuck_from_sequence", "sequence": SENSOR_FAULT_SEQUENCE },
+        "observations": stuck.observations,
+    });
+    Ok(SensorValidationArtifacts {
+        report,
+        dropout_trace,
+        stuck_trace,
+    })
+}
+
+fn first_sequence_gap(observations: &[ObservationFrame]) -> Option<(u64, u64, u64)> {
+    observations.windows(2).find_map(|pair| {
+        let expected = pair[0].step.checked_add(1)?;
+        (pair[1].step != expected).then_some((expected, pair[1].step, pair[1].consumed_at_ticks))
+    })
+}
+
+fn sha256_json(value: &impl Serialize) -> Result<String> {
+    Ok(sha256(&serde_json::to_vec(value)?))
+}
+
+const fn pass_fail(passed: bool) -> &'static str {
+    if passed {
+        "passed"
+    } else {
+        "failed"
+    }
 }
 
 fn observation_from_feedback(
@@ -628,6 +949,7 @@ fn observation_from_feedback(
     let mut targets = Vec::with_capacity(frame.payload.joints.len());
     let mut limited_efforts = Vec::with_capacity(frame.payload.joints.len());
     let mut saturated = Vec::with_capacity(frame.payload.joints.len());
+    let mut effort_measurement_available = Vec::with_capacity(frame.payload.joints.len());
     let mut maximum_tracking_error_rad = 0.0_f64;
     for joint in &frame.payload.joints {
         let (position_rad, velocity_rad_s) = match joint.coordinate {
@@ -655,6 +977,8 @@ fn observation_from_feedback(
         targets.push(target_position_rad);
         limited_efforts.push(limited_effort_command_nm);
         saturated.push(effort_saturated);
+        effort_measurement_available
+            .push(!matches!(joint.effort, JointEffortFeedback::Unavailable));
         maximum_tracking_error_rad =
             maximum_tracking_error_rad.max((position_rad - target_position_rad).abs());
     }
@@ -669,11 +993,13 @@ fn observation_from_feedback(
         available_time_ticks: frame.available_time.ticks(),
         consumed_at_ticks,
         observation_age_ticks: consumed_at_ticks.saturating_sub(frame.capture_time.ticks()),
+        sensor_status: frame.payload.status,
         joint_position_rad: positions,
         joint_velocity_rad_s: velocities,
         joint_position_target_rad: targets,
         limited_effort_command_nm: limited_efforts,
         effort_saturated: saturated,
+        effort_measurement_available,
         maximum_tracking_error_rad,
         physics_hash,
     })
@@ -794,6 +1120,23 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     fs::write(path, bytes).with_context(|| format!("write {}", path.display()))
 }
 
+fn write_html_report(path: &Path, title: &str, report: &serde_json::Value) -> Result<()> {
+    let report_json = serde_json::to_string_pretty(report)?;
+    let escaped = report_json
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let status = report["status"].as_str().unwrap_or("unknown");
+    let html = format!(
+        "<!doctype html>\n<meta charset=\"utf-8\">\n<title>{title}</title>\n\
+         <style>body{{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;background:#111827;color:#e5e7eb}}\
+         h1{{margin-bottom:8px}}.status{{display:inline-block;padding:6px 12px;border-radius:999px;background:#064e3b;color:#a7f3d0;font-weight:700}}\
+         pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#1f2937;border:1px solid #374151;border-radius:10px;padding:18px;line-height:1.4}}</style>\n\
+         <h1>{title}</h1><p class=\"status\">{status}</p><p>Self-contained deterministic sensor evidence. All times are simulation ticks and all physical fields retain explicit SI units.</p><pre>{escaped}</pre>\n"
+    );
+    fs::write(path, html).with_context(|| format!("write {}", path.display()))
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -801,6 +1144,31 @@ fn sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sensor_observation(
+        step: u64,
+        consumed_at_ticks: u64,
+        sensor_status: JointFeedbackStatus,
+    ) -> ObservationFrame {
+        ObservationFrame {
+            step,
+            sim_time_ticks: step * FIXED_DELTA_TICKS,
+            scheduled_capture_ticks: step * FIXED_DELTA_TICKS,
+            sample_phase_error_ticks: 0,
+            available_time_ticks: consumed_at_ticks,
+            consumed_at_ticks,
+            observation_age_ticks: FIXED_DELTA_TICKS,
+            sensor_status,
+            joint_position_rad: Vec::new(),
+            joint_velocity_rad_s: Vec::new(),
+            joint_position_target_rad: Vec::new(),
+            limited_effort_command_nm: Vec::new(),
+            effort_saturated: Vec::new(),
+            effort_measurement_available: Vec::new(),
+            maximum_tracking_error_rad: 0.0,
+            physics_hash: step,
+        }
+    }
 
     fn fixture(relative: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -846,5 +1214,17 @@ mod tests {
                 .joint_position_target_rad
         );
         assert_eq!(controller.intentional_failure.inject_at_step, 307);
+    }
+
+    #[test]
+    fn sequence_gap_reports_the_first_observable_deviation() {
+        let frames = vec![
+            sensor_observation(305, 5_100, JointFeedbackStatus::Nominal),
+            sensor_observation(306, 5_200, JointFeedbackStatus::Nominal),
+            sensor_observation(308, 5_400, JointFeedbackStatus::Nominal),
+            sensor_observation(310, 5_600, JointFeedbackStatus::Nominal),
+        ];
+        assert_eq!(first_sequence_gap(&frames), Some((307, 308, 5_400)));
+        assert_eq!(first_sequence_gap(&frames[..2]), None);
     }
 }

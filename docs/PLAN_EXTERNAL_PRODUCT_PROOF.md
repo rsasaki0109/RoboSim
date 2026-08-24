@@ -336,10 +336,10 @@ increased.
    contract; reject invalid tensors; eliminate implicit collider mass; bind the
    robot asset configuration into traces and capsules. Re-run the OpenArm
    joint-5 isolated/coupled identification and full pose-cycle regressions.
-2. **Joint-feedback measurement contract:** version the observation schema for
-   joint position, velocity, effort, command realization, saturation, sample
-   phase, and age. Produce nominal, one-step-delay, dropout, stuck-value, and
-   effort-saturation golden streams and the first headless
+2. **Complete -- joint-feedback measurement contract:** version the observation
+   schema for joint position, velocity, effort, command realization, saturation,
+   sample phase, and age. Produce nominal, one-step-delay, dropout, stuck-value,
+   and effort-saturation golden streams and the first headless
    `sensor-validation-report`.
 3. **Sensor-in-the-loop control:** remove privileged backend-state feedback from
    the OpenArm reference controller. Run the unchanged timestamped observation
@@ -374,10 +374,13 @@ units, scheduled capture time, phase error, DataBus availability latency,
 sequence-visible dropout, stuck-value status, and the unconstrained versus
 limited actuator command. Backend effort is deliberately reported as
 `Unavailable` until a backend supplies a qualifying measured realized effort;
-command reconstruction is not mislabeled as measurement. Remaining slice-2
-work is the versioned golden streams and `sensor-validation-report`, followed by
-making the OpenArm controller consume only `latest_available` observations in
-slice 3.
+command reconstruction is not mislabeled as measurement. The headless OpenArm
+`sensor-validation-report` now binds the sensor contract and all input hashes,
+retains deterministic nominal/replay/dropout/stuck stream hashes, identifies
+drop sequence 307 at the first observable gap and stuck sequence 307 from its
+first status, and records 2776 observable saturated channel-samples. Its static
+HTML companion is self-contained and browser-readable. Slice 3 remains the work
+of making the controller law consume the same observations across backends.
 
 The Rapier OpenArm trace now exercises the slice-3 observation boundary with a
 one-control-period latency: scoring consumes only `latest_available` frames and
