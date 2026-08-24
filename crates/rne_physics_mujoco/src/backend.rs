@@ -770,8 +770,8 @@ fn joint_control(
                 reason: "mode, value, gain, or limit",
             });
         }
-        let (effort, limit) = match command {
-            JointActuation::Disabled => (0.0, 0.0),
+        let (effort, limit, passive_damping) = match command {
+            JointActuation::Disabled => (0.0, 0.0, 0.0),
             JointActuation::RevolutePosition {
                 target_position_rad,
                 stiffness_nm_per_rad,
@@ -781,6 +781,7 @@ fn joint_control(
                 stiffness_nm_per_rad * (target_position_rad - position)
                     - damping_nm_s_per_rad * velocity,
                 max_effort_nm,
+                damping_nm_s_per_rad,
             ),
             JointActuation::RevoluteVelocity {
                 target_velocity_rad_s,
@@ -789,11 +790,12 @@ fn joint_control(
             } => (
                 gain_nm_s_per_rad * (target_velocity_rad_s - velocity),
                 max_effort_nm,
+                gain_nm_s_per_rad,
             ),
             JointActuation::RevoluteEffort {
                 effort_nm,
                 max_effort_nm,
-            } => (effort_nm, max_effort_nm),
+            } => (effort_nm, max_effort_nm, 0.0),
             JointActuation::PrismaticPosition {
                 target_position_m,
                 stiffness_n_per_m,
@@ -802,6 +804,7 @@ fn joint_control(
             } => (
                 stiffness_n_per_m * (target_position_m - position) - damping_n_s_per_m * velocity,
                 max_force_n,
+                damping_n_s_per_m,
             ),
             JointActuation::PrismaticVelocity {
                 target_velocity_m_s,
@@ -810,13 +813,17 @@ fn joint_control(
             } => (
                 gain_n_s_per_m * (target_velocity_m_s - velocity),
                 max_force_n,
+                gain_n_s_per_m,
             ),
             JointActuation::PrismaticEffort {
                 force_n,
                 max_force_n,
-            } => (force_n, max_force_n),
+            } => (force_n, max_force_n, 0.0),
         };
-        return Ok(effort.clamp(-limit, limit));
+        // MuJoCo integrates joint damping implicitly. Add the same damping term
+        // back to the motor command after clamping so motor + passive damping
+        // still realizes the exact bounded backend-neutral effort law.
+        return Ok(effort.clamp(-limit, limit) + passive_damping * velocity);
     }
     let Some(motor) = world.get::<JointMotor>(entity) else {
         return Ok(0.0);

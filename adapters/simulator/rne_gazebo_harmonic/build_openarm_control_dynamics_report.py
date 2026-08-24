@@ -18,6 +18,7 @@ TERMINAL_BIAS_LIMIT_RAD = 0.01
 TERMINAL_WINDOW_SAMPLES = 30
 VELOCITY_LIMIT_EPSILON_RAD_S = 1e-6
 POSITION_LIMIT_EPSILON_RAD = 1e-6
+PHYSICS_HASH_CONTRACT = "rne_physics_state_v2_fnv1a_1e-6_si"
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,6 +111,7 @@ def main() -> int:
     repo = args.repo_root.resolve()
     actions_path = trace_root / "controller-actions.json"
     rapier_path = trace_root / "rapier-success-trace.json"
+    mujoco_path = trace_root / "mujoco-success-trace.json"
     gazebo_path = trace_root / "gazebo-success-trace.json"
     actions_artifact = load(actions_path)
     actions = actions_artifact["actions"]
@@ -144,7 +146,7 @@ def main() -> int:
     ):
         raise ValueError("action trace identity differs from TaskSpec/controller")
     if (
-        rapier_actuation.get("backend_id") != "rne_rapier"
+        rapier_actuation.get("backend_id") != "rne_native_physics"
         or rapier_actuation.get("motor_model") != "force_based_v1"
         or rapier_actuation.get("fixed_delta_ticks")
         != actions_artifact["fixed_delta_ticks"]
@@ -160,7 +162,11 @@ def main() -> int:
 
     backend_reports: list[dict[str, Any]] = []
     violations: list[dict[str, Any]] = []
-    traces = [("rne_rapier", rapier_path), ("gazebo_sim", gazebo_path)]
+    traces = [
+        ("rne_rapier", rapier_path),
+        ("mujoco_native", mujoco_path),
+        ("gazebo_sim", gazebo_path),
+    ]
     loaded_traces: dict[str, dict[str, Any]] = {}
     for expected_backend, trace_path in traces:
         trace = load(trace_path)
@@ -173,14 +179,15 @@ def main() -> int:
             or len(trace["observations"]) != len(actions)
         ):
             raise ValueError(f"{expected_backend} trace identity or length drifted")
-        if expected_backend == "rne_rapier" and trace.get(
-            "actuation_config_sha256"
-        ) != sha256(rapier_actuation_path):
-            raise ValueError("Rapier trace differs from its actuation configuration")
-        if expected_backend == "rne_rapier" and trace.get(
-            "robot_asset_config_sha256"
-        ) != sha256(rapier_robot_asset_path):
-            raise ValueError("Rapier trace differs from its robot asset configuration")
+        if expected_backend in ("rne_rapier", "mujoco_native") and (
+            trace.get("actuation_config_sha256") != sha256(rapier_actuation_path)
+            or trace.get("robot_asset_config_sha256")
+            != sha256(rapier_robot_asset_path)
+            or trace.get("physics_state_hash_contract") != PHYSICS_HASH_CONTRACT
+        ):
+            raise ValueError(
+                f"{expected_backend} trace differs from its native physics configuration"
+            )
         if expected_backend == "gazebo_sim" and (
             trace.get("runtime_manifest_sha256") != sha256(gazebo_runtime_path)
             or trace.get("adapter_config_sha256") != sha256(gazebo_adapter_config_path)
@@ -347,34 +354,71 @@ def main() -> int:
         )
 
     cross_joint: list[dict[str, Any]] = []
-    rapier = loaded_traces["rne_rapier"]["observations"]
-    gazebo = loaded_traces["gazebo_sim"]["observations"]
+    backend_ids = [backend_id for backend_id, _ in traces]
     for index, joint in enumerate(joint_order):
-        position_deltas = [
-            left["joint_position_rad"][index] - right["joint_position_rad"][index]
-            for left, right in zip(rapier, gazebo)
-        ]
-        velocity_deltas = [
-            left["joint_velocity_rad_s"][index] - right["joint_velocity_rad_s"][index]
-            for left, right in zip(rapier, gazebo)
-        ]
-        maximum_position = max(abs(value) for value in position_deltas)
+        pairwise: list[dict[str, Any]] = []
+        for left_index, left_id in enumerate(backend_ids):
+            for right_id in backend_ids[left_index + 1 :]:
+                left = loaded_traces[left_id]["observations"]
+                right = loaded_traces[right_id]["observations"]
+                position_deltas = [
+                    left_frame["joint_position_rad"][index]
+                    - right_frame["joint_position_rad"][index]
+                    for left_frame, right_frame in zip(left, right)
+                ]
+                velocity_deltas = [
+                    left_frame["joint_velocity_rad_s"][index]
+                    - right_frame["joint_velocity_rad_s"][index]
+                    for left_frame, right_frame in zip(left, right)
+                ]
+                maximum_step = max(
+                    range(len(position_deltas)),
+                    key=lambda step: abs(position_deltas[step]),
+                )
+                pairwise.append(
+                    {
+                        "left_backend_id": left_id,
+                        "right_backend_id": right_id,
+                        "position_delta_rmse_rad": math.sqrt(
+                            sum(value * value for value in position_deltas)
+                            / len(position_deltas)
+                        ),
+                        "maximum_position_delta_rad": abs(
+                            position_deltas[maximum_step]
+                        ),
+                        "maximum_position_delta_step": maximum_step + 1,
+                        "maximum_velocity_delta_rad_s": max(
+                            abs(value) for value in velocity_deltas
+                        ),
+                        "final_position_delta_rad": abs(position_deltas[-1]),
+                    }
+                )
+        maximum_pair = max(
+            pairwise, key=lambda item: item["maximum_position_delta_rad"]
+        )
         maximum_step = max(
-            range(len(position_deltas)), key=lambda step: abs(position_deltas[step])
+            pairwise, key=lambda item: item["maximum_velocity_delta_rad_s"]
         )
         cross_joint.append(
             {
                 "joint": joint,
-                "position_delta_rmse_rad": math.sqrt(
-                    sum(value * value for value in position_deltas)
-                    / len(position_deltas)
+                "maximum_pairwise_position_delta_rad": maximum_pair[
+                    "maximum_position_delta_rad"
+                ],
+                "maximum_pairwise_position_delta_step": maximum_pair[
+                    "maximum_position_delta_step"
+                ],
+                "maximum_pairwise_position_delta_backends": [
+                    maximum_pair["left_backend_id"],
+                    maximum_pair["right_backend_id"],
+                ],
+                "maximum_pairwise_velocity_delta_rad_s": maximum_step[
+                    "maximum_velocity_delta_rad_s"
+                ],
+                "maximum_pairwise_final_position_delta_rad": max(
+                    item["final_position_delta_rad"] for item in pairwise
                 ),
-                "maximum_position_delta_rad": maximum_position,
-                "maximum_position_delta_step": maximum_step + 1,
-                "maximum_velocity_delta_rad_s": max(
-                    abs(value) for value in velocity_deltas
-                ),
-                "final_position_delta_rad": abs(position_deltas[-1]),
+                "pairwise": pairwise,
             }
         )
 
@@ -395,6 +439,7 @@ def main() -> int:
             "action_unit": "rad",
             "action_semantics": "joint_position_target",
             "terminal_window_samples": TERMINAL_WINDOW_SAMPLES,
+            "native_physics_state_hash_contract": PHYSICS_HASH_CONTRACT,
         },
         "actuation_contracts": [
             {
@@ -404,6 +449,15 @@ def main() -> int:
                 "configuration_sha256": sha256(rapier_actuation_path),
                 "robot_asset_config_sha256": sha256(rapier_robot_asset_path),
                 "joint_count": len(rapier_actuation["joints"]),
+            },
+            {
+                "backend_id": "mujoco_native",
+                "motor_model": rapier_actuation["motor_model"],
+                "solver_iterations": rapier_actuation["solver_iterations"],
+                "configuration_sha256": sha256(rapier_actuation_path),
+                "robot_asset_config_sha256": sha256(rapier_robot_asset_path),
+                "joint_count": len(rapier_actuation["joints"]),
+                "integration": "native_implicit_joint_damping_with_exact_bounded_total_effort",
             },
             {
                 "backend_id": "gazebo_sim",
@@ -450,6 +504,7 @@ def main() -> int:
             {"role": "controller", "sha256": sha256(controller_path)},
             {"role": "action_trace", "sha256": sha256(actions_path)},
             {"role": "rapier_trace", "sha256": sha256(rapier_path)},
+            {"role": "native_mujoco_trace", "sha256": sha256(mujoco_path)},
             {"role": "gazebo_trace", "sha256": sha256(gazebo_path)},
             {"role": "robot_model", "sha256": sha256(urdf_path)},
             {
@@ -457,7 +512,7 @@ def main() -> int:
                 "sha256": sha256(rapier_robot_asset_path),
             },
             {
-                "role": "rapier_actuation_config",
+                "role": "native_physics_actuation_config",
                 "sha256": sha256(rapier_actuation_path),
             },
             {

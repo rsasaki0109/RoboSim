@@ -29,10 +29,14 @@ available.
 | Track | Outcome | Main exit evidence |
 |---|---|---|
 | 0.2 Trust and benchmark | Backend-neutral determinism contracts, audited capability inventory, timing-free benchmark aggregation, and portable Failure Capsules | `xtask capability-report`, `xtask benchmark`, `xtask failure-capsule verify`, workspace/headless CI |
-| 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, and canonical contact evidence while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; a deliberately tightened first divergence reproduces from a verified replay/report Failure Capsule on Windows and Linux |
+| 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, canonical contact evidence, and control-engineering plant/controller validation while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; OpenArm step/ramp/chirp, plant-model, PID/state-space, and robustness reports retain the first divergent measurement, realization, or plant response in a verified Failure Capsule |
 | 0.4 Scalable learning | Ordered vector environments, deterministic reset streams, batched observations/actions, and accelerator adapters outside core | Single-environment replay matches its lane in a batch; throughput reports name hardware, batch size, and scenario |
-| 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
+| 0.5 Perception and data | Timestamped joint/actuator feedback, IMU, RGB-D/LiDAR datasets, renderer-specific capture adapters, calibration manifests, estimator evidence, and offline evaluation | Sensor timing/calibration/noise/failure contracts and dataset hashes reproduce headlessly; stationary and prescribed-motion IMU fixtures retain nominal and minimized estimator-failure evidence without making rendering a core requirement |
 | 0.7 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
+
+The concrete sensor and control-engineering sequence, report contents, and
+definition of done are tracked in the
+[External product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#sensor-and-control-dynamics-hardening-track).
 
 Contest scoring starts with the Tsukuba Challenge 2026 confirmation run, not a
 city-scale photoreal clone. See [TSUKUBA_CONFIRMATION_RUN.md](TSUKUBA_CONFIRMATION_RUN.md):

@@ -157,6 +157,7 @@ def open_and_reset(
 def controller_decision(
     controller: dict[str, Any],
     reference: list[float],
+    integral_correction: list[float],
     observation: dict[str, Any] | None,
     consumed_at_ticks: int,
 ) -> dict[str, Any]:
@@ -165,6 +166,7 @@ def controller_decision(
         return {
             "target": reference.copy(),
             "correction": [0.0] * len(reference),
+            "integral_correction": integral_correction.copy(),
             "observation_sequence": None,
             "observation_age_ticks": None,
             "bootstrap": False,
@@ -173,6 +175,7 @@ def controller_decision(
         return {
             "target": reference.copy(),
             "correction": [0.0] * len(reference),
+            "integral_correction": integral_correction.copy(),
             "observation_sequence": None,
             "observation_age_ticks": None,
             "bootstrap": True,
@@ -184,14 +187,35 @@ def controller_decision(
     if age_ticks < 0 or age_ticks > contract["maximum_age_ticks"]:
         raise RuntimeError("OpenArm controller rejected stale or future joint feedback")
     law = controller["feedback_law"]
+    sample_period_s = contract["sample_period_ticks"] / 1_000_000_000.0
+    for index, (desired, position, gain, maximum) in enumerate(
+        zip(
+            reference,
+            observation["joint_position_rad"],
+            law["integral_error_gain_s_inv"],
+            law["maximum_integral_correction_rad"],
+        )
+    ):
+        integral_correction[index] = max(
+            -maximum,
+            min(
+                maximum,
+                integral_correction[index]
+                + gain * (desired - position) * sample_period_s,
+            ),
+        )
     correction = [
-        max(-limit, min(limit, gain * (desired - position) - damping * velocity))
-        for desired, position, velocity, gain, damping, limit in zip(
+        max(
+            -limit,
+            min(limit, gain * (desired - position) - damping * velocity + integral),
+        )
+        for desired, position, velocity, gain, damping, integral, limit in zip(
             reference,
             observation["joint_position_rad"],
             observation["joint_velocity_rad_s"],
             law["position_error_gain"],
             law["velocity_damping_s"],
+            integral_correction,
             law["maximum_correction_rad"],
         )
     ]
@@ -207,6 +231,7 @@ def controller_decision(
     return {
         "target": target,
         "correction": correction,
+        "integral_correction": integral_correction.copy(),
         "observation_sequence": observation["step"],
         "observation_age_ticks": age_ticks,
         "bootstrap": False,
@@ -226,11 +251,13 @@ def run_success(
     open_and_reset(process, session, task, task_sha256, 2 * joint_count, joint_count)
     observations: list[dict[str, Any]] = []
     final_digest = 0
+    integral_correction = [0.0] * joint_count
     for action in action_artifact["actions"]:
         delayed_observation = observations[-2] if len(observations) >= 2 else None
         decision = controller_decision(
             controller,
             action["joint_position_target_rad"],
+            integral_correction,
             delayed_observation,
             (action["step"] - 1) * FIXED_DELTA_TICKS,
         )
@@ -281,6 +308,7 @@ def run_success(
                 ],
                 "joint_position_target_rad": decision["target"],
                 "joint_feedback_correction_rad": decision["correction"],
+                "joint_integral_correction_rad": decision["integral_correction"],
                 "maximum_actuator_tracking_error_rad": maximum_actuator_error,
                 "maximum_tracking_error_rad": maximum_error,
             }
@@ -433,6 +461,8 @@ def main() -> int:
     vector_fields = (
         "position_error_gain",
         "velocity_damping_s",
+        "integral_error_gain_s_inv",
+        "maximum_integral_correction_rad",
         "maximum_correction_rad",
         "minimum_target_rad",
         "maximum_target_rad",
@@ -449,7 +479,7 @@ def main() -> int:
         or contract.get("maximum_age_ticks") != FIXED_DELTA_TICKS
         or contract.get("required_status") != "nominal"
         or contract.get("bootstrap_policy") != "reference_until_first_available"
-        or law.get("kind") != "joint_position_reference_pd_v1"
+        or law.get("kind") != "joint_position_reference_pid_v1"
         or any(len(law.get(field, [])) != joint_count for field in vector_fields)
     ):
         raise ValueError("unsupported OpenArm controller observation/feedback contract")
@@ -490,7 +520,7 @@ def main() -> int:
             "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,
             "observation_source": "adapter_task_tensor_to_typed_joint_feedback",
             "controller_execution": (
-                "artifact_defined_joint_feedback_pd"
+                "artifact_defined_joint_feedback_pid"
                 if feedback_enabled
                 else "open_loop_reference"
             ),

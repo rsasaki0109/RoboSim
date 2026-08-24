@@ -20,7 +20,7 @@ pub use components::{
     RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
-pub use hash::hash_physics_state;
+pub use hash::{hash_physics_state, hash_physics_state_v2};
 pub use snapshot::{
     capture_physics_snapshot, PhysicsBodySnapshot, PhysicsContactSnapshot, PhysicsSnapshot,
     PhysicsSnapshotError, PHYSICS_SNAPSHOT_SCHEMA_VERSION,

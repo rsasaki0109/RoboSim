@@ -302,6 +302,46 @@ Dynamics work follows a control-engineering model stack:
    delay, drop, rate, and actuator degradation within declared bounds. Retain
    the smallest counterexample and its first violated contract.
 
+### Tangible proof targets
+
+This track must be visible as a working control and measurement laboratory, not
+only as new APIs or unit tests. The following four artifacts are the user-facing
+milestones, in dependency order:
+
+1. **OpenArm feedback lab:** one headless command runs the same typed-feedback
+   controller on Rapier, native MuJoCo, and Gazebo and produces an HTML report
+   with synchronized reference, observation, command, saturation, latency, and
+   backend-delta plots. A deterministic dropout must identify the same first
+   unavailable observation and fail closed on all three runners.
+2. **OpenArm plant lab:** bounded step, ramp, and chirp experiments produce
+   per-joint time-domain metrics, empirical frequency response, cross-axis
+   coupling, and training/validation data for a declared local plant model.
+   Every plot must be reproducible from the retained machine-readable report;
+   screenshots are not evidence.
+3. **IMU estimator lab:** a stationary fixture and a prescribed-motion fixture
+   show truth, raw measurement, and estimated state together, including bias,
+   random walk, innovation, latency, and dropout recovery. The same fixture
+   must emit both a passing report and a minimized estimator failure capsule.
+4. **Robustness envelope:** a browser dashboard shows pass/fail regions over
+   payload, friction, inertia, sensor delay/drop, and actuator degradation. A
+   selected failing point opens its exact trace, first violated requirement,
+   replay, and model/config hashes rather than only an aggregate heat map.
+
+The labs use one versioned experiment manifest and one requirements registry.
+The registry owns hard limits and engineering targets; report builders may not
+derive pass thresholds from observed solver spread. Frequency-domain claims
+must record excitation amplitude, sample period, window, leakage treatment,
+frequency grid, estimator method, and coherence or an equivalent validity
+measure. State-space claims must record state/output definitions, operating
+point, discretization method, validity range, and controllability/observability
+evidence.
+
+Progress is counted by closed evidence loops. A milestone is not complete until
+its manifest, deterministic fixture, report schema, browser rendering, nominal
+case, intentional failure, replay/hash check, and short documentation example
+are all present. This prevents sensor breadth or controller variety from
+outrunning measurement quality.
+
 The primary OpenArm benchmark is not considered complete until it includes a
 payload-free baseline and at least one declared payload, multi-axis coupling,
 sensor-in-the-loop feedback, effort saturation, a disturbance or parameter
@@ -341,12 +381,12 @@ increased.
    sample phase, and age. Produce nominal, one-step-delay, dropout, stuck-value,
    and effort-saturation golden streams and the first headless
    `sensor-validation-report`.
-3. **In progress -- sensor-in-the-loop control:** remove privileged
+3. **Complete -- sensor-in-the-loop control:** remove privileged
    backend-state feedback from the OpenArm reference controller. Run the same
    observation contract and controller artifact through Rapier, MuJoCo, and
    Gazebo, retaining each backend-derived command stream and the first
-   measurement, realization, or plant divergence. Rapier and Gazebo are now
-   complete; native MuJoCo remains the slice gate.
+   measurement, realization, or plant divergence. All three runners now pass
+   the same final-pose, controller-reproduction, and hard-dynamics contracts.
 4. **IMU contract and estimator fixture:** implement stationary and prescribed
    motion tests, seeded bias/noise/random walk, mount-frame validation, latency
    and dropout cases, then add a deterministic complementary or Kalman-filter
@@ -380,10 +420,11 @@ command reconstruction is not mislabeled as measurement. The headless OpenArm
 `sensor-validation-report` now binds the sensor contract and all input hashes,
 retains deterministic nominal/replay/dropout/stuck stream hashes, identifies
 drop sequence 307 at the first observable gap and stuck sequence 307 from its
-first status, and records 2842 observable saturated channel-samples in the
-sensor-in-the-loop run. Its static HTML companion is self-contained and
-browser-readable. Slice 3 advances that measurement boundary into the
-controller execution path described below.
+first status, records 2,788 observable saturated channel-samples in the
+sensor-in-the-loop run, and verifies the per-joint PID integrator anti-windup
+bounds. Its static HTML companion is self-contained and browser-readable.
+Slice 3 advances that measurement boundary into the controller execution path
+described below.
 
 The Rapier OpenArm trace now exercises the slice-3 observation boundary with a
 one-control-period latency: scoring consumes only `latest_available` frames and
@@ -395,15 +436,24 @@ TaskSpec's exact integer fixed-step duration into the plant instead of claiming
 `16,666,667` ticks while running the generic 60 Hz integer-divided
 `16,666,666`-tick default.
 
-Slice 3 now has an artifact-defined, bounded joint-space PD reference correction
-that consumes only typed, available joint feedback. Rapier and Gazebo each
+Slice 3 now has an artifact-defined, bounded joint-space PID reference
+correction that consumes only typed, available joint feedback and clamps each
+integral state independently. Rapier, native MuJoCo 3.9.0, and Gazebo 8.15 each
 execute 1,798 feedback decisions after two declared bootstrap frames. The
 cross-simulator report independently recomputes every correction and emitted
 target from the retained observation and controller artifact, with zero timing
-mismatches and zero numerical reproduction delta in both backends. The final
-reference errors are `0.001523 rad` for Rapier and `0.000766 rad` for Gazebo;
-their final joint-position delta is `0.001523 rad`. Native MuJoCo execution is
-still required before slice 3 is complete.
+mismatches and at most `8.9e-16 rad` numerical reproduction delta. The final
+reference errors are `0.004235 rad` for Rapier, `0.004991 rad` for native
+MuJoCo, and `0.003525 rad` for Gazebo. The maximum pairwise final joint-position
+delta is `0.006015 rad`; all remain inside the unchanged `0.01 rad` gates.
+MuJoCo uses native implicit joint damping while preserving the same exact
+bounded total-effort law, eliminating the unstable explicit-damping integration
+without adding a backend-specific controller or effort limit.
+Both native traces now use a versioned portable state digest that includes
+articulated joint coordinates/velocities and rigid-body pose/velocity. Each
+1,800-step run produces 1,800 distinct step digests and an exact replay-final
+match; the report rejects a constant articulated-state hash and does not claim
+that solver-private state is equal across backends.
 
 Honoring the exact TaskSpec period exposed a real terminal tracking failure
 (`0.0150 rad` against `0.01 rad`). The controller now reaches its unchanged

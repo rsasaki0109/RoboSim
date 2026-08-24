@@ -40,7 +40,7 @@ pub(crate) struct CompiledRigidBodyModel {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct JointDynamics {
     entity: Entity,
-    legacy_passive_damping: f64,
+    passive_damping: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,6 +116,7 @@ struct BodyInput {
     ecs_parent: Option<Entity>,
     joint: Option<JointSpec>,
     legacy_motor: Option<JointMotor>,
+    actuation: Option<JointActuation>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -224,9 +225,9 @@ pub(crate) fn compile_rigid_body_model(
     let joint_dynamics = bodies
         .iter()
         .filter_map(|body| {
-            legacy_passive_damping(*body).map(|legacy_passive_damping| JointDynamics {
+            passive_damping(*body).map(|passive_damping| JointDynamics {
                 entity: body.entity,
-                legacy_passive_damping,
+                passive_damping,
             })
         })
         .collect();
@@ -299,6 +300,7 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                     ecs_parent: entity_ref.get::<Parent>().map(|parent| parent.0),
                     joint: joints.into_iter().flatten().next(),
                     legacy_motor,
+                    actuation: entity_ref.get::<JointActuation>().copied(),
                 });
             }
         }
@@ -565,7 +567,7 @@ fn write_joint(
                 vector(axis_child)
             )
             .expect("writing to String cannot fail");
-            write_legacy_damping(output, body, true);
+            write_passive_damping(output, body, true);
             write_range(output, desc.lower_rad, desc.upper_rad);
             output.push_str("/>\n");
             actuators.push(format!(
@@ -585,7 +587,7 @@ fn write_joint(
                 vector(axis_child)
             )
             .expect("writing to String cannot fail");
-            write_legacy_damping(output, body, false);
+            write_passive_damping(output, body, false);
             write_range(output, desc.lower_m, desc.upper_m);
             output.push_str("/>\n");
             actuators.push(format!(
@@ -599,19 +601,47 @@ fn write_joint(
     }
 }
 
-fn legacy_passive_damping(body: BodyInput) -> Option<f64> {
-    match (body.joint, body.legacy_motor) {
-        (Some(JointSpec::Revolute(_)), Some(motor)) => Some(legacy_motor_gains(motor, true).1),
-        (Some(JointSpec::Prismatic(_)), Some(motor)) => Some(legacy_motor_gains(motor, false).1),
-        _ => None,
+fn passive_damping(body: BodyInput) -> Option<f64> {
+    let revolute = matches!(body.joint, Some(JointSpec::Revolute(_)));
+    let prismatic = matches!(body.joint, Some(JointSpec::Prismatic(_)));
+    if !revolute && !prismatic {
+        return None;
     }
+    if let Some(actuation) = body.actuation {
+        return Some(match actuation {
+            JointActuation::RevolutePosition {
+                damping_nm_s_per_rad,
+                ..
+            } if revolute => damping_nm_s_per_rad,
+            JointActuation::RevoluteVelocity {
+                gain_nm_s_per_rad, ..
+            } if revolute => gain_nm_s_per_rad,
+            JointActuation::PrismaticPosition {
+                damping_n_s_per_m, ..
+            } if prismatic => damping_n_s_per_m,
+            JointActuation::PrismaticVelocity { gain_n_s_per_m, .. } if prismatic => gain_n_s_per_m,
+            JointActuation::Disabled
+            | JointActuation::RevoluteEffort { .. }
+            | JointActuation::PrismaticEffort { .. } => 0.0,
+            _ => 0.0,
+        });
+    }
+    body.legacy_motor
+        .map(|motor| legacy_motor_gains(motor, revolute).1)
 }
 
-fn write_legacy_damping(output: &mut String, body: BodyInput, revolute: bool) {
-    let Some(motor) = body.legacy_motor else {
+fn write_passive_damping(output: &mut String, body: BodyInput, revolute: bool) {
+    let expected_joint = if revolute {
+        matches!(body.joint, Some(JointSpec::Revolute(_)))
+    } else {
+        matches!(body.joint, Some(JointSpec::Prismatic(_)))
+    };
+    if !expected_joint {
+        return;
+    }
+    let Some(damping) = passive_damping(body) else {
         return;
     };
-    let damping = legacy_motor_gains(motor, revolute).1;
     write!(output, " damping=\"{damping:.17}\"").expect("writing to String cannot fail");
 }
 
@@ -1017,6 +1047,57 @@ mod tests {
         assert_eq!(first.topology, changed.topology);
         assert_ne!(first.joint_dynamics, changed.joint_dynamics);
         assert!(changed.mjcf.contains("damping=\"10.00000000000000000\""));
+    }
+
+    #[test]
+    fn typed_actuation_damping_is_compiled_as_implicit_joint_dynamics() {
+        let mut world = World::new();
+        let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
+        let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
+        world.entity_mut(child).insert((
+            RevoluteJointDesc {
+                parent: root,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointActuation::RevolutePosition {
+                target_position_rad: 0.2,
+                stiffness_nm_per_rad: 120.0,
+                damping_nm_s_per_rad: 7.5,
+                max_effort_nm: 20.0,
+            },
+        ));
+
+        let first =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert!(first.mjcf.contains("damping=\"7.50000000000000000\""));
+        assert_eq!(first.joint_dynamics.len(), 1);
+
+        let JointActuation::RevolutePosition {
+            target_position_rad,
+            stiffness_nm_per_rad,
+            max_effort_nm,
+            ..
+        } = *world.get::<JointActuation>(child).unwrap()
+        else {
+            unreachable!()
+        };
+        world
+            .entity_mut(child)
+            .insert(JointActuation::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad: 9.0,
+                max_effort_nm,
+            });
+        let changed =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert_eq!(first.topology, changed.topology);
+        assert_ne!(first.joint_dynamics, changed.joint_dynamics);
+        assert!(changed.mjcf.contains("damping=\"9.00000000000000000\""));
     }
 
     #[test]

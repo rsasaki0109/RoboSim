@@ -50,15 +50,16 @@ intentionally qualifies the official positive-scale right-arm URDF only.
 This in-repository adapter proves real external-simulator execution but does
 not count as independent third-party adapter evidence.
 
-## Run the same OpenArm controller on Rapier and Gazebo
+## Run the same OpenArm controller on Rapier, MuJoCo, and Gazebo
 
 The portable pose-cycle controller owns one content-addressed reference
-trajectory, typed joint-feedback timing contract, and bounded joint-space PD
-correction law. RNE/Rapier and Gazebo execute that same controller artifact
-against their own observations; neither backend owns a private trajectory or
-gain set. The generated `controller-actions.json` is therefore the shared
-reference input, while each backend trace retains the observation sequence,
-age, correction, and emitted target for every decision.
+trajectory, typed joint-feedback timing contract, and bounded joint-space PID
+correction law with per-joint integral anti-windup limits. RNE/Rapier, native
+MuJoCo 3.9.0, and Gazebo execute that same controller artifact against their own
+observations; no backend owns a private trajectory or gain set. The generated
+`controller-actions.json` is therefore the shared reference input, while each
+backend trace retains the observation sequence, age, proportional/derivative
+plus integral correction, and emitted target for every decision.
 
 The Rapier command also writes `sensor-validation-report.json` and a
 self-contained `sensor-validation-report.html`, plus the complete
@@ -76,6 +77,12 @@ command exits non-zero.
 ```bash
 cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
   --output artifacts/openarm-cross-sim
+MUJOCO_DYNAMIC_LINK_DIR=/path/to/mujoco-3.9.0/lib \
+LD_LIBRARY_PATH=/path/to/mujoco-3.9.0/lib \
+cargo run --locked -p showcase_captures --features mujoco \
+  --bin rne-openarm-mujoco-trace -- \
+  --actions artifacts/openarm-cross-sim/controller-actions.json \
+  --output artifacts/openarm-cross-sim
 python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
   --actions artifacts/openarm-cross-sim/controller-actions.json \
   --output artifacts/openarm-cross-sim
@@ -89,19 +96,30 @@ python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_control_dynamics_re
 The successful comparison independently recomputes all 1,800 controller
 decisions from the artifact and each backend's retained typed observation. It
 requires zero timing mismatches and at most `1e-12 rad` reproduction error,
-then gates both final reference-tracking errors and the final cross-backend
-joint delta with named radian tolerances. Maximum transient divergence is
+then gates all three final reference-tracking errors and the maximum pairwise
+final joint delta with named radian tolerances. Maximum transient divergence is
 retained as a non-gating dynamics diagnostic. The intentional controller fault
-truncates the nine-element action at step 307; both RNE and Gazebo identify that
-exact first violation, and Gazebo proves that rejection did not advance state
-before accepting the corrected action.
+truncates the nine-element action at step 307; all three paths identify that
+exact first violation, and native MuJoCo plus Gazebo prove that rejection did
+not advance state before accepting the corrected action.
+
+Rapier and native MuJoCo also use the portable
+`rne_physics_state_v2_fnv1a_1e-6_si` replay digest. It covers articulated joint
+coordinates and velocities as well as non-fixed rigid-body pose and velocity;
+the report fails if the moving arm produces a constant digest or if the exact
+replay final digest changes. Solver-private digests are never compared across
+backends.
 
 The control-dynamics report evaluates the complete trajectory rather than only
-the final pose. It binds the RNE force-based actuation configuration and Gazebo
+the final pose. It binds the backend-neutral force-based actuation
+configuration, native MuJoCo source/runtime evidence, and Gazebo
 runtime/configuration hashes, then records per-joint RMSE, IAE, ISE, terminal
-bias, position range, peak velocity, and the first URDF position/velocity-limit
-violation. `needs_tuning` is a valid diagnostic result and must not be converted
-to `passed` by widening a tolerance.
+bias, position range, peak velocity, all three pairwise backend deltas, and the
+first URDF position/velocity-limit violation. MuJoCo compiles the declared
+velocity damping as native implicit joint damping, while the backend adds it
+back when forming the bounded effort so the resulting total effort remains the
+same typed actuator law. `needs_tuning` is a valid diagnostic result and must
+not be converted to `passed` by widening a tolerance.
 
 ## Identify the OpenArm joint-5 coupled response
 

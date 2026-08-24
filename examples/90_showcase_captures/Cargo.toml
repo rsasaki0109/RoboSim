@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+mujoco = ["dep:rne_physics_mujoco", "rne_physics_mujoco/mujoco"]
+
 [dependencies]
 anyhow = { workspace = true }
 png = { workspace = true }
@@ -17,9 +21,11 @@ rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_plateau = { workspace = true }
 rne_physics = { workspace = true }
+rne_physics_mujoco = { workspace = true, optional = true }
 rne_render = { workspace = true }
 rne_render_wgpu = { workspace = true }
 rne_sensor = { workspace = true }
+rne_world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -32,3 +38,8 @@ path = "main.rs"
 [[bin]]
 name = "rne-openarm-rapier-trace"
 path = "openarm_trace.rs"
+
+[[bin]]
+name = "rne-openarm-mujoco-trace"
+path = "openarm_mujoco_trace.rs"
+required-features = ["mujoco"]

@@ -10,7 +10,7 @@ use rne_data::{
     DataBus, Frame, InMemoryDataBus, JointEffortFeedback, JointFeedback, JointFeedbackStatus,
     StreamId,
 };
-use rne_physics::hash_physics_state;
+use rne_physics::hash_physics_state_v2;
 use rne_sensor::JointFeedbackFault;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -29,6 +29,7 @@ const ACTUATION_CONFIG_KIND: &str = "rne_revolute_position_actuation_config";
 const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_001);
 const SENSOR_REPORT_KIND: &str = "rne_sensor_validation_report";
 const SENSOR_FAULT_SEQUENCE: u64 = 307;
+const PHYSICS_HASH_CONTRACT: &str = "rne_physics_state_v2_fnv1a_1e-6_si";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +68,8 @@ struct FeedbackLaw {
     kind: String,
     position_error_gain: Vec<f64>,
     velocity_damping_s: Vec<f64>,
+    integral_error_gain_s_inv: Vec<f64>,
+    maximum_integral_correction_rad: Vec<f64>,
     maximum_correction_rad: Vec<f64>,
     minimum_target_rad: Vec<f64>,
     maximum_target_rad: Vec<f64>,
@@ -151,6 +154,7 @@ struct ObservationFrame {
     joint_reference_position_rad: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
     joint_feedback_correction_rad: Vec<f64>,
+    joint_integral_correction_rad: Vec<f64>,
     limited_effort_command_nm: Vec<f64>,
     effort_saturated: Vec<bool>,
     effort_measurement_available: Vec<bool>,
@@ -177,6 +181,7 @@ struct BackendTrace<'a> {
     joint_feedback_latency_ticks: u64,
     observation_source: &'static str,
     controller_execution: &'static str,
+    physics_state_hash_contract: &'static str,
     initial_state_digest: u64,
     final_state_digest: u64,
     replay_final_state_digest: u64,
@@ -236,9 +241,23 @@ struct ControllerDecision {
     reference_position_rad: Vec<f64>,
     target_position_rad: Vec<f64>,
     correction_rad: Vec<f64>,
+    integral_correction_rad: Vec<f64>,
     observation_sequence: Option<u64>,
     observation_age_ticks: Option<u64>,
     bootstrap: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ControllerState {
+    integral_correction_rad: Vec<f64>,
+}
+
+impl ControllerState {
+    fn new(width: usize) -> Self {
+        Self {
+            integral_correction_rad: vec![0.0; width],
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -424,10 +443,11 @@ fn run() -> Result<()> {
             joint_feedback_latency_ticks: FIXED_DELTA_TICKS,
             observation_source: "databus_latest_available",
             controller_execution: if controller.feedback_law.is_some() {
-                "artifact_defined_joint_feedback_pd"
+                "artifact_defined_joint_feedback_pid"
             } else {
                 "open_loop_reference"
             },
+            physics_state_hash_contract: PHYSICS_HASH_CONTRACT,
             initial_state_digest: first.initial_digest,
             final_state_digest: first.final_digest,
             replay_final_state_digest: replay.final_digest,
@@ -519,12 +539,17 @@ fn validate(
                 "unsupported OpenArm controller status or bootstrap policy"
             );
             anyhow::ensure!(
-                law.kind == "joint_position_reference_pd_v1",
+                law.kind == "joint_position_reference_pid_v1",
                 "unsupported OpenArm feedback law"
             );
             for (name, values) in [
                 ("position_error_gain", &law.position_error_gain),
                 ("velocity_damping_s", &law.velocity_damping_s),
+                ("integral_error_gain_s_inv", &law.integral_error_gain_s_inv),
+                (
+                    "maximum_integral_correction_rad",
+                    &law.maximum_integral_correction_rad,
+                ),
                 ("maximum_correction_rad", &law.maximum_correction_rad),
                 ("minimum_target_rad", &law.minimum_target_rad),
                 ("maximum_target_rad", &law.maximum_target_rad),
@@ -537,6 +562,14 @@ fn validate(
             anyhow::ensure!(
                 law.position_error_gain.iter().all(|value| *value >= 0.0)
                     && law.velocity_damping_s.iter().all(|value| *value >= 0.0)
+                    && law
+                        .integral_error_gain_s_inv
+                        .iter()
+                        .all(|value| *value >= 0.0)
+                    && law
+                        .maximum_integral_correction_rad
+                        .iter()
+                        .all(|value| *value >= 0.0)
                     && law.maximum_correction_rad.iter().all(|value| *value >= 0.0)
                     && law
                         .minimum_target_rad
@@ -623,7 +656,7 @@ fn validate(
     anyhow::ensure!(
         actuation_config.kind == ACTUATION_CONFIG_KIND
             && actuation_config.schema_version == 1
-            && actuation_config.backend_id == "rne_rapier"
+            && actuation_config.backend_id == "rne_native_physics"
             && actuation_config.motor_model == "force_based_v1"
             && actuation_config.solver_iterations > 0
             && actuation_config.fixed_delta_ticks == FIXED_DELTA_TICKS,
@@ -690,12 +723,17 @@ fn compile_actions(controller: &ControllerSpec) -> Vec<ActionFrame> {
 fn controller_decision(
     controller: &ControllerSpec,
     reference: &[f64],
+    state: &mut ControllerState,
     observation: Option<&ControllerObservation>,
     consumed_at_ticks: u64,
 ) -> Result<ControllerDecision> {
     anyhow::ensure!(
         reference.len() == controller.action_joint_order.len(),
         "OpenArm controller reference width mismatch"
+    );
+    anyhow::ensure!(
+        state.integral_correction_rad.len() == reference.len(),
+        "OpenArm controller state width mismatch"
     );
     let (contract, law) = match (&controller.observation_contract, &controller.feedback_law) {
         (Some(contract), Some(law)) => (contract, law),
@@ -704,6 +742,7 @@ fn controller_decision(
                 reference_position_rad: reference.to_vec(),
                 target_position_rad: reference.to_vec(),
                 correction_rad: vec![0.0; reference.len()],
+                integral_correction_rad: state.integral_correction_rad.clone(),
                 observation_sequence: None,
                 observation_age_ticks: None,
                 bootstrap: false,
@@ -716,6 +755,7 @@ fn controller_decision(
             reference_position_rad: reference.to_vec(),
             target_position_rad: reference.to_vec(),
             correction_rad: vec![0.0; reference.len()],
+            integral_correction_rad: state.integral_correction_rad.clone(),
             observation_sequence: None,
             observation_age_ticks: None,
             bootstrap: true,
@@ -740,16 +780,36 @@ fn controller_decision(
             && observation.joint_velocity_rad_s.len() == reference.len(),
         "OpenArm controller observation width mismatch"
     );
+    let sample_period_s = controller
+        .observation_contract
+        .as_ref()
+        .unwrap()
+        .sample_period_ticks as f64
+        / 1_000_000_000.0;
+    for (((integral, gain), maximum), (reference, position)) in state
+        .integral_correction_rad
+        .iter_mut()
+        .zip(&law.integral_error_gain_s_inv)
+        .zip(&law.maximum_integral_correction_rad)
+        .zip(reference.iter().zip(&observation.joint_position_rad))
+    {
+        *integral =
+            (*integral + gain * (reference - position) * sample_period_s).clamp(-maximum, *maximum);
+    }
     let correction_rad = reference
         .iter()
         .zip(&observation.joint_position_rad)
         .zip(&observation.joint_velocity_rad_s)
         .zip(&law.position_error_gain)
         .zip(&law.velocity_damping_s)
+        .zip(&state.integral_correction_rad)
         .zip(&law.maximum_correction_rad)
         .map(
-            |(((((reference, position), velocity), position_gain), velocity_gain), maximum)| {
-                (position_gain * (reference - position) - velocity_gain * velocity)
+            |(
+                (((((reference, position), velocity), position_gain), velocity_gain), integral),
+                maximum,
+            )| {
+                (position_gain * (reference - position) - velocity_gain * velocity + integral)
                     .clamp(-maximum, *maximum)
             },
         )
@@ -767,6 +827,7 @@ fn controller_decision(
         reference_position_rad: reference.to_vec(),
         target_position_rad,
         correction_rad,
+        integral_correction_rad: state.integral_correction_rad.clone(),
         observation_sequence: Some(observation.sequence),
         observation_age_ticks: Some(age_ticks),
         bootstrap: false,
@@ -808,6 +869,7 @@ fn first_controller_rejection(
 ) -> Option<ControllerRejection> {
     let mut available_index = 0;
     let mut latest = None;
+    let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     for action in actions {
         let consumed_at_ticks = action.sim_time_ticks.saturating_sub(FIXED_DELTA_TICKS);
         while let Some(frame) = observations.get(available_index) {
@@ -828,6 +890,7 @@ fn first_controller_rejection(
         if controller_decision(
             controller,
             &action.joint_position_target_rad,
+            &mut controller_state,
             observation,
             consumed_at_ticks,
         )
@@ -880,12 +943,13 @@ fn rollout(
         fault,
     })
     .context("install OpenArm joint-feedback sensor")?;
-    let initial_digest = hash_physics_state(sim.world());
+    let initial_digest = hash_physics_state_v2(sim.world());
     let mut observations = Vec::with_capacity(actions.len());
     let mut state_hashes = Vec::with_capacity(actions.len());
     let mut controller_decisions = Vec::with_capacity(actions.len());
     let mut bus = InMemoryDataBus::new();
     let mut latest_controller_observation = None;
+    let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     let mut last_observation_sequence = 0;
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
@@ -893,6 +957,7 @@ fn rollout(
         let decision = controller_decision(
             controller,
             &action.joint_position_target_rad,
+            &mut controller_state,
             if fault == JointFeedbackFault::None {
                 latest_controller_observation.as_ref()
             } else {
@@ -911,7 +976,7 @@ fn rollout(
             .collect::<Vec<_>>();
         sim.step_joint_position_actuation_targets(&targets);
         controller_decisions.push(decision);
-        state_hashes.push(hash_physics_state(sim.world()));
+        state_hashes.push(hash_physics_state_v2(sim.world()));
         sim.sample_joint_feedback(&mut bus)
             .context("sample OpenArm joint feedback")?;
         if fault == JointFeedbackFault::None {
@@ -990,7 +1055,7 @@ fn rollout(
     Ok(Rollout {
         world_seed: sim.world_seed(),
         initial_digest,
-        final_digest: hash_physics_state(sim.world()),
+        final_digest: hash_physics_state_v2(sim.world()),
         observations,
         maximum_sensor_backend_position_delta_rad,
         maximum_sensor_backend_velocity_delta_rad_s,
@@ -1107,6 +1172,34 @@ fn build_sensor_validation_report(
                 .fold(0.0_f64, f64::max)
         })
         .unwrap_or(0.0);
+    let maximum_integral_correction_rad = nominal
+        .observations
+        .iter()
+        .flat_map(|frame| &frame.joint_integral_correction_rad)
+        .map(|correction| correction.abs())
+        .fold(0.0_f64, f64::max);
+    let configured_maximum_integral_correction_rad = controller
+        .feedback_law
+        .as_ref()
+        .map(|law| {
+            law.maximum_integral_correction_rad
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max)
+        })
+        .unwrap_or(0.0);
+    let integral_correction_within_per_joint_bounds =
+        controller.feedback_law.as_ref().is_none_or(|law| {
+            nominal.observations.iter().all(|frame| {
+                frame.joint_integral_correction_rad.len()
+                    == law.maximum_integral_correction_rad.len()
+                    && frame
+                        .joint_integral_correction_rad
+                        .iter()
+                        .zip(&law.maximum_integral_correction_rad)
+                        .all(|(correction, maximum)| correction.abs() <= *maximum)
+            })
+        });
     let expected_controller_bootstrap_frames = usize::from(feedback_enabled) * 2;
     let expected_controller_feedback_frames = if feedback_enabled {
         actions.len() - 2
@@ -1172,6 +1265,13 @@ fn build_sensor_validation_report(
         } else {
             maximum_feedback_correction_rad == 0.0
         },
+        if feedback_enabled {
+            maximum_integral_correction_rad > 0.0
+                && maximum_integral_correction_rad <= configured_maximum_integral_correction_rad
+                && integral_correction_within_per_joint_bounds
+        } else {
+            maximum_integral_correction_rad == 0.0
+        },
         !feedback_enabled
             || dropout_controller_rejection
                 .as_ref()
@@ -1234,6 +1334,9 @@ fn build_sensor_validation_report(
             "feedback_frames": controller_feedback_frames,
             "maximum_feedback_correction_rad": maximum_feedback_correction_rad,
             "configured_maximum_feedback_correction_rad": configured_maximum_feedback_correction_rad,
+            "maximum_integral_correction_rad": maximum_integral_correction_rad,
+            "configured_maximum_integral_correction_rad": configured_maximum_integral_correction_rad,
+            "integrator_limit_policy": "per_joint_clamp_anti_windup",
         },
         "stream_hashes": {
             "nominal_sha256": nominal_hash,
@@ -1264,8 +1367,9 @@ fn build_sensor_validation_report(
             { "id": "controller_observation_sequence_and_age_v1", "classification": "estimation", "unit": "sequence_age_match", "observed": controller_timing_aligned, "expected": true, "status": pass_fail(check_results[13]) },
             { "id": "controller_feedback_frame_count_v1", "classification": "estimation", "unit": "frame", "observed": controller_feedback_frames, "expected": expected_controller_feedback_frames, "status": pass_fail(check_results[14]) },
             { "id": "controller_feedback_correction_bound_v1", "classification": "controller", "unit": "rad", "observed": maximum_feedback_correction_rad, "maximum": configured_maximum_feedback_correction_rad, "status": pass_fail(check_results[15]) },
-            { "id": "controller_dropout_fail_closed_v1", "classification": "measurement", "unit": "action_step", "observed": dropout_controller_rejection.as_ref().map(|rejection| rejection.action_step), "expected": if feedback_enabled { Some(expected_controller_rejection_step) } else { None }, "status": pass_fail(check_results[16]) },
-            { "id": "controller_stuck_value_fail_closed_v1", "classification": "measurement", "unit": "action_step", "observed": stuck_controller_rejection.as_ref().map(|rejection| rejection.action_step), "expected": if feedback_enabled { Some(expected_controller_rejection_step) } else { None }, "status": pass_fail(check_results[17]) },
+            { "id": "controller_integral_anti_windup_bound_v1", "classification": "controller", "unit": "rad", "observed": maximum_integral_correction_rad, "maximum": configured_maximum_integral_correction_rad, "per_joint_bounds_satisfied": integral_correction_within_per_joint_bounds, "status": pass_fail(check_results[16]) },
+            { "id": "controller_dropout_fail_closed_v1", "classification": "measurement", "unit": "action_step", "observed": dropout_controller_rejection.as_ref().map(|rejection| rejection.action_step), "expected": if feedback_enabled { Some(expected_controller_rejection_step) } else { None }, "status": pass_fail(check_results[17]) },
+            { "id": "controller_stuck_value_fail_closed_v1", "classification": "measurement", "unit": "action_step", "observed": stuck_controller_rejection.as_ref().map(|rejection| rejection.action_step), "expected": if feedback_enabled { Some(expected_controller_rejection_step) } else { None }, "status": pass_fail(check_results[18]) },
         ],
         "fault_evidence": {
             "dropout": {
@@ -1418,6 +1522,7 @@ fn observation_from_feedback(
         joint_reference_position_rad: decision.reference_position_rad.clone(),
         joint_position_target_rad: targets,
         joint_feedback_correction_rad: decision.correction_rad.clone(),
+        joint_integral_correction_rad: decision.integral_correction_rad.clone(),
         limited_effort_command_nm: limited_efforts,
         effort_saturated: saturated,
         effort_measurement_available,
@@ -1589,6 +1694,7 @@ mod tests {
             joint_reference_position_rad: Vec::new(),
             joint_position_target_rad: Vec::new(),
             joint_feedback_correction_rad: Vec::new(),
+            joint_integral_correction_rad: Vec::new(),
             limited_effort_command_nm: Vec::new(),
             effort_saturated: Vec::new(),
             effort_measurement_available: Vec::new(),
@@ -1674,9 +1780,12 @@ mod tests {
             joint_position_rad: vec![0.4; reference.len()],
             joint_velocity_rad_s: vec![0.2; reference.len()],
         };
+        let mut first_state = ControllerState::new(reference.len());
+        let mut replay_state = ControllerState::new(reference.len());
         let first = controller_decision(
             &controller,
             &reference,
+            &mut first_state,
             Some(&observation),
             100 + FIXED_DELTA_TICKS,
         )
@@ -1684,6 +1793,7 @@ mod tests {
         let replay = controller_decision(
             &controller,
             &reference,
+            &mut replay_state,
             Some(&observation),
             100 + FIXED_DELTA_TICKS,
         )
@@ -1697,7 +1807,14 @@ mod tests {
             .zip(&reference)
             .any(|(target, reference)| target != reference));
 
-        let bootstrap = controller_decision(&controller, &reference, None, 0).unwrap();
+        let bootstrap = controller_decision(
+            &controller,
+            &reference,
+            &mut ControllerState::new(reference.len()),
+            None,
+            0,
+        )
+        .unwrap();
         assert!(bootstrap.bootstrap);
         assert_eq!(bootstrap.target_position_rad, reference);
     }
@@ -1720,9 +1837,11 @@ mod tests {
             joint_position_rad: reference.clone(),
             joint_velocity_rad_s: reference.clone(),
         };
+        let mut state = ControllerState::new(reference.len());
         assert!(controller_decision(
             &controller,
             &reference,
+            &mut state,
             Some(&observation),
             2 * FIXED_DELTA_TICKS,
         )
@@ -1731,6 +1850,7 @@ mod tests {
         assert!(controller_decision(
             &controller,
             &reference,
+            &mut state,
             Some(&observation),
             FIXED_DELTA_TICKS,
         )

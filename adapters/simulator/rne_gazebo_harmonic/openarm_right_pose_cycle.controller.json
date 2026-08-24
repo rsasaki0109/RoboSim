@@ -37,9 +37,11 @@
     "bootstrap_policy": "reference_until_first_available"
   },
   "feedback_law": {
-    "kind": "joint_position_reference_pd_v1",
+    "kind": "joint_position_reference_pid_v1",
     "position_error_gain": [0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.15, 0.15],
     "velocity_damping_s": [0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001],
+    "integral_error_gain_s_inv": [0.60, 0.30, 0.20, 0.60, 0.30, 0.60, 0.20, 0.10, 0.10],
+    "maximum_integral_correction_rad": [0.03, 0.015, 0.01, 0.03, 0.015, 0.03, 0.01, 0.005, 0.005],
     "maximum_correction_rad": [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.02, 0.02],
     "minimum_target_rad": [-1.3963, -0.17453, -1.5708, 0.0, -1.5708, -0.7854, -1.5708, -0.7854, -0.7854],
     "maximum_target_rad": [3.4907, 3.3161, 1.5708, 2.4435, 1.5708, 0.7854, 1.5708, 0.0, 0.0]
