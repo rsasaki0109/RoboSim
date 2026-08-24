@@ -170,3 +170,27 @@ them without loading a simulator. The capsule is bound to producer commit
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-controller-lab
 ```
+
+## State-feedback robustness boundary
+
+The actuator-bias sweep changes one declared plant-input parameter while
+holding the TaskSpec, controller gains, reference, latency, actuator limits,
+and requirements fixed. Rapier runs the complete
+`[0.00, 0.03, 0.06, 0.09, 0.12] rad` grid. The boundary predecessor and first
+failure are then replayed on native MuJoCo and Gazebo.
+
+All three backends pass at `0.03 rad` and first fail the same
+`controller.state.maximum_disturbance_iae_rad_s` requirement at `0.06 rad`.
+Peak tracking error and recovery time remain within their limits, preventing a
+terminal-pose or single-peak metric from hiding the accumulated tracking loss.
+Rapier first crosses the fixed `0.02 rad*s` IAE limit at step 3292 with
+`0.020305 rad*s`; the dedicated replay stops at that measurement.
+
+The retained [robustness report](evidence/openarm-robustness-lab/evidence/openarm-robustness-report.html)
+and [minimum-failure Capsule](evidence/openarm-robustness-lab/capsule.json) can
+be verified without loading a simulator:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-robustness-lab
+```

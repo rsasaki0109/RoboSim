@@ -702,7 +702,6 @@ fn validate(
                 && disturbance.start_step <= disturbance.end_step
                 && disturbance.end_step <= final_step
                 && disturbance.offset_rad.is_finite()
-                && disturbance.offset_rad != 0.0
                 && disturbance.controller_visibility
                     == "unobserved_except_through_typed_joint_feedback"
                 && disturbance.application_order

@@ -420,7 +420,7 @@ increased.
    and controllability/observability checks, validate the current ARX path, and
    compare PID plus one justified state-space baseline under identical limits,
    delay, and disturbance conditions.
-7. **Robustness envelope:** execute seeded sweeps over payload, inertia,
+7. **In progress -- robustness envelope:** execute seeded sweeps over payload, inertia,
    friction, sensor latency/bias/drop, and actuator degradation. Report the
    verified operating envelope and minimize the first failing case rather than
    averaging failures away.
@@ -518,6 +518,18 @@ inside the fixed `0.005 rad` band in `0.20-0.233 s`, and holds IAE to
 `0.00448-0.00576 rad*s`; each is inside the predeclared requirements. The
 report independently reproduces controller output, disturbance, and applied
 plant target for all 21,600 decisions with no realization mismatch.
+
+Slice 7 now has its first measured dimension. A fixed
+`[0.00, 0.03, 0.06, 0.09, 0.12] rad` actuator-target bias grid holds the
+state-feedback controller and every other contract constant. Rapier identifies
+`0.03 rad` as the last passing point and `0.06 rad` as the smallest grid
+failure. MuJoCo and Gazebo reproduce that boundary: all three pass at
+`0.03 rad`, then first fail only the unchanged `0.02 rad*s` IAE requirement at
+`0.06 rad` while peak-error and recovery gates remain green. The Rapier trace
+localizes the first cumulative crossing to step 3292 at `0.020305 rad*s` and
+retains it as a dedicated behavior replay. Slice 7 remains in progress until
+payload, inertia, friction, sensor bias/drop, and actuator-authority dimensions
+are evaluated under the same boundary rules.
 
 ### Track definition of done
 

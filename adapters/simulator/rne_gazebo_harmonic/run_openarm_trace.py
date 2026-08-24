@@ -340,7 +340,6 @@ def apply_actuator_disturbance(
         or contract["joint"] not in controller["action_joint_order"]
         or not 1 <= contract["start_step"] <= contract["end_step"]
         or not math.isfinite(contract["offset_rad"])
-        or contract["offset_rad"] == 0.0
         or contract["controller_visibility"]
         != "unobserved_except_through_typed_joint_feedback"
         or contract["application_order"]

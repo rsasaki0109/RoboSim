@@ -255,3 +255,34 @@ MuJoCo, or Gazebo:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-controller-lab
 ```
+
+## Sweep the OpenArm actuator-bias robustness boundary
+
+The first robustness dimension holds the TaskSpec, state-feedback design,
+typed-observation latency, actuator limits, reference, and fixed requirements
+constant while sweeping an unobserved joint-5 actuator-target bias over
+`[0.00, 0.03, 0.06, 0.09, 0.12] rad`. Rapier executes the complete grid; the
+last passing and first failing cases are then run unchanged on MuJoCo and
+Gazebo:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --output artifacts/openarm-robustness-lab
+
+# Run every generated controller on Rapier. Then run the 0.03 rad and 0.06 rad
+# cases on MuJoCo and Gazebo using the same controller-actions.json artifact.
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-robustness-lab \
+  --output artifacts/openarm-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-robustness-lab/report/openarm-robustness-report.json \
+  --trace artifacts/openarm-robustness-lab/bias-060mrad/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-robustness-lab/report/minimum-bias-failure.rne-replay
+```
+
+The fixed grid brackets the boundary at `0.03 rad` passing and `0.06 rad`
+failing. At `0.06 rad`, all three backends first fail the unchanged
+`0.02 rad*s` IAE requirement while still passing peak-error and recovery-time
+requirements. Rapier localizes the first cumulative IAE crossing to step 3292
+at `0.020305 rad*s`; the replay ends at that first violation.

@@ -1,0 +1,263 @@
+//! Converts the first OpenArm robustness-boundary failure into a portable replay.
+
+use anyhow::{bail, Context, Result};
+use rne_ai::{
+    BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayAction, BehaviorReplayArtifact,
+    BehaviorReplayFailure, BehaviorReplayFrame, BehaviorViolation,
+};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::PathBuf;
+
+const JOINT_INDEX: usize = 4;
+
+#[derive(Debug, Deserialize)]
+struct RapierTrace {
+    kind: String,
+    schema_version: u32,
+    backend_id: String,
+    controller_id: String,
+    fixed_delta_ticks: u64,
+    initial_state_digest: u64,
+    observations: Vec<TraceObservation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TraceObservation {
+    step: u64,
+    sim_time_ticks: u64,
+    joint_position_rad: Vec<f64>,
+    joint_velocity_rad_s: Vec<f64>,
+    joint_reference_position_rad: Vec<f64>,
+    joint_controller_target_rad: Vec<f64>,
+    joint_actuator_disturbance_rad: Vec<f64>,
+    joint_position_target_rad: Vec<f64>,
+    physics_hash: u64,
+}
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("OpenArm robustness failure replay failed: {error:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    let mut report_path = None;
+    let mut trace_path = None;
+    let mut output_path = None;
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--report" => report_path = Some(required_path(&mut arguments, "--report")?),
+            "--trace" => trace_path = Some(required_path(&mut arguments, "--trace")?),
+            "--output" => output_path = Some(required_path(&mut arguments, "--output")?),
+            other => bail!("unknown argument {other:?}"),
+        }
+    }
+    let report_path = report_path.context("--report is required")?;
+    let trace_path = trace_path.context("--trace is required")?;
+    let output_path = output_path.context("--output is required")?;
+    let report_bytes =
+        fs::read(&report_path).with_context(|| format!("read {}", report_path.display()))?;
+    let trace_bytes =
+        fs::read(&trace_path).with_context(|| format!("read {}", trace_path.display()))?;
+    let report: Value = serde_json::from_slice(&report_bytes)
+        .with_context(|| format!("parse {}", report_path.display()))?;
+    let trace: RapierTrace = serde_json::from_slice(&trace_bytes)
+        .with_context(|| format!("parse {}", trace_path.display()))?;
+    validate_inputs(&report, &trace, &sha256(&trace_bytes))?;
+    let failure = &report["first_failure"];
+    let failure_step = required_u64(failure, "step")?;
+    let failure_index = usize::try_from(failure_step - 1)?;
+    let failure_observation = trace
+        .observations
+        .get(failure_index)
+        .context("robustness failure step exceeds the Rapier trace")?;
+    let requirement_id = required_str(failure, "requirement_id")?;
+    let descriptor = BehaviorContractDescriptor {
+        name: requirement_id.to_string(),
+        kind: BehaviorContractKind::Always,
+        entities: vec!["rne_rapier".to_string(), "openarm_right_joint5".to_string()],
+    };
+    let report_sha256 = sha256(&report_bytes);
+    let trace_sha256 = sha256(&trace_bytes);
+    let disturbance_start_step = required_u64(&report["dimension"], "start_step")?;
+    let maximum_iae_rad_s = required_f64(failure, "maximum")?;
+    let sample_period_s = trace.fixed_delta_ticks as f64 / 1_000_000_000.0;
+    let mut cumulative_iae_rad_s = 0.0;
+    let mut frames = Vec::with_capacity(failure_index + 2);
+    frames.push(BehaviorReplayFrame {
+        step: 0,
+        sim_time_ticks: 0,
+        action: BehaviorReplayAction::InitialObservation,
+        observation: json!({
+            "backend_id": trace.backend_id,
+            "controller_id": trace.controller_id,
+            "report_sha256": report_sha256,
+            "trace_sha256": trace_sha256,
+            "case_id": required_str(failure, "case_id")?,
+            "disturbance_offset_rad": required_f64(failure, "offset_rad")?,
+            "requirement_id": requirement_id,
+            "classification": "smallest_failed_actuator_bias_grid_case",
+            "contract_status": "initial"
+        }),
+        state_digest: trace.initial_state_digest,
+    });
+    for observation in &trace.observations[..=failure_index] {
+        if observation.step >= disturbance_start_step {
+            cumulative_iae_rad_s += (observation.joint_position_rad[JOINT_INDEX]
+                - observation.joint_reference_position_rad[JOINT_INDEX])
+                .abs()
+                * sample_period_s;
+        }
+        let failed = observation.step == failure_step;
+        frames.push(BehaviorReplayFrame {
+            step: observation.step,
+            sim_time_ticks: observation.sim_time_ticks,
+            action: BehaviorReplayAction::Advance,
+            observation: json!({
+                "joint5_reference_rad": observation.joint_reference_position_rad[JOINT_INDEX],
+                "joint5_position_rad": observation.joint_position_rad[JOINT_INDEX],
+                "joint5_velocity_rad_s": observation.joint_velocity_rad_s[JOINT_INDEX],
+                "joint5_controller_target_rad": observation.joint_controller_target_rad[JOINT_INDEX],
+                "joint5_disturbance_rad": observation.joint_actuator_disturbance_rad[JOINT_INDEX],
+                "joint5_applied_target_rad": observation.joint_position_target_rad[JOINT_INDEX],
+                "cumulative_iae_rad_s": cumulative_iae_rad_s,
+                "maximum_iae_rad_s": maximum_iae_rad_s,
+                "requirement_id": requirement_id,
+                "contract_status": if failed { "failed" } else { "pending" }
+            }),
+            state_digest: observation.physics_hash,
+        });
+    }
+    let observed_iae_rad_s = required_f64(failure, "observed")?;
+    anyhow::ensure!(
+        (cumulative_iae_rad_s - observed_iae_rad_s).abs() <= 1e-12,
+        "replayed cumulative IAE differs from the report"
+    );
+    let message = format!(
+        "OpenArm joint 5 cumulative disturbance IAE reached {observed_iae_rad_s:.9} rad*s at step {failure_step}, exceeding the fixed {maximum_iae_rad_s:.9} rad*s requirement under a {:.6} rad actuator bias",
+        required_f64(failure, "offset_rad")?
+    );
+    let scenario = required_str(&report, "suite_id")?.to_string();
+    let replay = BehaviorReplayArtifact::new(
+        scenario,
+        digest_u64(&report_bytes),
+        20260824,
+        trace.fixed_delta_ticks,
+        Vec::new(),
+        vec![descriptor.clone()],
+        frames,
+        BehaviorReplayFailure {
+            contract: descriptor.clone(),
+            violation: BehaviorViolation {
+                step: failure_step,
+                sim_time_ticks: failure_observation.sim_time_ticks,
+                state_digest: failure_observation.physics_hash,
+                entities: descriptor.entities.clone(),
+                message,
+            },
+        },
+    )?;
+    replay.write_json(&output_path)?;
+    println!(
+        "OpenArm robustness failure replay: requirement={requirement_id} step={failure_step} report_sha256={report_sha256}"
+    );
+    Ok(())
+}
+
+fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> Result<()> {
+    anyhow::ensure!(
+        report["kind"] == "rne_openarm_robustness_report"
+            && report["schema_version"] == 1
+            && report["status"] == "passed",
+        "report is not a supported robustness report"
+    );
+    let failure = &report["first_failure"];
+    anyhow::ensure!(
+        required_str(failure, "backend_id")? == "rne_rapier"
+            && required_str(failure, "requirement_id")?
+                == "controller.state.maximum_disturbance_iae_rad_s"
+            && required_f64(failure, "observed")? > required_f64(failure, "maximum")?
+            && required_f64(failure, "offset_rad")?
+                == required_f64(&report["boundary"], "first_failing_offset_rad")?,
+        "robustness report has no valid first IAE failure"
+    );
+    anyhow::ensure!(
+        trace.kind == "rne_openarm_backend_trace"
+            && trace.schema_version == 1
+            && trace.backend_id == "rne_rapier",
+        "trace is not a supported Rapier robustness trace"
+    );
+    let primary = report["primary_backend_results"]
+        .as_array()
+        .context("robustness report has no primary results")?
+        .iter()
+        .find(|item| item["case_id"] == failure["case_id"])
+        .context("robustness report has no matching failed Rapier case")?;
+    anyhow::ensure!(
+        required_str(primary, "trace_sha256")? == trace_sha256,
+        "failed Rapier trace digest differs from the robustness report"
+    );
+    anyhow::ensure!(
+        !trace.observations.is_empty()
+            && trace
+                .observations
+                .iter()
+                .enumerate()
+                .all(|(index, observation)| {
+                    observation.step == index as u64 + 1
+                        && observation.sim_time_ticks == observation.step * trace.fixed_delta_ticks
+                        && [
+                            observation.joint_position_rad.len(),
+                            observation.joint_velocity_rad_s.len(),
+                            observation.joint_reference_position_rad.len(),
+                            observation.joint_controller_target_rad.len(),
+                            observation.joint_actuator_disturbance_rad.len(),
+                            observation.joint_position_target_rad.len(),
+                        ]
+                        .iter()
+                        .all(|width| *width == 9)
+                }),
+        "Rapier robustness observations are not contiguous nine-joint evidence"
+    );
+    Ok(())
+}
+
+fn required_path(arguments: &mut impl Iterator<Item = String>, option: &str) -> Result<PathBuf> {
+    arguments
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .with_context(|| format!("{option} requires a path"))
+}
+
+fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
+    value[field]
+        .as_str()
+        .with_context(|| format!("missing string field {field}"))
+}
+
+fn required_u64(value: &Value, field: &str) -> Result<u64> {
+    value[field]
+        .as_u64()
+        .with_context(|| format!("missing integer field {field}"))
+}
+
+fn required_f64(value: &Value, field: &str) -> Result<f64> {
+    value[field]
+        .as_f64()
+        .filter(|number| number.is_finite())
+        .with_context(|| format!("missing finite field {field}"))
+}
+
+fn digest_u64(bytes: &[u8]) -> u64 {
+    u64::from_le_bytes(Sha256::digest(bytes)[..8].try_into().expect("eight bytes"))
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
