@@ -15,14 +15,14 @@
     {
       "role": "controller",
       "file": "adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json",
-      "size_bytes": 2198,
-      "sha256": "21e5262bb5323a732362db5857d135eb34fe9864de939c4a7b76c52fbff16dd5"
+      "size_bytes": 2203,
+      "sha256": "a6b03fdc2b0369d9458a59606d6a7fdc5e3b0de17131271e963be9dbaac08efc"
     },
     {
       "role": "compiled_action_trace",
       "file": "controller-actions.json",
-      "size_bytes": 661009,
-      "sha256": "c82e6e3b34fa531dedae76cc1bc068269ec926630d567a2663d248cb719b6aa2"
+      "size_bytes": 660557,
+      "sha256": "295c48678086d2e53c28d58d7bb202f7cdf03e0e7616d69fc9ccc96735593329"
     },
     {
       "role": "rapier_world",
@@ -37,10 +37,16 @@
       "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
     },
     {
+      "role": "rapier_robot_asset_config",
+      "file": "assets/robots/openarm_v2_right.rne.robot.toml",
+      "size_bytes": 372,
+      "sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19"
+    },
+    {
       "role": "rapier_actuation_config",
       "file": "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
       "size_bytes": 1709,
-      "sha256": "f744ccca217072f6af5ac572571429f4db5d5f9fd5eeaf16a58427a8256376ee"
+      "sha256": "160b6a99aca757767090b6793775aecb4cd8bd76a9be6b78b5c328523eb6ae88"
     },
     {
       "role": "gazebo_runtime_manifest",
@@ -67,8 +73,8 @@
       "backend_version": "0.22",
       "steps": 1800,
       "final_sim_time_ticks": 30000000600,
-      "final_maximum_tracking_error_rad": 0.0014724263823815698,
-      "maximum_tracking_error_rad": 0.8711557073852728,
+      "final_maximum_tracking_error_rad": 0.004922275799360367,
+      "maximum_tracking_error_rad": 0.11963744172375368,
       "replay_match": true,
       "status": "passed"
     },
@@ -78,7 +84,7 @@
       "steps": 1800,
       "final_sim_time_ticks": 30000000600,
       "final_maximum_tracking_error_rad": 0.0019544012114417197,
-      "maximum_tracking_error_rad": 0.07620237406219121,
+      "maximum_tracking_error_rad": 0.07571725726553202,
       "replay_match": true,
       "status": "passed"
     }
@@ -87,7 +93,7 @@
     {
       "id": "rapier_final_tracking_error_rad_v1",
       "unit": "rad",
-      "observed_delta": 0.0014724263823815698,
+      "observed_delta": 0.004922275799360367,
       "maximum_delta": 0.01,
       "status": "passed"
     },
@@ -101,7 +107,7 @@
     {
       "id": "final_cross_backend_joint_position_delta_rad_v1",
       "unit": "rad",
-      "observed_delta": 0.00048197482906015,
+      "observed_delta": 0.004922275799358963,
       "maximum_delta": 0.01,
       "status": "passed"
     }
@@ -115,9 +121,10 @@
       "task_id": "rne.openarm.right_joint_tracking.v1",
       "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
       "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
-      "controller_sha256": "21e5262bb5323a732362db5857d135eb34fe9864de939c4a7b76c52fbff16dd5",
-      "action_trace_sha256": "c82e6e3b34fa531dedae76cc1bc068269ec926630d567a2663d248cb719b6aa2",
-      "actuation_config_sha256": "f744ccca217072f6af5ac572571429f4db5d5f9fd5eeaf16a58427a8256376ee",
+      "controller_sha256": "a6b03fdc2b0369d9458a59606d6a7fdc5e3b0de17131271e963be9dbaac08efc",
+      "action_trace_sha256": "295c48678086d2e53c28d58d7bb202f7cdf03e0e7616d69fc9ccc96735593329",
+      "robot_asset_config_sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19",
+      "actuation_config_sha256": "160b6a99aca757767090b6793775aecb4cd8bd76a9be6b78b5c328523eb6ae88",
       "injection_kind": "controller_output_truncation",
       "injected_step": 307,
       "first_violation": "action_width_mismatch",
@@ -136,8 +143,8 @@
       "task_id": "rne.openarm.right_joint_tracking.v1",
       "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
       "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
-      "controller_sha256": "21e5262bb5323a732362db5857d135eb34fe9864de939c4a7b76c52fbff16dd5",
-      "action_trace_sha256": "c82e6e3b34fa531dedae76cc1bc068269ec926630d567a2663d248cb719b6aa2",
+      "controller_sha256": "a6b03fdc2b0369d9458a59606d6a7fdc5e3b0de17131271e963be9dbaac08efc",
+      "action_trace_sha256": "295c48678086d2e53c28d58d7bb202f7cdf03e0e7616d69fc9ccc96735593329",
       "runtime_manifest_sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f",
       "adapter_config_sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169",
       "injection_kind": "controller_output_truncation",
@@ -177,9 +184,9 @@
     }
   ],
   "diagnostics": {
-    "maximum_transient_joint_position_delta_rad": 0.8711557079074429,
-    "maximum_transient_delta_step": 701,
-    "maximum_transient_delta_joint_index": 4,
+    "maximum_transient_joint_position_delta_rad": 0.05530207117409103,
+    "maximum_transient_delta_step": 1397,
+    "maximum_transient_delta_joint_index": 0,
     "gating": false,
     "rationale": "Backend servo implementations are intentionally native; task success is gated by final SI tolerances while transient divergence is retained for control-dynamics analysis."
   }

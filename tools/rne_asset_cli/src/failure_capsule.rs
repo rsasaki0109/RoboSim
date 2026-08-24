@@ -1659,12 +1659,14 @@ mod tests {
             &fs::read(root.join("capsule.json")).expect("read retained capsule manifest"),
         )
         .expect("parse retained capsule manifest");
-        assert_eq!(manifest.artifacts.len(), 20);
+        assert_eq!(manifest.artifacts.len(), 21);
+        assert_ne!(manifest.build.git_commit, "unknown");
         for required in [
             "evidence/control-dynamics-report.json",
             "evidence/control-dynamics-report.html",
             "evidence/openarm_right.rne_actuation.json",
             "evidence/openarm_right.adapter.json",
+            "evidence/openarm_v2_right.rne.robot.toml",
             "evidence/openarm_v2_right.rne.urdf",
             "evidence/openarm_v2_right_validation.rne.scene.toml",
         ] {
@@ -1681,7 +1683,7 @@ mod tests {
                 .expect("read retained control-dynamics report"),
         )
         .expect("parse retained control-dynamics report");
-        assert_eq!(control_report["status"], "needs_tuning");
+        assert_eq!(control_report["status"], "passed");
         assert!(control_report["first_contract_violation"].is_null());
         assert_eq!(manifest.failure.step, 307);
         assert_eq!(manifest.failure.sim_time_ticks, 5_116_666_769);

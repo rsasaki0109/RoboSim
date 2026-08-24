@@ -1,7 +1,7 @@
 {
   "kind": "rne_control_dynamics_report",
   "schema_version": 1,
-  "status": "needs_tuning",
+  "status": "passed",
   "task_id": "rne.openarm.right_joint_tracking.v1",
   "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
   "measurement_contract": {
@@ -19,7 +19,8 @@
       "backend_id": "rne_rapier",
       "motor_model": "force_based_v1",
       "solver_iterations": 16,
-      "configuration_sha256": "f744ccca217072f6af5ac572571429f4db5d5f9fd5eeaf16a58427a8256376ee",
+      "configuration_sha256": "160b6a99aca757767090b6793775aecb4cd8bd76a9be6b78b5c328523eb6ae88",
+      "robot_asset_config_sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19",
       "joint_count": 9
     },
     {
@@ -67,27 +68,31 @@
     },
     {
       "role": "controller",
-      "sha256": "21e5262bb5323a732362db5857d135eb34fe9864de939c4a7b76c52fbff16dd5"
+      "sha256": "a6b03fdc2b0369d9458a59606d6a7fdc5e3b0de17131271e963be9dbaac08efc"
     },
     {
       "role": "action_trace",
-      "sha256": "c82e6e3b34fa531dedae76cc1bc068269ec926630d567a2663d248cb719b6aa2"
+      "sha256": "295c48678086d2e53c28d58d7bb202f7cdf03e0e7616d69fc9ccc96735593329"
     },
     {
       "role": "rapier_trace",
-      "sha256": "99959db4aa960683a7e1a64f317305e0b6d595081e572e5e4c1b89f013e58881"
+      "sha256": "2a8fb845fe9f9e0f050d86aac6cc3ca4b3ccfb528833f0c7bde88cbaa98cdae6"
     },
     {
       "role": "gazebo_trace",
-      "sha256": "f9b65bbc33e36f605889d8fc625c337298f4bd2ed29247142449c3c9a51a22fa"
+      "sha256": "5679528289101028d03cc7f40a807383c8a0cf0ba896c74230e9e75e4d68926f"
     },
     {
       "role": "robot_model",
       "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
     },
     {
+      "role": "rapier_robot_asset_config",
+      "sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19"
+    },
+    {
       "role": "rapier_actuation_config",
-      "sha256": "f744ccca217072f6af5ac572571429f4db5d5f9fd5eeaf16a58427a8256376ee"
+      "sha256": "160b6a99aca757767090b6793775aecb4cd8bd76a9be6b78b5c328523eb6ae88"
     },
     {
       "role": "gazebo_runtime_manifest",
@@ -107,15 +112,15 @@
       "joint_metrics": [
         {
           "joint": "openarm_right_joint1",
-          "tracking_rmse_rad": 0.0013532965634432393,
-          "integral_absolute_error_rad_s": 0.02945798868293431,
-          "integral_squared_error_rad2_s": 5.494234875766538e-05,
-          "maximum_absolute_tracking_error_rad": 0.0032975311437151156,
-          "terminal_window_mean_error_rad": -9.664292792825449e-06,
+          "tracking_rmse_rad": 0.0017763487604991162,
+          "integral_absolute_error_rad_s": 0.035473082998808185,
+          "integral_squared_error_rad2_s": 9.466244946105135e-05,
+          "maximum_absolute_tracking_error_rad": 0.00606727701900267,
+          "terminal_window_mean_error_rad": -0.0002137792561192771,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.4562959671020508,
-          "minimum_position_rad": -1.829561224211044e-05,
-          "maximum_position_rad": 2.399964170517223,
+          "peak_absolute_velocity_rad_s": 1.229573130607605,
+          "minimum_position_rad": -0.0007781245465793705,
+          "maximum_position_rad": 2.3955388421962627,
           "urdf_position_minimum_rad": -1.3963,
           "urdf_position_maximum_rad": 3.4907,
           "urdf_velocity_limit_rad_s": 16.755,
@@ -124,29 +129,29 @@
             {
               "id": "openarm_right_joint1.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.0013532965634432393,
+              "observed": 0.0017763487604991162,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint1.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 9.664292792825449e-06,
+              "observed": 0.0002137792561192771,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint1.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.4562959671020508,
+              "observed": 1.229573130607605,
               "maximum": 16.755001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint1.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -1.829561224211044e-05,
-              "observed_maximum": 2.399964170517223,
+              "observed_minimum": -0.0007781245465793705,
+              "observed_maximum": 2.3955388421962627,
               "minimum": -1.3963,
               "maximum": 3.4907,
               "status": "passed"
@@ -155,15 +160,15 @@
         },
         {
           "joint": "openarm_right_joint2",
-          "tracking_rmse_rad": 0.0011289254697760347,
-          "integral_absolute_error_rad_s": 0.024022321344616654,
-          "integral_squared_error_rad2_s": 3.823418225395484e-05,
-          "maximum_absolute_tracking_error_rad": 0.002440398216584483,
-          "terminal_window_mean_error_rad": 0.0,
+          "tracking_rmse_rad": 0.001022306091936188,
+          "integral_absolute_error_rad_s": 0.024330462318886754,
+          "integral_squared_error_rad2_s": 3.135329299536109e-05,
+          "maximum_absolute_tracking_error_rad": 0.002846814360889627,
+          "terminal_window_mean_error_rad": -9.230574746864565e-05,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.24190813302993774,
-          "minimum_position_rad": 0.0,
-          "maximum_position_rad": 1.3999777644517133,
+          "peak_absolute_velocity_rad_s": 0.8526017665863037,
+          "minimum_position_rad": -0.001217722960032108,
+          "maximum_position_rad": 1.3992824872159861,
           "urdf_position_minimum_rad": -0.17453,
           "urdf_position_maximum_rad": 3.3161,
           "urdf_velocity_limit_rad_s": 16.755,
@@ -172,29 +177,29 @@
             {
               "id": "openarm_right_joint2.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.0011289254697760347,
+              "observed": 0.001022306091936188,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint2.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.0,
+              "observed": 9.230574746864565e-05,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint2.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.24190813302993774,
+              "observed": 0.8526017665863037,
               "maximum": 16.755001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint2.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": 0.0,
-              "observed_maximum": 1.3999777644517133,
+              "observed_minimum": -0.001217722960032108,
+              "observed_maximum": 1.3992824872159861,
               "minimum": -0.17453,
               "maximum": 3.3161,
               "status": "passed"
@@ -203,15 +208,15 @@
         },
         {
           "joint": "openarm_right_joint3",
-          "tracking_rmse_rad": 0.06584211885256785,
-          "integral_absolute_error_rad_s": 0.8151006482969787,
-          "integral_squared_error_rad2_s": 0.13005554105098094,
-          "maximum_absolute_tracking_error_rad": 0.3658700097428975,
-          "terminal_window_mean_error_rad": 0.0,
+          "tracking_rmse_rad": 0.016892292362387176,
+          "integral_absolute_error_rad_s": 0.38242924369108583,
+          "integral_squared_error_rad2_s": 0.008560486408900647,
+          "maximum_absolute_tracking_error_rad": 0.04706702859323941,
+          "terminal_window_mean_error_rad": -0.0033230151136576843,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 1.0933527946472168,
-          "minimum_position_rad": -1.1510502170201133,
-          "maximum_position_rad": 0.0,
+          "peak_absolute_velocity_rad_s": 1.6605366468429565,
+          "minimum_position_rad": -0.9983878509229994,
+          "maximum_position_rad": 0.014378433482795737,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
           "urdf_velocity_limit_rad_s": 5.4454,
@@ -220,29 +225,29 @@
             {
               "id": "openarm_right_joint3.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.06584211885256785,
+              "observed": 0.016892292362387176,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint3.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.0,
+              "observed": 0.0033230151136576843,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint3.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 1.0933527946472168,
+              "observed": 1.6605366468429565,
               "maximum": 5.445401,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint3.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -1.1510502170201133,
-              "observed_maximum": 0.0,
+              "observed_minimum": -0.9983878509229994,
+              "observed_maximum": 0.014378433482795737,
               "minimum": -1.5708,
               "maximum": 1.5708,
               "status": "passed"
@@ -251,15 +256,15 @@
         },
         {
           "joint": "openarm_right_joint4",
-          "tracking_rmse_rad": 0.03127295618181559,
-          "integral_absolute_error_rad_s": 0.5694946734912072,
-          "integral_squared_error_rad2_s": 0.029339934237291403,
-          "maximum_absolute_tracking_error_rad": 0.11199693240578301,
-          "terminal_window_mean_error_rad": -0.00019674711782128687,
+          "tracking_rmse_rad": 0.03324133147070678,
+          "integral_absolute_error_rad_s": 0.5992728109955007,
+          "integral_squared_error_rad2_s": 0.033149584201353686,
+          "maximum_absolute_tracking_error_rad": 0.11963744172375368,
+          "terminal_window_mean_error_rad": 0.0003459835015445926,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.7036596536636353,
-          "minimum_position_rad": 1.0023165772203465e-05,
-          "maximum_position_rad": 2.0000279602230417,
+          "peak_absolute_velocity_rad_s": 0.9858235120773315,
+          "minimum_position_rad": 0.001469719135486157,
+          "maximum_position_rad": 2.005929463288189,
           "urdf_position_minimum_rad": 0.0,
           "urdf_position_maximum_rad": 2.4435,
           "urdf_velocity_limit_rad_s": 5.4454,
@@ -268,29 +273,29 @@
             {
               "id": "openarm_right_joint4.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.03127295618181559,
+              "observed": 0.03324133147070678,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint4.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.00019674711782128687,
+              "observed": 0.0003459835015445926,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint4.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.7036596536636353,
+              "observed": 0.9858235120773315,
               "maximum": 5.445401,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint4.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": 1.0023165772203465e-05,
-              "observed_maximum": 2.0000279602230417,
+              "observed_minimum": 0.001469719135486157,
+              "observed_maximum": 2.005929463288189,
               "minimum": 0.0,
               "maximum": 2.4435,
               "status": "passed"
@@ -299,15 +304,15 @@
         },
         {
           "joint": "openarm_right_joint5",
-          "tracking_rmse_rad": 0.25906701095401236,
-          "integral_absolute_error_rad_s": 3.390542071911218,
-          "integral_squared_error_rad2_s": 2.01347152520882,
-          "maximum_absolute_tracking_error_rad": 0.8711557073852728,
-          "terminal_window_mean_error_rad": 0.0,
+          "tracking_rmse_rad": 0.025900518374407603,
+          "integral_absolute_error_rad_s": 0.6229433568834615,
+          "integral_squared_error_rad2_s": 0.020125105964392886,
+          "maximum_absolute_tracking_error_rad": 0.06034540837230218,
+          "terminal_window_mean_error_rad": -0.00042981108574008246,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.625032365322113,
-          "minimum_position_rad": -4.7683715820311595e-07,
-          "maximum_position_rad": 1.4711557073852728,
+          "peak_absolute_velocity_rad_s": 2.8782153129577637,
+          "minimum_position_rad": -0.01177055439336075,
+          "maximum_position_rad": 0.9880705684041367,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
           "urdf_velocity_limit_rad_s": 20.944,
@@ -316,29 +321,29 @@
             {
               "id": "openarm_right_joint5.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.25906701095401236,
+              "observed": 0.025900518374407603,
               "maximum": 0.1,
-              "status": "failed"
+              "status": "passed"
             },
             {
               "id": "openarm_right_joint5.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.0,
+              "observed": 0.00042981108574008246,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint5.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.625032365322113,
+              "observed": 2.8782153129577637,
               "maximum": 20.944001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint5.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -4.7683715820311595e-07,
-              "observed_maximum": 1.4711557073852728,
+              "observed_minimum": -0.01177055439336075,
+              "observed_maximum": 0.9880705684041367,
               "minimum": -1.5708,
               "maximum": 1.5708,
               "status": "passed"
@@ -347,15 +352,15 @@
         },
         {
           "joint": "openarm_right_joint6",
-          "tracking_rmse_rad": 0.0102039012816211,
-          "integral_absolute_error_rad_s": 0.22734846683252175,
-          "integral_squared_error_rad2_s": 0.003123588103423822,
-          "maximum_absolute_tracking_error_rad": 0.019180528028090282,
-          "terminal_window_mean_error_rad": 1.2481536883383865e-05,
+          "tracking_rmse_rad": 0.01302884509771629,
+          "integral_absolute_error_rad_s": 0.27266656178675797,
+          "integral_squared_error_rad2_s": 0.005092524239259057,
+          "maximum_absolute_tracking_error_rad": 0.033040921152805214,
+          "terminal_window_mean_error_rad": -0.0002901495993977835,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.13860337436199188,
-          "minimum_position_rad": -0.5986019402021862,
-          "maximum_position_rad": 3.6371585122549514e-05,
+          "peak_absolute_velocity_rad_s": 1.0325851440429688,
+          "minimum_position_rad": -0.6153240363115722,
+          "maximum_position_rad": 0.0006947842742523288,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.7854,
           "urdf_velocity_limit_rad_s": 20.944,
@@ -364,29 +369,29 @@
             {
               "id": "openarm_right_joint6.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.0102039012816211,
+              "observed": 0.01302884509771629,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint6.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 1.2481536883383865e-05,
+              "observed": 0.0002901495993977835,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint6.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.13860337436199188,
+              "observed": 1.0325851440429688,
               "maximum": 20.944001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint6.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -0.5986019402021862,
-              "observed_maximum": 3.6371585122549514e-05,
+              "observed_minimum": -0.6153240363115722,
+              "observed_maximum": 0.0006947842742523288,
               "minimum": -0.7854,
               "maximum": 0.7854,
               "status": "passed"
@@ -395,15 +400,15 @@
         },
         {
           "joint": "openarm_right_joint7",
-          "tracking_rmse_rad": 0.01172105228267001,
-          "integral_absolute_error_rad_s": 0.22854436640236633,
-          "integral_squared_error_rad2_s": 0.004121492080822355,
-          "maximum_absolute_tracking_error_rad": 0.026644233362311476,
-          "terminal_window_mean_error_rad": 0.0,
+          "tracking_rmse_rad": 0.015158762382167661,
+          "integral_absolute_error_rad_s": 0.33308883876376255,
+          "integral_squared_error_rad2_s": 0.006893642446643488,
+          "maximum_absolute_tracking_error_rad": 0.04240476249161407,
+          "terminal_window_mean_error_rad": 0.0034559392588719724,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.18730653822422028,
-          "minimum_position_rad": -0.7982582825943524,
-          "maximum_position_rad": 0.00010776519764961344,
+          "peak_absolute_velocity_rad_s": 0.8446040153503418,
+          "minimum_position_rad": -0.808132679724167,
+          "maximum_position_rad": 0.018188132569211604,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
           "urdf_velocity_limit_rad_s": 20.944,
@@ -412,29 +417,29 @@
             {
               "id": "openarm_right_joint7.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.01172105228267001,
+              "observed": 0.015158762382167661,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint7.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.0,
+              "observed": 0.0034559392588719724,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint7.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.18730653822422028,
+              "observed": 0.8446040153503418,
               "maximum": 20.944001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint7.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -0.7982582825943524,
-              "observed_maximum": 0.00010776519764961344,
+              "observed_minimum": -0.808132679724167,
+              "observed_maximum": 0.018188132569211604,
               "minimum": -1.5708,
               "maximum": 1.5708,
               "status": "passed"
@@ -443,15 +448,15 @@
         },
         {
           "joint": "openarm_right_finger_joint1",
-          "tracking_rmse_rad": 0.009213317348784368,
-          "integral_absolute_error_rad_s": 0.1743198442570652,
-          "integral_squared_error_rad2_s": 0.0025465565480134607,
-          "maximum_absolute_tracking_error_rad": 0.02458181412410887,
-          "terminal_window_mean_error_rad": -0.004665757282372076,
+          "tracking_rmse_rad": 0.007737437500547557,
+          "integral_absolute_error_rad_s": 0.17716156832322902,
+          "integral_squared_error_rad2_s": 0.0017960382081671524,
+          "maximum_absolute_tracking_error_rad": 0.02010659953889099,
+          "terminal_window_mean_error_rad": -0.0009312831918786596,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.26145949959754944,
-          "minimum_position_rad": -0.5499971351072163,
-          "maximum_position_rad": -6.258487701395588e-06,
+          "peak_absolute_velocity_rad_s": 1.366920828819275,
+          "minimum_position_rad": -0.5552261637372429,
+          "maximum_position_rad": -0.0022627717825938853,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.0,
           "urdf_velocity_limit_rad_s": 5.0,
@@ -460,29 +465,29 @@
             {
               "id": "openarm_right_finger_joint1.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.009213317348784368,
+              "observed": 0.007737437500547557,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint1.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.004665757282372076,
+              "observed": 0.0009312831918786596,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint1.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.26145949959754944,
+              "observed": 1.366920828819275,
               "maximum": 5.000001,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint1.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -0.5499971351072163,
-              "observed_maximum": -6.258487701395588e-06,
+              "observed_minimum": -0.5552261637372429,
+              "observed_maximum": -0.0022627717825938853,
               "minimum": -0.7854,
               "maximum": 0.0,
               "status": "passed"
@@ -491,15 +496,15 @@
         },
         {
           "joint": "openarm_right_finger_joint2",
-          "tracking_rmse_rad": 0.009213317348784368,
-          "integral_absolute_error_rad_s": 0.1743198442570652,
-          "integral_squared_error_rad2_s": 0.0025465565480134607,
-          "maximum_absolute_tracking_error_rad": 0.02458181412410887,
-          "terminal_window_mean_error_rad": -0.004665757282372076,
+          "tracking_rmse_rad": 0.006617164034550484,
+          "integral_absolute_error_rad_s": 0.12546606458038934,
+          "integral_squared_error_rad2_s": 0.0013136058220765692,
+          "maximum_absolute_tracking_error_rad": 0.017785425040954927,
+          "terminal_window_mean_error_rad": -0.0031513639923754777,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.26145949959754944,
-          "minimum_position_rad": -0.5499971351072163,
-          "maximum_position_rad": -6.258487701395588e-06,
+          "peak_absolute_velocity_rad_s": 0.28355956077575684,
+          "minimum_position_rad": -0.5499978308641256,
+          "maximum_position_rad": -0.001988292151993378,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.0,
           "urdf_velocity_limit_rad_s": 5.0,
@@ -508,29 +513,29 @@
             {
               "id": "openarm_right_finger_joint2.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.009213317348784368,
+              "observed": 0.006617164034550484,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint2.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 0.004665757282372076,
+              "observed": 0.0031513639923754777,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint2.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.26145949959754944,
+              "observed": 0.28355956077575684,
               "maximum": 5.000001,
               "status": "passed"
             },
             {
               "id": "openarm_right_finger_joint2.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -0.5499971351072163,
-              "observed_maximum": -6.258487701395588e-06,
+              "observed_minimum": -0.5499978308641256,
+              "observed_maximum": -0.001988292151993378,
               "minimum": -0.7854,
               "maximum": 0.0,
               "status": "passed"
@@ -543,79 +548,79 @@
           "phase": "home",
           "start_step": 1,
           "end_step": 200,
-          "tracking_rmse_rad": 0.028374676276064607,
-          "maximum_absolute_tracking_error_rad": 0.11199693240578301
+          "tracking_rmse_rad": 0.029333660669192376,
+          "maximum_absolute_tracking_error_rad": 0.11963744172375368
         },
         {
           "phase": "approach",
           "start_step": 201,
           "end_step": 600,
-          "tracking_rmse_rad": 0.04015785268718772,
-          "maximum_absolute_tracking_error_rad": 0.4571094054036128
+          "tracking_rmse_rad": 0.01243647200397571,
+          "maximum_absolute_tracking_error_rad": 0.04293778231954004
         },
         {
           "phase": "close_gripper",
           "start_step": 601,
           "end_step": 760,
-          "tracking_rmse_rad": 0.25604422310883307,
-          "maximum_absolute_tracking_error_rad": 0.8711557073852728
+          "tracking_rmse_rad": 0.010199232456624201,
+          "maximum_absolute_tracking_error_rad": 0.030998946356988633
         },
         {
           "phase": "raise",
           "start_step": 761,
           "end_step": 980,
-          "tracking_rmse_rad": 0.10241708339448377,
-          "maximum_absolute_tracking_error_rad": 0.7094991577313602
+          "tracking_rmse_rad": 0.015596440628042841,
+          "maximum_absolute_tracking_error_rad": 0.05193622789282415
         },
         {
           "phase": "present",
           "start_step": 981,
           "end_step": 1180,
-          "tracking_rmse_rad": 0.03019501255540793,
-          "maximum_absolute_tracking_error_rad": 0.1999617493495106
+          "tracking_rmse_rad": 0.020458625825200305,
+          "maximum_absolute_tracking_error_rad": 0.06034540837230218
         },
         {
           "phase": "return_home",
           "start_step": 1181,
           "end_step": 1580,
-          "tracking_rmse_rad": 0.04410093267986559,
-          "maximum_absolute_tracking_error_rad": 0.3658700097428975
+          "tracking_rmse_rad": 0.017340396105650885,
+          "maximum_absolute_tracking_error_rad": 0.050195557352430586
         },
         {
           "phase": "stow_gripper",
           "start_step": 1581,
           "end_step": 1800,
-          "tracking_rmse_rad": 0.004882762537748623,
-          "maximum_absolute_tracking_error_rad": 0.014150422190574219
+          "tracking_rmse_rad": 0.005049214252626564,
+          "maximum_absolute_tracking_error_rad": 0.018188132569211604
         }
       ],
       "checks": [
         {
           "id": "openarm_right_joint1.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.0013532965634432393,
+          "observed": 0.0017763487604991162,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint1.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 9.664292792825449e-06,
+          "observed": 0.0002137792561192771,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint1.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.4562959671020508,
+          "observed": 1.229573130607605,
           "maximum": 16.755001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint1.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -1.829561224211044e-05,
-          "observed_maximum": 2.399964170517223,
+          "observed_minimum": -0.0007781245465793705,
+          "observed_maximum": 2.3955388421962627,
           "minimum": -1.3963,
           "maximum": 3.4907,
           "status": "passed"
@@ -623,29 +628,29 @@
         {
           "id": "openarm_right_joint2.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.0011289254697760347,
+          "observed": 0.001022306091936188,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint2.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.0,
+          "observed": 9.230574746864565e-05,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint2.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.24190813302993774,
+          "observed": 0.8526017665863037,
           "maximum": 16.755001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint2.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": 0.0,
-          "observed_maximum": 1.3999777644517133,
+          "observed_minimum": -0.001217722960032108,
+          "observed_maximum": 1.3992824872159861,
           "minimum": -0.17453,
           "maximum": 3.3161,
           "status": "passed"
@@ -653,29 +658,29 @@
         {
           "id": "openarm_right_joint3.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.06584211885256785,
+          "observed": 0.016892292362387176,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint3.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.0,
+          "observed": 0.0033230151136576843,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint3.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 1.0933527946472168,
+          "observed": 1.6605366468429565,
           "maximum": 5.445401,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint3.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -1.1510502170201133,
-          "observed_maximum": 0.0,
+          "observed_minimum": -0.9983878509229994,
+          "observed_maximum": 0.014378433482795737,
           "minimum": -1.5708,
           "maximum": 1.5708,
           "status": "passed"
@@ -683,29 +688,29 @@
         {
           "id": "openarm_right_joint4.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.03127295618181559,
+          "observed": 0.03324133147070678,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint4.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.00019674711782128687,
+          "observed": 0.0003459835015445926,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint4.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.7036596536636353,
+          "observed": 0.9858235120773315,
           "maximum": 5.445401,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint4.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": 1.0023165772203465e-05,
-          "observed_maximum": 2.0000279602230417,
+          "observed_minimum": 0.001469719135486157,
+          "observed_maximum": 2.005929463288189,
           "minimum": 0.0,
           "maximum": 2.4435,
           "status": "passed"
@@ -713,29 +718,29 @@
         {
           "id": "openarm_right_joint5.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.25906701095401236,
+          "observed": 0.025900518374407603,
           "maximum": 0.1,
-          "status": "failed"
+          "status": "passed"
         },
         {
           "id": "openarm_right_joint5.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.0,
+          "observed": 0.00042981108574008246,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint5.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.625032365322113,
+          "observed": 2.8782153129577637,
           "maximum": 20.944001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint5.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -4.7683715820311595e-07,
-          "observed_maximum": 1.4711557073852728,
+          "observed_minimum": -0.01177055439336075,
+          "observed_maximum": 0.9880705684041367,
           "minimum": -1.5708,
           "maximum": 1.5708,
           "status": "passed"
@@ -743,29 +748,29 @@
         {
           "id": "openarm_right_joint6.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.0102039012816211,
+          "observed": 0.01302884509771629,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint6.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 1.2481536883383865e-05,
+          "observed": 0.0002901495993977835,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint6.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.13860337436199188,
+          "observed": 1.0325851440429688,
           "maximum": 20.944001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint6.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -0.5986019402021862,
-          "observed_maximum": 3.6371585122549514e-05,
+          "observed_minimum": -0.6153240363115722,
+          "observed_maximum": 0.0006947842742523288,
           "minimum": -0.7854,
           "maximum": 0.7854,
           "status": "passed"
@@ -773,29 +778,29 @@
         {
           "id": "openarm_right_joint7.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.01172105228267001,
+          "observed": 0.015158762382167661,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint7.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.0,
+          "observed": 0.0034559392588719724,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint7.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.18730653822422028,
+          "observed": 0.8446040153503418,
           "maximum": 20.944001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint7.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -0.7982582825943524,
-          "observed_maximum": 0.00010776519764961344,
+          "observed_minimum": -0.808132679724167,
+          "observed_maximum": 0.018188132569211604,
           "minimum": -1.5708,
           "maximum": 1.5708,
           "status": "passed"
@@ -803,29 +808,29 @@
         {
           "id": "openarm_right_finger_joint1.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.009213317348784368,
+          "observed": 0.007737437500547557,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint1.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.004665757282372076,
+          "observed": 0.0009312831918786596,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint1.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.26145949959754944,
+          "observed": 1.366920828819275,
           "maximum": 5.000001,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint1.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -0.5499971351072163,
-          "observed_maximum": -6.258487701395588e-06,
+          "observed_minimum": -0.5552261637372429,
+          "observed_maximum": -0.0022627717825938853,
           "minimum": -0.7854,
           "maximum": 0.0,
           "status": "passed"
@@ -833,35 +838,35 @@
         {
           "id": "openarm_right_finger_joint2.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.009213317348784368,
+          "observed": 0.006617164034550484,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint2.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 0.004665757282372076,
+          "observed": 0.0031513639923754777,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint2.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.26145949959754944,
+          "observed": 0.28355956077575684,
           "maximum": 5.000001,
           "status": "passed"
         },
         {
           "id": "openarm_right_finger_joint2.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -0.5499971351072163,
-          "observed_maximum": -6.258487701395588e-06,
+          "observed_minimum": -0.5499978308641256,
+          "observed_maximum": -0.001988292151993378,
           "minimum": -0.7854,
           "maximum": 0.0,
           "status": "passed"
         }
       ],
-      "status": "needs_tuning"
+      "status": "passed"
     },
     {
       "backend_id": "gazebo_sim",
@@ -871,14 +876,14 @@
       "joint_metrics": [
         {
           "joint": "openarm_right_joint1",
-          "tracking_rmse_rad": 0.024798043229295144,
-          "integral_absolute_error_rad_s": 0.5194454788345245,
-          "integral_squared_error_rad2_s": 0.018448288809025493,
+          "tracking_rmse_rad": 0.02479804322929515,
+          "integral_absolute_error_rad_s": 0.5194454788345166,
+          "integral_squared_error_rad2_s": 0.0184482888090255,
           "maximum_absolute_tracking_error_rad": 0.058428579904712175,
-          "terminal_window_mean_error_rad": 1.6640611306458977e-15,
+          "terminal_window_mean_error_rad": 1.66404021335843e-15,
           "terminal_window_samples": 30,
           "peak_absolute_velocity_rad_s": 0.5393407392416948,
-          "minimum_position_rad": -7.966474661949924e-13,
+          "minimum_position_rad": -8.158402391109123e-13,
           "maximum_position_rad": 2.3974406789125617,
           "urdf_position_minimum_rad": -1.3963,
           "urdf_position_maximum_rad": 3.4907,
@@ -888,14 +893,14 @@
             {
               "id": "openarm_right_joint1.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.024798043229295144,
+              "observed": 0.02479804322929515,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint1.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 1.6640611306458977e-15,
+              "observed": 1.66404021335843e-15,
               "maximum": 0.01,
               "status": "passed"
             },
@@ -909,7 +914,7 @@
             {
               "id": "openarm_right_joint1.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -7.966474661949924e-13,
+              "observed_minimum": -8.158402391109123e-13,
               "observed_maximum": 2.3974406789125617,
               "minimum": -1.3963,
               "maximum": 3.4907,
@@ -919,14 +924,14 @@
         },
         {
           "joint": "openarm_right_joint2",
-          "tracking_rmse_rad": 0.016854701818565375,
-          "integral_absolute_error_rad_s": 0.36771774939223334,
-          "integral_squared_error_rad2_s": 0.008522429372231112,
+          "tracking_rmse_rad": 0.01685470181856537,
+          "integral_absolute_error_rad_s": 0.3677177493922253,
+          "integral_squared_error_rad2_s": 0.008522429372231109,
           "maximum_absolute_tracking_error_rad": 0.03408333827770249,
-          "terminal_window_mean_error_rad": 1.260400303437888e-15,
+          "terminal_window_mean_error_rad": 1.2605474338585118e-15,
           "terminal_window_samples": 30,
           "peak_absolute_velocity_rad_s": 0.31461543122444563,
-          "minimum_position_rad": -9.740505137989159e-13,
+          "minimum_position_rad": -9.680344747793468e-13,
           "maximum_position_rad": 1.3982157082582518,
           "urdf_position_minimum_rad": -0.17453,
           "urdf_position_maximum_rad": 3.3161,
@@ -936,14 +941,14 @@
             {
               "id": "openarm_right_joint2.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.016854701818565375,
+              "observed": 0.01685470181856537,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint2.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 1.260400303437888e-15,
+              "observed": 1.2605474338585118e-15,
               "maximum": 0.01,
               "status": "passed"
             },
@@ -957,7 +962,7 @@
             {
               "id": "openarm_right_joint2.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -9.740505137989159e-13,
+              "observed_minimum": -9.680344747793468e-13,
               "observed_maximum": 1.3982157082582518,
               "minimum": -0.17453,
               "maximum": 3.3161,
@@ -967,15 +972,15 @@
         },
         {
           "joint": "openarm_right_joint3",
-          "tracking_rmse_rad": 0.011469738884711894,
-          "integral_absolute_error_rad_s": 0.23793722792664465,
-          "integral_squared_error_rad2_s": 0.003946647381437108,
+          "tracking_rmse_rad": 0.011469738884711905,
+          "integral_absolute_error_rad_s": 0.2379372279266272,
+          "integral_squared_error_rad2_s": 0.003946647381437115,
           "maximum_absolute_tracking_error_rad": 0.02434524162750562,
-          "terminal_window_mean_error_rad": 1.5188961817090742e-16,
+          "terminal_window_mean_error_rad": 1.5190926985043411e-16,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.22472530801714655,
+          "peak_absolute_velocity_rad_s": 0.22472530801714646,
           "minimum_position_rad": -0.9985811847820093,
-          "maximum_position_rad": 1.913394378066919e-12,
+          "maximum_position_rad": 1.8855186025056608e-12,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
           "urdf_velocity_limit_rad_s": 5.4454,
@@ -984,21 +989,21 @@
             {
               "id": "openarm_right_joint3.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.011469738884711894,
+              "observed": 0.011469738884711905,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint3.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 1.5188961817090742e-16,
+              "observed": 1.5190926985043411e-16,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint3.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.22472530801714655,
+              "observed": 0.22472530801714646,
               "maximum": 5.445401,
               "status": "passed"
             },
@@ -1006,7 +1011,7 @@
               "id": "openarm_right_joint3.position_range_rad_v1",
               "unit": "rad",
               "observed_minimum": -0.9985811847820093,
-              "observed_maximum": 1.913394378066919e-12,
+              "observed_maximum": 1.8855186025056608e-12,
               "minimum": -1.5708,
               "maximum": 1.5708,
               "status": "passed"
@@ -1015,14 +1020,14 @@
         },
         {
           "joint": "openarm_right_joint4",
-          "tracking_rmse_rad": 0.021313129267718594,
-          "integral_absolute_error_rad_s": 0.3866563626483775,
-          "integral_squared_error_rad2_s": 0.013627484648024173,
-          "maximum_absolute_tracking_error_rad": 0.07620237406219121,
+          "tracking_rmse_rad": 0.02122623951189418,
+          "integral_absolute_error_rad_s": 0.38682275757438506,
+          "integral_squared_error_rad2_s": 0.013516597584820877,
+          "maximum_absolute_tracking_error_rad": 0.07571725726553202,
           "terminal_window_mean_error_rad": -2.020605904817785e-15,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.7034065319608714,
-          "minimum_position_rad": 8.528542689734574e-09,
+          "peak_absolute_velocity_rad_s": 0.6989285307472607,
+          "minimum_position_rad": 2.0828137798872923e-06,
           "maximum_position_rad": 1.9999999999999187,
           "urdf_position_minimum_rad": 0.0,
           "urdf_position_maximum_rad": 2.4435,
@@ -1032,7 +1037,7 @@
             {
               "id": "openarm_right_joint4.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.021313129267718594,
+              "observed": 0.02122623951189418,
               "maximum": 0.1,
               "status": "passed"
             },
@@ -1046,14 +1051,14 @@
             {
               "id": "openarm_right_joint4.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.7034065319608714,
+              "observed": 0.6989285307472607,
               "maximum": 5.445401,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint4.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": 8.528542689734574e-09,
+              "observed_minimum": 2.0828137798872923e-06,
               "observed_maximum": 1.9999999999999187,
               "minimum": 0.0,
               "maximum": 2.4435,
@@ -1063,14 +1068,14 @@
         },
         {
           "joint": "openarm_right_joint5",
-          "tracking_rmse_rad": 0.011469738884766687,
-          "integral_absolute_error_rad_s": 0.23793722792466343,
-          "integral_squared_error_rad2_s": 0.0039466473814748155,
+          "tracking_rmse_rad": 0.011469738884766682,
+          "integral_absolute_error_rad_s": 0.23793722792466082,
+          "integral_squared_error_rad2_s": 0.003946647381474811,
           "maximum_absolute_tracking_error_rad": 0.0243452416265878,
-          "terminal_window_mean_error_rad": 3.929498585422316e-16,
+          "terminal_window_mean_error_rad": 3.921274789908737e-16,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.22472530801754642,
-          "minimum_position_rad": -3.900659851522264e-13,
+          "peak_absolute_velocity_rad_s": 0.22472530801754653,
+          "minimum_position_rad": -3.8524044383097993e-13,
           "maximum_position_rad": 0.998581184785866,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
@@ -1080,28 +1085,28 @@
             {
               "id": "openarm_right_joint5.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.011469738884766687,
+              "observed": 0.011469738884766682,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint5.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 3.929498585422316e-16,
+              "observed": 3.921274789908737e-16,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint5.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.22472530801754642,
+              "observed": 0.22472530801754653,
               "maximum": 20.944001,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint5.position_range_rad_v1",
               "unit": "rad",
-              "observed_minimum": -3.900659851522264e-13,
+              "observed_minimum": -3.8524044383097993e-13,
               "observed_maximum": 0.998581184785866,
               "minimum": -1.5708,
               "maximum": 1.5708,
@@ -1111,15 +1116,15 @@
         },
         {
           "joint": "openarm_right_joint6",
-          "tracking_rmse_rad": 0.007773397493192757,
-          "integral_absolute_error_rad_s": 0.17300570112549377,
-          "integral_squared_error_rad2_s": 0.0018127712938706885,
+          "tracking_rmse_rad": 0.007773397493192787,
+          "integral_absolute_error_rad_s": 0.1730057011254722,
+          "integral_squared_error_rad2_s": 0.0018127712938707024,
           "maximum_absolute_tracking_error_rad": 0.014607144976402586,
-          "terminal_window_mean_error_rad": -1.6380803710286915e-15,
+          "terminal_window_mean_error_rad": -1.6380415751043286e-15,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.13483518481006454,
+          "peak_absolute_velocity_rad_s": 0.13483518481006443,
           "minimum_position_rad": -0.5991487108689483,
-          "maximum_position_rad": 2.4566706069758094e-12,
+          "maximum_position_rad": 2.511467241756844e-12,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.7854,
           "urdf_velocity_limit_rad_s": 20.944,
@@ -1128,21 +1133,21 @@
             {
               "id": "openarm_right_joint6.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.007773397493192757,
+              "observed": 0.007773397493192787,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint6.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 1.6380803710286915e-15,
+              "observed": 1.6380415751043286e-15,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint6.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.13483518481006454,
+              "observed": 0.13483518481006443,
               "maximum": 20.944001,
               "status": "passed"
             },
@@ -1150,7 +1155,7 @@
               "id": "openarm_right_joint6.position_range_rad_v1",
               "unit": "rad",
               "observed_minimum": -0.5991487108689483,
-              "observed_maximum": 2.4566706069758094e-12,
+              "observed_maximum": 2.511467241756844e-12,
               "minimum": -0.7854,
               "maximum": 0.7854,
               "status": "passed"
@@ -1159,15 +1164,15 @@
         },
         {
           "joint": "openarm_right_joint7",
-          "tracking_rmse_rad": 0.008856883640700053,
-          "integral_absolute_error_rad_s": 0.17308740484079058,
-          "integral_squared_error_rad2_s": 0.00235333168181364,
+          "tracking_rmse_rad": 0.008856883640700041,
+          "integral_absolute_error_rad_s": 0.17308740484076524,
+          "integral_squared_error_rad2_s": 0.0023533316818136335,
           "maximum_absolute_tracking_error_rad": 0.019476193300921207,
-          "terminal_window_mean_error_rad": 7.593636853155697e-16,
+          "terminal_window_mean_error_rad": 7.593648037057046e-16,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.17978024641418466,
+          "peak_absolute_velocity_rad_s": 0.17978024641418475,
           "minimum_position_rad": -0.7988649478296966,
-          "maximum_position_rad": 1.9207248084706823e-12,
+          "maximum_position_rad": 1.9088514106517787e-12,
           "urdf_position_minimum_rad": -1.5708,
           "urdf_position_maximum_rad": 1.5708,
           "urdf_velocity_limit_rad_s": 20.944,
@@ -1176,21 +1181,21 @@
             {
               "id": "openarm_right_joint7.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.008856883640700053,
+              "observed": 0.008856883640700041,
               "maximum": 0.1,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint7.terminal_bias_rad_v1",
               "unit": "rad",
-              "observed": 7.593636853155697e-16,
+              "observed": 7.593648037057046e-16,
               "maximum": 0.01,
               "status": "passed"
             },
             {
               "id": "openarm_right_joint7.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.17978024641418466,
+              "observed": 0.17978024641418475,
               "maximum": 20.944001,
               "status": "passed"
             },
@@ -1198,7 +1203,7 @@
               "id": "openarm_right_joint7.position_range_rad_v1",
               "unit": "rad",
               "observed_minimum": -0.7988649478296966,
-              "observed_maximum": 1.9207248084706823e-12,
+              "observed_maximum": 1.9088514106517787e-12,
               "minimum": -1.5708,
               "maximum": 1.5708,
               "status": "passed"
@@ -1207,15 +1212,15 @@
         },
         {
           "joint": "openarm_right_finger_joint1",
-          "tracking_rmse_rad": 0.010641596224737801,
-          "integral_absolute_error_rad_s": 0.20117567042510962,
-          "integral_squared_error_rad2_s": 0.003397307174256757,
+          "tracking_rmse_rad": 0.010584212809705026,
+          "integral_absolute_error_rad_s": 0.20117567042510742,
+          "integral_squared_error_rad2_s": 0.0033607668912490553,
           "maximum_absolute_tracking_error_rad": 0.028422111774186853,
           "terminal_window_mean_error_rad": -0.0056158826317802436,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.26235795564576986,
+          "peak_absolute_velocity_rad_s": 0.2623579556457698,
           "minimum_position_rad": -0.5500000000002512,
-          "maximum_position_rad": -5.481666768722003e-06,
+          "maximum_position_rad": -0.0013387153582569656,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.0,
           "urdf_velocity_limit_rad_s": 5.0,
@@ -1224,7 +1229,7 @@
             {
               "id": "openarm_right_finger_joint1.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.010641596224737801,
+              "observed": 0.010584212809705026,
               "maximum": 0.1,
               "status": "passed"
             },
@@ -1238,7 +1243,7 @@
             {
               "id": "openarm_right_finger_joint1.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.26235795564576986,
+              "observed": 0.2623579556457698,
               "maximum": 5.000001,
               "status": "passed"
             },
@@ -1246,7 +1251,7 @@
               "id": "openarm_right_finger_joint1.position_range_rad_v1",
               "unit": "rad",
               "observed_minimum": -0.5500000000002512,
-              "observed_maximum": -5.481666768722003e-06,
+              "observed_maximum": -0.0013387153582569656,
               "minimum": -0.7854,
               "maximum": 0.0,
               "status": "passed"
@@ -1255,15 +1260,15 @@
         },
         {
           "joint": "openarm_right_finger_joint2",
-          "tracking_rmse_rad": 0.01078493476104987,
-          "integral_absolute_error_rad_s": 0.20473066341770269,
-          "integral_squared_error_rad2_s": 0.0034894446037919452,
+          "tracking_rmse_rad": 0.010595584911452337,
+          "integral_absolute_error_rad_s": 0.20168213352745332,
+          "integral_squared_error_rad2_s": 0.0033679926558337447,
           "maximum_absolute_tracking_error_rad": 0.02842211177418552,
           "terminal_window_mean_error_rad": -0.005615882631782095,
           "terminal_window_samples": 30,
-          "peak_absolute_velocity_rad_s": 0.2623579556457923,
+          "peak_absolute_velocity_rad_s": 0.26235795564579234,
           "minimum_position_rad": -0.5499999999999959,
-          "maximum_position_rad": 2.7693224194257178e-14,
+          "maximum_position_rad": 2.029945207007822e-13,
           "urdf_position_minimum_rad": -0.7854,
           "urdf_position_maximum_rad": 0.0,
           "urdf_velocity_limit_rad_s": 5.0,
@@ -1272,7 +1277,7 @@
             {
               "id": "openarm_right_finger_joint2.tracking_rmse_rad_v1",
               "unit": "rad",
-              "observed": 0.01078493476104987,
+              "observed": 0.010595584911452337,
               "maximum": 0.1,
               "status": "passed"
             },
@@ -1286,7 +1291,7 @@
             {
               "id": "openarm_right_finger_joint2.peak_velocity_rad_s_v1",
               "unit": "rad/s",
-              "observed": 0.2623579556457923,
+              "observed": 0.26235795564579234,
               "maximum": 5.000001,
               "status": "passed"
             },
@@ -1294,7 +1299,7 @@
               "id": "openarm_right_finger_joint2.position_range_rad_v1",
               "unit": "rad",
               "observed_minimum": -0.5499999999999959,
-              "observed_maximum": 2.7693224194257178e-14,
+              "observed_maximum": 2.029945207007822e-13,
               "minimum": -0.7854,
               "maximum": 0.0,
               "status": "passed"
@@ -1307,14 +1312,14 @@
           "phase": "home",
           "start_step": 1,
           "end_step": 200,
-          "tracking_rmse_rad": 0.02075642894378417,
-          "maximum_absolute_tracking_error_rad": 0.07620237406219121
+          "tracking_rmse_rad": 0.020539485431452842,
+          "maximum_absolute_tracking_error_rad": 0.07571725726553202
         },
         {
           "phase": "approach",
           "start_step": 201,
           "end_step": 600,
-          "tracking_rmse_rad": 0.011801616280157573,
+          "tracking_rmse_rad": 0.01180153658211377,
           "maximum_absolute_tracking_error_rad": 0.0292142899522988
         },
         {
@@ -1328,21 +1333,21 @@
           "phase": "raise",
           "start_step": 761,
           "end_step": 980,
-          "tracking_rmse_rad": 0.009606893482761199,
+          "tracking_rmse_rad": 0.009606893482761197,
           "maximum_absolute_tracking_error_rad": 0.0308975248740595
         },
         {
           "phase": "present",
           "start_step": 981,
           "end_step": 1180,
-          "tracking_rmse_rad": 0.01600741962106818,
+          "tracking_rmse_rad": 0.016007419621068178,
           "maximum_absolute_tracking_error_rad": 0.03880955089419169
         },
         {
           "phase": "return_home",
           "start_step": 1181,
           "end_step": 1580,
-          "tracking_rmse_rad": 0.02008074063580071,
+          "tracking_rmse_rad": 0.020080740635800714,
           "maximum_absolute_tracking_error_rad": 0.058428579904712175
         },
         {
@@ -1357,14 +1362,14 @@
         {
           "id": "openarm_right_joint1.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.024798043229295144,
+          "observed": 0.02479804322929515,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint1.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 1.6640611306458977e-15,
+          "observed": 1.66404021335843e-15,
           "maximum": 0.01,
           "status": "passed"
         },
@@ -1378,7 +1383,7 @@
         {
           "id": "openarm_right_joint1.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -7.966474661949924e-13,
+          "observed_minimum": -8.158402391109123e-13,
           "observed_maximum": 2.3974406789125617,
           "minimum": -1.3963,
           "maximum": 3.4907,
@@ -1387,14 +1392,14 @@
         {
           "id": "openarm_right_joint2.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.016854701818565375,
+          "observed": 0.01685470181856537,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint2.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 1.260400303437888e-15,
+          "observed": 1.2605474338585118e-15,
           "maximum": 0.01,
           "status": "passed"
         },
@@ -1408,7 +1413,7 @@
         {
           "id": "openarm_right_joint2.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -9.740505137989159e-13,
+          "observed_minimum": -9.680344747793468e-13,
           "observed_maximum": 1.3982157082582518,
           "minimum": -0.17453,
           "maximum": 3.3161,
@@ -1417,21 +1422,21 @@
         {
           "id": "openarm_right_joint3.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.011469738884711894,
+          "observed": 0.011469738884711905,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint3.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 1.5188961817090742e-16,
+          "observed": 1.5190926985043411e-16,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint3.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.22472530801714655,
+          "observed": 0.22472530801714646,
           "maximum": 5.445401,
           "status": "passed"
         },
@@ -1439,7 +1444,7 @@
           "id": "openarm_right_joint3.position_range_rad_v1",
           "unit": "rad",
           "observed_minimum": -0.9985811847820093,
-          "observed_maximum": 1.913394378066919e-12,
+          "observed_maximum": 1.8855186025056608e-12,
           "minimum": -1.5708,
           "maximum": 1.5708,
           "status": "passed"
@@ -1447,7 +1452,7 @@
         {
           "id": "openarm_right_joint4.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.021313129267718594,
+          "observed": 0.02122623951189418,
           "maximum": 0.1,
           "status": "passed"
         },
@@ -1461,14 +1466,14 @@
         {
           "id": "openarm_right_joint4.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.7034065319608714,
+          "observed": 0.6989285307472607,
           "maximum": 5.445401,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint4.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": 8.528542689734574e-09,
+          "observed_minimum": 2.0828137798872923e-06,
           "observed_maximum": 1.9999999999999187,
           "minimum": 0.0,
           "maximum": 2.4435,
@@ -1477,28 +1482,28 @@
         {
           "id": "openarm_right_joint5.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.011469738884766687,
+          "observed": 0.011469738884766682,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint5.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 3.929498585422316e-16,
+          "observed": 3.921274789908737e-16,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint5.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.22472530801754642,
+          "observed": 0.22472530801754653,
           "maximum": 20.944001,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint5.position_range_rad_v1",
           "unit": "rad",
-          "observed_minimum": -3.900659851522264e-13,
+          "observed_minimum": -3.8524044383097993e-13,
           "observed_maximum": 0.998581184785866,
           "minimum": -1.5708,
           "maximum": 1.5708,
@@ -1507,21 +1512,21 @@
         {
           "id": "openarm_right_joint6.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.007773397493192757,
+          "observed": 0.007773397493192787,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint6.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 1.6380803710286915e-15,
+          "observed": 1.6380415751043286e-15,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint6.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.13483518481006454,
+          "observed": 0.13483518481006443,
           "maximum": 20.944001,
           "status": "passed"
         },
@@ -1529,7 +1534,7 @@
           "id": "openarm_right_joint6.position_range_rad_v1",
           "unit": "rad",
           "observed_minimum": -0.5991487108689483,
-          "observed_maximum": 2.4566706069758094e-12,
+          "observed_maximum": 2.511467241756844e-12,
           "minimum": -0.7854,
           "maximum": 0.7854,
           "status": "passed"
@@ -1537,21 +1542,21 @@
         {
           "id": "openarm_right_joint7.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.008856883640700053,
+          "observed": 0.008856883640700041,
           "maximum": 0.1,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint7.terminal_bias_rad_v1",
           "unit": "rad",
-          "observed": 7.593636853155697e-16,
+          "observed": 7.593648037057046e-16,
           "maximum": 0.01,
           "status": "passed"
         },
         {
           "id": "openarm_right_joint7.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.17978024641418466,
+          "observed": 0.17978024641418475,
           "maximum": 20.944001,
           "status": "passed"
         },
@@ -1559,7 +1564,7 @@
           "id": "openarm_right_joint7.position_range_rad_v1",
           "unit": "rad",
           "observed_minimum": -0.7988649478296966,
-          "observed_maximum": 1.9207248084706823e-12,
+          "observed_maximum": 1.9088514106517787e-12,
           "minimum": -1.5708,
           "maximum": 1.5708,
           "status": "passed"
@@ -1567,7 +1572,7 @@
         {
           "id": "openarm_right_finger_joint1.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.010641596224737801,
+          "observed": 0.010584212809705026,
           "maximum": 0.1,
           "status": "passed"
         },
@@ -1581,7 +1586,7 @@
         {
           "id": "openarm_right_finger_joint1.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.26235795564576986,
+          "observed": 0.2623579556457698,
           "maximum": 5.000001,
           "status": "passed"
         },
@@ -1589,7 +1594,7 @@
           "id": "openarm_right_finger_joint1.position_range_rad_v1",
           "unit": "rad",
           "observed_minimum": -0.5500000000002512,
-          "observed_maximum": -5.481666768722003e-06,
+          "observed_maximum": -0.0013387153582569656,
           "minimum": -0.7854,
           "maximum": 0.0,
           "status": "passed"
@@ -1597,7 +1602,7 @@
         {
           "id": "openarm_right_finger_joint2.tracking_rmse_rad_v1",
           "unit": "rad",
-          "observed": 0.01078493476104987,
+          "observed": 0.010595584911452337,
           "maximum": 0.1,
           "status": "passed"
         },
@@ -1611,7 +1616,7 @@
         {
           "id": "openarm_right_finger_joint2.peak_velocity_rad_s_v1",
           "unit": "rad/s",
-          "observed": 0.2623579556457923,
+          "observed": 0.26235795564579234,
           "maximum": 5.000001,
           "status": "passed"
         },
@@ -1619,7 +1624,7 @@
           "id": "openarm_right_finger_joint2.position_range_rad_v1",
           "unit": "rad",
           "observed_minimum": -0.5499999999999959,
-          "observed_maximum": 2.7693224194257178e-14,
+          "observed_maximum": 2.029945207007822e-13,
           "minimum": -0.7854,
           "maximum": 0.0,
           "status": "passed"
@@ -1631,75 +1636,75 @@
   "cross_backend_diagnostics": [
     {
       "joint": "openarm_right_joint1",
-      "position_delta_rmse_rad": 0.02352426352578865,
-      "maximum_position_delta_rad": 0.05704823136012971,
-      "maximum_position_delta_step": 1378,
-      "maximum_velocity_delta_rad_s": 0.2342841821653916,
-      "final_position_delta_rad": 1.0511601774993072e-05
+      "position_delta_rmse_rad": 0.0237004938770448,
+      "maximum_position_delta_rad": 0.05530207117409103,
+      "maximum_position_delta_step": 1397,
+      "maximum_velocity_delta_rad_s": 1.0854162138478978,
+      "final_position_delta_rad": 0.0003256365084948356
     },
     {
       "joint": "openarm_right_joint2",
-      "position_delta_rmse_rad": 0.015738235012101944,
-      "maximum_position_delta_rad": 0.031828618771537864,
-      "maximum_position_delta_step": 1391,
-      "maximum_velocity_delta_rad_s": 0.1610129046312973,
-      "final_position_delta_rad": 5.567212385074436e-16
+      "position_delta_rmse_rad": 0.015925967901374065,
+      "maximum_position_delta_rad": 0.03218313667937622,
+      "maximum_position_delta_step": 1393,
+      "maximum_velocity_delta_rad_s": 0.7305449947240844,
+      "final_position_delta_rad": 0.0002229213705373644
     },
     {
       "joint": "openarm_right_joint3",
-      "position_delta_rmse_rad": 0.0658295405718777,
-      "maximum_position_delta_rad": 0.3795974709086082,
-      "maximum_position_delta_step": 1255,
-      "maximum_velocity_delta_rad_s": 1.1386635893656385,
-      "final_position_delta_rad": 6.700371285606086e-16
+      "position_delta_rmse_rad": 0.008028388947180248,
+      "maximum_position_delta_rad": 0.023451747662982858,
+      "maximum_position_delta_step": 1065,
+      "maximum_velocity_delta_rad_s": 1.4978269683626848,
+      "final_position_delta_rad": 0.004054787436546224
     },
     {
       "joint": "openarm_right_joint4",
-      "position_delta_rmse_rad": 0.010030385007325272,
-      "maximum_position_delta_rad": 0.03596798408794766,
-      "maximum_position_delta_step": 116,
-      "maximum_velocity_delta_rad_s": 0.3961271576157781,
-      "final_position_delta_rad": 0.0001934540455239553
+      "position_delta_rmse_rad": 0.012578100701524198,
+      "maximum_position_delta_rad": 0.043950621269828516,
+      "maximum_position_delta_step": 109,
+      "maximum_velocity_delta_rad_s": 0.9715768577840614,
+      "final_position_delta_rad": 0.000652433257965157
     },
     {
       "joint": "openarm_right_joint5",
-      "position_delta_rmse_rad": 0.25863756485743017,
-      "maximum_position_delta_rad": 0.8711557079074429,
-      "maximum_position_delta_step": 701,
-      "maximum_velocity_delta_rad_s": 0.5851538883410486,
-      "final_position_delta_rad": 6.325260672978538e-17
+      "position_delta_rmse_rad": 0.017292812582846803,
+      "maximum_position_delta_rad": 0.03684303480548268,
+      "maximum_position_delta_step": 1064,
+      "maximum_velocity_delta_rad_s": 2.7433839003015037,
+      "final_position_delta_rad": 0.0008395314724318682
     },
     {
       "joint": "openarm_right_joint6",
-      "position_delta_rmse_rad": 0.0024373026786664283,
-      "maximum_position_delta_rad": 0.004581294308769079,
-      "maximum_position_delta_step": 1393,
-      "maximum_velocity_delta_rad_s": 0.026112365123175774,
-      "final_position_delta_rad": 1.2460666434558264e-05
+      "position_delta_rmse_rad": 0.0076699048951972895,
+      "maximum_position_delta_rad": 0.023269168296633946,
+      "maximum_position_delta_step": 1272,
+      "maximum_velocity_delta_rad_s": 0.9221343338632854,
+      "final_position_delta_rad": 0.00032593007885799223
     },
     {
       "joint": "openarm_right_joint7",
-      "position_delta_rmse_rad": 0.002892721093671321,
-      "maximum_position_delta_rad": 0.011205027523321198,
-      "maximum_position_delta_step": 1296,
-      "maximum_velocity_delta_rad_s": 0.23003414375333966,
-      "final_position_delta_rad": 1.4043758330932235e-15
+      "position_delta_rmse_rad": 0.00866773061364942,
+      "maximum_position_delta_rad": 0.02295245668907414,
+      "maximum_position_delta_step": 1380,
+      "maximum_velocity_delta_rad_s": 0.709421515466168,
+      "final_position_delta_rad": 0.004922275799358963
     },
     {
       "joint": "openarm_right_finger_joint1",
-      "position_delta_rmse_rad": 0.0014622979208330084,
-      "maximum_position_delta_rad": 0.004165075856616657,
-      "maximum_position_delta_step": 706,
-      "maximum_velocity_delta_rad_s": 0.010479333129764193,
-      "final_position_delta_rad": 0.0004819748290580683
+      "position_delta_rmse_rad": 0.00612293214430076,
+      "maximum_position_delta_rad": 0.016462508374197216,
+      "maximum_position_delta_step": 1734,
+      "maximum_velocity_delta_rad_s": 1.3669208288824133,
+      "final_position_delta_rad": 0.004563173277197463
     },
     {
       "joint": "openarm_right_finger_joint2",
-      "position_delta_rmse_rad": 0.0018009023685830541,
-      "maximum_position_delta_rad": 0.01538652366502763,
-      "maximum_position_delta_step": 25,
-      "maximum_velocity_delta_rad_s": 0.1161604054014597,
-      "final_position_delta_rad": 0.00048197482906015
+      "position_delta_rmse_rad": 0.003991154311198473,
+      "maximum_position_delta_rad": 0.01068045157565245,
+      "maximum_position_delta_step": 691,
+      "maximum_velocity_delta_rad_s": 0.12805926800332929,
+      "final_position_delta_rad": 0.0011441503015280907
     }
   ],
   "first_contract_violation": null,
