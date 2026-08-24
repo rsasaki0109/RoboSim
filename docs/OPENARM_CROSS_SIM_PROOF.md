@@ -249,3 +249,18 @@ minimum replay. Verify it without a simulator:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-dropout-robustness-lab
 ```
+
+## Physical payload fixture (in progress)
+
+The payload compiler generates content-addressed URDF variants for
+`0`, `0.10`, `0.25`, `0.50`, and `0.75 kg`. For every nonzero case it combines
+the existing hand inertia with the payload mass, offset center of mass, and box
+inertia using the parallel-axis theorem. Rapier and native MuJoCo runners accept
+the generated `--scene`, `--robot-asset`, and `--model-urdf` paths and record all
+three hashes in their output traces.
+
+Gazebo currently loads and hashes the same model, but its production adapter
+uses a velocity-servo realization. That is suitable for protocol portability,
+not payload-dynamics claims: `0.50` and `0.75 kg` produce identical velocity-
+servo trajectories. The payload lab therefore remains open until a stable
+force-based Gazebo actuator has its own limits, failure behavior, and tests.

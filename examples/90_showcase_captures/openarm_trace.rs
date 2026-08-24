@@ -276,6 +276,8 @@ struct BackendTrace<'a> {
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
     robot_asset_config_sha256: &'a str,
+    model_urdf_sha256: &'a str,
+    scene_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     fixed_delta_ticks: u64,
     joint_feedback_schema_version: u32,
@@ -306,6 +308,8 @@ struct FailureReport<'a> {
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
     robot_asset_config_sha256: &'a str,
+    model_urdf_sha256: &'a str,
+    scene_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     injection_kind: &'a str,
     injected_step: u64,
@@ -388,6 +392,8 @@ struct InputHashes<'a> {
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
     robot_asset_config_sha256: &'a str,
+    model_urdf_sha256: &'a str,
+    scene_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
 }
 
@@ -412,7 +418,11 @@ fn run() -> Result<()> {
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json");
     let mut actuation_config_path =
         repo_root.join("adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json");
-    let robot_asset_config_path = repo_root.join("assets/robots/openarm_v2_right.rne.robot.toml");
+    let mut robot_asset_config_path =
+        repo_root.join("assets/robots/openarm_v2_right.rne.robot.toml");
+    let mut model_urdf_path =
+        repo_root.join("assets/robots/openarm_description/openarm_v2_right.rne.urdf");
+    let mut scene_path = repo_root.join("assets/scenes/openarm_v2_right_validation.rne.scene.toml");
     let mut output = repo_root.join("artifacts/openarm-cross-sim");
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -422,6 +432,9 @@ fn run() -> Result<()> {
             "--actuation-config" => {
                 actuation_config_path = required_path(&mut args, "--actuation-config")?
             }
+            "--robot-asset" => robot_asset_config_path = required_path(&mut args, "--robot-asset")?,
+            "--model-urdf" => model_urdf_path = required_path(&mut args, "--model-urdf")?,
+            "--scene" => scene_path = required_path(&mut args, "--scene")?,
             "--output" => output = required_path(&mut args, "--output")?,
             other => bail!("unknown argument {other:?}"),
         }
@@ -435,6 +448,11 @@ fn run() -> Result<()> {
         .with_context(|| format!("read {}", actuation_config_path.display()))?;
     let robot_asset_config_bytes = fs::read(&robot_asset_config_path)
         .with_context(|| format!("read {}", robot_asset_config_path.display()))?;
+    let model_urdf_bytes = fs::read(&model_urdf_path)
+        .with_context(|| format!("read {}", model_urdf_path.display()))?;
+    let scene_config_bytes =
+        fs::read(&scene_path).with_context(|| format!("read {}", scene_path.display()))?;
+    validate_model_provenance(&scene_path, &robot_asset_config_path, &model_urdf_path)?;
     let controller: ControllerSpec = serde_json::from_slice(&controller_bytes)
         .with_context(|| format!("parse {}", controller_path.display()))?;
     let task: TaskSpec = serde_json::from_slice(&task_bytes)
@@ -447,6 +465,8 @@ fn run() -> Result<()> {
     let task_sha256 = sha256(&task_bytes);
     let actuation_config_sha256 = sha256(&actuation_config_bytes);
     let robot_asset_config_sha256 = sha256(&robot_asset_config_bytes);
+    let model_urdf_sha256 = sha256(&model_urdf_bytes);
+    let scene_config_sha256 = sha256(&scene_config_bytes);
     let actions = compile_actions(&controller);
     fs::create_dir_all(&output)?;
     let action_path = output.join("controller-actions.json");
@@ -469,14 +489,14 @@ fn run() -> Result<()> {
     let action_trace_sha256 = sha256(&fs::read(&action_path)?);
 
     let first = rollout(
-        &repo_root,
+        &scene_path,
         &controller,
         &actuation_config,
         &actions,
         JointFeedbackFault::None,
     )?;
     let replay = rollout(
-        &repo_root,
+        &scene_path,
         &controller,
         &actuation_config,
         &actions,
@@ -488,7 +508,7 @@ fn run() -> Result<()> {
     );
     if !has_dropout_fault(&controller) {
         let sensor_artifacts = build_sensor_validation_report(
-            &repo_root,
+            &scene_path,
             &controller,
             &actuation_config,
             &actions,
@@ -499,6 +519,8 @@ fn run() -> Result<()> {
                 controller_sha256: &controller_sha256,
                 action_trace_sha256: &action_trace_sha256,
                 robot_asset_config_sha256: &robot_asset_config_sha256,
+                model_urdf_sha256: &model_urdf_sha256,
+                scene_config_sha256: &scene_config_sha256,
                 actuation_config_sha256: &actuation_config_sha256,
             },
         )?;
@@ -553,6 +575,8 @@ fn run() -> Result<()> {
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
             robot_asset_config_sha256: &robot_asset_config_sha256,
+            model_urdf_sha256: &model_urdf_sha256,
+            scene_config_sha256: &scene_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             fixed_delta_ticks: FIXED_DELTA_TICKS,
             joint_feedback_schema_version: JointFeedback::SCHEMA_VERSION,
@@ -588,6 +612,8 @@ fn run() -> Result<()> {
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
             robot_asset_config_sha256: &robot_asset_config_sha256,
+            model_urdf_sha256: &model_urdf_sha256,
+            scene_config_sha256: &scene_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             injection_kind: &failure.kind,
             injected_step: failure.inject_at_step,
@@ -1506,15 +1532,14 @@ fn first_controller_rejection(
 }
 
 fn rollout(
-    repo_root: &Path,
+    scene: &Path,
     controller: &ControllerSpec,
     actuation_config: &ActuationConfig,
     actions: &[ActionFrame],
     fault: JointFeedbackFault,
 ) -> Result<Rollout> {
-    let scene = repo_root.join("assets/scenes/openarm_v2_right_validation.rne.scene.toml");
     let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
-        &scene,
+        scene,
         actuation_config.solver_iterations,
         rne_core::SimDuration::from_ticks(FIXED_DELTA_TICKS),
     )
@@ -1696,7 +1721,7 @@ fn feedback_bounds(controller: &ControllerSpec) -> (Vec<f64>, Vec<f64>) {
 }
 
 fn build_sensor_validation_report(
-    repo_root: &Path,
+    scene: &Path,
     controller: &ControllerSpec,
     actuation_config: &ActuationConfig,
     actions: &[ActionFrame],
@@ -1709,7 +1734,7 @@ fn build_sensor_validation_report(
         .min(actions.len());
     let fault_actions = &actions[..fault_window_end];
     let dropout = rollout(
-        repo_root,
+        scene,
         controller,
         actuation_config,
         fault_actions,
@@ -1718,7 +1743,7 @@ fn build_sensor_validation_report(
         },
     )?;
     let stuck = rollout(
-        repo_root,
+        scene,
         controller,
         actuation_config,
         fault_actions,
@@ -1937,6 +1962,8 @@ fn build_sensor_validation_report(
             "controller_sha256": hashes.controller_sha256,
             "action_trace_sha256": hashes.action_trace_sha256,
             "robot_asset_config_sha256": hashes.robot_asset_config_sha256,
+            "model_urdf_sha256": hashes.model_urdf_sha256,
+            "scene_config_sha256": hashes.scene_config_sha256,
             "actuation_config_sha256": hashes.actuation_config_sha256,
         },
         "sensor_contract": {
@@ -2301,6 +2328,40 @@ fn required_path(args: &mut impl Iterator<Item = String>, option: &str) -> Resul
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .with_context(|| format!("{option} requires a path"))
+}
+
+fn validate_model_provenance(scene: &Path, robot_asset: &Path, model_urdf: &Path) -> Result<()> {
+    let scene_value: toml::Value = toml::from_str(&fs::read_to_string(scene)?)?;
+    let declared_robot = scene_value
+        .get("robots")
+        .and_then(toml::Value::as_array)
+        .and_then(|robots| (robots.len() == 1).then_some(&robots[0]))
+        .and_then(|robot| robot.get("path"))
+        .and_then(toml::Value::as_str)
+        .context("OpenArm scene must declare exactly one robot path")?;
+    let robot_value: toml::Value = toml::from_str(&fs::read_to_string(robot_asset)?)?;
+    let declared_urdf = robot_value
+        .get("urdf")
+        .and_then(|urdf| urdf.get("path"))
+        .and_then(toml::Value::as_str)
+        .context("OpenArm robot asset must declare urdf.path")?;
+    let scene_robot = scene
+        .parent()
+        .context("OpenArm scene has no parent directory")?
+        .join(declared_robot);
+    let asset_urdf = robot_asset
+        .parent()
+        .context("OpenArm robot asset has no parent directory")?
+        .join(declared_urdf);
+    anyhow::ensure!(
+        fs::canonicalize(&scene_robot)? == fs::canonicalize(robot_asset)?,
+        "--robot-asset is not the robot referenced by --scene"
+    );
+    anyhow::ensure!(
+        fs::canonicalize(&asset_urdf)? == fs::canonicalize(model_urdf)?,
+        "--model-urdf is not the model referenced by --robot-asset"
+    );
+    Ok(())
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {

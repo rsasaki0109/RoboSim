@@ -21,6 +21,19 @@ advances exactly one 16,666,667 ns contract step.
 The checked runtime manifest records the exact locally validated Gazebo
 version. Regenerate it when deliberately qualifying another patch version.
 
+Generate deterministic physical payload fixtures with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_suite.py \
+  --output artifacts/openarm-payload/fixtures
+```
+
+The nonzero cases lump the payload into the hand inertial using the
+parallel-axis theorem and retain explicit mass, center-of-mass, inertia, model,
+scene, and runtime hashes. The current Gazebo velocity-servo adapter may verify
+model loading and protocol portability for these fixtures, but it is not
+qualified as payload-dynamics evidence.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

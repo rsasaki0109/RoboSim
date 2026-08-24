@@ -1,0 +1,15 @@
+{
+  "kind": "rne_openarm_payload_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.payload.robustness.v1",
+  "attachment_parent_link": "openarm_right_ee_base_link",
+  "attachment_origin_xyz_m": [0.055, 0.0, -0.085],
+  "payload_box_size_m": [0.08, 0.05, 0.04],
+  "payload_center_of_mass_local_m": [0.04, 0.0, 0.0],
+  "payload_mass_grid_kg": [0.0, 0.1, 0.25, 0.5, 0.75],
+  "declared_supported_payload_mass_kg": 0.5,
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "model_semantics": "rigidly_attached_payload_lumped_into_end_effector_inertial_with_parallel_axis_theorem",
+  "gazebo_actuation_scope": "model_integrity_only_until_force_based_adapter_is_stable",
+  "boundary_rule": "smallest_mass_with_any_predeclared_requirement_failure"
+}

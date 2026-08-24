@@ -602,6 +602,20 @@ violation is still capture sequence 3242, where the third consecutive
 publication is absent; the minimum replay stops there. Physical parameter
 sweeps and actuator-authority degradation remain open.
 
+The payload dimension now has a deterministic model-fixture compiler. It emits
+the same per-case URDF, robot asset, scene, and Gazebo runtime manifest for a
+fixed `[0, 0.10, 0.25, 0.50, 0.75] kg` grid. A rigid payload box is lumped into
+`openarm_right_ee_base_link` with the parallel-axis theorem, so mass, center of
+mass, and the complete inertia tensor change together instead of being
+emulated as a target offset. Rapier and native MuJoCo already show distinct,
+deterministic responses to these model hashes. The existing Gazebo adapter is
+deliberately not counted as payload-dynamics evidence: it realizes position
+targets by directly setting joint velocity, which makes its response
+mass-insensitive. A force/effort-based Gazebo actuation path must be stabilized
+and evidenced before the payload boundary can close across all three backends.
+This limitation is now an explicit actuator-realization work item, not hidden
+as cross-simulator agreement.
+
 ### Track definition of done
 
 The hardening track is complete only when:
