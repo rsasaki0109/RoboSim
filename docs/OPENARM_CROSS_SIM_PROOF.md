@@ -10,6 +10,7 @@ controller-output truncation.
 - [Browser inspector](evidence/openarm-cross-sim/evidence/replay-inspector.html)
 - [Cross-simulator report](evidence/openarm-cross-sim/evidence/cross-sim-report.json)
 - [Control-dynamics report](evidence/openarm-cross-sim/evidence/control-dynamics-report.html)
+- [Joint-feedback sensor report](evidence/openarm-cross-sim/evidence/sensor-validation-report.html)
 - [Failure Capsule manifest](evidence/openarm-cross-sim/capsule.json)
 - [Controller failure replay](evidence/openarm-cross-sim/replay/controller-failure.rne-replay)
 

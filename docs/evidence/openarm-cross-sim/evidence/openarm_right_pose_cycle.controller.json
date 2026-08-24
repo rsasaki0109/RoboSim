@@ -26,6 +26,26 @@
     "openarm_right_ee_link1",
     "openarm_right_ee_link2"
   ],
+  "observation_contract": {
+    "kind": "rne_joint_feedback",
+    "schema_version": 1,
+    "sample_period_ticks": 16666667,
+    "phase_offset_ticks": 16666667,
+    "latency_ticks": 16666667,
+    "maximum_age_ticks": 16666667,
+    "required_status": "nominal",
+    "bootstrap_policy": "reference_until_first_available"
+  },
+  "feedback_law": {
+    "kind": "joint_position_reference_pid_v1",
+    "position_error_gain": [0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.15, 0.15],
+    "velocity_damping_s": [0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001],
+    "integral_error_gain_s_inv": [0.60, 0.30, 0.20, 0.60, 0.30, 0.60, 0.20, 0.10, 0.10],
+    "maximum_integral_correction_rad": [0.03, 0.015, 0.01, 0.03, 0.015, 0.03, 0.01, 0.005, 0.005],
+    "maximum_correction_rad": [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.02, 0.02],
+    "minimum_target_rad": [-1.3963, -0.17453, -1.5708, 0.0, -1.5708, -0.7854, -1.5708, -0.7854, -0.7854],
+    "maximum_target_rad": [3.4907, 3.3161, 1.5708, 2.4435, 1.5708, 0.7854, 1.5708, 0.0, 0.0]
+  },
   "keyframes": [
     {
       "step": 0,
@@ -58,7 +78,7 @@
       "joint_position_target_rad": [2.4, 1.4, -1.0, 1.0, 1.0, -0.6, -0.8, -0.08, -0.08]
     },
     {
-      "step": 1580,
+      "step": 1500,
       "phase": "return_home",
       "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
     },

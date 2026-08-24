@@ -1,7 +1,7 @@
 {
   "kind": "rne_revolute_position_actuation_config",
   "schema_version": 1,
-  "backend_id": "rne_rapier",
+  "backend_id": "rne_native_physics",
   "motor_model": "force_based_v1",
   "solver_iterations": 16,
   "fixed_delta_ticks": 16666667,
