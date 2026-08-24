@@ -24,6 +24,7 @@ class OpenArmPayloadSuiteTests(unittest.TestCase):
             SCRIPT_DIR / "openarm_payload_experiments.json",
             ROOT / "assets/robots/openarm_description/openarm_v2_right.rne.urdf",
             SCRIPT_DIR / "openarm_right.adapter.json",
+            SCRIPT_DIR / "openarm_right.rne_actuation.json",
             output,
         )
 
@@ -79,6 +80,22 @@ class OpenArmPayloadSuiteTests(unittest.TestCase):
                 self.assertEqual(
                     MODULE.sha256(case_dir / "openarm_v2_right.payload.urdf"),
                     case["model_urdf_sha256"],
+                )
+                config = json.loads(
+                    (case_dir / "openarm_right.adapter.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(config["actuation_mode"], "effort_pd")
+                self.assertEqual(config["physics_substeps_per_control_step"], 10)
+                self.assertEqual(config["effort_joint_count"], 7)
+                self.assertEqual(config["stiffness_nm_per_rad"][0], 1840.0)
+                self.assertEqual(config["damping_nm_s_per_rad"][0], 10.8)
+                self.assertEqual(config["maximum_effort_nm"][0], 40.0)
+                world = ET.parse(case_dir / "openarm_payload.world.sdf").getroot()
+                fixed_joint = world.find("./world/joint[@name='openarm_right_world_fixed_joint']")
+                self.assertIsNotNone(fixed_joint)
+                self.assertEqual(
+                    fixed_joint.find("child").text,
+                    "openarm_v2_right::openarm_right_base_link",
                 )
 
 

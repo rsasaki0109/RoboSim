@@ -776,9 +776,13 @@ def main() -> int:
     task_sha256 = sha256(args.task)
     controller_sha256 = sha256(args.controller)
     runtime_manifest_sha256 = sha256(args.runtime_manifest)
-    adapter_config_sha256 = sha256(
-        runtime_artifact_path(args.runtime_manifest, "adapter_config")
-    )
+    adapter_config_path = runtime_artifact_path(args.runtime_manifest, "adapter_config")
+    robot_model_path = runtime_artifact_path(args.runtime_manifest, "robot_model")
+    world_path = runtime_artifact_path(args.runtime_manifest, "world")
+    adapter_config_sha256 = sha256(adapter_config_path)
+    robot_model_sha256 = sha256(robot_model_path)
+    world_sha256 = sha256(world_path)
+    adapter_config = load_json(adapter_config_path)
     if (
         actions.get("kind") != "rne_controller_action_trace"
         or actions.get("task_id") != task.get("task_id")
@@ -906,6 +910,18 @@ def main() -> int:
             "action_trace_sha256": sha256(args.actions),
             "runtime_manifest_sha256": runtime_manifest_sha256,
             "adapter_config_sha256": adapter_config_sha256,
+            "robot_model_sha256": robot_model_sha256,
+            "world_sha256": world_sha256,
+            "actuation_mode": adapter_config.get("actuation_mode", "velocity_servo"),
+            "physics_substeps_per_control_step": adapter_config.get(
+                "physics_substeps_per_control_step", 1
+            ),
+            "actuator_saturation_behavior": adapter_config.get(
+                "saturation_behavior", "velocity_clamp"
+            ),
+            "actuator_failure_behavior": adapter_config.get(
+                "failure_behavior", "reject_invalid_configuration_before_simulator_start"
+            ),
             "fixed_delta_ticks": FIXED_DELTA_TICKS,
             "joint_feedback_schema_version": 1,
             "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,

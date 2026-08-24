@@ -259,8 +259,11 @@ inertia using the parallel-axis theorem. Rapier and native MuJoCo runners accept
 the generated `--scene`, `--robot-asset`, and `--model-urdf` paths and record all
 three hashes in their output traces.
 
-Gazebo currently loads and hashes the same model, but its production adapter
-uses a velocity-servo realization. That is suitable for protocol portability,
-not payload-dynamics claims: `0.50` and `0.75 kg` produce identical velocity-
-servo trajectories. The payload lab therefore remains open until a stable
-force-based Gazebo actuator has its own limits, failure behavior, and tests.
+Payload runtimes fix the Gazebo base to the world and select a bounded
+effort-PD realization with ten physics substeps per control decision. Invalid
+gain/limit configurations are rejected before simulator startup and every
+joint effort is clamped to its declared limit. This path completes all 3,600
+decisions with exact replay and produces mass-sensitive trajectories. It is not
+yet a passing portability result: the best evaluated declared gain mapping has
+`0.2125 rad` final maximum error without payload, so controller/actuator tuning
+and the fixed payload requirements report remain in progress.

@@ -8,8 +8,11 @@
   "payload_center_of_mass_local_m": [0.04, 0.0, 0.0],
   "payload_mass_grid_kg": [0.0, 0.1, 0.25, 0.5, 0.75],
   "declared_supported_payload_mass_kg": 0.5,
+  "gazebo_physics_substeps_per_control_step": 10,
+  "gazebo_effort_stiffness_scale": 8.0,
+  "gazebo_effort_damping_scale": 4.0,
   "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
   "model_semantics": "rigidly_attached_payload_lumped_into_end_effector_inertial_with_parallel_axis_theorem",
-  "gazebo_actuation_scope": "model_integrity_only_until_force_based_adapter_is_stable",
+  "gazebo_actuation_scope": "fixed_base_effort_pd_with_ten_physics_substeps_per_control_step",
   "boundary_rule": "smallest_mass_with_any_predeclared_requirement_failure"
 }

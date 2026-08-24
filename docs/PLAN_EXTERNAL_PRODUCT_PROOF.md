@@ -607,14 +607,15 @@ the same per-case URDF, robot asset, scene, and Gazebo runtime manifest for a
 fixed `[0, 0.10, 0.25, 0.50, 0.75] kg` grid. A rigid payload box is lumped into
 `openarm_right_ee_base_link` with the parallel-axis theorem, so mass, center of
 mass, and the complete inertia tensor change together instead of being
-emulated as a target offset. Rapier and native MuJoCo already show distinct,
-deterministic responses to these model hashes. The existing Gazebo adapter is
-deliberately not counted as payload-dynamics evidence: it realizes position
-targets by directly setting joint velocity, which makes its response
-mass-insensitive. A force/effort-based Gazebo actuation path must be stabilized
-and evidenced before the payload boundary can close across all three backends.
-This limitation is now an explicit actuator-realization work item, not hidden
-as cross-simulator agreement.
+emulated as a target offset. Rapier and native MuJoCo show distinct,
+deterministic responses to these model hashes. The payload runtime now also
+fixes the Gazebo base to the world and uses bounded effort-PD realization over
+ten physics substeps per control period. It runs the complete 3,600-decision
+trace deterministically and responds to payload mass, replacing the previous
+mass-insensitive velocity-servo result. The current portable state-feedback
+controller still misses the Gazebo nominal tracking gate (`0.2125 rad` final
+maximum error at the best evaluated declared gain mapping), so tuning and a
+closed pass/fail boundary remain open rather than being hidden as agreement.
 
 ### Track definition of done
 

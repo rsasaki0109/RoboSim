@@ -6,10 +6,11 @@ fixed-step Gazebo commands. It is an adapter, not an RNE physics backend: no
 Gazebo, ROS 2, DDS, or simulator-specific type enters a core crate.
 
 The example contract exposes nine joint positions and velocities as its
-observation and accepts nine joint-position targets as its action. A bounded
-proportional servo becomes Gazebo joint-velocity commands during PreUpdate;
-positions and velocities are sampled during PostUpdate. Every accepted action
-advances exactly one 16,666,667 ns contract step.
+observation and accepts nine joint-position targets as its action. The default
+runtime uses a bounded velocity servo. A runtime may instead declare the tested
+effort-PD realization, explicit per-joint effort limits, failure behavior, and
+multiple physics substeps per 16,666,667 ns control step. Positions and
+velocities are sampled during PostUpdate.
 
 ## Requirements
 
@@ -30,9 +31,9 @@ python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_suite.py \
 
 The nonzero cases lump the payload into the hand inertial using the
 parallel-axis theorem and retain explicit mass, center-of-mass, inertia, model,
-scene, and runtime hashes. The current Gazebo velocity-servo adapter may verify
-model loading and protocol portability for these fixtures, but it is not
-qualified as payload-dynamics evidence.
+scene, and runtime hashes. Their Gazebo world fixes the robot base and selects
+bounded effort-PD actuation over ten physics substeps, so payload mass affects
+the measured trajectory. Invalid actuator declarations fail before startup.
 
 ## Run conformance
 

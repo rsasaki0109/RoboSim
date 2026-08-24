@@ -186,6 +186,7 @@ def compile_suite(
     manifest_path: Path,
     base_urdf_path: Path,
     adapter_config_path: Path,
+    actuation_config_path: Path,
     output: Path,
 ) -> dict[str, Any]:
     manifest = load_json(manifest_path)
@@ -207,7 +208,45 @@ def compile_suite(
     if any(value <= 0 for value in manifest["payload_box_size_m"]):
         raise ValueError("payload box dimensions must be positive")
     base_urdf = base_urdf_path.read_bytes()
-    adapter_config_bytes = adapter_config_path.read_bytes().replace(b"\r\n", b"\n")
+    adapter_config = load_json(adapter_config_path)
+    actuation_config = load_json(actuation_config_path)
+    joint_configs = {item["joint_name"]: item for item in actuation_config["joints"]}
+    if set(joint_configs) != set(adapter_config["joint_order"]):
+        raise ValueError("adapter and actuation joint orders differ")
+    ordered_actuation = [joint_configs[name] for name in adapter_config["joint_order"]]
+    substeps = manifest.get("gazebo_physics_substeps_per_control_step")
+    if not isinstance(substeps, int) or substeps < 1:
+        raise ValueError("invalid Gazebo physics substep count")
+    stiffness_scale = manifest.get("gazebo_effort_stiffness_scale")
+    damping_scale = manifest.get("gazebo_effort_damping_scale")
+    if any(
+        not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0
+        for value in (stiffness_scale, damping_scale)
+    ):
+        raise ValueError("invalid Gazebo effort gain scale")
+    adapter_config.update(
+        {
+            "actuation_mode": "effort_pd",
+            "effort_joint_count": 7,
+            "physics_substeps_per_control_step": substeps,
+            "stiffness_nm_per_rad": [
+                item["stiffness_nm_per_rad"] * stiffness_scale
+                for item in ordered_actuation
+            ],
+            "damping_nm_s_per_rad": [
+                item["damping_nm_s_per_rad"] * damping_scale
+                for item in ordered_actuation
+            ],
+            "maximum_effort_nm": [
+                item["max_effort_nm"] for item in ordered_actuation
+            ],
+            "source_actuation_stiffness_scale": stiffness_scale,
+            "source_actuation_damping_scale": damping_scale,
+            "saturation_behavior": "clamp_each_joint_effort_before_pre_update",
+            "failure_behavior": "reject_invalid_configuration_before_simulator_start",
+        }
+    )
+    adapter_config_bytes = (json.dumps(adapter_config, indent=2) + "\n").encode("utf-8")
     cases = []
     for mass_kg in masses:
         identifier = case_id(float(mass_kg))
@@ -247,7 +286,7 @@ path = "openarm_payload.rne.robot.toml"
 <sdf version="1.10">
   <world name="rne_openarm_payload">
     <physics name="fixed_step" type="ignored">
-      <max_step_size>0.016666667</max_step_size>
+      <max_step_size>0.0016666667</max_step_size>
       <real_time_factor>0</real_time_factor>
     </physics>
     <gravity>0 0 -9.81</gravity>
@@ -255,6 +294,10 @@ path = "openarm_payload.rne.robot.toml"
       <uri>openarm_v2_right.payload.urdf</uri>
       <name>openarm_v2_right</name>
     </include>
+    <joint name="openarm_right_world_fixed_joint" type="fixed">
+      <parent>world</parent>
+      <child>openarm_v2_right::openarm_right_base_link</child>
+    </joint>
   </world>
 </sdf>
 ''')
@@ -312,6 +355,7 @@ path = "openarm_payload.rne.robot.toml"
             "experiment_manifest_sha256": sha256(manifest_path),
             "source_model_sha256": sha256(base_urdf_path),
             "adapter_config_sha256": sha256(adapter_config_path),
+            "actuation_config_sha256": sha256(actuation_config_path),
         },
         "cases": cases,
     }
@@ -324,14 +368,36 @@ def main() -> None:
     root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--manifest", type=Path, default=root / "adapters/simulator/rne_gazebo_harmonic/openarm_payload_experiments.json")
-    parser.add_argument("--base-urdf", type=Path, default=root / "assets/robots/openarm_description/openarm_v2_right.rne.urdf")
-    parser.add_argument("--adapter-config", type=Path, default=root / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=root
+        / "adapters/simulator/rne_gazebo_harmonic/openarm_payload_experiments.json",
+    )
+    parser.add_argument(
+        "--base-urdf",
+        type=Path,
+        default=root
+        / "assets/robots/openarm_description/openarm_v2_right.rne.urdf",
+    )
+    parser.add_argument(
+        "--adapter-config",
+        type=Path,
+        default=root
+        / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json",
+    )
+    parser.add_argument(
+        "--actuation-config",
+        type=Path,
+        default=root
+        / "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
+    )
     args = parser.parse_args()
     suite = compile_suite(
         args.manifest,
         args.base_urdf,
         args.adapter_config,
+        args.actuation_config,
         args.output,
     )
     print(f"OpenArm payload suite: {len(suite['cases'])} cases -> {args.output}")

@@ -16,6 +16,8 @@ from typing import Any
 
 import gz.sim8 as gz_sim
 
+from openarm_actuation import realize_joint_command, validate_actuation
+
 
 HOST_KIND = "rne_simulator_host_frame"
 ADAPTER_KIND = "rne_simulator_adapter_frame"
@@ -86,6 +88,9 @@ class GazeboOpenArmAdapter:
             raise ValueError("observation width must be joint positions followed by velocities")
         if self.action_width != len(self.joint_names):
             raise ValueError("action width must equal configured joint count")
+        self.actuation_mode, self.physics_substeps, self.effort_joint_count = (
+            validate_actuation(self.config, len(self.joint_names))
+        )
         if self.runtime["fixed_delta_ticks"] != self.fixed_delta_ticks:
             raise ValueError("runtime and TaskSpec fixed delta differ")
         if self.runtime["simulator_version"] != gazebo_version():
@@ -220,15 +225,26 @@ class GazeboOpenArmAdapter:
         return joints
 
     def _pre_update(self, _info: gz_sim.UpdateInfo, ecm: gz_sim.EntityComponentManager) -> None:
-        gain = float(self.config["position_gain_s_inv"])
-        limit = float(self.config["maximum_velocity_rad_s"])
-        for joint, target in zip(self._joints(ecm), self.targets):
+        for index, (joint, target) in enumerate(zip(self._joints(ecm), self.targets)):
             joint.enable_position_check(ecm, True)
             joint.enable_velocity_check(ecm, True)
             position = joint.position(ecm)
             current = position[0] if position else 0.0
-            velocity = max(-limit, min(limit, gain * (target - current)))
-            joint.set_velocity(ecm, [velocity])
+            measured_velocity = joint.velocity(ecm)
+            current_velocity = measured_velocity[0] if measured_velocity else 0.0
+            command_kind, command = realize_joint_command(
+                self.config,
+                self.actuation_mode,
+                self.effort_joint_count,
+                index,
+                target,
+                current,
+                current_velocity,
+            )
+            if command_kind == "effort_nm":
+                joint.set_force(ecm, [command])
+            else:
+                joint.set_velocity(ecm, [command])
 
     def _post_update(self, _info: gz_sim.UpdateInfo, ecm: gz_sim.EntityComponentManager) -> None:
         positions: list[float] = []
@@ -256,7 +272,7 @@ class GazeboOpenArmAdapter:
         if payload["action_sequence"] != self.next_action_sequence:
             return self.rejected(request, "action_sequence_mismatch")
         self.targets = [float(value) for value in values]
-        if not self.server.run(True, 1, False):
+        if not self.server.run(True, self.physics_substeps, False):
             raise RuntimeError("Gazebo failed to advance one iteration")
         self.step_count += 1
         self.next_action_sequence += 1
