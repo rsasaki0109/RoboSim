@@ -15,6 +15,7 @@ from typing import Any
 
 FINAL_TRACKING_TOLERANCE_RAD = 0.01
 FINAL_CROSS_BACKEND_POSITION_TOLERANCE_RAD = 0.01
+CONTROLLER_REPRODUCTION_TOLERANCE_RAD = 1.0e-12
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +62,87 @@ def check(check_id: str, unit: str, observed: float, maximum: float) -> dict[str
     }
 
 
+def verify_controller_execution(
+    trace: dict[str, Any], controller: dict[str, Any], actions: dict[str, Any]
+) -> dict[str, Any]:
+    """Independently reproduce every artifact-defined feedback decision."""
+    observations = trace["observations"]
+    references = actions["actions"]
+    law = controller["feedback_law"]
+    if trace.get("controller_execution") != "artifact_defined_joint_feedback_pd":
+        raise ValueError(f"{trace['backend_id']} did not declare feedback execution")
+    maximum_correction_delta = 0.0
+    maximum_target_delta = 0.0
+    timing_mismatches = 0
+    for index, (frame, reference_frame) in enumerate(zip(observations, references)):
+        reference = reference_frame["joint_position_target_rad"]
+        if frame["joint_reference_position_rad"] != reference:
+            raise ValueError(
+                f"{trace['backend_id']} controller reference drifted at step {index + 1}"
+            )
+        if index < 2:
+            source = None
+            expected_correction = [0.0] * len(reference)
+            expected_sequence = None
+            expected_age = None
+            expected_bootstrap = True
+        else:
+            source = observations[index - 2]
+            expected_correction = [
+                max(-limit, min(limit, gain * (desired - position) - damping * velocity))
+                for desired, position, velocity, gain, damping, limit in zip(
+                    reference,
+                    source["joint_position_rad"],
+                    source["joint_velocity_rad_s"],
+                    law["position_error_gain"],
+                    law["velocity_damping_s"],
+                    law["maximum_correction_rad"],
+                )
+            ]
+            expected_sequence = source["step"]
+            expected_age = controller["observation_contract"]["latency_ticks"]
+            expected_bootstrap = False
+        expected_target = [
+            max(minimum, min(maximum, desired + correction))
+            for desired, correction, minimum, maximum in zip(
+                reference,
+                expected_correction,
+                law["minimum_target_rad"],
+                law["maximum_target_rad"],
+            )
+        ]
+        maximum_correction_delta = max(
+            maximum_correction_delta,
+            *(abs(actual - expected) for actual, expected in zip(
+                frame["joint_feedback_correction_rad"], expected_correction
+            )),
+        )
+        maximum_target_delta = max(
+            maximum_target_delta,
+            *(abs(actual - expected) for actual, expected in zip(
+                frame["joint_position_target_rad"], expected_target
+            )),
+        )
+        if (
+            frame["controller_observation_sequence"] != expected_sequence
+            or frame["controller_observation_age_ticks"] != expected_age
+            or frame["controller_bootstrap"] != expected_bootstrap
+            or frame.get("sensor_status") != "nominal"
+        ):
+            timing_mismatches += 1
+    return {
+        "backend_id": trace["backend_id"],
+        "law": law["kind"],
+        "input": "typed_joint_feedback_only",
+        "evaluated_frames": len(observations),
+        "feedback_frames": max(0, len(observations) - 2),
+        "bootstrap_frames": min(2, len(observations)),
+        "timing_mismatch_count": timing_mismatches,
+        "maximum_recomputed_correction_delta_rad": maximum_correction_delta,
+        "maximum_recomputed_target_delta_rad": maximum_target_delta,
+    }
+
+
 def main() -> int:
     args = parse_args()
     output = args.output.resolve()
@@ -87,6 +169,7 @@ def main() -> int:
     )
     task = load(task_path)
     controller = load(controller_path)
+    actions = load(output / "controller-actions.json")
 
     identities = [rapier, gazebo, rapier_failure, gazebo_failure]
     for value in identities:
@@ -115,6 +198,10 @@ def main() -> int:
             )
     if len(rapier["observations"]) != len(gazebo["observations"]):
         raise ValueError("backend traces differ in length")
+    controller_evidence = [
+        verify_controller_execution(backend, controller, actions)
+        for backend in (rapier, gazebo)
+    ]
 
     transient_delta = 0.0
     transient_step = 0
@@ -171,6 +258,30 @@ def main() -> int:
             FINAL_CROSS_BACKEND_POSITION_TOLERANCE_RAD,
         ),
     ]
+    for evidence in controller_evidence:
+        backend_id = evidence["backend_id"]
+        tolerance_checks.extend(
+            [
+                check(
+                    f"{backend_id}_controller_timing_mismatch_v1",
+                    "frame",
+                    evidence["timing_mismatch_count"],
+                    0.0,
+                ),
+                check(
+                    f"{backend_id}_controller_correction_reproduction_v1",
+                    "rad",
+                    evidence["maximum_recomputed_correction_delta_rad"],
+                    CONTROLLER_REPRODUCTION_TOLERANCE_RAD,
+                ),
+                check(
+                    f"{backend_id}_controller_target_reproduction_v1",
+                    "rad",
+                    evidence["maximum_recomputed_target_delta_rad"],
+                    CONTROLLER_REPRODUCTION_TOLERANCE_RAD,
+                ),
+            ]
+        )
     failure_checks = [
         check(
             "first_violation_step_delta_v1",
@@ -287,9 +398,10 @@ def main() -> int:
         "status": "passed" if passed else "failed",
         "task_id": task["task_id"],
         "controller_id": controller["controller_id"],
-        "comparison_contract": "same_task_controller_action_trace_and_named_si_tolerances",
+        "comparison_contract": "same_task_controller_reference_and_artifact_defined_sensor_feedback_with_named_si_tolerances",
         "inputs": inputs,
         "backend_outcomes": backend_outcomes,
+        "controller_execution_evidence": controller_evidence,
         "tolerance_checks": tolerance_checks,
         "intentional_failures": [rapier_failure, gazebo_failure],
         "failure_tolerance_checks": failure_checks,

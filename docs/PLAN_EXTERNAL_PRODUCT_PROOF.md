@@ -341,10 +341,12 @@ increased.
    sample phase, and age. Produce nominal, one-step-delay, dropout, stuck-value,
    and effort-saturation golden streams and the first headless
    `sensor-validation-report`.
-3. **Sensor-in-the-loop control:** remove privileged backend-state feedback from
-   the OpenArm reference controller. Run the unchanged timestamped observation
-   and command streams through Rapier, MuJoCo, and Gazebo, retaining the first
-   measurement, realization, or plant divergence.
+3. **In progress -- sensor-in-the-loop control:** remove privileged
+   backend-state feedback from the OpenArm reference controller. Run the same
+   observation contract and controller artifact through Rapier, MuJoCo, and
+   Gazebo, retaining each backend-derived command stream and the first
+   measurement, realization, or plant divergence. Rapier and Gazebo are now
+   complete; native MuJoCo remains the slice gate.
 4. **IMU contract and estimator fixture:** implement stationary and prescribed
    motion tests, seeded bias/noise/random walk, mount-frame validation, latency
    and dropout cases, then add a deterministic complementary or Kalman-filter
@@ -378,9 +380,10 @@ command reconstruction is not mislabeled as measurement. The headless OpenArm
 `sensor-validation-report` now binds the sensor contract and all input hashes,
 retains deterministic nominal/replay/dropout/stuck stream hashes, identifies
 drop sequence 307 at the first observable gap and stuck sequence 307 from its
-first status, and records 2776 observable saturated channel-samples. Its static
-HTML companion is self-contained and browser-readable. Slice 3 remains the work
-of making the controller law consume the same observations across backends.
+first status, and records 2842 observable saturated channel-samples in the
+sensor-in-the-loop run. Its static HTML companion is self-contained and
+browser-readable. Slice 3 advances that measurement boundary into the
+controller execution path described below.
 
 The Rapier OpenArm trace now exercises the slice-3 observation boundary with a
 one-control-period latency: scoring consumes only `latest_available` frames and
@@ -390,18 +393,29 @@ state. A zero-delta calibration check against the backend reference is retained
 separately from the controller-visible signal. The trace now passes the
 TaskSpec's exact integer fixed-step duration into the plant instead of claiming
 `16,666,667` ticks while running the generic 60 Hz integer-divided
-`16,666,666`-tick default. Remaining slice-3 work is to make the controller law,
-not only the evaluator, consume the delayed stream and to carry the same schema
-through MuJoCo and Gazebo.
+`16,666,666`-tick default.
+
+Slice 3 now has an artifact-defined, bounded joint-space PD reference correction
+that consumes only typed, available joint feedback. Rapier and Gazebo each
+execute 1,798 feedback decisions after two declared bootstrap frames. The
+cross-simulator report independently recomputes every correction and emitted
+target from the retained observation and controller artifact, with zero timing
+mismatches and zero numerical reproduction delta in both backends. The final
+reference errors are `0.001523 rad` for Rapier and `0.000766 rad` for Gazebo;
+their final joint-position delta is `0.001523 rad`. Native MuJoCo execution is
+still required before slice 3 is complete.
 
 Honoring the exact TaskSpec period exposed a real terminal tracking failure
 (`0.0150 rad` against `0.01 rad`). The controller now reaches its unchanged
 return-home target at step 1500 instead of 1580, leaving 300 steps for settling
 inside the unchanged 1800-step episode. Without increasing tolerance, gain, or
-effort limits, the resulting Rapier/Gazebo final errors are `0.005588 rad` and
-`0.001070 rad`, and the final cross-backend delta is `0.006075 rad`. The retained
-Rapier run contains 1800 typed observations with zero sample-phase error and an
-exact one-period (`16,666,667 ticks`) observation age for every frame.
+effort limits, the feed-forward baseline produced Rapier/Gazebo final errors of
+`0.005588 rad` and `0.001070 rad`, with a final cross-backend delta of
+`0.006075 rad`. The sensor-in-the-loop successor improves those values as
+recorded above without changing the TaskSpec tolerance or actuator effort
+limits. The retained Rapier run contains 1800 typed observations with zero
+sample-phase error and an exact one-period (`16,666,667 ticks`) observation age
+for every frame.
 
 ### Track definition of done
 

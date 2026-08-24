@@ -52,9 +52,13 @@ not count as independent third-party adapter evidence.
 
 ## Run the same OpenArm controller on Rapier and Gazebo
 
-The portable pose-cycle controller is compiled once into an exact action trace.
-RNE/Rapier and Gazebo then consume those identical bytes; neither backend owns
-a private copy of the trajectory.
+The portable pose-cycle controller owns one content-addressed reference
+trajectory, typed joint-feedback timing contract, and bounded joint-space PD
+correction law. RNE/Rapier and Gazebo execute that same controller artifact
+against their own observations; neither backend owns a private trajectory or
+gain set. The generated `controller-actions.json` is therefore the shared
+reference input, while each backend trace retains the observation sequence,
+age, correction, and emitted target for every decision.
 
 The Rapier command also writes `sensor-validation-report.json` and a
 self-contained `sensor-validation-report.html`, plus the complete
@@ -62,8 +66,12 @@ self-contained `sensor-validation-report.html`, plus the complete
 gate reruns the real OpenArm plant for nominal replay, sequence-307 dropout, and
 sequence-307 stuck-value cases; it verifies exact one-period DataBus latency,
 zero sampling phase error, backend calibration, explicit unavailable effort
-measurements, and observable actuator saturation. A failed check is written to
-both reports before the command exits non-zero.
+measurements, observable actuator saturation, two declared bootstrap frames,
+and 1,798 sensor-feedback decisions. The same evidence proves fail-closed
+controller behavior at action step 309: sequence-307 dropout exceeds the
+one-period age contract, while sequence-307 stuck feedback violates the
+required nominal status. A failed check is written to both reports before the
+command exits non-zero.
 
 ```bash
 cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
@@ -78,12 +86,15 @@ python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_control_dynamics_re
   --output artifacts/openarm-cross-sim
 ```
 
-The successful comparison gates both final tracking errors and the final
-cross-backend joint delta with named radian tolerances. Maximum transient
-divergence is retained as a non-gating dynamics diagnostic. The intentional
-controller fault truncates the nine-element action at step 307; both RNE and
-Gazebo identify that exact first violation, and Gazebo proves that rejection
-did not advance state before accepting the corrected action.
+The successful comparison independently recomputes all 1,800 controller
+decisions from the artifact and each backend's retained typed observation. It
+requires zero timing mismatches and at most `1e-12 rad` reproduction error,
+then gates both final reference-tracking errors and the final cross-backend
+joint delta with named radian tolerances. Maximum transient divergence is
+retained as a non-gating dynamics diagnostic. The intentional controller fault
+truncates the nine-element action at step 307; both RNE and Gazebo identify that
+exact first violation, and Gazebo proves that rejection did not advance state
+before accepting the corrected action.
 
 The control-dynamics report evaluates the complete trajectory rather than only
 the final pose. It binds the RNE force-based actuation configuration and Gazebo

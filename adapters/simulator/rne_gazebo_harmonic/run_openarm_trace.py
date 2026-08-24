@@ -154,11 +154,71 @@ def open_and_reset(
         raise RuntimeError("Gazebo adapter reset contract drifted")
 
 
+def controller_decision(
+    controller: dict[str, Any],
+    reference: list[float],
+    observation: dict[str, Any] | None,
+    consumed_at_ticks: int,
+) -> dict[str, Any]:
+    """Evaluate the artifact-defined feedback law without simulator-private state."""
+    if "observation_contract" not in controller and "feedback_law" not in controller:
+        return {
+            "target": reference.copy(),
+            "correction": [0.0] * len(reference),
+            "observation_sequence": None,
+            "observation_age_ticks": None,
+            "bootstrap": False,
+        }
+    if observation is None:
+        return {
+            "target": reference.copy(),
+            "correction": [0.0] * len(reference),
+            "observation_sequence": None,
+            "observation_age_ticks": None,
+            "bootstrap": True,
+        }
+    contract = controller["observation_contract"]
+    if observation["sensor_status"] != contract["required_status"]:
+        raise RuntimeError("OpenArm controller rejected non-nominal joint feedback")
+    age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
+    if age_ticks < 0 or age_ticks > contract["maximum_age_ticks"]:
+        raise RuntimeError("OpenArm controller rejected stale or future joint feedback")
+    law = controller["feedback_law"]
+    correction = [
+        max(-limit, min(limit, gain * (desired - position) - damping * velocity))
+        for desired, position, velocity, gain, damping, limit in zip(
+            reference,
+            observation["joint_position_rad"],
+            observation["joint_velocity_rad_s"],
+            law["position_error_gain"],
+            law["velocity_damping_s"],
+            law["maximum_correction_rad"],
+        )
+    ]
+    target = [
+        max(minimum, min(maximum, desired + delta))
+        for desired, delta, minimum, maximum in zip(
+            reference,
+            correction,
+            law["minimum_target_rad"],
+            law["maximum_target_rad"],
+        )
+    ]
+    return {
+        "target": target,
+        "correction": correction,
+        "observation_sequence": observation["step"],
+        "observation_age_ticks": age_ticks,
+        "bootstrap": False,
+    }
+
+
 def run_success(
     args: argparse.Namespace,
     task: dict[str, Any],
     task_sha256: str,
     action_artifact: dict[str, Any],
+    controller: dict[str, Any],
     session: str,
 ) -> tuple[list[dict[str, Any]], int]:
     process = AdapterProcess(args.adapter, args.runtime_manifest, args.task)
@@ -167,6 +227,13 @@ def run_success(
     observations: list[dict[str, Any]] = []
     final_digest = 0
     for action in action_artifact["actions"]:
+        delayed_observation = observations[-2] if len(observations) >= 2 else None
+        decision = controller_decision(
+            controller,
+            action["joint_position_target_rad"],
+            delayed_observation,
+            (action["step"] - 1) * FIXED_DELTA_TICKS,
+        )
         payload = process.exchange(
             host_frame(
                 session,
@@ -174,7 +241,7 @@ def run_success(
                 {
                     "type": "step",
                     "action_sequence": action["action_sequence"],
-                    "values": action["joint_position_target_rad"],
+                    "values": decision["target"],
                 },
             )
         )["payload"]
@@ -193,12 +260,28 @@ def run_success(
             abs(actual - expected)
             for actual, expected in zip(positions, action["joint_position_target_rad"])
         )
+        maximum_actuator_error = max(
+            abs(actual - expected)
+            for actual, expected in zip(positions, decision["target"])
+        )
         observations.append(
             {
                 "step": action["step"],
                 "sim_time_ticks": action["sim_time_ticks"],
+                "sensor_status": "nominal",
+                "controller_observation_sequence": decision["observation_sequence"],
+                "controller_observation_age_ticks": decision[
+                    "observation_age_ticks"
+                ],
+                "controller_bootstrap": decision["bootstrap"],
                 "joint_position_rad": positions,
                 "joint_velocity_rad_s": velocities,
+                "joint_reference_position_rad": action[
+                    "joint_position_target_rad"
+                ],
+                "joint_position_target_rad": decision["target"],
+                "joint_feedback_correction_rad": decision["correction"],
+                "maximum_actuator_tracking_error_rad": maximum_actuator_error,
                 "maximum_tracking_error_rad": maximum_error,
             }
         )
@@ -229,7 +312,9 @@ def run_intentional_failure(
     joint_count = len(action_artifact["action_joint_order"])
     open_and_reset(process, session, task, task_sha256, 2 * joint_count, joint_count)
     actions = action_artifact["actions"]
-    for action in actions[: inject_step - 1]:
+    for action, clean in zip(
+        actions[: inject_step - 1], clean_observations[: inject_step - 1]
+    ):
         payload = process.exchange(
             host_frame(
                 session,
@@ -237,7 +322,7 @@ def run_intentional_failure(
                 {
                     "type": "step",
                     "action_sequence": action["action_sequence"],
-                    "values": action["joint_position_target_rad"],
+                    "values": clean["joint_position_target_rad"],
                 },
             )
         )["payload"]
@@ -251,7 +336,9 @@ def run_intentional_failure(
             {
                 "type": "step",
                 "action_sequence": injected["action_sequence"],
-                "values": injected["joint_position_target_rad"][:-1],
+                "values": clean_observations[inject_step - 1][
+                    "joint_position_target_rad"
+                ][:-1],
             },
         )
     )["payload"]
@@ -264,7 +351,9 @@ def run_intentional_failure(
             {
                 "type": "step",
                 "action_sequence": injected["action_sequence"],
-                "values": injected["joint_position_target_rad"],
+                "values": clean_observations[inject_step - 1][
+                    "joint_position_target_rad"
+                ],
             },
         )
     )["payload"]
@@ -333,14 +422,42 @@ def main() -> int:
         or actions.get("controller_id") != controller.get("controller_id")
         or actions.get("controller_sha256") != controller_sha256
         or actions.get("fixed_delta_ticks") != FIXED_DELTA_TICKS
+        or actions.get("action_semantics")
+        != "reference_trajectory_before_sensor_feedback"
         or actions.get("action_joint_order") != controller.get("action_joint_order")
     ):
         raise ValueError("compiled action trace is not bound to this TaskSpec/controller")
+    joint_count = len(actions["action_joint_order"])
+    contract = controller.get("observation_contract")
+    law = controller.get("feedback_law")
+    vector_fields = (
+        "position_error_gain",
+        "velocity_damping_s",
+        "maximum_correction_rad",
+        "minimum_target_rad",
+        "maximum_target_rad",
+    )
+    feedback_enabled = contract is not None or law is not None
+    if feedback_enabled and (
+        not isinstance(contract, dict)
+        or not isinstance(law, dict)
+        or contract.get("kind") != "rne_joint_feedback"
+        or contract.get("schema_version") != 1
+        or contract.get("sample_period_ticks") != FIXED_DELTA_TICKS
+        or contract.get("phase_offset_ticks") != FIXED_DELTA_TICKS
+        or contract.get("latency_ticks") != FIXED_DELTA_TICKS
+        or contract.get("maximum_age_ticks") != FIXED_DELTA_TICKS
+        or contract.get("required_status") != "nominal"
+        or contract.get("bootstrap_policy") != "reference_until_first_available"
+        or law.get("kind") != "joint_position_reference_pd_v1"
+        or any(len(law.get(field, [])) != joint_count for field in vector_fields)
+    ):
+        raise ValueError("unsupported OpenArm controller observation/feedback contract")
     first, first_digest = run_success(
-        args, task, task_sha256, actions, "rne.openarm.gazebo.success-a.v1"
+        args, task, task_sha256, actions, controller, "rne.openarm.gazebo.success-a.v1"
     )
     replay, replay_digest = run_success(
-        args, task, task_sha256, actions, "rne.openarm.gazebo.success-b.v1"
+        args, task, task_sha256, actions, controller, "rne.openarm.gazebo.success-b.v1"
     )
     if first != replay or first_digest != replay_digest:
         raise RuntimeError("Gazebo replay differed for the exact same controller trace")
@@ -369,6 +486,14 @@ def main() -> int:
             "runtime_manifest_sha256": runtime_manifest_sha256,
             "adapter_config_sha256": adapter_config_sha256,
             "fixed_delta_ticks": FIXED_DELTA_TICKS,
+            "joint_feedback_schema_version": 1,
+            "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,
+            "observation_source": "adapter_task_tensor_to_typed_joint_feedback",
+            "controller_execution": (
+                "artifact_defined_joint_feedback_pd"
+                if feedback_enabled
+                else "open_loop_reference"
+            ),
             "final_state_digest": first_digest,
             "replay_final_state_digest": replay_digest,
             "replay_match": True,
