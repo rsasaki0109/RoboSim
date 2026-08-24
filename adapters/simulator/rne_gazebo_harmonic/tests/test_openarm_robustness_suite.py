@@ -59,6 +59,9 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertEqual(MODULE.case_id(0.12), "bias-120mrad")
         with self.assertRaisesRegex(ValueError, "whole milliradians"):
             MODULE.case_id(0.0005)
+        self.assertEqual(MODULE.rate_limit_case_id(0.15), "rate-150mrad-s")
+        with self.assertRaisesRegex(ValueError, "milliradians per second"):
+            MODULE.rate_limit_case_id(0.0005)
 
     def test_sensor_bias_grid_preserves_raw_sensor_and_disables_actuator_bias(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
@@ -160,11 +163,56 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         history = [[step / start_step] * width for step in range(1, start_step + 1)]
         current = history[-1]
         applied, disturbance = RUNNER.apply_actuator_disturbance(
-            controller, start_step, current, history
+            controller, start_step, current, history, history[:-1]
         )
         self.assertEqual(applied[joint_index], (start_step - 2) / start_step)
         self.assertEqual(
             disturbance[joint_index], (start_step - 2) / start_step - 1.0
+        )
+        self.assertTrue(
+            all(
+                applied[index] == current[index]
+                for index in range(width)
+                if index != joint_index
+            )
+        )
+
+    def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "actuator_command_rate_limit",
+        )
+        self.assertEqual(suite["dimension_id"], "actuator_command_rate_limit")
+        self.assertEqual(
+            [
+                controller["disturbance_contract"]["maximum_rate_rad_s"]
+                for controller in controllers.values()
+            ],
+            [0.4, 0.25, 0.15, 0.1, 0.05],
+        )
+        controller = controllers["rate-050mrad-s"]
+        width = len(controller["action_joint_order"])
+        joint_index = controller["action_joint_order"].index("openarm_right_joint5")
+        start_step = controller["disturbance_contract"]["start_step"]
+        previous = [0.0] * width
+        current = [0.0] * width
+        current[joint_index] = 0.1
+        applied, disturbance = RUNNER.apply_actuator_disturbance(
+            controller,
+            start_step,
+            current,
+            [current] * start_step,
+            [previous] * (start_step - 1),
+        )
+        maximum_delta_rad = 0.05 * RUNNER.FIXED_DELTA_TICKS / 1_000_000_000.0
+        self.assertAlmostEqual(applied[joint_index], maximum_delta_rad)
+        self.assertAlmostEqual(
+            disturbance[joint_index], maximum_delta_rad - current[joint_index]
         )
         self.assertTrue(
             all(

@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
         choices=(
             "actuator_target_bias",
             "actuator_command_delay",
+            "actuator_command_rate_limit",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         ),
@@ -100,6 +101,15 @@ def delay_case_id(delay_steps: int) -> str:
     return f"delay-{delay_steps:03d}steps"
 
 
+def rate_limit_case_id(maximum_rate_rad_s: float) -> str:
+    milliradians_per_second = round(maximum_rate_rad_s * 1000.0)
+    if not math.isclose(
+        maximum_rate_rad_s, milliradians_per_second / 1000.0, abs_tol=1e-12
+    ):
+        raise ValueError("rate limits must resolve to whole milliradians per second")
+    return f"rate-{milliradians_per_second:03d}mrad-s"
+
+
 def compile_robustness_suite(
     compiler: Any,
     robustness_path: Path,
@@ -122,25 +132,48 @@ def compile_robustness_suite(
         raise ValueError("unsupported OpenArm robustness manifest")
     dimension = manifest.get("dimensions", {}).get(dimension_id, {})
     values = dimension.get("values")
+    supported_dimensions = {
+        "actuator_target_bias",
+        "actuator_command_delay",
+        "actuator_command_rate_limit",
+        "joint_position_measurement_bias",
+        "joint_feedback_publication_dropout",
+    }
+    integer_dimension = dimension_id in {
+        "actuator_command_delay",
+        "joint_feedback_publication_dropout",
+    }
+    if dimension_id == "actuator_command_rate_limit":
+        grid_valid = (
+            isinstance(values, list)
+            and len(values) >= 3
+            and values == sorted(set(values), reverse=True)
+            and all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and value > 0.0
+                for value in values
+            )
+            and dimension.get("severity_order") == "descending_maximum_rate_rad_s"
+        )
+    else:
+        grid_valid = (
+            isinstance(values, list)
+            and len(values) >= 3
+            and values == sorted(set(values))
+            and values[0] == 0
+            and all(
+                isinstance(value, int) and value >= 0
+                if integer_dimension
+                else isinstance(value, float) and math.isfinite(value)
+                for value in values
+            )
+        )
     if (
         dimension_id
-        not in {
-            "actuator_target_bias",
-            "actuator_command_delay",
-            "joint_position_measurement_bias",
-            "joint_feedback_publication_dropout",
-        }
-        or not isinstance(values, list)
-        or len(values) < 3
-        or values != sorted(set(values))
-        or values[0] != 0
-        or not all(
-            isinstance(value, int) and value >= 0
-            if dimension_id
-            in {"actuator_command_delay", "joint_feedback_publication_dropout"}
-            else isinstance(value, float) and math.isfinite(value)
-            for value in values
-        )
+        not in supported_dimensions
+        or not grid_valid
     ):
         raise ValueError("invalid robustness grid")
     identities = {
@@ -151,6 +184,10 @@ def compile_robustness_suite(
         "actuator_command_delay": (
             "actuator_command_transport_delay_pulse_v1",
             "actuator_transport_delay",
+        ),
+        "actuator_command_rate_limit": (
+            "actuator_command_slew_rate_limit_pulse_v1",
+            "actuator_rate_limit",
         ),
         "joint_position_measurement_bias": (
             "additive_joint_position_bias_pulse_v1",
@@ -170,6 +207,7 @@ def compile_robustness_suite(
     requirement_ids = {item["id"] for item in requirements.get("requirements", [])}
     evaluation_key = {
         "actuator_command_delay": "delay_evaluation",
+        "actuator_command_rate_limit": "rate_limit_evaluation",
         "joint_feedback_publication_dropout": "availability_evaluation",
     }.get(dimension_id, "evaluation")
     evaluation = manifest[evaluation_key]
@@ -185,6 +223,8 @@ def compile_robustness_suite(
             identifier = case_id(value)
         elif dimension_id == "actuator_command_delay":
             identifier = delay_case_id(value)
+        elif dimension_id == "actuator_command_rate_limit":
+            identifier = rate_limit_case_id(value)
         elif dimension_id == "joint_position_measurement_bias":
             identifier = sensor_case_id(value)
         else:
@@ -212,6 +252,23 @@ def compile_robustness_suite(
                 if key not in {"unit", "values"}
             }
             contract["delay_steps"] = value
+            controller["disturbance_contract"] = contract
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_step",
+                "end_step",
+                "application_order",
+                "controller_visibility",
+            )
+        elif dimension_id == "actuator_command_rate_limit":
+            contract = {
+                key: item
+                for key, item in dimension.items()
+                if key not in {"unit", "values", "severity_order"}
+            }
+            contract["maximum_rate_rad_s"] = value
             controller["disturbance_contract"] = contract
             fields = (
                 "kind",
@@ -321,6 +378,8 @@ def main() -> int:
             dimension_value = controller["disturbance_contract"]["offset_rad"]
         elif args.dimension == "actuator_command_delay":
             dimension_value = controller["disturbance_contract"]["delay_steps"]
+        elif args.dimension == "actuator_command_rate_limit":
+            dimension_value = controller["disturbance_contract"]["maximum_rate_rad_s"]
         elif args.dimension == "joint_position_measurement_bias":
             dimension_value = controller["measurement_fault_contract"]["offset_rad"]
         else:
@@ -338,6 +397,8 @@ def main() -> int:
             declaration["consecutive_dropped_frames"] = dimension_value
         elif args.dimension == "actuator_command_delay":
             declaration["delay_steps"] = dimension_value
+        elif args.dimension == "actuator_command_rate_limit":
+            declaration["maximum_rate_rad_s"] = dimension_value
         else:
             declaration["offset_rad"] = dimension_value
         suite["cases"].append(declaration)

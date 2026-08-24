@@ -492,6 +492,7 @@ def apply_actuator_disturbance(
     step: int,
     controller_target: list[float],
     controller_target_history: list[list[float]],
+    applied_target_history: list[list[float]],
 ) -> tuple[list[float], list[float]]:
     """Apply a declared plant-input disturbance after the controller boundary."""
     disturbance = [0.0] * len(controller_target)
@@ -534,6 +535,16 @@ def apply_actuator_disturbance(
             and contract["delay_steps"] >= 0
             and contract["start_step"] > contract["delay_steps"]
         )
+    elif kind == "actuator_command_slew_rate_limit_pulse_v1":
+        valid_specific = (
+            set(contract) == common_keys | {"maximum_rate_rad_s"}
+            and contract["classification"] == "actuator_rate_limit"
+            and isinstance(contract["maximum_rate_rad_s"], (int, float))
+            and not isinstance(contract["maximum_rate_rad_s"], bool)
+            and math.isfinite(contract["maximum_rate_rad_s"])
+            and contract["maximum_rate_rad_s"] > 0.0
+            and contract["start_step"] > 1
+        )
     else:
         valid_specific = False
     if not valid_specific:
@@ -543,7 +554,7 @@ def apply_actuator_disturbance(
         if kind == "additive_actuator_target_bias_pulse_v1":
             disturbance[index] = contract["offset_rad"]
             applied[index] += disturbance[index]
-        else:
+        elif kind == "actuator_command_transport_delay_pulse_v1":
             source_step = step - contract["delay_steps"]
             try:
                 applied[index] = controller_target_history[source_step - 1][index]
@@ -551,6 +562,20 @@ def apply_actuator_disturbance(
                 raise RuntimeError(
                     "actuator command delay source step is absent from history"
                 ) from error
+            disturbance[index] = applied[index] - controller_target[index]
+        else:
+            if not applied_target_history:
+                raise RuntimeError(
+                    "actuator command rate limit has no previous applied target"
+                )
+            previous = applied_target_history[-1][index]
+            maximum_delta_rad = (
+                contract["maximum_rate_rad_s"] * FIXED_DELTA_TICKS / 1_000_000_000.0
+            )
+            applied[index] = min(
+                max(controller_target[index], previous - maximum_delta_rad),
+                previous + maximum_delta_rad,
+            )
             disturbance[index] = applied[index] - controller_target[index]
     if not all(math.isfinite(value) and -3.0 <= value <= 3.0 for value in applied):
         raise RuntimeError("disturbed OpenArm target violates TaskSpec bounds")
@@ -583,6 +608,7 @@ def run_success(
     previous_input_target: list[float | None] = [None] * joint_count
     previous_previous_input_target: list[float | None] = [None] * joint_count
     controller_target_history: list[list[float]] = []
+    applied_target_history: list[list[float]] = []
     last_accepted_target = action_artifact["actions"][0]["joint_position_target_rad"].copy()
     recovering_from_rejection = False
     for action in action_artifact["actions"]:
@@ -617,7 +643,9 @@ def run_success(
             action["step"],
             decision["target"],
             controller_target_history,
+            applied_target_history,
         )
+        applied_target_history.append(applied_target.copy())
         actuator_command_saturated = [
             abs(
                 adapter_config["position_gain_s_inv"] * (target - position)

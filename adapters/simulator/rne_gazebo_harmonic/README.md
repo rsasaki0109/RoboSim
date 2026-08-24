@@ -433,3 +433,39 @@ cargo run --locked -p showcase_captures \
   --trace artifacts/openarm-command-delay-robustness-lab/delay-003steps/rne_rapier/rapier-success-trace.json \
   --output artifacts/openarm-command-delay-robustness-lab/report/minimum-command-delay-failure.rne-replay
 ```
+
+## Sweep the OpenArm actuator command slew-rate limit
+
+The fifth robustness dimension applies a physical command slew-rate limit to
+right joint 5 after controller limits and before backend actuation. Each
+applied target is clamped against the previous applied target using the fixed
+control period, so the contract is expressed in `rad/s` rather than an
+abstract severity value:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_rate_limit \
+  --output artifacts/openarm-command-rate-limit-robustness-lab
+```
+
+The descending `[0.40, 0.25, 0.15, 0.10, 0.05] rad/s` grid exercises steps
+1298 through 1357, where all three backends issue changing joint-5 commands.
+`0.15 rad/s` is the last supported case: Rapier, native MuJoCo, and Gazebo
+perform 43, 42, and 38 limited applications respectively while passing peak,
+IAE, and recovery gates. `0.10 rad/s` is the first unsupported case and limits
+60, 59, and 57 applications. Every backend localizes the first contract
+deviation to step 1298 against the fixed `0.15 rad/s` minimum. The browser
+report independently reconstructs the recursive previous-applied-target
+relationship for both boundary cases and obtains zero realization delta on all
+six traces; the later closed-loop IAE effect remains a separate check.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-rate-limit-robustness-lab \
+  --output artifacts/openarm-command-rate-limit-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-rate-limit-robustness-lab/report/openarm-command-rate-limit-robustness-report.json \
+  --trace artifacts/openarm-command-rate-limit-robustness-lab/rate-100mrad-s/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-rate-limit-robustness-lab/report/minimum-command-rate-limit-failure.rne-replay
+```

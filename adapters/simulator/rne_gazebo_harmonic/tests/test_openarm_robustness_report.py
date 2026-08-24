@@ -87,6 +87,82 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(mismatch["step"], 3)
         self.assertEqual(mismatch["expected_source_step"], 1)
 
+    def test_command_rate_limit_is_recomputed_from_previous_applied_target(self) -> None:
+        report_module = MODULE.load_controller_report_module(SCRIPT.parent)
+        controller = {
+            "disturbance_contract": {
+                "kind": "actuator_command_slew_rate_limit_pulse_v1",
+                "joint": "openarm_right_joint5",
+                "start_step": 3,
+                "end_step": 4,
+                "maximum_rate_rad_s": 0.06,
+            }
+        }
+        observations = []
+        expected_applied = 0.0
+        for step, commanded in enumerate([0.0, 0.0, 0.01, 0.02, 0.02, 0.02], 1):
+            if 3 <= step <= 4:
+                expected_applied = min(max(commanded, expected_applied - 0.001), expected_applied + 0.001)
+            else:
+                expected_applied = commanded
+            observations.append(
+                {
+                    "step": step,
+                    "joint_controller_target_rad": [commanded],
+                    "joint_position_target_rad": [expected_applied],
+                    "joint_actuator_disturbance_rad": [expected_applied - commanded],
+                    "actuator_disturbance_active": expected_applied != commanded,
+                    "joint_position_rad": [0.0],
+                    "joint_reference_position_rad": [0.0],
+                }
+            )
+        metrics = report_module.disturbance_metrics(
+            controller, observations, 0, 60.0
+        )
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        self.assertEqual(
+            metrics["realization_verification"]["relationship"],
+            "applied_target_delta_is_clamped_to_declared_rate_times_fixed_delta",
+        )
+        self.assertAlmostEqual(
+            metrics["realization_verification"]["maximum_recomputed_applied_rate_rad_s"],
+            0.06,
+        )
+        observations[3]["joint_position_target_rad"][0] += 0.001
+        mismatch = report_module.disturbance_metrics(
+            controller, observations, 0, 60.0
+        )["first_realization_mismatch"]
+        self.assertEqual(mismatch["step"], 4)
+
+    def test_command_rate_limit_requirement_fails_below_minimum(self) -> None:
+        controller = {
+            "disturbance_contract": {
+                "kind": "actuator_command_slew_rate_limit_pulse_v1",
+                "start_step": 10,
+                "end_step": 20,
+                "maximum_rate_rad_s": 0.01,
+            }
+        }
+        observations = [
+            {"step": step, "sim_time_ticks": step * 100}
+            for step in range(1, 21)
+        ]
+        requirement = {
+            "id": "controller.actuator.minimum_command_slew_rate_rad_s",
+            "unit": "rad/s",
+            "minimum": 0.02,
+        }
+        violation = MODULE.command_rate_limit_violation(
+            controller, observations, requirement
+        )
+        self.assertEqual(violation["step"], 10)
+        self.assertEqual(violation["observed"], 0.01)
+        self.assertEqual(violation["minimum"], 0.02)
+        controller["disturbance_contract"]["maximum_rate_rad_s"] = 0.02
+        self.assertIsNone(
+            MODULE.command_rate_limit_violation(controller, observations, requirement)
+        )
+
     def test_first_violation_is_the_first_cumulative_iae_crossing(self) -> None:
         observations = [
             {

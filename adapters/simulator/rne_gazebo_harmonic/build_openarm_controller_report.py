@@ -124,6 +124,7 @@ def reproduce_decisions(
     previous_input: list[float | None] = [None] * width
     previous_previous_input: list[float | None] = [None] * width
     controller_target_history: list[list[float]] = []
+    applied_target_history: list[list[float]] = []
     maximum = 0.0
     first_mismatch = None
     for index, (action, actual) in enumerate(zip(actions, observations)):
@@ -144,7 +145,9 @@ def reproduce_decisions(
             action["step"],
             decision["target"],
             controller_target_history,
+            applied_target_history,
         )
+        applied_target_history.append(applied_target.copy())
         delta = max(
             maximum_delta(decision["target"], actual["joint_controller_target_rad"]),
             maximum_delta(applied_target, actual["joint_position_target_rad"]),
@@ -206,6 +209,8 @@ def disturbance_metrics(
     first_realization_mismatch = None
     maximum_realization_delta_rad = 0.0
     realized_active_step_count = 0
+    maximum_recomputed_applied_rate_rad_s = 0.0
+    previous_expected_applied: list[float] | None = None
     for frame in observations:
         step = frame["step"]
         controller_target = frame["joint_controller_target_rad"]
@@ -219,6 +224,19 @@ def disturbance_metrics(
                 expected_applied[joint_index] = observations[expected_source_step - 1][
                     "joint_controller_target_rad"
                 ][joint_index]
+            elif contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1":
+                if previous_expected_applied is None:
+                    raise ValueError("rate limit has no previous expected applied target")
+                maximum_delta_rad = contract["maximum_rate_rad_s"] / sample_rate_hz
+                previous = previous_expected_applied[joint_index]
+                expected_applied[joint_index] = min(
+                    max(controller_target[joint_index], previous - maximum_delta_rad),
+                    previous + maximum_delta_rad,
+                )
+                maximum_recomputed_applied_rate_rad_s = max(
+                    maximum_recomputed_applied_rate_rad_s,
+                    abs(expected_applied[joint_index] - previous) * sample_rate_hz,
+                )
             else:
                 raise ValueError("unsupported actuator disturbance contract")
         expected_disturbance = [
@@ -250,6 +268,7 @@ def disturbance_metrics(
                 "expected_active": expected_active,
                 "observed_active": active,
             }
+        previous_expected_applied = expected_applied
     errors = [
         frame["joint_position_rad"][joint_index]
         - frame["joint_reference_position_rad"][joint_index]
@@ -283,11 +302,25 @@ def disturbance_metrics(
             "relationship": (
                 "applied_target_at_step_equals_controller_target_at_step_minus_delay_steps"
                 if contract["kind"] == "actuator_command_transport_delay_pulse_v1"
-                else "applied_target_equals_controller_target_plus_declared_bias"
+                else (
+                    "applied_target_delta_is_clamped_to_declared_rate_times_fixed_delta"
+                    if contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1"
+                    else "applied_target_equals_controller_target_plus_declared_bias"
+                )
             ),
             "maximum_delta_rad": maximum_realization_delta_rad,
             "realized_active_step_count": realized_active_step_count,
-            "source_step_recomputed_from_trace": True,
+            "source_step_recomputed_from_trace": (
+                contract["kind"] == "actuator_command_transport_delay_pulse_v1"
+            ),
+            "maximum_recomputed_applied_rate_rad_s": (
+                maximum_recomputed_applied_rate_rad_s
+                if contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1"
+                else None
+            ),
+            "previous_applied_target_recomputed_from_trace": (
+                contract["kind"] == "actuator_command_slew_rate_limit_pulse_v1"
+            ),
         },
         "peak_tracking_error_rad": max(abs(value) for value in pulse_errors),
         "iae_rad_s": sum(abs(value) for value in evaluation_errors) / sample_rate_hz,

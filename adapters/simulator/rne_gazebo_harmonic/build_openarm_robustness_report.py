@@ -50,6 +50,8 @@ def controller_dimension_value(controller: dict[str, Any], dimension_id: str) ->
         return controller.get("disturbance_contract", {}).get("offset_rad")
     if dimension_id == "actuator_command_delay":
         return controller.get("disturbance_contract", {}).get("delay_steps")
+    if dimension_id == "actuator_command_rate_limit":
+        return controller.get("disturbance_contract", {}).get("maximum_rate_rad_s")
     if dimension_id == "joint_position_measurement_bias":
         return controller.get("measurement_fault_contract", {}).get("offset_rad")
     if dimension_id == "joint_feedback_publication_dropout":
@@ -162,6 +164,29 @@ def command_delay_violation(
         "maximum": requirement["maximum"],
         "unit": requirement["unit"],
         "source_step": step - delay_steps,
+    }
+
+
+def command_rate_limit_violation(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    requirement: dict[str, Any],
+) -> dict[str, Any] | None:
+    contract = controller.get("disturbance_contract", {})
+    if contract.get("kind") != "actuator_command_slew_rate_limit_pulse_v1":
+        return None
+    maximum_rate_rad_s = contract["maximum_rate_rad_s"]
+    if maximum_rate_rad_s >= requirement["minimum"]:
+        return None
+    step = contract["start_step"]
+    frame = observations[step - 1]
+    return {
+        "requirement_id": requirement["id"],
+        "step": step,
+        "sim_time_ticks": frame["sim_time_ticks"],
+        "observed": maximum_rate_rad_s,
+        "minimum": requirement["minimum"],
+        "unit": requirement["unit"],
     }
 
 
@@ -492,6 +517,28 @@ def evaluate_trace(
                 if candidates
                 else None
             )
+        elif delay_contract.get("kind") == "actuator_command_slew_rate_limit_pulse_v1":
+            rate_requirement = requirements[
+                "controller.actuator.minimum_command_slew_rate_rad_s"
+            ]
+            checks.append(
+                report_module.check(
+                    rate_requirement, delay_contract["maximum_rate_rad_s"]
+                )
+            )
+            rate_violation = command_rate_limit_violation(
+                controller, observations, rate_requirement
+            )
+            candidates = [
+                candidate
+                for candidate in (performance_violation, rate_violation)
+                if candidate is not None
+            ]
+            first_violation = (
+                min(candidates, key=lambda item: (item["step"], item["requirement_id"]))
+                if candidates
+                else None
+            )
         else:
             first_violation = performance_violation
     if sensor_metrics is not None:
@@ -556,6 +603,7 @@ def main() -> int:
         not in {
             "actuator_target_bias",
             "actuator_command_delay",
+            "actuator_command_rate_limit",
             "joint_position_measurement_bias",
             "joint_feedback_publication_dropout",
         }
@@ -704,6 +752,7 @@ def main() -> int:
     stems = {
         "actuator_target_bias": "openarm-robustness-report",
         "actuator_command_delay": "openarm-command-delay-robustness-report",
+        "actuator_command_rate_limit": "openarm-command-rate-limit-robustness-report",
         "joint_position_measurement_bias": "openarm-sensor-bias-robustness-report",
         "joint_feedback_publication_dropout": "openarm-sensor-dropout-robustness-report",
     }

@@ -93,6 +93,16 @@ enum DisturbanceContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "actuator_command_slew_rate_limit_pulse_v1")]
+    ActuatorCommandSlewRateLimitPulseV1 {
+        classification: String,
+        joint: String,
+        start_step: u64,
+        end_step: u64,
+        maximum_rate_rad_s: f64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -935,6 +945,7 @@ fn rollout(
     let mut latest_controller_observation = None;
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     let mut controller_target_history = Vec::with_capacity(actions.len());
+    let mut applied_target_history = Vec::with_capacity(actions.len());
     let mut last_accepted_target_rad = actions
         .first()
         .context("MuJoCo rollout has no actions")?
@@ -964,7 +975,9 @@ fn rollout(
             action.step,
             &decision.target_position_rad,
             &controller_target_history,
+            &applied_target_history,
         )?;
+        applied_target_history.push(applied_target.clone());
         sim.step_targets(&controller.rne_actuator_link_order, &applied_target)?;
         decisions.push(decision);
         state_hashes.push(hash_physics_state_v2(&sim.world));
@@ -1271,6 +1284,7 @@ fn apply_actuator_disturbance(
     step: u64,
     controller_target: &[f64],
     controller_target_history: &[Vec<f64>],
+    applied_target_history: &[Vec<f64>],
 ) -> Result<(Vec<f64>, Vec<f64>)> {
     let mut applied = controller_target.to_vec();
     let mut disturbance = vec![0.0; controller_target.len()];
@@ -1305,6 +1319,26 @@ fn apply_actuator_disturbance(
                 applied[index] = *source_target
                     .get(index)
                     .context("actuator command delay source width drifted")?;
+                disturbance[index] = applied[index] - controller_target[index];
+            }
+            DisturbanceContract::ActuatorCommandSlewRateLimitPulseV1 {
+                joint,
+                start_step,
+                end_step,
+                maximum_rate_rad_s,
+                ..
+            } if (*start_step..=*end_step).contains(&step) => {
+                let index = disturbance_joint_index(controller, joint)?;
+                let previous_target = applied_target_history
+                    .last()
+                    .context("actuator command rate limit has no previous applied target")?;
+                let previous = *previous_target
+                    .get(index)
+                    .context("actuator command rate limit previous target width drifted")?;
+                let maximum_delta_rad =
+                    *maximum_rate_rad_s * FIXED_DELTA_TICKS as f64 / 1_000_000_000.0;
+                applied[index] = controller_target[index]
+                    .clamp(previous - maximum_delta_rad, previous + maximum_delta_rad);
                 disturbance[index] = applied[index] - controller_target[index];
             }
             _ => {}
@@ -1381,6 +1415,28 @@ fn validate_actuator_disturbance(
         } => {
             classification == "actuator_transport_delay"
                 && *start_step > *delay_steps
+                && common_valid(
+                    classification,
+                    joint,
+                    *start_step,
+                    *end_step,
+                    controller_visibility,
+                    application_order,
+                )
+        }
+        DisturbanceContract::ActuatorCommandSlewRateLimitPulseV1 {
+            classification,
+            joint,
+            start_step,
+            end_step,
+            maximum_rate_rad_s,
+            controller_visibility,
+            application_order,
+        } => {
+            classification == "actuator_rate_limit"
+                && maximum_rate_rad_s.is_finite()
+                && *maximum_rate_rad_s > 0.0
+                && *start_step > 1
                 && common_valid(
                     classification,
                     joint,

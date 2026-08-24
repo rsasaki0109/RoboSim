@@ -409,7 +409,8 @@ actuator-authority envelope. The next slices are:
 1. **Complete:** add a source-step-verifiable actuator command-transport delay across
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
-2. **Next:** complete the actuator envelope with rate limit, deadband, friction/damping,
+2. **In progress:** the physical command slew-rate boundary is complete; continue the
+   actuator envelope with deadband, friction/damping,
    inertia, and transmission-efficiency sweeps, retaining the smallest failing
    value for each mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
@@ -628,8 +629,19 @@ drops and first fail three. At the failing boundary they reject exactly decision
 zero delta, and recover in one decision on fresh sequence 3243. The earliest
 violation is still capture sequence 3242, where the third consecutive
 publication is absent; the minimum replay stops there. Physical parameter
-sweeps and actuator-authority degradation are recorded below; rate limit,
-deadband, friction/damping, and inertia boundaries remain open.
+sweeps, actuator-authority degradation, command delay, and command slew-rate
+limits are recorded below; deadband, friction/damping, and inertia boundaries
+remain open.
+
+The command slew-rate fixture clamps each joint-5 applied target against the
+previous applied target using the fixed control period. Its descending
+`[0.40, 0.25, 0.15, 0.10, 0.05] rad/s` grid produces a real cross-backend
+boundary rather than a declaration-only failure: `0.15 rad/s` passes on
+Rapier, native MuJoCo, and Gazebo with 43/42/38 limited applications, while
+`0.10 rad/s` first violates the fixed minimum at step 1298 with 60/59/57
+limited applications. All six boundary traces have zero independently
+recomputed realization delta. The deterministic browser-report SHA-256 is
+`d4efb1cd9214420e24445a7804b2bb32532d6c8fa6ebfa0c7a5683e1a6f5f540`.
 
 The payload dimension now has a deterministic model-fixture compiler. It emits
 the same per-case URDF, robot asset, scene, and Gazebo runtime manifest for a
