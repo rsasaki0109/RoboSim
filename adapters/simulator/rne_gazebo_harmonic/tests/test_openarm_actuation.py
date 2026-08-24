@@ -7,7 +7,12 @@ import unittest
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPT_DIR))
-from openarm_actuation import realize_joint_command, validate_actuation  # noqa: E402
+from openarm_actuation import (  # noqa: E402
+    ActuationDiagnosticAccumulator,
+    realize_joint_command,
+    realize_joint_command_diagnostic,
+    validate_actuation,
+)
 
 
 def effort_config() -> dict:
@@ -59,6 +64,36 @@ class OpenArmActuationTests(unittest.TestCase):
             ),
             ("velocity_rad_s", 2.0),
         )
+
+    def test_diagnostic_reports_actual_substep_effort_and_saturation(self) -> None:
+        config = effort_config()
+        accumulator = ActuationDiagnosticAccumulator(1)
+        first = realize_joint_command_diagnostic(
+            config, "effort_pd", frozenset({0}), 0, 1.0, 0.0, 0.0
+        )
+        second = realize_joint_command_diagnostic(
+            config, "effort_pd", frozenset({0}), 0, 0.1, 0.0, 0.0
+        )
+        accumulator.record(0, first, 1.0)
+        accumulator.record(0, second, 0.1)
+        diagnostic = accumulator.finish(2, [0.05])
+        self.assertEqual(diagnostic["joint_command_kind"], ["effort_nm"])
+        self.assertEqual(diagnostic["joint_raw_command_peak_abs"], [10.0])
+        self.assertEqual(diagnostic["joint_applied_command_mean"], [2.5])
+        self.assertEqual(diagnostic["joint_saturation_substep_count"], [1])
+        self.assertEqual(diagnostic["joint_saturation_fraction"], [0.5])
+        self.assertEqual(diagnostic["joint_initial_position_error_rad"], [1.0])
+        self.assertEqual(diagnostic["joint_final_position_error_rad"], [0.05])
+
+    def test_diagnostic_rejects_missing_substeps(self) -> None:
+        accumulator = ActuationDiagnosticAccumulator(1)
+        command = realize_joint_command_diagnostic(
+            effort_config(), "effort_pd", frozenset({0}), 0, 0.1, 0.0, 0.0
+        )
+        accumulator.record(0, command, 0.1)
+        with self.assertRaisesRegex(ValueError, "substeps"):
+            accumulator.finish(2, [0.0])
+
 
 
 if __name__ == "__main__":

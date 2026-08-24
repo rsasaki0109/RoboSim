@@ -217,31 +217,38 @@ def compile_suite(
     substeps = manifest.get("gazebo_physics_substeps_per_control_step")
     if not isinstance(substeps, int) or substeps < 1:
         raise ValueError("invalid Gazebo physics substep count")
-    stiffness_scale = manifest.get("gazebo_effort_stiffness_scale")
-    damping_scale = manifest.get("gazebo_effort_damping_scale")
+    stiffness_scales = manifest.get("gazebo_effort_stiffness_scale_by_joint")
+    damping_scales = manifest.get("gazebo_effort_damping_scale_by_joint")
     if any(
-        not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0
-        for value in (stiffness_scale, damping_scale)
+        not isinstance(values, list)
+        or len(values) != len(ordered_actuation)
+        or any(
+            not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0.0
+            for value in values
+        )
+        for values in (stiffness_scales, damping_scales)
     ):
-        raise ValueError("invalid Gazebo effort gain scale")
+        raise ValueError("invalid per-joint Gazebo effort gain scale")
     adapter_config.update(
         {
             "actuation_mode": "effort_pd",
             "effort_joint_indices": list(range(7)),
             "physics_substeps_per_control_step": substeps,
             "stiffness_nm_per_rad": [
-                item["stiffness_nm_per_rad"] * stiffness_scale
-                for item in ordered_actuation
+                item["stiffness_nm_per_rad"] * scale
+                for item, scale in zip(ordered_actuation, stiffness_scales)
             ],
             "damping_nm_s_per_rad": [
-                item["damping_nm_s_per_rad"] * damping_scale
-                for item in ordered_actuation
+                item["damping_nm_s_per_rad"] * scale
+                for item, scale in zip(ordered_actuation, damping_scales)
             ],
             "maximum_effort_nm": [
                 item["max_effort_nm"] for item in ordered_actuation
             ],
-            "source_actuation_stiffness_scale": stiffness_scale,
-            "source_actuation_damping_scale": damping_scale,
+            "source_actuation_stiffness_scale_by_joint": stiffness_scales,
+            "source_actuation_damping_scale_by_joint": damping_scales,
             "saturation_behavior": "clamp_each_joint_effort_before_pre_update",
             "failure_behavior": "reject_invalid_configuration_before_simulator_start",
         }

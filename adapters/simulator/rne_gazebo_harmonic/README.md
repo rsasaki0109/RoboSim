@@ -10,7 +10,11 @@ observation and accepts nine joint-position targets as its action. The default
 runtime uses a bounded velocity servo. A runtime may instead declare the tested
 effort-PD realization, explicit per-joint effort limits, failure behavior, and
 multiple physics substeps per 16,666,667 ns control step. Positions and
-velocities are sampled during PostUpdate.
+velocities are sampled during PostUpdate. Trace collection also writes a
+deterministic actuation sidecar for each replay. It records raw and applied
+commands, command kind and units, initial/final position error, and saturation
+count across every physics substep while leaving the strict JSONL wire v1
+payload unchanged.
 
 ## Requirements
 
@@ -33,7 +37,9 @@ The nonzero cases lump the payload into the hand inertial using the
 parallel-axis theorem and retain explicit mass, center-of-mass, inertia, model,
 scene, and runtime hashes. Their Gazebo world fixes the robot base and selects
 bounded effort-PD actuation over ten physics substeps, so payload mass affects
-the measured trajectory. Invalid actuator declarations fail before startup.
+the measured trajectory. Gain scaling is declared per joint so shoulder and
+wrist authority are not conflated; the URDF effort limits remain unchanged.
+Invalid actuator declarations fail before startup.
 
 After collecting the three backend traces, independently recompute the model
 and control requirements and write the browser report with:

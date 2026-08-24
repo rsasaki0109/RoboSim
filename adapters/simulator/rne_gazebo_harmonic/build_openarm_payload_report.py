@@ -98,6 +98,49 @@ def controlled_joint_metrics(
     }
 
 
+def gazebo_actuation_metrics(
+    trace_path: Path, trace: dict[str, Any], joint_index: int
+) -> dict[str, float]:
+    """Verifies both diagnostic sidecars and summarizes realized actuation."""
+    first_path = trace_path.parent / "gazebo-actuation-diagnostics-a.json"
+    replay_path = trace_path.parent / "gazebo-actuation-diagnostics-b.json"
+    if not first_path.exists() or not replay_path.exists():
+        raise ValueError("Gazebo actuation diagnostic sidecar is missing")
+    first_sha = sha256(first_path)
+    replay_sha = sha256(replay_path)
+    if (
+        first_sha != trace.get("actuation_diagnostics_sha256")
+        or replay_sha != trace.get("replay_actuation_diagnostics_sha256")
+        or first_sha != replay_sha
+    ):
+        raise ValueError("Gazebo actuation diagnostic replay hash differs")
+    first = load(first_path)
+    replay = load(replay_path)
+    observations = trace["observations"]
+    steps = first.get("steps")
+    if (
+        first != replay
+        or first.get("kind") != "rne_gazebo_actuation_diagnostics"
+        or not isinstance(steps, list)
+        or len(steps) != len(observations)
+        or any(
+            observation.get("actuator_realization") != step
+            for observation, step in zip(observations, steps)
+        )
+    ):
+        raise ValueError("Gazebo embedded actuation diagnostics differ")
+    substeps = sum(step["substep_count"] for step in steps)
+    saturated = sum(
+        step["joint_saturation_substep_count"][joint_index] for step in steps
+    )
+    return {
+        "actuator_saturation_fraction": saturated / substeps,
+        "actuator_raw_command_peak_abs": max(
+            step["joint_raw_command_peak_abs"][joint_index] for step in steps
+        ),
+    }
+
+
 def requirement_map(suite: dict[str, Any]) -> dict[str, dict[str, Any]]:
     requirements = suite.get("requirements")
     if not isinstance(requirements, list):
@@ -248,6 +291,8 @@ def build_report(
                 raise ValueError(f"{backend_id} native model provenance differs")
             action_hashes.add(trace["action_trace_sha256"])
             metrics = controlled_joint_metrics(trace, joint_index, 0.016666667)
+            if backend_id == "gazebo_sim":
+                metrics.update(gazebo_actuation_metrics(trace_path, trace, joint_index))
             checks = [
                 model_check,
                 check(
@@ -358,7 +403,7 @@ def write_outputs(output: Path, report: dict[str, Any]) -> None:
         "</", "<\\/"
     )
     html = '''<!doctype html><meta charset="utf-8"><title>OpenArm physical payload robustness</title><style>
-body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.failed_as_expected{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}code{word-break:break-all}</style><main><h1>OpenArm physical payload robustness</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><h2>Backend outcomes</h2><table><thead><tr><th>backend / case</th><th>mass kg</th><th>RMSE rad</th><th>final rad</th><th>IAE rad·s</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').innerHTML=`controlled joint: <b>${r.controlled_joint}</b> · model cases: ${r.model_cases.length} · traces: ${r.outcomes.length} · missing: ${r.missing_traces.length}<br>action <code>${r.inputs.action_trace_sha256||'not available'}</code>`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${x.payload_mass_kg.toFixed(3)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${f(x.metrics.final_absolute_error_rad)}</td><td>${f(x.metrics.integral_absolute_error_rad_s)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main>'''.replace(
+body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.failed_as_expected{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}code{word-break:break-all}</style><main><h1>OpenArm physical payload robustness</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><h2>Backend outcomes</h2><table><thead><tr><th>backend / case</th><th>mass kg</th><th>RMSE rad</th><th>final rad</th><th>IAE rad·s</th><th>saturation</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').innerHTML=`controlled joint: <b>${r.controlled_joint}</b> · model cases: ${r.model_cases.length} · traces: ${r.outcomes.length} · missing: ${r.missing_traces.length}<br>action <code>${r.inputs.action_trace_sha256||'not available'}</code>`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${x.payload_mass_kg.toFixed(3)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${f(x.metrics.final_absolute_error_rad)}</td><td>${f(x.metrics.integral_absolute_error_rad_s)}</td><td>${x.metrics.actuator_saturation_fraction===undefined?'—':f(x.metrics.actuator_saturation_fraction)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main>'''.replace(
         "__REPORT__", payload
     )
     html_path.write_text(html + "\n", encoding="utf-8")

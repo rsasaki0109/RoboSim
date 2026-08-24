@@ -66,16 +66,27 @@ def runtime_artifact_path(runtime_path: Path, role: str) -> Path:
 
 
 class AdapterProcess:
-    def __init__(self, adapter: Path, runtime: Path, task: Path) -> None:
+    def __init__(
+        self,
+        adapter: Path,
+        runtime: Path,
+        task: Path,
+        actuation_diagnostics_output: Path | None = None,
+    ) -> None:
+        command = [
+            sys.executable,
+            str(adapter),
+            "--runtime-manifest",
+            str(runtime),
+            "--task",
+            str(task),
+        ]
+        if actuation_diagnostics_output is not None:
+            command.extend(
+                ["--actuation-diagnostics-output", str(actuation_diagnostics_output)]
+            )
         self.process = subprocess.Popen(
-            [
-                sys.executable,
-                str(adapter),
-                "--runtime-manifest",
-                str(runtime),
-                "--task",
-                str(task),
-            ],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
@@ -524,8 +535,14 @@ def run_success(
     action_artifact: dict[str, Any],
     controller: dict[str, Any],
     session: str,
-) -> tuple[list[dict[str, Any]], int]:
-    process = AdapterProcess(args.adapter, args.runtime_manifest, args.task)
+    actuation_diagnostics_output: Path,
+) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+    process = AdapterProcess(
+        args.adapter,
+        args.runtime_manifest,
+        args.task,
+        actuation_diagnostics_output,
+    )
     joint_count = len(action_artifact["action_joint_order"])
     open_and_reset(process, session, task, task_sha256, 2 * joint_count, joint_count)
     observations: list[dict[str, Any]] = []
@@ -656,7 +673,24 @@ def run_success(
     if closed.get("type") != "closed":
         raise RuntimeError("Gazebo adapter did not close cleanly")
     process.finish()
-    return observations, final_digest
+    diagnostics = load_json(actuation_diagnostics_output)
+    if (
+        diagnostics.get("kind") != "rne_gazebo_actuation_diagnostics"
+        or diagnostics.get("joint_order") != action_artifact["action_joint_order"]
+        or len(diagnostics.get("steps", [])) != len(observations)
+    ):
+        raise RuntimeError("Gazebo actuation diagnostic sidecar violated its contract")
+    for observation, diagnostic in zip(observations, diagnostics["steps"]):
+        if diagnostic.get("step") != observation["step"]:
+            raise RuntimeError("Gazebo actuation diagnostic step order drifted")
+        observation["actuator_realization"] = diagnostic
+        observation["actuator_command_saturated"] = [
+            count > 0 for count in diagnostic["joint_saturation_substep_count"]
+        ]
+        observation["actuator_command_semantics"] = (
+            "gazebo_pre_update_realized_command_v1"
+        )
+    return observations, final_digest, diagnostics
 
 
 def run_intentional_failure(
@@ -878,13 +912,31 @@ def main() -> int:
                 raise ValueError("invalid state-feedback controller contract")
         else:
             raise ValueError("unsupported OpenArm feedback law")
-    first, first_digest = run_success(
-        args, task, task_sha256, actions, controller, "rne.openarm.gazebo.success-a.v1"
+    first_diagnostics_path = args.output / "gazebo-actuation-diagnostics-a.json"
+    replay_diagnostics_path = args.output / "gazebo-actuation-diagnostics-b.json"
+    first, first_digest, first_diagnostics = run_success(
+        args,
+        task,
+        task_sha256,
+        actions,
+        controller,
+        "rne.openarm.gazebo.success-a.v1",
+        first_diagnostics_path,
     )
-    replay, replay_digest = run_success(
-        args, task, task_sha256, actions, controller, "rne.openarm.gazebo.success-b.v1"
+    replay, replay_digest, replay_diagnostics = run_success(
+        args,
+        task,
+        task_sha256,
+        actions,
+        controller,
+        "rne.openarm.gazebo.success-b.v1",
+        replay_diagnostics_path,
     )
-    if first != replay or first_digest != replay_digest:
+    if (
+        first != replay
+        or first_digest != replay_digest
+        or first_diagnostics != replay_diagnostics
+    ):
         raise RuntimeError("Gazebo replay differed for the exact same controller trace")
     failure = run_intentional_failure(
         args,
@@ -922,6 +974,9 @@ def main() -> int:
             "actuator_failure_behavior": adapter_config.get(
                 "failure_behavior", "reject_invalid_configuration_before_simulator_start"
             ),
+            "actuation_diagnostics_kind": first_diagnostics["kind"],
+            "actuation_diagnostics_sha256": sha256(first_diagnostics_path),
+            "replay_actuation_diagnostics_sha256": sha256(replay_diagnostics_path),
             "fixed_delta_ticks": FIXED_DELTA_TICKS,
             "joint_feedback_schema_version": 1,
             "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,

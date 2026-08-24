@@ -16,7 +16,11 @@ from typing import Any
 
 import gz.sim8 as gz_sim
 
-from openarm_actuation import realize_joint_command, validate_actuation
+from openarm_actuation import (
+    ActuationDiagnosticAccumulator,
+    realize_joint_command_diagnostic,
+    validate_actuation,
+)
 
 
 HOST_KIND = "rne_simulator_host_frame"
@@ -28,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime-manifest", required=True, type=Path)
     parser.add_argument("--task", required=True, type=Path)
+    parser.add_argument("--actuation-diagnostics-output", type=Path)
     return parser.parse_args()
 
 
@@ -69,7 +74,12 @@ def artifact_path(manifest_path: Path, manifest: dict[str, Any], role: str) -> P
 
 
 class GazeboOpenArmAdapter:
-    def __init__(self, runtime_path: Path, task_path: Path) -> None:
+    def __init__(
+        self,
+        runtime_path: Path,
+        task_path: Path,
+        actuation_diagnostics_output: Path | None = None,
+    ) -> None:
         self.runtime_path = runtime_path.resolve()
         self.task_path = task_path.resolve()
         self.runtime = load_json(self.runtime_path)
@@ -104,6 +114,9 @@ class GazeboOpenArmAdapter:
         self.server: gz_sim.Server | None = None
         self.targets = [0.0] * self.action_width
         self.observation = [0.0] * self.observation_width
+        self.actuation_diagnostics_output = actuation_diagnostics_output
+        self.actuation_diagnostics: list[dict[str, Any]] = []
+        self.current_actuation_diagnostic: ActuationDiagnosticAccumulator | None = None
 
         resource_paths = [str(self.world_path.parent), str(self.robot_path.parent)]
         repo_assets = Path(__file__).resolve().parents[3] / "assets" / "robots"
@@ -195,6 +208,8 @@ class GazeboOpenArmAdapter:
         self.step_count = 0
         self.targets = [0.0] * self.action_width
         self.observation = [0.0] * self.observation_width
+        self.actuation_diagnostics = []
+        self.current_actuation_diagnostic = None
         self._create_fixture()
         return self.response(
             request,
@@ -232,7 +247,7 @@ class GazeboOpenArmAdapter:
             current = position[0] if position else 0.0
             measured_velocity = joint.velocity(ecm)
             current_velocity = measured_velocity[0] if measured_velocity else 0.0
-            command_kind, command = realize_joint_command(
+            realized = realize_joint_command_diagnostic(
                 self.config,
                 self.actuation_mode,
                 self.effort_joint_indices,
@@ -241,10 +256,14 @@ class GazeboOpenArmAdapter:
                 current,
                 current_velocity,
             )
-            if command_kind == "effort_nm":
-                joint.set_force(ecm, [command])
+            if self.current_actuation_diagnostic is not None:
+                self.current_actuation_diagnostic.record(
+                    index, realized, target - current
+                )
+            if realized.kind == "effort_nm":
+                joint.set_force(ecm, [realized.applied])
             else:
-                joint.set_velocity(ecm, [command])
+                joint.set_velocity(ecm, [realized.applied])
 
     def _post_update(self, _info: gz_sim.UpdateInfo, ecm: gz_sim.EntityComponentManager) -> None:
         positions: list[float] = []
@@ -272,8 +291,19 @@ class GazeboOpenArmAdapter:
         if payload["action_sequence"] != self.next_action_sequence:
             return self.rejected(request, "action_sequence_mismatch")
         self.targets = [float(value) for value in values]
+        self.current_actuation_diagnostic = ActuationDiagnosticAccumulator(
+            self.action_width
+        )
         if not self.server.run(True, self.physics_substeps, False):
             raise RuntimeError("Gazebo failed to advance one iteration")
+        final_positions = self.observation[: self.action_width]
+        diagnostic = self.current_actuation_diagnostic.finish(
+            self.physics_substeps,
+            [target - position for target, position in zip(self.targets, final_positions)],
+        )
+        diagnostic["step"] = self.step_count + 1
+        self.actuation_diagnostics.append(diagnostic)
+        self.current_actuation_diagnostic = None
         self.step_count += 1
         self.next_action_sequence += 1
         return self.response(
@@ -297,6 +327,20 @@ class GazeboOpenArmAdapter:
             return self.rejected(request, "not_open")
         self.fixture = None
         self.server = None
+        if self.actuation_diagnostics_output is not None:
+            output = {
+                "kind": "rne_gazebo_actuation_diagnostics",
+                "schema_version": 1,
+                "joint_order": self.joint_names,
+                "actuation_mode": self.actuation_mode,
+                "physics_substeps_per_control_step": self.physics_substeps,
+                "steps": self.actuation_diagnostics,
+            }
+            self.actuation_diagnostics_output.parent.mkdir(parents=True, exist_ok=True)
+            self.actuation_diagnostics_output.write_text(
+                json.dumps(output, indent=2, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
         return self.response(request, {"type": "closed"})
 
 
@@ -321,7 +365,9 @@ def state_digest(step: int, values: list[float]) -> int:
 
 def main() -> int:
     args = parse_args()
-    adapter = GazeboOpenArmAdapter(args.runtime_manifest, args.task)
+    adapter = GazeboOpenArmAdapter(
+        args.runtime_manifest, args.task, args.actuation_diagnostics_output
+    )
     for line in sys.stdin:
         request = json.loads(line)
         response = adapter.handle(request)

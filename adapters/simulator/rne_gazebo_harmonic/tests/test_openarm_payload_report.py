@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import json
 import tempfile
 import unittest
 
@@ -97,6 +98,40 @@ class OpenArmPayloadReportTests(unittest.TestCase):
                     / "assets/robots/openarm_description/openarm_v2_right.rne.urdf",
                     ROOT
                     / "docs/evidence/openarm-controller-lab/evidence/openarm-plant-state-feedback.controller.json",
+                )
+
+    def test_gazebo_actuation_sidecars_are_hash_bound_and_replayed(self) -> None:
+        with tempfile.TemporaryDirectory() as output_dir:
+            root = Path(output_dir)
+            step = {
+                "substep_count": 2,
+                "joint_saturation_substep_count": [1],
+                "joint_raw_command_peak_abs": [4.0],
+            }
+            sidecar = {
+                "kind": "rne_gazebo_actuation_diagnostics",
+                "steps": [step],
+            }
+            payload = json.dumps(sidecar, indent=2) + "\n"
+            first = root / "gazebo-actuation-diagnostics-a.json"
+            replay = root / "gazebo-actuation-diagnostics-b.json"
+            first.write_text(payload, encoding="utf-8")
+            replay.write_text(payload, encoding="utf-8")
+            digest = REPORT.sha256(first)
+            trace = {
+                "actuation_diagnostics_sha256": digest,
+                "replay_actuation_diagnostics_sha256": digest,
+                "observations": [{"actuator_realization": step}],
+            }
+            metrics = REPORT.gazebo_actuation_metrics(
+                root / "gazebo-success-trace.json", trace, 0
+            )
+            self.assertEqual(metrics["actuator_saturation_fraction"], 0.5)
+            self.assertEqual(metrics["actuator_raw_command_peak_abs"], 4.0)
+            replay.write_text(payload + " ", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "replay hash"):
+                REPORT.gazebo_actuation_metrics(
+                    root / "gazebo-success-trace.json", trace, 0
                 )
 
 
