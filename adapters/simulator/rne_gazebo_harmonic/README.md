@@ -197,3 +197,43 @@ failure replay, verifies without loading any simulator:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-plant-lab
 ```
+
+## Compare PID and state-space control
+
+The controller lab consumes the retained Rapier ARX model without refitting,
+forms the discrete three-state plant plus an integrated tracking-error state,
+checks controllability, and places four declared stable poles. A one-sample ARX
+predictor compensates the exact typed-observation latency. PID and state-space
+artifacts control only right joint 5 and share the same reference, sample time,
+latency, +/-0.04 rad feedback-correction bound, +/-0.015 rad integral-correction
+bound, target limits, actuator configuration, and intentional failure.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_controller_suite.py \
+  --output artifacts/openarm-controller-lab
+
+# Run this command once for each generated controller, changing ROLE and CONTROLLER.
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller artifacts/openarm-controller-lab/CONTROLLER \
+  --output artifacts/openarm-controller-lab/ROLE
+# Then run the MuJoCo and Gazebo commands from the plant lab with the same
+# controller and ROLE/controller-actions.json paths.
+
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_controller_report.py \
+  --suite-root artifacts/openarm-controller-lab \
+  --output artifacts/openarm-controller-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-controller-failure-replay -- \
+  --report artifacts/openarm-controller-lab/report/openarm-controller-comparison-report.json \
+  --trace artifacts/openarm-controller-lab/pid/rapier-success-trace.json \
+  --output artifacts/openarm-controller-lab/report/pid-settling-failure.rne-replay
+```
+
+The report independently reproduces all 21,600 controller decisions across two
+controllers and three backends. The fixed PID baseline settles in approximately
+4.983 s on Rapier, 3.017 s on MuJoCo, and 1.283 s on Gazebo; only the Rapier
+baseline misses the unchanged 3.5 s requirement. State-space control settles in
+approximately 0.567 s, 0.550 s, and 0.467 s respectively. Its largest
+cross-backend settling delta is approximately 0.10 s, and every declared pole
+lies inside the unit circle. The PID replay distinguishes the 3.5 s deadline at
+step 571 from the first subsequent band exit at step 577.

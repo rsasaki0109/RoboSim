@@ -66,13 +66,57 @@ struct ObservationContract {
 #[serde(deny_unknown_fields)]
 struct FeedbackLaw {
     kind: String,
+    #[serde(default)]
     position_error_gain: Vec<f64>,
+    #[serde(default)]
     velocity_damping_s: Vec<f64>,
+    #[serde(default)]
     integral_error_gain_s_inv: Vec<f64>,
+    #[serde(default)]
     maximum_integral_correction_rad: Vec<f64>,
+    #[serde(default)]
     maximum_correction_rad: Vec<f64>,
+    #[serde(default)]
     minimum_target_rad: Vec<f64>,
+    #[serde(default)]
     maximum_target_rad: Vec<f64>,
+    #[serde(default)]
+    controlled_joint: Option<String>,
+    #[serde(default)]
+    state_order: Vec<String>,
+    #[serde(default)]
+    reference_feedforward: Option<String>,
+    #[serde(default)]
+    observation_latency_compensation: Option<String>,
+    #[serde(default)]
+    operating_point_position_rad: Option<f64>,
+    #[serde(default)]
+    operating_point_input_rad: Option<f64>,
+    #[serde(default)]
+    identified_plant: Option<IdentifiedPlant>,
+    #[serde(default)]
+    state_feedback_gain: Vec<f64>,
+    #[serde(default)]
+    integral_state_feedback_gain_s_inv: Option<f64>,
+    #[serde(default)]
+    desired_closed_loop_poles: Vec<f64>,
+    #[serde(default)]
+    closed_loop_a: Vec<Vec<f64>>,
+    #[serde(default)]
+    maximum_integral_state_error_rad_s: Option<f64>,
+    #[serde(default)]
+    maximum_state_integral_correction_rad: Option<f64>,
+    #[serde(default)]
+    maximum_state_feedback_correction_rad: Option<f64>,
+    #[serde(default)]
+    minimum_controlled_target_rad: Option<f64>,
+    #[serde(default)]
+    maximum_controlled_target_rad: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdentifiedPlant {
+    arx_coefficients: Vec<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -250,12 +294,18 @@ struct ControllerDecision {
 #[derive(Clone, Debug, PartialEq)]
 struct ControllerState {
     integral_correction_rad: Vec<f64>,
+    previous_observation_position_rad: Vec<Option<f64>>,
+    previous_input_target_rad: Vec<Option<f64>>,
+    previous_previous_input_target_rad: Vec<Option<f64>>,
 }
 
 impl ControllerState {
     fn new(width: usize) -> Self {
         Self {
             integral_correction_rad: vec![0.0; width],
+            previous_observation_position_rad: vec![None; width],
+            previous_input_target_rad: vec![None; width],
+            previous_previous_input_target_rad: vec![None; width],
         }
     }
 }
@@ -442,11 +492,7 @@ fn run() -> Result<()> {
             joint_feedback_schema_version: JointFeedback::SCHEMA_VERSION,
             joint_feedback_latency_ticks: FIXED_DELTA_TICKS,
             observation_source: "databus_latest_available",
-            controller_execution: if controller.feedback_law.is_some() {
-                "artifact_defined_joint_feedback_pid"
-            } else {
-                "open_loop_reference"
-            },
+            controller_execution: controller_execution(&controller),
             physics_state_hash_contract: PHYSICS_HASH_CONTRACT,
             initial_state_digest: first.initial_digest,
             final_state_digest: first.final_digest,
@@ -495,6 +541,21 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn controller_execution(controller: &ControllerSpec) -> &'static str {
+    match controller
+        .feedback_law
+        .as_ref()
+        .map(|law| law.kind.as_str())
+    {
+        None => "open_loop_reference",
+        Some("joint_position_reference_pid_v1") => "artifact_defined_joint_feedback_pid",
+        Some("joint_position_state_feedback_integral_v1") => {
+            "artifact_defined_joint_feedback_state_space"
+        }
+        Some(_) => "unsupported",
+    }
+}
+
 fn validate(
     controller: &ControllerSpec,
     task: &TaskSpec,
@@ -538,46 +599,13 @@ fn validate(
                     && contract.bootstrap_policy == "reference_until_first_available",
                 "unsupported OpenArm controller status or bootstrap policy"
             );
-            anyhow::ensure!(
-                law.kind == "joint_position_reference_pid_v1",
-                "unsupported OpenArm feedback law"
-            );
-            for (name, values) in [
-                ("position_error_gain", &law.position_error_gain),
-                ("velocity_damping_s", &law.velocity_damping_s),
-                ("integral_error_gain_s_inv", &law.integral_error_gain_s_inv),
-                (
-                    "maximum_integral_correction_rad",
-                    &law.maximum_integral_correction_rad,
-                ),
-                ("maximum_correction_rad", &law.maximum_correction_rad),
-                ("minimum_target_rad", &law.minimum_target_rad),
-                ("maximum_target_rad", &law.maximum_target_rad),
-            ] {
-                anyhow::ensure!(
-                    values.len() == width && values.iter().all(|value| value.is_finite()),
-                    "OpenArm feedback field {name} must contain {width} finite values"
-                );
+            if law.kind == "joint_position_reference_pid_v1" {
+                validate_pid_law(law, width)?;
+            } else if law.kind == "joint_position_state_feedback_integral_v1" {
+                validate_state_feedback_law(controller, law)?;
+            } else {
+                bail!("unsupported OpenArm feedback law {}", law.kind);
             }
-            anyhow::ensure!(
-                law.position_error_gain.iter().all(|value| *value >= 0.0)
-                    && law.velocity_damping_s.iter().all(|value| *value >= 0.0)
-                    && law
-                        .integral_error_gain_s_inv
-                        .iter()
-                        .all(|value| *value >= 0.0)
-                    && law
-                        .maximum_integral_correction_rad
-                        .iter()
-                        .all(|value| *value >= 0.0)
-                    && law.maximum_correction_rad.iter().all(|value| *value >= 0.0)
-                    && law
-                        .minimum_target_rad
-                        .iter()
-                        .zip(&law.maximum_target_rad)
-                        .all(|(minimum, maximum)| minimum < maximum),
-                "OpenArm feedback gains, correction limits, or target bounds are invalid"
-            );
         }
         _ => bail!("OpenArm controller must declare both observation contract and feedback law"),
     }
@@ -690,6 +718,117 @@ fn validate(
     Ok(())
 }
 
+fn validate_pid_law(law: &FeedbackLaw, width: usize) -> Result<()> {
+    for (name, values) in [
+        ("position_error_gain", &law.position_error_gain),
+        ("velocity_damping_s", &law.velocity_damping_s),
+        ("integral_error_gain_s_inv", &law.integral_error_gain_s_inv),
+        (
+            "maximum_integral_correction_rad",
+            &law.maximum_integral_correction_rad,
+        ),
+        ("maximum_correction_rad", &law.maximum_correction_rad),
+        ("minimum_target_rad", &law.minimum_target_rad),
+        ("maximum_target_rad", &law.maximum_target_rad),
+    ] {
+        anyhow::ensure!(
+            values.len() == width && values.iter().all(|value| value.is_finite()),
+            "OpenArm feedback field {name} must contain {width} finite values"
+        );
+    }
+    anyhow::ensure!(
+        law.position_error_gain.iter().all(|value| *value >= 0.0)
+            && law.velocity_damping_s.iter().all(|value| *value >= 0.0)
+            && law
+                .integral_error_gain_s_inv
+                .iter()
+                .all(|value| *value >= 0.0)
+            && law
+                .maximum_integral_correction_rad
+                .iter()
+                .all(|value| *value >= 0.0)
+            && law.maximum_correction_rad.iter().all(|value| *value >= 0.0)
+            && law
+                .minimum_target_rad
+                .iter()
+                .zip(&law.maximum_target_rad)
+                .all(|(minimum, maximum)| minimum < maximum),
+        "OpenArm feedback gains, correction limits, or target bounds are invalid"
+    );
+    Ok(())
+}
+
+fn validate_state_feedback_law(controller: &ControllerSpec, law: &FeedbackLaw) -> Result<()> {
+    let controlled_joint = law
+        .controlled_joint
+        .as_deref()
+        .context("state-feedback law has no controlled joint")?;
+    let scalar_fields = [
+        law.operating_point_position_rad,
+        law.operating_point_input_rad,
+        law.integral_state_feedback_gain_s_inv,
+        law.maximum_integral_state_error_rad_s,
+        law.maximum_state_integral_correction_rad,
+        law.maximum_state_feedback_correction_rad,
+        law.minimum_controlled_target_rad,
+        law.maximum_controlled_target_rad,
+    ];
+    anyhow::ensure!(
+        controller
+            .action_joint_order
+            .iter()
+            .any(|joint| joint == controlled_joint)
+            && law.state_order
+                == [
+                    "predicted_tracking_error_rad",
+                    "observed_tracking_error_rad",
+                    "previous_input_tracking_error_rad",
+                    "integrated_reference_error_rad_s",
+                ]
+            && law.reference_feedforward.as_deref() == Some("unity_position_reference_v1")
+            && law.observation_latency_compensation.as_deref()
+                == Some("one_sample_arx_predictor_v1")
+            && law.state_feedback_gain.len() == 3
+            && law
+                .state_feedback_gain
+                .iter()
+                .all(|value| value.is_finite())
+            && law.desired_closed_loop_poles.len() == 4
+            && law
+                .desired_closed_loop_poles
+                .iter()
+                .all(|pole| pole.is_finite() && pole.abs() < 1.0)
+            && law.closed_loop_a.len() == 4
+            && law
+                .closed_loop_a
+                .iter()
+                .all(|row| row.len() == 4 && row.iter().all(|value| value.is_finite()))
+            && scalar_fields
+                .iter()
+                .all(|value| value.is_some_and(f64::is_finite))
+            && law
+                .identified_plant
+                .as_ref()
+                .is_some_and(|plant| plant.arx_coefficients.len() == 5
+                    && plant.arx_coefficients.iter().all(|value| value.is_finite()))
+            && law
+                .integral_state_feedback_gain_s_inv
+                .is_some_and(|value| value > 0.0)
+            && law
+                .maximum_integral_state_error_rad_s
+                .is_some_and(|value| value >= 0.0)
+            && law
+                .maximum_state_integral_correction_rad
+                .is_some_and(|value| value >= 0.0)
+            && law
+                .maximum_state_feedback_correction_rad
+                .is_some_and(|value| value >= 0.0)
+            && law.minimum_controlled_target_rad < law.maximum_controlled_target_rad,
+        "invalid OpenArm state-feedback contract"
+    );
+    Ok(())
+}
+
 fn compile_actions(controller: &ControllerSpec) -> Vec<ActionFrame> {
     let final_step = controller.keyframes.last().unwrap().step;
     (1..=final_step)
@@ -751,6 +890,20 @@ fn controller_decision(
         _ => bail!("OpenArm controller feedback contract is incomplete"),
     };
     let Some(observation) = observation else {
+        if law.kind == "joint_position_state_feedback_integral_v1" {
+            let joint = law
+                .controlled_joint
+                .as_deref()
+                .context("state-feedback law has no controlled joint")?;
+            let index = controller
+                .action_joint_order
+                .iter()
+                .position(|name| name == joint)
+                .context("state-feedback joint is absent from the action order")?;
+            state.previous_previous_input_target_rad[index] =
+                state.previous_input_target_rad[index];
+            state.previous_input_target_rad[index] = Some(reference[index]);
+        }
         return Ok(ControllerDecision {
             reference_position_rad: reference.to_vec(),
             target_position_rad: reference.to_vec(),
@@ -779,6 +932,13 @@ fn controller_decision(
         observation.joint_position_rad.len() == reference.len()
             && observation.joint_velocity_rad_s.len() == reference.len(),
         "OpenArm controller observation width mismatch"
+    );
+    if law.kind == "joint_position_state_feedback_integral_v1" {
+        return state_feedback_decision(controller, law, reference, state, observation, age_ticks);
+    }
+    anyhow::ensure!(
+        law.kind == "joint_position_reference_pid_v1",
+        "unsupported OpenArm feedback law"
     );
     let sample_period_s = controller
         .observation_contract
@@ -823,6 +983,98 @@ fn controller_decision(
             (reference + correction).clamp(*minimum, *maximum)
         })
         .collect();
+    Ok(ControllerDecision {
+        reference_position_rad: reference.to_vec(),
+        target_position_rad,
+        correction_rad,
+        integral_correction_rad: state.integral_correction_rad.clone(),
+        observation_sequence: Some(observation.sequence),
+        observation_age_ticks: Some(age_ticks),
+        bootstrap: false,
+    })
+}
+
+fn state_feedback_decision(
+    controller: &ControllerSpec,
+    law: &FeedbackLaw,
+    reference: &[f64],
+    state: &mut ControllerState,
+    observation: &ControllerObservation,
+    age_ticks: u64,
+) -> Result<ControllerDecision> {
+    let joint = law
+        .controlled_joint
+        .as_deref()
+        .context("state-feedback law has no controlled joint")?;
+    let index = controller
+        .action_joint_order
+        .iter()
+        .position(|name| name == joint)
+        .context("state-feedback joint is absent from the action order")?;
+    let position = observation.joint_position_rad[index];
+    let previous_position = state.previous_observation_position_rad[index].unwrap_or(position);
+    let operating_position = law
+        .operating_point_position_rad
+        .context("state-feedback law has no position operating point")?;
+    let operating_input = law
+        .operating_point_input_rad
+        .context("state-feedback law has no input operating point")?;
+    let previous_input = state.previous_input_target_rad[index].unwrap_or(operating_input);
+    let previous_previous_input =
+        state.previous_previous_input_target_rad[index].unwrap_or(operating_input);
+    let coefficients = &law
+        .identified_plant
+        .as_ref()
+        .context("state-feedback law has no identified plant")?
+        .arx_coefficients;
+    let predicted_position_error = coefficients[1] * (position - operating_position)
+        + coefficients[2] * (previous_position - operating_position)
+        + coefficients[3] * (previous_input - operating_input)
+        + coefficients[4] * (previous_previous_input - operating_input);
+    let sample_period_s = controller
+        .observation_contract
+        .as_ref()
+        .context("state-feedback law has no observation contract")?
+        .sample_period_ticks as f64
+        / 1_000_000_000.0;
+    let integral_gain = law
+        .integral_state_feedback_gain_s_inv
+        .context("state-feedback law has no integral gain")?;
+    let maximum_integral = law
+        .maximum_state_integral_correction_rad
+        .context("state-feedback law has no integral correction limit")?;
+    state.integral_correction_rad[index] = (state.integral_correction_rad[index]
+        + integral_gain * (reference[index] - position) * sample_period_s)
+        .clamp(-maximum_integral, maximum_integral);
+    let state_vector = [
+        operating_position + predicted_position_error - reference[index],
+        position - reference[index],
+        previous_input - reference[index],
+    ];
+    let raw_target = reference[index]
+        - law
+            .state_feedback_gain
+            .iter()
+            .zip(state_vector)
+            .map(|(gain, value)| gain * value)
+            .sum::<f64>()
+        + state.integral_correction_rad[index];
+    let maximum_correction = law
+        .maximum_state_feedback_correction_rad
+        .context("state-feedback law has no correction limit")?;
+    let mut correction_rad = vec![0.0; reference.len()];
+    correction_rad[index] =
+        (raw_target - reference[index]).clamp(-maximum_correction, maximum_correction);
+    let mut target_position_rad = reference.to_vec();
+    target_position_rad[index] = (reference[index] + correction_rad[index]).clamp(
+        law.minimum_controlled_target_rad
+            .context("state-feedback law has no minimum target")?,
+        law.maximum_controlled_target_rad
+            .context("state-feedback law has no maximum target")?,
+    );
+    state.previous_observation_position_rad[index] = Some(position);
+    state.previous_previous_input_target_rad[index] = Some(previous_input);
+    state.previous_input_target_rad[index] = Some(target_position_rad[index]);
     Ok(ControllerDecision {
         reference_position_rad: reference.to_vec(),
         target_position_rad,
@@ -1062,6 +1314,31 @@ fn rollout(
     })
 }
 
+fn feedback_bounds(controller: &ControllerSpec) -> (Vec<f64>, Vec<f64>) {
+    let width = controller.action_joint_order.len();
+    let Some(law) = controller.feedback_law.as_ref() else {
+        return (vec![0.0; width], vec![0.0; width]);
+    };
+    if law.kind == "joint_position_reference_pid_v1" {
+        return (
+            law.maximum_correction_rad.clone(),
+            law.maximum_integral_correction_rad.clone(),
+        );
+    }
+    let mut correction = vec![0.0; width];
+    let mut integral = vec![0.0; width];
+    if let Some(index) = law.controlled_joint.as_ref().and_then(|controlled| {
+        controller
+            .action_joint_order
+            .iter()
+            .position(|joint| joint == controlled)
+    }) {
+        correction[index] = law.maximum_state_feedback_correction_rad.unwrap_or(0.0);
+        integral[index] = law.maximum_state_integral_correction_rad.unwrap_or(0.0);
+    }
+    (correction, integral)
+}
+
 fn build_sensor_validation_report(
     repo_root: &Path,
     controller: &ControllerSpec,
@@ -1162,44 +1439,29 @@ fn build_sensor_validation_report(
         .flat_map(|frame| &frame.joint_feedback_correction_rad)
         .map(|correction| correction.abs())
         .fold(0.0_f64, f64::max);
-    let configured_maximum_feedback_correction_rad = controller
-        .feedback_law
-        .as_ref()
-        .map(|law| {
-            law.maximum_correction_rad
-                .iter()
-                .copied()
-                .fold(0.0_f64, f64::max)
-        })
-        .unwrap_or(0.0);
+    let (feedback_correction_bounds, integral_correction_bounds) = feedback_bounds(controller);
+    let configured_maximum_feedback_correction_rad = feedback_correction_bounds
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
     let maximum_integral_correction_rad = nominal
         .observations
         .iter()
         .flat_map(|frame| &frame.joint_integral_correction_rad)
         .map(|correction| correction.abs())
         .fold(0.0_f64, f64::max);
-    let configured_maximum_integral_correction_rad = controller
-        .feedback_law
-        .as_ref()
-        .map(|law| {
-            law.maximum_integral_correction_rad
+    let configured_maximum_integral_correction_rad = integral_correction_bounds
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let integral_correction_within_per_joint_bounds = nominal.observations.iter().all(|frame| {
+        frame.joint_integral_correction_rad.len() == integral_correction_bounds.len()
+            && frame
+                .joint_integral_correction_rad
                 .iter()
-                .copied()
-                .fold(0.0_f64, f64::max)
-        })
-        .unwrap_or(0.0);
-    let integral_correction_within_per_joint_bounds =
-        controller.feedback_law.as_ref().is_none_or(|law| {
-            nominal.observations.iter().all(|frame| {
-                frame.joint_integral_correction_rad.len()
-                    == law.maximum_integral_correction_rad.len()
-                    && frame
-                        .joint_integral_correction_rad
-                        .iter()
-                        .zip(&law.maximum_integral_correction_rad)
-                        .all(|(correction, maximum)| correction.abs() <= *maximum)
-            })
-        });
+                .zip(&integral_correction_bounds)
+                .all(|(correction, maximum)| correction.abs() <= *maximum)
+    });
     let expected_controller_bootstrap_frames = usize::from(feedback_enabled) * 2;
     let expected_controller_feedback_frames = if feedback_enabled {
         actions.len() - 2

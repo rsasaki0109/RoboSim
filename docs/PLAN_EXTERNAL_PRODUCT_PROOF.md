@@ -416,7 +416,7 @@ increased.
    versioned experiment manifest. Generate frequency-response data where
    applicable, time-domain metrics, coupling matrices, and train/validation
    datasets for the OpenArm joints and gripper.
-6. **Model and controller suite:** add deterministic linearization and
+6. **In progress -- model and controller suite:** add deterministic linearization and
    controllability/observability checks, validate the current ARX path, and
    compare PID plus one justified state-space baseline under identical limits,
    delay, and disturbance conditions.

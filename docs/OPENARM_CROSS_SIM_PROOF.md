@@ -119,3 +119,30 @@ failure. Verify its 34 content-addressed artifacts with:
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-plant-lab
 ```
+
+## PID versus state-space controller proof
+
+The controller successor uses the retained Rapier ARX(2,2) model as its nominal
+plant without refitting. Its compiler forms a discrete three-state realization,
+adds integrated tracking error, proves the augmented controllability determinant
+is nonzero (`1.3369e-5`), and places the declared poles at 0.50, 0.65, 0.75, and
+0.85. The two unknown output-history states are observable; the third plant
+state is previous input supplied by controller-owned history rather than
+pretended to be inferred from the sensor. Because controller-visible joint
+feedback is one sample old, the runtime
+first predicts the current position with the retained ARX coefficients; it does
+not treat delayed measurement as current state.
+
+PID and state-space controllers use identical 3,600-step references, joint-5-only
+authority, one-period latency, target bounds, actuator model, +/-0.04 rad total
+feedback correction, and +/-0.015 rad integral correction. The state-space
+controller reduces Rapier settling from approximately 4.983 s to 0.567 s while
+MuJoCo moves from 3.017 s to 0.550 s and Gazebo from 1.283 s to 0.467 s. All
+state-space runs pass the fixed 3.5 s, 25% overshoot, and 0.08 rad ramp-RMSE
+requirements. The maximum decision reproduction delta across all 21,600
+decisions is below `9.8e-17 rad`.
+
+The PID baseline is retained as a real, non-gating failure. It is briefly inside
+the +/-0.0024 rad band at the step-571 deadline, then first exits at step 577;
+the dedicated behavior replay therefore ends at step 577 rather than claiming
+the deadline itself was the first deviation.

@@ -49,5 +49,9 @@ name = "rne-openarm-plant-failure-replay"
 path = "openarm_plant_failure_replay.rs"
 
 [[bin]]
+name = "rne-openarm-controller-failure-replay"
+path = "openarm_controller_failure_replay.rs"
+
+[[bin]]
 name = "rne-imu-validation"
 path = "imu_validation.rs"

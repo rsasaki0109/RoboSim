@@ -158,6 +158,9 @@ def controller_decision(
     controller: dict[str, Any],
     reference: list[float],
     integral_correction: list[float],
+    previous_observation_position: list[float | None],
+    previous_input_target: list[float | None],
+    previous_previous_input_target: list[float | None],
     observation: dict[str, Any] | None,
     consumed_at_ticks: int,
 ) -> dict[str, Any]:
@@ -172,6 +175,11 @@ def controller_decision(
             "bootstrap": False,
         }
     if observation is None:
+        law = controller["feedback_law"]
+        if law["kind"] == "joint_position_state_feedback_integral_v1":
+            index = controller["action_joint_order"].index(law["controlled_joint"])
+            previous_previous_input_target[index] = previous_input_target[index]
+            previous_input_target[index] = reference[index]
         return {
             "target": reference.copy(),
             "correction": [0.0] * len(reference),
@@ -188,6 +196,74 @@ def controller_decision(
         raise RuntimeError("OpenArm controller rejected stale or future joint feedback")
     law = controller["feedback_law"]
     sample_period_s = contract["sample_period_ticks"] / 1_000_000_000.0
+    if law["kind"] == "joint_position_state_feedback_integral_v1":
+        index = controller["action_joint_order"].index(law["controlled_joint"])
+        position = observation["joint_position_rad"][index]
+        previous_position = previous_observation_position[index]
+        if previous_position is None:
+            previous_position = position
+        operating_position = law["operating_point_position_rad"]
+        operating_input = law["operating_point_input_rad"]
+        previous_input = previous_input_target[index]
+        previous_previous_input = previous_previous_input_target[index]
+        if previous_input is None:
+            previous_input = operating_input
+        if previous_previous_input is None:
+            previous_previous_input = operating_input
+        _, a1, a2, b1, b2 = law["identified_plant"]["arx_coefficients"]
+        predicted_position_error = (
+            a1 * (position - operating_position)
+            + a2 * (previous_position - operating_position)
+            + b1 * (previous_input - operating_input)
+            + b2 * (previous_previous_input - operating_input)
+        )
+        integral_gain = law["integral_state_feedback_gain_s_inv"]
+        maximum_integral = law["maximum_state_integral_correction_rad"]
+        integral_correction[index] = max(
+            -maximum_integral,
+            min(
+                maximum_integral,
+                integral_correction[index]
+                + integral_gain * (reference[index] - position) * sample_period_s,
+            ),
+        )
+        state = [
+            operating_position + predicted_position_error - reference[index],
+            position - reference[index],
+            previous_input - reference[index],
+        ]
+        raw_target = (
+            reference[index]
+            - sum(gain * value for gain, value in zip(law["state_feedback_gain"], state))
+            + integral_correction[index]
+        )
+        maximum_correction = law["maximum_state_feedback_correction_rad"]
+        correction = [0.0] * len(reference)
+        correction[index] = max(
+            -maximum_correction,
+            min(maximum_correction, raw_target - reference[index]),
+        )
+        target = reference.copy()
+        target[index] = max(
+            law["minimum_controlled_target_rad"],
+            min(
+                law["maximum_controlled_target_rad"],
+                reference[index] + correction[index],
+            ),
+        )
+        previous_observation_position[index] = position
+        previous_previous_input_target[index] = previous_input
+        previous_input_target[index] = target[index]
+        return {
+            "target": target,
+            "correction": correction,
+            "integral_correction": integral_correction.copy(),
+            "observation_sequence": observation["step"],
+            "observation_age_ticks": age_ticks,
+            "bootstrap": False,
+        }
+    if law["kind"] != "joint_position_reference_pid_v1":
+        raise RuntimeError("unsupported OpenArm feedback law")
     for index, (desired, position, gain, maximum) in enumerate(
         zip(
             reference,
@@ -254,12 +330,18 @@ def run_success(
     previous_positions = [0.0] * joint_count
     final_digest = 0
     integral_correction = [0.0] * joint_count
+    previous_observation_position: list[float | None] = [None] * joint_count
+    previous_input_target: list[float | None] = [None] * joint_count
+    previous_previous_input_target: list[float | None] = [None] * joint_count
     for action in action_artifact["actions"]:
         delayed_observation = observations[-2] if len(observations) >= 2 else None
         decision = controller_decision(
             controller,
             action["joint_position_target_rad"],
             integral_correction,
+            previous_observation_position,
+            previous_input_target,
+            previous_previous_input_target,
             delayed_observation,
             (action["step"] - 1) * FIXED_DELTA_TICKS,
         )
@@ -470,7 +552,7 @@ def main() -> int:
     joint_count = len(actions["action_joint_order"])
     contract = controller.get("observation_contract")
     law = controller.get("feedback_law")
-    vector_fields = (
+    pid_vector_fields = (
         "position_error_gain",
         "velocity_damping_s",
         "integral_error_gain_s_inv",
@@ -491,10 +573,46 @@ def main() -> int:
         or contract.get("maximum_age_ticks") != FIXED_DELTA_TICKS
         or contract.get("required_status") != "nominal"
         or contract.get("bootstrap_policy") != "reference_until_first_available"
-        or law.get("kind") != "joint_position_reference_pid_v1"
-        or any(len(law.get(field, [])) != joint_count for field in vector_fields)
     ):
         raise ValueError("unsupported OpenArm controller observation/feedback contract")
+    if feedback_enabled:
+        if law["kind"] == "joint_position_reference_pid_v1":
+            if any(len(law.get(field, [])) != joint_count for field in pid_vector_fields):
+                raise ValueError("PID controller vector width differs from the task")
+        elif law["kind"] == "joint_position_state_feedback_integral_v1":
+            numeric_fields = (
+                "operating_point_position_rad",
+                "operating_point_input_rad",
+                "integral_state_feedback_gain_s_inv",
+                "maximum_integral_state_error_rad_s",
+                "maximum_state_integral_correction_rad",
+                "maximum_state_feedback_correction_rad",
+                "minimum_controlled_target_rad",
+                "maximum_controlled_target_rad",
+            )
+            if (
+                law.get("controlled_joint") not in actions["action_joint_order"]
+                or law.get("state_order")
+                != [
+                    "predicted_tracking_error_rad",
+                    "observed_tracking_error_rad",
+                    "previous_input_tracking_error_rad",
+                    "integrated_reference_error_rad_s",
+                ]
+                or law.get("reference_feedforward") != "unity_position_reference_v1"
+                or law.get("observation_latency_compensation")
+                != "one_sample_arx_predictor_v1"
+                or len(law.get("state_feedback_gain", [])) != 3
+                or len(law.get("desired_closed_loop_poles", [])) != 4
+                or any(
+                    not math.isfinite(value)
+                    for field in numeric_fields
+                    for value in [law.get(field, math.nan)]
+                )
+            ):
+                raise ValueError("invalid state-feedback controller contract")
+        else:
+            raise ValueError("unsupported OpenArm feedback law")
     first, first_digest = run_success(
         args, task, task_sha256, actions, controller, "rne.openarm.gazebo.success-a.v1"
     )
@@ -532,9 +650,13 @@ def main() -> int:
             "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,
             "observation_source": "adapter_task_tensor_to_typed_joint_feedback",
             "controller_execution": (
-                "artifact_defined_joint_feedback_pid"
-                if feedback_enabled
-                else "open_loop_reference"
+                "open_loop_reference"
+                if not feedback_enabled
+                else (
+                    "artifact_defined_joint_feedback_pid"
+                    if law["kind"] == "joint_position_reference_pid_v1"
+                    else "artifact_defined_joint_feedback_state_space"
+                )
             ),
             "state_hash_contract": "rne_gazebo_adapter_state_v1_blake2b64_f64",
             "final_state_digest": first_digest,
