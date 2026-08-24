@@ -15,6 +15,8 @@ controller-output truncation.
 - [Controller failure replay](evidence/openarm-cross-sim/replay/controller-failure.rne-replay)
 - [OpenArm plant lab](evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.html)
 - [Plant settling Failure Capsule](evidence/openarm-plant-lab/capsule.json)
+- [PID/state-space comparison](evidence/openarm-controller-lab/evidence/openarm-controller-comparison-report.html)
+- [PID settling Failure Capsule](evidence/openarm-controller-lab/capsule.json)
 
 The successful traces each contain 1,800 fixed steps. The final maximum tracking
 errors are approximately 0.004235 rad for Rapier, 0.004991 rad for native
@@ -146,3 +148,15 @@ The PID baseline is retained as a real, non-gating failure. It is briefly inside
 the +/-0.0024 rad band at the step-571 deadline, then first exits at step 577;
 the dedicated behavior replay therefore ends at step 577 rather than claiming
 the deadline itself was the first deviation.
+
+The retained [comparison report](evidence/openarm-controller-lab/evidence/openarm-controller-comparison-report.html)
+and [Failure Capsule](evidence/openarm-controller-lab/capsule.json) contain 43
+content-addressed artifacts, including both controllers, both action traces, all
+six successful backend traces, all six intentional action-width failures, the
+model/requirements/configuration inputs, and the 578-frame PID replay. Verify
+them without loading a simulator:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-controller-lab
+```

@@ -237,3 +237,11 @@ approximately 0.567 s, 0.550 s, and 0.467 s respectively. Its largest
 cross-backend settling delta is approximately 0.10 s, and every declared pole
 lies inside the unit circle. The PID replay distinguishes the 3.5 s deadline at
 step 571 from the first subsequent band exit at step 577.
+
+The committed 43-artifact controller proof verifies without loading Rapier,
+MuJoCo, or Gazebo:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-controller-lab
+```
