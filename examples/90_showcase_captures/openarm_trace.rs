@@ -117,6 +117,7 @@ struct BackendTrace<'a> {
     controller_id: &'a str,
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
+    robot_asset_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     fixed_delta_ticks: u64,
     initial_state_digest: u64,
@@ -139,6 +140,7 @@ struct FailureReport<'a> {
     controller_id: &'a str,
     controller_sha256: &'a str,
     action_trace_sha256: &'a str,
+    robot_asset_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     injection_kind: &'a str,
     injected_step: u64,
@@ -172,6 +174,7 @@ fn run() -> Result<()> {
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json");
     let mut actuation_config_path =
         repo_root.join("adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json");
+    let robot_asset_config_path = repo_root.join("assets/robots/openarm_v2_right.rne.robot.toml");
     let mut output = repo_root.join("artifacts/openarm-cross-sim");
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -192,6 +195,8 @@ fn run() -> Result<()> {
         fs::read(&task_path).with_context(|| format!("read {}", task_path.display()))?;
     let actuation_config_bytes = fs::read(&actuation_config_path)
         .with_context(|| format!("read {}", actuation_config_path.display()))?;
+    let robot_asset_config_bytes = fs::read(&robot_asset_config_path)
+        .with_context(|| format!("read {}", robot_asset_config_path.display()))?;
     let controller: ControllerSpec = serde_json::from_slice(&controller_bytes)
         .with_context(|| format!("parse {}", controller_path.display()))?;
     let task: TaskSpec = serde_json::from_slice(&task_bytes)
@@ -203,6 +208,7 @@ fn run() -> Result<()> {
     let controller_sha256 = sha256(&controller_bytes);
     let task_sha256 = sha256(&task_bytes);
     let actuation_config_sha256 = sha256(&actuation_config_bytes);
+    let robot_asset_config_sha256 = sha256(&robot_asset_config_bytes);
     let actions = compile_actions(&controller);
     fs::create_dir_all(&output)?;
     let action_path = output.join("controller-actions.json");
@@ -257,6 +263,7 @@ fn run() -> Result<()> {
             controller_id: &controller.controller_id,
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
+            robot_asset_config_sha256: &robot_asset_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             fixed_delta_ticks: FIXED_DELTA_TICKS,
             initial_state_digest: first.initial_digest,
@@ -282,6 +289,7 @@ fn run() -> Result<()> {
             controller_id: &controller.controller_id,
             controller_sha256: &controller_sha256,
             action_trace_sha256: &action_trace_sha256,
+            robot_asset_config_sha256: &robot_asset_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             injection_kind: &failure.kind,
             injected_step: failure.inject_at_step,

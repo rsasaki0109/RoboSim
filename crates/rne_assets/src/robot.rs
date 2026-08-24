@@ -205,7 +205,8 @@ pub struct UrdfRobotAsset {
     /// When true, the backend uses reduced-coordinate multibody joints.
     #[serde(default)]
     pub multibody: bool,
-    /// When true, positive URDF inertial masses override legacy link defaults.
+    /// When true, positive URDF inertial masses, centres of mass, and complete
+    /// inertia tensors override legacy link defaults when declared.
     #[serde(default)]
     pub use_declared_inertial_masses: bool,
 }

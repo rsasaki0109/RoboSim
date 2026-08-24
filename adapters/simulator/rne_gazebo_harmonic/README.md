@@ -105,6 +105,8 @@ python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_joint5_identificati
 
 The report fits a SISO ARX(2,2) model only on the isolated window, validates it
 on the coupled window, and records the first URDF position-limit violation. Its
-expected diagnostic status is `expected_coupling_failure_reproduced` until the
-Rapier coupled response is corrected; a future fix must turn the coupled and
-hard-limit checks green rather than changing the registered tolerances.
+corrected status is `coupled_response_passed`: the Rapier path consumes the
+URDF-declared mass, centre of mass, and complete inertia tensor, while the robot
+asset configuration, actuation configuration, and model remain independently
+content-addressed. The coupled and hard-limit checks turned green without
+changing their registered tolerances or URDF effort limits.

@@ -42,6 +42,103 @@ impl Default for RigidBody {
     }
 }
 
+/// Exact rigid-body centre of mass and symmetric inertia tensor.
+///
+/// When present, [`RigidBody::mass_kg`] together with this component defines the
+/// body's complete inertial properties. Physics backends must not add collider
+/// mass or infer a replacement tensor. Tensor entries are expressed about
+/// [`Self::center_of_mass_local_m`] in the rigid body's local frame.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidBodyInertia {
+    /// Centre of mass in the rigid body's local frame, in metres.
+    pub center_of_mass_local_m: Vec3,
+    /// Inertia tensor x-x entry in kg·m².
+    pub ixx_kg_m2: f64,
+    /// Inertia tensor x-y entry in kg·m².
+    pub ixy_kg_m2: f64,
+    /// Inertia tensor x-z entry in kg·m².
+    pub ixz_kg_m2: f64,
+    /// Inertia tensor y-y entry in kg·m².
+    pub iyy_kg_m2: f64,
+    /// Inertia tensor y-z entry in kg·m².
+    pub iyz_kg_m2: f64,
+    /// Inertia tensor z-z entry in kg·m².
+    pub izz_kg_m2: f64,
+}
+
+impl RigidBodyInertia {
+    /// Returns true when every value is finite, the symmetric tensor is
+    /// positive definite, and its principal moments satisfy the physical
+    /// triangle inequalities.
+    pub fn is_valid(self) -> bool {
+        let values = [
+            self.center_of_mass_local_m.x,
+            self.center_of_mass_local_m.y,
+            self.center_of_mass_local_m.z,
+            self.ixx_kg_m2,
+            self.ixy_kg_m2,
+            self.ixz_kg_m2,
+            self.iyy_kg_m2,
+            self.iyz_kg_m2,
+            self.izz_kg_m2,
+        ];
+        if values.into_iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let leading_minor_2 = self.ixx_kg_m2 * self.iyy_kg_m2 - self.ixy_kg_m2 * self.ixy_kg_m2;
+        let determinant = self.ixx_kg_m2
+            * (self.iyy_kg_m2 * self.izz_kg_m2 - self.iyz_kg_m2 * self.iyz_kg_m2)
+            - self.ixy_kg_m2 * (self.ixy_kg_m2 * self.izz_kg_m2 - self.iyz_kg_m2 * self.ixz_kg_m2)
+            + self.ixz_kg_m2 * (self.ixy_kg_m2 * self.iyz_kg_m2 - self.iyy_kg_m2 * self.ixz_kg_m2);
+        if !(self.ixx_kg_m2 > 0.0 && leading_minor_2 > 0.0 && determinant > 0.0) {
+            return false;
+        }
+
+        // Positive-definite symmetric matrices are not automatically
+        // realizable inertia tensors. Principal moments must also satisfy the
+        // triangle inequalities. Equivalently, trace(I)/2 * identity - I is a
+        // positive-semidefinite second-moment matrix.
+        let half_trace = (self.ixx_kg_m2 + self.iyy_kg_m2 + self.izz_kg_m2) * 0.5;
+        let covariance = [
+            [
+                half_trace - self.ixx_kg_m2,
+                -self.ixy_kg_m2,
+                -self.ixz_kg_m2,
+            ],
+            [
+                -self.ixy_kg_m2,
+                half_trace - self.iyy_kg_m2,
+                -self.iyz_kg_m2,
+            ],
+            [
+                -self.ixz_kg_m2,
+                -self.iyz_kg_m2,
+                half_trace - self.izz_kg_m2,
+            ],
+        ];
+        let tolerance = half_trace.abs().max(1.0) * 1.0e-12;
+        let principal_minor_xy =
+            covariance[0][0] * covariance[1][1] - covariance[0][1] * covariance[0][1];
+        let principal_minor_xz =
+            covariance[0][0] * covariance[2][2] - covariance[0][2] * covariance[0][2];
+        let principal_minor_yz =
+            covariance[1][1] * covariance[2][2] - covariance[1][2] * covariance[1][2];
+        let covariance_determinant = covariance[0][0]
+            * (covariance[1][1] * covariance[2][2] - covariance[1][2] * covariance[1][2])
+            - covariance[0][1]
+                * (covariance[0][1] * covariance[2][2] - covariance[1][2] * covariance[0][2])
+            + covariance[0][2]
+                * (covariance[0][1] * covariance[1][2] - covariance[1][1] * covariance[0][2]);
+        covariance[0][0] >= -tolerance
+            && covariance[1][1] >= -tolerance
+            && covariance[2][2] >= -tolerance
+            && principal_minor_xy >= -tolerance * tolerance
+            && principal_minor_xz >= -tolerance * tolerance
+            && principal_minor_yz >= -tolerance * tolerance
+            && covariance_determinant >= -tolerance * tolerance * tolerance
+    }
+}
+
 /// Collision shape definition.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ColliderShape {
@@ -498,7 +595,37 @@ impl Default for JointMotor {
 
 #[cfg(test)]
 mod tests {
-    use super::JointActuation;
+    use super::{JointActuation, RigidBodyInertia};
+    use rne_math::Vec3;
+
+    #[test]
+    fn exact_inertia_requires_positive_definite_and_physically_realizable_tensor() {
+        let valid = RigidBodyInertia {
+            center_of_mass_local_m: Vec3::new(0.01, -0.02, 0.03),
+            ixx_kg_m2: 0.4,
+            ixy_kg_m2: 0.01,
+            ixz_kg_m2: -0.02,
+            iyy_kg_m2: 0.5,
+            iyz_kg_m2: 0.03,
+            izz_kg_m2: 0.6,
+        };
+        assert!(valid.is_valid());
+        assert!(!RigidBodyInertia {
+            iyy_kg_m2: -0.5,
+            ..valid
+        }
+        .is_valid());
+        assert!(!RigidBodyInertia {
+            ixx_kg_m2: 1.0,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyy_kg_m2: 1.0,
+            iyz_kg_m2: 0.0,
+            izz_kg_m2: 3.0,
+            ..valid
+        }
+        .is_valid());
+    }
 
     #[test]
     fn joint_actuation_has_explicit_units_and_fail_closed_values() {

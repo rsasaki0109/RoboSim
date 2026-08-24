@@ -272,6 +272,14 @@ pub enum PhysicsError {
         /// Static validation reason shared by backend implementations.
         reason: &'static str,
     },
+    /// Exact rigid-body inertial properties are invalid.
+    #[error("invalid rigid-body inertia on entity {entity_index}: {reason}")]
+    InvalidInertia {
+        /// Stable ECS entity index carrying the rejected properties.
+        entity_index: u32,
+        /// Static validation reason shared by backend implementations.
+        reason: &'static str,
+    },
 }
 
 /// Verifies a backend's declared capabilities satisfy every required one.

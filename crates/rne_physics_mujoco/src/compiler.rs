@@ -4,7 +4,8 @@ use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
     Collider, ColliderShape, FixedJointDesc, JointActuation, JointMotor, PhysicsCapability,
-    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::fmt::Write as _;
@@ -81,6 +82,7 @@ pub(crate) struct BodyTopology {
     entity: Entity,
     body_type: RigidBodyType,
     mass_kg: f64,
+    inertia: Option<RigidBodyInertia>,
     collider: Option<Collider>,
     structural_transform: Option<Transform3>,
     joint: Option<JointSpec>,
@@ -107,6 +109,7 @@ impl JointSpec {
 struct BodyInput {
     entity: Entity,
     rigid_body: RigidBody,
+    inertia: Option<RigidBodyInertia>,
     collider: Option<Collider>,
     local_transform: Transform3,
     transform: Transform3,
@@ -139,6 +142,11 @@ pub(crate) enum CompileError {
     JointCycle { entity_index: u32 },
     #[error("invalid joint actuation on entity {entity_index}: {reason}")]
     InvalidActuation {
+        entity_index: u32,
+        reason: &'static str,
+    },
+    #[error("invalid rigid-body inertia on entity {entity_index}: {reason}")]
+    InvalidInertia {
         entity_index: u32,
         reason: &'static str,
     },
@@ -254,7 +262,8 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                 // body frames, so feeding the local component directly would
                 // apply every parent transform twice for imported robots.
                 let transform = world_transform_of(world, entity);
-                validate_body(entity, rigid_body, collider, transform)?;
+                let inertia = entity_ref.get::<RigidBodyInertia>().copied();
+                validate_body(entity, rigid_body, inertia, collider, transform)?;
                 let joints = [
                     entity_ref
                         .get::<RevoluteJointDesc>()
@@ -283,6 +292,7 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                 bodies.push(BodyInput {
                     entity,
                     rigid_body,
+                    inertia,
                     collider,
                     local_transform,
                     transform,
@@ -477,9 +487,19 @@ fn write_body(
     .expect("writing to String cannot fail");
 
     let joint = write_joint(output, body, structural_transform, depth + 1, actuators);
+    if let Some(inertia) = body.inertia {
+        write_exact_inertial(output, body.rigid_body, inertia, depth + 1);
+    }
     if let Some(collider) = body.collider {
-        write_geom(output, index, body.rigid_body, collider, depth + 1);
-    } else {
+        write_geom(
+            output,
+            index,
+            body.rigid_body,
+            collider,
+            body.inertia.is_none(),
+            depth + 1,
+        );
+    } else if body.inertia.is_none() {
         write_inertial(output, body.rigid_body, depth + 1);
     }
     bindings.push(BodyBinding {
@@ -491,6 +511,7 @@ fn write_body(
         entity: body.entity,
         body_type: body.rigid_body.body_type,
         mass_kg: body.rigid_body.mass_kg,
+        inertia: body.inertia,
         collider: body.collider,
         structural_transform: (body.rigid_body.body_type == RigidBodyType::Fixed
             || matches!(body.joint, Some(JointSpec::Fixed(_))))
@@ -615,6 +636,7 @@ fn relative_transform(parent: Transform3, child: Transform3) -> Transform3 {
 fn validate_body(
     entity: Entity,
     rigid_body: RigidBody,
+    inertia: Option<RigidBodyInertia>,
     collider: Option<Collider>,
     transform: Transform3,
 ) -> Result<(), CompileError> {
@@ -627,6 +649,12 @@ fn validate_body(
     }
     if !rigid_body.mass_kg.is_finite() || rigid_body.mass_kg <= 0.0 {
         return Err(invalid(entity_index, "mass_kg"));
+    }
+    if inertia.is_some_and(|properties| !properties.is_valid()) {
+        return Err(CompileError::InvalidInertia {
+            entity_index,
+            reason: "physically invalid tensor",
+        });
     }
     validate_vec3(entity_index, "translation_m", transform.translation)?;
     validate_quat(entity_index, "rotation", transform.rotation)?;
@@ -700,6 +728,7 @@ fn write_geom(
     index: u32,
     rigid_body: RigidBody,
     collider: Collider,
+    include_mass: bool,
     depth: usize,
 ) {
     let (kind, size, alignment) = match collider.shape {
@@ -726,22 +755,46 @@ fn write_geom(
     } else {
         ""
     };
+    let mass_attribute = if include_mass {
+        format!(" mass=\"{:.17}\"", rigid_body.mass_kg)
+    } else {
+        String::new()
+    };
     writeln!(
         output,
-        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\" mass=\"{:.17}\" friction=\"{:.9}\"{sensor_attributes}/>",
+        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\"{mass_attribute} friction=\"{:.9}\"{sensor_attributes}/>",
         vector(collider.local_offset.translation),
         quaternion(rotation),
-        rigid_body.mass_kg,
         collider.material.friction,
     )
     .expect("writing to String cannot fail");
 }
 
+fn write_exact_inertial(
+    output: &mut String,
+    rigid_body: RigidBody,
+    inertia: RigidBodyInertia,
+    depth: usize,
+) {
+    let indent = "  ".repeat(depth);
+    writeln!(
+        output,
+        "{indent}<inertial pos=\"{}\" mass=\"{:.17}\" fullinertia=\"{:.17} {:.17} {:.17} {:.17} {:.17} {:.17}\"/>",
+        vector(inertia.center_of_mass_local_m),
+        rigid_body.mass_kg,
+        inertia.ixx_kg_m2,
+        inertia.iyy_kg_m2,
+        inertia.izz_kg_m2,
+        inertia.ixy_kg_m2,
+        inertia.ixz_kg_m2,
+        inertia.iyz_kg_m2,
+    )
+    .expect("writing to String cannot fail");
+}
+
 fn write_inertial(output: &mut String, rigid_body: RigidBody, depth: usize) {
-    // RNE's compact rigid-body contract does not expose an inertia tensor.
-    // Colliderless URDF links still need positive inertia in MuJoCo, so use a
-    // small isotropic tensor derived solely from their declared mass. This is
-    // a backend-private representation detail, not a new public physics type.
+    // Legacy bodies without an exact inertia component retain the historical
+    // backend-private isotropic fallback.
     let inertia_kg_m2 = (rigid_body.mass_kg * 1.0e-2).max(1.0e-9);
     let indent = "  ".repeat(depth);
     writeln!(
@@ -865,6 +918,52 @@ mod tests {
         ));
         assert!(!compiled.mjcf.contains(
             "<body name=\"rne_body_0\" pos=\"1.00000000000000000 2.00000000000000000 3.00000000000000000\""
+        ));
+    }
+
+    #[test]
+    fn exact_inertia_is_emitted_independently_of_collision_geometry() {
+        let mut world = World::new();
+        let dynamic = body(&mut world, "identified", RigidBodyType::Dynamic, Vec3::ZERO);
+        world.entity_mut(dynamic).insert(RigidBodyInertia {
+            center_of_mass_local_m: Vec3::new(0.1, -0.2, 0.3),
+            ixx_kg_m2: 0.4,
+            ixy_kg_m2: 0.01,
+            ixz_kg_m2: -0.02,
+            iyy_kg_m2: 0.5,
+            iyz_kg_m2: 0.03,
+            izz_kg_m2: 0.6,
+        });
+
+        let compiled =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert!(compiled.mjcf.contains(
+            "<inertial pos=\"0.10000000000000001 -0.20000000000000001 0.29999999999999999\" mass=\"2.00000000000000000\" fullinertia=\"0.40000000000000002 0.50000000000000000 0.59999999999999998 0.01000000000000000 -0.02000000000000000 0.03000000000000000\"/>"
+        ));
+        let geom = compiled
+            .mjcf
+            .lines()
+            .find(|line| line.contains("rne_geom_0"))
+            .expect("collision geometry");
+        assert!(!geom.contains(" mass="));
+    }
+
+    #[test]
+    fn invalid_exact_inertia_is_rejected() {
+        let mut world = World::new();
+        let dynamic = body(&mut world, "invalid", RigidBodyType::Dynamic, Vec3::ZERO);
+        world.entity_mut(dynamic).insert(RigidBodyInertia {
+            center_of_mass_local_m: Vec3::ZERO,
+            ixx_kg_m2: 1.0,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyy_kg_m2: -1.0,
+            iyz_kg_m2: 0.0,
+            izz_kg_m2: 1.0,
+        });
+        assert!(matches!(
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666),
+            Err(CompileError::InvalidInertia { .. })
         ));
     }
 

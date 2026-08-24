@@ -11,3 +11,4 @@ collisions = true
 mesh_collisions = false
 self_collisions = false
 multibody = true
+use_declared_inertial_masses = true

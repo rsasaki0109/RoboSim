@@ -189,10 +189,22 @@ or subsystem expansion enters these slices.
 
 ## Sensor and control-dynamics hardening track
 
-This track starts after the external simulator contract is shipped and remains
-subordinate to the product-proof gates. It strengthens the existing indoor
-mobile-lift and OpenArm validation fixtures; it does not justify adding unrelated
-robots, scenes, sensor types, or engine-specific physics features.
+This is a first-class technical gate serving the product proof, not a side
+catalog of simulation features. It strengthens the existing indoor mobile-lift
+and OpenArm validation fixtures and must produce evidence reusable in
+simulation, recorded playback, shadow, and bounded hardware operation. It does
+not justify adding unrelated robots, scenes, sensor types, or engine-specific
+physics features.
+
+The engineering question is deliberately concrete:
+
+> Given the same timestamped sensor observations, actuator contract, plant
+> identity, controller, and reference trajectory, can RNE explain and reproduce
+> the first closed-loop deviation across backends and later on hardware?
+
+Every result must therefore separate four causes: measurement error, state
+estimation error, actuator realization error, and plant-model error. A final
+pose alone is not sufficient evidence.
 
 ### Sensor evidence
 
@@ -218,6 +230,25 @@ sensor specs, calibration, model/config hashes, seed, latency/drop trace, named
 unit-bearing tolerances, and the first failed field. At least one nominal and
 one injected-failure case must compare Rapier, MuJoCo, recorded observations,
 and later Gazebo without claiming renderer-private pixels are byte-identical.
+
+Sensor work is delivered in dependency order:
+
+1. **Joint and actuator feedback:** position, velocity, effort, command,
+   saturation state, sample age, and status bits. This is the measurement path
+   used to close the first OpenArm control loop.
+2. **IMU:** timestamped orientation/angular velocity/linear acceleration,
+   gravity convention, bias and random-walk state, saturation, mount transform,
+   and stationary plus prescribed-motion validation.
+3. **Camera and depth:** intrinsics, distortion, exposure timestamp, optical
+   frame, depth scale and invalid-pixel policy, with geometric rather than
+   byte-identical cross-renderer comparisons.
+4. **Lidar only when required by the retained mobile task:** scan timing,
+   per-ray pose convention, range/return policy, and map/fixture alignment.
+
+Each sensor family needs a calibration fixture, deterministic golden stream,
+nominal error budget, boundary case, and at least one injected failure. New
+sensor APIs are not accepted until timestamp, latency, noise, saturation, and
+failure behavior are testable without rendering.
 
 ### Control-engineering dynamics
 
@@ -248,6 +279,36 @@ plant, operating point, controller, actuator/sensor contracts, experiment input,
 backend/runtime, metrics, tolerance registry, state hashes, and replay. Every
 analysis must run headless and from `SimClock`; rendering is never required.
 
+Dynamics work follows a control-engineering model stack:
+
+1. **Parameter integrity:** preserve mass, center of mass, inertia tensor,
+   joint friction/damping, limits, transmission, and actuator parameters from
+   source asset to backend evidence. Reject non-physical inertias and report
+   every fallback or default.
+2. **Open-loop characterization:** deterministic step, ramp, impulse, and chirp
+   excitation with saturation-aware input records. Estimate delay, bandwidth,
+   static gain, damping, natural frequency, and cross-axis coupling over named
+   operating regions.
+3. **Model identification and validation:** keep training and validation
+   trajectories separate; retain their hashes; compare declared physics,
+   linearized state-space, and fitted models using residual whiteness and
+   unit-bearing prediction metrics.
+4. **Controller synthesis and analysis:** establish PID first, then use
+   state-feedback or LQR only when controllability, observability, operating
+   range, and estimator assumptions are evidenced. Report stability margins,
+   saturation exposure, anti-windup behavior, tracking metrics, and disturbance
+   rejection.
+5. **Closed-loop robustness:** sweep payload, inertia, friction, sensor bias,
+   delay, drop, rate, and actuator degradation within declared bounds. Retain
+   the smallest counterexample and its first violated contract.
+
+The primary OpenArm benchmark is not considered complete until it includes a
+payload-free baseline and at least one declared payload, multi-axis coupling,
+sensor-in-the-loop feedback, effort saturation, a disturbance or parameter
+variation, and backend comparisons using the same compiled action/controller
+artifact. Pass/fail limits must come from URDF/actuator contracts or a named
+requirements registry, never from observed backend spread.
+
 The first OpenArm report is intentionally stricter than the existing final-pose
 proof. It evaluates the complete trajectory with RMSE, IAE, ISE, terminal bias,
 peak velocity, and measured position range for every joint. URDF position and
@@ -260,39 +321,74 @@ The first plant-identification fixture isolates OpenArm right joint 5 before
 moving the remaining arm joints with the joint-5 reference held constant. An
 ARX(2,2) model is fitted only to the isolated, deterministic training window and
 is evaluated without refitting on the coupled validation window. The baseline
-evidence localizes the current Rapier discrepancy: isolated tracking passes,
-but coupled motion amplifies joint-5 error and eventually crosses its URDF hard
-position limit, while Gazebo remains within the same contracts. This is a
-diagnostic acceptance result, not permission to weaken the tolerance or exceed
-the declared actuator effort.
+evidence localized the original Rapier discrepancy: isolated tracking passed,
+but coupled motion amplified joint-5 error and eventually crossed its URDF hard
+position limit, while Gazebo remained within the same contracts. Passing the
+URDF mass without its centre of mass and inertia tensor had changed the plant.
+The corrected fixture passes both windows after binding exact URDF inertial
+properties and an interior reset reference; no tolerance or actuator effort was
+increased.
 
 ### Ordered implementation slices
 
-1. Define versioned sensor-validation and control-dynamics report schemas plus
-   unit-bearing tolerance registries. The OpenArm time-domain report and joint-5
-   identification experiment are the first concrete control artifacts; both
-   expose the first URDF hard-contract violation instead of relying on final
-   pose error.
-2. Correct the Rapier joint-5 coupled response using an actuator-aware,
-   backend-neutral control/constraint contract. Gate isolated and coupled
-   validation separately, retain actuator saturation, and require joint 5 to
-   remain inside its URDF position and effort limits without regressing the
-   other joints or compatibility fixtures.
-3. Make sensor sample phase, latency, noise, calibration, and fault order
-   explicit for joint/actuator feedback, IMU, and the existing flagship camera
-   and depth observations. Emit the first headless `sensor-validation-report`
-   with nominal and deterministic latency/dropout cases.
-4. Close the loop through the declared sensor stream rather than privileged
-   backend state. Bind sensor delay/noise and actuator saturation to the same
-   replay, then compare the unchanged controller/plant experiment across
-   Rapier, MuJoCo, and Gazebo.
-5. Add linearization, controllability/observability, time-domain, and
-   frequency-domain analysis over recorded deterministic trajectories. Add
-   reference PID/state-feedback/LQR baselines only where the identified model
-   and operating range support them.
-6. Package the first sensor or control divergence into a Failure Capsule and
-   reuse the same reports for recorded playback, shadow, and the bounded
-   physical path before expanding to another robot or sensor family.
+1. **In progress -- physical parameter integrity:** preserve exact URDF mass,
+   center of mass, and inertia tensor through the backend-neutral rigid-body
+   contract; reject invalid tensors; eliminate implicit collider mass; bind the
+   robot asset configuration into traces and capsules. Re-run the OpenArm
+   joint-5 isolated/coupled identification and full pose-cycle regressions.
+2. **Joint-feedback measurement contract:** version the observation schema for
+   joint position, velocity, effort, command realization, saturation, sample
+   phase, and age. Produce nominal, one-step-delay, dropout, stuck-value, and
+   effort-saturation golden streams and the first headless
+   `sensor-validation-report`.
+3. **Sensor-in-the-loop control:** remove privileged backend-state feedback from
+   the OpenArm reference controller. Run the unchanged timestamped observation
+   and command streams through Rapier, MuJoCo, and Gazebo, retaining the first
+   measurement, realization, or plant divergence.
+4. **IMU contract and estimator fixture:** implement stationary and prescribed
+   motion tests, seeded bias/noise/random walk, mount-frame validation, latency
+   and dropout cases, then add a deterministic complementary or Kalman-filter
+   reference estimator with innovation and consistency metrics.
+5. **Open-loop plant suite:** add bounded step/ramp/chirp experiments and a
+   versioned experiment manifest. Generate frequency-response data where
+   applicable, time-domain metrics, coupling matrices, and train/validation
+   datasets for the OpenArm joints and gripper.
+6. **Model and controller suite:** add deterministic linearization and
+   controllability/observability checks, validate the current ARX path, and
+   compare PID plus one justified state-space baseline under identical limits,
+   delay, and disturbance conditions.
+7. **Robustness envelope:** execute seeded sweeps over payload, inertia,
+   friction, sensor latency/bias/drop, and actuator degradation. Report the
+   verified operating envelope and minimize the first failing case rather than
+   averaging failures away.
+8. **Geometric sensors:** validate the flagship camera/depth calibration and
+   3DGS metric alignment with reprojection, depth, occlusion, and semantic-pose
+   metrics. Add lidar only if the retained mobile task consumes it.
+9. **Portable evidence:** package at least one measurement failure and one
+   closed-loop dynamics failure into browser-readable Failure Capsules; replay
+   both through recorded and shadow paths before expanding to another robot or
+   sensor family.
+
+### Track definition of done
+
+The hardening track is complete only when:
+
+- the OpenArm loop consumes typed sensor observations instead of hidden backend
+  state, while every command is checked against the same actuator contract;
+- one command produces nominal and deliberately failing sensor/control reports
+  headlessly on Rapier, MuJoCo, and Gazebo;
+- reports identify the first bad timestamp, field, command, or state and classify
+  it as measurement, estimation, actuator, or plant divergence;
+- deterministic reruns reproduce report and replay hashes, while declared
+  stochastic tests reproduce from `WorldRandom` seeds;
+- URDF limits and physical parameter checks pass without tolerance inflation or
+  backend-specific exceptions;
+- a payload/disturbance robustness envelope and frequency/time-domain control
+  evidence are retained with named SI-unit requirements;
+- the same schemas accept at least one recorded observation stream and one
+  process-isolated shadow run; and
+- both a sensor fault and a dynamics/control fault are independently inspectable
+  from verified Failure Capsules.
 
 ## Stop conditions
 

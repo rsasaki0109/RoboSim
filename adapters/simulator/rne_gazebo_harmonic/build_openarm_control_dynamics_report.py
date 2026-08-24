@@ -64,7 +64,9 @@ def joint_limits(urdf: Path, joint_order: list[str]) -> list[dict[str, float]]:
     return [limits[joint] for joint in joint_order]
 
 
-def metric_check(metric_id: str, unit: str, observed: float, maximum: float) -> dict[str, Any]:
+def metric_check(
+    metric_id: str, unit: str, observed: float, maximum: float
+) -> dict[str, Any]:
     status = "passed" if math.isfinite(observed) and observed <= maximum else "failed"
     return {
         "id": metric_id,
@@ -76,8 +78,12 @@ def metric_check(metric_id: str, unit: str, observed: float, maximum: float) -> 
 
 
 def range_check(
-    metric_id: str, unit: str, observed_minimum: float, observed_maximum: float,
-    minimum: float, maximum: float,
+    metric_id: str,
+    unit: str,
+    observed_minimum: float,
+    observed_maximum: float,
+    minimum: float,
+    maximum: float,
 ) -> dict[str, Any]:
     status = (
         "passed"
@@ -116,16 +122,13 @@ def main() -> int:
         / "adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json"
     )
     urdf_path = repo / "assets/robots/openarm_description/openarm_v2_right.rne.urdf"
+    rapier_robot_asset_path = repo / "assets/robots/openarm_v2_right.rne.robot.toml"
     rapier_actuation_path = (
-        repo
-        / "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json"
+        repo / "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json"
     )
-    gazebo_runtime_path = (
-        repo / "adapters/simulator/rne_gazebo_harmonic/runtime.json"
-    )
+    gazebo_runtime_path = repo / "adapters/simulator/rne_gazebo_harmonic/runtime.json"
     gazebo_adapter_config_path = (
-        repo
-        / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json"
+        repo / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json"
     )
     controller = load(controller_path)
     task = load(task_path)
@@ -145,8 +148,7 @@ def main() -> int:
         or rapier_actuation.get("motor_model") != "force_based_v1"
         or rapier_actuation.get("fixed_delta_ticks")
         != actions_artifact["fixed_delta_ticks"]
-        or [joint["joint_name"] for joint in rapier_actuation["joints"]]
-        != joint_order
+        or [joint["joint_name"] for joint in rapier_actuation["joints"]] != joint_order
         or gazebo_adapter_config.get("joint_order") != joint_order
     ):
         raise ValueError("actuation configuration identity/order drifted")
@@ -175,10 +177,13 @@ def main() -> int:
             "actuation_config_sha256"
         ) != sha256(rapier_actuation_path):
             raise ValueError("Rapier trace differs from its actuation configuration")
+        if expected_backend == "rne_rapier" and trace.get(
+            "robot_asset_config_sha256"
+        ) != sha256(rapier_robot_asset_path):
+            raise ValueError("Rapier trace differs from its robot asset configuration")
         if expected_backend == "gazebo_sim" and (
             trace.get("runtime_manifest_sha256") != sha256(gazebo_runtime_path)
-            or trace.get("adapter_config_sha256")
-            != sha256(gazebo_adapter_config_path)
+            or trace.get("adapter_config_sha256") != sha256(gazebo_adapter_config_path)
         ):
             raise ValueError("Gazebo trace differs from its runtime/configuration")
         per_joint: list[dict[str, Any]] = []
@@ -198,7 +203,9 @@ def main() -> int:
             rmse = math.sqrt(sum(error * error for error in errors) / len(errors))
             iae = sum(abs(error) for error in errors) * dt_s
             ise = sum(error * error for error in errors) * dt_s
-            terminal_bias = sum(errors[-TERMINAL_WINDOW_SAMPLES:]) / TERMINAL_WINDOW_SAMPLES
+            terminal_bias = (
+                sum(errors[-TERMINAL_WINDOW_SAMPLES:]) / TERMINAL_WINDOW_SAMPLES
+            )
             peak_velocity = max(abs(value) for value in velocities)
             joint_checks = [
                 metric_check(
@@ -281,7 +288,9 @@ def main() -> int:
                     "tracking_rmse_rad": rmse,
                     "integral_absolute_error_rad_s": iae,
                     "integral_squared_error_rad2_s": ise,
-                    "maximum_absolute_tracking_error_rad": max(abs(error) for error in errors),
+                    "maximum_absolute_tracking_error_rad": max(
+                        abs(error) for error in errors
+                    ),
                     "terminal_window_mean_error_rad": terminal_bias,
                     "terminal_window_samples": TERMINAL_WINDOW_SAMPLES,
                     "peak_absolute_velocity_rad_s": peak_velocity,
@@ -357,11 +366,14 @@ def main() -> int:
             {
                 "joint": joint,
                 "position_delta_rmse_rad": math.sqrt(
-                    sum(value * value for value in position_deltas) / len(position_deltas)
+                    sum(value * value for value in position_deltas)
+                    / len(position_deltas)
                 ),
                 "maximum_position_delta_rad": maximum_position,
                 "maximum_position_delta_step": maximum_step + 1,
-                "maximum_velocity_delta_rad_s": max(abs(value) for value in velocity_deltas),
+                "maximum_velocity_delta_rad_s": max(
+                    abs(value) for value in velocity_deltas
+                ),
                 "final_position_delta_rad": abs(position_deltas[-1]),
             }
         )
@@ -390,13 +402,12 @@ def main() -> int:
                 "motor_model": rapier_actuation["motor_model"],
                 "solver_iterations": rapier_actuation["solver_iterations"],
                 "configuration_sha256": sha256(rapier_actuation_path),
+                "robot_asset_config_sha256": sha256(rapier_robot_asset_path),
                 "joint_count": len(rapier_actuation["joints"]),
             },
             {
                 "backend_id": "gazebo_sim",
-                "position_gain_s_inv": gazebo_adapter_config[
-                    "position_gain_s_inv"
-                ],
+                "position_gain_s_inv": gazebo_adapter_config["position_gain_s_inv"],
                 "maximum_velocity_rad_s": gazebo_adapter_config[
                     "maximum_velocity_rad_s"
                 ],
@@ -442,6 +453,10 @@ def main() -> int:
             {"role": "gazebo_trace", "sha256": sha256(gazebo_path)},
             {"role": "robot_model", "sha256": sha256(urdf_path)},
             {
+                "role": "rapier_robot_asset_config",
+                "sha256": sha256(rapier_robot_asset_path),
+            },
+            {
                 "role": "rapier_actuation_config",
                 "sha256": sha256(rapier_actuation_path),
             },
@@ -479,7 +494,7 @@ def main() -> int:
 def write_html(path: Path, report: dict[str, Any]) -> None:
     payload = json.dumps(report, separators=(",", ":")).replace("</", "<\\/")
     document = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenArm control dynamics</title><style>
-body{{margin:0;background:#08111d;color:#edf5ff;font:14px system-ui,sans-serif}}main{{max-width:1250px;margin:auto;padding:28px}}h1{{font-size:28px}}.warn{{color:#ffbd66}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}.card{{background:#122033;border:1px solid #29415f;border-radius:10px;padding:14px}}table{{width:100%;border-collapse:collapse;margin-top:10px}}th,td{{border:1px solid #29415f;padding:7px;text-align:right}}th:first-child,td:first-child{{text-align:left}}.failed{{color:#ff7e7e}}.passed{{color:#6ee7aa}}code{{word-break:break-all;font-size:11px}}</style></head><body><main><h1>OpenArm control dynamics</h1><p>Status: <strong class="warn">{report['status'].upper()}</strong></p><div id="summary" class="grid"></div><h2>Per-joint metrics</h2><div id="metrics"></div><h2>First actuator-contract violation</h2><div id="violation" class="card"></div><h2>Content-addressed inputs</h2><div id="inputs" class="card"></div><script>const r={payload};const fmt=x=>Number(x).toFixed(6);document.querySelector('#summary').innerHTML=r.backends.map(b=>`<div class=card><b>${{b.backend_id}} ${{b.backend_version}}</b><p>samples: ${{b.sample_count}} @ ${{b.sample_period_s}} s</p><p class=${{b.status==='passed'?'passed':'failed'}}>${{b.status}}</p></div>`).join('');document.querySelector('#metrics').innerHTML=r.backends.map(b=>`<h3>${{b.backend_id}}</h3><table><tr><th>joint</th><th>RMSE rad</th><th>IAE rad·s</th><th>ISE rad²·s</th><th>terminal bias rad</th><th>position / URDF range rad</th><th>peak / limit rad/s</th></tr>${{b.joint_metrics.map(j=>`<tr><td>${{j.joint}}</td><td>${{fmt(j.tracking_rmse_rad)}}</td><td>${{fmt(j.integral_absolute_error_rad_s)}}</td><td>${{fmt(j.integral_squared_error_rad2_s)}}</td><td>${{fmt(j.terminal_window_mean_error_rad)}}</td><td>${{fmt(j.minimum_position_rad)}}…${{fmt(j.maximum_position_rad)}} / ${{fmt(j.urdf_position_minimum_rad)}}…${{fmt(j.urdf_position_maximum_rad)}}</td><td>${{fmt(j.peak_absolute_velocity_rad_s)}} / ${{fmt(j.urdf_velocity_limit_rad_s)}}</td></tr>`).join('')}}</table>`).join('');const v=r.first_contract_violation;document.querySelector('#violation').innerHTML=v?`<b class=failed>${{v.backend_id}} · ${{v.joint}}</b><p>step ${{v.step}} (${{v.sim_time_ticks}} ns): ${{fmt(v.observed)}} ${{v.unit}}; allowed ${{v.minimum===undefined?'|x| ≤ '+fmt(v.maximum):fmt(v.minimum)+' … '+fmt(v.maximum)}} ${{v.unit}}</p>`:'none';document.querySelector('#inputs').innerHTML=r.inputs.map(x=>`<p><b>${{x.role}}</b> <code>${{x.sha256}}</code></p>`).join('');</script></main></body></html>"""
+body{{margin:0;background:#08111d;color:#edf5ff;font:14px system-ui,sans-serif}}main{{max-width:1250px;margin:auto;padding:28px}}h1{{font-size:28px}}.warn{{color:#ffbd66}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}.card{{background:#122033;border:1px solid #29415f;border-radius:10px;padding:14px}}table{{width:100%;border-collapse:collapse;margin-top:10px}}th,td{{border:1px solid #29415f;padding:7px;text-align:right}}th:first-child,td:first-child{{text-align:left}}.failed{{color:#ff7e7e}}.passed{{color:#6ee7aa}}code{{word-break:break-all;font-size:11px}}</style></head><body><main><h1>OpenArm control dynamics</h1><p>Status: <strong class="warn">{report["status"].upper()}</strong></p><div id="summary" class="grid"></div><h2>Per-joint metrics</h2><div id="metrics"></div><h2>First actuator-contract violation</h2><div id="violation" class="card"></div><h2>Content-addressed inputs</h2><div id="inputs" class="card"></div><script>const r={payload};const fmt=x=>Number(x).toFixed(6);document.querySelector('#summary').innerHTML=r.backends.map(b=>`<div class=card><b>${{b.backend_id}} ${{b.backend_version}}</b><p>samples: ${{b.sample_count}} @ ${{b.sample_period_s}} s</p><p class=${{b.status==='passed'?'passed':'failed'}}>${{b.status}}</p></div>`).join('');document.querySelector('#metrics').innerHTML=r.backends.map(b=>`<h3>${{b.backend_id}}</h3><table><tr><th>joint</th><th>RMSE rad</th><th>IAE rad·s</th><th>ISE rad²·s</th><th>terminal bias rad</th><th>position / URDF range rad</th><th>peak / limit rad/s</th></tr>${{b.joint_metrics.map(j=>`<tr><td>${{j.joint}}</td><td>${{fmt(j.tracking_rmse_rad)}}</td><td>${{fmt(j.integral_absolute_error_rad_s)}}</td><td>${{fmt(j.integral_squared_error_rad2_s)}}</td><td>${{fmt(j.terminal_window_mean_error_rad)}}</td><td>${{fmt(j.minimum_position_rad)}}…${{fmt(j.maximum_position_rad)}} / ${{fmt(j.urdf_position_minimum_rad)}}…${{fmt(j.urdf_position_maximum_rad)}}</td><td>${{fmt(j.peak_absolute_velocity_rad_s)}} / ${{fmt(j.urdf_velocity_limit_rad_s)}}</td></tr>`).join('')}}</table>`).join('');const v=r.first_contract_violation;document.querySelector('#violation').innerHTML=v?`<b class=failed>${{v.backend_id}} · ${{v.joint}}</b><p>step ${{v.step}} (${{v.sim_time_ticks}} ns): ${{fmt(v.observed)}} ${{v.unit}}; allowed ${{v.minimum===undefined?'|x| ≤ '+fmt(v.maximum):fmt(v.minimum)+' … '+fmt(v.maximum)}} ${{v.unit}}</p>`:'none';document.querySelector('#inputs').innerHTML=r.inputs.map(x=>`<p><b>${{x.role}}</b> <code>${{x.sha256}}</code></p>`).join('');</script></main></body></html>"""
     path.write_text(document, encoding="utf-8")
 
 

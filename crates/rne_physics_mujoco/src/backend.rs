@@ -75,6 +75,14 @@ pub enum MuJoCoError {
         /// Static validation reason.
         reason: &'static str,
     },
+    /// Exact rigid-body inertial properties are invalid.
+    #[error("invalid MuJoCo rigid-body inertia on entity {entity_index}: {reason}")]
+    InvalidInertia {
+        /// Stable ECS entity index carrying the rejected properties.
+        entity_index: u32,
+        /// Static validation reason.
+        reason: &'static str,
+    },
     /// A fixed-step duration did not match the model timestep.
     #[error("MuJoCo timestep mismatch: expected {expected_s:.12} s, got {actual_s:.12} s")]
     TimestepMismatch {
@@ -243,6 +251,13 @@ impl MuJoCoBackend {
                 entity_index,
                 reason,
             },
+            MuJoCoError::InvalidInertia {
+                entity_index,
+                reason,
+            } => PhysicsError::InvalidInertia {
+                entity_index,
+                reason,
+            },
             _ => PhysicsError::InitializationFailed,
         }
     }
@@ -261,6 +276,13 @@ fn map_compile_error(error: CompileError) -> MuJoCoError {
             entity_index,
             reason,
         } => MuJoCoError::InvalidActuation {
+            entity_index,
+            reason,
+        },
+        CompileError::InvalidInertia {
+            entity_index,
+            reason,
+        } => MuJoCoError::InvalidInertia {
             entity_index,
             reason,
         },

@@ -4,7 +4,7 @@ use crate::convert::{
     body_type_to_rapier, isometry_to_transform, quat_to_rapier, shape_to_shared,
     transform_to_isometry, vec3_from_point, vec3_from_rapier, vec3_to_point, vec3_to_rapier,
 };
-use rapier3d::na::{Translation3, Unit, UnitQuaternion, Vector3};
+use rapier3d::na::{Matrix3, Translation3, Unit, UnitQuaternion, Vector3};
 use rapier3d::pipeline::{PhysicsPipeline, QueryPipeline};
 use rapier3d::prelude::*;
 use rne_core::SimDuration;
@@ -16,7 +16,7 @@ use rne_physics::{
     Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointMotorGainModel,
     JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
     PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
-    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -297,9 +297,36 @@ impl PhysicsBackend for RapierBackend {
                 continue;
             }
 
-            let mut builder = RigidBodyBuilder::new(body_type_to_rapier(rigid_body.body_type))
-                .position(isometry)
-                .additional_mass(rigid_body.mass_kg as f32);
+            let mut builder =
+                RigidBodyBuilder::new(body_type_to_rapier(rigid_body.body_type)).position(isometry);
+            if let Some(inertia) = world.get::<RigidBodyInertia>(entity).copied() {
+                if !inertia.is_valid()
+                    || !rigid_body.mass_kg.is_finite()
+                    || rigid_body.mass_kg <= 0.0
+                {
+                    return Err(PhysicsError::InvalidInertia {
+                        entity_index: entity.index(),
+                        reason: "non-positive mass or physically invalid tensor",
+                    });
+                }
+                builder = builder.additional_mass_properties(MassProperties::with_inertia_matrix(
+                    vec3_to_point(inertia.center_of_mass_local_m),
+                    rigid_body.mass_kg as f32,
+                    Matrix3::new(
+                        inertia.ixx_kg_m2 as f32,
+                        inertia.ixy_kg_m2 as f32,
+                        inertia.ixz_kg_m2 as f32,
+                        inertia.ixy_kg_m2 as f32,
+                        inertia.iyy_kg_m2 as f32,
+                        inertia.iyz_kg_m2 as f32,
+                        inertia.ixz_kg_m2 as f32,
+                        inertia.iyz_kg_m2 as f32,
+                        inertia.izz_kg_m2 as f32,
+                    ),
+                ));
+            } else {
+                builder = builder.additional_mass(rigid_body.mass_kg as f32);
+            }
 
             if rigid_body.body_type == RigidBodyType::Dynamic {
                 builder = builder
@@ -312,22 +339,7 @@ impl PhysicsBackend for RapierBackend {
             state.body_to_entity.insert(body_handle, entity);
             if let Some(collider) = collider {
                 let collider_handle = state.colliders.insert_with_parent(
-                    ColliderBuilder::new(shape_to_shared(collider.shape))
-                        .position(transform_to_isometry(&collider.local_offset))
-                        .friction(collider.material.friction)
-                        .restitution(collider.material.restitution)
-                        .sensor(collider.sensor)
-                        .collision_groups({
-                            let groups = world
-                                .get::<rne_physics::CollisionGroups>(entity)
-                                .copied()
-                                .unwrap_or_default();
-                            InteractionGroups::new(
-                                Group::from_bits_truncate(groups.memberships),
-                                Group::from_bits_truncate(groups.filter),
-                            )
-                        })
-                        .build(),
+                    collider_builder(world, entity, collider).build(),
                     body_handle,
                     &mut state.bodies,
                 );
@@ -601,12 +613,16 @@ fn sync_entity_collider(
 }
 
 fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
-    ColliderBuilder::new(shape_to_shared(collider.shape))
+    let mut builder = ColliderBuilder::new(shape_to_shared(collider.shape))
         .position(transform_to_isometry(&collider.local_offset))
         .friction(collider.material.friction)
         .restitution(collider.material.restitution)
         .sensor(collider.sensor)
-        .collision_groups(interaction_groups(world, entity))
+        .collision_groups(interaction_groups(world, entity));
+    if world.get::<RigidBodyInertia>(entity).is_some() {
+        builder = builder.density(0.0);
+    }
+    builder
 }
 
 fn interaction_groups(world: &World, entity: Entity) -> InteractionGroups {
@@ -1232,6 +1248,61 @@ mod tests {
             (mean_impulse - expected_impulse).abs() < 0.5 * expected_impulse,
             "mean resting contact impulse {mean_impulse} should approximate steady-state weight*dt {expected_impulse}"
         );
+    }
+
+    #[test]
+    fn exact_inertia_replaces_collider_derived_mass_properties() {
+        let (mut backend, physics_world, mut world, _, cube) = setup_world();
+        world.entity_mut(cube).insert(RigidBodyInertia {
+            center_of_mass_local_m: Vec3::new(0.1, -0.2, 0.3),
+            ixx_kg_m2: 0.4,
+            ixy_kg_m2: 0.01,
+            ixz_kg_m2: -0.02,
+            iyy_kg_m2: 0.5,
+            iyz_kg_m2: 0.03,
+            izz_kg_m2: 0.6,
+        });
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+
+        let state = backend.world(physics_world).unwrap();
+        let handle = state.entity_to_body[&cube];
+        let body = &state.bodies[handle];
+        let mass_properties = body.mass_properties();
+        assert_relative_eq!(body.mass() as f64, 1.0, epsilon = 1.0e-6);
+        assert_relative_eq!(
+            mass_properties.local_mprops.local_com.x as f64,
+            0.1,
+            epsilon = 1.0e-6
+        );
+        assert_relative_eq!(
+            mass_properties.local_mprops.local_com.y as f64,
+            -0.2,
+            epsilon = 1.0e-6
+        );
+        assert_relative_eq!(
+            mass_properties.local_mprops.local_com.z as f64,
+            0.3,
+            epsilon = 1.0e-6
+        );
+    }
+
+    #[test]
+    fn invalid_exact_inertia_is_rejected_before_step() {
+        let (mut backend, physics_world, mut world, _, cube) = setup_world();
+        world.entity_mut(cube).insert(RigidBodyInertia {
+            center_of_mass_local_m: Vec3::ZERO,
+            ixx_kg_m2: 1.0,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyy_kg_m2: -1.0,
+            iyz_kg_m2: 0.0,
+            izz_kg_m2: 1.0,
+        });
+        assert!(matches!(
+            backend.sync_from_ecs(&mut world, physics_world),
+            Err(PhysicsError::InvalidInertia { .. })
+        ));
     }
 
     #[test]

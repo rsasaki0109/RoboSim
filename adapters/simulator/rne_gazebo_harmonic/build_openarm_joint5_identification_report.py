@@ -210,6 +210,7 @@ def main() -> int:
         repo / "adapters/simulator/rne_gazebo_harmonic/openarm_right.adapter.json"
     )
     model_path = repo / "assets/robots/openarm_description/openarm_v2_right.rne.urdf"
+    robot_asset_path = repo / "assets/robots/openarm_v2_right.rne.robot.toml"
     actions_path = trace_root / "controller-actions.json"
     rapier_path = trace_root / "rapier-success-trace.json"
     gazebo_path = trace_root / "gazebo-success-trace.json"
@@ -249,6 +250,11 @@ def main() -> int:
             or len(trace["observations"]) != len(actions)
         ):
             raise ValueError(f"{backend_id} identification trace identity drifted")
+        if backend_id == "rne_rapier" and (
+            trace.get("actuation_config_sha256") != sha256(actuation_path)
+            or trace.get("robot_asset_config_sha256") != sha256(robot_asset_path)
+        ):
+            raise ValueError("Rapier identification trace configuration drifted")
         observations = trace["observations"]
         positions = [frame["joint_position_rad"][joint_index] for frame in observations]
         targets = [
@@ -359,6 +365,27 @@ def main() -> int:
         and not first_violations
     )
     first_violations.sort(key=lambda value: (value["step"], value["backend_id"]))
+    if corrected:
+        diagnosis = (
+            "Joint 5 meets both isolated and coupled tracking contracts on RNE/Rapier "
+            "and Gazebo, and neither backend crosses the URDF hard position limit. "
+            "The exact URDF mass, centre of mass, and inertia tensor remain bound "
+            "inputs to this corrected plant result."
+        )
+    elif reproduced:
+        diagnosis = (
+            "Joint 5 meets the isolated SISO tracking contract on both backends. "
+            "Only RNE/Rapier loses tracking and crosses the URDF hard position limit "
+            "when the other arm joints move, localizing the failure to coupled "
+            "articulation dynamics/constraint enforcement rather than the portable "
+            "joint-5 reference trajectory."
+        )
+    else:
+        diagnosis = (
+            "The measured result matches neither the registered corrected response "
+            "nor the retained historical coupling failure; inspect the first failed "
+            "check and content-addressed inputs before changing a tolerance."
+        )
     report = {
         "kind": "rne_openarm_joint5_identification_report",
         "schema_version": 1,
@@ -394,19 +421,14 @@ def main() -> int:
             {"role": "rapier_trace", "sha256": sha256(rapier_path)},
             {"role": "gazebo_trace", "sha256": sha256(gazebo_path)},
             {"role": "robot_model", "sha256": sha256(model_path)},
+            {"role": "rapier_robot_asset_config", "sha256": sha256(robot_asset_path)},
             {"role": "rapier_actuation_config", "sha256": sha256(actuation_path)},
             {"role": "gazebo_runtime_manifest", "sha256": sha256(gazebo_runtime_path)},
             {"role": "gazebo_adapter_config", "sha256": sha256(gazebo_config_path)},
         ],
         "backends": backend_reports,
         "first_contract_divergence": first_violations[0] if first_violations else None,
-        "diagnosis": (
-            "Joint 5 meets the isolated SISO tracking contract on both backends. "
-            "Only RNE/Rapier loses tracking and crosses the URDF hard position limit "
-            "when the other arm joints move, localizing the failure to coupled "
-            "articulation dynamics/constraint enforcement rather than the portable "
-            "joint-5 reference trajectory."
-        ),
+        "diagnosis": diagnosis,
     }
     output.mkdir(parents=True, exist_ok=True)
     json_path = output / "joint5-identification-report.json"

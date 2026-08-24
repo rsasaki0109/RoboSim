@@ -15,8 +15,8 @@ use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_articulation, attach_urdf_visuals, parse_urdf, parse_urdf_file,
-    spawn_urdf_robot_with_config, UrdfRobot,
+    attach_urdf_articulation, attach_urdf_visuals, parse_urdf_document, parse_urdf_document_file,
+    parse_urdf_file, spawn_urdf_document_with_config, UrdfDocument,
 };
 use rne_world::{
     spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
@@ -159,7 +159,7 @@ pub fn spawn_robot_asset_with_sources(
                 .ok_or_else(|| AssetError::invalid("robot", "missing urdf section"))?;
             let base_dir = asset_path.parent().unwrap_or_else(|| Path::new("."));
             let urdf_path = section.resolve_path(base_dir);
-            let urdf = load_urdf_robot(&urdf_path, urdf_sources).map_err(|error| {
+            let document = load_urdf_document(&urdf_path, urdf_sources).map_err(|error| {
                 AssetError::invalid(
                     asset_path.display().to_string(),
                     format!("urdf parse failed ({}): {error}", urdf_path.display()),
@@ -171,22 +171,28 @@ pub fn spawn_robot_asset_with_sources(
                 spawn_config.mesh_assets_root = Some(parent.to_path_buf());
             }
 
-            let spawned =
-                spawn_urdf_robot_with_config(world, &urdf, spawn_config).map_err(|error| {
+            let spawned = spawn_urdf_document_with_config(world, &document, spawn_config).map_err(
+                |error| {
                     AssetError::invalid(
                         asset_path.display().to_string(),
                         format!("urdf spawn failed: {error}"),
                     )
-                })?;
+                },
+            )?;
 
             if wire_articulation && section.articulation {
-                attach_urdf_articulation(world, &urdf, &spawned, section.to_articulation_config())
-                    .map_err(|error| {
-                        AssetError::invalid(
-                            asset_path.display().to_string(),
-                            format!("urdf articulation failed: {error}"),
-                        )
-                    })?;
+                attach_urdf_articulation(
+                    world,
+                    &document.robot,
+                    &spawned,
+                    section.to_articulation_config(),
+                )
+                .map_err(|error| {
+                    AssetError::invalid(
+                        asset_path.display().to_string(),
+                        format!("urdf articulation failed: {error}"),
+                    )
+                })?;
             }
 
             world
@@ -425,16 +431,16 @@ pub fn spawn_scene_bundle(
     spawn_scene_with_sources(world, &bundle.scene, &bundle.robots, urdf_sources, options)
 }
 
-fn load_urdf_robot(
+fn load_urdf_document(
     urdf_path: &Path,
     urdf_sources: Option<&UrdfSourceMap<'_>>,
-) -> Result<UrdfRobot, rne_urdf_import::UrdfParseError> {
+) -> Result<UrdfDocument, rne_urdf_import::UrdfParseError> {
     if let Some(sources) = urdf_sources {
         if let Some(xml) = sources.get(urdf_path) {
-            return parse_urdf(xml);
+            return parse_urdf_document(xml);
         }
     }
-    parse_urdf_file(urdf_path)
+    parse_urdf_document_file(urdf_path)
 }
 
 /// Spawns a fixed ground plane collider used by built-in scenes.
