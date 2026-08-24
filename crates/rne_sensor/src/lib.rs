@@ -14,7 +14,10 @@ pub use camera::{
     sample_camera, sample_camera_rgbd, sample_camera_rgbd_keyed, sample_camera_rgbd_swept,
     CameraDistortion, CameraRgbdSample, CameraSpec, CameraSweep,
 };
-pub use components::{ImuState, LidarMaterial, Sensor, SensorKind, SensorState};
+pub use components::{
+    ImuState, JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor,
+    JointFeedbackSensorState, LidarMaterial, Sensor, SensorKind, SensorState,
+};
 pub use imu::{
     sample_imu, sample_imu_keyed, sample_imu_stateful, ImuAxisErrors, ImuSpec, GRAVITY_M_S2,
 };
@@ -24,5 +27,8 @@ pub use lidar::{
     LidarSweep, RANGE_REFERENCE_M,
 };
 pub use noise::{NoiseModel, SensorNoiseKey};
-pub use systems::{sample_sensors, SensorSampleContext, SensorSampler, CAMERA_DEPTH_STREAM_OFFSET};
+pub use systems::{
+    sample_joint_feedback_sensors, sample_sensors, JointFeedbackError, SensorSampleContext,
+    SensorSampler, CAMERA_DEPTH_STREAM_OFFSET,
+};
 pub use wheel_encoder::{sample_wheel_encoder, WheelEncoderSpec};

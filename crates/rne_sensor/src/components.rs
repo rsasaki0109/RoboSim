@@ -3,7 +3,8 @@
 use crate::{CameraSpec, ImuSpec, LidarSpec, WheelEncoderSpec};
 use bevy_ecs::prelude::Component;
 use rne_core::SimDuration;
-use rne_data::StreamId;
+use rne_data::{JointFeedback, StreamId};
+use rne_ecs::Entity;
 use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -171,4 +172,96 @@ pub struct SensorState {
     pub last_sample_ticks: u64,
     /// Total emitted frames.
     pub frame_count: u64,
+}
+
+/// One named joint included in a [`JointFeedbackSensor`] stream.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JointFeedbackChannelSpec {
+    /// Stable joint name serialized into every sample.
+    pub name: String,
+    /// ECS entity carrying backend-neutral joint state and actuation components.
+    pub joint_entity: Entity,
+}
+
+/// Deterministic fault injected after sampling and before output latency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointFeedbackFault {
+    /// No injected fault.
+    #[default]
+    None,
+    /// Drop exactly one attempted sequence, producing an observable sequence gap.
+    DropSequence {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the last emitted values from this attempted sequence onward.
+    StuckFromSequence {
+        /// One-based first attempted sequence that reuses the previous values.
+        sequence: u64,
+    },
+}
+
+/// Typed joint and actuator feedback sensor configuration.
+///
+/// This is separate from [`SensorKind`] so adding the control-oriented stream
+/// does not break exhaustive matches over the compatibility-stable sensor enum.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct JointFeedbackSensor {
+    /// Update rate in hertz.
+    pub update_rate_hz: f64,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// Whether sampling is enabled.
+    pub enabled: bool,
+    /// DataBus stream id.
+    pub stream_id: StreamId,
+    /// Joint channels in externally visible contract order.
+    pub channels: Vec<JointFeedbackChannelSpec>,
+    /// Optional deterministic fault applied in the documented processing order.
+    pub fault: JointFeedbackFault,
+}
+
+impl JointFeedbackSensor {
+    /// Sample period derived from the declared update rate.
+    pub fn period(&self) -> SimDuration {
+        SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz))
+    }
+
+    /// Returns true when rate, channel identities, and fault sequence are valid.
+    pub fn is_valid(&self) -> bool {
+        if !self.update_rate_hz.is_finite()
+            || self.update_rate_hz <= 0.0
+            || self.channels.is_empty()
+        {
+            return false;
+        }
+        let mut names = std::collections::BTreeSet::new();
+        let mut entities = std::collections::BTreeSet::new();
+        if self.channels.iter().any(|channel| {
+            channel.name.is_empty()
+                || !names.insert(channel.name.as_str())
+                || !entities.insert(channel.joint_entity.index())
+        }) {
+            return false;
+        }
+        match self.fault {
+            JointFeedbackFault::None => true,
+            JointFeedbackFault::DropSequence { sequence } => sequence > 0,
+            JointFeedbackFault::StuckFromSequence { sequence } => sequence > 1,
+        }
+    }
+}
+
+/// Runtime state for a [`JointFeedbackSensor`].
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointFeedbackSensorState {
+    /// Number of scheduled sample attempts, including injected drops.
+    pub attempted_sequence: u64,
+    /// Number of frames actually emitted.
+    pub emitted_frames: u64,
+    /// Last emitted payload used by deterministic stuck-value injection.
+    pub last_emitted: Option<JointFeedback>,
 }

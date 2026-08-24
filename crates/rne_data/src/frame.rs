@@ -13,6 +13,7 @@ impl FramePayload for crate::payloads::PoseSample {}
 impl FramePayload for crate::payloads::PointCloud {}
 impl FramePayload for crate::payloads::WheelEncoderSample {}
 impl FramePayload for crate::payloads::JointState {}
+impl FramePayload for crate::payloads::JointFeedback {}
 impl FramePayload for crate::payloads::ImageRgb8 {}
 impl FramePayload for crate::payloads::ImageDepth {}
 impl FramePayload for crate::dataset_payload::DatasetActionSample {}

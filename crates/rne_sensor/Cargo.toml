@@ -18,6 +18,7 @@ rne_render = { workspace = true }
 rne_robot = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"

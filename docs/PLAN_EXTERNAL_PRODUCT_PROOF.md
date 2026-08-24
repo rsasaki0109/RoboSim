@@ -331,7 +331,7 @@ increased.
 
 ### Ordered implementation slices
 
-1. **In progress -- physical parameter integrity:** preserve exact URDF mass,
+1. **Complete -- physical parameter integrity:** preserve exact URDF mass,
    center of mass, and inertia tensor through the backend-neutral rigid-body
    contract; reject invalid tensors; eliminate implicit collider mass; bind the
    robot asset configuration into traces and capsules. Re-run the OpenArm
@@ -368,6 +368,16 @@ increased.
    closed-loop dynamics failure into browser-readable Failure Capsules; replay
    both through recorded and shadow paths before expanding to another robot or
    sensor family.
+
+Slice 2 now has an additive typed `JointFeedback` baseline with explicit SI
+units, scheduled capture time, phase error, DataBus availability latency,
+sequence-visible dropout, stuck-value status, and the unconstrained versus
+limited actuator command. Backend effort is deliberately reported as
+`Unavailable` until a backend supplies a qualifying measured realized effort;
+command reconstruction is not mislabeled as measurement. Remaining slice-2
+work is the versioned golden streams and `sensor-validation-report`, followed by
+making the OpenArm controller consume only `latest_available` observations in
+slice 3.
 
 ### Track definition of done
 
