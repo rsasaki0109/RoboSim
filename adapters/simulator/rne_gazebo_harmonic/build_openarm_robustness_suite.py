@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a fixed OpenArm actuator-bias robustness sweep."""
+"""Compile a fixed OpenArm robustness sweep."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--dimension",
-        choices=("actuator_target_bias", "joint_position_measurement_bias"),
+        choices=(
+            "actuator_target_bias",
+            "joint_position_measurement_bias",
+            "joint_feedback_publication_dropout",
+        ),
         default="actuator_target_bias",
     )
     parser.add_argument(
@@ -87,6 +91,10 @@ def sensor_case_id(offset_rad: float) -> str:
     return "sensor-" + case_id(offset_rad)
 
 
+def dropout_case_id(consecutive_frames: int) -> str:
+    return f"dropout-{consecutive_frames:03d}frames"
+
+
 def compile_robustness_suite(
     compiler: Any,
     robustness_path: Path,
@@ -110,50 +118,72 @@ def compile_robustness_suite(
     dimension = manifest.get("dimensions", {}).get(dimension_id, {})
     values = dimension.get("values")
     if (
-        dimension_id not in {"actuator_target_bias", "joint_position_measurement_bias"}
+        dimension_id
+        not in {
+            "actuator_target_bias",
+            "joint_position_measurement_bias",
+            "joint_feedback_publication_dropout",
+        }
         or not isinstance(values, list)
         or len(values) < 3
         or values != sorted(set(values))
-        or values[0] != 0.0
-        or not all(isinstance(value, float) and math.isfinite(value) for value in values)
+        or values[0] != 0
+        or not all(
+            isinstance(value, int) and value >= 0
+            if dimension_id == "joint_feedback_publication_dropout"
+            else isinstance(value, float) and math.isfinite(value)
+            for value in values
+        )
     ):
         raise ValueError("invalid robustness grid")
-    expected_kind = (
-        "additive_actuator_target_bias_pulse_v1"
-        if dimension_id == "actuator_target_bias"
-        else "additive_joint_position_bias_pulse_v1"
-    )
-    expected_classification = (
-        "actuator_realization_error"
-        if dimension_id == "actuator_target_bias"
-        else "measurement_error"
-    )
+    identities = {
+        "actuator_target_bias": (
+            "additive_actuator_target_bias_pulse_v1",
+            "actuator_realization_error",
+        ),
+        "joint_position_measurement_bias": (
+            "additive_joint_position_bias_pulse_v1",
+            "measurement_error",
+        ),
+        "joint_feedback_publication_dropout": (
+            "joint_feedback_publication_dropout_burst_v1",
+            "measurement_unavailability",
+        ),
+    }
+    expected_kind, expected_classification = identities[dimension_id]
     if (
         dimension.get("kind") != expected_kind
         or dimension.get("classification") != expected_classification
     ):
         raise ValueError("robustness dimension identity drifted")
     requirement_ids = {item["id"] for item in requirements.get("requirements", [])}
-    if not set(manifest["evaluation"]["requirement_ids"]).issubset(requirement_ids):
+    evaluation_key = (
+        "availability_evaluation"
+        if dimension_id == "joint_feedback_publication_dropout"
+        else "evaluation"
+    )
+    evaluation = manifest[evaluation_key]
+    if not set(evaluation["requirement_ids"]).issubset(requirement_ids):
         raise ValueError("robustness manifest names an unknown requirement")
     _, base_controllers = compiler.compile_suite(
         plant_report_path, plant_manifest_path, limits_controller_path
     )
     base = base_controllers["state_feedback"]
     controllers: dict[str, dict[str, Any]] = {}
-    for offset_rad in values:
-        identifier = (
-            case_id(offset_rad)
-            if dimension_id == "actuator_target_bias"
-            else sensor_case_id(offset_rad)
-        )
+    for value in values:
+        if dimension_id == "actuator_target_bias":
+            identifier = case_id(value)
+        elif dimension_id == "joint_position_measurement_bias":
+            identifier = sensor_case_id(value)
+        else:
+            identifier = dropout_case_id(value)
         controller = copy.deepcopy(base)
         controller["controller_id"] = (
             f"rne.controller.openarm_right.plant_state_feedback_integral.{identifier}.v1"
         )
         if dimension_id == "actuator_target_bias":
             contract = controller["disturbance_contract"]
-            contract["offset_rad"] = offset_rad
+            contract["offset_rad"] = value
             fields = (
                 "kind",
                 "classification",
@@ -163,10 +193,10 @@ def compile_robustness_suite(
                 "application_order",
                 "controller_visibility",
             )
-        else:
+        elif dimension_id == "joint_position_measurement_bias":
             controller["disturbance_contract"]["offset_rad"] = 0.0
             contract = {key: value for key, value in dimension.items() if key not in {"unit", "values"}}
-            contract["offset_rad"] = offset_rad
+            contract["offset_rad"] = value
             controller["measurement_fault_contract"] = contract
             fields = (
                 "kind",
@@ -175,6 +205,38 @@ def compile_robustness_suite(
                 "start_controller_step",
                 "end_controller_step",
                 "sensor_status",
+                "application_order",
+                "controller_visibility",
+            )
+        else:
+            controller["disturbance_contract"]["offset_rad"] = 0.0
+            contract = {
+                key: value
+                for key, value in dimension.items()
+                if key
+                not in {
+                    "unit",
+                    "values",
+                    "maximum_age_ticks",
+                    "stale_observation_policy",
+                    "recovery_policy",
+                }
+            }
+            contract["consecutive_dropped_frames"] = value
+            controller["measurement_fault_contract"] = contract
+            controller["observation_contract"]["maximum_age_ticks"] = dimension[
+                "maximum_age_ticks"
+            ]
+            controller["observation_contract"]["stale_observation_policy"] = dimension[
+                "stale_observation_policy"
+            ]
+            controller["observation_contract"]["recovery_policy"] = dimension[
+                "recovery_policy"
+            ]
+            fields = (
+                "kind",
+                "classification",
+                "start_capture_sequence",
                 "application_order",
                 "controller_visibility",
             )
@@ -192,7 +254,7 @@ def compile_robustness_suite(
         "primary_sweep_backend": manifest["primary_sweep_backend"],
         "backend_order": manifest["backend_order"],
         "dimension": dimension,
-        "evaluation": manifest["evaluation"],
+        "evaluation": evaluation,
         "inputs": {
             "robustness_manifest_sha256": sha256(robustness_path),
             "plant_report_sha256": sha256(plant_report_path),
@@ -226,19 +288,26 @@ def main() -> int:
     for identifier, controller in controllers.items():
         path = output / f"openarm-state-feedback-{identifier}.controller.json"
         write_json(path, controller)
-        suite["cases"].append(
-            {
-                "case_id": identifier,
-                "offset_rad": (
-                    controller["disturbance_contract"]["offset_rad"]
-                    if args.dimension == "actuator_target_bias"
-                    else controller["measurement_fault_contract"]["offset_rad"]
-                ),
-                "controller_id": controller["controller_id"],
-                "controller_path": path.name,
-                "controller_sha256": sha256(path),
-            }
-        )
+        if args.dimension == "actuator_target_bias":
+            dimension_value = controller["disturbance_contract"]["offset_rad"]
+        elif args.dimension == "joint_position_measurement_bias":
+            dimension_value = controller["measurement_fault_contract"]["offset_rad"]
+        else:
+            dimension_value = controller["measurement_fault_contract"][
+                "consecutive_dropped_frames"
+            ]
+        declaration = {
+            "case_id": identifier,
+            "dimension_value": dimension_value,
+            "controller_id": controller["controller_id"],
+            "controller_path": path.name,
+            "controller_sha256": sha256(path),
+        }
+        if args.dimension == "joint_feedback_publication_dropout":
+            declaration["consecutive_dropped_frames"] = dimension_value
+        else:
+            declaration["offset_rad"] = dimension_value
+        suite["cases"].append(declaration)
     write_json(output / "openarm-robustness-suite.json", suite)
     print(
         "OpenArm robustness suite: "

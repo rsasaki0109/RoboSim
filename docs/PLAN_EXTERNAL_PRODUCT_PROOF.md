@@ -581,9 +581,8 @@ failure. MuJoCo and Gazebo reproduce that boundary: all three pass at
 `0.06 rad` while peak-error and recovery gates remain green. The Rapier trace
 localizes the first cumulative crossing to step 3292 at `0.020305 rad*s` and
 retains it as a dedicated behavior replay and verified 49-artifact Failure
-Capsule. Slice 7 remains in progress until
-payload, inertia, friction, sensor bias/drop, and actuator-authority dimensions
-are evaluated under the same boundary rules.
+Capsule. Slice 7 remains in progress until payload, inertia, friction, and
+actuator-authority dimensions are evaluated under the same boundary rules.
 
 The joint-position sensor-bias dimension now preserves raw typed feedback and
 records the separate delayed position consumed by the controller. A fixed
@@ -594,8 +593,14 @@ the first crossing occurs at step 3303 on Rapier and step 3304 on MuJoCo and
 Gazebo. Each boundary trace proves exactly 60 biased controller decisions and
 at most `3.47e-18 rad` realization error. The retained 43-artifact Capsule is
 bound to its producer and stops its replay at the first failed measurement.
-Sensor dropout, physical parameter
-sweeps, and actuator-authority degradation remain open.
+The publication-dropout dimension uses a fixed `[0, 1, 2, 3, 4]` consecutive-
+frame grid and a three-period maximum-age contract. All three backends pass two
+drops and first fail three. At the failing boundary they reject exactly decision
+3244 at `66,666,668 ticks`, freeze state, hold the previous accepted target with
+zero delta, and recover in one decision on fresh sequence 3243. The earliest
+violation is still capture sequence 3242, where the third consecutive
+publication is absent; the minimum replay stops there. Physical parameter
+sweeps and actuator-authority degradation remain open.
 
 ### Track definition of done
 

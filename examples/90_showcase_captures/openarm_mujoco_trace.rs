@@ -64,6 +64,10 @@ struct ObservationContract {
     maximum_age_ticks: u64,
     required_status: JointFeedbackStatus,
     bootstrap_policy: String,
+    #[serde(default)]
+    stale_observation_policy: Option<String>,
+    #[serde(default)]
+    recovery_policy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,17 +84,27 @@ struct DisturbanceContract {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MeasurementFaultContract {
-    kind: String,
-    classification: String,
-    joint: String,
-    start_controller_step: u64,
-    end_controller_step: u64,
-    offset_rad: f64,
-    sensor_status: JointFeedbackStatus,
-    controller_visibility: String,
-    application_order: String,
+#[serde(tag = "kind", deny_unknown_fields)]
+enum MeasurementFaultContract {
+    #[serde(rename = "additive_joint_position_bias_pulse_v1")]
+    AdditiveJointPositionBiasPulseV1 {
+        classification: String,
+        joint: String,
+        start_controller_step: u64,
+        end_controller_step: u64,
+        offset_rad: f64,
+        sensor_status: JointFeedbackStatus,
+        controller_visibility: String,
+        application_order: String,
+    },
+    #[serde(rename = "joint_feedback_publication_dropout_burst_v1")]
+    JointFeedbackPublicationDropoutBurstV1 {
+        classification: String,
+        start_capture_sequence: u64,
+        consecutive_dropped_frames: u64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,9 +229,15 @@ struct ObservationFrame {
     consumed_at_ticks: u64,
     observation_age_ticks: u64,
     sensor_status: JointFeedbackStatus,
+    sensor_sample_published: bool,
     controller_observation_sequence: Option<u64>,
     controller_observation_age_ticks: Option<u64>,
     controller_bootstrap: bool,
+    controller_rejected: bool,
+    controller_rejection_reason: Option<&'static str>,
+    fail_safe_hold_active: bool,
+    controller_state_frozen: bool,
+    controller_recovered: bool,
     joint_position_rad: Vec<f64>,
     joint_velocity_rad_s: Vec<f64>,
     joint_reference_position_rad: Vec<f64>,
@@ -259,8 +279,14 @@ struct ControllerDecision {
     observation_sequence: Option<u64>,
     observation_age_ticks: Option<u64>,
     bootstrap: bool,
+    rejected: bool,
+    rejection_reason: Option<&'static str>,
+    fail_safe_hold_active: bool,
+    state_frozen: bool,
+    recovered: bool,
 }
 
+#[derive(Clone)]
 struct ControllerState {
     integral_correction_rad: Vec<f64>,
     previous_observation_position_rad: Vec<Option<f64>>,
@@ -660,23 +686,48 @@ fn validate(
         );
     }
     if let Some(fault) = &controller.measurement_fault_contract {
-        anyhow::ensure!(
-            fault.kind == "additive_joint_position_bias_pulse_v1"
-                && fault.classification == "measurement_error"
-                && controller
-                    .action_joint_order
-                    .iter()
-                    .any(|joint| joint == &fault.joint)
-                && fault.start_controller_step >= 1
-                && fault.start_controller_step <= fault.end_controller_step
-                && fault.end_controller_step <= actions.actions.len() as u64
-                && fault.offset_rad.is_finite()
-                && fault.sensor_status == JointFeedbackStatus::Nominal
-                && fault.controller_visibility == "biased_position_as_nominal"
-                && fault.application_order
-                    == "after_typed_feedback_availability_before_controller_law",
-            "invalid OpenArm measurement-bias contract"
-        );
+        match fault {
+            MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 {
+                classification,
+                joint,
+                start_controller_step,
+                end_controller_step,
+                offset_rad,
+                sensor_status,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_error"
+                    && controller
+                        .action_joint_order
+                        .iter()
+                        .any(|name| name == joint)
+                    && *start_controller_step >= 1
+                    && start_controller_step <= end_controller_step
+                    && *end_controller_step <= actions.actions.len() as u64
+                    && offset_rad.is_finite()
+                    && *sensor_status == JointFeedbackStatus::Nominal
+                    && controller_visibility == "biased_position_as_nominal"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_law",
+                "invalid OpenArm measurement-bias contract"
+            ),
+            MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 {
+                classification,
+                start_capture_sequence,
+                consecutive_dropped_frames,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_unavailability"
+                    && *start_capture_sequence >= 1
+                    && start_capture_sequence.saturating_add(*consecutive_dropped_frames)
+                        <= (actions.actions.len() as u64).saturating_add(1)
+                    && controller_visibility == "missing_publication_only"
+                    && application_order == "after_typed_sensor_capture_before_controller_ingress",
+                "invalid OpenArm measurement-dropout contract"
+            ),
+        }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
         (Some(contract), Some(law)) => {
@@ -686,7 +737,17 @@ fn validate(
                     && contract.sample_period_ticks == FIXED_DELTA_TICKS
                     && contract.phase_offset_ticks == FIXED_DELTA_TICKS
                     && contract.latency_ticks == FIXED_DELTA_TICKS
-                    && contract.maximum_age_ticks == FIXED_DELTA_TICKS
+                    && if has_dropout_fault(controller) {
+                        contract.maximum_age_ticks == 3 * FIXED_DELTA_TICKS
+                            && contract.stale_observation_policy.as_deref()
+                                == Some("hold_last_accepted_target_and_freeze_state")
+                            && contract.recovery_policy.as_deref()
+                                == Some("resume_on_fresh_nominal_observation")
+                    } else {
+                        contract.maximum_age_ticks == FIXED_DELTA_TICKS
+                            && contract.stale_observation_policy.is_none()
+                            && contract.recovery_policy.is_none()
+                    }
                     && contract.required_status == JointFeedbackStatus::Nominal
                     && contract.bootstrap_policy == "reference_until_first_available",
                 "unsupported controller observation contract"
@@ -860,17 +921,29 @@ fn rollout(
     let mut decisions = Vec::with_capacity(actions.len());
     let mut latest_controller_observation = None;
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
+    let mut last_accepted_target_rad = actions
+        .first()
+        .context("MuJoCo rollout has no actions")?
+        .joint_position_target_rad
+        .clone();
+    let mut recovering_from_rejection = false;
     let mut last_observation_sequence = 0;
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
     for action in actions {
-        let decision = controller_decision(
+        let decision = bounded_controller_decision(
             controller,
             &action.joint_position_target_rad,
             &mut controller_state,
             latest_controller_observation.as_ref(),
             sim.sim_time.ticks(),
+            &last_accepted_target_rad,
+            recovering_from_rejection,
         )?;
+        if !decision.rejected {
+            last_accepted_target_rad.clone_from(&decision.target_position_rad);
+        }
+        recovering_from_rejection = decision.rejected;
         let (applied_target, _) =
             apply_actuator_disturbance(controller, action.step, &decision.target_position_rad)?;
         sim.step_targets(&controller.rne_actuator_link_order, &applied_target)?;
@@ -896,10 +969,14 @@ fn rollout(
         let now = sim.sim_time;
         if let Some(frame) = bus.latest_available::<JointFeedback>(JOINT_FEEDBACK_STREAM, now) {
             if frame.sequence > last_observation_sequence {
-                latest_controller_observation = Some(controller_observation(&frame)?);
+                let published = sensor_sample_published(controller, frame.sequence);
+                if published {
+                    latest_controller_observation = Some(controller_observation(&frame)?);
+                }
                 observations.push(observation_frame(
                     frame,
                     now.ticks(),
+                    published,
                     &state_hashes,
                     &decisions,
                 )?);
@@ -912,9 +989,11 @@ fn rollout(
         .latest_available::<JointFeedback>(JOINT_FEEDBACK_STREAM, final_time)
         .context("final MuJoCo joint feedback did not become available")?;
     if final_frame.sequence > last_observation_sequence {
+        let final_published = sensor_sample_published(controller, final_frame.sequence);
         observations.push(observation_frame(
             final_frame,
             final_time.ticks(),
+            final_published,
             &state_hashes,
             &decisions,
         )?);
@@ -981,7 +1060,14 @@ fn apply_measurement_bias(
 ) -> Result<(Vec<f64>, Vec<f64>)> {
     let mut positions = observation.joint_position_rad.clone();
     let mut bias = vec![0.0; positions.len()];
-    let Some(contract) = &controller.measurement_fault_contract else {
+    let Some(MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 {
+        joint,
+        start_controller_step,
+        end_controller_step,
+        offset_rad,
+        ..
+    }) = &controller.measurement_fault_contract
+    else {
         return Ok((positions, bias));
     };
     let sample_period_ticks = controller
@@ -994,14 +1080,14 @@ fn apply_measurement_bias(
         "measurement-bias consumption time is off the control grid"
     );
     let controller_step = consumed_at_ticks / sample_period_ticks + 1;
-    if (contract.start_controller_step..=contract.end_controller_step).contains(&controller_step) {
+    if (*start_controller_step..=*end_controller_step).contains(&controller_step) {
         let index = controller
             .action_joint_order
             .iter()
-            .position(|joint| joint == &contract.joint)
+            .position(|name| name == joint)
             .context("measurement-bias joint is absent from the action order")?;
-        bias[index] = contract.offset_rad;
-        positions[index] += contract.offset_rad;
+        bias[index] = *offset_rad;
+        positions[index] += *offset_rad;
     }
     anyhow::ensure!(
         positions.iter().all(|value| value.is_finite()),
@@ -1030,6 +1116,11 @@ fn controller_decision(
                 observation_sequence: None,
                 observation_age_ticks: None,
                 bootstrap: false,
+                rejected: false,
+                rejection_reason: None,
+                fail_safe_hold_active: false,
+                state_frozen: false,
+                recovered: false,
             });
         }
         _ => bail!("controller feedback contract is incomplete"),
@@ -1059,6 +1150,11 @@ fn controller_decision(
             observation_sequence: None,
             observation_age_ticks: None,
             bootstrap: true,
+            rejected: false,
+            rejection_reason: None,
+            fail_safe_hold_active: false,
+            state_frozen: false,
+            recovered: false,
         });
     };
     anyhow::ensure!(
@@ -1143,6 +1239,11 @@ fn controller_decision(
         observation_sequence: Some(observation.sequence),
         observation_age_ticks: Some(age_ticks),
         bootstrap: false,
+        rejected: false,
+        rejection_reason: None,
+        fail_safe_hold_active: false,
+        state_frozen: false,
+        recovered: false,
     })
 }
 
@@ -1264,7 +1365,91 @@ fn state_feedback_decision(
         observation_sequence: Some(observation.sequence),
         observation_age_ticks: Some(age_ticks),
         bootstrap: false,
+        rejected: false,
+        rejection_reason: None,
+        fail_safe_hold_active: false,
+        state_frozen: false,
+        recovered: false,
     })
+}
+
+fn bounded_controller_decision(
+    controller: &ControllerSpec,
+    reference: &[f64],
+    state: &mut ControllerState,
+    observation: Option<&ControllerObservation>,
+    consumed_at_ticks: u64,
+    last_accepted_target_rad: &[f64],
+    recovering_from_rejection: bool,
+) -> Result<ControllerDecision> {
+    let state_before = state.clone();
+    match controller_decision(controller, reference, state, observation, consumed_at_ticks) {
+        Ok(mut decision) => {
+            decision.recovered = recovering_from_rejection && !decision.bootstrap;
+            Ok(decision)
+        }
+        Err(error) => {
+            let Some(observation) = observation else {
+                return Err(error);
+            };
+            let Some(contract) = controller.observation_contract.as_ref() else {
+                return Err(error);
+            };
+            let age_ticks = consumed_at_ticks.saturating_sub(observation.capture_time_ticks);
+            if !has_dropout_fault(controller)
+                || observation.status != contract.required_status
+                || observation.available_time_ticks > consumed_at_ticks
+                || age_ticks <= contract.maximum_age_ticks
+            {
+                return Err(error);
+            }
+            *state = state_before;
+            anyhow::ensure!(
+                last_accepted_target_rad.len() == reference.len(),
+                "fail-safe hold target width mismatch"
+            );
+            Ok(ControllerDecision {
+                reference_position_rad: reference.to_vec(),
+                target_position_rad: last_accepted_target_rad.to_vec(),
+                correction_rad: last_accepted_target_rad
+                    .iter()
+                    .zip(reference)
+                    .map(|(target, reference)| target - reference)
+                    .collect(),
+                integral_correction_rad: state.integral_correction_rad.clone(),
+                controller_observation_position_rad: observation.joint_position_rad.clone(),
+                measurement_bias_rad: vec![0.0; reference.len()],
+                observation_sequence: Some(observation.sequence),
+                observation_age_ticks: Some(age_ticks),
+                bootstrap: false,
+                rejected: true,
+                rejection_reason: Some("maximum_observation_age_ticks"),
+                fail_safe_hold_active: true,
+                state_frozen: true,
+                recovered: false,
+            })
+        }
+    }
+}
+
+fn has_dropout_fault(controller: &ControllerSpec) -> bool {
+    matches!(
+        controller.measurement_fault_contract.as_ref(),
+        Some(MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 { .. })
+    )
+}
+
+fn sensor_sample_published(controller: &ControllerSpec, sequence: u64) -> bool {
+    match &controller.measurement_fault_contract {
+        Some(MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 {
+            start_capture_sequence,
+            consecutive_dropped_frames,
+            ..
+        }) => !(*start_capture_sequence
+            ..start_capture_sequence.saturating_add(*consecutive_dropped_frames))
+            .contains(&sequence),
+        _ => true,
+    }
 }
 
 fn controller_observation(frame: &Frame<JointFeedback>) -> Result<ControllerObservation> {
@@ -1298,6 +1483,7 @@ fn coordinate(joint: &rne_data::JointFeedbackChannel) -> Result<(f64, f64)> {
 fn observation_frame(
     frame: Frame<JointFeedback>,
     consumed_at_ticks: u64,
+    sensor_sample_published: bool,
     state_hashes: &[u64],
     decisions: &[ControllerDecision],
 ) -> Result<ObservationFrame> {
@@ -1347,9 +1533,15 @@ fn observation_frame(
         consumed_at_ticks,
         observation_age_ticks: consumed_at_ticks.saturating_sub(frame.capture_time.ticks()),
         sensor_status: frame.payload.status,
+        sensor_sample_published,
         controller_observation_sequence: decision.observation_sequence,
         controller_observation_age_ticks: decision.observation_age_ticks,
         controller_bootstrap: decision.bootstrap,
+        controller_rejected: decision.rejected,
+        controller_rejection_reason: decision.rejection_reason,
+        fail_safe_hold_active: decision.fail_safe_hold_active,
+        controller_state_frozen: decision.state_frozen,
+        controller_recovered: decision.recovered,
         joint_position_rad: positions,
         joint_velocity_rad_s: velocities,
         joint_reference_position_rad: decision.reference_position_rad.clone(),

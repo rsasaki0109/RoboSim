@@ -36,6 +36,22 @@ struct TraceObservation {
     joint_controller_target_rad: Vec<f64>,
     joint_actuator_disturbance_rad: Vec<f64>,
     joint_position_target_rad: Vec<f64>,
+    #[serde(default)]
+    sensor_sample_published: bool,
+    #[serde(default)]
+    controller_observation_sequence: Option<u64>,
+    #[serde(default)]
+    controller_observation_age_ticks: Option<u64>,
+    #[serde(default)]
+    controller_rejected: bool,
+    #[serde(default)]
+    controller_rejection_reason: Option<String>,
+    #[serde(default)]
+    fail_safe_hold_active: bool,
+    #[serde(default)]
+    controller_state_frozen: bool,
+    #[serde(default)]
+    controller_recovered: bool,
     physics_hash: u64,
 }
 
@@ -87,12 +103,18 @@ fn run() -> Result<()> {
     let report_sha256 = sha256(&report_bytes);
     let trace_sha256 = sha256(&trace_bytes);
     let dimension_id = required_str(&report, "dimension_id")?;
-    let disturbance_start_step = if dimension_id == "actuator_target_bias" {
-        required_u64(&report["dimension"], "start_step")?
-    } else {
-        required_u64(&report["dimension"], "start_controller_step")?
+    let availability_failure = dimension_id == "joint_feedback_publication_dropout";
+    let disturbance_start_step = match dimension_id {
+        "actuator_target_bias" => required_u64(&report["dimension"], "start_step")?,
+        "joint_position_measurement_bias" => {
+            required_u64(&report["dimension"], "start_controller_step")?
+        }
+        "joint_feedback_publication_dropout" => {
+            required_u64(&report["dimension"], "start_capture_sequence")?
+        }
+        _ => bail!("unsupported robustness dimension"),
     };
-    let maximum_iae_rad_s = required_f64(failure, "maximum")?;
+    let maximum = required_f64(failure, "maximum")?;
     let sample_period_s = trace.fixed_delta_ticks as f64 / 1_000_000_000.0;
     let mut cumulative_iae_rad_s = 0.0;
     let mut frames = Vec::with_capacity(failure_index + 2);
@@ -106,15 +128,23 @@ fn run() -> Result<()> {
             "report_sha256": report_sha256,
             "trace_sha256": trace_sha256,
             "case_id": required_str(failure, "case_id")?,
-            "disturbance_offset_rad": required_f64(failure, "offset_rad")?,
+            "dimension_value": dimension_value(failure)?,
+            "dimension_unit": required_str(&report["dimension"], "unit")?,
             "requirement_id": requirement_id,
             "classification": format!("smallest_failed_{dimension_id}_grid_case"),
             "contract_status": "initial"
         }),
         state_digest: trace.initial_state_digest,
     });
+    let mut consecutive_dropout_frames = 0_u64;
     for observation in &trace.observations[..=failure_index] {
-        if observation.step >= disturbance_start_step {
+        if availability_failure {
+            if observation.step >= disturbance_start_step && !observation.sensor_sample_published {
+                consecutive_dropout_frames += 1;
+            } else if observation.step >= disturbance_start_step {
+                consecutive_dropout_frames = 0;
+            }
+        } else if observation.step >= disturbance_start_step {
             cumulative_iae_rad_s += (observation.joint_position_rad[JOINT_INDEX]
                 - observation.joint_reference_position_rad[JOINT_INDEX])
                 .abs()
@@ -134,23 +164,42 @@ fn run() -> Result<()> {
                 "joint5_controller_target_rad": observation.joint_controller_target_rad[JOINT_INDEX],
                 "joint5_disturbance_rad": observation.joint_actuator_disturbance_rad[JOINT_INDEX],
                 "joint5_applied_target_rad": observation.joint_position_target_rad[JOINT_INDEX],
-                "cumulative_iae_rad_s": cumulative_iae_rad_s,
-                "maximum_iae_rad_s": maximum_iae_rad_s,
+                "sensor_sample_published": observation.sensor_sample_published,
+                "controller_observation_sequence": observation.controller_observation_sequence,
+                "controller_observation_age_ticks": observation.controller_observation_age_ticks,
+                "controller_rejected": observation.controller_rejected,
+                "controller_rejection_reason": observation.controller_rejection_reason,
+                "fail_safe_hold_active": observation.fail_safe_hold_active,
+                "controller_state_frozen": observation.controller_state_frozen,
+                "controller_recovered": observation.controller_recovered,
+                "cumulative_iae_rad_s": (!availability_failure).then_some(cumulative_iae_rad_s),
+                "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
+                "maximum": maximum,
                 "requirement_id": requirement_id,
                 "contract_status": if failed { "failed" } else { "pending" }
             }),
             state_digest: observation.physics_hash,
         });
     }
-    let observed_iae_rad_s = required_f64(failure, "observed")?;
-    anyhow::ensure!(
-        (cumulative_iae_rad_s - observed_iae_rad_s).abs() <= 1e-12,
-        "replayed cumulative IAE differs from the report"
-    );
-    let message = format!(
-        "OpenArm joint 5 cumulative disturbance IAE reached {observed_iae_rad_s:.9} rad*s at step {failure_step}, exceeding the fixed {maximum_iae_rad_s:.9} rad*s requirement under a {:.6} rad {dimension_id}",
-        required_f64(failure, "offset_rad")?
-    );
+    let observed = required_f64(failure, "observed")?;
+    let message = if availability_failure {
+        anyhow::ensure!(
+            consecutive_dropout_frames as f64 == observed,
+            "replayed consecutive dropout count differs from the report"
+        );
+        format!(
+            "OpenArm joint-feedback publication reached {observed:.0} consecutive dropped frames at step {failure_step}, exceeding the fixed {maximum:.0}-frame requirement"
+        )
+    } else {
+        anyhow::ensure!(
+            (cumulative_iae_rad_s - observed).abs() <= 1e-12,
+            "replayed cumulative IAE differs from the report"
+        );
+        format!(
+            "OpenArm joint 5 cumulative disturbance IAE reached {observed:.9} rad*s at step {failure_step}, exceeding the fixed {maximum:.9} rad*s requirement under a {:.6} rad {dimension_id}",
+            dimension_value(failure)?
+        )
+    };
     let scenario = required_str(&report, "suite_id")?.to_string();
     let replay = BehaviorReplayArtifact::new(
         scenario,
@@ -189,18 +238,24 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
     anyhow::ensure!(
         matches!(
             required_str(report, "dimension_id")?,
-            "actuator_target_bias" | "joint_position_measurement_bias"
+            "actuator_target_bias"
+                | "joint_position_measurement_bias"
+                | "joint_feedback_publication_dropout"
         ),
         "unsupported robustness dimension"
     );
+    let dimension_id = required_str(report, "dimension_id")?;
+    let expected_requirement = if dimension_id == "joint_feedback_publication_dropout" {
+        "controller.sensor.maximum_consecutive_dropout_frames"
+    } else {
+        "controller.state.maximum_disturbance_iae_rad_s"
+    };
     anyhow::ensure!(
         required_str(failure, "backend_id")? == "rne_rapier"
-            && required_str(failure, "requirement_id")?
-                == "controller.state.maximum_disturbance_iae_rad_s"
+            && required_str(failure, "requirement_id")? == expected_requirement
             && required_f64(failure, "observed")? > required_f64(failure, "maximum")?
-            && required_f64(failure, "offset_rad")?
-                == required_f64(&report["boundary"], "first_failing_offset_rad")?,
-        "robustness report has no valid first IAE failure"
+            && dimension_value(failure)? == first_failing_value(&report["boundary"])?,
+        "robustness report has no valid first boundary failure"
     );
     anyhow::ensure!(
         trace.kind == "rne_openarm_backend_trace"
@@ -273,6 +328,15 @@ fn required_f64(value: &Value, field: &str) -> Result<f64> {
         .as_f64()
         .filter(|number| number.is_finite())
         .with_context(|| format!("missing finite field {field}"))
+}
+
+fn dimension_value(value: &Value) -> Result<f64> {
+    required_f64(value, "dimension_value").or_else(|_| required_f64(value, "offset_rad"))
+}
+
+fn first_failing_value(value: &Value) -> Result<f64> {
+    required_f64(value, "first_failing_value")
+        .or_else(|_| required_f64(value, "first_failing_offset_rad"))
 }
 
 fn digest_u64(bytes: &[u8]) -> u64 {

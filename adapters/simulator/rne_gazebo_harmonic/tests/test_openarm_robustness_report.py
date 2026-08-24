@@ -72,6 +72,7 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
             )
         controller = {
             "measurement_fault_contract": {
+                "kind": "additive_joint_position_bias_pulse_v1",
                 "start_controller_step": 4,
                 "end_controller_step": 4,
                 "offset_rad": 0.02,
@@ -82,6 +83,55 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(metrics["maximum_realization_delta_rad"], 0.0)
         self.assertEqual(metrics["active_decision_count"], 1)
         self.assertIsNone(metrics["first_realization_mismatch"])
+
+    def test_dropout_metrics_separate_publication_hold_and_recovery(self) -> None:
+        observations = []
+        for step in range(1, 7):
+            rejected = step == 5
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": step not in {2, 3, 4},
+                    "controller_observation_sequence": (
+                        None if step <= 2 else (1 if step <= 5 else 5)
+                    ),
+                    "controller_observation_age_ticks": (
+                        None if step <= 2 else (step - 1) * 10 if step <= 5 else 10
+                    ),
+                    "joint_position_rad": [step / 100.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if step <= 2 else [0.01 if step <= 5 else 0.05]
+                    ),
+                    "joint_controller_target_rad": [0.2 if step >= 4 else 0.1],
+                    "joint_integral_correction_rad": [0.03 if step >= 4 else 0.02],
+                    "controller_rejected": rejected,
+                    "controller_rejection_reason": (
+                        "maximum_observation_age_ticks" if rejected else None
+                    ),
+                    "fail_safe_hold_active": rejected,
+                    "controller_state_frozen": rejected,
+                    "controller_recovered": step == 6,
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_publication_dropout_burst_v1",
+                "start_capture_sequence": 2,
+                "consecutive_dropped_frames": 3,
+            }
+        }
+        metrics = MODULE.availability_metrics(controller, observations)
+        self.assertIsNotNone(metrics)
+        self.assertTrue(metrics["publication_realization_matches"])
+        self.assertEqual(metrics["maximum_controller_observation_age_ticks"], 40)
+        self.assertEqual(metrics["rejected_decision_count"], 1)
+        self.assertEqual(metrics["first_rejected_step"], 5)
+        self.assertEqual(metrics["maximum_fail_safe_target_delta_rad"], 0.0)
+        self.assertEqual(metrics["maximum_frozen_integral_delta_rad"], 0.0)
+        self.assertEqual(metrics["recovery_decision_count"], 1)
+        self.assertEqual(metrics["first_recovered_step"], 6)
+        self.assertIsNone(metrics["first_controller_source_mismatch"])
 
 
 if __name__ == "__main__":

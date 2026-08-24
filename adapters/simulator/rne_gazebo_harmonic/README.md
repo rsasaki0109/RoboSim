@@ -320,3 +320,29 @@ raw/visible observation report, and the 3,304-frame first-failure replay.
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-robustness-lab
 ```
+
+The third dimension sweeps controller-ingress publication dropout while keeping
+the backend measurement intact:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_publication_dropout \
+  --output artifacts/openarm-sensor-dropout-robustness-lab
+```
+
+The observation contract permits a maximum age of three control periods. It
+therefore passes bursts of zero, one, and two dropped frames. Three frames is
+the first failure: Rapier, MuJoCo, and Gazebo all observe the same
+`66,666,668`-tick age, reject exactly one decision at step 3244, hold the last
+accepted target with zero realization delta while freezing controller state,
+and resume on fresh nominal sequence 3243 at step 3245. The first contract
+deviation remains the third missing publication at capture sequence 3242, so
+the minimum replay stops there rather than hiding it behind the later rejection.
+
+The browser report and retained capsule preserve all five Rapier cases and the
+two/three-frame boundary on all backends:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-dropout-robustness-lab
+```

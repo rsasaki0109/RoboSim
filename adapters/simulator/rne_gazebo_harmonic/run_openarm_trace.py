@@ -325,6 +325,108 @@ def controller_decision(
     }
 
 
+def dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if isinstance(contract, dict) and contract.get("kind") == "joint_feedback_publication_dropout_burst_v1":
+        return contract
+    return None
+
+
+def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
+    contract = dropout_contract(controller)
+    if contract is None:
+        return True
+    start = contract["start_capture_sequence"]
+    return not start <= sequence < start + contract["consecutive_dropped_frames"]
+
+
+def validate_measurement_fault(controller: dict[str, Any], action_count: int) -> None:
+    contract = controller.get("measurement_fault_contract")
+    if contract is None or contract.get("kind") == "additive_joint_position_bias_pulse_v1":
+        return
+    expected_keys = {
+        "kind",
+        "classification",
+        "start_capture_sequence",
+        "consecutive_dropped_frames",
+        "controller_visibility",
+        "application_order",
+    }
+    start = contract.get("start_capture_sequence")
+    count = contract.get("consecutive_dropped_frames")
+    if (
+        set(contract) != expected_keys
+        or contract.get("kind") != "joint_feedback_publication_dropout_burst_v1"
+        or contract.get("classification") != "measurement_unavailability"
+        or not isinstance(start, int)
+        or not isinstance(count, int)
+        or not 1 <= start <= action_count
+        or not 0 <= count
+        or start + count > action_count + 1
+        or contract.get("controller_visibility") != "missing_publication_only"
+        or contract.get("application_order")
+        != "after_typed_sensor_capture_before_controller_ingress"
+    ):
+        raise ValueError("invalid OpenArm measurement-dropout contract")
+
+
+def bounded_controller_decision(
+    controller: dict[str, Any],
+    reference: list[float],
+    integral_correction: list[float],
+    previous_observation_position: list[float | None],
+    previous_input_target: list[float | None],
+    previous_previous_input_target: list[float | None],
+    observation: dict[str, Any] | None,
+    consumed_at_ticks: int,
+    last_accepted_target: list[float],
+    recovering_from_rejection: bool,
+) -> dict[str, Any]:
+    contract = controller.get("observation_contract")
+    if observation is not None and dropout_contract(controller) is not None:
+        age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
+        if age_ticks > contract["maximum_age_ticks"]:
+            if len(last_accepted_target) != len(reference):
+                raise RuntimeError("fail-safe hold target width mismatch")
+            return {
+                "target": last_accepted_target.copy(),
+                "correction": [
+                    target - desired for target, desired in zip(last_accepted_target, reference)
+                ],
+                "integral_correction": integral_correction.copy(),
+                "controller_observation_position_rad": observation["joint_position_rad"].copy(),
+                "joint_measurement_bias_rad": [0.0] * len(reference),
+                "observation_sequence": observation["step"],
+                "observation_age_ticks": age_ticks,
+                "bootstrap": False,
+                "controller_rejected": True,
+                "controller_rejection_reason": "maximum_observation_age_ticks",
+                "fail_safe_hold_active": True,
+                "controller_state_frozen": True,
+                "controller_recovered": False,
+            }
+    decision = controller_decision(
+        controller,
+        reference,
+        integral_correction,
+        previous_observation_position,
+        previous_input_target,
+        previous_previous_input_target,
+        observation,
+        consumed_at_ticks,
+    )
+    decision.update(
+        {
+            "controller_rejected": False,
+            "controller_rejection_reason": None,
+            "fail_safe_hold_active": False,
+            "controller_state_frozen": False,
+            "controller_recovered": recovering_from_rejection and not decision["bootstrap"],
+        }
+    )
+    return decision
+
+
 def apply_measurement_bias(
     controller: dict[str, Any],
     observation: dict[str, Any],
@@ -334,6 +436,8 @@ def apply_measurement_bias(
     bias = [0.0] * len(positions)
     contract = controller.get("measurement_fault_contract")
     if contract is None:
+        return positions, bias
+    if contract.get("kind") == "joint_feedback_publication_dropout_burst_v1":
         return positions, bias
     expected_keys = {
         "kind",
@@ -432,9 +536,20 @@ def run_success(
     previous_observation_position: list[float | None] = [None] * joint_count
     previous_input_target: list[float | None] = [None] * joint_count
     previous_previous_input_target: list[float | None] = [None] * joint_count
+    last_accepted_target = action_artifact["actions"][0]["joint_position_target_rad"].copy()
+    recovering_from_rejection = False
     for action in action_artifact["actions"]:
-        delayed_observation = observations[-2] if len(observations) >= 2 else None
-        decision = controller_decision(
+        consumed_at_ticks = (action["step"] - 1) * FIXED_DELTA_TICKS
+        delayed_observation = next(
+            (
+                frame
+                for frame in reversed(observations)
+                if frame["sensor_sample_published"]
+                and frame["sim_time_ticks"] + FIXED_DELTA_TICKS <= consumed_at_ticks
+            ),
+            None,
+        )
+        decision = bounded_controller_decision(
             controller,
             action["joint_position_target_rad"],
             integral_correction,
@@ -442,8 +557,13 @@ def run_success(
             previous_input_target,
             previous_previous_input_target,
             delayed_observation,
-            (action["step"] - 1) * FIXED_DELTA_TICKS,
+            consumed_at_ticks,
+            last_accepted_target,
+            recovering_from_rejection,
         )
+        if not decision["controller_rejected"]:
+            last_accepted_target = decision["target"].copy()
+        recovering_from_rejection = decision["controller_rejected"]
         applied_target, disturbance = apply_actuator_disturbance(
             controller, action["step"], decision["target"]
         )
@@ -489,11 +609,21 @@ def run_success(
                 "step": action["step"],
                 "sim_time_ticks": action["sim_time_ticks"],
                 "sensor_status": "nominal",
+                "sensor_sample_published": sensor_sample_published(
+                    controller, action["step"]
+                ),
                 "controller_observation_sequence": decision["observation_sequence"],
                 "controller_observation_age_ticks": decision[
                     "observation_age_ticks"
                 ],
                 "controller_bootstrap": decision["bootstrap"],
+                "controller_rejected": decision["controller_rejected"],
+                "controller_rejection_reason": decision[
+                    "controller_rejection_reason"
+                ],
+                "fail_safe_hold_active": decision["fail_safe_hold_active"],
+                "controller_state_frozen": decision["controller_state_frozen"],
+                "controller_recovered": decision["controller_recovered"],
                 "joint_position_rad": positions,
                 "joint_velocity_rad_s": velocities,
                 "joint_reference_position_rad": action[
@@ -674,6 +804,8 @@ def main() -> int:
         "maximum_target_rad",
     )
     feedback_enabled = contract is not None or law is not None
+    validate_measurement_fault(controller, len(actions["actions"]))
+    availability_fault = dropout_contract(controller)
     if feedback_enabled and (
         not isinstance(contract, dict)
         or not isinstance(law, dict)
@@ -682,7 +814,24 @@ def main() -> int:
         or contract.get("sample_period_ticks") != FIXED_DELTA_TICKS
         or contract.get("phase_offset_ticks") != FIXED_DELTA_TICKS
         or contract.get("latency_ticks") != FIXED_DELTA_TICKS
-        or contract.get("maximum_age_ticks") != FIXED_DELTA_TICKS
+        or (
+            availability_fault is None
+            and (
+                contract.get("maximum_age_ticks") != FIXED_DELTA_TICKS
+                or "stale_observation_policy" in contract
+                or "recovery_policy" in contract
+            )
+        )
+        or (
+            availability_fault is not None
+            and (
+                contract.get("maximum_age_ticks") != 3 * FIXED_DELTA_TICKS
+                or contract.get("stale_observation_policy")
+                != "hold_last_accepted_target_and_freeze_state"
+                or contract.get("recovery_policy")
+                != "resume_on_fresh_nominal_observation"
+            )
+        )
         or contract.get("required_status") != "nominal"
         or contract.get("bootstrap_policy") != "reference_until_first_available"
     ):

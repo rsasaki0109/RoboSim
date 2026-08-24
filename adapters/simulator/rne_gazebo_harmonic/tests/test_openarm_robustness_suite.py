@@ -103,6 +103,38 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
             )
         )
 
+    def test_dropout_grid_has_bounded_hold_and_recovery_contract(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_publication_dropout",
+        )
+        self.assertEqual(suite["dimension_id"], "joint_feedback_publication_dropout")
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"]["consecutive_dropped_frames"]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["dropout-003frames"]
+        contract = controller["observation_contract"]
+        self.assertEqual(contract["maximum_age_ticks"], 3 * 16_666_667)
+        self.assertEqual(
+            contract["stale_observation_policy"],
+            "hold_last_accepted_target_and_freeze_state",
+        )
+        self.assertEqual(
+            contract["recovery_policy"], "resume_on_fresh_nominal_observation"
+        )
+        self.assertFalse(RUNNER.sensor_sample_published(controller, 3240))
+        self.assertFalse(RUNNER.sensor_sample_published(controller, 3242))
+        self.assertTrue(RUNNER.sensor_sample_published(controller, 3243))
+
 
 if __name__ == "__main__":
     unittest.main()

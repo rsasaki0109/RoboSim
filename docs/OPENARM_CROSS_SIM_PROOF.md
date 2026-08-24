@@ -222,3 +222,30 @@ artifacts are bound to producer commit
 cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-robustness-lab
 ```
+
+## Joint-feedback dropout and recovery boundary
+
+The availability experiment drops publication only after typed backend sensor
+capture and before controller ingress. It does not delete backend state or
+rewrite a sample as nominal. The fixed `[0, 1, 2, 3, 4]` consecutive-frame grid
+uses one unchanged maximum-age contract of `50,000,001 ticks`: zero through two
+frames pass, while three is the first failure on Rapier, MuJoCo, and Gazebo.
+
+At the three-frame boundary every backend reaches `66,666,668 ticks` of age and
+rejects exactly controller decision 3244. The controller state is frozen and
+the previous accepted target is held with zero numerical delta; fresh nominal
+sequence 3243 is consumed at decision 3245 and recovery takes one decision.
+The earlier capture-side contract is violated first at sequence 3242 when the
+third consecutive publication is absent. The dedicated 3,243-frame replay ends
+at that first deviation.
+
+The retained [dropout report](evidence/openarm-sensor-dropout-robustness-lab/evidence/openarm-sensor-dropout-robustness-report.html)
+and [Failure Capsule](evidence/openarm-sensor-dropout-robustness-lab/capsule.json)
+bind raw measurements, publication flags, consumed sequences and ages,
+safe-hold/recovery metadata, controllers, actions, all boundary traces, and the
+minimum replay. Verify it without a simulator:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-dropout-robustness-lab
+```
