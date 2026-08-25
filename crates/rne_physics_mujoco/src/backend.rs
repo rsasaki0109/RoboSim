@@ -28,6 +28,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::Articulation,
     PhysicsCapability::ContactForce,
     PhysicsCapability::RaycastBatch,
+    PhysicsCapability::JointEffortMeasurement,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.

@@ -148,7 +148,7 @@ This is the immediate next development milestone.
 
 Current implementation status:
 
-- conformance report schema v2 and backend manifest schema v2 are registered;
+- conformance report schema v2 and backend manifest schema v3 are registered;
 - the capability catalog is callable through a generic `PhysicsBackend`
   factory for Analytic, Rapier, and feature-gated MuJoCo;
 - Rapier synchronizes backend-neutral completed-step `JointState` values into

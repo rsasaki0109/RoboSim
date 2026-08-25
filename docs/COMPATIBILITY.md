@@ -267,7 +267,7 @@ tolerance, and verify their own replay. Backend-private failure state digests
 remain diagnostic and are never compared. Schema-v1 reports prove only the
 successful cross-backend path and remain historical evidence.
 
-Physics conformance report schema v2 embeds backend-manifest schema v2,
+Physics conformance report schema v2 embeds backend-manifest schema v3,
 catalog version, tolerance-registry version, declared/runtime capabilities, and
 coverage verdicts. Its canonical shape lives at
 `tests/golden/physics/conformance-report-v2.json`. A backend identifier with no

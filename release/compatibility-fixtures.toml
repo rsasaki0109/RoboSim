@@ -181,14 +181,14 @@ id = "physics_conformance_v2"
 contract = "physics_conformance"
 schema_version = 2
 path = "tests/golden/physics/conformance-report-v2.json"
-canonical_json_sha256 = "sha256:674aefef6e5bd67f0917741d2b1d11a24d24c0a3d18d0aa3a669d91b3bead4bd"
+canonical_json_sha256 = "sha256:4eb812654411ac8b0de486fd85aa14983582d85d41da24eed240d6b357509626"
 
 [[fixture]]
 id = "physics_external_conformance_v1"
 contract = "external_physics_conformance"
 schema_version = 1
 path = "crates/rne_physics_conformance/tests/golden/external-backend-conformance-v1.json"
-canonical_json_sha256 = "sha256:ca5868832023438150c9f9d73e44ea88437e98a7ab147cb5bdb776a848426647"
+canonical_json_sha256 = "sha256:472564db7913f5aedfe038a199caf48a44bf71d0a112fd86946a417511b22b5f"
 
 [[fixture]]
 id = "portable_batch_checkpoint_v2"

@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Current schema version for backend capability manifests.
-pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 2;
+pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 3;
 
 /// Current schema version for aggregate physics conformance reports.
 pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
 
 /// Current version of the named, unit-bearing physics tolerance registry.
-pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 1;
+pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 2;
 
 /// Identifier for a backend-owned physics world instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,6 +64,8 @@ pub enum PhysicsCapability {
     RaycastBatch,
     /// Supports externally posed kinematic rigid bodies.
     KinematicBody,
+    /// Retains backend-measured joint effort from the completed simulation step.
+    JointEffortMeasurement,
 }
 
 /// Repeatability promise made by a physics backend manifest.
@@ -175,6 +177,13 @@ impl PhysicsBackendManifest {
         {
             return Err(PhysicsBackendManifestError::KinematicWithoutRigidBody);
         }
+        if self
+            .capabilities
+            .contains(&PhysicsCapability::JointEffortMeasurement)
+            && !self.capabilities.contains(&PhysicsCapability::Articulation)
+        {
+            return Err(PhysicsBackendManifestError::JointEffortWithoutArticulation);
+        }
         Ok(())
     }
 }
@@ -211,6 +220,9 @@ pub enum PhysicsBackendManifestError {
     /// Kinematic-body support refines the rigid-body capability.
     #[error("kinematic_body capability requires rigid_body capability")]
     KinematicWithoutRigidBody,
+    /// Joint-effort measurement refines the articulation capability.
+    #[error("joint_effort_measurement capability requires articulation capability")]
+    JointEffortWithoutArticulation,
 }
 
 fn is_stable_identifier(value: &str) -> bool {
@@ -223,7 +235,7 @@ fn is_stable_identifier(value: &str) -> bool {
 
 impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::RigidBody,
         Self::Articulation,
         Self::GpuRigidBody,
@@ -232,6 +244,7 @@ impl PhysicsCapability {
         Self::ContactForce,
         Self::RaycastBatch,
         Self::KinematicBody,
+        Self::JointEffortMeasurement,
     ];
 
     /// Returns the stable lowercase identifier used by conformance reports.
@@ -245,6 +258,7 @@ impl PhysicsCapability {
             Self::SoftBody => "soft_body",
             Self::ContactForce => "contact_force",
             Self::RaycastBatch => "raycast_batch",
+            Self::JointEffortMeasurement => "joint_effort_measurement",
         }
     }
 }
@@ -577,6 +591,20 @@ mod tests {
         assert_eq!(
             orphan_kinematic,
             PhysicsBackendManifestError::KinematicWithoutRigidBody
+        );
+
+        let orphan_joint_effort = PhysicsBackendManifest::new(
+            "fixture",
+            "0.1.0",
+            "fixture",
+            "1",
+            [PhysicsCapability::JointEffortMeasurement],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("joint-effort measurement refines articulation support");
+        assert_eq!(
+            orphan_joint_effort,
+            PhysicsBackendManifestError::JointEffortWithoutArticulation
         );
     }
 

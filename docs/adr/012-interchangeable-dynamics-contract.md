@@ -38,7 +38,7 @@ capability declaration. The schema, manifest, and tolerance-registry versions
 are compiled constants checked against `release/contracts.toml` and a committed
 golden JSON shape.
 
-Backend-manifest schema v2 adds `kinematic_body` as a refinement of
+Backend-manifest schema v2 added `kinematic_body` as a refinement of
 `rigid_body`. A backend may advertise it only when the catalog's shared
 external-pose vector passes. Analytic and Rapier do so; MuJoCo's compiler maps a
 kinematic entity to a typed missing-capability error before allocating native
@@ -67,7 +67,8 @@ conformance contract.
 
 For independently maintained Rust backends, the publishable
 `rne_physics_conformance` authoring crate owns a distinct external report schema
-v1. It keeps nine checks in fixed order, uses a backend-independent tolerance
+v1. Catalog v2 keeps ten checks in fixed order, including completed-step joint
+effort measurement, uses a backend-independent tolerance
 registry that authors cannot widen, accepts arbitrary stable backend IDs, and
 fails unsupported GPU/soft-body claims explicitly. Each report hashes the exact
 implementation subject and canonical manifest; Failure Capsule verification

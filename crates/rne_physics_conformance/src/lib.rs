@@ -11,9 +11,9 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    capture_physics_snapshot, Collider, JointState, MultibodyLink, PhysicsBackend,
-    PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot, PhysicsWorldDesc,
-    PhysicsWorldId, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    capture_physics_snapshot, Collider, JointEffortMeasurement, JointState, MultibodyLink,
+    PhysicsBackend, PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot,
+    PhysicsWorldDesc, PhysicsWorldId, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -32,17 +32,17 @@ pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND: &str =
 pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 1;
 
 /// Current immutable external capability-case catalog.
-pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 1;
+pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 2;
 
 /// Current named, unit-bearing tolerance registry used by the external catalog.
-pub const EXTERNAL_PHYSICS_BACKEND_TOLERANCE_REGISTRY_VERSION: u16 = 1;
+pub const EXTERNAL_PHYSICS_BACKEND_TOLERANCE_REGISTRY_VERSION: u16 = 2;
 
 const STEP_HZ: f64 = 60.0;
 const FREE_FALL_STEPS: u64 = 60;
 const GRAVITY_M_S2: f64 = -9.81;
 const FREE_FALL_INITIAL_Y_M: f64 = 5.0;
 
-const CHECK_IDS: [&str; 9] = [
+const CHECK_IDS: [&str; 10] = [
     "manifest_identity",
     "rigid_body.free_fall",
     "articulation.revolute_limit",
@@ -52,6 +52,7 @@ const CHECK_IDS: [&str; 9] = [
     "contact_force.resting_impulse",
     "raycast_batch.ordered_hits",
     "kinematic_body.external_pose",
+    "joint_effort_measurement.direct_revolute_effort",
 ];
 
 /// Invalid conformance configuration, report, or serialized artifact.
@@ -217,7 +218,7 @@ pub struct ExternalPhysicsBackendConformanceReport {
     pub runtime_capabilities: Vec<PhysicsCapability>,
     /// Advertised capabilities proven by passing cases.
     pub covered_capabilities: Vec<PhysicsCapability>,
-    /// Nine catalog checks in fixed order.
+    /// Ten catalog checks in fixed order.
     pub checks: Vec<ExternalPhysicsBackendCheck>,
     /// True only when identity and every advertised capability pass.
     pub passed: bool,
@@ -412,6 +413,9 @@ where
             PhysicsCapability::ContactForce => case_result(capability, run_contact(factory())),
             PhysicsCapability::RaycastBatch => case_result(capability, run_raycast(factory())),
             PhysicsCapability::KinematicBody => case_result(capability, run_kinematic(factory())),
+            PhysicsCapability::JointEffortMeasurement => {
+                case_result(capability, run_joint_effort_measurement(factory()))
+            }
         };
         checks.push(check);
     }
@@ -747,6 +751,76 @@ fn run_articulation<B: PhysicsBackend>(
     ))
 }
 
+fn run_joint_effort_measurement<B: PhysicsBackend>(
+    mut backend: B,
+) -> Result<ExternalPhysicsBackendCheck, String> {
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .map_err(|error| error.to_string())?;
+    let mut world = World::new();
+    let parent = spawn_named(&mut world, "external_effort_parent");
+    world.entity_mut(parent).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::sphere(0.05),
+        MultibodyLink,
+        Transform3::default(),
+    ));
+    let child = spawn_named(&mut world, "external_effort_child");
+    world.entity_mut(child).insert((
+        RigidBody::default(),
+        Collider::sphere(0.05),
+        MultibodyLink,
+        Transform3::from_translation_rotation(Vec3::new(0.0, -1.0, 0.0), Quat::IDENTITY),
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+            lower_rad: None,
+            upper_rad: None,
+        },
+        rne_physics::JointActuation::RevoluteEffort {
+            effort_nm: 2.0,
+            max_effort_nm: 2.0,
+        },
+    ));
+    for _ in 0..30 {
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
+    }
+    let measured_effort_nm = match world.get::<JointEffortMeasurement>(child) {
+        Some(JointEffortMeasurement::Revolute { measured_effort_nm }) => *measured_effort_nm,
+        Some(JointEffortMeasurement::Prismatic { .. }) => {
+            return Err(
+                "backend synchronized a prismatic measurement for a revolute joint".to_string(),
+            )
+        }
+        None => return Err("backend did not retain completed-step joint effort".to_string()),
+    };
+    let metrics = vec![metric(
+        "measured_effort_nm",
+        "N*m",
+        measured_effort_nm,
+        2.0,
+        "external_direct_revolute_effort_nm_v1",
+        1e-9,
+        1e-9,
+        "direct actuator effort must retain its commanded SI value apart from numeric conversion rounding",
+    )];
+    Ok(completed_case(
+        PhysicsCapability::JointEffortMeasurement,
+        metrics.iter().all(|metric| metric.passed),
+        None,
+        metrics,
+        "completed-step native actuator effort is retained as a revolute N*m measurement",
+    ))
+}
+
 fn run_contact<B: PhysicsBackend>(mut backend: B) -> Result<ExternalPhysicsBackendCheck, String> {
     let physics_world = backend
         .create_world(PhysicsWorldDesc::default())
@@ -971,6 +1045,7 @@ fn capability_check_id(capability: PhysicsCapability) -> &'static str {
         PhysicsCapability::ContactForce => CHECK_IDS[6],
         PhysicsCapability::RaycastBatch => CHECK_IDS[7],
         PhysicsCapability::KinematicBody => CHECK_IDS[8],
+        PhysicsCapability::JointEffortMeasurement => CHECK_IDS[9],
     }
 }
 
@@ -1185,7 +1260,7 @@ mod tests {
         )
         .expect("conformance report");
         assert!(report.passed());
-        assert_eq!(report.checks.len(), 9);
+        assert_eq!(report.checks.len(), 10);
         assert_eq!(
             report.covered_capabilities,
             external_manifest().capabilities

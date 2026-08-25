@@ -1,15 +1,15 @@
 {
   "kind": "rne_external_physics_backend_conformance_report",
   "schema_version": 1,
-  "catalog_version": 1,
-  "tolerance_registry_version": 1,
+  "catalog_version": 2,
+  "tolerance_registry_version": 2,
   "subject": {
     "label": "reference-external-backend-source.tar.zst",
     "sha256": "sha256:61ff506e88ae5bec62c03b23d22bf13be83e21990c8c50bd9488055bf007f4e0"
   },
-  "manifest_sha256": "sha256:99cc6aa5dea521fb9b43dbd1b475e4578e527765c1784a38165d80e607dde723",
+  "manifest_sha256": "sha256:aaca34f073a27280bdd90c1a5c6bee1303e5d3e7b0eb1dab915c69f9e8d26f00",
   "manifest": {
-    "schema_version": 2,
+    "schema_version": 3,
     "backend_id": "reference_external_backend",
     "adapter_version": "0.1.0",
     "engine_id": "independent_ballistic_engine",
@@ -165,6 +165,14 @@
         }
       ],
       "detail": "externally supplied pose remains authoritative across a fixed step"
+    },
+    {
+      "id": "joint_effort_measurement.direct_revolute_effort",
+      "capability": "joint_effort_measurement",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
     }
   ],
   "passed": true

@@ -44,6 +44,7 @@ one required case:
 | Rapier | `Articulation` | revolute anchor and limit invariants remain bounded under load |
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
 | Rapier | `RaycastBatch` | repeated queries return bounded hits in distance/entity order |
+| MuJoCo | `JointEffortMeasurement` | a direct 2 N*m revolute command is retained as completed-step native actuator effort |
 
 `GpuRigidBody` and `SoftBody` remain unadvertised. A coverage test fails when a
 backend adds a capability without adding a catalog case.
@@ -152,11 +153,16 @@ assumption:
   Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
   and MuJoCo must implement the same contract before advertising articulation.
 
-Backend-manifest schema v2 adds the `kinematic_body` vocabulary. Analytic and
+Backend-manifest schema v2 added the `kinematic_body` vocabulary. Analytic and
 Rapier advertise it only after passing the shared external-pose vector. MuJoCo
 does not advertise it: both `preflight_world` and the trait sync boundary reject
 a kinematic entity before native model creation with a typed missing-capability
 error.
+
+Schema v3 adds `joint_effort_measurement`, which requires a completed-step,
+backend-measured, unit-explicit actuator realization value. MuJoCo advertises it
+only after passing the shared direct 2 N*m revolute-effort vector; Rapier remains
+explicitly unadvertised until its solver exposes equivalent measured effort.
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
