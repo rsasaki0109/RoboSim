@@ -74,6 +74,12 @@ metadata and does not require shipping either source tree in the native bundle.
 The bundle includes the fixtures and validation binaries used by the release
 rehearsal. From its top-level directory:
 
+Independent operators reproducing the installed flagship should start with
+`docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md`. That archive-only guide separates
+operator evidence collection from the maintainer-only acceptance check and
+uses `release/external-flagship-submission-template.json` to prevent missing
+provenance or artifact identities.
+
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
   --measure-on "lab-workstation-a"

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 4;
+const REGISTRY_SCHEMA_VERSION: u32 = 5;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -16,6 +16,8 @@ const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 struct IntakeRegistry {
     schema_version: u32,
     guide_path: String,
+    installed_flagship_quickstart_path: String,
+    installed_flagship_submission_template_path: String,
     route: Vec<IntakeRoute>,
 }
 
@@ -247,6 +249,27 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
         guide.starts_with("# External evidence intake\n"),
         "external evidence intake guide title drifted"
     );
+    let flagship_quickstart =
+        read_repository_file(root, &registry.installed_flagship_quickstart_path)?;
+    anyhow::ensure!(
+        flagship_quickstart.starts_with("# Installed flagship reproduction quickstart\n"),
+        "installed flagship quickstart title drifted"
+    );
+    anyhow::ensure!(
+        flagship_quickstart.contains(&registry.installed_flagship_submission_template_path)
+            && flagship_quickstart.contains("candidate submission")
+            && flagship_quickstart.contains("not accepted evidence"),
+        "installed flagship quickstart must bind the candidate template and non-acceptance boundary"
+    );
+    validate_flagship_submission_template(&read_repository_file(
+        root,
+        &registry.installed_flagship_submission_template_path,
+    )?)?;
+    anyhow::ensure!(
+        guide.contains(&registry.installed_flagship_quickstart_path)
+            || guide.contains("EXTERNAL_FLAGSHIP_REPRODUCTION.md"),
+        "external intake guide must link the installed flagship quickstart"
+    );
     let readme = read_repository_file(root, "README.md")?;
     validate_readme_discovery(&readme, &registry)?;
 
@@ -269,6 +292,60 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
             guide.contains(&route.issue_template),
             "external evidence intake guide does not link template {}",
             route.issue_template
+        );
+    }
+    Ok(())
+}
+
+fn validate_flagship_submission_template(text: &str) -> Result<()> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).context("parse installed flagship submission template")?;
+    anyhow::ensure!(
+        value.get("kind").and_then(serde_json::Value::as_str)
+            == Some("rne_external_flagship_submission_candidate")
+            && value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(1)
+            && value
+                .get("candidate_status")
+                .and_then(serde_json::Value::as_str)
+                == Some("not_accepted_pending_maintainer_verification")
+            && value
+                .get("author_assistance")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false),
+        "installed flagship submission template identity or non-acceptance policy drifted"
+    );
+    let required_paths = value
+        .get("required_proof_paths")
+        .and_then(serde_json::Value::as_array)
+        .context("installed flagship submission template omitted required_proof_paths")?;
+    let actual = required_paths
+        .iter()
+        .map(|path| path.as_str().context("required proof path is not a string"))
+        .collect::<Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        actual
+            == [
+                "flagship-proof/installed-proof-report.json",
+                "flagship-proof/time-to-proof-report.json",
+                "flagship-proof/cross-backend-report.json",
+                "flagship-proof/recorded-shadow-proof.json",
+                "flagship-proof/failure-capsule/capsule.json",
+            ],
+        "installed flagship submission template proof paths drifted"
+    );
+    for object in [
+        "evidence_repository",
+        "measurement",
+        "release_archive",
+        "proof_bundle",
+        "reproduction",
+    ] {
+        anyhow::ensure!(
+            value.get(object).is_some_and(serde_json::Value::is_object),
+            "installed flagship submission template omitted {object}"
         );
     }
     Ok(())

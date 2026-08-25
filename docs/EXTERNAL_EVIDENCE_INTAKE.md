@@ -7,12 +7,12 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v4 adds a qualifying,
-content-addressed simulator-adapter route without relabelling simulators as
-hardware. It retains the independently measured installed flagship route and
+`release/external-evidence-intake.toml`. Registry v5 binds the archive-only
+installed flagship quickstart and its non-acceptance candidate submission
+template. It retains the content-addressed simulator-adapter route and
 continues to distinguish qualifying systems from audited nonqualifying
-accelerator evidence. Validate the registry, this guide, and all required
-issue-form fields before publishing a release:
+accelerator evidence. Validate the registry, guides, template, and all
+required issue-form fields before publishing a release:
 
 ```bash
 cargo run --locked -p xtask -- external-intake-check
@@ -65,10 +65,16 @@ it, and run from the extracted bundle root:
   --measure-on "community-lab-desktop-a"
 ```
 
-On Windows use `bin\\rne-flagship-proof.exe`. Preserve the archive, the exact
-extracted bundle, and the complete `flagship-proof` directory without editing
-their contents. From a pinned checkout of the same RNE release, generate the
-versioned external report (PowerShell line continuations are shown):
+On Windows use `bin\\rne-flagship-proof.exe`. The complete archive-only operator
+procedure and candidate JSON are in
+[`EXTERNAL_FLAGSHIP_REPRODUCTION.md`](EXTERNAL_FLAGSHIP_REPRODUCTION.md) and
+`release/external-flagship-submission-template.json`. Preserve the archive, the
+exact extracted bundle, and the complete `flagship-proof` directory without
+editing their contents.
+
+After submission, a maintainer freshly downloads the retained bytes and, from
+a pinned checkout of the same RNE release, generates the versioned external
+report (PowerShell line continuations are shown):
 
 ```powershell
 cargo run --locked -p xtask -- external-flagship-check `
@@ -82,7 +88,9 @@ cargo run --locked -p xtask -- external-flagship-check `
   --output external-flagship-reproduction.json
 ```
 
-The checker fails closed unless the release is clean, tagged, reproducible,
+The operator never needs an RNE source checkout, and maintainer verification
+does not retroactively provide author assistance to the independent run. The
+checker fails closed unless the release is clean, tagged, reproducible,
 and internally checksum-consistent. It records the release source revision and
 rehashes the archive, checksum manifest, and packaged producer executable,
 verifies the proof report and Failure Capsule, requires

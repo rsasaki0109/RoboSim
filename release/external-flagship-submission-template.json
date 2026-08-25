@@ -1,0 +1,45 @@
+{
+  "kind": "rne_external_flagship_submission_candidate",
+  "schema_version": 1,
+  "candidate_status": "not_accepted_pending_maintainer_verification",
+  "author_assistance": false,
+  "evidence_repository": {
+    "owner": null,
+    "url": null,
+    "revision": null
+  },
+  "measurement": {
+    "measured_on": null,
+    "machine_label": null,
+    "operating_system": null,
+    "architecture": "x86_64",
+    "release_target": null,
+    "elapsed_ms": null,
+    "target_ms": 900000
+  },
+  "release_archive": {
+    "url": null,
+    "file_name": null,
+    "size_bytes": null,
+    "sha256": null
+  },
+  "proof_bundle": {
+    "url": null,
+    "file_name": null,
+    "size_bytes": null,
+    "sha256": null
+  },
+  "required_proof_paths": [
+    "flagship-proof/installed-proof-report.json",
+    "flagship-proof/time-to-proof-report.json",
+    "flagship-proof/cross-backend-report.json",
+    "flagship-proof/recorded-shadow-proof.json",
+    "flagship-proof/failure-capsule/capsule.json"
+  ],
+  "reproduction": {
+    "commands": null,
+    "exit_statuses": null,
+    "stdout_log_path": null,
+    "stderr_log_path": null
+  }
+}

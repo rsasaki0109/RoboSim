@@ -203,10 +203,12 @@ Work proceeds in this order, one mergeable slice at a time:
 6. **Delivered:** ship the MuJoCo-enabled proof runner and pinned runtime in
    both native archives and require the cross-backend result in extracted
    release rehearsal.
-7. **Delivered; first submission pending:** publish a copy-paste external
-   reproduction guide, bind the proof to its producer executable and clean
-   tagged archive, reject CI/placeholder measurements, and expose a validated
-   public issue route.
+7. **Delivered; first submission pending:** ship an archive-only external
+   reproduction quickstart and non-acceptance candidate JSON in every native
+   bundle, bind the proof to its producer executable and clean tagged archive,
+   reject CI/placeholder measurements, and expose a validated public issue
+   route. The independent operator no longer needs an RNE source checkout;
+   maintainers run the source-side acceptance checker only after submission.
 8. Ask the first external operator to run the next tagged release without
    maintainer intervention and audit the retained report.
 

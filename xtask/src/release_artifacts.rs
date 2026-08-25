@@ -88,7 +88,7 @@ const INSTALL_CHECK_IDS: [&str; 12] = [
     "python_api",
 ];
 
-const BUNDLE_FILES: [(&str, &str); 86] = [
+const BUNDLE_FILES: [(&str, &str); 88] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -103,6 +103,10 @@ const BUNDLE_FILES: [(&str, &str); 86] = [
     (
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
+    ),
+    (
+        "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md",
+        "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md",
     ),
     ("docs/PLUGIN_SDK.md", "docs/PLUGIN_SDK.md"),
     (
@@ -137,6 +141,10 @@ const BUNDLE_FILES: [(&str, &str); 86] = [
     (
         "release/external-evidence-intake.toml",
         "release/external-evidence-intake.toml",
+    ),
+    (
+        "release/external-flagship-submission-template.json",
+        "release/external-flagship-submission-template.json",
     ),
     (
         "release/evidence/compatibility-report-v1.json",
@@ -3940,8 +3948,18 @@ mod tests {
             fs::read(output.path().join("release/external-evidence-intake.toml")).unwrap(),
             fs::read(root.join("release/external-evidence-intake.toml")).unwrap()
         );
+        assert_eq!(
+            fs::read(
+                output
+                    .path()
+                    .join("release/external-flagship-submission-template.json")
+            )
+            .unwrap(),
+            fs::read(root.join("release/external-flagship-submission-template.json")).unwrap()
+        );
         for guide in [
             "EXTERNAL_EVIDENCE_INTAKE.md",
+            "EXTERNAL_FLAGSHIP_REPRODUCTION.md",
             "EVIDENCE_QUICKSTART.md",
             "FAILURE_CAPSULE.md",
             "PLUGIN_SDK.md",
