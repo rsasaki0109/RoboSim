@@ -124,6 +124,13 @@ verifier invokes the known TaskSpec, hardware-session, LeKiwi
 reference-session, wire-trace, and shadow-report validators. It does not trust
 host paths recorded in the capsule.
 
+Creation records the repository HEAD as `build.git_commit`. When a Windows Git
+linked worktree is executed through WSL, the creator resolves the foreign
+drive-letter `.git` pointer against the matching `/mnt/<drive>` mount and asks
+Git for that worktree's HEAD. Failure to resolve either the normal repository
+or the linked-worktree metadata remains explicit as `unknown`; it is never
+replaced with a guessed commit.
+
 The capsule schema is intentionally independent of transport. A future archive
 or object-store adapter can package the same relative paths without changing
 `capsule.json`.

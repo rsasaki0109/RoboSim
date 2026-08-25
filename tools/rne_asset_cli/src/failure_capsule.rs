@@ -770,23 +770,69 @@ fn fallback_target_triple() -> String {
 }
 
 fn git_commit(root: &Path) -> String {
-    let Ok(output) = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "HEAD"])
-        .output()
-    else {
+    if let Some(commit) = invoke_git_commit(root, None) {
+        return commit;
+    }
+    let Some(git_dir) = linked_worktree_git_dir(root) else {
         return "unknown".to_string();
     };
+    invoke_git_commit(root, Some(&git_dir)).unwrap_or_else(|| "unknown".to_string())
+}
+
+fn invoke_git_commit(root: &Path, git_dir: Option<&Path>) -> Option<String> {
+    let mut command = Command::new("git");
+    if let Some(git_dir) = git_dir {
+        command
+            .arg("--git-dir")
+            .arg(git_dir)
+            .arg("--work-tree")
+            .arg(root);
+    } else {
+        command.arg("-C").arg(root);
+    }
+    let output = command.args(["rev-parse", "HEAD"]).output().ok()?;
     if !output.status.success() {
-        return "unknown".to_string();
+        return None;
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
-        "unknown".to_string()
+        None
     } else {
-        value
+        Some(value)
     }
+}
+
+fn linked_worktree_git_dir(root: &Path) -> Option<PathBuf> {
+    let pointer = fs::read_to_string(root.join(".git")).ok()?;
+    let raw = pointer.trim().strip_prefix("gitdir:")?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(resolve_linked_git_dir(root, raw))
+}
+
+fn resolve_linked_git_dir(root: &Path, raw: &str) -> PathBuf {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    #[cfg(unix)]
+    {
+        let normalized = raw.replace('\\', "/");
+        let bytes = normalized.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'/'
+        {
+            let drive = (bytes[0] as char).to_ascii_lowercase();
+            let mount = format!("/mnt/{drive}/");
+            if root.to_string_lossy().starts_with(&mount) {
+                return PathBuf::from(format!("{mount}{}", &normalized[3..]));
+            }
+        }
+    }
+    root.join(path)
 }
 
 enum SourceReplay {
@@ -1111,6 +1157,29 @@ mod tests {
                 let _ = fs::remove_dir_all(&self.0);
             }
         }
+    }
+
+    #[test]
+    fn linked_worktree_git_dir_resolves_relative_pointer() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::write(temp.path().join(".git"), "gitdir: metadata/worktree\n")
+            .expect("write worktree pointer");
+        assert_eq!(
+            linked_worktree_git_dir(temp.path()),
+            Some(temp.path().join("metadata/worktree"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_worktree_git_dir_maps_windows_pointer_on_matching_wsl_drive() {
+        assert_eq!(
+            resolve_linked_git_dir(
+                Path::new("/mnt/c/workspace/proof"),
+                "C:/workspace/main/.git/worktrees/proof"
+            ),
+            PathBuf::from("/mnt/c/workspace/main/.git/worktrees/proof")
+        );
     }
 
     fn generic_fixture() -> ReplayArtifact {
