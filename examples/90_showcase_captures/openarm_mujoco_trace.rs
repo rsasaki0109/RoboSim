@@ -10,8 +10,8 @@ use rne_data::{
 };
 use rne_ecs::{spawn_named, Entity, Name, World};
 use rne_physics::{
-    hash_physics_state_v2, JointActuation, JointMotorGainModel, JointPassiveDynamics, JointState,
-    PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RevoluteJointDesc,
+    hash_physics_state_v2, JointActuation, JointPassiveDynamics, JointState, PhysicsBackend,
+    PhysicsWorldDesc, PhysicsWorldId, RevoluteJointDesc,
 };
 use rne_physics_mujoco::MuJoCoBackend;
 use rne_sensor::{
@@ -251,6 +251,7 @@ struct JointActuationConfig {
     stiffness_nm_per_rad: f64,
     damping_nm_s_per_rad: f64,
     max_effort_nm: f64,
+    max_velocity_rad_s: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -291,6 +292,13 @@ struct ObservationFrame {
     maximum_actuator_tracking_error_rad: f64,
     maximum_tracking_error_rad: f64,
     physics_hash: u64,
+}
+
+#[derive(Clone, Debug)]
+struct AppliedActuation {
+    target_position_rad: Vec<f64>,
+    limited_effort_command_nm: Vec<f64>,
+    effort_saturated: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -367,6 +375,17 @@ impl MujocoOpenArmSim {
         physics_substeps_per_control_step: usize,
     ) -> Result<Self> {
         let fixed_delta = SimDuration::from_ticks(FIXED_DELTA_TICKS);
+        let physics_substeps = std::num::NonZeroUsize::new(physics_substeps_per_control_step)
+            .context("physics substeps must be nonzero")?;
+        let substep_deltas = fixed_delta
+            .split_evenly(physics_substeps)
+            .context("control period is too short for requested physics substeps")?;
+        anyhow::ensure!(
+            substep_deltas
+                .iter()
+                .all(|delta| *delta == substep_deltas[0]),
+            "MuJoCo requires exact equal-tick physics substeps"
+        );
         let mut world = World::new();
         let spawned = load_and_spawn_scene(&mut world, scene_path)
             .with_context(|| format!("load {}", scene_path.display()))?;
@@ -374,7 +393,7 @@ impl MujocoOpenArmSim {
             .get::<WorldEntity>(spawned.world)
             .map(|world| world.seed)
             .unwrap_or(0);
-        let mut backend = MuJoCoBackend::new(fixed_delta).context("create MuJoCo backend")?;
+        let mut backend = MuJoCoBackend::new(substep_deltas[0]).context("create MuJoCo backend")?;
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
                 solver_iterations,
@@ -417,21 +436,12 @@ impl MujocoOpenArmSim {
                 "OpenArm actuator {} is not revolute",
                 joint.link_name
             );
-            let position_rad = self
-                .world
-                .get::<JointState>(entity)
-                .copied()
-                .and_then(JointState::position_rad)
-                .with_context(|| format!("missing initial state for {}", joint.link_name))?;
-            self.world.entity_mut(entity).insert((
-                JointActuation::RevolutePosition {
-                    target_position_rad: position_rad,
-                    stiffness_nm_per_rad: joint.stiffness_nm_per_rad,
-                    damping_nm_s_per_rad: joint.damping_nm_s_per_rad,
+            self.world
+                .entity_mut(entity)
+                .insert(JointActuation::RevoluteEffort {
+                    effort_nm: 0.0,
                     max_effort_nm: joint.max_effort_nm,
-                },
-                JointMotorGainModel::ForceBased,
-            ));
+                });
         }
         Ok(())
     }
@@ -471,33 +481,19 @@ impl MujocoOpenArmSim {
         Ok(())
     }
 
-    fn step_targets(&mut self, link_names: &[String], targets: &[f64]) -> Result<()> {
+    fn step_targets(
+        &mut self,
+        config: &ActuationConfig,
+        link_names: &[String],
+        targets: &[f64],
+    ) -> Result<AppliedActuation> {
         anyhow::ensure!(link_names.len() == targets.len(), "action width mismatch");
-        for (name, target) in link_names.iter().zip(targets) {
-            let entity = self
-                .find_named(name)
-                .with_context(|| format!("missing actuator {name}"))?;
-            let Some(JointActuation::RevolutePosition {
-                stiffness_nm_per_rad,
-                damping_nm_s_per_rad,
-                max_effort_nm,
-                ..
-            }) = self.world.get::<JointActuation>(entity).copied()
-            else {
-                bail!("actuator {name} is not in revolute position mode");
-            };
-            self.world
-                .entity_mut(entity)
-                .insert(JointActuation::RevolutePosition {
-                    target_position_rad: *target,
-                    stiffness_nm_per_rad,
-                    damping_nm_s_per_rad,
-                    max_effort_nm,
-                });
-        }
-        self.backend
-            .sync_from_ecs(&mut self.world, self.physics_world)
-            .context("upload OpenArm command to MuJoCo")?;
+        anyhow::ensure!(
+            link_names.len() == config.joints.len(),
+            "actuation width mismatch"
+        );
+        let mut efforts = Vec::with_capacity(link_names.len());
+        let mut saturated = Vec::with_capacity(link_names.len());
         let deltas = self
             .fixed_delta
             .split_evenly(
@@ -506,15 +502,54 @@ impl MujocoOpenArmSim {
             )
             .context("control period is too short for requested physics substeps")?;
         for delta in deltas {
+            efforts.clear();
+            saturated.clear();
+            for ((name, target), joint) in link_names.iter().zip(targets).zip(&config.joints) {
+                anyhow::ensure!(name == &joint.link_name, "actuation link order mismatch");
+                let entity = self
+                    .find_named(name)
+                    .with_context(|| format!("missing actuator {name}"))?;
+                let Some(JointActuation::RevoluteEffort { max_effort_nm, .. }) =
+                    self.world.get::<JointActuation>(entity).copied()
+                else {
+                    bail!("actuator {name} is not in revolute effort mode");
+                };
+                let (position_rad, velocity_rad_s) = self.named_state(name)?;
+                let raw_effort_nm = joint.stiffness_nm_per_rad * (target - position_rad)
+                    - joint.damping_nm_s_per_rad * velocity_rad_s;
+                let clamped_effort_nm = raw_effort_nm.clamp(-max_effort_nm, max_effort_nm);
+                let limited_effort_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
+                    let drive_fraction =
+                        (1.0 - velocity_rad_s.abs() / joint.max_velocity_rad_s).clamp(0.0, 1.0);
+                    clamped_effort_nm * drive_fraction
+                } else {
+                    clamped_effort_nm
+                };
+                self.world
+                    .entity_mut(entity)
+                    .insert(JointActuation::RevoluteEffort {
+                        effort_nm: limited_effort_nm,
+                        max_effort_nm,
+                    });
+                efforts.push(limited_effort_nm);
+                saturated.push(raw_effort_nm != limited_effort_nm);
+            }
+            self.backend
+                .sync_from_ecs(&mut self.world, self.physics_world)
+                .context("upload OpenArm command to MuJoCo")?;
             self.backend
                 .step(self.physics_world, delta)
                 .context("step OpenArm MuJoCo world")?;
             self.sim_time = self.sim_time + delta;
+            self.backend
+                .sync_to_ecs(&mut self.world, self.physics_world)
+                .context("download OpenArm MuJoCo substep state")?;
         }
-        self.backend
-            .sync_to_ecs(&mut self.world, self.physics_world)
-            .context("download OpenArm MuJoCo state")?;
-        Ok(())
+        Ok(AppliedActuation {
+            target_position_rad: targets.to_vec(),
+            limited_effort_command_nm: efforts,
+            effort_saturated: saturated,
+        })
     }
 
     fn sample(&mut self, bus: &mut InMemoryDataBus) -> Result<usize> {
@@ -818,12 +853,13 @@ fn validate(
         _ => bail!("controller feedback contract is incomplete"),
     }
     anyhow::ensure!(
-        actuation.kind == "rne_revolute_position_actuation_config"
+        actuation.kind == "rne_portable_pd_effort_actuation_config"
             && actuation.schema_version == 1
             && actuation.backend_id == "rne_native_physics"
-            && actuation.motor_model == "force_based_v1"
+            && actuation.motor_model == "explicit_pd_effort_v1"
             && actuation.physics_substeps_per_control_step > 0
             && actuation.physics_substeps_per_control_step <= FIXED_DELTA_TICKS as usize
+            && FIXED_DELTA_TICKS.is_multiple_of(actuation.physics_substeps_per_control_step as u64)
             && actuation.fixed_delta_ticks == FIXED_DELTA_TICKS
             && actuation.joints.len() == width,
         "invalid native actuation contract"
@@ -840,6 +876,20 @@ fn validate(
                 .map(|joint| &joint.link_name)
                 .eq(&controller.rne_actuator_link_order),
         "actuation order differs from controller"
+    );
+    anyhow::ensure!(
+        actuation.joints.iter().all(|joint| {
+            [
+                joint.stiffness_nm_per_rad,
+                joint.damping_nm_s_per_rad,
+                joint.max_effort_nm,
+                joint.max_velocity_rad_s,
+            ]
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+                && joint.max_velocity_rad_s > 0.0
+        }),
+        "native actuation configuration has invalid gains, effort, or velocity limits"
     );
     anyhow::ensure!(
         actions.kind == "rne_controller_action_trace"
@@ -992,6 +1042,7 @@ fn rollout(
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     let mut controller_target_history = Vec::with_capacity(actions.len());
     let mut applied_target_history = Vec::with_capacity(actions.len());
+    let mut applied_actuation_history = Vec::with_capacity(actions.len());
     let mut last_accepted_target_rad = actions
         .first()
         .context("MuJoCo rollout has no actions")?
@@ -1024,7 +1075,12 @@ fn rollout(
             &applied_target_history,
         )?;
         applied_target_history.push(applied_target.clone());
-        sim.step_targets(&controller.rne_actuator_link_order, &applied_target)?;
+        let applied_actuation = sim.step_targets(
+            actuation,
+            &controller.rne_actuator_link_order,
+            &applied_target,
+        )?;
+        applied_actuation_history.push(applied_actuation);
         decisions.push(decision);
         state_hashes.push(hash_physics_state_v2(&sim.world));
         sim.sample(&mut bus)?;
@@ -1057,6 +1113,7 @@ fn rollout(
                     published,
                     &state_hashes,
                     &decisions,
+                    &applied_actuation_history,
                 )?);
                 last_observation_sequence = observations.last().unwrap().step;
             }
@@ -1074,6 +1131,7 @@ fn rollout(
             final_published,
             &state_hashes,
             &decisions,
+            &applied_actuation_history,
         )?);
     }
     anyhow::ensure!(
@@ -1113,6 +1171,7 @@ fn intentional_failure(
     sim.configure_actuators(actuation)?;
     for observation in &clean[..inject_index] {
         sim.step_targets(
+            actuation,
             &controller.rne_actuator_link_order,
             &observation.joint_position_target_rad,
         )?;
@@ -1121,7 +1180,7 @@ fn intentional_failure(
     let truncated =
         &clean[inject_index].joint_position_target_rad[..controller.action_joint_order.len() - 1];
     let rejected = sim
-        .step_targets(&controller.rne_actuator_link_order, truncated)
+        .step_targets(actuation, &controller.rne_actuator_link_order, truncated)
         .is_err();
     let after_rejection = hash_physics_state_v2(&sim.world);
     anyhow::ensure!(rejected, "MuJoCo runner accepted a truncated action");
@@ -1130,6 +1189,7 @@ fn intentional_failure(
         "rejected MuJoCo action changed ECS state"
     );
     sim.step_targets(
+        actuation,
         &controller.rne_actuator_link_order,
         &clean[inject_index].joint_position_target_rad,
     )?;
@@ -1759,12 +1819,16 @@ fn observation_frame(
     sensor_sample_published: bool,
     state_hashes: &[u64],
     decisions: &[ControllerDecision],
+    applied_actuations: &[AppliedActuation],
 ) -> Result<ObservationFrame> {
     let index = usize::try_from(frame.sequence.saturating_sub(1))?;
     let decision = decisions
         .get(index)
         .context("missing controller decision")?;
     let physics_hash = *state_hashes.get(index).context("missing physics hash")?;
+    let actuation = applied_actuations
+        .get(index)
+        .context("missing applied actuation")?;
     let mut positions = Vec::new();
     let mut velocities = Vec::new();
     let mut targets = Vec::new();
@@ -1773,17 +1837,26 @@ fn observation_frame(
     let mut effort_available = Vec::new();
     let mut measured_efforts = Vec::new();
     let mut maximum_actuator_tracking_error_rad = 0.0_f64;
-    for joint in &frame.payload.joints {
+    anyhow::ensure!(
+        actuation.target_position_rad.len() == frame.payload.joints.len(),
+        "actuation width does not match joint feedback"
+    );
+    for (joint_index, joint) in frame.payload.joints.iter().enumerate() {
         let (position, velocity) = coordinate(joint)?;
-        let (target, effort, is_saturated) = match joint.command {
-            rne_data::JointCommandFeedback::Revolute {
-                target_position_rad: Some(target),
-                limited_effort_command_nm,
-                saturated,
-                ..
-            } => (target, limited_effort_command_nm, saturated),
-            _ => bail!("feedback channel {} has no position command", joint.name),
-        };
+        anyhow::ensure!(
+            matches!(
+                joint.command,
+                rne_data::JointCommandFeedback::Revolute {
+                    mode: rne_data::JointCommandMode::Effort,
+                    ..
+                }
+            ),
+            "feedback channel {} has no effort command",
+            joint.name
+        );
+        let target = actuation.target_position_rad[joint_index];
+        let effort = actuation.limited_effort_command_nm[joint_index];
+        let is_saturated = actuation.effort_saturated[joint_index];
         positions.push(position);
         velocities.push(velocity);
         targets.push(target);
@@ -1847,13 +1920,8 @@ fn observation_frame(
             .joints
             .iter()
             .zip(&decision.target_position_rad)
-            .any(|(joint, commanded)| match joint.command {
-                rne_data::JointCommandFeedback::Revolute {
-                    target_position_rad: Some(applied),
-                    ..
-                } => (applied - commanded).abs() > 0.0,
-                _ => false,
-            }),
+            .zip(&actuation.target_position_rad)
+            .any(|((_joint, commanded), applied)| (applied - commanded).abs() > 0.0),
         joint_feedback_correction_rad: decision.correction_rad.clone(),
         joint_integral_correction_rad: decision.integral_correction_rad.clone(),
         limited_effort_command_nm: efforts,

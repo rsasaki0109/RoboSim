@@ -386,11 +386,13 @@ impl PhysicsBackend for RapierBackend {
 
         state.completed_joint_efforts = std::mem::take(&mut state.pending_joint_efforts);
 
-        // One-step disturbance forces have done their work; clear them so they do
-        // not integrate a second time.
+        // One-step disturbance wrenches have done their work; clear both linear
+        // and angular parts so direct joint effort and revolute Coulomb friction
+        // do not accumulate in Rapier's persistent user-force storage.
         for body_handle in state.impulse_forced.drain(..) {
             if let Some(body) = state.bodies.get_mut(body_handle) {
                 body.reset_forces(true);
+                body.reset_torques(true);
             }
         }
 
@@ -1880,6 +1882,14 @@ mod tests {
         ));
         for _ in 0..5 {
             step_physics(&mut backend, &mut world, physics_world, fixed_step())?;
+            assert!(
+                backend
+                    .world(physics_world)?
+                    .bodies
+                    .iter()
+                    .all(|(_, body)| body.user_torque().norm_squared() == 0.0),
+                "one-step joint torque persisted after Rapier step"
+            );
         }
         world.entity_mut(child).insert(JointActuation::Disabled);
         if let Some(passive_dynamics) = passive_dynamics {
@@ -1986,7 +1996,7 @@ mod tests {
         });
         assert!(position.position_rad().unwrap() > 0.1);
         assert!(velocity.position_rad().unwrap() > 0.1);
-        assert!(effort.position_rad().unwrap().abs() > 0.01);
+        assert!(effort.position_rad().unwrap() > 0.01);
     }
 
     fn run_prismatic_actuation(command: JointActuation) -> JointState {

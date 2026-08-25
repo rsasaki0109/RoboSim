@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use rne_ai::{
     BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayAction, BehaviorReplayArtifact,
     BehaviorReplayFailure, BehaviorReplayFrame, BehaviorViolation, TaskSpec,
-    UrdfJointFeedbackSensorConfig, UrdfJointPositionTarget, UrdfSceneSim,
+    UrdfJointFeedbackSensorConfig, UrdfJointPdEffortTarget, UrdfSceneSim,
 };
 use rne_data::{
     DataBus, Frame, InMemoryDataBus, JointEffortFeedback, JointFeedback, JointFeedbackStatus,
@@ -26,7 +26,7 @@ const TRACE_KIND: &str = "rne_controller_action_trace";
 const RAPIER_TRACE_KIND: &str = "rne_openarm_backend_trace";
 const FAILURE_KIND: &str = "rne_controller_contract_failure";
 const FIXED_DELTA_TICKS: u64 = 16_666_667;
-const ACTUATION_CONFIG_KIND: &str = "rne_revolute_position_actuation_config";
+const ACTUATION_CONFIG_KIND: &str = "rne_portable_pd_effort_actuation_config";
 const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_001);
 const SENSOR_REPORT_KIND: &str = "rne_sensor_validation_report";
 const SENSOR_FAULT_SEQUENCE: u64 = 307;
@@ -235,6 +235,7 @@ struct JointActuationConfig {
     stiffness_nm_per_rad: f64,
     damping_nm_s_per_rad: f64,
     max_effort_nm: f64,
+    max_velocity_rad_s: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -298,6 +299,13 @@ struct ObservationFrame {
     maximum_actuator_tracking_error_rad: f64,
     maximum_tracking_error_rad: f64,
     physics_hash: u64,
+}
+
+#[derive(Clone, Debug)]
+struct AppliedActuation {
+    target_position_rad: Vec<f64>,
+    limited_effort_command_nm: Vec<f64>,
+    effort_saturated: Vec<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -875,10 +883,12 @@ fn validate(
         actuation_config.kind == ACTUATION_CONFIG_KIND
             && actuation_config.schema_version == 1
             && actuation_config.backend_id == "rne_native_physics"
-            && actuation_config.motor_model == "force_based_v1"
+            && actuation_config.motor_model == "explicit_pd_effort_v1"
             && actuation_config.solver_iterations > 0
             && actuation_config.physics_substeps_per_control_step > 0
             && actuation_config.physics_substeps_per_control_step <= FIXED_DELTA_TICKS as usize
+            && FIXED_DELTA_TICKS
+                .is_multiple_of(actuation_config.physics_substeps_per_control_step as u64)
             && actuation_config.fixed_delta_ticks == FIXED_DELTA_TICKS,
         "unsupported or invalid RNE actuation configuration"
     );
@@ -901,11 +911,13 @@ fn validate(
                 joint.stiffness_nm_per_rad,
                 joint.damping_nm_s_per_rad,
                 joint.max_effort_nm,
+                joint.max_velocity_rad_s,
             ]
             .iter()
             .all(|value| value.is_finite() && *value >= 0.0)
+                && joint.max_velocity_rad_s > 0.0
         }),
-        "RNE actuation configuration has invalid gains or effort limits"
+        "RNE actuation configuration has invalid gains, effort, or velocity limits"
     );
     Ok(())
 }
@@ -1789,6 +1801,7 @@ fn rollout(
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     let mut controller_target_history = Vec::with_capacity(actions.len());
     let mut applied_target_history = Vec::with_capacity(actions.len());
+    let mut applied_actuation_history = Vec::with_capacity(actions.len());
     let mut last_accepted_target_rad = actions
         .first()
         .context("OpenArm rollout has no actions")?
@@ -1829,16 +1842,34 @@ fn rollout(
             .rne_actuator_link_order
             .iter()
             .zip(&applied_target)
-            .map(|(link_name, position)| UrdfJointPositionTarget {
-                link_name,
-                position: *position,
+            .zip(&actuation_config.joints)
+            .map(|((link_name, target_position_rad), joint)| {
+                anyhow::ensure!(
+                    link_name == &joint.link_name,
+                    "actuation link order mismatch"
+                );
+                Ok(UrdfJointPdEffortTarget {
+                    link_name,
+                    target_position_rad: *target_position_rad,
+                    stiffness_nm_per_rad: joint.stiffness_nm_per_rad,
+                    damping_nm_s_per_rad: joint.damping_nm_s_per_rad,
+                    max_effort_nm: joint.max_effort_nm,
+                    max_velocity_rad_s: joint.max_velocity_rad_s,
+                })
             })
-            .collect::<Vec<_>>();
-        sim.step_joint_position_actuation_targets_substeps(
-            &targets,
-            actuation_config.physics_substeps_per_control_step,
-        )
-        .context("step OpenArm Rapier physics substeps")?;
+            .collect::<Result<Vec<_>>>()?;
+        let applied = sim
+            .step_joint_pd_effort_targets_substeps(
+                &targets,
+                actuation_config.physics_substeps_per_control_step,
+            )
+            .context("step OpenArm portable PD effort physics substeps")?;
+        let applied_actuation = AppliedActuation {
+            target_position_rad: applied_target,
+            limited_effort_command_nm: applied.iter().map(|value| value.effort_nm).collect(),
+            effort_saturated: applied.iter().map(|value| value.saturated).collect(),
+        };
+        applied_actuation_history.push(applied_actuation);
         controller_decisions.push(decision);
         state_hashes.push(hash_physics_state_v2(sim.world()));
         sim.sample_joint_feedback(&mut bus)
@@ -1887,6 +1918,7 @@ fn rollout(
                     published,
                     &state_hashes,
                     &controller_decisions,
+                    &applied_actuation_history,
                 )?);
                 last_observation_sequence = observations.last().unwrap().step;
             }
@@ -1912,6 +1944,7 @@ fn rollout(
             final_published,
             &state_hashes,
             &controller_decisions,
+            &applied_actuation_history,
         )?);
     }
     if fault == JointFeedbackFault::None {
@@ -2016,11 +2049,11 @@ fn build_sensor_validation_report(
         .map(|frame| frame.observation_age_ticks)
         .max()
         .unwrap_or(u64::MAX);
-    let unavailable_effort_measurements = nominal
+    let available_effort_measurements = nominal
         .observations
         .iter()
         .flat_map(|frame| &frame.effort_measurement_available)
-        .filter(|available| !**available)
+        .filter(|available| **available)
         .count();
     let expected_effort_measurements =
         nominal.observations.len() * controller.rne_actuator_link_order.len();
@@ -2132,7 +2165,7 @@ fn build_sensor_validation_report(
         maximum_observation_age_ticks == FIXED_DELTA_TICKS,
         nominal.maximum_sensor_backend_position_delta_rad == 0.0,
         nominal.maximum_sensor_backend_velocity_delta_rad_s == 0.0,
-        unavailable_effort_measurements == expected_effort_measurements,
+        available_effort_measurements == expected_effort_measurements,
         saturation_count > 0,
         sequence_gap.is_some_and(|(missing, next, detected)| {
             missing == SENSOR_FAULT_SEQUENCE
@@ -2217,7 +2250,7 @@ fn build_sensor_validation_report(
             "phase_offset_ticks": FIXED_DELTA_TICKS,
             "latency_ticks": FIXED_DELTA_TICKS,
             "consumption": "databus_latest_available",
-            "effort_semantics": "backend_measurement_or_explicit_unavailable",
+            "effort_semantics": "completed_backend_step_direct_effort_measurement",
         },
         "controller_observation_contract": {
             "law": controller.feedback_law.as_ref().map(|law| law.kind.as_str()).unwrap_or("open_loop_reference_v1"),
@@ -2253,7 +2286,7 @@ fn build_sensor_validation_report(
             { "id": "observation_age_max_v1", "classification": "measurement", "unit": "tick", "observed": maximum_observation_age_ticks, "expected": FIXED_DELTA_TICKS, "status": pass_fail(check_results[4]) },
             { "id": "sensor_backend_position_calibration_v1", "classification": "measurement", "unit": "rad", "observed_delta": nominal.maximum_sensor_backend_position_delta_rad, "maximum_delta": 0.0, "status": pass_fail(check_results[5]) },
             { "id": "sensor_backend_velocity_calibration_v1", "classification": "measurement", "unit": "rad/s", "observed_delta": nominal.maximum_sensor_backend_velocity_delta_rad_s, "maximum_delta": 0.0, "status": pass_fail(check_results[6]) },
-            { "id": "unavailable_effort_is_explicit_v1", "classification": "measurement", "unit": "channel_sample", "observed": unavailable_effort_measurements, "expected": expected_effort_measurements, "status": pass_fail(check_results[7]) },
+            { "id": "direct_effort_measurement_is_complete_v1", "classification": "measurement", "unit": "channel_sample", "observed": available_effort_measurements, "expected": expected_effort_measurements, "status": pass_fail(check_results[7]) },
             { "id": "effort_saturation_is_observable_v1", "classification": "actuator", "unit": "channel_sample", "observed": saturation_count, "minimum": 1, "status": pass_fail(check_results[8]) },
             { "id": "dropout_first_sequence_gap_v1", "classification": "measurement", "unit": "sequence", "observed": missing_sequence, "expected": SENSOR_FAULT_SEQUENCE, "status": pass_fail(check_results[9]) },
             { "id": "stuck_value_first_status_v1", "classification": "measurement", "unit": "sequence", "observed": first_stuck_sequence, "expected": SENSOR_FAULT_SEQUENCE, "status": pass_fail(check_results[10]) },
@@ -2294,7 +2327,7 @@ fn build_sensor_validation_report(
             "first_saturation_sequence": first_saturation_sequence,
             "first_saturation_joint_index": first_saturation_joint_index,
             "first_saturation_joint_name": first_saturation_joint_name,
-            "measured_effort_available": false,
+            "measured_effort_available": true,
         },
     });
     let dropout_trace = json!({
@@ -2347,6 +2380,7 @@ fn observation_from_feedback(
     sensor_sample_published: bool,
     state_hashes: &[u64],
     controller_decisions: &[ControllerDecision],
+    applied_actuations: &[AppliedActuation],
 ) -> Result<ObservationFrame> {
     anyhow::ensure!(
         frame.payload.schema_version == JointFeedback::SCHEMA_VERSION,
@@ -2360,7 +2394,14 @@ fn observation_from_feedback(
     let mut effort_measurement_available = Vec::with_capacity(frame.payload.joints.len());
     let mut measured_efforts = Vec::with_capacity(frame.payload.joints.len());
     let mut maximum_actuator_tracking_error_rad = 0.0_f64;
-    for joint in &frame.payload.joints {
+    let actuation = applied_actuations
+        .get(frame.sequence.saturating_sub(1) as usize)
+        .context("OpenArm feedback sequence has no matching actuation")?;
+    anyhow::ensure!(
+        actuation.target_position_rad.len() == frame.payload.joints.len(),
+        "OpenArm actuation width does not match joint feedback"
+    );
+    for (index, joint) in frame.payload.joints.iter().enumerate() {
         let (position_rad, velocity_rad_s) = match joint.coordinate {
             rne_data::JointCoordinateFeedback::Revolute {
                 position_rad,
@@ -2368,19 +2409,20 @@ fn observation_from_feedback(
             } => (position_rad, velocity_rad_s),
             _ => bail!("OpenArm feedback channel {} is not revolute", joint.name),
         };
-        let (target_position_rad, limited_effort_command_nm, effort_saturated) = match joint.command
-        {
-            rne_data::JointCommandFeedback::Revolute {
-                target_position_rad: Some(target_position_rad),
-                limited_effort_command_nm,
-                saturated,
-                ..
-            } => (target_position_rad, limited_effort_command_nm, saturated),
-            _ => bail!(
-                "OpenArm feedback channel {} has no revolute position command",
-                joint.name
+        anyhow::ensure!(
+            matches!(
+                joint.command,
+                rne_data::JointCommandFeedback::Revolute {
+                    mode: rne_data::JointCommandMode::Effort,
+                    ..
+                }
             ),
-        };
+            "OpenArm feedback channel {} has no revolute effort command",
+            joint.name
+        );
+        let target_position_rad = actuation.target_position_rad[index];
+        let limited_effort_command_nm = actuation.limited_effort_command_nm[index];
+        let effort_saturated = actuation.effort_saturated[index];
         positions.push(position_rad);
         velocities.push(velocity_rad_s);
         targets.push(target_position_rad);
@@ -2564,12 +2606,7 @@ fn write_failure_replay(
 fn configure_actuators(sim: &mut UrdfSceneSim, config: &ActuationConfig) -> Result<()> {
     for joint in &config.joints {
         anyhow::ensure!(
-            sim.configure_named_revolute_position_actuation(
-                &joint.link_name,
-                joint.stiffness_nm_per_rad,
-                joint.damping_nm_s_per_rad,
-                joint.max_effort_nm,
-            ),
+            sim.configure_named_revolute_effort_actuation(&joint.link_name, joint.max_effort_nm),
             "missing OpenArm actuator {}",
             joint.link_name
         );

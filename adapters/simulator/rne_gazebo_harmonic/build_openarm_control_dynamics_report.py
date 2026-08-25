@@ -147,7 +147,8 @@ def main() -> int:
         raise ValueError("action trace identity differs from TaskSpec/controller")
     if (
         rapier_actuation.get("backend_id") != "rne_native_physics"
-        or rapier_actuation.get("motor_model") != "force_based_v1"
+        or rapier_actuation.get("kind") != "rne_portable_pd_effort_actuation_config"
+        or rapier_actuation.get("motor_model") != "explicit_pd_effort_v1"
         or rapier_actuation.get("fixed_delta_ticks")
         != actions_artifact["fixed_delta_ticks"]
         or [joint["joint_name"] for joint in rapier_actuation["joints"]] != joint_order
@@ -159,6 +160,8 @@ def main() -> int:
     ):
         if configured["max_effort_nm"] > limit["effort_max"] + 1e-9:
             raise ValueError(f"{joint} configured effort exceeds the URDF limit")
+        if abs(configured["max_velocity_rad_s"] - limit["velocity_max"]) > 1e-9:
+            raise ValueError(f"{joint} configured velocity differs from the URDF limit")
 
     backend_reports: list[dict[str, Any]] = []
     violations: list[dict[str, Any]] = []
@@ -438,6 +441,9 @@ def main() -> int:
             "velocity_unit": "rad/s",
             "action_unit": "rad",
             "action_semantics": "joint_position_target",
+            "actuator_command": "explicit_pd_to_direct_effort",
+            "effort_unit": "N*m",
+            "effort_observation": "completed_backend_step_measurement",
             "terminal_window_samples": TERMINAL_WINDOW_SAMPLES,
             "native_physics_state_hash_contract": PHYSICS_HASH_CONTRACT,
         },
@@ -446,6 +452,10 @@ def main() -> int:
                 "backend_id": "rne_rapier",
                 "motor_model": rapier_actuation["motor_model"],
                 "solver_iterations": rapier_actuation["solver_iterations"],
+                "physics_substeps_per_control_step": rapier_actuation[
+                    "physics_substeps_per_control_step"
+                ],
+                "integration": "equal_tick_explicit_pd_direct_effort",
                 "configuration_sha256": sha256(rapier_actuation_path),
                 "robot_asset_config_sha256": sha256(rapier_robot_asset_path),
                 "joint_count": len(rapier_actuation["joints"]),
@@ -454,10 +464,13 @@ def main() -> int:
                 "backend_id": "mujoco_native",
                 "motor_model": rapier_actuation["motor_model"],
                 "solver_iterations": rapier_actuation["solver_iterations"],
+                "physics_substeps_per_control_step": rapier_actuation[
+                    "physics_substeps_per_control_step"
+                ],
                 "configuration_sha256": sha256(rapier_actuation_path),
                 "robot_asset_config_sha256": sha256(rapier_robot_asset_path),
                 "joint_count": len(rapier_actuation["joints"]),
-                "integration": "native_implicit_joint_damping_with_exact_bounded_total_effort",
+                "integration": "equal_tick_explicit_pd_direct_effort",
             },
             {
                 "backend_id": "gazebo_sim",

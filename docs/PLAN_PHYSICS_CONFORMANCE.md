@@ -167,6 +167,15 @@ vector. Rapier measures the native `user_torque`/`user_force` increment accepted
 before the step and retains it only after that step completes; motor-driven
 position/velocity modes remain unavailable rather than copying their command.
 
+The OpenArm cross-backend controller now consumes the same position reference
+but realizes it with an explicit backend-neutral PD-to-effort law. Rapier and
+MuJoCo recompute `Kp * position_error - Kd * velocity` at 19 equal 877,193-tick
+physics substeps, apply the same symmetric N·m clamp and URDF no-load-speed
+envelope, and retain the final substep's measured effort. This replaces the
+previous comparison of two backend-native position motors. Rapier also clears
+both linear and angular one-step user wrenches after each step; otherwise its
+persistent `user_torque` storage accumulates direct effort and Coulomb friction.
+
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
 `rne_physics_conformance_suite/mujoco` feature. It also advertises `articulation` after

@@ -107,8 +107,8 @@ use rne_ecs::{spawn_named, Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
     Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
-    JointMotorGainModel, MultibodyLink, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    JointMotorGainModel, JointState, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
+    PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{Joint, JointKind, Link};
@@ -241,6 +241,41 @@ pub struct UrdfJointTorqueTarget<'a> {
     /// that are non-positive or non-finite fall back to an effectively
     /// unbounded 1000.
     pub max_velocity_rad_s: f64,
+}
+
+/// Direct effort command for a named actuated URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointEffortTarget<'a> {
+    /// Child-link name whose articulation joint owns the actuator.
+    pub link_name: &'a str,
+    /// Requested joint torque in N·m. The configured effort ceiling is retained.
+    pub effort_nm: f64,
+}
+
+/// Portable PD-to-effort command for a named revolute URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointPdEffortTarget<'a> {
+    /// Child-link name whose articulation joint owns the actuator.
+    pub link_name: &'a str,
+    /// Desired revolute angle in radians.
+    pub target_position_rad: f64,
+    /// Proportional gain in N·m/rad.
+    pub stiffness_nm_per_rad: f64,
+    /// Derivative gain in N·m·s/rad.
+    pub damping_nm_s_per_rad: f64,
+    /// Symmetric output ceiling in N·m.
+    pub max_effort_nm: f64,
+    /// No-load actuator speed ceiling in rad/s.
+    pub max_velocity_rad_s: f64,
+}
+
+/// Applied output of a portable PD-to-effort command.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointAppliedEffort {
+    /// Clamped torque delivered to the backend in N·m.
+    pub effort_nm: f64,
+    /// Whether the unclamped PD output exceeded its configured ceiling.
+    pub saturated: bool,
 }
 
 /// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
@@ -1571,6 +1606,151 @@ impl UrdfSceneSim {
         }
     }
 
+    /// Applies direct revolute-effort commands over exact physics substeps.
+    ///
+    /// Only links explicitly configured through
+    /// [`Self::configure_named_revolute_effort_actuation`] are updated. Each
+    /// requested torque is clamped by that actuator's retained N·m ceiling.
+    pub fn step_joint_effort_actuation_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointEffortTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<(), AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            let Some(JointActuation::RevoluteEffort { max_effort_nm, .. }) =
+                self.world.get::<JointActuation>(entity).copied()
+            else {
+                continue;
+            };
+            if !target.effort_nm.is_finite() {
+                continue;
+            }
+            self.world
+                .entity_mut(entity)
+                .insert(JointActuation::RevoluteEffort {
+                    effort_nm: target.effort_nm.clamp(-max_effort_nm, max_effort_nm),
+                    max_effort_nm,
+                });
+        }
+        for delta in parts {
+            self.step_physics_with_delta(delta);
+        }
+        Ok(())
+    }
+
+    /// Recomputes portable PD effort at every exact physics substep.
+    ///
+    /// The same `Kp * position_error - Kd * velocity` law is evaluated from
+    /// completed backend state before each substep. This gives an explicit
+    /// discrete-time controller contract independent of a backend's built-in
+    /// position motor. Returned outputs are those applied in the final substep.
+    pub fn step_joint_pd_effort_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointPdEffortTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<Vec<UrdfJointAppliedEffort>, AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        if !targets.iter().all(|target| {
+            [
+                target.target_position_rad,
+                target.stiffness_nm_per_rad,
+                target.damping_nm_s_per_rad,
+                target.max_effort_nm,
+                target.max_velocity_rad_s,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                && target.stiffness_nm_per_rad >= 0.0
+                && target.damping_nm_s_per_rad >= 0.0
+                && target.max_effort_nm >= 0.0
+                && target.max_velocity_rad_s > 0.0
+        }) {
+            return Err(AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: "portable PD effort target has invalid value, gain, or limit".into(),
+            });
+        }
+        let mut applied = Vec::with_capacity(targets.len());
+        for delta in parts {
+            applied.clear();
+            for target in targets {
+                let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                    return Err(AssetError::Invalid {
+                        path: self.scene_path.display().to_string(),
+                        message: format!(
+                            "portable PD effort link does not exist: {}",
+                            target.link_name
+                        ),
+                    });
+                };
+                let position_rad =
+                    self.named_joint_position(target.link_name).ok_or_else(|| {
+                        AssetError::Invalid {
+                            path: self.scene_path.display().to_string(),
+                            message: format!(
+                                "portable PD effort link is not revolute: {}",
+                                target.link_name
+                            ),
+                        }
+                    })?;
+                let velocity_rad_s =
+                    self.named_joint_velocity(target.link_name).ok_or_else(|| {
+                        AssetError::Invalid {
+                            path: self.scene_path.display().to_string(),
+                            message: format!(
+                                "portable PD effort link has no velocity: {}",
+                                target.link_name
+                            ),
+                        }
+                    })?;
+                let raw_effort_nm = target.stiffness_nm_per_rad
+                    * (target.target_position_rad - position_rad)
+                    - target.damping_nm_s_per_rad * velocity_rad_s;
+                let clamped_effort_nm =
+                    raw_effort_nm.clamp(-target.max_effort_nm, target.max_effort_nm);
+                let effort_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
+                    let drive_fraction =
+                        (1.0 - velocity_rad_s.abs() / target.max_velocity_rad_s).clamp(0.0, 1.0);
+                    clamped_effort_nm * drive_fraction
+                } else {
+                    clamped_effort_nm
+                };
+                self.world
+                    .entity_mut(entity)
+                    .insert(JointActuation::RevoluteEffort {
+                        effort_nm,
+                        max_effort_nm: target.max_effort_nm,
+                    });
+                applied.push(UrdfJointAppliedEffort {
+                    effort_nm,
+                    saturated: raw_effort_nm != effort_nm,
+                });
+            }
+            self.step_physics_with_delta(delta);
+        }
+        Ok(applied)
+    }
+
     /// Updates named joint position targets **without stepping** the
     /// simulation.
     ///
@@ -1653,6 +1833,18 @@ impl UrdfSceneSim {
         let entity = find_link_by_name(&self.world, link_name)?;
         self.backend
             .multibody_joint_position(self.physics_world, entity)
+            .or_else(|| {
+                self.world
+                    .get::<JointState>(entity)
+                    .copied()
+                    .and_then(JointState::position_rad)
+            })
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.position)
+                })
+            })
     }
 
     /// Reads the generalized velocity of a named link's articulation joint in
@@ -1664,6 +1856,17 @@ impl UrdfSceneSim {
         let entity = find_link_by_name(&self.world, link_name)?;
         self.backend
             .multibody_joint_velocity(self.physics_world, entity)
+            .or_else(|| match self.world.get::<JointState>(entity).copied()? {
+                JointState::Revolute { velocity_rad_s, .. } => Some(velocity_rad_s),
+                JointState::Prismatic { velocity_m_s, .. } => Some(velocity_m_s),
+                JointState::Fixed => None,
+            })
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.velocity)
+                })
+            })
     }
 
     /// Configures every actuated joint as a force-limited position motor.
@@ -1768,6 +1971,34 @@ impl UrdfSceneSim {
             },
             JointMotorGainModel::ForceBased,
         ));
+        true
+    }
+
+    /// Configures one named revolute link for direct, unit-explicit effort control.
+    ///
+    /// The actuator starts at zero N·m and retains `max_effort_nm` when later
+    /// commands are applied. Returns false for a missing/non-revolute link or
+    /// an invalid effort ceiling.
+    pub fn configure_named_revolute_effort_actuation(
+        &mut self,
+        link_name: &str,
+        max_effort_nm: f64,
+    ) -> bool {
+        if !max_effort_nm.is_finite() || max_effort_nm < 0.0 {
+            return false;
+        }
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        if self.world.get::<RevoluteJointDesc>(entity).is_none() {
+            return false;
+        }
+        self.world
+            .entity_mut(entity)
+            .insert(JointActuation::RevoluteEffort {
+                effort_nm: 0.0,
+                max_effort_nm,
+            });
         true
     }
 
@@ -2084,6 +2315,89 @@ mod tests {
             3.0,
             4.0,
         ));
+    }
+
+    #[test]
+    fn direct_effort_actuation_retains_ceiling_and_clamps_command() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        assert!(sim.configure_named_revolute_effort_actuation("shoulder_link", 2.0));
+        sim.step_joint_effort_actuation_targets_substeps(
+            &[UrdfJointEffortTarget {
+                link_name: "shoulder_link",
+                effort_nm: 3.5,
+            }],
+            2,
+        )
+        .expect("step direct effort actuation");
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        assert_eq!(
+            sim.world().get::<JointActuation>(shoulder),
+            Some(&JointActuation::RevoluteEffort {
+                effort_nm: 2.0,
+                max_effort_nm: 2.0,
+            })
+        );
+        assert!(sim
+            .world()
+            .get::<rne_physics::JointEffortMeasurement>(shoulder)
+            .is_some());
+        let mut pd_sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn PD so101");
+        assert!(pd_sim.configure_named_revolute_effort_actuation("shoulder_link", 1.0));
+        let applied = pd_sim
+            .step_joint_pd_effort_targets_substeps(
+                &[UrdfJointPdEffortTarget {
+                    link_name: "shoulder_link",
+                    target_position_rad: 10.0,
+                    stiffness_nm_per_rad: 4.0,
+                    damping_nm_s_per_rad: 0.5,
+                    max_effort_nm: 1.0,
+                    max_velocity_rad_s: 5.0,
+                }],
+                2,
+            )
+            .expect("step portable PD effort actuation");
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].effort_nm, 1.0);
+        assert!(applied[0].saturated);
+        assert!(!sim.configure_named_revolute_effort_actuation("shoulder_link", f64::NAN,));
+        assert!(sim
+            .step_joint_effort_actuation_targets_substeps(&[], 0)
+            .is_err());
+    }
+
+    #[test]
+    fn openarm_direct_effort_matches_reported_joint_coordinate_direction() {
+        let scene_path = assets_scene_path("openarm_v2_right_validation.rne.scene.toml");
+        let run =
+            |effort_nm: f64| {
+                let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+                    &scene_path,
+                    16,
+                    SimDuration::from_ticks(16_666_667),
+                )
+                .expect("spawn OpenArm");
+                assert!(sim.configure_named_revolute_effort_actuation(
+                    "openarm_right_link4",
+                    effort_nm.abs(),
+                ));
+                sim.step_joint_effort_actuation_targets_substeps(
+                    &[UrdfJointEffortTarget {
+                        link_name: "openarm_right_link4",
+                        effort_nm,
+                    }],
+                    10,
+                )
+                .expect("step OpenArm direct effort");
+                sim.named_joint_position("openarm_right_link4")
+                    .expect("OpenArm joint4 position")
+            };
+        let positive = run(0.5);
+        let negative = run(-0.5);
+        assert!(
+            positive > negative,
+            "positive effort produced {positive} rad; negative produced {negative} rad"
+        );
     }
 
     #[test]
