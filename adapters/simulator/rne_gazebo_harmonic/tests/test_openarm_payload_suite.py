@@ -87,10 +87,10 @@ class OpenArmPayloadSuiteTests(unittest.TestCase):
                 self.assertEqual(config["actuation_mode"], "effort_pd")
                 self.assertEqual(config["physics_substeps_per_control_step"], 10)
                 self.assertEqual(config["effort_joint_indices"], list(range(7)))
-                self.assertEqual(config["stiffness_nm_per_rad"][0], 1840.0)
-                self.assertEqual(config["damping_nm_s_per_rad"][0], 10.8)
-                self.assertEqual(config["stiffness_nm_per_rad"][4], 120.0)
-                self.assertEqual(config["damping_nm_s_per_rad"][4], 5.0)
+                self.assertEqual(config["stiffness_nm_per_rad"][0], 552.0)
+                self.assertEqual(config["damping_nm_s_per_rad"][0], 0.108)
+                self.assertEqual(config["stiffness_nm_per_rad"][4], 36.0)
+                self.assertEqual(config["damping_nm_s_per_rad"][4], 0.05)
                 self.assertEqual(
                     config["source_actuation_stiffness_scale_by_joint"][:5],
                     [8.0, 8.0, 8.0, 8.0, 1.0],

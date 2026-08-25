@@ -61,7 +61,35 @@ class OpenArmCoulombFrictionSuiteTests(unittest.TestCase):
             self.assertEqual(case["gazebo_adapter_realized_coulomb_friction_nm"], 2.0)
             case_dir = output / case["case_id"]
             config = json.loads((case_dir / "openarm_right.adapter.json").read_text())
+            source_actuation = json.loads(
+                (SCRIPT_DIR / "openarm_right.rne_actuation.json").read_text()
+            )
+            source_joints = source_actuation["joints"]
             index = config["joint_order"].index(first["controlled_joint"])
+            self.assertEqual(
+                config["physics_substeps_per_control_step"],
+                source_actuation["physics_substeps_per_control_step"],
+            )
+            self.assertEqual(config["effort_joint_indices"], list(range(9)))
+            self.assertEqual(
+                config["stiffness_nm_per_rad"],
+                [item["stiffness_nm_per_rad"] for item in source_joints],
+            )
+            self.assertEqual(
+                config["damping_nm_s_per_rad"],
+                [item["damping_nm_s_per_rad"] for item in source_joints],
+            )
+            self.assertEqual(
+                config["maximum_effort_nm"],
+                [item["max_effort_nm"] for item in source_joints],
+            )
+            self.assertEqual(
+                config["maximum_velocity_rad_s_by_joint"],
+                [item["max_velocity_rad_s"] for item in source_joints],
+            )
+            self.assertNotIn("source_actuation_stiffness_scale_by_joint", config)
+            self.assertNotIn("source_actuation_damping_scale_by_joint", config)
+            self.assertNotIn("derivative_filter_kind", config)
             self.assertEqual(config["plant_coulomb_friction_nm"][index], 2.0)
             self.assertEqual(config["plant_coulomb_transition_velocity_rad_s"][index], 0.01)
             self.assertEqual(sum(config["plant_coulomb_friction_nm"]), 2.0)

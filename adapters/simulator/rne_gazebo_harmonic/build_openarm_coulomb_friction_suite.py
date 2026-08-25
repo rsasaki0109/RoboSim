@@ -120,21 +120,46 @@ def portable_robot_config(source: str, joint_name: str, transition_rad_s: float)
 
 
 def adapter_config(
-    source: dict[str, Any], joint_name: str, friction_nm: float, transition_rad_s: float
+    source: dict[str, Any],
+    actuation: dict[str, Any],
+    joint_name: str,
+    friction_nm: float,
+    transition_rad_s: float,
 ) -> dict[str, Any]:
     config = json.loads(json.dumps(source))
     joints = config.get("joint_order")
     effort_indices = config.get("effort_joint_indices")
+    actuation_joints = actuation.get("joints")
     if (
         config.get("actuation_mode") != "effort_pd"
         or not isinstance(joints, list)
         or joints.count(joint_name) != 1
         or not isinstance(effort_indices, list)
+        or not isinstance(actuation_joints, list)
+        or [item.get("joint_name") for item in actuation_joints] != joints
     ):
         raise ValueError("baseline Gazebo adapter is not the qualified effort fixture")
     index = joints.index(joint_name)
-    if index not in effort_indices:
-        raise ValueError("controlled joint is not effort-controlled")
+    config["physics_substeps_per_control_step"] = actuation[
+        "physics_substeps_per_control_step"
+    ]
+    config["effort_joint_indices"] = list(range(len(joints)))
+    config["stiffness_nm_per_rad"] = [
+        item["stiffness_nm_per_rad"] for item in actuation_joints
+    ]
+    config["damping_nm_s_per_rad"] = [
+        item["damping_nm_s_per_rad"] for item in actuation_joints
+    ]
+    config["maximum_effort_nm"] = [item["max_effort_nm"] for item in actuation_joints]
+    config["maximum_velocity_rad_s_by_joint"] = [
+        item["max_velocity_rad_s"] for item in actuation_joints
+    ]
+    config.pop("source_actuation_stiffness_scale_by_joint", None)
+    config.pop("source_actuation_damping_scale_by_joint", None)
+    config.pop("derivative_filter_kind", None)
+    config.pop("derivative_filter_time_constant_s", None)
+    config["portable_actuation_source_kind"] = actuation["kind"]
+    config["portable_actuation_source_motor_model"] = actuation["motor_model"]
     config["plant_coulomb_friction_nm"] = [0.0] * len(joints)
     config["plant_coulomb_transition_velocity_rad_s"] = [0.0] * len(joints)
     config["plant_coulomb_friction_nm"][index] = friction_nm
@@ -170,6 +195,7 @@ def compile_suite(
         raise ValueError("baseline controlled joint must not declare plant dynamics")
     baseline_runtime = load(baseline / "runtime.json")
     baseline_adapter = load(baseline / ADAPTER_FILE)
+    source_actuation = load(actuation_config_path)
     cases = []
     damping = float(manifest["viscous_damping_nm_s_per_rad"])
     transition = float(manifest["coulomb_transition_velocity_rad_s"])
@@ -190,7 +216,12 @@ def compile_suite(
             (baseline / ROBOT_FILE).read_text(encoding="utf-8"), joint_name, transition
         )
         (directory / ROBOT_FILE).write_text(robot_text, encoding="utf-8")
-        write_json(directory / ADAPTER_FILE, adapter_config(baseline_adapter, joint_name, friction, transition))
+        write_json(
+            directory / ADAPTER_FILE,
+            adapter_config(
+                baseline_adapter, source_actuation, joint_name, friction, transition
+            ),
+        )
 
         runtime = json.loads(json.dumps(baseline_runtime))
         runtime["artifacts"] = [

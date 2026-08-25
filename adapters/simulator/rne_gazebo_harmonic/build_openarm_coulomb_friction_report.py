@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
         / "adapters/simulator/rne_gazebo_harmonic/openarm_coulomb_friction_experiments.json",
     )
     parser.add_argument("--controller", required=True, type=Path)
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        help="Limit the report to one or more compiled case IDs.",
+    )
     return parser.parse_args()
 
 
@@ -123,6 +128,7 @@ def build_report(
     trace_root: Path,
     experiment_path: Path,
     controller_path: Path,
+    case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     suite_path = fixture_root / "coulomb-friction-suite.json"
     suite = load(suite_path)
@@ -144,7 +150,15 @@ def build_report(
     outcomes: list[dict[str, Any]] = []
     missing: list[dict[str, str]] = []
     action_hashes: set[str] = set()
-    for case in suite["cases"]:
+    selected_case_ids = set(case_ids or (case["case_id"] for case in suite["cases"]))
+    known_case_ids = {case["case_id"] for case in suite["cases"]}
+    unknown_case_ids = selected_case_ids - known_case_ids
+    if unknown_case_ids:
+        raise ValueError(f"unknown Coulomb case IDs: {sorted(unknown_case_ids)}")
+    selected_cases = [
+        case for case in suite["cases"] if case["case_id"] in selected_case_ids
+    ]
+    for case in selected_cases:
         case_dir = fixture_root / case["case_id"]
         if load(case_dir / "coulomb-friction-fixture.json") != case:
             raise ValueError(f"{case['case_id']} fixture differs from suite")
@@ -281,7 +295,7 @@ def build_report(
                     "trace_sha256": sha256(trace_path),
                 }
             )
-    expected_count = len(suite["cases"]) * len(suite["backend_order"])
+    expected_count = len(selected_cases) * len(suite["backend_order"])
     accepted = {"passed", "outside_declared_envelope", "expected_boundary_failure"}
     status = (
         "incomplete"
@@ -334,6 +348,7 @@ def build_report(
         "status": status,
         "experiment_id": suite["experiment_id"],
         "controlled_joint": joint,
+        "selected_case_ids": [case["case_id"] for case in selected_cases],
         "parameter_semantics": suite["parameter_semantics"],
         "gazebo_derivation": suite["gazebo_derivation"],
         "inputs": {
@@ -363,6 +378,7 @@ def main() -> int:
         args.trace_root.resolve(),
         args.experiment.resolve(),
         args.controller.resolve(),
+        args.case_id,
     )
     write_json(args.output / "openarm-coulomb-friction-report.json", report)
     write_html(args.output / "openarm-coulomb-friction-report.html", report)

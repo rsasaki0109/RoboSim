@@ -48,6 +48,18 @@ def validate_actuation(
             )
         ):
             raise ValueError(f"invalid effort-PD field {key}")
+    velocity_limits = config.get("maximum_velocity_rad_s_by_joint")
+    if velocity_limits is not None and (
+        not isinstance(velocity_limits, list)
+        or len(velocity_limits) != joint_count
+        or not all(
+            isinstance(value, (int, float))
+            and math.isfinite(value)
+            and value > 0.0
+            for value in velocity_limits
+        )
+    ):
+        raise ValueError("invalid effort-PD field maximum_velocity_rad_s_by_joint")
     friction = config.get("plant_coulomb_friction_nm", [0.0] * joint_count)
     transition = config.get(
         "plant_coulomb_transition_velocity_rad_s", [0.0] * joint_count
@@ -182,12 +194,23 @@ def realize_joint_command_diagnostic(
         raw = config["position_gain_s_inv"] * (target_rad - position_rad)
         limit = config["maximum_velocity_rad_s"]
         kind = "velocity_rad_s"
+    applied = max(-limit, min(limit, raw))
+    velocity_limits = config.get("maximum_velocity_rad_s_by_joint")
+    if (
+        kind == "effort_nm"
+        and velocity_limits is not None
+        and applied * velocity_rad_s > 0.0
+    ):
+        drive_fraction = max(
+            0.0, min(1.0, 1.0 - abs(velocity_rad_s) / velocity_limits[index])
+        )
+        applied *= drive_fraction
     return RealizedJointCommand(
         kind=kind,
         raw=raw,
-        applied=max(-limit, min(limit, raw)),
+        applied=applied,
         limit=limit,
-        saturated=abs(raw) > limit,
+        saturated=abs(raw) > limit or applied != raw,
     )
 
 

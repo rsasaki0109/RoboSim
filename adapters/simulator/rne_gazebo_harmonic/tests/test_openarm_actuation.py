@@ -63,6 +63,23 @@ class OpenArmActuationTests(unittest.TestCase):
             ("effort_nm", -5.0),
         )
 
+    def test_effort_speed_envelope_matches_portable_motor_model(self) -> None:
+        config = effort_config()
+        config["maximum_velocity_rad_s_by_joint"] = [2.0, 4.0, 6.0]
+        command = realize_joint_command_diagnostic(
+            config, "effort_pd", frozenset({0, 1}), 0, 1.0, 0.0, 1.0
+        )
+        self.assertEqual(command.raw, 9.0)
+        self.assertEqual(command.applied, 2.0)
+        self.assertTrue(command.saturated)
+        opposing = realize_joint_command_diagnostic(
+            config, "effort_pd", frozenset({0, 1}), 0, -1.0, 0.0, 1.0
+        )
+        self.assertEqual(opposing.applied, -4.0)
+        config["maximum_velocity_rad_s_by_joint"][0] = 0.0
+        with self.assertRaisesRegex(ValueError, "maximum_velocity"):
+            validate_actuation(config, 3)
+
     def test_non_effort_joints_retain_bounded_velocity_servo(self) -> None:
         config = effort_config()
         self.assertEqual(

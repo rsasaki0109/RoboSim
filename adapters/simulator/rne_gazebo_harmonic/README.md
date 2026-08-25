@@ -161,6 +161,13 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-coulomb/report/openarm-coulomb-friction-first-failure.rne-replay
 ```
 
+Use `--case-id joint5-coulomb-0500mn` for a focused three-backend rerun. The
+compiled Gazebo fixture copies the portable actuation artifact's exact PD gains,
+effort and velocity limits, full effort-controlled joint set, and physics
+substep count. Its effort-speed envelope is applied after effort clamping, just
+as in the native backends; Gazebo evidence remains adapter diagnostics rather
+than a backend effort measurement.
+
 The frozen `[0, 0.25, 0.5, 1, 2] N*m` grid keeps plant viscous damping at
 10 N*m*s/rad and the transition velocity at 0.01 rad/s. All 15 real runs have
 exact same-runtime replay and exact independently checked parameter
