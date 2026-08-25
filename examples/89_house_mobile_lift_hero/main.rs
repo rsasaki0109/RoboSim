@@ -4,8 +4,9 @@
 //! the headless examples.  The render-only foreground is rebuilt from the
 //! post-physics world transform of each of the ten URDF links, then resolved
 //! through the visual-only manifest and PBR-aware [`rne_render::MeshRenderCache`].
-//! The Dr Johnson scan is calibrated into the same Y-up metric frame as the
-//! physics rollout. The measured floor and invisible pickup support share that frame;
+//! The Dr Johnson scan is aligned with the same Y-up reconstruction frame as the
+//! physics rollout. The registered floor and invisible pickup support share that
+//! frame; physical scale remains unqualified until an independent anchor is retained.
 //! 3DGS remains the appearance layer.
 //!
 //! Headless evidence (no GPU required):
@@ -31,8 +32,9 @@ use rne_assets::{load_visual_manifest, VisualManifest};
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 use rne_physics::hash_physics_state;
 use rne_render::{
-    hash_rgba8, validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene,
-    MeshRenderCache, PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
+    audit_gaussian_splat_validation_fixture, hash_rgba8,
+    validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, MeshRenderCache,
+    PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::WgpuRenderBackend;
@@ -50,9 +52,9 @@ const FRAME_COUNT: usize = 45;
 const FOV_Y_RAD: f64 = 0.800_689_935_801_928_9;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.070, 0.085, 1.0];
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
-const TARGET_X_M: f64 = -1.70;
+const TARGET_X_M: f64 = -2.20;
 const TARGET_Y_M: f64 = 0.035;
-const TARGET_Z_M: f64 = -3.30;
+const TARGET_Z_M: f64 = -4.025_096_749_341_726;
 const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_support"];
 const WRIST_WIDTH: u32 = 160;
 const WRIST_HEIGHT: u32 = 120;
@@ -184,6 +186,7 @@ struct HeroMetadata {
     house_ply_path: String,
     house_ply_bytes: u64,
     house_ply_sha256: String,
+    validation: GaussianSplatValidationEvidence,
     visual_manifest_path: String,
     visual_link_count: usize,
     visual_manifest_validated: bool,
@@ -196,6 +199,16 @@ struct HeroMetadata {
     reproduce_smoke: &'static str,
     reproduce_capture: &'static str,
     provenance: [&'static str; 3],
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GaussianSplatValidationEvidence {
+    fixture_path: String,
+    fixture_sha256: String,
+    qualifying: bool,
+    passed_contracts: Vec<String>,
+    missing_contracts: Vec<String>,
+    failed_contracts: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -258,6 +271,33 @@ fn run() -> Result<()> {
         ply_override.as_deref(),
     )
     .context("validate real-capture Dr Johnson 3DGS manifest")?;
+    let validation_fixture_path = house
+        .validation_fixture_path
+        .as_ref()
+        .context("Dr Johnson manifest must bind a validation fixture")?;
+    let validation_audit = audit_gaussian_splat_validation_fixture(validation_fixture_path)
+        .context("audit real-capture Dr Johnson 3DGS fixture")?;
+    anyhow::ensure!(
+        validation_audit.environment_id == house.environment_id,
+        "3DGS validation fixture environment does not match its manifest"
+    );
+    anyhow::ensure!(
+        validation_audit.failed_contracts.is_empty()
+            && validation_audit.passed_contracts
+                == [
+                    "floor_world_alignment",
+                    "camera_intrinsics_extrinsics",
+                    "semantic_landmark_reprojection",
+                    "collision_semantic_alignment",
+                ]
+            && validation_audit.missing_contracts
+                == [
+                    "independent_metric_scale_anchor",
+                    "real_sim_observation_comparison",
+                ]
+            && !validation_audit.qualifying,
+        "Dr Johnson evidence state changed; inspect and update the registered contract instead of silently accepting it: {validation_audit:?}"
+    );
     let drjohnson_scene_path =
         repo_root.join("assets/scenes/mm_mobile_lift_drjohnson.rne.scene.toml");
     let visual_manifest_path =
@@ -370,12 +410,20 @@ fn run() -> Result<()> {
         render_capture(&house, &captured, &capture_dir, &media_dir)?;
     let metadata = HeroMetadata {
         kind: "rne_house_mobile_lift_hero_metadata",
-        schema_version: 1,
+        schema_version: 2,
         environment_id: house.environment_id.clone(),
         renderer_identity: house.renderer_identity.clone(),
         house_ply_path: relative_path(&repo_root, &house.ply_path),
         house_ply_bytes: fs::metadata(&house.ply_path)?.len(),
         house_ply_sha256: sha256_file(&house.ply_path),
+        validation: GaussianSplatValidationEvidence {
+            fixture_path: relative_path(&repo_root, validation_fixture_path),
+            fixture_sha256: validation_audit.fixture_sha256,
+            qualifying: validation_audit.qualifying,
+            passed_contracts: validation_audit.passed_contracts,
+            missing_contracts: validation_audit.missing_contracts,
+            failed_contracts: validation_audit.failed_contracts,
+        },
         visual_manifest_path: relative_path(&repo_root, &visual_manifest_path),
         visual_link_count: visual_manifest.links.len(),
         visual_manifest_validated: true,

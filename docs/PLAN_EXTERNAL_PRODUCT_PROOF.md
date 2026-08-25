@@ -73,6 +73,16 @@ metric world transform, camera intrinsics and extrinsics, collision alignment,
 and semantic object identities. A visually plausible background alone is not
 a product gate.
 
+The Dr Johnson fixture now provides the first fail-closed partial geometric
+baseline. It rehashes the official Deep Blending COLMAP inputs, two real
+reference images, the committed splat manifest and PLY; verifies registered
+camera reprojection, six semantic landmarks and floor alignment; and projects
+the pickup collision proxy into the retained real-image rug polygon. Four of
+six contracts pass. It intentionally remains non-qualifying because COLMAP
+scale lacks an independent physical anchor and no registered real-versus-RNE
+observation comparison has been retained. Those are the next two geometric
+sensor deliverables; neither may be inferred from visual plausibility.
+
 ## Delivery gates
 
 ### Gate 1: installed proof
@@ -451,8 +461,10 @@ actuator-authority envelope. The next slices are:
 
 Sensor dropout/recovery at the typed controller boundary, actuator realization
 diagnostics, payload robustness, and actuator-authority degradation are already
-complete. Camera/depth and 3DGS calibration remain the next geometric-sensor
-stage; they do not displace the joint-feedback and control-loop work above.
+complete. Camera/depth and 3DGS calibration now have a fail-closed 4/6 Dr
+Johnson fixture; an independent metric anchor and registered real/sim
+observation comparison remain the next geometric-sensor stage. They do not
+displace the joint-feedback and control-loop work above.
 
 The labs use one versioned experiment manifest and one requirements registry.
 The registry owns hard limits and engineering targets; report builders may not

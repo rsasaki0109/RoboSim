@@ -32,16 +32,43 @@ floats byte-for-byte. No splat geometry or colour is synthesized.
 
 ## Calibration and simulation frame
 
-The published Deep Blending COLMAP bundle supplies measured poses for
-`IMG_6292.jpg` and `IMG_6293.jpg`. The manifest rotates the second camera's
-measured up vector onto RNE `+Y`. The dominant captured wood-floor plane is
-translated to `y = 0 m`; the reconstruction scale is retained because its
-camera-to-floor height is already metric-scale. Robot bodies, task furniture,
-collision proxies, and splats consequently share one world frame.
+The official INRIA Deep Blending source archive supplies the COLMAP camera and
+point reconstruction used to register `IMG_6292.jpg` and `IMG_6293.jpg`:
+
+- Archive: <https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/input/tandt_db.zip>
+- Archive bytes: `682,628,995`
+- Archive SHA-256: `816e62f22a161abbfe841d2a6b10cdf036e297c9fa289b3bfeee9c6ec526d7e1`
+- Camera model: `PINHOLE`, `1332 x 876`, `fx = 1035.496599 px`,
+  `fy = 1034.971864 px`, `cx = 666 px`, `cy = 438 px`
+
+`drjohnson.validation.json` binds those source hashes, two retained real
+reference frames, their COLMAP intrinsics/extrinsics, six registered semantic
+landmarks, the dominant floor plane, the splat manifest, and the derivative
+PLY. The manifest rotates the registered camera up direction onto RNE `+Y` and
+translates the dominant floor plane to `y = 0` reconstruction units. Its
+337-point inlier plane has a claimed height of `0.01894` and RMSE `0.01606`
+against the declared `0.03` tolerance.
+
+The pickup support and payload are centered at the registered
+`rug_front_center` landmark. The support top center projects to the manually
+retained rug polygon in `IMG_6293.reference.jpg`, so collision geometry no
+longer occupies arbitrary empty room space.
+
+This is deliberately **not yet a qualifying metric calibration**. COLMAP
+reconstruction units are only defined up to scale, and the archive contains no
+independently measured physical length. Plausible camera height is not accepted
+as a scale anchor. A registered RNE render versus the real reference image is
+also still missing. The fixture therefore passes four of six contracts and
+reports these two as missing:
+
+- `independent_metric_scale_anchor`
+- `real_sim_observation_comparison`
 
 ## Reproduction
 
 ```text
 python tools/prepare_voxel51_drjohnson_3dgs.py
 python tools/prepare_voxel51_drjohnson_3dgs.py --check
+python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip
+python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip --check
 ```
