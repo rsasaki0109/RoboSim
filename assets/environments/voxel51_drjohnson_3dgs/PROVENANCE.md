@@ -74,6 +74,18 @@ reports one as missing:
 
 - `independent_metric_scale_anchor`
 
+The original Deep Blending reconstruction archive was also inspected by its
+ZIP central directory: its 1,865 entries contain COLMAP inputs/outputs, source
+images, refined depth maps, and a RealityCapture mesh, but no survey, control
+point, GPS/XMP, measurement, or scale record. The missing result is therefore
+explicit rather than inferred from an unavailable file.
+
+`docs/3DGS_METRIC_ANCHOR.md` defines the field procedure and the fail-closed
+intake path. `--metric-anchor` accepts only an independently authored record
+whose two endpoints exactly match retained COLMAP observations, whose evidence
+files are content-addressed, and whose measured scale agrees with the manifest
+inside declared uncertainty. No placeholder anchor is committed.
+
 ## Reproduction
 
 ```text

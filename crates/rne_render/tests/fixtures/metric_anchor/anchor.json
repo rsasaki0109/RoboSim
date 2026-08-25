@@ -1,0 +1,39 @@
+{
+  "kind": "rne_independent_metric_scale_anchor",
+  "schema_version": 1,
+  "environment_id": "test.metric.anchor",
+  "operator": {
+    "organization": "Independent Test Lab",
+    "operator_role": "metrology technician",
+    "independence_statement": "The operator did not author the tested fixture.",
+    "independent_from_rne_fixture_authoring": true
+  },
+  "measurement": {
+    "method": "calibrated laser distance meter",
+    "captured_at_utc": "2026-08-26T00:00:00Z",
+    "measured_distance_m": 2.0,
+    "uncertainty_m": 0.01
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "a",
+      "camera_id": "colmap.test.jpg",
+      "pixel_uv": [10.0, 20.0],
+      "colmap_point3d_id": 1
+    },
+    {
+      "endpoint_id": "b",
+      "camera_id": "colmap.test.jpg",
+      "pixel_uv": [30.0, 20.0],
+      "colmap_point3d_id": 2
+    }
+  ],
+  "evidence_artifacts": [
+    {
+      "path": "measurement.txt",
+      "size_bytes": 106,
+      "sha256": "14bae052e40e5f496ea18ab22dcb485de59b4524c44d741853cd17706070e5d5",
+      "description": "Test-only signed distance record"
+    }
+  ]
+}

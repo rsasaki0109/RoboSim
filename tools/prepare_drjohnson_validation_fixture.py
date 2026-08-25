@@ -12,6 +12,7 @@ non-qualifying until an independent metric scale anchor is retained.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import io
 import json
@@ -307,7 +308,148 @@ def file_artifact(path: pathlib.Path, relative: str) -> dict[str, object]:
     }
 
 
-def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, object]:
+def load_metric_anchor(
+    anchor_path: pathlib.Path | None,
+    asset_root: pathlib.Path,
+    environment_id: str,
+) -> dict[str, object] | None:
+    if anchor_path is None:
+        return None
+    anchor_path = anchor_path.resolve(strict=True)
+    asset_root = asset_root.resolve(strict=True)
+    if anchor_path.parent != asset_root:
+        raise ValueError("metric anchor record must be stored beside the validation fixture")
+    anchor = json.loads(anchor_path.read_text(encoding="utf-8"))
+    required = {
+        "kind",
+        "schema_version",
+        "environment_id",
+        "operator",
+        "measurement",
+        "endpoints",
+        "evidence_artifacts",
+    }
+    if set(anchor) != required:
+        raise ValueError("metric anchor fields drifted")
+    if anchor["kind"] != "rne_independent_metric_scale_anchor":
+        raise ValueError("unexpected metric anchor kind")
+    if anchor["schema_version"] != 1:
+        raise ValueError("unsupported metric anchor schema version")
+    if anchor["environment_id"] != environment_id:
+        raise ValueError("metric anchor environment mismatch")
+    operator = anchor["operator"]
+    if set(operator) != {
+        "organization",
+        "operator_role",
+        "independence_statement",
+        "independent_from_rne_fixture_authoring",
+    }:
+        raise ValueError("metric anchor operator fields drifted")
+    for name in ("organization", "operator_role", "independence_statement"):
+        if not isinstance(operator[name], str) or not operator[name].strip():
+            raise ValueError(f"metric anchor operator {name} must be non-empty")
+    if operator["independent_from_rne_fixture_authoring"] is not True:
+        raise ValueError("metric anchor operator must attest independence")
+    measurement = anchor["measurement"]
+    if set(measurement) != {
+        "method",
+        "captured_at_utc",
+        "measured_distance_m",
+        "uncertainty_m",
+    }:
+        raise ValueError("metric anchor measurement fields drifted")
+    for name in ("method", "captured_at_utc"):
+        if not isinstance(measurement[name], str) or not measurement[name].strip():
+            raise ValueError(f"metric anchor measurement {name} must be non-empty")
+    captured_at_utc = measurement["captured_at_utc"]
+    try:
+        parsed_capture_time = datetime.datetime.fromisoformat(
+            captured_at_utc.removesuffix("Z") + "+00:00"
+        )
+    except ValueError as error:
+        raise ValueError("metric anchor captured_at_utc must be RFC 3339 UTC") from error
+    if not captured_at_utc.endswith("Z") or parsed_capture_time.utcoffset() != datetime.timedelta(0):
+        raise ValueError("metric anchor captured_at_utc must use the UTC Z designator")
+    if isinstance(measurement["measured_distance_m"], bool) or isinstance(
+        measurement["uncertainty_m"], bool
+    ):
+        raise ValueError("metric anchor distance and uncertainty must be numbers")
+    measured_distance_m = float(measurement["measured_distance_m"])
+    uncertainty_m = float(measurement["uncertainty_m"])
+    if not math.isfinite(measured_distance_m) or measured_distance_m <= 0.0:
+        raise ValueError("metric anchor distance must be finite and positive")
+    if (
+        not math.isfinite(uncertainty_m)
+        or uncertainty_m <= 0.0
+        or uncertainty_m >= measured_distance_m
+    ):
+        raise ValueError("metric anchor uncertainty must be positive and smaller than distance")
+    endpoints = anchor["endpoints"]
+    if not isinstance(endpoints, list) or len(endpoints) != 2:
+        raise ValueError("metric anchor requires exactly two endpoints")
+    endpoint_ids = set()
+    point_ids = set()
+    camera_ids = set()
+    for endpoint in endpoints:
+        if set(endpoint) != {"endpoint_id", "camera_id", "pixel_uv", "colmap_point3d_id"}:
+            raise ValueError("metric anchor endpoint fields drifted")
+        if not isinstance(endpoint["endpoint_id"], str) or not endpoint["endpoint_id"].strip():
+            raise ValueError("metric anchor endpoint_id must be non-empty")
+        if endpoint["endpoint_id"] in endpoint_ids:
+            raise ValueError("metric anchor endpoint IDs must be distinct")
+        endpoint_ids.add(endpoint["endpoint_id"])
+        if not isinstance(endpoint["camera_id"], str) or not endpoint["camera_id"].startswith("colmap."):
+            raise ValueError("metric anchor endpoint camera_id must name a COLMAP image")
+        camera_ids.add(endpoint["camera_id"])
+        pixels = endpoint["pixel_uv"]
+        if (
+            not isinstance(pixels, list)
+            or len(pixels) != 2
+            or not all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                for value in pixels
+            )
+        ):
+            raise ValueError("metric anchor endpoint pixel_uv must contain two finite numbers")
+        point_id = endpoint["colmap_point3d_id"]
+        if (
+            not isinstance(point_id, int)
+            or isinstance(point_id, bool)
+            or point_id < 0
+            or point_id in point_ids
+        ):
+            raise ValueError("metric anchor endpoint point IDs must be distinct unsigned integers")
+        point_ids.add(point_id)
+    if len(camera_ids) != 1:
+        raise ValueError("metric anchor endpoints must share one retained camera frame")
+    evidence = anchor["evidence_artifacts"]
+    if not isinstance(evidence, list) or not evidence:
+        raise ValueError("metric anchor requires at least one evidence artifact")
+    for index, artifact in enumerate(evidence):
+        if set(artifact) != {"path", "size_bytes", "sha256", "description"}:
+            raise ValueError("metric anchor evidence fields drifted")
+        relative = pathlib.PurePosixPath(artifact["path"])
+        if relative.is_absolute() or ".." in relative.parts or len(relative.parts) != 1:
+            raise ValueError("metric anchor evidence must be stored beside the fixture")
+        actual_path = asset_root / relative.as_posix()
+        actual = file_artifact(actual_path, relative.as_posix())
+        if {key: artifact[key] for key in ("path", "size_bytes", "sha256")} != actual:
+            raise ValueError(f"metric anchor evidence artifact {index} drifted")
+        if not isinstance(artifact["description"], str) or not artifact["description"].strip():
+            raise ValueError("metric anchor evidence description must be non-empty")
+    return {
+        "record": file_artifact(anchor_path, anchor_path.name),
+        "data": anchor,
+    }
+
+
+def build(
+    source_archive: pathlib.Path,
+    repository: pathlib.Path,
+    metric_anchor_path: pathlib.Path | None = None,
+) -> dict[str, object]:
     if source_archive.stat().st_size != SOURCE_BYTES:
         raise ValueError(f"unexpected source archive size: {source_archive.stat().st_size}")
     archive_hash = sha256_file(source_archive)
@@ -320,6 +462,9 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
     translation = manifest["translation_m"]
     uniform_scale = float(manifest["scale"])
     environment_rotation = quaternion_to_rotation_xyzw(manifest["rotation_xyzw"])
+    metric_anchor = load_metric_anchor(
+        metric_anchor_path, asset_root, manifest["environment_id"]
+    )
 
     with zipfile.ZipFile(source_archive) as archive:
         camera_bytes = archive.read(CAMERAS_MEMBER)
@@ -356,7 +501,81 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
         if point_in_polygon((observation[0], observation[1]), FLOOR_REGION_POLYGON_PX)
     ]
     floor_ids = {observation[2] for observation in floor_observations}
-    points = read_points(point_bytes, selected_ids | floor_ids)
+    anchor_ids = (
+        {
+            endpoint["colmap_point3d_id"]
+            for endpoint in metric_anchor["data"]["endpoints"]
+        }
+        if metric_anchor is not None
+        else set()
+    )
+    points = read_points(point_bytes, selected_ids | floor_ids | anchor_ids)
+
+    metric_scale = {
+        "status": "unverified",
+        "scale_to_m": uniform_scale,
+        "independent_physical_anchor": None,
+        "reason": "The retained COLMAP model has no independently measured physical length; plausible room scale is not a metric calibration.",
+    }
+    if metric_anchor is not None:
+        anchor = metric_anchor["data"]
+        resolved_endpoints = []
+        for endpoint in anchor["endpoints"]:
+            image_name = endpoint["camera_id"].removeprefix("colmap.")
+            if image_name not in images:
+                raise ValueError("metric anchor must use a retained reference image")
+            matching = [
+                observation
+                for observation in images[image_name]["observations"]
+                if observation[2] == endpoint["colmap_point3d_id"]
+            ]
+            if len(matching) != 1:
+                raise ValueError("metric anchor point is not observed by its declared camera")
+            observed_u, observed_v, _ = matching[0]
+            declared_u, declared_v = endpoint["pixel_uv"]
+            pixel_error = math.hypot(observed_u - declared_u, observed_v - declared_v)
+            if pixel_error > 1.0e-6:
+                raise ValueError("metric anchor endpoint pixel does not match COLMAP observation")
+            resolved_endpoints.append(
+                {
+                    **endpoint,
+                    "source_position": list(points[endpoint["colmap_point3d_id"]]),
+                    "registration_error_px": pixel_error,
+                }
+            )
+        source_distance = math.dist(
+            resolved_endpoints[0]["source_position"],
+            resolved_endpoints[1]["source_position"],
+        )
+        if source_distance <= 1.0e-9:
+            raise ValueError("metric anchor source endpoints are coincident")
+        measured_distance_m = float(anchor["measurement"]["measured_distance_m"])
+        uncertainty_m = float(anchor["measurement"]["uncertainty_m"])
+        derived_scale = measured_distance_m / source_distance
+        scale_uncertainty = uncertainty_m / source_distance
+        if abs(uniform_scale - derived_scale) > scale_uncertainty:
+            raise ValueError(
+                "manifest scale is outside the independent anchor uncertainty: "
+                f"manifest={uniform_scale} derived={derived_scale} ± {scale_uncertainty}"
+            )
+        metric_scale = {
+            "status": "verified",
+            "scale_to_m": uniform_scale,
+            "independent_physical_anchor": {
+                "kind": anchor["kind"],
+                "schema_version": anchor["schema_version"],
+                "environment_id": anchor["environment_id"],
+                "record": metric_anchor["record"],
+                "operator": anchor["operator"],
+                "measurement": anchor["measurement"],
+                "endpoints": resolved_endpoints,
+                "source_distance_reconstruction_units": source_distance,
+                "derived_scale_m_per_source_unit": derived_scale,
+                "scale_uncertainty_m_per_source_unit": scale_uncertainty,
+                "evidence_artifacts": anchor["evidence_artifacts"],
+            },
+            "reason": "An independent physical length is bound to two registered COLMAP points and agrees with the manifest scale within declared uncertainty.",
+        }
 
     floor_world_y = [
         transform_point(points[point_id], environment_rotation, translation, uniform_scale)[1]
@@ -519,12 +738,7 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
             "source_units": "COLMAP reconstruction units",
             "world_units_claim": "m",
         },
-        "metric_scale": {
-            "status": "unverified",
-            "scale_to_m": uniform_scale,
-            "independent_physical_anchor": None,
-            "reason": "The retained COLMAP model has no independently measured physical length; plausible room scale is not a metric calibration.",
-        },
+        "metric_scale": metric_scale,
         "floor_alignment": {
             "status": "verified" if abs(floor_height) <= 0.03 else "failed",
             "reference_camera_id": "colmap.IMG_6293.jpg",
@@ -593,7 +807,10 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
                 "id": "collision_semantic_alignment",
                 "status": "passed" if support_inside_rug else "failed",
             },
-            {"id": "independent_metric_scale_anchor", "status": "missing"},
+            {
+                "id": "independent_metric_scale_anchor",
+                "status": "passed" if metric_anchor is not None else "missing",
+            },
             {
                 "id": "real_sim_observation_comparison",
                 "status": "passed" if observation_passed else "failed",
@@ -615,6 +832,11 @@ def main() -> None:
         default=pathlib.Path("E:/RNE-tools/tandt_db.zip"),
     )
     parser.add_argument("--repository", type=pathlib.Path, default=pathlib.Path("."))
+    parser.add_argument(
+        "--metric-anchor",
+        type=pathlib.Path,
+        help="independently authored metric anchor record stored beside the fixture",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     repository = args.repository.resolve(strict=True)
@@ -622,7 +844,7 @@ def main() -> None:
         repository
         / "assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json"
     )
-    fixture = build(args.source_archive, repository)
+    fixture = build(args.source_archive, repository, args.metric_anchor)
     encoded = canonical_json(fixture)
     if args.check:
         if not output.is_file():

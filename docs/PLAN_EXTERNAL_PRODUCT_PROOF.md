@@ -85,6 +85,14 @@ remains non-qualifying because COLMAP scale lacks an independent physical
 anchor; that anchor is the remaining geometric-sensor deliverable and may not
 be inferred from visual plausibility.
 
+The metric-anchor intake contract and operator procedure are now implemented.
+They bind role-separated operator identity, method, UTC capture time, SI
+distance and uncertainty, two exact registered COLMAP observations, and hashed
+raw evidence. Both the fixture generator and Rust auditor recompute the scale
+and fail closed. The upstream reconstruction archive has no metric metadata, so
+completion now requires a genuine field measurement; no synthetic substitute
+is accepted.
+
 ## Delivery gates
 
 ### Gate 1: installed proof

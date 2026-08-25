@@ -170,7 +170,8 @@ pub fn audit_gaussian_splat_validation_fixture(
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
 
     validate_provenance(object(field(root, "provenance")?, "provenance")?, parent)?;
-    validate_source_to_world(object(field(root, "source_to_world")?, "source_to_world")?)?;
+    let source_to_world = object(field(root, "source_to_world")?, "source_to_world")?;
+    validate_source_to_world(source_to_world)?;
     let floor_passed = validate_floor(object(field(root, "floor_alignment")?, "floor_alignment")?)?;
     let camera_passed = validate_camera_calibration(
         object(field(root, "camera_calibration")?, "camera_calibration")?,
@@ -185,8 +186,12 @@ pub fn audit_gaussian_splat_validation_fixture(
         "collision_semantic_alignment",
     )?)?;
     let metric = object(field(root, "metric_scale")?, "metric_scale")?;
-    let metric_passed = string(metric, "status")? == "verified"
-        && !field(metric, "independent_physical_anchor")?.is_null();
+    let metric_passed = validate_metric_scale(
+        metric,
+        parent,
+        &environment_id,
+        finite(source_to_world, "scale")?,
+    )?;
     let observation_passed = validate_observation_comparison(
         object(
             field(root, "real_sim_observation_comparison")?,
@@ -352,6 +357,283 @@ fn validate_source_to_world(
     let _ = nonempty_string(value, "source_units")?;
     let _ = nonempty_string(value, "world_units_claim")?;
     Ok(())
+}
+
+fn validate_metric_scale(
+    value: &Map<String, Value>,
+    parent: &Path,
+    environment_id: &str,
+    source_to_world_scale: f64,
+) -> Result<bool, GaussianSplatValidationError> {
+    ensure_exact_keys(
+        value,
+        &[
+            "status",
+            "scale_to_m",
+            "independent_physical_anchor",
+            "reason",
+        ],
+        "metric_scale",
+    )?;
+    let status = string(value, "status")?;
+    let scale_to_m = finite(value, "scale_to_m")?;
+    ensure!(
+        scale_to_m.is_sign_positive(),
+        "metric scale must be positive"
+    );
+    ensure!(
+        within_tolerance(scale_to_m, source_to_world_scale, f64::EPSILON),
+        "metric scale and source-to-world scale disagree"
+    );
+    let _ = nonempty_string(value, "reason")?;
+    let anchor_value = field(value, "independent_physical_anchor")?;
+    if status == "unverified" {
+        ensure!(
+            anchor_value.is_null(),
+            "unverified metric scale retained an anchor"
+        );
+        return Ok(false);
+    }
+    ensure!(status == "verified", "unknown metric scale status");
+    let anchor = object(anchor_value, "independent physical anchor")?;
+    ensure_exact_keys(
+        anchor,
+        &[
+            "kind",
+            "schema_version",
+            "environment_id",
+            "record",
+            "operator",
+            "measurement",
+            "endpoints",
+            "source_distance_reconstruction_units",
+            "derived_scale_m_per_source_unit",
+            "scale_uncertainty_m_per_source_unit",
+            "evidence_artifacts",
+        ],
+        "independent physical anchor",
+    )?;
+    ensure!(
+        string(anchor, "kind")? == "rne_independent_metric_scale_anchor"
+            && unsigned(anchor, "schema_version")? == 1
+            && string(anchor, "environment_id")? == environment_id,
+        "metric anchor identity drifted"
+    );
+
+    let operator = object(field(anchor, "operator")?, "metric anchor operator")?;
+    ensure_exact_keys(
+        operator,
+        &[
+            "organization",
+            "operator_role",
+            "independence_statement",
+            "independent_from_rne_fixture_authoring",
+        ],
+        "metric anchor operator",
+    )?;
+    for name in ["organization", "operator_role", "independence_statement"] {
+        let _ = nonempty_string(operator, name)?;
+    }
+    ensure!(
+        boolean(operator, "independent_from_rne_fixture_authoring")?,
+        "metric anchor operator did not attest independence"
+    );
+
+    let measurement = object(field(anchor, "measurement")?, "metric anchor measurement")?;
+    ensure_exact_keys(
+        measurement,
+        &[
+            "method",
+            "captured_at_utc",
+            "measured_distance_m",
+            "uncertainty_m",
+        ],
+        "metric anchor measurement",
+    )?;
+    let _ = nonempty_string(measurement, "method")?;
+    ensure!(
+        is_canonical_utc_timestamp(nonempty_string(measurement, "captured_at_utc")?),
+        "metric anchor capture time must be canonical RFC 3339 UTC"
+    );
+    let measured_distance = finite(measurement, "measured_distance_m")?;
+    let uncertainty = finite(measurement, "uncertainty_m")?;
+    ensure!(
+        measured_distance.is_sign_positive()
+            && uncertainty.is_sign_positive()
+            && (0.0..measured_distance).contains(&uncertainty),
+        "invalid metric anchor distance or uncertainty"
+    );
+
+    let endpoints = array(field(anchor, "endpoints")?, "metric anchor endpoints")?;
+    ensure!(endpoints.len() == 2, "metric anchor requires two endpoints");
+    let mut endpoint_ids = BTreeSet::new();
+    let mut point_ids = BTreeSet::new();
+    let mut camera_ids = BTreeSet::new();
+    let mut positions = Vec::with_capacity(2);
+    for endpoint_value in endpoints {
+        let endpoint = object(endpoint_value, "metric anchor endpoint")?;
+        ensure_exact_keys(
+            endpoint,
+            &[
+                "endpoint_id",
+                "camera_id",
+                "pixel_uv",
+                "colmap_point3d_id",
+                "source_position",
+                "registration_error_px",
+            ],
+            "metric anchor endpoint",
+        )?;
+        ensure!(
+            endpoint_ids.insert(nonempty_string(endpoint, "endpoint_id")?),
+            "metric anchor endpoint IDs must be distinct"
+        );
+        let camera_id = nonempty_string(endpoint, "camera_id")?;
+        ensure!(
+            camera_id.starts_with("colmap."),
+            "metric anchor endpoint must name a COLMAP camera"
+        );
+        camera_ids.insert(camera_id);
+        finite_vector(field(endpoint, "pixel_uv")?, 2, "metric anchor pixel_uv")?;
+        ensure!(
+            point_ids.insert(unsigned(endpoint, "colmap_point3d_id")?),
+            "metric anchor point IDs must be distinct"
+        );
+        positions.push(finite_vector(
+            field(endpoint, "source_position")?,
+            3,
+            "metric anchor source_position",
+        )?);
+        let registration_error = finite(endpoint, "registration_error_px")?;
+        ensure!(
+            (0.0..=1.0e-6).contains(&registration_error),
+            "metric anchor endpoint registration error exceeded tolerance"
+        );
+    }
+    ensure!(
+        camera_ids.len() == 1,
+        "metric anchor endpoints must share one retained camera frame"
+    );
+    let source_distance = positions[0]
+        .iter()
+        .zip(&positions[1])
+        .map(|(left, right)| (left - right).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    ensure!(
+        source_distance.is_finite() && (1.0e-9..).contains(&source_distance),
+        "metric anchor endpoints coincide"
+    );
+    let declared_source_distance = finite(anchor, "source_distance_reconstruction_units")?;
+    ensure!(
+        within_tolerance(declared_source_distance, source_distance, 1.0e-9),
+        "metric anchor source distance drifted"
+    );
+    let derived_scale = measured_distance / source_distance;
+    let scale_uncertainty = uncertainty / source_distance;
+    ensure!(
+        within_tolerance(
+            finite(anchor, "derived_scale_m_per_source_unit")?,
+            derived_scale,
+            1.0e-9,
+        ) && within_tolerance(
+            finite(anchor, "scale_uncertainty_m_per_source_unit")?,
+            scale_uncertainty,
+            1.0e-9,
+        ),
+        "metric anchor derived scale drifted"
+    );
+    ensure!(
+        within_tolerance(scale_to_m, derived_scale, scale_uncertainty),
+        "source-to-world scale is outside metric anchor uncertainty"
+    );
+
+    let evidence = array(
+        field(anchor, "evidence_artifacts")?,
+        "metric anchor evidence",
+    )?;
+    ensure!(
+        !evidence.is_empty(),
+        "metric anchor has no evidence artifacts"
+    );
+    for (index, artifact_value) in evidence.iter().enumerate() {
+        let artifact = object(artifact_value, "metric anchor evidence artifact")?;
+        ensure_exact_keys(
+            artifact,
+            &["path", "size_bytes", "sha256", "description"],
+            "metric anchor evidence artifact",
+        )?;
+        let _ = nonempty_string(artifact, "description")?;
+        verify_artifact(
+            artifact,
+            parent,
+            &format!("metric anchor evidence[{index}]"),
+        )?;
+    }
+
+    let record_path = verify_artifact(
+        object(field(anchor, "record")?, "metric anchor record")?,
+        parent,
+        "metric anchor record",
+    )?;
+    let record_bytes =
+        fs::read(&record_path).map_err(|error| GaussianSplatValidationError::Io {
+            path: record_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let record_value: Value = serde_json::from_slice(&record_bytes).map_err(|error| {
+        GaussianSplatValidationError::Parse {
+            path: record_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let record = object(&record_value, "metric anchor record")?;
+    ensure_exact_keys(
+        record,
+        &[
+            "kind",
+            "schema_version",
+            "environment_id",
+            "operator",
+            "measurement",
+            "endpoints",
+            "evidence_artifacts",
+        ],
+        "metric anchor record",
+    )?;
+    ensure!(
+        field(record, "kind")? == field(anchor, "kind")?
+            && field(record, "schema_version")? == field(anchor, "schema_version")?
+            && field(record, "environment_id")? == field(anchor, "environment_id")?
+            && field(record, "operator")? == field(anchor, "operator")?
+            && field(record, "measurement")? == field(anchor, "measurement")?
+            && field(record, "evidence_artifacts")? == field(anchor, "evidence_artifacts")?,
+        "metric anchor record and fixture disagree"
+    );
+    let record_endpoints = array(
+        field(record, "endpoints")?,
+        "metric anchor record endpoints",
+    )?;
+    ensure!(
+        record_endpoints.len() == endpoints.len(),
+        "metric anchor endpoint count drifted"
+    );
+    for (record_value, resolved_value) in record_endpoints.iter().zip(endpoints) {
+        let record_endpoint = object(record_value, "metric anchor record endpoint")?;
+        let resolved_endpoint = object(resolved_value, "metric anchor resolved endpoint")?;
+        ensure_exact_keys(
+            record_endpoint,
+            &["endpoint_id", "camera_id", "pixel_uv", "colmap_point3d_id"],
+            "metric anchor record endpoint",
+        )?;
+        for name in ["endpoint_id", "camera_id", "pixel_uv", "colmap_point3d_id"] {
+            ensure!(
+                field(record_endpoint, name)? == field(resolved_endpoint, name)?,
+                "metric anchor endpoint record drifted"
+            );
+        }
+    }
+    Ok(true)
 }
 
 fn validate_floor(value: &Map<String, Value>) -> Result<bool, GaussianSplatValidationError> {
@@ -934,6 +1216,58 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn within_tolerance(value: f64, expected: f64, tolerance: f64) -> bool {
+    value.is_finite()
+        && expected.is_finite()
+        && tolerance.is_finite()
+        && tolerance.is_sign_positive()
+        && (value - expected).abs() <= tolerance
+}
+
+fn is_canonical_utc_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes.last() != Some(&b'Z')
+        || (bytes.len() > 20
+            && (bytes.len() < 22
+                || bytes[19] != b'.'
+                || !bytes[20..bytes.len() - 1].iter().all(u8::is_ascii_digit)))
+    {
+        return false;
+    }
+    let parse = |range: std::ops::Range<usize>| value[range].parse::<u32>().ok();
+    let Some((year, month, day, hour, minute, second)) = parse(0..4)
+        .zip(parse(5..7))
+        .zip(parse(8..10))
+        .zip(parse(11..13))
+        .zip(parse(14..16))
+        .zip(parse(17..19))
+        .map(|(((((year, month), day), hour), minute), second)| {
+            (year, month, day, hour, minute, second)
+        })
+    else {
+        return false;
+    };
+    let leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days_in_month).contains(&day)
+        && (0..24).contains(&hour)
+        && (0..60).contains(&minute)
+        && (0..60).contains(&second)
+}
+
 fn pass_or_fail(passed: bool) -> &'static str {
     if passed {
         "passed"
@@ -953,10 +1287,53 @@ fn pass_status(passed: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn committed_fixture() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json")
+    }
+
+    fn metric_anchor_fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metric_anchor")
+    }
+
+    fn artifact(path: &Path, name: &str) -> Value {
+        let bytes = fs::read(path).unwrap();
+        json!({
+            "path": name,
+            "size_bytes": bytes.len(),
+            "sha256": sha256_hex(&bytes),
+        })
+    }
+
+    fn verified_metric_anchor() -> Value {
+        let root = metric_anchor_fixture_root();
+        let record: Value =
+            serde_json::from_slice(&fs::read(root.join("anchor.json")).unwrap()).unwrap();
+        let mut endpoints = record["endpoints"].as_array().unwrap().clone();
+        endpoints[0]["source_position"] = json!([0.0, 0.0, 0.0]);
+        endpoints[0]["registration_error_px"] = json!(0.0);
+        endpoints[1]["source_position"] = json!([2.0, 0.0, 0.0]);
+        endpoints[1]["registration_error_px"] = json!(0.0);
+        json!({
+            "status": "verified",
+            "scale_to_m": 1.0,
+            "independent_physical_anchor": {
+                "kind": record["kind"].clone(),
+                "schema_version": record["schema_version"].clone(),
+                "environment_id": record["environment_id"].clone(),
+                "record": artifact(&root.join("anchor.json"), "anchor.json"),
+                "operator": record["operator"].clone(),
+                "measurement": record["measurement"].clone(),
+                "endpoints": endpoints,
+                "source_distance_reconstruction_units": 2.0,
+                "derived_scale_m_per_source_unit": 1.0,
+                "scale_uncertainty_m_per_source_unit": 0.005,
+                "evidence_artifacts": record["evidence_artifacts"].clone(),
+            },
+            "reason": "test-only verified independent measurement",
+        })
     }
 
     #[test]
@@ -978,6 +1355,46 @@ mod tests {
         assert!(matches!(
             require_qualifying_gaussian_splat_fixture(&committed_fixture()),
             Err(GaussianSplatValidationError::NotQualifying { .. })
+        ));
+    }
+
+    #[test]
+    fn metric_anchor_recomputes_scale_and_rejects_forged_derivation() {
+        let root = metric_anchor_fixture_root();
+        let value = verified_metric_anchor();
+        assert!(validate_metric_scale(
+            value.as_object().unwrap(),
+            &root,
+            "test.metric.anchor",
+            1.0,
+        )
+        .unwrap());
+
+        let mut forged = value;
+        forged["independent_physical_anchor"]["derived_scale_m_per_source_unit"] = json!(0.9);
+        assert!(matches!(
+            validate_metric_scale(
+                forged.as_object().unwrap(),
+                &root,
+                "test.metric.anchor",
+                1.0,
+            ),
+            Err(GaussianSplatValidationError::Invalid(message))
+                if message.contains("derived scale drifted")
+        ));
+
+        let mut invalid_time = verified_metric_anchor();
+        invalid_time["independent_physical_anchor"]["measurement"]["captured_at_utc"] =
+            json!("sometime");
+        assert!(matches!(
+            validate_metric_scale(
+                invalid_time.as_object().unwrap(),
+                &root,
+                "test.metric.anchor",
+                1.0,
+            ),
+            Err(GaussianSplatValidationError::Invalid(message))
+                if message.contains("canonical RFC 3339 UTC")
         ));
     }
 }

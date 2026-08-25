@@ -1,0 +1,1 @@
+Test-only independent measurement evidence: endpoints A and B are 2.000 m apart with 0.010 m uncertainty.
