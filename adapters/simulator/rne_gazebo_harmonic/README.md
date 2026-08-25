@@ -192,6 +192,15 @@ and `0.038900 rad`. No transition is selected; the browser report remains
 `needs_tuning`, and physics-substep sensitivity is the next predeclared
 experiment.
 
+The substep experiment partitions the exact `16,666,667 tick` control period
+without drift and freezes `[1, 2, 5, 10]` physics steps before execution. It
+also stays red: RMSE is `0.036139`, `0.047853`, `0.324674`, and `0.084528 rad`.
+The 5- and 10-substep cases materially worsen the force-based servo response,
+so no substep count is selected and the 1-step production behavior remains
+unchanged. Transition smoothing and numerical subdivision are therefore ruled
+out as fixes for this contract; controller/plant-model retuning at the fixed
+0.5 N*m case is next.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

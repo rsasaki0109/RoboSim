@@ -2,6 +2,7 @@
 
 use rne_math::{Hertz, Seconds};
 use std::fmt;
+use std::num::NonZeroUsize;
 
 /// Simulation timestamp in seconds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -90,6 +91,24 @@ impl SimDuration {
     /// Returns raw nanosecond ticks.
     pub const fn ticks(self) -> u64 {
         self.ticks
+    }
+
+    /// Splits this duration into positive integer-tick parts with an exact sum.
+    ///
+    /// Adjacent parts differ by at most one tick. `None` is returned when the
+    /// duration is too short to give every requested part at least one tick.
+    pub fn split_evenly(self, parts: NonZeroUsize) -> Option<Vec<Self>> {
+        let count = u64::try_from(parts.get()).ok()?;
+        if self.ticks < count {
+            return None;
+        }
+        let base = self.ticks / count;
+        let remainder = self.ticks % count;
+        Some(
+            (0..count)
+                .map(|index| Self::from_ticks(base + u64::from(index < remainder)))
+                .collect(),
+        )
     }
 }
 
@@ -249,5 +268,22 @@ mod tests {
             fixed.as_seconds().value() * 30.0,
             epsilon = 1e-9
         );
+    }
+
+    #[test]
+    fn duration_split_preserves_exact_ticks() {
+        let parts = SimDuration::from_ticks(16_666_667)
+            .split_evenly(NonZeroUsize::new(10).unwrap())
+            .unwrap();
+        assert_eq!(parts.len(), 10);
+        assert_eq!(
+            parts.iter().map(|part| part.ticks()).sum::<u64>(),
+            16_666_667
+        );
+        assert_eq!(parts.iter().map(|part| part.ticks()).min(), Some(1_666_666));
+        assert_eq!(parts.iter().map(|part| part.ticks()).max(), Some(1_666_667));
+        assert!(SimDuration::from_ticks(1)
+            .split_evenly(NonZeroUsize::new(2).unwrap())
+            .is_none());
     }
 }

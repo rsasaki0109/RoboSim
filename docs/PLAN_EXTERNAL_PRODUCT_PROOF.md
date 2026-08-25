@@ -668,6 +668,14 @@ physics-substep sensitivity with controller and plant held fixed. A verified
 Failure Capsule captures the first deviation. Inertia and
 transmission-efficiency dimensions also remain open.
 
+The exact-tick substep sweep is also complete. `[1, 2, 5, 10]` Rapier physics
+steps per 16,666,667-tick control period produce `0.036139`, `0.047853`,
+`0.324674`, and `0.084528 rad` RMSE. All replay and timing checks remain exact,
+but none passes and higher substep counts degrade the force-based motor
+response. No numerical setting is selected. The next bounded experiment must
+retune the controller/identified plant at the fixed supported 0.5 N*m point,
+then hold the selected controller unchanged across all backends and magnitudes.
+
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending
 `[0.40, 0.25, 0.15, 0.10, 0.05] rad/s` grid produces a real cross-backend

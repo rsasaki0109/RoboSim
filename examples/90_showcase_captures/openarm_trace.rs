@@ -221,6 +221,8 @@ struct ActuationConfig {
     backend_id: String,
     motor_model: String,
     solver_iterations: usize,
+    #[serde(default = "default_physics_substeps_per_control_step")]
+    physics_substeps_per_control_step: usize,
     fixed_delta_ticks: u64,
     joints: Vec<JointActuationConfig>,
 }
@@ -313,6 +315,7 @@ struct BackendTrace<'a> {
     scene_config_sha256: &'a str,
     actuation_config_sha256: &'a str,
     fixed_delta_ticks: u64,
+    physics_substeps_per_control_step: usize,
     joint_feedback_schema_version: u32,
     joint_feedback_latency_ticks: u64,
     observation_source: &'static str,
@@ -614,6 +617,7 @@ fn run() -> Result<()> {
             scene_config_sha256: &scene_config_sha256,
             actuation_config_sha256: &actuation_config_sha256,
             fixed_delta_ticks: FIXED_DELTA_TICKS,
+            physics_substeps_per_control_step: actuation_config.physics_substeps_per_control_step,
             joint_feedback_schema_version: JointFeedback::SCHEMA_VERSION,
             joint_feedback_latency_ticks: FIXED_DELTA_TICKS,
             observation_source: "databus_latest_available",
@@ -872,6 +876,8 @@ fn validate(
             && actuation_config.backend_id == "rne_native_physics"
             && actuation_config.motor_model == "force_based_v1"
             && actuation_config.solver_iterations > 0
+            && actuation_config.physics_substeps_per_control_step > 0
+            && actuation_config.physics_substeps_per_control_step <= FIXED_DELTA_TICKS as usize
             && actuation_config.fixed_delta_ticks == FIXED_DELTA_TICKS,
         "unsupported or invalid RNE actuation configuration"
     );
@@ -1827,7 +1833,11 @@ fn rollout(
                 position: *position,
             })
             .collect::<Vec<_>>();
-        sim.step_joint_position_actuation_targets(&targets);
+        sim.step_joint_position_actuation_targets_substeps(
+            &targets,
+            actuation_config.physics_substeps_per_control_step,
+        )
+        .context("step OpenArm Rapier physics substeps")?;
         controller_decisions.push(decision);
         state_hashes.push(hash_physics_state_v2(sim.world()));
         sim.sample_joint_feedback(&mut bus)
@@ -1920,6 +1930,10 @@ fn rollout(
         maximum_sensor_backend_velocity_delta_rad_s,
         joint_passive_dynamics,
     })
+}
+
+fn default_physics_substeps_per_control_step() -> usize {
+    1
 }
 
 fn feedback_bounds(controller: &ControllerSpec) -> (Vec<f64>, Vec<f64>) {

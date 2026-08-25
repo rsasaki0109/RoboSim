@@ -117,6 +117,7 @@ use rne_sensor::{
     JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
 };
 use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3, WorldEntity};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -1515,6 +1516,37 @@ impl UrdfSceneSim {
         &mut self,
         targets: &[UrdfJointPositionTarget<'_>],
     ) {
+        self.set_joint_position_actuation_targets(targets);
+        self.step_physics();
+    }
+
+    /// Applies one set of position-actuator targets over exact physics substeps.
+    ///
+    /// The configured control-period duration is partitioned into positive
+    /// integer-tick steps whose sum is exact, so control and sensor timestamps
+    /// do not drift when the period is not divisible by the substep count.
+    pub fn step_joint_position_actuation_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointPositionTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<(), AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        self.set_joint_position_actuation_targets(targets);
+        for delta in parts {
+            self.step_physics_with_delta(delta);
+        }
+        Ok(())
+    }
+
+    fn set_joint_position_actuation_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
         for target in targets {
             let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
                 continue;
@@ -1537,7 +1569,6 @@ impl UrdfSceneSim {
                     max_effort_nm,
                 });
         }
-        self.step_physics();
     }
 
     /// Updates named joint position targets **without stepping** the
@@ -1794,11 +1825,15 @@ impl UrdfSceneSim {
     }
 
     fn step_physics(&mut self) {
+        self.step_physics_with_delta(self.dt);
+    }
+
+    fn step_physics_with_delta(&mut self, delta: SimDuration) {
         step_physics(
             &mut self.backend,
             &mut self.world,
             self.physics_world,
-            self.dt,
+            delta,
         )
         .expect("urdf scene physics step");
         let gravity_m_s2 = self
@@ -1809,11 +1844,11 @@ impl UrdfSceneSim {
         step_deformable_world(
             &mut self.world,
             gravity_m_s2,
-            self.dt.as_seconds().value(),
+            delta.as_seconds().value(),
             self.deformable_solver_config,
         )
         .expect("urdf scene deformable step");
-        self.sim_time = self.sim_time + self.dt;
+        self.sim_time = self.sim_time + delta;
     }
 }
 
@@ -2077,6 +2112,12 @@ mod tests {
         .expect("install feedback sensor");
         sim.step_joint_position_targets(&[]);
         assert_eq!(sim.sim_time().ticks(), fixed_delta.ticks());
+        sim.step_joint_position_actuation_targets_substeps(&[], 10)
+            .expect("step exact substeps");
+        assert_eq!(sim.sim_time().ticks(), fixed_delta.ticks() * 2);
+        assert!(sim
+            .step_joint_position_actuation_targets_substeps(&[], 0)
+            .is_err());
         let sensor_entity = find_entity_by_name(sim.world(), "controller_feedback")
             .expect("installed sensor entity");
         let sensor = sim

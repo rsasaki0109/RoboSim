@@ -237,6 +237,8 @@ struct ActuationConfig {
     backend_id: String,
     motor_model: String,
     solver_iterations: usize,
+    #[serde(default = "default_physics_substeps_per_control_step")]
+    physics_substeps_per_control_step: usize,
     fixed_delta_ticks: u64,
     joints: Vec<JointActuationConfig>,
 }
@@ -353,11 +355,16 @@ struct MujocoOpenArmSim {
     physics_world: PhysicsWorldId,
     sim_time: SimTime,
     fixed_delta: SimDuration,
+    physics_substeps_per_control_step: usize,
     world_seed: u64,
 }
 
 impl MujocoOpenArmSim {
-    fn new(scene_path: &Path, solver_iterations: usize) -> Result<Self> {
+    fn new(
+        scene_path: &Path,
+        solver_iterations: usize,
+        physics_substeps_per_control_step: usize,
+    ) -> Result<Self> {
         let fixed_delta = SimDuration::from_ticks(FIXED_DELTA_TICKS);
         let mut world = World::new();
         let spawned = load_and_spawn_scene(&mut world, scene_path)
@@ -385,6 +392,7 @@ impl MujocoOpenArmSim {
             physics_world,
             sim_time: SimTime::default(),
             fixed_delta,
+            physics_substeps_per_control_step,
             world_seed,
         })
     }
@@ -489,13 +497,22 @@ impl MujocoOpenArmSim {
         self.backend
             .sync_from_ecs(&mut self.world, self.physics_world)
             .context("upload OpenArm command to MuJoCo")?;
-        self.backend
-            .step(self.physics_world, self.fixed_delta)
-            .context("step OpenArm MuJoCo world")?;
+        let deltas = self
+            .fixed_delta
+            .split_evenly(
+                std::num::NonZeroUsize::new(self.physics_substeps_per_control_step)
+                    .context("physics substeps must be nonzero")?,
+            )
+            .context("control period is too short for requested physics substeps")?;
+        for delta in deltas {
+            self.backend
+                .step(self.physics_world, delta)
+                .context("step OpenArm MuJoCo world")?;
+            self.sim_time = self.sim_time + delta;
+        }
         self.backend
             .sync_to_ecs(&mut self.world, self.physics_world)
             .context("download OpenArm MuJoCo state")?;
-        self.sim_time = self.sim_time + self.fixed_delta;
         Ok(())
     }
 
@@ -618,6 +635,7 @@ fn run() -> Result<()> {
             "scene_config_sha256": scene_config_sha256,
             "actuation_config_sha256": actuation_sha256,
             "fixed_delta_ticks": FIXED_DELTA_TICKS,
+            "physics_substeps_per_control_step": actuation.physics_substeps_per_control_step,
             "joint_feedback_schema_version": JointFeedback::SCHEMA_VERSION,
             "joint_feedback_latency_ticks": FIXED_DELTA_TICKS,
             "observation_source": "databus_latest_available",
@@ -803,6 +821,8 @@ fn validate(
             && actuation.schema_version == 1
             && actuation.backend_id == "rne_native_physics"
             && actuation.motor_model == "force_based_v1"
+            && actuation.physics_substeps_per_control_step > 0
+            && actuation.physics_substeps_per_control_step <= FIXED_DELTA_TICKS as usize
             && actuation.fixed_delta_ticks == FIXED_DELTA_TICKS
             && actuation.joints.len() == width,
         "invalid native actuation contract"
@@ -946,7 +966,11 @@ fn rollout(
     actuation: &ActuationConfig,
     actions: &[ActionFrame],
 ) -> Result<Rollout> {
-    let mut sim = MujocoOpenArmSim::new(scene, actuation.solver_iterations)?;
+    let mut sim = MujocoOpenArmSim::new(
+        scene,
+        actuation.solver_iterations,
+        actuation.physics_substeps_per_control_step,
+    )?;
     let joint_passive_dynamics = controller
         .rne_actuator_link_order
         .iter()
@@ -1068,6 +1092,10 @@ fn rollout(
     })
 }
 
+fn default_physics_substeps_per_control_step() -> usize {
+    1
+}
+
 fn intentional_failure(
     scene: &Path,
     controller: &ControllerSpec,
@@ -1076,7 +1104,11 @@ fn intentional_failure(
     clean: &[ObservationFrame],
 ) -> Result<bool> {
     let inject_index = usize::try_from(controller.intentional_failure.inject_at_step - 1)?;
-    let mut sim = MujocoOpenArmSim::new(scene, actuation.solver_iterations)?;
+    let mut sim = MujocoOpenArmSim::new(
+        scene,
+        actuation.solver_iterations,
+        actuation.physics_substeps_per_control_step,
+    )?;
     sim.configure_actuators(actuation)?;
     for observation in &clean[..inject_index] {
         sim.step_targets(
