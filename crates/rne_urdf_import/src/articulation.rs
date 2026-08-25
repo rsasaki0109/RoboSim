@@ -6,8 +6,8 @@ use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, Name, World};
 use rne_math::Vec3;
 use rne_physics::{
-    FixedJointDesc, JointMotor, MultibodyLink, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    FixedJointDesc, JointMotor, JointPassiveDynamics, MultibodyLink, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_robot::{Actuator, ActuatorLimits, ActuatorTarget, ControlMode, Joint};
 use std::collections::HashSet;
@@ -111,6 +111,14 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
+                if let Some(dynamics) = joint.dynamics {
+                    world
+                        .entity_mut(child)
+                        .insert(JointPassiveDynamics::Revolute {
+                            viscous_damping_nm_s_per_rad: dynamics.damping,
+                            coulomb_friction_nm: dynamics.friction,
+                        });
+                }
                 attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
                 revolute_joints += 1;
             }
@@ -131,6 +139,14 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
+                if let Some(dynamics) = joint.dynamics {
+                    world
+                        .entity_mut(child)
+                        .insert(JointPassiveDynamics::Prismatic {
+                            viscous_damping_n_s_per_m: dynamics.damping,
+                            coulomb_friction_n: dynamics.friction,
+                        });
+                }
                 attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
                 prismatic_joints += 1;
             }
@@ -328,6 +344,52 @@ mod tests {
         assert_eq!(actuator.limits.min_velocity_rad_s, -0.5);
         assert_eq!(actuator.limits.max_velocity_rad_s, 0.5);
         assert_eq!(actuator.limits.max_effort_nm, 20.0);
+    }
+
+    #[test]
+    fn attach_articulation_preserves_unit_explicit_passive_dynamics() {
+        let urdf = parse_urdf(
+            r#"
+            <robot name="lossy_slider">
+              <link name="base"/>
+              <link name="slider"/>
+              <joint name="slide" type="prismatic">
+                <parent link="base"/>
+                <child link="slider"/>
+                <axis xyz="1 0 0"/>
+                <limit lower="0" upper="1" velocity="1" effort="10"/>
+                <dynamics damping="3.5" friction="0.25"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot_with_config(
+            &mut world,
+            &urdf,
+            UrdfSpawnConfig {
+                base_body_type: RigidBodyType::Fixed,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        attach_urdf_articulation(
+            &mut world,
+            &urdf,
+            &spawned,
+            UrdfArticulationConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            world
+                .get::<JointPassiveDynamics>(spawned.links["slider"])
+                .copied(),
+            Some(JointPassiveDynamics::Prismatic {
+                viscous_damping_n_s_per_m: 3.5,
+                coulomb_friction_n: 0.25,
+            })
+        );
     }
 
     #[test]

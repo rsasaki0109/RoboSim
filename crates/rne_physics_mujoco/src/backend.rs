@@ -75,6 +75,14 @@ pub enum MuJoCoError {
         /// Static validation reason.
         reason: &'static str,
     },
+    /// Passive joint dynamics are invalid.
+    #[error("invalid MuJoCo passive joint dynamics on entity {entity_index}: {reason}")]
+    InvalidPassiveDynamics {
+        /// Stable ECS entity index carrying the rejected plant parameters.
+        entity_index: u32,
+        /// Static validation reason.
+        reason: &'static str,
+    },
     /// Exact rigid-body inertial properties are invalid.
     #[error("invalid MuJoCo rigid-body inertia on entity {entity_index}: {reason}")]
     InvalidInertia {
@@ -251,6 +259,13 @@ impl MuJoCoBackend {
                 entity_index,
                 reason,
             },
+            MuJoCoError::InvalidPassiveDynamics {
+                entity_index,
+                reason,
+            } => PhysicsError::InvalidPassiveDynamics {
+                entity_index,
+                reason,
+            },
             MuJoCoError::InvalidInertia {
                 entity_index,
                 reason,
@@ -276,6 +291,13 @@ fn map_compile_error(error: CompileError) -> MuJoCoError {
             entity_index,
             reason,
         } => MuJoCoError::InvalidActuation {
+            entity_index,
+            reason,
+        },
+        CompileError::InvalidPassiveDynamics {
+            entity_index,
+            reason,
+        } => MuJoCoError::InvalidPassiveDynamics {
             entity_index,
             reason,
         },

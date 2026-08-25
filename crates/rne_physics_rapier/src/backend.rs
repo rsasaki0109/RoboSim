@@ -14,9 +14,10 @@ use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
     Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointMotorGainModel,
-    JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
-    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
-    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest,
+    PhysicsBackendRepeatability, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
+    PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -814,6 +815,12 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
         };
+        if passive_viscous_damping(world, *entity)? != 0.0 {
+            return Err(invalid_passive_dynamics(
+                *entity,
+                "viscous damping requires a multibody articulation",
+            ));
+        }
         let Some(joint) = state.impulse_joints.get_mut(*joint_handle) else {
             continue;
         };
@@ -826,6 +833,23 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
         let Some((multibody, link_id)) = state.multibody_joints.get_mut(*joint_handle) else {
             continue;
         };
+        let assembly_id = multibody
+            .links()
+            .take(link_id)
+            .map(|link| link.joint.ndofs())
+            .sum::<usize>();
+        let Some(link) = multibody.link(link_id) else {
+            continue;
+        };
+        let ndofs = link.joint.ndofs();
+        if ndofs != 1 {
+            return Err(invalid_passive_dynamics(
+                *entity,
+                "supported articulated joints must have exactly one degree of freedom",
+            ));
+        }
+        let damping = passive_viscous_damping(world, *entity)? as f32;
+        multibody.damping_mut()[assembly_id] = damping;
         let Some(link) = multibody.link_mut(link_id) else {
             continue;
         };
@@ -1017,8 +1041,62 @@ fn apply_direct_joint_efforts(
     Ok(())
 }
 
+fn passive_viscous_damping(world: &World, entity: Entity) -> Result<f64, PhysicsError> {
+    let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied() else {
+        // Rapier installs a numerical 0.1 damping on angular multibody DOFs by
+        // default. RNE's plant contract is explicit, so absence means zero.
+        return Ok(0.0);
+    };
+    if !dynamics.has_valid_values() {
+        return Err(invalid_passive_dynamics(
+            entity,
+            "non-finite or negative coefficient",
+        ));
+    }
+    let coulomb_friction = match dynamics {
+        JointPassiveDynamics::Revolute {
+            coulomb_friction_nm,
+            ..
+        } => coulomb_friction_nm,
+        JointPassiveDynamics::Prismatic {
+            coulomb_friction_n, ..
+        } => coulomb_friction_n,
+    };
+    if coulomb_friction != 0.0 {
+        return Err(invalid_passive_dynamics(
+            entity,
+            "nonzero Coulomb friction is not yet portable",
+        ));
+    }
+    match dynamics {
+        JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad,
+            ..
+        } if world.get::<RevoluteJointDesc>(entity).is_some() => Ok(viscous_damping_nm_s_per_rad),
+        JointPassiveDynamics::Prismatic {
+            viscous_damping_n_s_per_m,
+            ..
+        } if world.get::<PrismaticJointDesc>(entity).is_some() => Ok(viscous_damping_n_s_per_m),
+        JointPassiveDynamics::Revolute { .. } => Err(invalid_passive_dynamics(
+            entity,
+            "revolute dynamics on non-revolute joint",
+        )),
+        JointPassiveDynamics::Prismatic { .. } => Err(invalid_passive_dynamics(
+            entity,
+            "prismatic dynamics on non-prismatic joint",
+        )),
+    }
+}
+
 fn invalid_actuation(entity: Entity, reason: &'static str) -> PhysicsError {
     PhysicsError::InvalidActuation {
+        entity_index: entity.index(),
+        reason,
+    }
+}
+
+fn invalid_passive_dynamics(entity: Entity, reason: &'static str) -> PhysicsError {
+    PhysicsError::InvalidPassiveDynamics {
         entity_index: entity.index(),
         reason,
     }
@@ -1651,6 +1729,98 @@ mod tests {
             step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
         }
         *world.get::<JointState>(child).expect("joint state")
+    }
+
+    fn coast_velocity_with_passive_loss(
+        passive_dynamics: Option<JointPassiveDynamics>,
+    ) -> Result<f64, PhysicsError> {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "passive_parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::sphere(0.05),
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "passive_child");
+        world.entity_mut(child).insert((
+            RigidBody::default(),
+            Collider::sphere(0.05),
+            MultibodyLink,
+            Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::Y,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointActuation::RevoluteEffort {
+                effort_nm: 0.5,
+                max_effort_nm: 0.5,
+            },
+        ));
+        for _ in 0..5 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step())?;
+        }
+        world.entity_mut(child).insert(JointActuation::Disabled);
+        if let Some(passive_dynamics) = passive_dynamics {
+            world.entity_mut(child).insert(passive_dynamics);
+        }
+        for _ in 0..20 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step())?;
+        }
+        Ok(
+            match *world.get::<JointState>(child).expect("joint state") {
+                JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s.abs(),
+                other => panic!("unexpected joint state {other:?}"),
+            },
+        )
+    }
+
+    #[test]
+    fn passive_joint_loss_opposes_completed_step_velocity() {
+        let undamped = coast_velocity_with_passive_loss(None).unwrap();
+        let damped = coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.2,
+            coulomb_friction_nm: 0.0,
+        }))
+        .unwrap();
+        let strongly_damped =
+            coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 20.0,
+                coulomb_friction_nm: 0.0,
+            }))
+            .unwrap();
+        assert!(
+            damped < undamped,
+            "passive loss should reduce coast velocity: undamped={undamped}, damped={damped}"
+        );
+        assert!(
+            strongly_damped.is_finite() && strongly_damped < damped,
+            "implicit damping should remain finite and monotonic: damped={damped}, strongly_damped={strongly_damped}"
+        );
+    }
+
+    #[test]
+    fn nonzero_coulomb_friction_fails_before_rapier_step() {
+        let error = coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: 0.1,
+        }))
+        .unwrap_err();
+        assert!(matches!(error, PhysicsError::InvalidPassiveDynamics { .. }));
     }
 
     #[test]

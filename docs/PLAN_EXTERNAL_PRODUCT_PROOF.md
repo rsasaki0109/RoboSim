@@ -409,10 +409,10 @@ actuator-authority envelope. The next slices are:
 1. **Complete:** add a source-step-verifiable actuator command-transport delay across
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
-2. **In progress:** the physical command slew-rate and command-deadband
-   boundaries are complete; continue the actuator and plant envelope with
-   friction/damping, inertia, and transmission-efficiency sweeps, retaining the
-   smallest failing value for each mechanism;
+2. **In progress:** the physical command slew-rate, command-deadband, and
+   viscous joint-damping boundaries are complete; continue the actuator and
+   plant envelope with Coulomb friction, inertia, and transmission-efficiency
+   sweeps, retaining the smallest failing value for each mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
@@ -632,6 +632,17 @@ publication is absent; the minimum replay stops there. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 and command deadband are recorded below; friction/damping, inertia, and
 transmission-efficiency boundaries remain open.
+
+The first physical joint-loss dimension now separates URDF plant damping from
+actuator servo damping. Its predeclared `[0, 2.5, 5, 10, 20] N*m*s/rad` joint-5
+grid holds Coulomb friction at zero and binds identical TaskSpec, controller,
+actuation, scene, world, adapter, and action hashes across Rapier, native
+MuJoCo, and external Gazebo. All 15 runs are exact same-runtime replays with
+zero independently parsed model-parameter delta. The shared controller passes
+5 on every backend. The declared 10-point fails only MuJoCo RMSE
+(`0.021031 rad > 0.02 rad`), and 20 fails all three. A browser report and
+step-3600 minimum replay retain this honest `needs_tuning` boundary. Coulomb
+friction, inertia, and transmission-efficiency dimensions remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

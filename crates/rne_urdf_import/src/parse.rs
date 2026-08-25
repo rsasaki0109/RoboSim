@@ -1,8 +1,8 @@
 //! URDF parsing.
 
 use crate::schema::{
-    UrdfDocument, UrdfGeometry, UrdfGeometryElement, UrdfInertial, UrdfJoint, UrdfJointLimit,
-    UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
+    UrdfDocument, UrdfGeometry, UrdfGeometryElement, UrdfInertial, UrdfJoint, UrdfJointDynamics,
+    UrdfJointLimit, UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
 };
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
@@ -378,6 +378,11 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         .find(|node| node.is_element() && node.tag_name().name() == "mimic")
         .map(parse_joint_mimic)
         .transpose()?;
+    let dynamics = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "dynamics")
+        .map(parse_joint_dynamics)
+        .transpose()?;
 
     Ok(UrdfJoint {
         name,
@@ -389,7 +394,30 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         axis,
         limit,
         mimic,
+        dynamics,
     })
+}
+
+fn parse_joint_dynamics(
+    node: roxmltree::Node<'_, '_>,
+) -> Result<UrdfJointDynamics, UrdfParseError> {
+    let damping = node
+        .attribute("damping")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(0.0);
+    let friction = node
+        .attribute("friction")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(0.0);
+    if !damping.is_finite() || damping < 0.0 || !friction.is_finite() || friction < 0.0 {
+        return Err(UrdfParseError::InvalidValue {
+            field: "joint/dynamics".into(),
+            value: format!("damping={damping},friction={friction}"),
+        });
+    }
+    Ok(UrdfJointDynamics { damping, friction })
 }
 
 fn parse_joint_limit(node: roxmltree::Node<'_, '_>) -> Result<UrdfJointLimit, UrdfParseError> {
@@ -715,6 +743,41 @@ mod tests {
         assert_eq!(limit.upper, 1.5);
         assert_eq!(limit.max_velocity_rad_s, 2.0);
         assert_eq!(limit.max_effort_nm, 10.0);
+    }
+
+    #[test]
+    fn parses_non_negative_joint_passive_dynamics() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="lossy_arm">
+              <link name="base_link"/>
+              <link name="arm_link"/>
+              <joint name="shoulder" type="revolute">
+                <parent link="base_link"/>
+                <child link="arm_link"/>
+                <dynamics damping="2.5" friction="0.4"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let dynamics = robot.joints[0].dynamics.expect("dynamics");
+        assert_eq!(dynamics.damping, 2.5);
+        assert_eq!(dynamics.friction, 0.4);
+    }
+
+    #[test]
+    fn rejects_negative_or_non_finite_joint_passive_dynamics() {
+        for dynamics in [
+            r#"<dynamics damping="-0.1" friction="0"/>"#,
+            r#"<dynamics damping="0" friction="-0.1"/>"#,
+            r#"<dynamics damping="NaN" friction="0"/>"#,
+        ] {
+            let xml = format!(
+                r#"<robot name="invalid"><link name="a"/><link name="b"/><joint name="j" type="revolute"><parent link="a"/><child link="b"/>{dynamics}</joint></robot>"#
+            );
+            assert!(parse_urdf(&xml).is_err(), "accepted {dynamics}");
+        }
     }
 
     #[test]

@@ -272,6 +272,14 @@ pub enum PhysicsError {
         /// Static validation reason shared by backend implementations.
         reason: &'static str,
     },
+    /// Passive joint dynamics are invalid for the target entity.
+    #[error("invalid passive joint dynamics on entity {entity_index}: {reason}")]
+    InvalidPassiveDynamics {
+        /// Stable ECS entity index carrying the rejected plant parameters.
+        entity_index: u32,
+        /// Static validation reason shared by backend implementations.
+        reason: &'static str,
+    },
     /// Exact rigid-body inertial properties are invalid.
     #[error("invalid rigid-body inertia on entity {entity_index}: {reason}")]
     InvalidInertia {

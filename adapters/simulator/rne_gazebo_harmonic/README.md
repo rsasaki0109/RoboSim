@@ -73,6 +73,48 @@ python adapters/simulator/rne_gazebo_harmonic/build_openarm_authority_report.py 
   --output artifacts/openarm-authority/report
 ```
 
+Compile the joint-5 plant viscous-damping envelope independently of actuator
+servo damping with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-joint-loss/fixtures
+```
+
+The fixed `[0, 2.5, 5, 10, 20] N*m*s/rad` grid holds Coulomb friction at zero
+and leaves the TaskSpec, controller, actuator gains/limits, scene, world, and
+Gazebo adapter config unchanged. Each fixture binds the requested value, the
+independently parsed URDF realization, and every model/config/runtime hash. The
+zero case is byte-identical to the source model. Nonzero cases add exactly one
+joint-5 `<dynamics>` declaration. Plant damping and the existing joint-5 servo
+damping remain separate unit-bearing report fields.
+Nonzero Coulomb friction is intentionally rejected before stepping until the
+Rapier and MuJoCo static/kinetic transition semantics can be made identical.
+
+After writing each backend trace beneath `rapier/CASE`, `mujoco/CASE`, and
+`gazebo/CASE`, build the browser report and minimum aggregate failure replay:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_report.py \
+  --fixture-root artifacts/openarm-joint-loss/fixtures \
+  --trace-root artifacts/openarm-joint-loss \
+  --output artifacts/openarm-joint-loss/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-joint-loss/report/openarm-joint-loss-report.json \
+  --trace artifacts/openarm-joint-loss/mujoco/joint5-damping-10000mnms-per-rad/mujoco-success-trace.json \
+  --output artifacts/openarm-joint-loss/report/minimum-joint-loss-failure.rne-replay
+```
+
+The initially declared 10 N*m*s/rad cross-backend contract is deliberately not
+relaxed after measurement. The current state-feedback controller passes 5 on
+all three paths. At 10, MuJoCo is the first failure (`0.021031 rad` RMSE against
+the registered `0.02 rad` maximum), while Rapier and Gazebo still pass. At 20,
+all three fail RMSE. The report therefore remains `needs_tuning` and localizes
+the earliest aggregate violation to MuJoCo step 3600 rather than converting a
+characterization result into a green claim.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

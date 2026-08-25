@@ -148,6 +148,21 @@ pub struct UrdfJointMimic {
     pub offset: f64,
 }
 
+/// Parsed URDF `<dynamics>` coefficients for a joint.
+///
+/// URDF uses the same attributes for revolute and prismatic joints; their SI
+/// units are interpreted from [`UrdfJointType`] when the articulation is
+/// attached to the physics world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointDynamics {
+    /// Viscous damping coefficient. Units are N·m·s/rad for revolute joints and
+    /// N·s/m for prismatic joints.
+    pub damping: f64,
+    /// Coulomb-friction magnitude. Units are N·m for revolute joints and N for
+    /// prismatic joints.
+    pub friction: f64,
+}
+
 /// Parsed URDF joint.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UrdfJoint {
@@ -169,4 +184,6 @@ pub struct UrdfJoint {
     pub limit: Option<UrdfJointLimit>,
     /// Optional mimic coupling from `<mimic>` (parse-only; not simulated).
     pub mimic: Option<UrdfJointMimic>,
+    /// Optional passive joint dynamics from `<dynamics>`.
+    pub dynamics: Option<UrdfJointDynamics>,
 }

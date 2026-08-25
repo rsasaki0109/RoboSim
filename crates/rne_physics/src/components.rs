@@ -381,6 +381,48 @@ pub enum JointMotorGainModel {
     ForceBased,
 }
 
+/// Backend-neutral passive dynamics of a single-degree-of-freedom joint.
+///
+/// The component describes plant loss independently from actuator servo gains.
+/// Physics backends apply viscous damping against joint velocity. Coulomb
+/// coefficients are retained as typed plant input, but a backend must reject a
+/// nonzero value until it can implement the declared static/kinetic transition
+/// without substituting undocumented native semantics.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointPassiveDynamics {
+    /// Passive dynamics of a revolute joint.
+    Revolute {
+        /// Viscous damping coefficient in newton-metre-seconds per radian.
+        viscous_damping_nm_s_per_rad: f64,
+        /// Requested Coulomb-friction magnitude in newton-metres.
+        coulomb_friction_nm: f64,
+    },
+    /// Passive dynamics of a prismatic joint.
+    Prismatic {
+        /// Viscous damping coefficient in newton-seconds per metre.
+        viscous_damping_n_s_per_m: f64,
+        /// Requested Coulomb-friction magnitude in newtons.
+        coulomb_friction_n: f64,
+    },
+}
+
+impl JointPassiveDynamics {
+    /// Returns true when every coefficient is finite and non-negative.
+    pub fn has_valid_values(self) -> bool {
+        match self {
+            Self::Revolute {
+                viscous_damping_nm_s_per_rad,
+                coulomb_friction_nm,
+            } => non_negative(viscous_damping_nm_s_per_rad) && non_negative(coulomb_friction_nm),
+            Self::Prismatic {
+                viscous_damping_n_s_per_m,
+                coulomb_friction_n,
+            } => non_negative(viscous_damping_n_s_per_m) && non_negative(coulomb_friction_n),
+        }
+    }
+}
+
 /// Unit-explicit actuation command for a one-degree-of-freedom joint.
 ///
 /// Physics backends apply this component before each fixed step. Commands with
@@ -595,8 +637,27 @@ impl Default for JointMotor {
 
 #[cfg(test)]
 mod tests {
-    use super::{JointActuation, RigidBodyInertia};
+    use super::{JointActuation, JointPassiveDynamics, RigidBodyInertia};
     use rne_math::Vec3;
+
+    #[test]
+    fn passive_joint_dynamics_require_finite_non_negative_coefficients() {
+        assert!(JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 2.5,
+            coulomb_friction_nm: 0.4,
+        }
+        .has_valid_values());
+        assert!(!JointPassiveDynamics::Prismatic {
+            viscous_damping_n_s_per_m: f64::NAN,
+            coulomb_friction_n: 0.0,
+        }
+        .has_valid_values());
+        assert!(!JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: -0.1,
+        }
+        .has_valid_values());
+    }
 
     #[test]
     fn exact_inertia_requires_positive_definite_and_physically_realizable_tensor() {

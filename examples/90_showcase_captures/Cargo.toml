@@ -49,6 +49,10 @@ name = "rne-openarm-plant-failure-replay"
 path = "openarm_plant_failure_replay.rs"
 
 [[bin]]
+name = "rne-openarm-joint-loss-failure-replay"
+path = "openarm_joint_loss_failure_replay.rs"
+
+[[bin]]
 name = "rne-openarm-controller-failure-replay"
 path = "openarm_controller_failure_replay.rs"
 

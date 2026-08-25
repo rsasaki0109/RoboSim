@@ -16,8 +16,8 @@ pub use parse::{
     UrdfParseError, URDF_MAX_INPUT_BYTES,
 };
 pub use schema::{
-    UrdfDocument, UrdfGeometry, UrdfGeometryElement, UrdfInertial, UrdfJoint, UrdfJointLimit,
-    UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
+    UrdfDocument, UrdfGeometry, UrdfGeometryElement, UrdfInertial, UrdfJoint, UrdfJointDynamics,
+    UrdfJointLimit, UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
 };
 pub use spawn::{
     attach_urdf_visuals, spawn_urdf_document, spawn_urdf_document_with_config, spawn_urdf_robot,

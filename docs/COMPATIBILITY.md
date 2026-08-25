@@ -293,6 +293,18 @@ revolute/prismatic position, velocity, and effort variants. Field names carry
 their SI units. A backend rejects unknown variants, non-finite values, negative
 gains/limits, and joint-kind mismatches before a physics step.
 
+`JointPassiveDynamics` is the separate plant-loss contract. Revolute joints use
+`viscous_damping_nm_s_per_rad` and `coulomb_friction_nm`; prismatic joints use
+`viscous_damping_n_s_per_m` and `coulomb_friction_n`. URDF `<dynamics>` imports
+into this component rather than changing actuator servo gains. Absent dynamics
+means zero declared plant loss. Rapier multibodies and MuJoCo integrate viscous
+damping implicitly; Rapier impulse-joint fixtures reject nonzero damping rather
+than using an unstable explicit approximation. Nonzero Coulomb friction
+currently fails preflight on both paths because native static/kinetic
+transitions differ; the coefficient is retained but is not claimed as a
+portable realized parameter. Backends also reject negative, non-finite, or
+joint-kind-mismatched coefficients before stepping.
+
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,

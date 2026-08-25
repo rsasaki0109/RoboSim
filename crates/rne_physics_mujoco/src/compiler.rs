@@ -3,9 +3,9 @@
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointActuation, JointMotor, PhysicsCapability,
-    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia,
-    RigidBodyType,
+    Collider, ColliderShape, FixedJointDesc, JointActuation, JointMotor, JointPassiveDynamics,
+    PhysicsCapability, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::fmt::Write as _;
@@ -40,7 +40,7 @@ pub(crate) struct CompiledRigidBodyModel {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct JointDynamics {
     entity: Entity,
-    passive_damping: f64,
+    implicit_damping: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,6 +117,7 @@ struct BodyInput {
     joint: Option<JointSpec>,
     legacy_motor: Option<JointMotor>,
     actuation: Option<JointActuation>,
+    passive_dynamics: Option<JointPassiveDynamics>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -143,6 +144,11 @@ pub(crate) enum CompileError {
     JointCycle { entity_index: u32 },
     #[error("invalid joint actuation on entity {entity_index}: {reason}")]
     InvalidActuation {
+        entity_index: u32,
+        reason: &'static str,
+    },
+    #[error("invalid passive joint dynamics on entity {entity_index}: {reason}")]
+    InvalidPassiveDynamics {
         entity_index: u32,
         reason: &'static str,
     },
@@ -225,9 +231,9 @@ pub(crate) fn compile_rigid_body_model(
     let joint_dynamics = bodies
         .iter()
         .filter_map(|body| {
-            passive_damping(*body).map(|passive_damping| JointDynamics {
+            passive_damping(*body).map(|implicit_damping| JointDynamics {
                 entity: body.entity,
-                passive_damping,
+                implicit_damping,
             })
         })
         .collect();
@@ -301,6 +307,7 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                     joint: joints.into_iter().flatten().next(),
                     legacy_motor,
                     actuation: entity_ref.get::<JointActuation>().copied(),
+                    passive_dynamics: entity_ref.get::<JointPassiveDynamics>().copied(),
                 });
             }
         }
@@ -315,6 +322,12 @@ fn validate_joint_graph(bodies: &[BodyInput], world: &World) -> Result<(), Compi
                 return Err(CompileError::InvalidActuation {
                     entity_index: body.entity.index(),
                     reason: "actuation without joint",
+                });
+            }
+            if body.passive_dynamics.is_some() {
+                return Err(CompileError::InvalidPassiveDynamics {
+                    entity_index: body.entity.index(),
+                    reason: "passive dynamics without joint",
                 });
             }
             continue;
@@ -332,6 +345,7 @@ fn validate_joint_graph(bodies: &[BodyInput], world: &World) -> Result<(), Compi
         validate_joint(body, joint)?;
         validate_actuation(world, body.entity, joint)?;
         validate_legacy_motor(body, joint)?;
+        validate_passive_dynamics(body, joint)?;
 
         let mut cursor = parent;
         for _ in 0..bodies.len() {
@@ -350,6 +364,51 @@ fn validate_joint_graph(bodies: &[BodyInput], world: &World) -> Result<(), Compi
         }
     }
     Ok(())
+}
+
+fn validate_passive_dynamics(body: &BodyInput, joint: JointSpec) -> Result<(), CompileError> {
+    let Some(dynamics) = body.passive_dynamics else {
+        return Ok(());
+    };
+    if !dynamics.has_valid_values() {
+        return Err(CompileError::InvalidPassiveDynamics {
+            entity_index: body.entity.index(),
+            reason: "non-finite or negative coefficient",
+        });
+    }
+    let coulomb_friction = match dynamics {
+        JointPassiveDynamics::Revolute {
+            coulomb_friction_nm,
+            ..
+        } => coulomb_friction_nm,
+        JointPassiveDynamics::Prismatic {
+            coulomb_friction_n, ..
+        } => coulomb_friction_n,
+    };
+    if coulomb_friction != 0.0 {
+        return Err(CompileError::InvalidPassiveDynamics {
+            entity_index: body.entity.index(),
+            reason: "nonzero Coulomb friction is not yet portable",
+        });
+    }
+    let compatible = matches!(
+        (dynamics, joint),
+        (
+            JointPassiveDynamics::Revolute { .. },
+            JointSpec::Revolute(_)
+        ) | (
+            JointPassiveDynamics::Prismatic { .. },
+            JointSpec::Prismatic(_)
+        )
+    );
+    if compatible {
+        Ok(())
+    } else {
+        Err(CompileError::InvalidPassiveDynamics {
+            entity_index: body.entity.index(),
+            reason: "joint kind mismatch",
+        })
+    }
 }
 
 fn validate_legacy_motor(body: &BodyInput, joint: JointSpec) -> Result<(), CompileError> {
@@ -607,8 +666,8 @@ fn passive_damping(body: BodyInput) -> Option<f64> {
     if !revolute && !prismatic {
         return None;
     }
-    if let Some(actuation) = body.actuation {
-        return Some(match actuation {
+    let actuator_damping = if let Some(actuation) = body.actuation {
+        Some(match actuation {
             JointActuation::RevolutePosition {
                 damping_nm_s_per_rad,
                 ..
@@ -624,10 +683,26 @@ fn passive_damping(body: BodyInput) -> Option<f64> {
             | JointActuation::RevoluteEffort { .. }
             | JointActuation::PrismaticEffort { .. } => 0.0,
             _ => 0.0,
-        });
+        })
+    } else {
+        body.legacy_motor
+            .map(|motor| legacy_motor_gains(motor, revolute).1)
+    };
+    let plant_damping = match body.passive_dynamics {
+        Some(JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad,
+            ..
+        }) if revolute => Some(viscous_damping_nm_s_per_rad),
+        Some(JointPassiveDynamics::Prismatic {
+            viscous_damping_n_s_per_m,
+            ..
+        }) if prismatic => Some(viscous_damping_n_s_per_m),
+        _ => None,
+    };
+    match (actuator_damping, plant_damping) {
+        (None, None) => None,
+        (actuator, plant) => Some(actuator.unwrap_or(0.0) + plant.unwrap_or(0.0)),
     }
-    body.legacy_motor
-        .map(|motor| legacy_motor_gains(motor, revolute).1)
 }
 
 fn write_passive_damping(output: &mut String, body: BodyInput, revolute: bool) {
@@ -1047,6 +1122,70 @@ mod tests {
         assert_eq!(first.topology, changed.topology);
         assert_ne!(first.joint_dynamics, changed.joint_dynamics);
         assert!(changed.mjcf.contains("damping=\"10.00000000000000000\""));
+    }
+
+    #[test]
+    fn passive_joint_loss_is_separate_from_actuator_damping() {
+        let mut world = World::new();
+        let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
+        let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
+        world.entity_mut(child).insert((
+            RevoluteJointDesc {
+                parent: root,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointActuation::RevolutePosition {
+                target_position_rad: 0.0,
+                stiffness_nm_per_rad: 120.0,
+                damping_nm_s_per_rad: 20.0,
+                max_effort_nm: 7.0,
+            },
+            JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 2.5,
+                coulomb_friction_nm: 0.0,
+            },
+        ));
+
+        let compiled =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert!(compiled.mjcf.contains("damping=\"22.50000000000000000\""));
+        assert!(!compiled.mjcf.contains("frictionloss="));
+        assert_eq!(
+            compiled.joint_dynamics,
+            vec![JointDynamics {
+                entity: child,
+                implicit_damping: 22.5,
+            }]
+        );
+    }
+
+    #[test]
+    fn nonzero_coulomb_friction_fails_before_native_model_creation() {
+        let mut world = World::new();
+        let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
+        let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
+        world.entity_mut(child).insert((
+            RevoluteJointDesc {
+                parent: root,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 0.0,
+                coulomb_friction_nm: 0.1,
+            },
+        ));
+        assert!(matches!(
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666),
+            Err(CompileError::InvalidPassiveDynamics { .. })
+        ));
     }
 
     #[test]
