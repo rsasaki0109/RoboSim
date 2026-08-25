@@ -462,8 +462,18 @@ robot model, adapter configuration, subject, and normalized launch arguments.
 Schema-v6 reports remain valid historical eleven-check rehearsals but do not
 prove that the external simulator authoring path shipped in the archive.
 
-Installed flagship proof report schema v2 is the timing-free index emitted by
-that runner. It fixes the task and outcome identities, binds the exact packaged
+Installed flagship proof report schema v3 adds a required three-case
+recorded/shadow result: 512-sample exact playback, 512-sample Rapier-to-MuJoCo
+shadow comparison with its first measured divergence, and a sequence-128
+fail-closed disconnect. Every submitted action is suppressed and actuator
+writes must remain zero. Its sessions bind the same TaskSpec/controller,
+calibration, requirements, and retained compact traces by SHA-256 and replay
+semantically through Failure Capsule verification. Schema v2 remains valid for
+its original simulation-only installed proof but cannot qualify for the current
+recorded/shadow gate.
+
+The installed flagship report remains the timing-free index emitted by that
+runner. It fixes the task and outcome identities, binds the exact packaged
 producer executable, and binds the TaskSpec,
 Rapier/MuJoCo success and failure reports, both failure replays, unit-bearing
 cross-backend report, browser inspector, workflow report, and capsule manifest

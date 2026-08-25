@@ -18,6 +18,7 @@ rne_asset_cli = { workspace = true }
 rne_assets = { workspace = true }
 rne_core = { workspace = true }
 rne_ecs = { workspace = true }
+rne_hardware_gateway = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_mujoco = { workspace = true, optional = true }
 rne_traffic = { workspace = true }

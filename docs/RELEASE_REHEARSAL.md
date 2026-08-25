@@ -36,6 +36,14 @@ the fixture is authoring-path evidence, not independent accelerator evidence;
 its canonical `rne-scaffold.json` must validate the exact schema-v1 file set.
 Both scaffold contracts are retained compatibility fixtures; neither counts as
 independent external implementation evidence.
+
+The installed flagship check also runs the same mobile-manipulation TaskSpec
+through recorded playback and process-authority shadow evaluation. It requires
+an exact 512-sample playback, retains the first unit-bearing Rapier/MuJoCo
+trajectory divergence from another 512 samples, injects a sequence-128
+disconnect, suppresses every action, and rejects any actuator write. These
+artifacts are semantically replayed when the bundled Failure Capsule is
+verified; they are not counted as physical-device evidence.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path

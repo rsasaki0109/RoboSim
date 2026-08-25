@@ -37,7 +37,10 @@ check uses `rne-flagship-proof`: one packaged command that reproduces the comple
 indoor mobile-manipulation flagship success, expected failure, first contract
 violation, browser inspector, verified Failure Capsule, and a SHA-256-bound
 installed proof report. It executes the same proof on Rapier and a bundled,
-pinned MuJoCo runtime. Clean tagged Windows/Linux archive evidence and the
+pinned MuJoCo runtime. The installed proof now also retains real controller-time
+observations/actions for exact playback, Rapier-to-MuJoCo shadow comparison,
+and a bounded disconnect, all under the same mobile-manipulation TaskSpec and
+inside the verified Failure Capsule. Clean tagged Windows/Linux archive evidence and the
 15-minute external measurement remain the open parts of Gate 1; the public
 intake path now verifies rather than trusts that submission.
 

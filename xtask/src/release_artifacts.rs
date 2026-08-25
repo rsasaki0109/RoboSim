@@ -467,8 +467,38 @@ struct InstalledFlagshipProofReport {
     expected_failure_contract: String,
     first_violation_step: u64,
     capsule_verified: bool,
+    recorded_shadow_status: Option<String>,
+    recorded_shadow_case_count: usize,
     producer_executable: MemberDigest,
     artifacts: Vec<MemberDigest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledRecordedShadowCase {
+    id: String,
+    mode: rne_hardware_gateway::HardwareMode,
+    expected_status: String,
+    observed_status: String,
+    accepted_samples: usize,
+    violating_elements: usize,
+    first_divergence_tensor: Option<String>,
+    suppressed_actions: usize,
+    actuator_writes_emitted: bool,
+    session: String,
+    report: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledRecordedShadowProof {
+    kind: String,
+    schema_version: u32,
+    status: String,
+    task_id: String,
+    controller_id: String,
+    clock_source: String,
+    cases: Vec<InstalledRecordedShadowCase>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -2760,7 +2790,9 @@ fn validate_installed_flagship_proof(
         report.success_status == "passed"
             && report.expected_failure_contract == "perception_stream_alive"
             && report.first_violation_step > 0
-            && report.capsule_verified,
+            && report.capsule_verified
+            && report.recorded_shadow_status.as_deref() == Some("passed")
+            && report.recorded_shadow_case_count == 3,
         "installed flagship proof omitted required success/failure evidence"
     );
     let producer_name = producer
@@ -2791,6 +2823,18 @@ fn validate_installed_flagship_proof(
         "mujoco-failure.rne-replay",
         "mujoco-success.behavior-report.json",
         "rapier-minimized-failure.behavior-report.json",
+        "recorded-shadow-calibration.json",
+        "recorded-shadow-controller.json",
+        "recorded-shadow-disconnect.report.json",
+        "recorded-shadow-disconnect.session.json",
+        "recorded-shadow-mujoco.trace.json",
+        "recorded-shadow-playback.report.json",
+        "recorded-shadow-playback.session.json",
+        "recorded-shadow-proof.json",
+        "recorded-shadow-rapier.trace.json",
+        "recorded-shadow-requirements.json",
+        "recorded-shadow-shadow.report.json",
+        "recorded-shadow-shadow.session.json",
         "replay-inspector.html",
         "success.behavior-report.json",
         "workflow-report.json",
@@ -2806,7 +2850,81 @@ fn validate_installed_flagship_proof(
     for artifact in &report.artifacts {
         validate_proof_member(root, artifact, &artifact.path)?;
     }
+    validate_installed_recorded_shadow_proof(root)?;
     Ok(report)
+}
+
+fn validate_installed_recorded_shadow_proof(root: &Path) -> anyhow::Result<()> {
+    let path = root.join("recorded-shadow-proof.json");
+    let proof: InstalledRecordedShadowProof = serde_json::from_slice(
+        &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+    )
+    .with_context(|| format!("parse {}", path.display()))?;
+    anyhow::ensure!(
+        proof.kind == "rne_installed_recorded_shadow_proof"
+            && proof.schema_version == 1
+            && proof.status == "passed"
+            && proof.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+            && proof.controller_id == "rne.ai.ik_mobile_lift_pick_place_policy.v1"
+            && proof.clock_source == "sim_clock_fixed_step",
+        "installed recorded/shadow proof identity or status is invalid"
+    );
+    let expected = [
+        (
+            "playback",
+            rne_hardware_gateway::HardwareMode::Playback,
+            "passed",
+            512,
+            "recorded-shadow-playback.session.json",
+            "recorded-shadow-playback.report.json",
+        ),
+        (
+            "shadow",
+            rne_hardware_gateway::HardwareMode::Shadow,
+            "failed",
+            512,
+            "recorded-shadow-shadow.session.json",
+            "recorded-shadow-shadow.report.json",
+        ),
+        (
+            "disconnect",
+            rne_hardware_gateway::HardwareMode::Shadow,
+            "failed_as_expected",
+            128,
+            "recorded-shadow-disconnect.session.json",
+            "recorded-shadow-disconnect.report.json",
+        ),
+    ];
+    anyhow::ensure!(
+        proof.cases.len() == expected.len(),
+        "installed recorded/shadow proof must contain three cases"
+    );
+    for (case, (id, mode, status, samples, session, report)) in proof.cases.iter().zip(expected) {
+        anyhow::ensure!(
+            case.id == id
+                && case.mode == mode
+                && case.expected_status == status
+                && case.observed_status == status
+                && case.accepted_samples == samples
+                && case.suppressed_actions == samples
+                && !case.actuator_writes_emitted
+                && case.session == session
+                && case.report == report,
+            "installed recorded/shadow case {id} violates its retained contract"
+        );
+        if id == "shadow" {
+            anyhow::ensure!(
+                case.violating_elements > 0 && case.first_divergence_tensor.is_some(),
+                "installed shadow case omitted its measured divergence"
+            );
+        } else {
+            anyhow::ensure!(
+                case.violating_elements == 0 && case.first_divergence_tensor.is_none(),
+                "installed {id} case unexpectedly contains numeric divergence"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow::Result<()> {
@@ -3403,6 +3521,18 @@ mod tests {
             "mujoco-failure.rne-replay",
             "mujoco-success.behavior-report.json",
             "rapier-minimized-failure.behavior-report.json",
+            "recorded-shadow-calibration.json",
+            "recorded-shadow-controller.json",
+            "recorded-shadow-disconnect.report.json",
+            "recorded-shadow-disconnect.session.json",
+            "recorded-shadow-mujoco.trace.json",
+            "recorded-shadow-playback.report.json",
+            "recorded-shadow-playback.session.json",
+            "recorded-shadow-proof.json",
+            "recorded-shadow-rapier.trace.json",
+            "recorded-shadow-requirements.json",
+            "recorded-shadow-shadow.report.json",
+            "recorded-shadow-shadow.session.json",
             "replay-inspector.html",
             "success.behavior-report.json",
             "workflow-report.json",
@@ -3412,7 +3542,49 @@ mod tests {
             .map(|relative| {
                 let path = directory.path().join(relative);
                 fs::create_dir_all(path.parent().unwrap()).expect("artifact parent");
-                let bytes = format!("stable:{relative}").into_bytes();
+                let bytes = if relative == "recorded-shadow-proof.json" {
+                    serde_json::to_vec(&serde_json::json!({
+                        "kind": "rne_installed_recorded_shadow_proof",
+                        "schema_version": 1,
+                        "status": "passed",
+                        "task_id": "rne.flagship.mobile_lift_shared_aisle.v1",
+                        "controller_id": "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+                        "clock_source": "sim_clock_fixed_step",
+                        "cases": [
+                            {
+                                "id": "playback", "mode": "playback",
+                                "expected_status": "passed", "observed_status": "passed",
+                                "accepted_samples": 512, "violating_elements": 0,
+                                "first_divergence_tensor": null, "suppressed_actions": 512,
+                                "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-playback.session.json",
+                                "report": "recorded-shadow-playback.report.json"
+                            },
+                            {
+                                "id": "shadow", "mode": "shadow",
+                                "expected_status": "failed", "observed_status": "failed",
+                                "accepted_samples": 512, "violating_elements": 174,
+                                "first_divergence_tensor": "lift_position_m",
+                                "suppressed_actions": 512, "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-shadow.session.json",
+                                "report": "recorded-shadow-shadow.report.json"
+                            },
+                            {
+                                "id": "disconnect", "mode": "shadow",
+                                "expected_status": "failed_as_expected",
+                                "observed_status": "failed_as_expected",
+                                "accepted_samples": 128, "violating_elements": 0,
+                                "first_divergence_tensor": null, "suppressed_actions": 128,
+                                "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-disconnect.session.json",
+                                "report": "recorded-shadow-disconnect.report.json"
+                            }
+                        ]
+                    }))
+                    .expect("recorded/shadow proof fixture")
+                } else {
+                    format!("stable:{relative}").into_bytes()
+                };
                 fs::write(&path, &bytes).expect("artifact");
                 MemberDigest {
                     path: relative.to_string(),
@@ -3431,6 +3603,8 @@ mod tests {
             expected_failure_contract: "perception_stream_alive".to_string(),
             first_violation_step: 307,
             capsule_verified: true,
+            recorded_shadow_status: Some("passed".to_string()),
+            recorded_shadow_case_count: 3,
             producer_executable: MemberDigest {
                 path: if cfg!(windows) {
                     "bin/rne-flagship-proof.exe"
@@ -3455,6 +3629,15 @@ mod tests {
         )
         .expect("proof report");
         validate_installed_flagship_proof(directory.path(), &producer).expect("valid proof");
+
+        let recorded_proof_path = directory.path().join("recorded-shadow-proof.json");
+        let recorded_proof_bytes = fs::read(&recorded_proof_path).expect("recorded proof");
+        let mut recorded_proof: serde_json::Value =
+            serde_json::from_slice(&recorded_proof_bytes).expect("recorded proof JSON");
+        recorded_proof["cases"][0]["actuator_writes_emitted"] = serde_json::json!(true);
+        write_pretty_json(&recorded_proof_path, &recorded_proof).expect("tampered recorded proof");
+        assert!(validate_installed_recorded_shadow_proof(directory.path()).is_err());
+        fs::write(&recorded_proof_path, recorded_proof_bytes).expect("restore recorded proof");
 
         let bound_member = |relative: &str| {
             let bytes = fs::read(directory.path().join(relative)).expect("bound member");

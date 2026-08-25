@@ -144,11 +144,16 @@ rehearsal. From its top-level directory:
 ```
 
 The flagship command writes `flagship-proof/installed-proof-report.json`. Its
-schema-v2 report requires both packaged physics paths, binds the exact packaged
+schema-v3 report requires both packaged physics paths, binds the exact packaged
 producer executable, and indexes the generated TaskSpec, Rapier/MuJoCo success
 and failure reports, both verified failure replays, unit-bearing cross-backend
 comparison, browser inspector, workflow report, and verified capsule manifest
-by relative path, byte size, and SHA-256.
+by relative path, byte size, and SHA-256. The same command also retains compact
+controller-time traces and executes three non-actuating cases under that exact
+TaskSpec: 512-sample Rapier playback, 512-sample Rapier-to-MuJoCo shadow
+comparison, and a sequence-128 transport disconnect. Inspect
+`recorded-shadow-proof.json`; its sessions, reports, controller, calibration,
+requirements, and trace hashes are part of the verified Failure Capsule.
 When `--measure-on MACHINE` is present, the same command also writes
 `time-to-proof-report.json`. This timing-only schema-v1 artifact records the
 operator-supplied machine label, OS, architecture, elapsed milliseconds from

@@ -49,6 +49,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use uuid::Uuid;
 
+#[cfg(feature = "mujoco")]
+mod recorded_proof;
+
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
 const REPORT_KIND: &str = "rne_flagship_workflow_report";
 const REPORT_SCHEMA_VERSION: u32 = 1;
@@ -158,6 +161,13 @@ struct FlagshipObservation {
     fail_closed_abort: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FlagshipRecordedStep {
+    observation: FlagshipObservation,
+    action_values: Vec<f64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ScenarioOverrides {
     perception_blackout: bool,
@@ -198,6 +208,7 @@ struct FlagshipScenario {
     dimensions: Vec<BehaviorDimension>,
     scene_input_digest: u64,
     trace: Option<Arc<Mutex<Vec<FlagshipObservation>>>>,
+    recorded_trace: Option<Arc<Mutex<Vec<FlagshipRecordedStep>>>>,
 }
 
 impl FlagshipScenario {
@@ -274,11 +285,17 @@ impl FlagshipScenario {
             dimensions: dimensions.to_vec(),
             scene_input_digest,
             trace: None,
+            recorded_trace: None,
         })
     }
 
-    fn with_trace(mut self, trace: Arc<Mutex<Vec<FlagshipObservation>>>) -> Self {
+    fn with_traces(
+        mut self,
+        trace: Arc<Mutex<Vec<FlagshipObservation>>>,
+        recorded_trace: Arc<Mutex<Vec<FlagshipRecordedStep>>>,
+    ) -> Self {
         self.trace = Some(trace);
+        self.recorded_trace = Some(recorded_trace);
         self
     }
 
@@ -366,6 +383,18 @@ impl FlagshipScenario {
             {
                 trace.push(observation.clone());
             }
+        }
+    }
+
+    fn record_control_step(&self, observation: &FlagshipObservation, action_values: Vec<f64>) {
+        if let Some(trace) = &self.recorded_trace {
+            trace
+                .lock()
+                .expect("flagship recorded trace mutex is not poisoned")
+                .push(FlagshipRecordedStep {
+                    observation: observation.clone(),
+                    action_values,
+                });
         }
     }
 }
@@ -509,6 +538,7 @@ impl BehaviorScenario for FlagshipScenario {
             MobileManipulatorAction::default()
         };
         let motion_commanded = action_commands_motion(&action);
+        let normalized_action_values = flatten_action(action, &self.observation(motion_commanded));
         let robot_step = self.episode.step(action);
         self.robot_observation = robot_step.observation;
         self.robot_terminated = robot_step.terminated;
@@ -527,6 +557,7 @@ impl BehaviorScenario for FlagshipScenario {
 
         let observation = self.observation(motion_commanded);
         self.record_trace(&observation);
+        self.record_control_step(&observation, normalized_action_values);
         BehaviorScenarioStep {
             observation,
             done: self.fail_closed_abort || robot_step.is_done(),
@@ -690,6 +721,8 @@ struct InstalledFlagshipProofReport {
     expected_failure_contract: &'static str,
     first_violation_step: u64,
     capsule_verified: bool,
+    recorded_shadow_status: Option<&'static str>,
+    recorded_shadow_case_count: usize,
     producer_executable: InstalledProofArtifact,
     artifacts: Vec<InstalledProofArtifact>,
 }
@@ -731,7 +764,10 @@ fn run(started: Instant) -> Result<()> {
     fs::create_dir_all(&output)
         .with_context(|| format!("could not create {}", output.display()))?;
 
-    let (clean_run, success_trace) = run_clean_flagship(FlagshipPhysicsBackend::Rapier)?;
+    let (clean_run, success_trace, rapier_recorded_trace) =
+        run_clean_flagship(FlagshipPhysicsBackend::Rapier)?;
+    #[cfg(not(feature = "mujoco"))]
+    let _ = &rapier_recorded_trace;
 
     #[cfg(feature = "mujoco")]
     let mujoco_success_evidence = if cli.cross_backend {
@@ -740,7 +776,11 @@ fn run(started: Instant) -> Result<()> {
         None
     };
     #[cfg(not(feature = "mujoco"))]
-    let mujoco_success_evidence: Option<(BehaviorRun, Vec<FlagshipObservation>)> = {
+    let mujoco_success_evidence: Option<(
+        BehaviorRun,
+        Vec<FlagshipObservation>,
+        Vec<FlagshipRecordedStep>,
+    )> = {
         if cli.cross_backend {
             bail!("--cross-backend requires --features mujoco and a MuJoCo 3.9 runtime");
         }
@@ -781,79 +821,83 @@ fn run(started: Instant) -> Result<()> {
     })?;
 
     #[cfg(feature = "mujoco")]
-    let cross_backend_evidence = if let Some((mujoco_run, mujoco_trace)) = mujoco_success_evidence {
-        let mut rapier_comparison_failure_run =
-            run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
-                FlagshipScenario::from_dimensions(seed, &minimized.artifact.dimensions)
-            })?;
-        if rapier_comparison_failure_run.report.passed()
-            || rapier_comparison_failure_run.failure_replays.len() != 1
-        {
-            bail!("Rapier minimized comparison failure did not emit exactly one replay");
-        }
-        let rapier_comparison_failure = rapier_comparison_failure_run
-            .failure_replays
-            .pop()
-            .expect("Rapier comparison failure replay count checked");
-        if rapier_comparison_failure.failure != minimized.artifact.failure {
-            bail!("Rapier minimized comparison failure changed its first violation");
-        }
-        rapier_comparison_failure_run.report.set_failure_artifacts(
-            SEED,
-            Some("failure-minimized.rne-replay".to_string()),
-            None,
-            None,
-        );
-        let mut mujoco_failure_run =
-            run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
-                FlagshipScenario::from_dimensions_with_physics(
-                    seed,
-                    &minimized.artifact.dimensions,
-                    FlagshipPhysicsBackend::Mujoco,
-                )
-            })?;
-        if mujoco_failure_run.report.passed() || mujoco_failure_run.failure_replays.len() != 1 {
-            bail!("MuJoCo intentional failure did not emit exactly one replay");
-        }
-        let mujoco_failure_replay = mujoco_failure_run
-            .failure_replays
-            .pop()
-            .expect("MuJoCo failure replay count checked");
-        if mujoco_failure_replay.failure.contract.name != EXPECTED_FAILURE_CONTRACT {
-            bail!(
-                "expected MuJoCo {EXPECTED_FAILURE_CONTRACT}, got {}",
-                mujoco_failure_replay.failure.contract.name
+    let mut mujoco_recorded_trace = None;
+    #[cfg(feature = "mujoco")]
+    let cross_backend_evidence =
+        if let Some((mujoco_run, mujoco_trace, recorded_trace)) = mujoco_success_evidence {
+            mujoco_recorded_trace = Some(recorded_trace);
+            let mut rapier_comparison_failure_run =
+                run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+                    FlagshipScenario::from_dimensions(seed, &minimized.artifact.dimensions)
+                })?;
+            if rapier_comparison_failure_run.report.passed()
+                || rapier_comparison_failure_run.failure_replays.len() != 1
+            {
+                bail!("Rapier minimized comparison failure did not emit exactly one replay");
+            }
+            let rapier_comparison_failure = rapier_comparison_failure_run
+                .failure_replays
+                .pop()
+                .expect("Rapier comparison failure replay count checked");
+            if rapier_comparison_failure.failure != minimized.artifact.failure {
+                bail!("Rapier minimized comparison failure changed its first violation");
+            }
+            rapier_comparison_failure_run.report.set_failure_artifacts(
+                SEED,
+                Some("failure-minimized.rne-replay".to_string()),
+                None,
+                None,
             );
-        }
-        let mujoco_verification =
-            verify_behavior_replay(&mujoco_failure_replay, |seed, dimensions| {
-                FlagshipScenario::from_dimensions_with_physics(
-                    seed,
-                    dimensions,
-                    FlagshipPhysicsBackend::Mujoco,
-                )
-            })?;
-        mujoco_failure_run.report.set_failure_artifacts(
-            SEED,
-            Some("mujoco-failure.rne-replay".to_string()),
-            None,
-            None,
-        );
-        Some(build_cross_backend_report(CrossBackendReportInputs {
-            rapier_report: &clean_run.report,
-            rapier_trace: &success_trace,
-            mujoco_report: &mujoco_run.report,
-            mujoco_trace: &mujoco_trace,
-            rapier_failure: &minimized.artifact,
-            rapier_matched_replay_frames: verification.matched_frames,
-            rapier_failure_report: &rapier_comparison_failure_run.report,
-            mujoco_failure_report: &mujoco_failure_run.report,
-            mujoco_failure: mujoco_failure_replay,
-            mujoco_matched_replay_frames: mujoco_verification.matched_frames,
-        })?)
-    } else {
-        None
-    };
+            let mut mujoco_failure_run =
+                run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
+                    FlagshipScenario::from_dimensions_with_physics(
+                        seed,
+                        &minimized.artifact.dimensions,
+                        FlagshipPhysicsBackend::Mujoco,
+                    )
+                })?;
+            if mujoco_failure_run.report.passed() || mujoco_failure_run.failure_replays.len() != 1 {
+                bail!("MuJoCo intentional failure did not emit exactly one replay");
+            }
+            let mujoco_failure_replay = mujoco_failure_run
+                .failure_replays
+                .pop()
+                .expect("MuJoCo failure replay count checked");
+            if mujoco_failure_replay.failure.contract.name != EXPECTED_FAILURE_CONTRACT {
+                bail!(
+                    "expected MuJoCo {EXPECTED_FAILURE_CONTRACT}, got {}",
+                    mujoco_failure_replay.failure.contract.name
+                );
+            }
+            let mujoco_verification =
+                verify_behavior_replay(&mujoco_failure_replay, |seed, dimensions| {
+                    FlagshipScenario::from_dimensions_with_physics(
+                        seed,
+                        dimensions,
+                        FlagshipPhysicsBackend::Mujoco,
+                    )
+                })?;
+            mujoco_failure_run.report.set_failure_artifacts(
+                SEED,
+                Some("mujoco-failure.rne-replay".to_string()),
+                None,
+                None,
+            );
+            Some(build_cross_backend_report(CrossBackendReportInputs {
+                rapier_report: &clean_run.report,
+                rapier_trace: &success_trace,
+                mujoco_report: &mujoco_run.report,
+                mujoco_trace: &mujoco_trace,
+                rapier_failure: &minimized.artifact,
+                rapier_matched_replay_frames: verification.matched_frames,
+                rapier_failure_report: &rapier_comparison_failure_run.report,
+                mujoco_failure_report: &mujoco_failure_run.report,
+                mujoco_failure: mujoco_failure_replay,
+                mujoco_matched_replay_frames: mujoco_verification.matched_frames,
+            })?)
+        } else {
+            None
+        };
     #[cfg(not(feature = "mujoco"))]
     let cross_backend_evidence: Option<CrossBackendEvidence> = {
         let _ = mujoco_success_evidence;
@@ -904,6 +948,15 @@ fn run(started: Instant) -> Result<()> {
         .validate()
         .context("generated flagship TaskSpec is invalid")?;
     write_pretty_json(&task_spec_path, &task_spec)?;
+    #[cfg(feature = "mujoco")]
+    if let Some(mujoco_recorded_trace) = &mujoco_recorded_trace {
+        recorded_proof::write_recorded_shadow_proof(
+            &output,
+            &task_spec,
+            &rapier_recorded_trace,
+            mujoco_recorded_trace,
+        )?;
+    }
 
     let (imported_asset_digest, imported_assets) =
         digest_scene_inputs(&rne_ai::mm_mobile_lift_pick_place_scene_path())?;
@@ -1018,6 +1071,8 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
             "mujoco-success.behavior-report.json",
             "rapier-minimized-failure.behavior-report.json",
         ]);
+        #[cfg(feature = "mujoco")]
+        paths.extend(recorded_proof::PROOF_ARTIFACTS);
     }
     paths.sort_unstable();
     let artifacts = paths
@@ -1034,6 +1089,8 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
         expected_failure_contract: workflow.intentional_failure.expected_contract,
         first_violation_step: workflow.intentional_failure.injected_step,
         capsule_verified: true,
+        recorded_shadow_status: workflow.cross_backend_report.as_ref().map(|_| "passed"),
+        recorded_shadow_case_count: usize::from(workflow.cross_backend_report.is_some()) * 3,
         producer_executable: installed_proof_producer()?,
         artifacts,
     };
@@ -1104,6 +1161,15 @@ fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Resu
                 output.join(evidence).display().to_string(),
             ]);
         }
+        #[cfg(feature = "mujoco")]
+        {
+            for evidence in recorded_proof::PROOF_ARTIFACTS {
+                create_args.extend([
+                    "--evidence".to_string(),
+                    output.join(evidence).display().to_string(),
+                ]);
+            }
+        }
     }
     create_args.extend([
         "--output".to_string(),
@@ -1160,12 +1226,19 @@ fn parse_cli_args(mut arguments: impl Iterator<Item = String>) -> Result<Cli> {
 
 fn run_clean_flagship(
     physics_backend: FlagshipPhysicsBackend,
-) -> Result<(BehaviorRun, Vec<FlagshipObservation>)> {
+) -> Result<(
+    BehaviorRun,
+    Vec<FlagshipObservation>,
+    Vec<FlagshipRecordedStep>,
+)> {
     let trace = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&trace);
+    let recorded_trace = Arc::new(Mutex::new(Vec::new()));
+    let recorded_captured = Arc::clone(&recorded_trace);
     let run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
-        FlagshipScenario::clean_with_physics(seed, physics_backend)
-            .map(|scenario| scenario.with_trace(Arc::clone(&captured)))
+        FlagshipScenario::clean_with_physics(seed, physics_backend).map(|scenario| {
+            scenario.with_traces(Arc::clone(&captured), Arc::clone(&recorded_captured))
+        })
     })?;
     if !run.report.passed() || !run.failure_replays.is_empty() {
         bail!(
@@ -1183,7 +1256,16 @@ fn run_clean_flagship(
             physics_backend.as_str()
         );
     }
-    Ok((run, trace))
+    let recorded_trace = recorded_trace
+        .lock()
+        .expect("flagship recorded trace mutex is not poisoned")
+        .clone();
+    anyhow::ensure!(
+        !recorded_trace.is_empty(),
+        "{} clean flagship run emitted no controller trace",
+        physics_backend.as_str()
+    );
+    Ok((run, trace, recorded_trace))
 }
 
 #[cfg(feature = "mujoco")]
@@ -1653,6 +1735,27 @@ fn action_commands_motion(action: &MobileManipulatorAction) -> bool {
         || action.wrist_yaw_target_rad.is_some()
 }
 
+fn flatten_action(action: MobileManipulatorAction, observation: &FlagshipObservation) -> Vec<f64> {
+    let target = action.lift_joint_target;
+    vec![
+        action.left_wheel_velocity_rad_s,
+        action.right_wheel_velocity_rad_s,
+        target
+            .map(|value| value.shoulder_rad)
+            .unwrap_or(observation.shoulder_position_rad),
+        target
+            .map(|value| value.elbow_rad)
+            .unwrap_or(observation.elbow_position_rad),
+        action
+            .wrist_yaw_target_rad
+            .unwrap_or(observation.wrist_yaw_position_rad),
+        target
+            .map(|value| value.lift_m)
+            .unwrap_or(observation.lift_position_m),
+        action.gripper_velocity_m_s,
+    ]
+}
+
 fn observation_is_finite(observation: &FlagshipObservation) -> bool {
     [
         observation.wrist_depth_min_m,
@@ -1874,8 +1977,11 @@ mod tests {
         let trace = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&trace);
         let run = run_behavior_scenarios_with_replays(SCENARIO, [SEED], |seed| {
-            FlagshipScenario::clean_with_physics(seed, FlagshipPhysicsBackend::Mujoco)
-                .map(|scenario| scenario.with_trace(Arc::clone(&captured)))
+            FlagshipScenario::clean_with_physics(seed, FlagshipPhysicsBackend::Mujoco).map(
+                |scenario| {
+                    scenario.with_traces(Arc::clone(&captured), Arc::new(Mutex::new(Vec::new())))
+                },
+            )
         })
         .expect("MuJoCo flagship run");
         let trace = trace.lock().expect("MuJoCo trace mutex");
