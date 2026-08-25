@@ -203,6 +203,19 @@ comparison. An untrusted report replays every vector against its TaskSpec; its
 canonical failing fixture is
 `tests/golden/hardware/gateway-shadow-comparison-v1.json`.
 
+Recorded-shadow session/report schema v1 wraps that comparator without changing
+its v1 bytes. The session binds exact TaskSpec, controller, requirements,
+actions, source/comparison traces, and calibration SHA-256 values; it also
+freezes clock source, tick scale, nominal/maximum latency, explicit sequence-gap
+drop accounting, TaskSpec tensor units, bootstrap count, sample capacity, and
+an optional declared disconnect sequence. The process report retains the
+non-actuating gateway audit, requires every accepted action to be suppressed,
+and separately classifies exact playback, numeric shadow divergence, and a
+bounded transport failure. Host timestamps remain external-boundary evidence,
+not simulation time. Failure Capsule replay requires exact structure, integer
+counts, identities, and hashes; independently recomputed floating metrics use
+an absolute `1e-12` serialization/reduction tolerance.
+
 Hardware mock-conformance report schema v1 requires exactly six canonically
 ordered cases: command deadline, disconnect, reconnect, stale command,
 actuator limit, and emergency stop. Every case must prove device zero-output

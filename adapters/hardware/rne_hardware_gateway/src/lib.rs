@@ -9,6 +9,7 @@
 
 pub mod conformance;
 pub mod mock;
+pub mod recorded;
 pub mod shadow;
 pub mod simulator;
 pub mod wire;

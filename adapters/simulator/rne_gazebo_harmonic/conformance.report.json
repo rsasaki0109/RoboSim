@@ -4,8 +4,8 @@
   "status": "passed",
   "subject": {
     "adapter_file": "rne_gazebo_harmonic_adapter.py",
-    "adapter_sha256": "d2776fb3d3613bd9ae57fbb0c94d4d6552fbe5073d8dbd1f79b90d2dd119e63d",
-    "adapter_size_bytes": 13719,
+    "adapter_sha256": "fb88583f61b6d9c3bd298467c3b2ad1eac1ad3262909d0c524cc333bf6228d49",
+    "adapter_size_bytes": 18644,
     "launcher_file": "python3",
     "arguments_sha256": "2e2da1c1ad6027e8ae12e072a595df487f89c3dcca7c8e806da3ea848c5b0bb0",
     "argument_count": 5,

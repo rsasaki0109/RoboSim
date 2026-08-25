@@ -3826,6 +3826,7 @@ dependencies = [
 name = "rne_hardware_gateway"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "rne_ai",
  "serde",
  "serde_json",

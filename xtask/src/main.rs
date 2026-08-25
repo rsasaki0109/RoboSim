@@ -1518,6 +1518,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "hardware",
+            "recorded_shadow_session",
+            u64::from(rne_hardware_gateway::recorded::RECORDED_SHADOW_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "recorded_shadow_report",
+            u64::from(rne_hardware_gateway::recorded::RECORDED_SHADOW_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
             "mock_conformance",
             u64::from(rne_hardware_gateway::mock::MOCK_CONFORMANCE_SCHEMA_VERSION),
         ),

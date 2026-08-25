@@ -134,6 +134,14 @@ Acceptance criteria:
 - transport or device failure terminates within declared bounds and fails
   closed.
 
+Current retained OpenArm evidence satisfies this software-side gate with one
+exact Rapier playback, one strict Rapier-to-MuJoCo shadow divergence, and one
+predeclared sequence-900 transport disconnect. All three runs use the same
+TaskSpec/controller identity, suppress every submitted action, emit zero
+actuator writes, and are independently replayed from a verified Failure
+Capsule. This is recorded simulator evidence, not physical-device evidence;
+Gate 4 still requires a bounded reference-device run.
+
 ### Gate 4: bounded physical proof
 
 One named mobile manipulator completes a low-speed, bounded task under the same

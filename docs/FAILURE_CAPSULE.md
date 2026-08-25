@@ -63,6 +63,15 @@ requires the negotiated TaskSpec identity. Missing subject evidence,
 inconsistent top-level session metadata, or a tampered summary fails before a
 capsule is accepted.
 
+Recorded/shadow session and report evidence is also replayed semantically.
+The capsule must contain bytes matching the session's TaskSpec, controller,
+requirements, calibration, action, and trace SHA-256 bindings. Verification
+reruns the non-actuating playback/shadow evaluator from that session and
+compares the retained report, including its first numeric divergence and
+fail-closed gateway audit. Structural fields, identities, hashes, and integer
+counts remain exact; only independently reduced floating metrics admit the
+documented absolute `1e-12` serialization tolerance.
+
 For the LeKiwi reference path, pass the complete
 `rne_lekiwi_reference_session` output from `rne-lekiwi-session` in place of a
 bare nested session. Creation and verification preserve its concrete kind,
