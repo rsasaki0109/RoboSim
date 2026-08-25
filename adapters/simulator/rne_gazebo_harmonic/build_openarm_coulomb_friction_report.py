@@ -33,6 +33,7 @@ PERFORMANCE_IDS = {
 STRUCTURAL_IDS = {
     "coulomb.maximum_model_parameter_realization_delta",
     "coulomb.maximum_transition_velocity_realization_delta",
+    "coulomb.maximum_bounded_actuator_effort_excess_nm",
     "coulomb.requires_exact_replay",
 }
 CAPACITY_ID = "coulomb.maximum_supported_friction_nm"
@@ -123,6 +124,42 @@ def gazebo_realization(
     return runtime_damping, friction, transition
 
 
+def bounded_actuator_peak(
+    backend: str,
+    trace_path: Path,
+    effort_evidence: dict[str, Any],
+    joint_index: int,
+) -> tuple[str, float]:
+    """Return the strongest retained actuator-side effort evidence."""
+    measured = effort_evidence.get("measured_effort_peak_abs_nm")
+    if isinstance(measured, (int, float)) and math.isfinite(float(measured)):
+        return "measured_actuator_force", float(measured)
+    if backend == "gazebo_sim":
+        diagnostics = load(trace_path.parent / "gazebo-actuation-diagnostics-a.json")
+        steps = diagnostics.get("steps")
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("Gazebo actuator diagnostics have no steps")
+        values = []
+        for step in steps:
+            minimum = step.get("joint_applied_command_min")
+            maximum = step.get("joint_applied_command_max")
+            if (
+                not isinstance(minimum, list)
+                or not isinstance(maximum, list)
+                or len(minimum) <= joint_index
+                or len(maximum) <= joint_index
+            ):
+                raise ValueError("Gazebo actuator diagnostics omit applied effort")
+            values.extend((abs(float(minimum[joint_index])), abs(float(maximum[joint_index]))))
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Gazebo applied actuator effort is non-finite")
+        return "adapter_clamp_diagnostic", max(values)
+    command = effort_evidence.get("limited_effort_command_peak_abs_nm")
+    if not isinstance(command, (int, float)) or not math.isfinite(float(command)):
+        raise ValueError(f"{backend} has no bounded actuator effort evidence")
+    return "bounded_command_model", float(command)
+
+
 def build_report(
     fixture_root: Path,
     trace_root: Path,
@@ -178,6 +215,13 @@ def build_report(
         if list(portable) != case["portable_model_realized_dynamics"]:
             raise ValueError(f"{case['case_id']} portable URDF dynamics differ")
         supported = case["plant_coulomb_friction_nm"] <= supported_maximum
+        actuation = load(case_dir / "openarm_right.rne_actuation.json")
+        actuation_joints = actuation.get("joints")
+        if not isinstance(actuation_joints, list) or len(actuation_joints) <= joint_index:
+            raise ValueError(f"{case['case_id']} actuation config omits controlled joint")
+        actuator_limit_nm = float(actuation_joints[joint_index]["max_effort_nm"])
+        if not math.isfinite(actuator_limit_nm) or actuator_limit_nm <= 0.0:
+            raise ValueError(f"{case['case_id']} actuator limit is invalid")
         for backend in suite["backend_order"]:
             directory, filename = TRACE_FILES[backend]
             trace_path = trace_root / directory / case["case_id"] / filename
@@ -245,6 +289,18 @@ def build_report(
                 measured["passive_coulomb_effort_max_nm"] = passive_max
                 if max(abs(passive_min), abs(passive_max)) > expected[1] + 1.0e-12:
                     raise ValueError("Gazebo passive effort exceeded declared magnitude")
+            effort_source, actuator_peak_nm = bounded_actuator_peak(
+                backend, trace_path, effort_evidence, joint_index
+            )
+            actuator_excess_nm = max(0.0, actuator_peak_nm - actuator_limit_nm)
+            effort_evidence.update(
+                {
+                    "bounded_effort_source": effort_source,
+                    "bounded_actuator_effort_limit_nm": actuator_limit_nm,
+                    "bounded_actuator_effort_peak_abs_nm": actuator_peak_nm,
+                    "bounded_actuator_effort_excess_nm": actuator_excess_nm,
+                }
+            )
             checks = [
                 check_maximum(
                     "coulomb.maximum_model_parameter_realization_delta",
@@ -255,6 +311,11 @@ def build_report(
                     "coulomb.maximum_transition_velocity_realization_delta",
                     transition_delta,
                     requirements["coulomb.maximum_transition_velocity_realization_delta"],
+                ),
+                check_maximum(
+                    "coulomb.maximum_bounded_actuator_effort_excess_nm",
+                    actuator_excess_nm,
+                    requirements["coulomb.maximum_bounded_actuator_effort_excess_nm"],
                 ),
                 check_maximum(
                     "coulomb.maximum_controlled_joint_rmse_rad",

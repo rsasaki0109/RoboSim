@@ -233,26 +233,31 @@ command limit: its saturated-sample RMSE is `0.065922 rad`, versus `0.010210
 rad` while not saturated. The otherwise identical zero-Coulomb run reaches
 that command-model limit for only three samples and passes at `0.013454 rad`.
 The browser report deliberately distinguishes commands from measurements. At
-0.5 N*m, Rapier and MuJoCo retain command-model saturation fractions of
-`28.333%` and `0.278%`, while Gazebo's adapter-owned backend diagnostic reports
-`6.314%`; none of the three traces claims measured joint effort. This localizes
-the next experiment to portable actuator-realization evidence before bounded
-model-based Coulomb compensation is accepted. The supported friction envelope
-and acceptance limit remain unchanged.
+0.5 N*m, the retained sweep localizes both tracking-performance failures and
+actuator-realization evidence before bounded model-based Coulomb compensation
+is accepted. The experiment now has a fixed structural check that actuator-side
+effort exceeds its declared clamp by no more than `1e-12 N*m`. It uses native
+measured actuator force when available, the bounded command model otherwise,
+and Gazebo's adapter-owned post-clamp diagnostic. The supported friction
+envelope and tracking acceptance limits remain unchanged.
 
 The portable measurement boundary is `rne_physics::JointEffortMeasurement`.
 It is optional completed-step evidence, so a missing backend measurement stays
 `Unavailable` instead of being replaced by the reconstructed PD command. The
 joint-feedback sensor preserves its capture timestamp and declared latency,
 adds no effort noise, and rejects non-finite or revolute/prismatic mismatches.
-MuJoCo now publishes its native actuator-space force through this path. A real
-0.5 N*m rerun retains all 3,600 measurements, exact replay, and the unchanged
-`0.017886 rad` RMSE, while exposing an `18.148104 N*m` actuator-space peak
-against the `7 N*m` bounded command. That peak comes from MuJoCo's implicit
-damping compensation being realized outside the command clamp; it is retained
-as a conformance failure lead, not accepted as equivalent actuator semantics.
-Rapier continues to report effort unavailable until a qualifying solver or
-hardware measurement exists.
+MuJoCo publishes its native actuator-space force through this path. The first
+real 0.5 N*m rerun exposed an `18.148104 N*m` peak against the `7 N*m` clamp:
+implicit actuator-damping cancellation had been added outside the bounded
+control law. Typed actuator damping is now evaluated inside the clamp, passive
+plant damping remains native, and regularized Coulomb loss is applied as a
+separate generalized plant force. A same-controller, same-action rerun retains
+all 3,600 measurements and exact replay while bounding both native measurement
+and command to a `6.362613 N*m` peak. Its joint-5 RMSE is `0.021737 rad`, just
+outside the unchanged `0.02 rad` performance gate, so actuator conformance is
+fixed but controller tuning remains explicitly open. Rapier continues to
+report effort unavailable until a qualifying solver or hardware measurement
+exists.
 
 ## Run conformance
 
@@ -348,10 +353,9 @@ the final pose. It binds the backend-neutral force-based actuation
 configuration, native MuJoCo source/runtime evidence, and Gazebo
 runtime/configuration hashes, then records per-joint RMSE, IAE, ISE, terminal
 bias, position range, peak velocity, all three pairwise backend deltas, and the
-first URDF position/velocity-limit violation. MuJoCo compiles the declared
-velocity damping as native implicit joint damping, while the backend adds it
-back when forming the bounded effort so the resulting total effort remains the
-same typed actuator law. `needs_tuning` is a valid diagnostic result and must
+first URDF position/velocity-limit violation. MuJoCo evaluates declared typed
+actuator damping in the bounded control law and reserves native implicit joint
+damping for passive plant loss. `needs_tuning` is a valid diagnostic result and must
 not be converted to `passed` by widening a tolerance.
 
 ## Identify the OpenArm joint-5 coupled response

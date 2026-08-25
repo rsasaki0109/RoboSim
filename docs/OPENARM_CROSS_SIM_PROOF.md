@@ -45,9 +45,11 @@ bootstrap frames and 1,798 feedback decisions. The report independently
 recomputes the reference, integral state, bounded correction, and final target;
 timing mismatches are zero and the largest numerical round-trip/reproduction
 delta is below 8.9e-16 rad. Per-joint integrator clamps are also checked as an
-anti-windup contract. MuJoCo compiles the configured velocity damping as native
-implicit joint damping while preserving the same bounded total-effort equation,
-avoiding unstable explicit damping without changing the controller artifact.
+anti-windup contract. MuJoCo realizes typed actuator damping inside the same
+bounded control law as stiffness and keeps only passive plant damping in native
+implicit joint dynamics. Passive regularized-Coulomb effort is applied
+separately from the actuator channel, so native actuator-force measurement
+cannot escape the declared clamp through a damping-cancellation term.
 Rapier and MuJoCo each produce 1,800 distinct portable articulated-state
 digests under the versioned `rne_physics_state_v2_fnv1a_1e-6_si` contract, and
 their exact replay final digests match. Those same-runtime digests are not

@@ -595,9 +595,11 @@ mismatches and at most `8.9e-16 rad` numerical reproduction delta. The final
 reference errors are `0.004235 rad` for Rapier, `0.004991 rad` for native
 MuJoCo, and `0.003525 rad` for Gazebo. The maximum pairwise final joint-position
 delta is `0.006015 rad`; all remain inside the unchanged `0.01 rad` gates.
-MuJoCo uses native implicit joint damping while preserving the same exact
-bounded total-effort law, eliminating the unstable explicit-damping integration
-without adding a backend-specific controller or effort limit.
+MuJoCo keeps passive plant damping in native implicit joint dynamics while
+realizing typed actuator damping inside the same exact bounded control law as
+stiffness. Passive regularized-Coulomb effort is a separate generalized plant
+force; it is not folded into native actuator-force measurement or used to
+cancel damping outside the declared effort limit.
 Both native traces now use a versioned portable state digest that includes
 articulated joint coordinates/velocities and rigid-body pose/velocity. Each
 1,800-step run produces 1,800 distinct step digests and an exact replay-final

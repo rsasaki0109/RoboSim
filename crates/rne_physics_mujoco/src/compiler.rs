@@ -651,27 +651,15 @@ fn passive_damping(body: BodyInput) -> Option<f64> {
     if !revolute && !prismatic {
         return None;
     }
-    let actuator_damping = if let Some(actuation) = body.actuation {
-        Some(match actuation {
-            JointActuation::RevolutePosition {
-                damping_nm_s_per_rad,
-                ..
-            } if revolute => damping_nm_s_per_rad,
-            JointActuation::RevoluteVelocity {
-                gain_nm_s_per_rad, ..
-            } if revolute => gain_nm_s_per_rad,
-            JointActuation::PrismaticPosition {
-                damping_n_s_per_m, ..
-            } if prismatic => damping_n_s_per_m,
-            JointActuation::PrismaticVelocity { gain_n_s_per_m, .. } if prismatic => gain_n_s_per_m,
-            JointActuation::Disabled
-            | JointActuation::RevoluteEffort { .. }
-            | JointActuation::PrismaticEffort { .. } => 0.0,
-            _ => 0.0,
-        })
-    } else {
+    // Typed actuator damping is part of the bounded actuator law and remains in
+    // `ctrl`; compiling it as passive damping requires an unbounded cancellation
+    // motor and makes `actuator_force` exceed the declared actuator limit. Legacy
+    // JointMotor keeps its historical implicit damping behavior.
+    let actuator_damping = if body.actuation.is_none() {
         body.legacy_motor
             .map(|motor| legacy_motor_gains(motor, revolute).1)
+    } else {
+        None
     };
     let plant_damping = match body.passive_dynamics {
         Some(JointPassiveDynamics::Revolute {
@@ -1138,13 +1126,13 @@ mod tests {
 
         let compiled =
             compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
-        assert!(compiled.mjcf.contains("damping=\"22.50000000000000000\""));
+        assert!(compiled.mjcf.contains("damping=\"2.50000000000000000\""));
         assert!(!compiled.mjcf.contains("frictionloss="));
         assert_eq!(
             compiled.joint_dynamics,
             vec![JointDynamics {
                 entity: child,
-                implicit_damping: 22.5,
+                implicit_damping: 2.5,
             }]
         );
     }
@@ -1175,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_actuation_damping_is_compiled_as_implicit_joint_dynamics() {
+    fn typed_actuation_damping_stays_in_the_bounded_control_law() {
         let mut world = World::new();
         let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
         let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
@@ -1198,8 +1186,8 @@ mod tests {
 
         let first =
             compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
-        assert!(first.mjcf.contains("damping=\"7.50000000000000000\""));
-        assert_eq!(first.joint_dynamics.len(), 1);
+        assert!(!first.mjcf.contains(" damping="));
+        assert!(first.joint_dynamics.is_empty());
 
         let JointActuation::RevolutePosition {
             target_position_rad,
@@ -1221,8 +1209,8 @@ mod tests {
         let changed =
             compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
         assert_eq!(first.topology, changed.topology);
-        assert_ne!(first.joint_dynamics, changed.joint_dynamics);
-        assert!(changed.mjcf.contains("damping=\"9.00000000000000000\""));
+        assert_eq!(first.joint_dynamics, changed.joint_dynamics);
+        assert_eq!(first.mjcf, changed.mjcf);
     }
 
     #[test]

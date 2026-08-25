@@ -363,6 +363,71 @@ fn revolute_position_velocity_and_effort_modes_move_the_joint() {
     );
 }
 
+#[test]
+fn typed_actuator_measurement_stays_bounded_with_passive_joint_loss() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let parent = spawn_body(
+        &mut world,
+        "bounded_parent",
+        RigidBodyType::Fixed,
+        Collider::sphere(0.05),
+        Vec3::ZERO,
+    );
+    let child = spawn_body(
+        &mut world,
+        "bounded_child",
+        RigidBodyType::Dynamic,
+        Collider::sphere(0.05),
+        -Vec3::Y,
+    );
+    world.entity_mut(child).insert((
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::Y,
+            lower_rad: None,
+            upper_rad: None,
+        },
+        JointActuation::RevolutePosition {
+            target_position_rad: 1.0,
+            stiffness_nm_per_rad: 100.0,
+            damping_nm_s_per_rad: 20.0,
+            max_effort_nm: 2.0,
+        },
+        JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 2.5,
+            coulomb_friction_nm: 0.5,
+            coulomb_transition_velocity_rad_s: 0.01,
+        },
+        JointState::Revolute {
+            position_rad: 0.0,
+            velocity_rad_s: 10.0,
+        },
+    ));
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend.step(physics_world, dt).unwrap();
+    backend.sync_to_ecs(&mut world, physics_world).unwrap();
+    let JointEffortMeasurement::Revolute { measured_effort_nm } = *world
+        .get::<JointEffortMeasurement>(child)
+        .expect("bounded actuator measurement")
+    else {
+        panic!("expected revolute effort measurement")
+    };
+    assert!(
+        measured_effort_nm.abs() <= 2.0 + 1.0e-12,
+        "actuator effort {measured_effort_nm} escaped the declared 2 N*m limit"
+    );
+}
+
 fn coast_revolute_velocity(passive_dynamics: Option<JointPassiveDynamics>) -> f64 {
     let dt = SimDuration::from_hertz(Hertz::new(60.0));
     let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");

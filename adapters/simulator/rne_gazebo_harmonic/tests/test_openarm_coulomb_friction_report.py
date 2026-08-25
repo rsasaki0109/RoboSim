@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -27,6 +28,39 @@ def checks(performance: str, structural: str, capacity: str):
 
 
 class OpenArmCoulombFrictionReportTests(unittest.TestCase):
+    def test_measured_effort_is_preferred_over_command_model(self) -> None:
+        source, peak = REPORT.bounded_actuator_peak(
+            "mujoco_native",
+            Path("unused.json"),
+            {
+                "measured_effort_peak_abs_nm": 6.5,
+                "limited_effort_command_peak_abs_nm": 7.0,
+            },
+            4,
+        )
+        self.assertEqual(source, "measured_actuator_force")
+        self.assertEqual(peak, 6.5)
+
+    def test_gazebo_uses_post_clamp_adapter_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace_path = Path(directory) / "gazebo-success-trace.json"
+            REPORT.write_json(
+                trace_path.parent / "gazebo-actuation-diagnostics-a.json",
+                {
+                    "steps": [
+                        {
+                            "joint_applied_command_min": [0.0, -7.0],
+                            "joint_applied_command_max": [0.0, 6.75],
+                        }
+                    ]
+                },
+            )
+            source, peak = REPORT.bounded_actuator_peak(
+                "gazebo_sim", trace_path, {}, 1
+            )
+        self.assertEqual(source, "adapter_clamp_diagnostic")
+        self.assertEqual(peak, 7.0)
+
     def test_supported_failure_cannot_be_relabelled_as_boundary(self) -> None:
         self.assertEqual(REPORT.outcome_status(checks("failed", "passed", "passed"), True), "failed")
 

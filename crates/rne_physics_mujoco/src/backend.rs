@@ -765,7 +765,8 @@ fn sync_scalar_joint_from_ecs(
             "joint {joint_name} is not scalar"
         )));
     }
-    let control = joint_control(world, entity, revolute, view.qpos[0], view.qvel[0])?;
+    let (control, passive_coulomb_effort) =
+        joint_control(world, entity, revolute, view.qpos[0], view.qvel[0])?;
     let actuator_id = data
         .model()
         .name_to_id(MjtObj::mjOBJ_ACTUATOR, actuator_name)
@@ -773,6 +774,13 @@ fn sync_scalar_joint_from_ecs(
             MuJoCoError::UnsupportedFixture(format!("missing actuator {actuator_name}"))
         })?;
     data.ctrl_mut()[actuator_id] = control;
+    let mut view = joint.view_mut(data);
+    if view.qfrc_applied.len() != 1 {
+        return Err(MuJoCoError::UnsupportedFixture(format!(
+            "joint {joint_name} generalized-force width differs"
+        )));
+    }
+    view.qfrc_applied[0] = passive_coulomb_effort;
     Ok(())
 }
 
@@ -782,7 +790,7 @@ fn joint_control(
     revolute: bool,
     position: f64,
     velocity: f64,
-) -> Result<f64, MuJoCoError> {
+) -> Result<(f64, f64), MuJoCoError> {
     let coulomb_effort = if let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied()
     {
         let compatible = matches!(
@@ -810,8 +818,8 @@ fn joint_control(
                 reason: "mode, value, gain, or limit",
             });
         }
-        let (effort, limit, passive_damping) = match command {
-            JointActuation::Disabled => (0.0, 0.0, 0.0),
+        let (effort, limit) = match command {
+            JointActuation::Disabled => (0.0, 0.0),
             JointActuation::RevolutePosition {
                 target_position_rad,
                 stiffness_nm_per_rad,
@@ -821,7 +829,6 @@ fn joint_control(
                 stiffness_nm_per_rad * (target_position_rad - position)
                     - damping_nm_s_per_rad * velocity,
                 max_effort_nm,
-                damping_nm_s_per_rad,
             ),
             JointActuation::RevoluteVelocity {
                 target_velocity_rad_s,
@@ -830,12 +837,11 @@ fn joint_control(
             } => (
                 gain_nm_s_per_rad * (target_velocity_rad_s - velocity),
                 max_effort_nm,
-                gain_nm_s_per_rad,
             ),
             JointActuation::RevoluteEffort {
                 effort_nm,
                 max_effort_nm,
-            } => (effort_nm, max_effort_nm, 0.0),
+            } => (effort_nm, max_effort_nm),
             JointActuation::PrismaticPosition {
                 target_position_m,
                 stiffness_n_per_m,
@@ -844,7 +850,6 @@ fn joint_control(
             } => (
                 stiffness_n_per_m * (target_position_m - position) - damping_n_s_per_m * velocity,
                 max_force_n,
-                damping_n_s_per_m,
             ),
             JointActuation::PrismaticVelocity {
                 target_velocity_m_s,
@@ -853,20 +858,16 @@ fn joint_control(
             } => (
                 gain_n_s_per_m * (target_velocity_m_s - velocity),
                 max_force_n,
-                gain_n_s_per_m,
             ),
             JointActuation::PrismaticEffort {
                 force_n,
                 max_force_n,
-            } => (force_n, max_force_n, 0.0),
+            } => (force_n, max_force_n),
         };
-        // MuJoCo integrates joint damping implicitly. Add the same damping term
-        // back to the motor command after clamping so motor + passive damping
-        // still realizes the exact bounded backend-neutral effort law.
-        return Ok(effort.clamp(-limit, limit) + passive_damping * velocity + coulomb_effort);
+        return Ok((effort.clamp(-limit, limit), coulomb_effort));
     }
     let Some(motor) = world.get::<JointMotor>(entity) else {
-        return Ok(coulomb_effort);
+        return Ok((0.0, coulomb_effort));
     };
     if !motor.velocity_rad_s.is_finite()
         || !motor.gain.is_finite()
@@ -889,11 +890,14 @@ fn joint_control(
     // `JointActuation` above remains exact and is used by conformance fixtures.
     let (stiffness, damping) = legacy_motor_gains(*motor, revolute);
     let effort = stiffness * (motor.target_position - position) + damping * motor.velocity_rad_s;
-    Ok((if motor.max_force > 0.0 {
-        effort.clamp(-motor.max_force, motor.max_force)
-    } else {
-        effort
-    }) + coulomb_effort)
+    Ok((
+        if motor.max_force > 0.0 {
+            effort.clamp(-motor.max_force, motor.max_force)
+        } else {
+            effort
+        },
+        coulomb_effort,
+    ))
 }
 
 impl PhysicsBackend for MuJoCoBackend {

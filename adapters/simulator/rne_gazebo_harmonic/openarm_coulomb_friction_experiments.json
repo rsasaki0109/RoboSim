@@ -11,6 +11,7 @@
   "requirements": [
     {"id": "coulomb.maximum_model_parameter_realization_delta", "unit": "N*m", "maximum": 0.000000000001},
     {"id": "coulomb.maximum_transition_velocity_realization_delta", "unit": "rad/s", "maximum": 0.000000000001},
+    {"id": "coulomb.maximum_bounded_actuator_effort_excess_nm", "unit": "N*m", "maximum": 0.000000000001},
     {"id": "coulomb.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
     {"id": "coulomb.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
     {"id": "coulomb.maximum_supported_friction_nm", "unit": "N*m", "maximum": 0.5},
