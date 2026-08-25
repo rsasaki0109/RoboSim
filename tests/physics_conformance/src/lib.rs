@@ -48,8 +48,6 @@ const CASE_RAPIER_ARTICULATION: &str = "rapier.articulation.revolute_limit";
 const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
 #[cfg(feature = "mujoco")]
 const CASE_MUJOCO_CONTACT: &str = "mujoco.contact_force.resting_impulse";
-#[cfg(feature = "mujoco")]
-const CASE_MUJOCO_JOINT_EFFORT: &str = "mujoco.joint_effort_measurement.direct_revolute_effort";
 const CASE_RAPIER_RAYCAST: &str = "rapier.raycast_batch.ordered_hits";
 const CASE_BACKEND_COMPARISON: &str = "analytic_vs_rapier.free_fall";
 #[cfg(feature = "mujoco")]
@@ -208,15 +206,14 @@ const TOLERANCES: &[ToleranceSpec] = &[
         relative: 0.02,
         rationale: "settled MuJoCo contact force integrated over one fixed step tracks body weight",
     },
-    #[cfg(feature = "mujoco")]
     ToleranceSpec {
-        id: "mujoco_direct_revolute_effort_nm_v1",
-        case_id: CASE_MUJOCO_JOINT_EFFORT,
+        id: "direct_revolute_effort_nm_v1",
+        case_id: "shared.joint_effort_measurement",
         metric_id: "measured_effort_nm",
         unit: MetricUnit::NewtonMetre,
-        absolute: 1e-9,
-        relative: 1e-9,
-        rationale: "direct MuJoCo actuator effort retains the commanded f64 SI value",
+        absolute: 1e-6,
+        relative: 1e-6,
+        rationale: "direct native actuator effort retains the commanded SI value within backend numeric conversion rounding",
     },
     ToleranceSpec {
         id: "raycast_distance_m_v1",
@@ -1174,7 +1171,7 @@ fn run_joint_effort_measurement_case<B: PhysicsBackend>(
         "measured_effort_nm",
         measured_effort_nm,
         2.0,
-        "mujoco_direct_revolute_effort_nm_v1",
+        "direct_revolute_effort_nm_v1",
     )];
     Ok(CaseReport {
         id: capability_case_id(backend_id, PhysicsCapability::JointEffortMeasurement),
@@ -1528,12 +1525,22 @@ mod tests {
             .iter()
             .all(|backend| backend.manifest_passed && backend.coverage_passed));
 
+        let rapier_effort = report
+            .cases
+            .iter()
+            .find(|case| case.id == "rapier.joint_effort_measurement.direct_revolute_effort")
+            .expect("Rapier joint-effort capability case");
+        assert!(rapier_effort.passed);
+        assert_eq!(rapier_effort.metrics.len(), 1);
+        assert_eq!(rapier_effort.metrics[0].unit, "N*m");
+        assert_eq!(rapier_effort.metrics[0].measured, 2.0);
+
         #[cfg(feature = "mujoco")]
         {
             let effort = report
                 .cases
                 .iter()
-                .find(|case| case.id == CASE_MUJOCO_JOINT_EFFORT)
+                .find(|case| case.id == "mujoco.joint_effort_measurement.direct_revolute_effort")
                 .expect("MuJoCo joint-effort capability case");
             assert!(effort.passed);
             assert_eq!(effort.metrics.len(), 1);

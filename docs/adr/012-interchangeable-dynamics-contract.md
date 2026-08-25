@@ -67,8 +67,8 @@ conformance contract.
 
 For independently maintained Rust backends, the publishable
 `rne_physics_conformance` authoring crate owns a distinct external report schema
-v1. Catalog v2 keeps ten checks in fixed order, including completed-step joint
-effort measurement, uses a backend-independent tolerance
+v1. Catalog v2 keeps ten checks in fixed order, including completed-step native
+realization of direct joint-effort actuation, uses a backend-independent tolerance
 registry that authors cannot widen, accepts arbitrary stable backend IDs, and
 fails unsupported GPU/soft-body claims explicitly. Each report hashes the exact
 implementation subject and canonical manifest; Failure Capsule verification

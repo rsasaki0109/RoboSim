@@ -13,11 +13,11 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointActuation, JointMotor, JointMotorGainModel,
-    JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest,
-    PhysicsBackendRepeatability, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId,
-    PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
-    RigidBodyType,
+    Collider, ContactEvent, FixedJointDesc, JointActuation, JointEffortMeasurement, JointMotor,
+    JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend,
+    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
+    RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::ContactForce,
     PhysicsCapability::RaycastBatch,
     PhysicsCapability::KinematicBody,
+    PhysicsCapability::JointEffortMeasurement,
 ];
 
 /// Rapier-backed physics simulation.
@@ -59,6 +60,10 @@ struct RapierWorldState {
     contacts: Vec<ContactEvent>,
     /// Bodies carrying a one-step disturbance force, cleared after the next step.
     impulse_forced: Vec<RigidBodyHandle>,
+    /// Native force/torque increments accepted for the upcoming step.
+    pending_joint_efforts: HashMap<Entity, JointEffortMeasurement>,
+    /// Native force/torque increments retained from the completed step.
+    completed_joint_efforts: HashMap<Entity, JointEffortMeasurement>,
 }
 
 impl RapierBackend {
@@ -258,6 +263,8 @@ impl PhysicsBackend for RapierBackend {
                 entity_to_multibody_joint: HashMap::new(),
                 contacts: Vec::new(),
                 impulse_forced: Vec::new(),
+                pending_joint_efforts: HashMap::new(),
+                completed_joint_efforts: HashMap::new(),
             },
         );
 
@@ -376,6 +383,8 @@ impl PhysicsBackend for RapierBackend {
             &(),
             &(),
         );
+
+        state.completed_joint_efforts = std::mem::take(&mut state.pending_joint_efforts);
 
         // One-step disturbance forces have done their work; clear them so they do
         // not integrate a second time.
@@ -522,6 +531,21 @@ impl PhysicsBackend for RapierBackend {
             .collect::<Vec<_>>();
         for (entity, joint_state) in joint_states {
             world.entity_mut(entity).insert(joint_state);
+        }
+        let mut measured_entities = state
+            .entity_to_multibody_joint
+            .keys()
+            .chain(state.entity_to_joint.keys())
+            .copied()
+            .collect::<Vec<_>>();
+        measured_entities.sort_unstable();
+        measured_entities.dedup();
+        for entity in measured_entities {
+            if let Some(measurement) = state.completed_joint_efforts.get(&entity).copied() {
+                world.entity_mut(entity).insert(measurement);
+            } else {
+                world.entity_mut(entity).remove::<JointEffortMeasurement>();
+            }
         }
 
         Ok(())
@@ -1014,7 +1038,20 @@ fn apply_direct_joint_efforts(
                 "non-finite effort or negative limit",
             ));
         }
-        apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
+        let measured =
+            apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
+        state.pending_joint_efforts.insert(
+            entity,
+            if revolute {
+                JointEffortMeasurement::Revolute {
+                    measured_effort_nm: measured,
+                }
+            } else {
+                JointEffortMeasurement::Prismatic {
+                    measured_force_n: measured,
+                }
+            },
+        );
     }
     Ok(())
 }
@@ -1074,7 +1111,8 @@ fn apply_passive_coulomb_friction(
             ));
         }
         let effort = dynamics.regularized_coulomb_effort(velocity);
-        apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
+        let _ =
+            apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
     }
     Ok(())
 }
@@ -1087,7 +1125,7 @@ fn apply_generalized_effort(
     axis_local: Vec3,
     effort: f64,
     revolute: bool,
-) -> Result<(), PhysicsError> {
+) -> Result<f64, PhysicsError> {
     let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
     if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
         return Err(invalid_actuation(
@@ -1095,6 +1133,7 @@ fn apply_generalized_effort(
             "joint axis is zero or non-finite",
         ));
     }
+    let mut measured = None;
     for (target, sign) in [(entity, 1.0), (parent, -1.0)] {
         let Some(handle) = state.entity_to_body.get(&target).copied() else {
             continue;
@@ -1102,17 +1141,26 @@ fn apply_generalized_effort(
         let Some(body) = state.bodies.get_mut(handle) else {
             continue;
         };
-        let vector = vec3_to_rapier(axis_world * (effort * sign));
+        let axis = vec3_to_rapier(axis_world);
+        let vector = axis * (effort * sign) as f32;
         if revolute {
+            let before = body.user_torque();
             body.add_torque(vector, true);
+            if target == entity {
+                measured = Some(f64::from((body.user_torque() - before).dot(&axis)));
+            }
         } else {
+            let before = body.user_force();
             body.add_force(vector, true);
+            if target == entity {
+                measured = Some(f64::from((body.user_force() - before).dot(&axis)));
+            }
         }
         if !state.impulse_forced.contains(&handle) {
             state.impulse_forced.push(handle);
         }
     }
-    Ok(())
+    measured.ok_or_else(|| invalid_actuation(entity, "dynamic child did not accept joint effort"))
 }
 
 fn passive_viscous_damping(world: &World, entity: Entity) -> Result<f64, PhysicsError> {

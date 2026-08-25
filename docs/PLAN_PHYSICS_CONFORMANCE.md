@@ -44,6 +44,7 @@ one required case:
 | Rapier | `Articulation` | revolute anchor and limit invariants remain bounded under load |
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
 | Rapier | `RaycastBatch` | repeated queries return bounded hits in distance/entity order |
+| Rapier | `JointEffortMeasurement` | the native accepted force/torque increment for direct effort actuation is retained after the step |
 | MuJoCo | `JointEffortMeasurement` | a direct 2 N*m revolute command is retained as completed-step native actuator effort |
 
 `GpuRigidBody` and `SoftBody` remain unadvertised. A coverage test fails when a
@@ -160,9 +161,11 @@ a kinematic entity before native model creation with a typed missing-capability
 error.
 
 Schema v3 adds `joint_effort_measurement`, which requires a completed-step,
-backend-measured, unit-explicit actuator realization value. MuJoCo advertises it
-only after passing the shared direct 2 N*m revolute-effort vector; Rapier remains
-explicitly unadvertised until its solver exposes equivalent measured effort.
+backend-measured, unit-explicit realization of direct effort actuation. MuJoCo
+and Rapier advertise it only after passing the shared direct 2 N*m revolute-effort
+vector. Rapier measures the native `user_torque`/`user_force` increment accepted
+before the step and retains it only after that step completes; motor-driven
+position/velocity modes remain unavailable rather than copying their command.
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the

@@ -64,7 +64,8 @@ pub enum PhysicsCapability {
     RaycastBatch,
     /// Supports externally posed kinematic rigid bodies.
     KinematicBody,
-    /// Retains backend-measured joint effort from the completed simulation step.
+    /// Retains backend-measured realization of direct joint-effort actuation from
+    /// the completed simulation step.
     JointEffortMeasurement,
 }
 
