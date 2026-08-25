@@ -44,6 +44,14 @@ inside the verified Failure Capsule. Clean tagged Windows/Linux archive evidence
 15-minute external measurement remain the open parts of Gate 1; the public
 intake path now verifies rather than trusts that submission.
 
+The first Windows archive diagnostic is now retained in
+`docs/evidence/windows-installed-release-rehearsal-v1.json`. Two independent
+deterministic ZIP writes produced identical bytes, all twelve checks passed
+again from a separate extraction, and the extracted flagship reached its
+verified 23-artifact capsule in 10.408 seconds. This deliberately remains
+non-qualifying local evidence: the source commit was clean but not bound to an
+expected release tag, and no independent external operator performed the run.
+
 ## Flagship product contract
 
 The retained flagship is indoor mobile manipulation. Its visual environment

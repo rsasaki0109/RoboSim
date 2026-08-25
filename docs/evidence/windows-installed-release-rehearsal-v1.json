@@ -1,0 +1,42 @@
+{
+  "kind": "rne_local_installed_release_rehearsal",
+  "schema_version": 1,
+  "status": "passed",
+  "release_version": "0.2.0",
+  "source_commit": "39f7437e0a9ff6922e64e4a78a9817c87ca6103b",
+  "source_worktree_clean": true,
+  "target": "x86_64-pc-windows-msvc",
+  "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "archive": {
+    "file": "rne-0.2.0-x86_64-pc-windows-msvc.zip",
+    "size_bytes": 18258202,
+    "sha256": "cb91565ab2750927ad8b949b07a4b79f6ed736b30026f1839ad56633a2148f4e",
+    "independent_repeat_sha256": "cb91565ab2750927ad8b949b07a4b79f6ed736b30026f1839ad56633a2148f4e"
+  },
+  "wheel": {
+    "file": "rne_py-0.2.0-cp39-abi3-win_amd64.whl",
+    "size_bytes": 2416689,
+    "sha256": "40a76e248e8de7cdc9c3686a9c701e764ae92b869a9887c256d317111e5e60d6",
+    "maturin_version": "1.13.3"
+  },
+  "extracted_rehearsal": {
+    "status": "passed",
+    "passed_checks": 12,
+    "total_checks": 12,
+    "archive_install_report_sha256": "1038350c76e96a4d4b1a2d9f507a735f52f03c6b3dc76dc6378eb6672e1e5ef4",
+    "installed_proof_report_sha256": "27ba6b82bda40cd1b50c51d6134b85bed8824b2ecdfec73ccb8d81138baddd7b",
+    "failure_capsule_manifest_sha256": "bb0c34a8e5b2dae3bf3e498107eb2ea77a3250d34864d063d2bd7bed19b4b284",
+    "time_to_proof_ms": 10408,
+    "time_to_proof_target_ms": 900000,
+    "recorded_shadow_status": "passed",
+    "recorded_shadow_cases": 3,
+    "failure_capsule_artifacts": 23
+  },
+  "qualification": {
+    "tag_bound": false,
+    "independent_external_user": false,
+    "qualifies_for_external_adoption_gate": false,
+    "reason": "Local clean-worktree archive rehearsal without an expected release tag or independent operator; retain as diagnostic packaging evidence only."
+  }
+}
