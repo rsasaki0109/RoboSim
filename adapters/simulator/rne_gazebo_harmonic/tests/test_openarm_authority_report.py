@@ -48,6 +48,27 @@ class OpenArmAuthorityReportTests(unittest.TestCase):
             "failed_as_expected",
         )
 
+    def test_actuator_evidence_does_not_call_commands_measurements(self) -> None:
+        trace = {
+            "observations": [
+                {
+                    "limited_effort_command_nm": [7.0],
+                    "effort_saturated": [True],
+                    "effort_measurement_available": [False],
+                },
+                {
+                    "limited_effort_command_nm": [2.0],
+                    "effort_saturated": [False],
+                    "effort_measurement_available": [False],
+                },
+            ]
+        }
+        evidence = REPORT.actuator_evidence(trace, 0)
+        self.assertEqual(evidence["kind"], "command_model_only")
+        self.assertEqual(evidence["command_saturation_sample_count"], 1)
+        self.assertEqual(evidence["command_saturation_fraction"], 0.5)
+        self.assertEqual(evidence["measured_effort_sample_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

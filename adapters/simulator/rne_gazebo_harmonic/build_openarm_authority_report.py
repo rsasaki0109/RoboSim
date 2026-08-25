@@ -75,6 +75,59 @@ def metrics(trace: dict[str, Any], joint_index: int) -> dict[str, float]:
     }
 
 
+def actuator_evidence(trace: dict[str, Any], joint_index: int) -> dict[str, Any]:
+    """Classify effort evidence without confusing commands with measurements."""
+    observations = trace.get("observations")
+    if not isinstance(observations, list) or not observations:
+        raise ValueError("actuator evidence trace has no observations")
+    command_frames = [
+        frame
+        for frame in observations
+        if isinstance(frame.get("limited_effort_command_nm"), list)
+        and len(frame["limited_effort_command_nm"]) > joint_index
+        and isinstance(frame.get("effort_saturated"), list)
+        and len(frame["effort_saturated"]) > joint_index
+    ]
+    measurement_frames = [
+        frame
+        for frame in observations
+        if isinstance(frame.get("effort_measurement_available"), list)
+        and len(frame["effort_measurement_available"]) > joint_index
+        and frame["effort_measurement_available"][joint_index] is True
+    ]
+    kind = (
+        "measured_effort"
+        if measurement_frames
+        else "command_model_only" if len(command_frames) == len(observations) else "unavailable"
+    )
+    result: dict[str, Any] = {
+        "kind": kind,
+        "sample_count": len(observations),
+        "command_sample_count": len(command_frames),
+        "measured_effort_sample_count": len(measurement_frames),
+        "measured_effort_fraction": len(measurement_frames) / len(observations),
+    }
+    if command_frames:
+        result.update(
+            {
+                "command_saturation_sample_count": sum(
+                    bool(frame["effort_saturated"][joint_index])
+                    for frame in command_frames
+                ),
+                "command_saturation_fraction": sum(
+                    bool(frame["effort_saturated"][joint_index])
+                    for frame in command_frames
+                )
+                / len(command_frames),
+                "limited_effort_command_peak_abs_nm": max(
+                    abs(float(frame["limited_effort_command_nm"][joint_index]))
+                    for frame in command_frames
+                ),
+            }
+        )
+    return result
+
+
 def check_maximum(identifier: str, observed: float, requirement: dict[str, Any]) -> dict[str, Any]:
     return {
         "requirement_id": identifier,

@@ -16,6 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from build_openarm_authority_report import (  # noqa: E402
     TRACE_FILES,
+    actuator_evidence,
     check_maximum,
     load,
     metrics,
@@ -204,8 +205,19 @@ def build_report(
             model_delta = abs(realized[1] - expected[1])
             transition_delta = abs(realized[2] - expected[2])
             measured = metrics(trace, joint_index)
+            effort_evidence = actuator_evidence(trace, joint_index)
             if backend == "gazebo_sim":
                 measured.update(validate_gazebo_sidecars(trace_path, trace, joint_index))
+                effort_evidence["kind"] = "backend_diagnostic"
+                effort_evidence["backend_diagnostic_source"] = (
+                    "gazebo_actuation_diagnostics_sidecar_v1"
+                )
+                effort_evidence["command_saturation_fraction"] = measured[
+                    "actuator_saturation_fraction"
+                ]
+                effort_evidence["limited_effort_command_peak_abs_nm"] = measured[
+                    "actuator_raw_command_peak_abs"
+                ]
                 diagnostics = load(trace_path.parent / "gazebo-actuation-diagnostics-a.json")
                 passive_min = min(
                     step["joint_passive_coulomb_effort_min_nm"][joint_index]
@@ -263,6 +275,7 @@ def build_report(
                         "coulomb_transition_velocity_rad_s": realized[2],
                     },
                     "metrics": measured,
+                    "actuator_effort_evidence": effort_evidence,
                     "checks": checks,
                     "status": outcome_status(checks, supported),
                     "trace_sha256": sha256(trace_path),
@@ -338,7 +351,7 @@ def build_report(
 def write_html(path: Path, report: dict[str, Any]) -> None:
     payload = json.dumps(report, separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
     html = """<!doctype html><html lang="en"><meta charset="utf-8"><title>OpenArm regularized-Coulomb envelope</title><style>
-body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.outside_declared_envelope,.expected_boundary_failure{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}</style><main><h1>OpenArm joint-5 regularized-Coulomb envelope</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><table><thead><tr><th>backend / case</th><th>friction N·m</th><th>transition rad/s</th><th>RMSE rad</th><th>final rad</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First performance failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>x===undefined||x===null?'—':Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').textContent=`controlled joint: ${r.controlled_joint} · outcomes: ${r.outcomes.length} · missing: ${r.missing_traces.length} · ${r.parameter_semantics}`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${f(x.plant_coulomb_friction_nm)}</td><td>${f(x.plant_coulomb_transition_velocity_rad_s)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${f(x.metrics.final_absolute_error_rad)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_performance_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main></html>""".replace("__REPORT__", payload)
+body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1350px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.outside_declared_envelope,.expected_boundary_failure{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}</style><main><h1>OpenArm joint-5 regularized-Coulomb envelope</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><table><thead><tr><th>backend / case</th><th>friction N·m</th><th>transition rad/s</th><th>RMSE rad</th><th>effort evidence</th><th>command saturation</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First performance failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>x===undefined||x===null?'—':Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').textContent=`controlled joint: ${r.controlled_joint} · outcomes: ${r.outcomes.length} · missing: ${r.missing_traces.length} · ${r.parameter_semantics}`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${f(x.plant_coulomb_friction_nm)}</td><td>${f(x.plant_coulomb_transition_velocity_rad_s)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${x.actuator_effort_evidence.kind}</td><td>${f(x.actuator_effort_evidence.command_saturation_fraction)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_performance_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main></html>""".replace("__REPORT__", payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")
 

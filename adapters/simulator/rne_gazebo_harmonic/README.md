@@ -222,11 +222,16 @@ The `fast`, `baseline`, `medium`, and `slow` candidates produce respectively
 replay, exact controller identity, and exact plant realization, but none passes
 the unchanged `0.02 rad` gate, so the report remains `needs_tuning` and selects
 no controller. The baseline spends 1,020 of 3,600 samples at the joint-5 effort
-limit: its saturated-sample RMSE is `0.065922 rad`, versus `0.010210 rad` while
-not saturated. The otherwise identical zero-Coulomb run saturates for only
-three samples and passes at `0.013454 rad`. This localizes the next experiment
-to bounded model-based Coulomb compensation and actuator-authority handling;
-the supported friction envelope and acceptance limit remain unchanged.
+command limit: its saturated-sample RMSE is `0.065922 rad`, versus `0.010210
+rad` while not saturated. The otherwise identical zero-Coulomb run reaches
+that command-model limit for only three samples and passes at `0.013454 rad`.
+The browser report deliberately distinguishes commands from measurements. At
+0.5 N*m, Rapier and MuJoCo retain command-model saturation fractions of
+`28.333%` and `0.278%`, while Gazebo's adapter-owned backend diagnostic reports
+`6.314%`; none of the three traces claims measured joint effort. This localizes
+the next experiment to portable actuator-realization evidence before bounded
+model-based Coulomb compensation is accepted. The supported friction envelope
+and acceptance limit remain unchanged.
 
 ## Run conformance
 
