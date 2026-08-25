@@ -305,6 +305,13 @@ transitions differ; the coefficient is retained but is not claimed as a
 portable realized parameter. Backends also reject negative, non-finite, or
 joint-kind-mismatched coefficients before stepping.
 
+The OpenArm damping-envelope evidence distinguishes a supported-case failure
+from an expected failure beyond the declared plant-loss envelope. A report may
+be `passed` only when every supported case passes and every out-of-envelope
+`expected_boundary_failure` still passes model realization, provenance, and
+exact replay checks. An out-of-envelope model/hash/replay failure remains a hard
+failure and cannot be relabeled as an observed performance boundary.
+
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
 transport, asset, replay, physics, determinism, task, accelerator-selection,

@@ -29,6 +29,7 @@ struct Outcome {
     backend_id: String,
     case_id: String,
     plant_viscous_damping_nm_s_per_rad: f64,
+    status: String,
     trace_sha256: String,
     metrics: Metrics,
     checks: Vec<Check>,
@@ -202,20 +203,26 @@ fn validate_inputs<'a>(
     anyhow::ensure!(
         report.kind == "rne_openarm_joint_loss_report"
             && report.schema_version == 1
-            && report.status == "needs_tuning",
-        "report is not a supported failing OpenArm joint-loss report"
+            && matches!(report.status.as_str(), "passed" | "needs_tuning"),
+        "report is not a supported OpenArm joint-loss envelope report"
     );
     let outcome = report
         .outcomes
         .iter()
         .filter(|outcome| {
-            outcome.checks.iter().any(|check| {
-                check.requirement_id == PERFORMANCE_REQUIREMENT && check.status == "failed"
-            })
+            ((report.status == "passed" && outcome.status == "expected_boundary_failure")
+                || (report.status == "needs_tuning" && outcome.status == "failed"))
+                && outcome.checks.iter().any(|check| {
+                    check.requirement_id == PERFORMANCE_REQUIREMENT && check.status == "failed"
+                })
         })
         .min_by(|left, right| {
             left.plant_viscous_damping_nm_s_per_rad
                 .total_cmp(&right.plant_viscous_damping_nm_s_per_rad)
+                .then_with(|| {
+                    replay_backend_rank(&left.backend_id)
+                        .cmp(&replay_backend_rank(&right.backend_id))
+                })
                 .then_with(|| left.backend_id.cmp(&right.backend_id))
         })
         .context("joint-loss report has no failed performance outcome")?;
@@ -271,6 +278,14 @@ fn validate_inputs<'a>(
         outcome.metrics.tracking_rmse_rad
     );
     Ok((outcome, requirement))
+}
+
+fn replay_backend_rank(backend_id: &str) -> u8 {
+    match backend_id {
+        "rne_rapier" => 0,
+        "mujoco_native" => 1,
+        _ => 2,
+    }
 }
 
 fn required_path(arguments: &mut impl Iterator<Item = String>, option: &str) -> Result<PathBuf> {

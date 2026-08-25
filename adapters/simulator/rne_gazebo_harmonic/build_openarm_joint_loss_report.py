@@ -73,21 +73,46 @@ def actuator_damping(path: Path, joint_name: str) -> float:
 
 
 def outcome_status(checks: list[dict[str, Any]], supported: bool) -> str:
+    performance_ids = {
+        "joint_loss.maximum_controlled_joint_rmse_rad",
+        "joint_loss.maximum_controlled_joint_final_error_rad",
+    }
+    structural_ids = {
+        "joint_loss.maximum_model_parameter_realization_delta",
+        "joint_loss.requires_exact_replay",
+    }
+    capacity_id = "joint_loss.maximum_supported_viscous_damping_nm_s_per_rad"
+    required_ids = performance_ids | structural_ids | {capacity_id}
+    if len(checks) != len(required_ids) or {
+        item.get("requirement_id") for item in checks
+    } != required_ids:
+        return "failed"
     capacity = next(
         item
         for item in checks
-        if item["requirement_id"]
-        == "joint_loss.maximum_supported_viscous_damping_nm_s_per_rad"
+        if item["requirement_id"] == capacity_id
     )
-    non_capacity_passed = all(
-        item["status"] == "passed"
+    performance = [
+        item for item in checks if item["requirement_id"] in performance_ids
+    ]
+    structural = [
+        item
         for item in checks
-        if item is not capacity
-    )
+        if item["requirement_id"] in structural_ids
+    ]
+    non_capacity_passed = all(item["status"] == "passed" for item in performance + structural)
     if supported and non_capacity_passed and capacity["status"] == "passed":
         return "passed"
     if not supported and capacity["status"] == "failed" and non_capacity_passed:
         return "outside_declared_envelope"
+    if (
+        not supported
+        and capacity["status"] == "failed"
+        and performance
+        and any(item["status"] == "failed" for item in performance)
+        and all(item["status"] == "passed" for item in structural)
+    ):
+        return "expected_boundary_failure"
     return "failed"
 
 
@@ -237,7 +262,11 @@ def build_report(
                 }
             )
     expected = len(suite["cases"]) * len(suite["backend_order"])
-    accepted = {"passed", "outside_declared_envelope"}
+    accepted = {
+        "passed",
+        "outside_declared_envelope",
+        "expected_boundary_failure",
+    }
     status = (
         "incomplete"
         if missing_traces
@@ -313,7 +342,7 @@ def write_html(path: Path, report: dict[str, Any]) -> None:
         "</", "<\\/"
     )
     html = """<!doctype html><html lang="en"><meta charset="utf-8"><title>OpenArm joint-loss envelope</title><style>
-body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1220px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.outside_declared_envelope{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}</style><main><h1>OpenArm joint-5 plant viscous-damping envelope</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><table><thead><tr><th>backend / case</th><th>plant N·m·s/rad</th><th>servo N·m·s/rad</th><th>RMSE rad</th><th>final rad</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First performance failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>x===undefined||x===null?'—':Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').textContent=`controlled joint: ${r.controlled_joint} · outcomes: ${r.outcomes.length} · missing: ${r.missing_traces.length} · ${r.parameter_semantics}`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${f(x.plant_viscous_damping_nm_s_per_rad)}</td><td>${f(x.actuator_servo_damping_nm_s_per_rad)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${f(x.metrics.final_absolute_error_rad)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_performance_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main></html>""".replace(
+body{margin:0;background:#07111f;color:#eaf2ff;font:14px system-ui,sans-serif}main{max-width:1220px;margin:auto;padding:28px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #294563;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}.card{background:#112238;border:1px solid #294563;border-radius:10px;padding:14px;margin:12px 0}.passed,.outside_declared_envelope,.expected_boundary_failure{color:#64e6a1}.failed,.needs_tuning{color:#ff9b85}.incomplete{color:#ffd477}</style><main><h1>OpenArm joint-5 plant viscous-damping envelope</h1><p>Status: <b id="status"></b></p><div id="summary" class="card"></div><table><thead><tr><th>backend / case</th><th>plant N·m·s/rad</th><th>servo N·m·s/rad</th><th>RMSE rad</th><th>final rad</th><th>status</th></tr></thead><tbody id="rows"></tbody></table><h2>First performance failures</h2><div id="failures" class="card"></div><script>const r=__REPORT__,f=x=>x===undefined||x===null?'—':Number(x).toFixed(6),s=document.querySelector('#status');s.textContent=r.status;s.className=r.status;document.querySelector('#summary').textContent=`controlled joint: ${r.controlled_joint} · outcomes: ${r.outcomes.length} · missing: ${r.missing_traces.length} · ${r.parameter_semantics}`;document.querySelector('#rows').innerHTML=r.outcomes.map(x=>`<tr><td>${x.backend_id} / ${x.case_id}</td><td>${f(x.plant_viscous_damping_nm_s_per_rad)}</td><td>${f(x.actuator_servo_damping_nm_s_per_rad)}</td><td>${f(x.metrics.tracking_rmse_rad)}</td><td>${f(x.metrics.final_absolute_error_rad)}</td><td class=${x.status}>${x.status}</td></tr>`).join('');document.querySelector('#failures').innerHTML=r.first_performance_failures.map(x=>`<p><b>${x.backend_id}</b>: ${x.first_failing_case_id||'none'} ${x.first_failed_requirement||''}</p>`).join('');</script></main></html>""".replace(
         "__REPORT__", payload
     )
     path.parent.mkdir(parents=True, exist_ok=True)

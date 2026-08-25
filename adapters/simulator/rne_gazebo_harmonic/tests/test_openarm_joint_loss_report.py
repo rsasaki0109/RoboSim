@@ -27,22 +27,73 @@ class OpenArmJointLossReportTests(unittest.TestCase):
     def test_supported_case_requires_every_check(self) -> None:
         checks = [
             {
+                "requirement_id": "joint_loss.maximum_model_parameter_realization_delta",
+                "status": "passed",
+            },
+            {
                 "requirement_id": "joint_loss.maximum_controlled_joint_rmse_rad",
+                "status": "passed",
+            },
+            {
+                "requirement_id": "joint_loss.maximum_controlled_joint_final_error_rad",
                 "status": "passed",
             },
             {
                 "requirement_id": "joint_loss.maximum_supported_viscous_damping_nm_s_per_rad",
                 "status": "passed",
             },
+            {
+                "requirement_id": "joint_loss.requires_exact_replay",
+                "status": "passed",
+            },
         ]
         self.assertEqual(REPORT.outcome_status(checks, supported=True), "passed")
-        checks[0]["status"] = "failed"
+        checks[1]["status"] = "failed"
         self.assertEqual(REPORT.outcome_status(checks, supported=True), "failed")
 
-    def test_outside_envelope_is_distinct_from_performance_failure(self) -> None:
+    def test_outside_envelope_distinguishes_margin_and_expected_boundary(self) -> None:
+        checks = [
+            {
+                "requirement_id": "joint_loss.maximum_model_parameter_realization_delta",
+                "status": "passed",
+            },
+            {
+                "requirement_id": "joint_loss.maximum_controlled_joint_rmse_rad",
+                "status": "passed",
+            },
+            {
+                "requirement_id": "joint_loss.maximum_controlled_joint_final_error_rad",
+                "status": "passed",
+            },
+            {
+                "requirement_id": "joint_loss.maximum_supported_viscous_damping_nm_s_per_rad",
+                "status": "failed",
+            },
+            {
+                "requirement_id": "joint_loss.requires_exact_replay",
+                "status": "passed",
+            },
+        ]
+        self.assertEqual(
+            REPORT.outcome_status(checks, supported=False),
+            "outside_declared_envelope",
+        )
+        checks[1]["status"] = "failed"
+        self.assertEqual(
+            REPORT.outcome_status(checks, supported=False),
+            "expected_boundary_failure",
+        )
+        checks[4]["status"] = "failed"
+        self.assertEqual(REPORT.outcome_status(checks, supported=False), "failed")
+
+    def test_missing_structural_check_fails_closed(self) -> None:
         checks = [
             {
                 "requirement_id": "joint_loss.maximum_controlled_joint_rmse_rad",
+                "status": "failed",
+            },
+            {
+                "requirement_id": "joint_loss.maximum_controlled_joint_final_error_rad",
                 "status": "passed",
             },
             {
@@ -50,11 +101,6 @@ class OpenArmJointLossReportTests(unittest.TestCase):
                 "status": "failed",
             },
         ]
-        self.assertEqual(
-            REPORT.outcome_status(checks, supported=False),
-            "outside_declared_envelope",
-        )
-        checks[0]["status"] = "failed"
         self.assertEqual(REPORT.outcome_status(checks, supported=False), "failed")
 
     def test_urdf_parser_distinguishes_absent_and_explicit_dynamics(self) -> None:

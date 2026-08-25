@@ -410,9 +410,10 @@ actuator-authority envelope. The next slices are:
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
 2. **In progress:** the physical command slew-rate, command-deadband, and
-   viscous joint-damping boundaries are complete; continue the actuator and
-   plant envelope with Coulomb friction, inertia, and transmission-efficiency
-   sweeps, retaining the smallest failing value for each mechanism;
+   viscous joint-damping boundaries are complete, including controller
+   retuning at the predeclared damping limit; continue the actuator and plant
+   envelope with Coulomb friction, inertia, and transmission-efficiency sweeps,
+   retaining the smallest failing value for each mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
@@ -635,14 +636,20 @@ transmission-efficiency boundaries remain open.
 
 The first physical joint-loss dimension now separates URDF plant damping from
 actuator servo damping. Its predeclared `[0, 2.5, 5, 10, 20] N*m*s/rad` joint-5
-grid holds Coulomb friction at zero and binds identical TaskSpec, controller,
-actuation, scene, world, adapter, and action hashes across Rapier, native
-MuJoCo, and external Gazebo. All 15 runs are exact same-runtime replays with
-zero independently parsed model-parameter delta. The shared controller passes
-5 on every backend. The declared 10-point fails only MuJoCo RMSE
-(`0.021031 rad > 0.02 rad`), and 20 fails all three. A browser report and
-step-3600 minimum replay retain this honest `needs_tuning` boundary. Coulomb
-friction, inertia, and transmission-efficiency dimensions remain open.
+grid holds Coulomb friction at zero. A separate predeclared
+`[0.04, 0.05, 0.06, 0.08] rad` correction-limit grid uses only the MuJoCo
+10-point as tuning data and deterministically selects `0.08 rad`; the selected
+controller is then held unchanged across the complete validation grid. All 15
+validation runs bind identical TaskSpec, controller, actuation, scene, world,
+adapter, and action hashes across Rapier, native MuJoCo, and external Gazebo and
+are exact same-runtime replays with zero independently parsed model-parameter
+delta. The declared 10-point now passes at `0.013450`, `0.017185`, and
+`0.009439 rad` RMSE. The first out-of-envelope point, 20, fails the same fixed
+`0.02 rad` RMSE contract on all three at `0.021962`, `0.024173`, and
+`0.021684 rad`. The browser report is `passed` and classifies those three rows
+as `expected_boundary_failure`; the step-3600 replay retains the first Rapier
+boundary failure. Coulomb friction, inertia, and transmission-efficiency
+dimensions remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

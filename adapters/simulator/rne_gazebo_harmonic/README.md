@@ -80,6 +80,8 @@ servo damping with:
 python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_suite.py \
   --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
   --output artifacts/openarm-joint-loss/fixtures
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_controller_tuning.py \
+  --output artifacts/openarm-joint-loss/controller-tuning
 ```
 
 The fixed `[0, 2.5, 5, 10, 20] N*m*s/rad` grid holds Coulomb friction at zero
@@ -92,28 +94,46 @@ damping remain separate unit-bearing report fields.
 Nonzero Coulomb friction is intentionally rejected before stepping until the
 Rapier and MuJoCo static/kinetic transition semantics can be made identical.
 
-After writing each backend trace beneath `rapier/CASE`, `mujoco/CASE`, and
-`gazebo/CASE`, build the browser report and minimum aggregate failure replay:
+The controller tuning manifest freezes the `[0.04, 0.05, 0.06, 0.08] rad`
+state-feedback correction-limit candidates before execution. Run only the
+declared MuJoCo 10 N*m*s/rad tuning case for each candidate, then select it with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_controller_tuning_report.py \
+  --candidate-root artifacts/openarm-joint-loss/controller-tuning \
+  --trace-root artifacts/openarm-joint-loss/controller-tuning-results \
+  --output artifacts/openarm-joint-loss/controller-tuning-report
+```
+
+The report selects the passing candidate with minimum RMSE, breaking a tie in
+favor of the smaller correction limit, and copies the exact selected controller
+with its SHA-256. The remaining damping/backend combinations are validation
+data, not tuning data. After running the selected controller unchanged beneath
+`rapier/CASE`, `mujoco/CASE`, and `gazebo/CASE`, build the browser report and
+minimum aggregate boundary-failure replay:
 
 ```bash
 python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_report.py \
   --fixture-root artifacts/openarm-joint-loss/fixtures \
   --trace-root artifacts/openarm-joint-loss \
+  --controller artifacts/openarm-joint-loss/controller-tuning-report/openarm-joint-loss-selected.controller.json \
   --output artifacts/openarm-joint-loss/report
 cargo run --locked -p showcase_captures \
   --bin rne-openarm-joint-loss-failure-replay -- \
   --report artifacts/openarm-joint-loss/report/openarm-joint-loss-report.json \
-  --trace artifacts/openarm-joint-loss/mujoco/joint5-damping-10000mnms-per-rad/mujoco-success-trace.json \
+  --trace artifacts/openarm-joint-loss/rapier/joint5-damping-20000mnms-per-rad/rapier-success-trace.json \
   --output artifacts/openarm-joint-loss/report/minimum-joint-loss-failure.rne-replay
 ```
 
-The initially declared 10 N*m*s/rad cross-backend contract is deliberately not
-relaxed after measurement. The current state-feedback controller passes 5 on
-all three paths. At 10, MuJoCo is the first failure (`0.021031 rad` RMSE against
-the registered `0.02 rad` maximum), while Rapier and Gazebo still pass. At 20,
-all three fail RMSE. The report therefore remains `needs_tuning` and localizes
-the earliest aggregate violation to MuJoCo step 3600 rather than converting a
-characterization result into a green claim.
+The initially declared 10 N*m*s/rad cross-backend contract and `0.02 rad` RMSE
+limit are not relaxed after measurement. The predeclared selection chooses the
+bounded `0.08 rad` correction candidate. Its content-addressed controller passes
+10 on Rapier, MuJoCo, and Gazebo at `0.013450`, `0.017185`, and `0.009439 rad`
+RMSE respectively. At the first out-of-envelope point, 20, all three fail the
+same unchanged RMSE contract at `0.021962`, `0.024173`, and `0.021684 rad`.
+The final report is `passed`: supported cases pass, model/hash/replay checks
+remain exact, and the 20-point rows are retained as
+`expected_boundary_failure`, not hidden or converted into successes.
 
 ## Run conformance
 
