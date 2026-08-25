@@ -22,13 +22,15 @@ chairs, window, and doors represented by the committed splats.
 
 `tools/prepare_voxel51_drjohnson_3dgs.py` verifies the complete upstream byte
 length and SHA-256. It retains records whose zero-based index is divisible by
-ten and copies position, DC colour, opacity, anisotropic scale, and rotation
-floats byte-for-byte. No splat geometry or colour is synthesized.
+four and copies position, DC colour, opacity, anisotropic scale, and rotation
+floats byte-for-byte. No splat geometry or colour is synthesized. The 4:1
+derivative is the smallest tested density that satisfies the registered
+structural-observation limits; the previous 10:1 derivative did not.
 
-- Derivative: `drjohnson_dc_every10.ply`
-- Derivative Gaussian records: `317,756`
-- Derivative bytes: `17,794,698`
-- Derivative SHA-256: `f357a929801db2be75574c47205479c53a6bf71686af3f4bf8c1641db3688663`
+- Derivative: `drjohnson_dc_every4.ply`
+- Derivative Gaussian records: `794,389`
+- Derivative bytes: `44,486,146`
+- Derivative SHA-256: `9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f`
 
 ## Calibration and simulation frame
 
@@ -54,15 +56,23 @@ The pickup support and payload are centered at the registered
 retained rug polygon in `IMG_6293.reference.jpg`, so collision geometry no
 longer occupies arbitrary empty room space.
 
+The retained same-camera RNE observation is generated at `1332 x 876` from the
+exact `IMG_6293` pose and intrinsics. The validator re-decodes both images and
+recomputes raw RGB PSNR (`13.046 dB`), luminance Pearson correlation (`0.9267`),
+and gradient-magnitude Pearson correlation (`0.6879`) against fixed limits of
+`12 dB`, `0.90`, and `0.65`. The report and rendered PNG are content-addressed;
+the comparison cannot pass by editing the reported numbers alone.
+The retained render identifies its execution adapter as an NVIDIA GeForce GTX
+1660 Ti using Vulkan and NVIDIA driver `596.36`; GPU byte-level output is not
+claimed portable, while the registered metric limits are.
+
 This is deliberately **not yet a qualifying metric calibration**. COLMAP
 reconstruction units are only defined up to scale, and the archive contains no
 independently measured physical length. Plausible camera height is not accepted
-as a scale anchor. A registered RNE render versus the real reference image is
-also still missing. The fixture therefore passes four of six contracts and
-reports these two as missing:
+as a scale anchor. The fixture therefore passes five of six contracts and
+reports one as missing:
 
 - `independent_metric_scale_anchor`
-- `real_sim_observation_comparison`
 
 ## Reproduction
 

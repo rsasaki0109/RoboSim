@@ -1,5 +1,6 @@
 //! Fail-closed validation for real-capture 3DGS robot fixtures.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +42,42 @@ pub struct GaussianSplatValidationAudit {
     pub missing_contracts: Vec<String>,
     /// Required contracts that have evidence but failed their tolerance.
     pub failed_contracts: Vec<String>,
+}
+
+/// Pixel and structure metrics for one registered real-versus-RNE observation.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct GaussianSplatObservationMetrics {
+    /// Mean absolute RGB channel error in 8-bit intensity units.
+    pub rgb_mae_8bit: f64,
+    /// Root-mean-square RGB channel error in 8-bit intensity units.
+    pub rgb_rmse_8bit: f64,
+    /// Raw RGB peak signal-to-noise ratio in decibels.
+    pub rgb_psnr_db: f64,
+    /// Pearson correlation between reference and rendered luminance.
+    pub luminance_pearson: f64,
+    /// Pearson correlation between central-difference gradient magnitudes.
+    pub gradient_magnitude_pearson: f64,
+}
+
+/// Registered acceptance limits for real-versus-RNE 3DGS observations.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct GaussianSplatObservationTolerances {
+    /// Minimum accepted raw RGB PSNR.
+    pub min_rgb_psnr_db: f64,
+    /// Minimum accepted luminance correlation.
+    pub min_luminance_pearson: f64,
+    /// Minimum accepted gradient-magnitude correlation.
+    pub min_gradient_magnitude_pearson: f64,
+}
+
+/// Returns the fixed registered observation limits used by fixture validation.
+#[must_use]
+pub const fn gaussian_splat_observation_tolerances() -> GaussianSplatObservationTolerances {
+    GaussianSplatObservationTolerances {
+        min_rgb_psnr_db: 12.0,
+        min_luminance_pearson: 0.90,
+        min_gradient_magnitude_pearson: 0.65,
+    }
 }
 
 /// Error while loading or semantically verifying a 3DGS validation fixture.
@@ -127,7 +164,7 @@ pub fn audit_gaussian_splat_validation_fixture(
         "unsupported fixture schema_version"
     );
     let environment_id = nonempty_string(root, "environment_id")?.to_string();
-    let _ = nonempty_string(root, "renderer_identity")?;
+    let renderer_identity = nonempty_string(root, "renderer_identity")?;
     let declared_status = string(root, "status")?;
     let declared_qualifying = boolean(root, "qualifying")?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -150,18 +187,15 @@ pub fn audit_gaussian_splat_validation_fixture(
     let metric = object(field(root, "metric_scale")?, "metric_scale")?;
     let metric_passed = string(metric, "status")? == "verified"
         && !field(metric, "independent_physical_anchor")?.is_null();
-    let observation = object(
-        field(root, "real_sim_observation_comparison")?,
-        "real_sim_observation_comparison",
-    )?;
-    verify_artifact(
-        object(field(observation, "reference_image")?, "reference_image")?,
+    let observation_passed = validate_observation_comparison(
+        object(
+            field(root, "real_sim_observation_comparison")?,
+            "real_sim_observation_comparison",
+        )?,
         parent,
-        "real_sim_observation_comparison.reference_image",
+        &environment_id,
+        renderer_identity,
     )?;
-    let observation_passed = string(observation, "status")? == "verified"
-        && !field(observation, "rne_render")?.is_null()
-        && !field(observation, "metrics")?.is_null();
 
     let expected = BTreeMap::from([
         ("floor_world_alignment", pass_or_fail(floor_passed)),
@@ -180,11 +214,7 @@ pub fn audit_gaussian_splat_validation_fixture(
         ),
         (
             "real_sim_observation_comparison",
-            if observation_passed {
-                "passed"
-            } else {
-                "missing"
-            },
+            pass_or_fail(observation_passed),
         ),
     ]);
     let contracts = validate_contracts(array(field(root, "contracts")?, "contracts")?)?;
@@ -236,6 +266,35 @@ pub fn require_qualifying_gaussian_splat_fixture(
         });
     }
     Ok(audit)
+}
+
+/// Recomputes registered RGB and structural metrics from retained image files.
+pub fn compare_registered_gaussian_splat_observations(
+    reference_path: &Path,
+    rendered_path: &Path,
+) -> Result<GaussianSplatObservationMetrics, GaussianSplatValidationError> {
+    let reference = image::open(reference_path)
+        .map_err(|error| GaussianSplatValidationError::ArtifactMismatch {
+            label: "registered reference image".into(),
+            message: error.to_string(),
+        })?
+        .to_rgb8();
+    let rendered = image::open(rendered_path)
+        .map_err(|error| GaussianSplatValidationError::ArtifactMismatch {
+            label: "registered RNE render".into(),
+            message: error.to_string(),
+        })?
+        .to_rgb8();
+    ensure!(
+        rendered.dimensions() == reference.dimensions(),
+        "registered observation extents differ"
+    );
+    compare_observations(
+        reference.as_raw(),
+        rendered.as_raw(),
+        reference.width() as usize,
+        reference.height() as usize,
+    )
 }
 
 fn validate_provenance(
@@ -440,6 +499,253 @@ fn validate_collision_alignment(
         "collision alignment status drifted"
     );
     Ok(inside)
+}
+
+fn validate_observation_comparison(
+    value: &Map<String, Value>,
+    parent: &Path,
+    environment_id: &str,
+    renderer_identity: &str,
+) -> Result<bool, GaussianSplatValidationError> {
+    ensure_exact_keys(
+        value,
+        &[
+            "status",
+            "reference_camera_id",
+            "reference_image",
+            "rne_render",
+            "report",
+            "metrics",
+            "tolerances",
+            "photometric_note",
+        ],
+        "real_sim_observation_comparison",
+    )?;
+    let camera_id = nonempty_string(value, "reference_camera_id")?;
+    let _ = nonempty_string(value, "photometric_note")?;
+    let reference_artifact = object(field(value, "reference_image")?, "reference_image")?;
+    let render_artifact = object(field(value, "rne_render")?, "rne_render")?;
+    let reference_path = verify_artifact(
+        reference_artifact,
+        parent,
+        "real_sim_observation_comparison.reference_image",
+    )?;
+    let render_path = verify_artifact(
+        render_artifact,
+        parent,
+        "real_sim_observation_comparison.rne_render",
+    )?;
+    let report_path = verify_artifact(
+        object(field(value, "report")?, "observation report")?,
+        parent,
+        "real_sim_observation_comparison.report",
+    )?;
+    let report_bytes =
+        fs::read(&report_path).map_err(|error| GaussianSplatValidationError::Io {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let report_value: Value = serde_json::from_slice(&report_bytes).map_err(|error| {
+        GaussianSplatValidationError::Parse {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let report = object(&report_value, "observation report")?;
+    ensure_exact_keys(
+        report,
+        &[
+            "kind",
+            "schema_version",
+            "environment_id",
+            "camera_id",
+            "renderer_identity",
+            "gpu_adapter",
+            "reference_image",
+            "rne_render",
+            "intrinsics",
+            "metrics",
+            "tolerances",
+            "status",
+            "photometric_note",
+        ],
+        "observation report",
+    )?;
+    ensure!(
+        string(report, "kind")? == "rne_registered_real_sim_observation"
+            && unsigned(report, "schema_version")? == 1,
+        "unsupported observation report identity"
+    );
+    ensure!(
+        string(report, "environment_id")? == environment_id
+            && string(report, "camera_id")? == camera_id
+            && string(report, "renderer_identity")? == renderer_identity,
+        "observation report identity drifted"
+    );
+    let gpu_adapter = object(field(report, "gpu_adapter")?, "gpu_adapter")?;
+    ensure_exact_keys(
+        gpu_adapter,
+        &[
+            "name",
+            "vendor",
+            "device",
+            "device_type",
+            "driver",
+            "driver_info",
+            "backend",
+        ],
+        "gpu_adapter",
+    )?;
+    let _ = nonempty_string(gpu_adapter, "name")?;
+    let _ = unsigned(gpu_adapter, "vendor")?;
+    let _ = unsigned(gpu_adapter, "device")?;
+    let _ = nonempty_string(gpu_adapter, "device_type")?;
+    let _ = nonempty_string(gpu_adapter, "driver")?;
+    let _ = string(gpu_adapter, "driver_info")?;
+    let _ = nonempty_string(gpu_adapter, "backend")?;
+    ensure!(
+        field(report, "reference_image")? == field(value, "reference_image")?
+            && field(report, "rne_render")? == field(value, "rne_render")?
+            && field(report, "metrics")? == field(value, "metrics")?
+            && field(report, "tolerances")? == field(value, "tolerances")?
+            && field(report, "status")? == field(value, "status")?
+            && field(report, "photometric_note")? == field(value, "photometric_note")?,
+        "observation fixture and report disagree"
+    );
+    let intrinsics = object(field(report, "intrinsics")?, "observation intrinsics")?;
+    let width = unsigned(intrinsics, "width_px")?;
+    let height = unsigned(intrinsics, "height_px")?;
+    for name in ["fx_px", "fy_px", "cx_px", "cy_px", "fov_y_rad"] {
+        let _ = finite(intrinsics, name)?;
+    }
+    let reference_extent = image::image_dimensions(&reference_path).map_err(|error| {
+        GaussianSplatValidationError::ArtifactMismatch {
+            label: "real_sim_observation_comparison.reference_image".into(),
+            message: error.to_string(),
+        }
+    })?;
+    ensure!(
+        u64::from(reference_extent.0) == width && u64::from(reference_extent.1) == height,
+        "registered reference extent differs from intrinsics"
+    );
+    let actual = compare_registered_gaussian_splat_observations(&reference_path, &render_path)?;
+    let declared = object(field(value, "metrics")?, "observation metrics")?;
+    for (name, actual) in [
+        ("rgb_mae_8bit", actual.rgb_mae_8bit),
+        ("rgb_rmse_8bit", actual.rgb_rmse_8bit),
+        ("rgb_psnr_db", actual.rgb_psnr_db),
+        ("luminance_pearson", actual.luminance_pearson),
+        (
+            "gradient_magnitude_pearson",
+            actual.gradient_magnitude_pearson,
+        ),
+    ] {
+        let metric_matches = (finite(declared, name)? - actual).abs() <= 1.0e-9;
+        ensure!(metric_matches, "observation metric {name} drifted");
+    }
+    let tolerances = object(field(value, "tolerances")?, "observation tolerances")?;
+    let min_psnr = finite(tolerances, "min_rgb_psnr_db")?;
+    let min_luminance = finite(tolerances, "min_luminance_pearson")?;
+    let min_gradient = finite(tolerances, "min_gradient_magnitude_pearson")?;
+    let registered_tolerances = gaussian_splat_observation_tolerances();
+    ensure!(
+        (min_psnr - registered_tolerances.min_rgb_psnr_db).abs() <= f64::EPSILON
+            && (min_luminance - registered_tolerances.min_luminance_pearson).abs() <= f64::EPSILON
+            && (min_gradient - registered_tolerances.min_gradient_magnitude_pearson).abs()
+                <= f64::EPSILON,
+        "observation tolerances are not the registered limits"
+    );
+    let passed = actual.rgb_psnr_db >= min_psnr
+        && actual.luminance_pearson >= min_luminance
+        && actual.gradient_magnitude_pearson >= min_gradient;
+    ensure!(
+        string(value, "status")? == pass_status(passed),
+        "observation status does not match recomputed metrics"
+    );
+    Ok(passed)
+}
+
+fn compare_observations(
+    reference_rgb8: &[u8],
+    rendered_rgb8: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<GaussianSplatObservationMetrics, GaussianSplatValidationError> {
+    ensure!(
+        reference_rgb8.len() == rendered_rgb8.len()
+            && reference_rgb8.len() == width.saturating_mul(height).saturating_mul(3)
+            && width >= 3
+            && height >= 3,
+        "registered observation buffers are inconsistent"
+    );
+    let mut absolute_sum = 0.0;
+    let mut squared_sum = 0.0;
+    let mut reference_luminance = Vec::with_capacity(width * height);
+    let mut rendered_luminance = Vec::with_capacity(width * height);
+    for (reference, rendered) in reference_rgb8
+        .chunks_exact(3)
+        .zip(rendered_rgb8.chunks_exact(3))
+    {
+        for channel in 0..3 {
+            let error = f64::from(reference[channel]) - f64::from(rendered[channel]);
+            absolute_sum += error.abs();
+            squared_sum += error * error;
+        }
+        reference_luminance.push(rgb_luminance(reference));
+        rendered_luminance.push(rgb_luminance(rendered));
+    }
+    let count = reference_rgb8.len() as f64;
+    let rmse = (squared_sum / count).sqrt();
+    let reference_gradient = gradient_magnitudes(&reference_luminance, width, height);
+    let rendered_gradient = gradient_magnitudes(&rendered_luminance, width, height);
+    Ok(GaussianSplatObservationMetrics {
+        rgb_mae_8bit: absolute_sum / count,
+        rgb_rmse_8bit: rmse,
+        rgb_psnr_db: 20.0 * (255.0 / rmse).log10(),
+        luminance_pearson: pearson_correlation(&reference_luminance, &rendered_luminance)?,
+        gradient_magnitude_pearson: pearson_correlation(&reference_gradient, &rendered_gradient)?,
+    })
+}
+
+fn rgb_luminance(rgb: &[u8]) -> f64 {
+    0.2126 * f64::from(rgb[0]) + 0.7152 * f64::from(rgb[1]) + 0.0722 * f64::from(rgb[2])
+}
+
+fn gradient_magnitudes(luminance: &[f64], width: usize, height: usize) -> Vec<f64> {
+    let mut result = Vec::with_capacity((width - 2) * (height - 2));
+    for y in 1..height - 1 {
+        for x in 1..width - 1 {
+            let dx = luminance[y * width + x + 1] - luminance[y * width + x - 1];
+            let dy = luminance[(y + 1) * width + x] - luminance[(y - 1) * width + x];
+            result.push(dx.hypot(dy));
+        }
+    }
+    result
+}
+
+fn pearson_correlation(left: &[f64], right: &[f64]) -> Result<f64, GaussianSplatValidationError> {
+    ensure!(
+        left.len() == right.len() && !left.is_empty(),
+        "correlation buffers are inconsistent"
+    );
+    let count = left.len() as f64;
+    let left_mean = left.iter().sum::<f64>() / count;
+    let right_mean = right.iter().sum::<f64>() / count;
+    let mut covariance = 0.0;
+    let mut left_variance = 0.0;
+    let mut right_variance = 0.0;
+    for (&left, &right) in left.iter().zip(right) {
+        let left_delta = left - left_mean;
+        let right_delta = right - right_mean;
+        covariance += left_delta * right_delta;
+        left_variance += left_delta * left_delta;
+        right_variance += right_delta * right_delta;
+    }
+    ensure!(
+        left_variance.is_sign_positive() && right_variance.is_sign_positive(),
+        "correlation inputs must not be constant"
+    );
+    Ok(covariance / (left_variance * right_variance).sqrt())
 }
 
 fn validate_contracts(
@@ -664,15 +970,10 @@ mod tests {
                 "camera_intrinsics_extrinsics",
                 "semantic_landmark_reprojection",
                 "collision_semantic_alignment",
+                "real_sim_observation_comparison",
             ]
         );
-        assert_eq!(
-            audit.missing_contracts,
-            [
-                "independent_metric_scale_anchor",
-                "real_sim_observation_comparison"
-            ]
-        );
+        assert_eq!(audit.missing_contracts, ["independent_metric_scale_anchor"]);
         assert!(audit.failed_contracts.is_empty());
         assert!(matches!(
             require_qualifying_gaussian_splat_fixture(&committed_fixture()),

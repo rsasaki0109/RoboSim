@@ -14,13 +14,13 @@
     "colmap_points3d_sha256": "9b8ecf96dc829f6a337dae0680ed9d42cb22ed056a44102b857605ba1cad667b",
     "splat_manifest": {
       "path": "voxel51_drjohnson.rne.splat.toml",
-      "size_bytes": 680,
-      "sha256": "66ba0813d9f3b6a8ece9f13b55b892636bb94add79b66ae919a3e81948c0c9cb"
+      "size_bytes": 679,
+      "sha256": "9a587070a07afae935602f8fba9a938664bb45a26a291df6f06084a99581b8bf"
     },
     "splat_ply": {
-      "path": "drjohnson_dc_every10.ply",
-      "size_bytes": 17794698,
-      "sha256": "f357a929801db2be75574c47205479c53a6bf71686af3f4bf8c1641db3688663"
+      "path": "drjohnson_dc_every4.ply",
+      "size_bytes": 44486146,
+      "sha256": "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f"
     }
   },
   "source_to_world": {
@@ -389,15 +389,36 @@
     "top_center_inside_expected_semantic_polygon": true
   },
   "real_sim_observation_comparison": {
-    "status": "pending",
+    "status": "verified",
     "reference_camera_id": "colmap.IMG_6293.jpg",
     "reference_image": {
       "path": "IMG_6293.reference.jpg",
       "size_bytes": 622185,
       "sha256": "278a543e1755beab9cef1ac708c587ffef12f5cc418db7afea91f52205157cca"
     },
-    "rne_render": null,
-    "metrics": null
+    "rne_render": {
+      "path": "IMG_6293.rne.png",
+      "size_bytes": 1442825,
+      "sha256": "465a433f8334b4d588c0f00e9e646be3d797c5f395c685acb37d588c41dec954"
+    },
+    "report": {
+      "path": "IMG_6293.observation.json",
+      "size_bytes": 1519,
+      "sha256": "52cfef61a90f3ec5f380be3bc314b693f5df92665abcd84796c1099211745ac1"
+    },
+    "metrics": {
+      "rgb_mae_8bit": 53.397328550011196,
+      "rgb_rmse_8bit": 56.78427070466878,
+      "rgb_psnr_db": 13.046242560724968,
+      "luminance_pearson": 0.9266620671360476,
+      "gradient_magnitude_pearson": 0.6879226988132977
+    },
+    "tolerances": {
+      "min_rgb_psnr_db": 12.0,
+      "min_luminance_pearson": 0.9,
+      "min_gradient_magnitude_pearson": 0.65
+    },
+    "photometric_note": "Raw PSNR is retained and bounded; luminance and gradient correlation provide exposure-robust structural registration metrics."
   },
   "contracts": [
     {
@@ -422,7 +443,7 @@
     },
     {
       "id": "real_sim_observation_comparison",
-      "status": "missing"
+      "status": "passed"
     }
   ]
 }

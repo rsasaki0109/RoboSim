@@ -37,7 +37,9 @@ pub use gaussian_splat::{
     GAUSSIAN_SPLAT_RENDERER_ID_V1,
 };
 pub use gaussian_splat_validation::{
-    audit_gaussian_splat_validation_fixture, require_qualifying_gaussian_splat_fixture,
+    audit_gaussian_splat_validation_fixture, compare_registered_gaussian_splat_observations,
+    gaussian_splat_observation_tolerances, require_qualifying_gaussian_splat_fixture,
+    GaussianSplatObservationMetrics, GaussianSplatObservationTolerances,
     GaussianSplatValidationAudit, GaussianSplatValidationError,
 };
 pub use headless::HeadlessRenderBackend;

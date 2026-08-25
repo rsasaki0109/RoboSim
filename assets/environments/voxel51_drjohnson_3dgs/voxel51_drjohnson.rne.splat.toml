@@ -1,7 +1,7 @@
 kind = "rne_gaussian_splat_environment"
 schema_version = 2
 environment_id = "voxel51.drjohnson.real_capture.v1"
-ply_path = "drjohnson_dc_every10.ply"
+ply_path = "drjohnson_dc_every4.ply"
 standin = false
 translation_m = [0.0, 1.4536229671489928, 0.0]
 rotation_y_rad = 0.0

@@ -4,9 +4,9 @@
 The source archive is the official INRIA 3DGS Deep Blending input bundle.  The
 tool extracts two reference frames, decodes their COLMAP intrinsics/extrinsics,
 binds semantic image annotations to reconstructed 3D points, and projects the
-RNE pickup collision proxy back into the real frame.  It deliberately leaves
-the fixture non-qualifying until an independent metric scale anchor and an RNE
-render-vs-reference comparison are retained.
+RNE pickup collision proxy back into the real frame, and binds a registered
+RNE render-vs-reference observation report. It deliberately leaves the fixture
+non-qualifying until an independent metric scale anchor is retained.
 """
 
 from __future__ import annotations
@@ -444,6 +444,49 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
     )
     support_inside_rug = point_in_polygon((support_u, support_v), RUG_POLYGON_PX)
 
+    observation_report_path = asset_root / "IMG_6293.observation.json"
+    observation_report = json.loads(observation_report_path.read_text(encoding="utf-8"))
+    if observation_report.get("kind") != "rne_registered_real_sim_observation":
+        raise ValueError("unexpected registered observation report kind")
+    if observation_report.get("schema_version") != 1:
+        raise ValueError("unsupported registered observation report schema")
+    if observation_report.get("environment_id") != manifest["environment_id"]:
+        raise ValueError("registered observation environment mismatch")
+    if observation_report.get("camera_id") != f"colmap.{comparison_name}":
+        raise ValueError("registered observation camera mismatch")
+    if observation_report.get("renderer_identity") != manifest["renderer_identity"]:
+        raise ValueError("registered observation renderer mismatch")
+    reference_artifact = observation_report["reference_image"]
+    render_artifact = observation_report["rne_render"]
+    if reference_artifact["path"] != "IMG_6293.reference.jpg":
+        raise ValueError("registered observation reference path mismatch")
+    if render_artifact["path"] != "IMG_6293.rne.png":
+        raise ValueError("registered observation render path mismatch")
+    for label, artifact in (
+        ("reference", reference_artifact),
+        ("render", render_artifact),
+    ):
+        actual = file_artifact(asset_root / artifact["path"], artifact["path"])
+        if artifact != actual:
+            raise ValueError(f"registered observation {label} artifact drifted")
+    metrics = observation_report["metrics"]
+    tolerances = observation_report["tolerances"]
+    expected_tolerances = {
+        "min_rgb_psnr_db": 12.0,
+        "min_luminance_pearson": 0.9,
+        "min_gradient_magnitude_pearson": 0.65,
+    }
+    if tolerances != expected_tolerances:
+        raise ValueError("registered observation tolerances drifted")
+    observation_passed = (
+        metrics["rgb_psnr_db"] >= tolerances["min_rgb_psnr_db"]
+        and metrics["luminance_pearson"] >= tolerances["min_luminance_pearson"]
+        and metrics["gradient_magnitude_pearson"]
+        >= tolerances["min_gradient_magnitude_pearson"]
+    )
+    if observation_report.get("status") != ("verified" if observation_passed else "failed"):
+        raise ValueError("registered observation status does not match metrics")
+
     ply_path = asset_root / manifest["ply_path"]
     reprojection_rmse = math.sqrt(
         sum(error * error for error in reprojection_errors) / len(reprojection_errors)
@@ -518,15 +561,20 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
             "top_center_inside_expected_semantic_polygon": support_inside_rug,
         },
         "real_sim_observation_comparison": {
-            "status": "pending",
+            "status": "verified" if observation_passed else "failed",
             "reference_camera_id": f"colmap.{comparison_name}",
             "reference_image": next(
                 camera["reference_image"]
                 for camera in camera_entries
                 if camera["source_image_name"] == comparison_name
             ),
-            "rne_render": None,
-            "metrics": None,
+            "rne_render": render_artifact,
+            "report": file_artifact(
+                observation_report_path, "IMG_6293.observation.json"
+            ),
+            "metrics": metrics,
+            "tolerances": tolerances,
+            "photometric_note": observation_report["photometric_note"],
         },
         "contracts": [
             {
@@ -546,7 +594,10 @@ def build(source_archive: pathlib.Path, repository: pathlib.Path) -> dict[str, o
                 "status": "passed" if support_inside_rug else "failed",
             },
             {"id": "independent_metric_scale_anchor", "status": "missing"},
-            {"id": "real_sim_observation_comparison", "status": "missing"},
+            {
+                "id": "real_sim_observation_comparison",
+                "status": "passed" if observation_passed else "failed",
+            },
         ],
     }
     return fixture

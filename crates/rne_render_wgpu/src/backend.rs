@@ -13,6 +13,7 @@ use rne_render::{
 pub struct WgpuRenderBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    adapter_info: wgpu::AdapterInfo,
     primitive: Option<PrimitiveRenderer>,
     environment: EnvironmentLighting,
     taa: TaaSettings,
@@ -50,6 +51,7 @@ impl WgpuRenderBackend {
         required_limits.max_storage_buffers_per_shader_stage =
             required_limits.max_storage_buffers_per_shader_stage.max(16);
 
+        let adapter_info = adapter.get_info();
         let (device, queue) = block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("rne_render_wgpu"),
@@ -64,6 +66,7 @@ impl WgpuRenderBackend {
         Ok(Self {
             device,
             queue,
+            adapter_info,
             primitive: None,
             environment: EnvironmentLighting::default(),
             taa: TaaSettings::default(),
@@ -92,6 +95,11 @@ impl WgpuRenderBackend {
     /// Returns the underlying GPU queue for optional render adapters.
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+
+    /// Returns the selected adapter identity for retained render evidence.
+    pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
+        &self.adapter_info
     }
 
     /// Replaces the temporal anti-aliasing settings for subsequent renders.
