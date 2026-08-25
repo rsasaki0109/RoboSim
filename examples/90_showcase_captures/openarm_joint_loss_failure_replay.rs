@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 
-const PERFORMANCE_REQUIREMENT: &str = "joint_loss.maximum_controlled_joint_rmse_rad";
+const JOINT_LOSS_PERFORMANCE_REQUIREMENT: &str = "joint_loss.maximum_controlled_joint_rmse_rad";
+const COULOMB_PERFORMANCE_REQUIREMENT: &str = "coulomb.maximum_controlled_joint_rmse_rad";
 const RMSE_RECOMPUTE_TOLERANCE_RAD: f64 = 1.0e-12;
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +30,10 @@ struct Outcome {
     backend_id: String,
     case_id: String,
     plant_viscous_damping_nm_s_per_rad: f64,
+    #[serde(default)]
+    plant_coulomb_friction_nm: Option<f64>,
+    #[serde(default)]
+    plant_coulomb_transition_velocity_rad_s: Option<f64>,
     status: String,
     trace_sha256: String,
     metrics: Metrics,
@@ -124,6 +129,8 @@ fn run() -> Result<()> {
             "backend_id": trace.backend_id,
             "case_id": outcome.case_id,
             "plant_viscous_damping_nm_s_per_rad": outcome.plant_viscous_damping_nm_s_per_rad,
+            "plant_coulomb_friction_nm": outcome.plant_coulomb_friction_nm,
+            "plant_coulomb_transition_velocity_rad_s": outcome.plant_coulomb_transition_velocity_rad_s,
             "report_sha256": report_sha256,
             "trace_sha256": trace_sha256,
             "requirement_id": requirement.requirement_id,
@@ -156,14 +163,27 @@ fn run() -> Result<()> {
     let maximum = requirement
         .maximum
         .context("failed RMSE requirement has no maximum")?;
+    let loss_parameters = if let (Some(friction), Some(transition)) = (
+        outcome.plant_coulomb_friction_nm,
+        outcome.plant_coulomb_transition_velocity_rad_s,
+    ) {
+        format!(
+            "plant Coulomb friction {friction:.6} N*m and transition velocity {transition:.6} rad/s"
+        )
+    } else {
+        format!(
+            "plant damping {:.6} N*m*s/rad",
+            outcome.plant_viscous_damping_nm_s_per_rad
+        )
+    };
     let message = format!(
-        "joint 5 episode RMSE {:.9} {} exceeded {:.9} {} at step {} with plant damping {:.6} N*m*s/rad",
+        "joint 5 episode RMSE {:.9} {} exceeded {:.9} {} at step {} with {}",
         outcome.metrics.tracking_rmse_rad,
         requirement.unit,
         maximum,
         requirement.unit,
         final_observation.step,
-        outcome.plant_viscous_damping_nm_s_per_rad
+        loss_parameters
     );
     let replay = BehaviorReplayArtifact::new(
         report.experiment_id.clone(),
@@ -186,9 +206,11 @@ fn run() -> Result<()> {
     )?;
     replay.write_json(&output_path)?;
     println!(
-        "OpenArm joint-loss failure replay: backend={} damping={} requirement={} step={} report_sha256={report_sha256}",
+        "OpenArm joint-loss failure replay: backend={} damping={} friction={:?} transition={:?} requirement={} step={} report_sha256={report_sha256}",
         outcome.backend_id,
         outcome.plant_viscous_damping_nm_s_per_rad,
+        outcome.plant_coulomb_friction_nm,
+        outcome.plant_coulomb_transition_velocity_rad_s,
         requirement.requirement_id,
         final_observation.step
     );
@@ -200,10 +222,13 @@ fn validate_inputs<'a>(
     trace: &BackendTrace,
     trace_sha256: &str,
 ) -> Result<(&'a Outcome, &'a Check)> {
+    let performance_requirement = match report.kind.as_str() {
+        "rne_openarm_joint_loss_report" => JOINT_LOSS_PERFORMANCE_REQUIREMENT,
+        "rne_openarm_coulomb_friction_report" => COULOMB_PERFORMANCE_REQUIREMENT,
+        _ => bail!("report is not a supported OpenArm joint-loss envelope report"),
+    };
     anyhow::ensure!(
-        report.kind == "rne_openarm_joint_loss_report"
-            && report.schema_version == 1
-            && matches!(report.status.as_str(), "passed" | "needs_tuning"),
+        report.schema_version == 1 && matches!(report.status.as_str(), "passed" | "needs_tuning"),
         "report is not a supported OpenArm joint-loss envelope report"
     );
     let outcome = report
@@ -213,12 +238,12 @@ fn validate_inputs<'a>(
             ((report.status == "passed" && outcome.status == "expected_boundary_failure")
                 || (report.status == "needs_tuning" && outcome.status == "failed"))
                 && outcome.checks.iter().any(|check| {
-                    check.requirement_id == PERFORMANCE_REQUIREMENT && check.status == "failed"
+                    check.requirement_id == performance_requirement && check.status == "failed"
                 })
         })
         .min_by(|left, right| {
-            left.plant_viscous_damping_nm_s_per_rad
-                .total_cmp(&right.plant_viscous_damping_nm_s_per_rad)
+            loss_parameter(left)
+                .total_cmp(&loss_parameter(right))
                 .then_with(|| {
                     replay_backend_rank(&left.backend_id)
                         .cmp(&replay_backend_rank(&right.backend_id))
@@ -229,7 +254,7 @@ fn validate_inputs<'a>(
     let requirement = outcome
         .checks
         .iter()
-        .find(|check| check.requirement_id == PERFORMANCE_REQUIREMENT)
+        .find(|check| check.requirement_id == performance_requirement)
         .context("failed outcome has no RMSE requirement")?;
     anyhow::ensure!(
         trace.kind == "rne_openarm_backend_trace"
@@ -278,6 +303,12 @@ fn validate_inputs<'a>(
         outcome.metrics.tracking_rmse_rad
     );
     Ok((outcome, requirement))
+}
+
+fn loss_parameter(outcome: &Outcome) -> f64 {
+    outcome
+        .plant_coulomb_friction_nm
+        .unwrap_or(outcome.plant_viscous_damping_nm_s_per_rad)
 }
 
 fn replay_backend_rank(backend_id: &str) -> u8 {

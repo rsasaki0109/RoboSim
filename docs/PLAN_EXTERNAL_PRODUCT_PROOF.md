@@ -651,9 +651,17 @@ delta. The declared 10-point now passes at `0.013450`, `0.017185`, and
 `0.02 rad` RMSE contract on all three at `0.021962`, `0.024173`, and
 `0.021684 rad`. The browser report is `passed` and classifies those three rows
 as `expected_boundary_failure`; the step-3600 replay retains the first Rapier
-boundary failure. The portable regularized-Coulomb implementation is now
-present, while its cross-backend sweep and capsule remain open; inertia and
-transmission-efficiency dimensions also remain open.
+boundary failure. The portable regularized-Coulomb implementation now has a
+complete 15-run Rapier/native-MuJoCo/external-Gazebo sweep over the frozen
+`[0, 0.25, 0.5, 1, 2] N*m` grid. Model realization and same-runtime replay are
+exact in every row, but the report is honestly `needs_tuning`: Rapier first
+misses the fixed `0.02 rad` RMSE contract at the supported 0.25 N*m point
+(`0.038961 rad`). MuJoCo and Gazebo pass through 0.5 N*m. A predeclared
+controller-correction diagnostic at the Rapier 0.5 N*m point did not close the
+gap, making transition-width/integration sensitivity—not a post-hoc relaxed
+tolerance—the next experiment. A replay captures the first deviation; the
+verified capsule remains open. Inertia and transmission-efficiency dimensions
+also remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

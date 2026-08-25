@@ -10,8 +10,8 @@ use rne_data::{
 };
 use rne_ecs::{spawn_named, Entity, Name, World};
 use rne_physics::{
-    hash_physics_state_v2, JointActuation, JointMotorGainModel, JointState, PhysicsBackend,
-    PhysicsWorldDesc, PhysicsWorldId, RevoluteJointDesc,
+    hash_physics_state_v2, JointActuation, JointMotorGainModel, JointPassiveDynamics, JointState,
+    PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, RevoluteJointDesc,
 };
 use rne_physics_mujoco::MuJoCoBackend;
 use rne_sensor::{
@@ -344,6 +344,7 @@ struct Rollout {
     observations: Vec<ObservationFrame>,
     maximum_sensor_backend_position_delta_rad: f64,
     maximum_sensor_backend_velocity_delta_rad_s: f64,
+    joint_passive_dynamics: Vec<Option<JointPassiveDynamics>>,
 }
 
 struct MujocoOpenArmSim {
@@ -631,6 +632,7 @@ fn run() -> Result<()> {
             "maximum_sensor_backend_velocity_delta_rad_s": first.maximum_sensor_backend_velocity_delta_rad_s,
             "final_maximum_tracking_error_rad": final_error,
             "maximum_tracking_error_rad": maximum_error,
+            "joint_passive_dynamics": first.joint_passive_dynamics,
             "observations": first.observations,
         }),
     )?;
@@ -945,6 +947,15 @@ fn rollout(
     actions: &[ActionFrame],
 ) -> Result<Rollout> {
     let mut sim = MujocoOpenArmSim::new(scene, actuation.solver_iterations)?;
+    let joint_passive_dynamics = controller
+        .rne_actuator_link_order
+        .iter()
+        .map(|name| {
+            sim.find_named(name)
+                .with_context(|| format!("missing MuJoCo actuator link {name}"))
+                .map(|entity| sim.world.get::<JointPassiveDynamics>(entity).copied())
+        })
+        .collect::<Result<Vec<_>>>()?;
     sim.configure_actuators(actuation)?;
     sim.install_sensor(controller, JointFeedbackFault::None)?;
     let initial_digest = hash_physics_state_v2(&sim.world);
@@ -1053,6 +1064,7 @@ fn rollout(
         observations,
         maximum_sensor_backend_position_delta_rad,
         maximum_sensor_backend_velocity_delta_rad_s,
+        joint_passive_dynamics,
     })
 }
 

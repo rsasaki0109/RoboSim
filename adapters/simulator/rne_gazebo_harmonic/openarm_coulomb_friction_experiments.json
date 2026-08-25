@@ -1,0 +1,22 @@
+{
+  "kind": "rne_openarm_coulomb_friction_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.joint5_regularized_coulomb.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "viscous_damping_nm_s_per_rad": 10.0,
+  "coulomb_friction_grid_nm": [0.0, 0.25, 0.5, 1.0, 2.0],
+  "coulomb_transition_velocity_rad_s": 0.01,
+  "declared_supported_coulomb_friction_nm": 0.5,
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "requirements": [
+    {"id": "coulomb.maximum_model_parameter_realization_delta", "unit": "N*m", "maximum": 0.000000000001},
+    {"id": "coulomb.maximum_transition_velocity_realization_delta", "unit": "rad/s", "maximum": 0.000000000001},
+    {"id": "coulomb.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
+    {"id": "coulomb.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
+    {"id": "coulomb.maximum_supported_friction_nm", "unit": "N*m", "maximum": 0.5},
+    {"id": "coulomb.requires_exact_replay", "unit": "bool", "required": true}
+  ],
+  "parameter_semantics": "joint5_regularized_kinetic_loss_-magnitude*tanh(velocity/transition_velocity)_separate_from_actuator_limit",
+  "gazebo_derivation": "portable_urdf_friction_is_zeroed_in_runtime_urdf_and_realized_by_process_isolated_adapter_after_actuator_saturation",
+  "boundary_rule": "smallest_friction_with_any_predeclared_non_capacity_requirement_failure"
+}

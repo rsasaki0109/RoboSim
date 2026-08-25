@@ -10,7 +10,8 @@ use rne_data::{
     DataBus, Frame, InMemoryDataBus, JointEffortFeedback, JointFeedback, JointFeedbackStatus,
     StreamId,
 };
-use rne_physics::hash_physics_state_v2;
+use rne_ecs::Name;
+use rne_physics::{hash_physics_state_v2, JointPassiveDynamics};
 use rne_sensor::JointFeedbackFault;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -325,6 +326,7 @@ struct BackendTrace<'a> {
     maximum_sensor_backend_velocity_delta_rad_s: f64,
     final_maximum_tracking_error_rad: f64,
     maximum_tracking_error_rad: f64,
+    joint_passive_dynamics: Vec<Option<JointPassiveDynamics>>,
     observations: Vec<ObservationFrame>,
 }
 
@@ -361,6 +363,7 @@ struct Rollout {
     observations: Vec<ObservationFrame>,
     maximum_sensor_backend_position_delta_rad: f64,
     maximum_sensor_backend_velocity_delta_rad_s: f64,
+    joint_passive_dynamics: Vec<Option<JointPassiveDynamics>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -626,6 +629,7 @@ fn run() -> Result<()> {
                 .maximum_sensor_backend_velocity_delta_rad_s,
             final_maximum_tracking_error_rad: final_error,
             maximum_tracking_error_rad: maximum_error,
+            joint_passive_dynamics: first.joint_passive_dynamics,
             observations: first.observations,
         },
     )?;
@@ -1746,6 +1750,17 @@ fn rollout(
         rne_core::SimDuration::from_ticks(FIXED_DELTA_TICKS),
     )
     .context("load OpenArm right-arm validation scene")?;
+    let joint_passive_dynamics = controller
+        .rne_actuator_link_order
+        .iter()
+        .map(|name| {
+            sim.world()
+                .iter_entities()
+                .find(|entity| entity.get::<Name>().is_some_and(|value| value.0 == *name))
+                .with_context(|| format!("missing OpenArm actuator link {name}"))
+                .map(|entity| entity.get::<JointPassiveDynamics>().copied())
+        })
+        .collect::<Result<Vec<_>>>()?;
     configure_actuators(&mut sim, actuation_config)?;
     sim.install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
         sensor_name: "openarm_right_joint_feedback".into(),
@@ -1903,6 +1918,7 @@ fn rollout(
         observations,
         maximum_sensor_backend_position_delta_rad,
         maximum_sensor_backend_velocity_delta_rad_s,
+        joint_passive_dynamics,
     })
 }
 

@@ -143,6 +143,35 @@ The final report is `passed`: supported cases pass, model/hash/replay checks
 remain exact, and the 20-point rows are retained as
 `expected_boundary_failure`, not hidden or converted into successes.
 
+Build the separate regularized-Coulomb envelope with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-coulomb/fixtures
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_report.py \
+  --fixture-root artifacts/openarm-coulomb/fixtures \
+  --trace-root artifacts/openarm-coulomb \
+  --controller artifacts/openarm-joint-loss/controller-tuning-report/openarm-joint-loss-selected.controller.json \
+  --output artifacts/openarm-coulomb/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-coulomb/report/openarm-coulomb-friction-report.json \
+  --trace artifacts/openarm-coulomb/rapier/joint5-coulomb-0250mn/rapier-success-trace.json \
+  --output artifacts/openarm-coulomb/report/openarm-coulomb-friction-first-failure.rne-replay
+```
+
+The frozen `[0, 0.25, 0.5, 1, 2] N*m` grid keeps plant viscous damping at
+10 N*m*s/rad and the transition velocity at 0.01 rad/s. All 15 real runs have
+exact same-runtime replay and exact independently checked parameter
+realization. The report deliberately remains `needs_tuning`: the first
+supported failure is Rapier at 0.25 N*m, where RMSE is 0.038961 rad against the
+unchanged 0.02 rad limit. MuJoCo and Gazebo pass through the declared 0.5 N*m
+point. A diagnostic Rapier controller-correction sweep at 0.5 N*m did not
+recover the limit, so transition-width/integration sensitivity is the next
+predeclared tuning dimension. The supported envelope and tolerance are not
+changed after observing this result.
+
 ## Run conformance
 
 From the repository root on Ubuntu:
