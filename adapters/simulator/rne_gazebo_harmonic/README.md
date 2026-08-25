@@ -201,6 +201,33 @@ unchanged. Transition smoothing and numerical subdivision are therefore ruled
 out as fixes for this contract; controller/plant-model retuning at the fixed
 0.5 N*m case is next.
 
+The first controller retuning experiment freezes that same plant, TaskSpec,
+trajectory, observation/disturbance contracts, correction limits, and
+single-substep execution while replacing only the four desired closed-loop
+poles. Build its predeclared candidates and browser report with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_pole_tuning.py \
+  --base-controller artifacts/openarm-controller-lab/openarm-plant-state-feedback.controller.json \
+  --output artifacts/openarm-coulomb-controller-poles/candidates
+# Run each candidate on the unchanged 0.5 N*m Rapier fixture, then:
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_pole_tuning_report.py \
+  --candidate-root artifacts/openarm-coulomb-controller-poles/candidates \
+  --trace-root artifacts/openarm-coulomb-controller-poles/results \
+  --output artifacts/openarm-coulomb-controller-poles/report
+```
+
+The `fast`, `baseline`, `medium`, and `slow` candidates produce respectively
+`0.055565`, `0.036139`, `0.034136`, and `0.035176 rad` RMSE. All retain exact
+replay, exact controller identity, and exact plant realization, but none passes
+the unchanged `0.02 rad` gate, so the report remains `needs_tuning` and selects
+no controller. The baseline spends 1,020 of 3,600 samples at the joint-5 effort
+limit: its saturated-sample RMSE is `0.065922 rad`, versus `0.010210 rad` while
+not saturated. The otherwise identical zero-Coulomb run saturates for only
+three samples and passes at `0.013454 rad`. This localizes the next experiment
+to bounded model-based Coulomb compensation and actuator-authority handling;
+the supported friction envelope and acceptance limit remain unchanged.
+
 ## Run conformance
 
 From the repository root on Ubuntu:
