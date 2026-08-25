@@ -10,9 +10,9 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, JointActuation, JointMotor, JointPassiveDynamics, JointState,
-    PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit,
-    RaycastQuery, RigidBody, RigidBodyType,
+    ColliderShape, ContactEvent, JointActuation, JointEffortMeasurement, JointMotor,
+    JointPassiveDynamics, JointState, PhysicsBackend, PhysicsCapability, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
@@ -1090,8 +1090,14 @@ impl PhysicsBackend for MuJoCoBackend {
                             Vec3::from_slice(&joint_view.qvel[3..6]);
                     }
                 }
-                JointBinding::Revolute { joint_name, .. }
-                | JointBinding::Prismatic { joint_name, .. } => {
+                JointBinding::Revolute {
+                    joint_name,
+                    actuator_name,
+                }
+                | JointBinding::Prismatic {
+                    joint_name,
+                    actuator_name,
+                } => {
                     let joint = data
                         .joint(joint_name)
                         .ok_or(PhysicsError::InitializationFailed)?;
@@ -1111,6 +1117,25 @@ impl PhysicsBackend for MuJoCoBackend {
                         JointBinding::Prismatic { .. } => JointState::Prismatic {
                             position_m: joint_view.qpos[0],
                             velocity_m_s: joint_view.qvel[0],
+                        },
+                        JointBinding::Free { .. } | JointBinding::Fixed => unreachable!(),
+                    };
+                    let actuator_id = data
+                        .model()
+                        .name_to_id(MjtObj::mjOBJ_ACTUATOR, actuator_name)
+                        .ok_or(PhysicsError::InitializationFailed)?;
+                    let realized_effort = data.actuator_force()[actuator_id];
+                    if !realized_effort.is_finite() {
+                        return Err(Self::map_error(MuJoCoError::NonFiniteState(
+                            "actuator effort",
+                        )));
+                    }
+                    let effort_measurement = match binding.joint {
+                        JointBinding::Revolute { .. } => JointEffortMeasurement::Revolute {
+                            measured_effort_nm: realized_effort,
+                        },
+                        JointBinding::Prismatic { .. } => JointEffortMeasurement::Prismatic {
+                            measured_force_n: realized_effort,
                         },
                         JointBinding::Free { .. } | JointBinding::Fixed => unreachable!(),
                     };
@@ -1150,7 +1175,9 @@ impl PhysicsBackend for MuJoCoBackend {
                     if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
                         *transform = local_transform;
                     }
-                    world.entity_mut(binding.entity).insert(joint_state);
+                    world
+                        .entity_mut(binding.entity)
+                        .insert((joint_state, effort_measurement));
                 }
                 JointBinding::Fixed => {}
             }

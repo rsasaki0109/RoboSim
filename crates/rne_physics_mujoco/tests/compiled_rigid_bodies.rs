@@ -4,9 +4,9 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, JointActuation, JointMotor, JointPassiveDynamics, JointState, PhysicsBackend,
-    PhysicsError, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    Collider, JointActuation, JointEffortMeasurement, JointMotor, JointPassiveDynamics, JointState,
+    PhysicsBackend, PhysicsError, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc,
+    RigidBody, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
 use rne_world::{world_transform_of, Transform3};
@@ -281,7 +281,7 @@ fn kinematic_body_fails_with_capability_error_before_model_creation() {
         .expect("failed preflight did not create or lock a native model");
 }
 
-fn run_revolute(command: JointActuation) -> JointState {
+fn run_revolute(command: JointActuation) -> (JointState, JointEffortMeasurement) {
     let dt = SimDuration::from_hertz(Hertz::new(60.0));
     let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
     let physics_world = backend
@@ -325,29 +325,42 @@ fn run_revolute(command: JointActuation) -> JointState {
             .sync_to_ecs(&mut world, physics_world)
             .expect("download joint state");
     }
-    *world.get::<JointState>(child).expect("joint state")
+    (
+        *world.get::<JointState>(child).expect("joint state"),
+        *world
+            .get::<JointEffortMeasurement>(child)
+            .expect("realized joint effort"),
+    )
 }
 
 #[test]
 fn revolute_position_velocity_and_effort_modes_move_the_joint() {
-    let position = run_revolute(JointActuation::RevolutePosition {
+    let (position, position_effort) = run_revolute(JointActuation::RevolutePosition {
         target_position_rad: 0.4,
         stiffness_nm_per_rad: 40.0,
         damping_nm_s_per_rad: 4.0,
         max_effort_nm: 20.0,
     });
-    let velocity = run_revolute(JointActuation::RevoluteVelocity {
+    let (velocity, velocity_effort) = run_revolute(JointActuation::RevoluteVelocity {
         target_velocity_rad_s: 1.0,
         gain_nm_s_per_rad: 4.0,
         max_effort_nm: 20.0,
     });
-    let effort = run_revolute(JointActuation::RevoluteEffort {
+    let (effort, direct_effort) = run_revolute(JointActuation::RevoluteEffort {
         effort_nm: 2.0,
         max_effort_nm: 2.0,
     });
     assert!(position.position_rad().unwrap() > 0.1);
     assert!(velocity.position_rad().unwrap() > 0.1);
     assert!(effort.position_rad().unwrap() > 0.01);
+    assert!(position_effort.has_valid_value());
+    assert!(velocity_effort.has_valid_value());
+    assert_eq!(
+        direct_effort,
+        JointEffortMeasurement::Revolute {
+            measured_effort_nm: 2.0
+        }
+    );
 }
 
 fn coast_revolute_velocity(passive_dynamics: Option<JointPassiveDynamics>) -> f64 {

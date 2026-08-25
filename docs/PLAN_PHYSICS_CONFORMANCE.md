@@ -172,3 +172,15 @@ position/velocity bounds. `rne-physics-divergence` tightens only the latter
 position bound to 1 cm, finds the first violation at a stable fixed step, and
 emits an existing-schema Behavior replay plus a deliberately failing report.
 The MuJoCo Windows/Linux job packages both into a verified Failure Capsule.
+
+The next articulation observable is optional completed-step joint-effort
+evidence. `JointEffortMeasurement` keeps revolute N*m and prismatic N distinct;
+absence remains different from measured zero. The joint-feedback sensor samples
+it at the declared simulation capture time, applies the existing sensor latency,
+adds no noise, and fails closed on non-finite values or unit-kind mismatch.
+MuJoCo writes native `actuator_force` into this contract after each completed
+step. Rapier remains explicitly unavailable because its multibody constraint
+solver does not retain the solved motor impulse in public joint state. A backend
+must not substitute the reconstructed bounded PD command for this measurement.
+The follow-on conformance vector must compare command limit, actuator-space
+effort, and any passive/implicit compensation as separate quantities.

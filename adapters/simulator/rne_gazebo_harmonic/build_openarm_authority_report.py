@@ -88,13 +88,23 @@ def actuator_evidence(trace: dict[str, Any], joint_index: int) -> dict[str, Any]
         and isinstance(frame.get("effort_saturated"), list)
         and len(frame["effort_saturated"]) > joint_index
     ]
-    measurement_frames = [
+    advertised_measurement_frames = [
         frame
         for frame in observations
         if isinstance(frame.get("effort_measurement_available"), list)
         and len(frame["effort_measurement_available"]) > joint_index
         and frame["effort_measurement_available"][joint_index] is True
     ]
+    measurement_frames = [
+        frame
+        for frame in observations
+        if isinstance(frame.get("measured_effort_nm"), list)
+        and len(frame["measured_effort_nm"]) > joint_index
+        and isinstance(frame["measured_effort_nm"][joint_index], (int, float))
+        and math.isfinite(float(frame["measured_effort_nm"][joint_index]))
+    ]
+    if len(advertised_measurement_frames) != len(measurement_frames):
+        raise ValueError("effort availability differs from retained finite measurements")
     kind = (
         "measured_effort"
         if measurement_frames
@@ -124,6 +134,11 @@ def actuator_evidence(trace: dict[str, Any], joint_index: int) -> dict[str, Any]
                     for frame in command_frames
                 ),
             }
+        )
+    if measurement_frames:
+        result["measured_effort_peak_abs_nm"] = max(
+            abs(float(frame["measured_effort_nm"][joint_index]))
+            for frame in measurement_frames
         )
     return result
 

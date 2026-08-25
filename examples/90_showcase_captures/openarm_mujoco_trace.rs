@@ -285,6 +285,7 @@ struct ObservationFrame {
     joint_feedback_correction_rad: Vec<f64>,
     joint_integral_correction_rad: Vec<f64>,
     limited_effort_command_nm: Vec<f64>,
+    measured_effort_nm: Vec<Option<f64>>,
     effort_saturated: Vec<bool>,
     effort_measurement_available: Vec<bool>,
     maximum_actuator_tracking_error_rad: f64,
@@ -1770,6 +1771,7 @@ fn observation_frame(
     let mut efforts = Vec::new();
     let mut saturated = Vec::new();
     let mut effort_available = Vec::new();
+    let mut measured_efforts = Vec::new();
     let mut maximum_actuator_tracking_error_rad = 0.0_f64;
     for joint in &frame.payload.joints {
         let (position, velocity) = coordinate(joint)?;
@@ -1787,7 +1789,15 @@ fn observation_frame(
         targets.push(target);
         efforts.push(effort);
         saturated.push(is_saturated);
-        effort_available.push(!matches!(joint.effort, JointEffortFeedback::Unavailable));
+        let measured_effort = match joint.effort {
+            JointEffortFeedback::Unavailable => None,
+            JointEffortFeedback::Revolute { measured_effort_nm } => Some(measured_effort_nm),
+            JointEffortFeedback::Prismatic { .. } => {
+                bail!("feedback channel {} has prismatic effort", joint.name)
+            }
+        };
+        effort_available.push(measured_effort.is_some());
+        measured_efforts.push(measured_effort);
         maximum_actuator_tracking_error_rad =
             maximum_actuator_tracking_error_rad.max((position - target).abs());
     }
@@ -1847,6 +1857,7 @@ fn observation_frame(
         joint_feedback_correction_rad: decision.correction_rad.clone(),
         joint_integral_correction_rad: decision.integral_correction_rad.clone(),
         limited_effort_command_nm: efforts,
+        measured_effort_nm: measured_efforts,
         effort_saturated: saturated,
         effort_measurement_available: effort_available,
         maximum_actuator_tracking_error_rad,

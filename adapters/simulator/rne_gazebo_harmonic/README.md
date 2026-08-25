@@ -233,6 +233,20 @@ the next experiment to portable actuator-realization evidence before bounded
 model-based Coulomb compensation is accepted. The supported friction envelope
 and acceptance limit remain unchanged.
 
+The portable measurement boundary is `rne_physics::JointEffortMeasurement`.
+It is optional completed-step evidence, so a missing backend measurement stays
+`Unavailable` instead of being replaced by the reconstructed PD command. The
+joint-feedback sensor preserves its capture timestamp and declared latency,
+adds no effort noise, and rejects non-finite or revolute/prismatic mismatches.
+MuJoCo now publishes its native actuator-space force through this path. A real
+0.5 N*m rerun retains all 3,600 measurements, exact replay, and the unchanged
+`0.017886 rad` RMSE, while exposing an `18.148104 N*m` actuator-space peak
+against the `7 N*m` bounded command. That peak comes from MuJoCo's implicit
+damping compensation being realized outside the command clamp; it is retained
+as a conformance failure lead, not accepted as equivalent actuator semantics.
+Rapier continues to report effort unavailable until a qualifying solver or
+hardware measurement exists.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

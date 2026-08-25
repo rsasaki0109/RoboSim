@@ -17,7 +17,9 @@ use rne_data::{
     JointFeedbackChannel, JointFeedbackStatus,
 };
 use rne_ecs::{Entity, World};
-use rne_physics::{JointActuation, JointState, PhysicsBackend, PhysicsWorldId};
+use rne_physics::{
+    JointActuation, JointEffortMeasurement, JointState, PhysicsBackend, PhysicsWorldId,
+};
 use rne_render::{HeadlessRenderBackend, RenderBackend, RenderScene};
 use rne_world::{Transform3, WorldRandom};
 use thiserror::Error;
@@ -456,6 +458,12 @@ pub enum JointFeedbackError {
         /// Stable joint name.
         joint_name: String,
     },
+    /// A backend effort value is non-finite or disagrees with the joint kind.
+    #[error("joint-feedback channel {joint_name} has invalid realized effort")]
+    InvalidEffortMeasurement {
+        /// Stable joint name.
+        joint_name: String,
+    },
     /// A stuck-value fault has no prior emitted value to hold.
     #[error(
         "joint-feedback stuck-value fault on entity {sensor_entity_index} has no prior sample"
@@ -586,11 +594,18 @@ fn build_joint_feedback(
                 .unwrap_or_default();
             let (coordinate, command) =
                 joint_coordinate_and_command(&channel.name, state, actuation)?;
+            let effort = joint_effort_feedback(
+                &channel.name,
+                state,
+                world
+                    .get::<JointEffortMeasurement>(channel.joint_entity)
+                    .copied(),
+            )?;
             Ok(JointFeedbackChannel {
                 name: channel.name.clone(),
                 coordinate,
                 command,
-                effort: JointEffortFeedback::Unavailable,
+                effort,
             })
         })
         .collect::<Result<Vec<_>, JointFeedbackError>>()?;
@@ -601,6 +616,32 @@ fn build_joint_feedback(
         status: JointFeedbackStatus::Nominal,
         joints,
     })
+}
+
+fn joint_effort_feedback(
+    joint_name: &str,
+    state: JointState,
+    measurement: Option<JointEffortMeasurement>,
+) -> Result<JointEffortFeedback, JointFeedbackError> {
+    let Some(measurement) = measurement else {
+        return Ok(JointEffortFeedback::Unavailable);
+    };
+    if !measurement.has_valid_value() {
+        return Err(JointFeedbackError::InvalidEffortMeasurement {
+            joint_name: joint_name.to_owned(),
+        });
+    }
+    match (state, measurement) {
+        (JointState::Revolute { .. }, JointEffortMeasurement::Revolute { measured_effort_nm }) => {
+            Ok(JointEffortFeedback::Revolute { measured_effort_nm })
+        }
+        (JointState::Prismatic { .. }, JointEffortMeasurement::Prismatic { measured_force_n }) => {
+            Ok(JointEffortFeedback::Prismatic { measured_force_n })
+        }
+        _ => Err(JointFeedbackError::InvalidEffortMeasurement {
+            joint_name: joint_name.to_owned(),
+        }),
+    }
 }
 
 fn joint_coordinate_and_command(
@@ -1349,6 +1390,42 @@ mod tests {
         assert_eq!(
             frame.payload.joints[0].effort,
             JointEffortFeedback::Unavailable
+        );
+    }
+
+    #[test]
+    fn joint_feedback_preserves_measured_effort_and_rejects_wrong_units() {
+        let (mut world, joint, _, stream, mut bus) =
+            joint_feedback_fixture(JointFeedbackFault::None);
+        world
+            .entity_mut(joint)
+            .insert(JointEffortMeasurement::Revolute {
+                measured_effort_nm: -1.25,
+            });
+        sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        let frame = bus.latest::<JointFeedback>(stream).expect("joint feedback");
+        assert_eq!(
+            frame.payload.joints[0].effort,
+            JointEffortFeedback::Revolute {
+                measured_effort_nm: -1.25
+            }
+        );
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+
+        world
+            .entity_mut(joint)
+            .insert(JointEffortMeasurement::Prismatic {
+                measured_force_n: 2.0,
+            });
+        assert!(matches!(
+            sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(1_000_005), &mut bus),
+            Err(JointFeedbackError::InvalidEffortMeasurement { .. })
+        ));
+        assert_eq!(
+            bus.frame_count(stream),
+            1,
+            "invalid effort must fail closed"
         );
     }
 

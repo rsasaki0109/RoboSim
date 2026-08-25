@@ -619,6 +619,39 @@ impl JointActuation {
     }
 }
 
+/// Backend-reported effort realized during the most recently completed step.
+///
+/// Backends insert or replace this component during physics-to-ECS
+/// synchronization only when they can expose a qualifying realized actuator
+/// effort. Absence is meaningful and must remain distinguishable from a
+/// measured zero. Joint-feedback sensors sample the value at their simulation
+/// capture time and apply their declared transport latency without adding
+/// noise.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointEffortMeasurement {
+    /// Realized revolute-joint effort in newton-metres.
+    Revolute {
+        /// Measured effort in newton-metres.
+        measured_effort_nm: f64,
+    },
+    /// Realized prismatic-joint force in newtons.
+    Prismatic {
+        /// Measured force in newtons.
+        measured_force_n: f64,
+    },
+}
+
+impl JointEffortMeasurement {
+    /// Returns true when the measured value is finite.
+    pub fn has_valid_value(self) -> bool {
+        match self {
+            Self::Revolute { measured_effort_nm } => measured_effort_nm.is_finite(),
+            Self::Prismatic { measured_force_n } => measured_force_n.is_finite(),
+        }
+    }
+}
+
 fn non_negative(value: f64) -> bool {
     value.is_finite() && value >= 0.0
 }

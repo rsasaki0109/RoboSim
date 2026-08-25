@@ -69,6 +69,24 @@ class OpenArmAuthorityReportTests(unittest.TestCase):
         self.assertEqual(evidence["command_saturation_fraction"], 0.5)
         self.assertEqual(evidence["measured_effort_sample_count"], 0)
 
+    def test_actuator_evidence_requires_retained_finite_measurements(self) -> None:
+        trace = {
+            "observations": [
+                {
+                    "limited_effort_command_nm": [1.0],
+                    "effort_saturated": [False],
+                    "effort_measurement_available": [True],
+                    "measured_effort_nm": [-0.75],
+                }
+            ]
+        }
+        evidence = REPORT.actuator_evidence(trace, 0)
+        self.assertEqual(evidence["kind"], "measured_effort")
+        self.assertEqual(evidence["measured_effort_peak_abs_nm"], 0.75)
+        del trace["observations"][0]["measured_effort_nm"]
+        with self.assertRaisesRegex(ValueError, "availability differs"):
+            REPORT.actuator_evidence(trace, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

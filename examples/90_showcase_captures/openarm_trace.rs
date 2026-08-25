@@ -292,6 +292,7 @@ struct ObservationFrame {
     joint_feedback_correction_rad: Vec<f64>,
     joint_integral_correction_rad: Vec<f64>,
     limited_effort_command_nm: Vec<f64>,
+    measured_effort_nm: Vec<Option<f64>>,
     effort_saturated: Vec<bool>,
     effort_measurement_available: Vec<bool>,
     maximum_actuator_tracking_error_rad: f64,
@@ -2357,6 +2358,7 @@ fn observation_from_feedback(
     let mut limited_efforts = Vec::with_capacity(frame.payload.joints.len());
     let mut saturated = Vec::with_capacity(frame.payload.joints.len());
     let mut effort_measurement_available = Vec::with_capacity(frame.payload.joints.len());
+    let mut measured_efforts = Vec::with_capacity(frame.payload.joints.len());
     let mut maximum_actuator_tracking_error_rad = 0.0_f64;
     for joint in &frame.payload.joints {
         let (position_rad, velocity_rad_s) = match joint.coordinate {
@@ -2384,8 +2386,18 @@ fn observation_from_feedback(
         targets.push(target_position_rad);
         limited_efforts.push(limited_effort_command_nm);
         saturated.push(effort_saturated);
-        effort_measurement_available
-            .push(!matches!(joint.effort, JointEffortFeedback::Unavailable));
+        let measured_effort = match joint.effort {
+            JointEffortFeedback::Unavailable => None,
+            JointEffortFeedback::Revolute { measured_effort_nm } => Some(measured_effort_nm),
+            JointEffortFeedback::Prismatic { .. } => {
+                bail!(
+                    "OpenArm feedback channel {} has prismatic effort",
+                    joint.name
+                )
+            }
+        };
+        effort_measurement_available.push(measured_effort.is_some());
+        measured_efforts.push(measured_effort);
         maximum_actuator_tracking_error_rad =
             maximum_actuator_tracking_error_rad.max((position_rad - target_position_rad).abs());
     }
@@ -2454,6 +2466,7 @@ fn observation_from_feedback(
         joint_feedback_correction_rad: decision.correction_rad.clone(),
         joint_integral_correction_rad: decision.integral_correction_rad.clone(),
         limited_effort_command_nm: limited_efforts,
+        measured_effort_nm: measured_efforts,
         effort_saturated: saturated,
         effort_measurement_available,
         maximum_actuator_tracking_error_rad,
@@ -2672,6 +2685,7 @@ mod tests {
             joint_feedback_correction_rad: Vec::new(),
             joint_integral_correction_rad: Vec::new(),
             limited_effort_command_nm: Vec::new(),
+            measured_effort_nm: Vec::new(),
             effort_saturated: Vec::new(),
             effort_measurement_available: Vec::new(),
             maximum_actuator_tracking_error_rad: 0.0,
