@@ -294,15 +294,26 @@ their SI units. A backend rejects unknown variants, non-finite values, negative
 gains/limits, and joint-kind mismatches before a physics step.
 
 `JointPassiveDynamics` is the separate plant-loss contract. Revolute joints use
-`viscous_damping_nm_s_per_rad` and `coulomb_friction_nm`; prismatic joints use
-`viscous_damping_n_s_per_m` and `coulomb_friction_n`. URDF `<dynamics>` imports
-into this component rather than changing actuator servo gains. Absent dynamics
+`viscous_damping_nm_s_per_rad`, `coulomb_friction_nm`, and
+`coulomb_transition_velocity_rad_s`; prismatic joints use the corresponding
+`_n_s_per_m`, `_n`, and `_m_s` fields. URDF `<dynamics>` imports into this
+component rather than changing actuator servo gains. Because URDF has no
+transition-width field, the importer explicitly records `0.01 rad/s` or
+`0.01 m/s`; these values are policy, not backend defaults. Absent dynamics
 means zero declared plant loss. Rapier multibodies and MuJoCo integrate viscous
 damping implicitly; Rapier impulse-joint fixtures reject nonzero damping rather
-than using an unstable explicit approximation. Nonzero Coulomb friction
-currently fails preflight on both paths because native static/kinetic
-transitions differ; the coefficient is retained but is not claimed as a
-portable realized parameter. Backends also reject negative, non-finite, or
+than using an unstable explicit approximation.
+
+Portable Coulomb loss is the smooth generalized effort
+`-magnitude*tanh(velocity/transition_velocity)`, evaluated from the pre-step
+joint velocity. It approaches the requested kinetic-friction magnitude but is
+zero at rest: RNE does not call this true static friction, stiction, or a
+breakaway model. Rapier applies it as equal-and-opposite joint-axis effort;
+MuJoCo keeps native `frictionloss` disabled and adds the same result outside the
+bounded actuator effort. The process-isolated Gazebo effort adapter exposes the
+same explicit arrays and records both passive effort and the total backend
+command per physics substep. A nonzero magnitude requires a finite positive
+transition velocity. Backends also reject negative, non-finite, or
 joint-kind-mismatched coefficients before stepping.
 
 The OpenArm damping-envelope evidence distinguishes a supported-case failure

@@ -10,9 +10,9 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, JointActuation, JointMotor, JointState, PhysicsBackend,
-    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
-    RigidBody, RigidBodyType,
+    ColliderShape, ContactEvent, JointActuation, JointMotor, JointPassiveDynamics, JointState,
+    PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit,
+    RaycastQuery, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
@@ -782,6 +782,23 @@ fn joint_control(
     position: f64,
     velocity: f64,
 ) -> Result<f64, MuJoCoError> {
+    let coulomb_effort = if let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied()
+    {
+        let compatible = matches!(
+            (revolute, dynamics),
+            (true, JointPassiveDynamics::Revolute { .. })
+                | (false, JointPassiveDynamics::Prismatic { .. })
+        );
+        if !dynamics.has_valid_values() || !compatible || !velocity.is_finite() {
+            return Err(MuJoCoError::InvalidPassiveDynamics {
+                entity_index: entity.index(),
+                reason: "kind, coefficient, transition velocity, or joint velocity",
+            });
+        }
+        dynamics.regularized_coulomb_effort(velocity)
+    } else {
+        0.0
+    };
     if let Some(command) = world.get::<JointActuation>(entity).copied() {
         if !command.has_valid_values()
             || (revolute && !command.supports_revolute())
@@ -845,10 +862,10 @@ fn joint_control(
         // MuJoCo integrates joint damping implicitly. Add the same damping term
         // back to the motor command after clamping so motor + passive damping
         // still realizes the exact bounded backend-neutral effort law.
-        return Ok(effort.clamp(-limit, limit) + passive_damping * velocity);
+        return Ok(effort.clamp(-limit, limit) + passive_damping * velocity + coulomb_effort);
     }
     let Some(motor) = world.get::<JointMotor>(entity) else {
-        return Ok(0.0);
+        return Ok(coulomb_effort);
     };
     if !motor.velocity_rad_s.is_finite()
         || !motor.gain.is_finite()
@@ -871,11 +888,11 @@ fn joint_control(
     // `JointActuation` above remains exact and is used by conformance fixtures.
     let (stiffness, damping) = legacy_motor_gains(*motor, revolute);
     let effort = stiffness * (motor.target_position - position) + damping * motor.velocity_rad_s;
-    Ok(if motor.max_force > 0.0 {
+    Ok((if motor.max_force > 0.0 {
         effort.clamp(-motor.max_force, motor.max_force)
     } else {
         effort
-    })
+    }) + coulomb_effort)
 }
 
 impl PhysicsBackend for MuJoCoBackend {

@@ -10,6 +10,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from openarm_actuation import (  # noqa: E402
     ActuationDiagnosticAccumulator,
     low_pass_velocity,
+    regularized_coulomb_effort,
     realize_joint_command,
     realize_joint_command_diagnostic,
     validate_actuation,
@@ -71,6 +72,18 @@ class OpenArmActuationTests(unittest.TestCase):
             ("velocity_rad_s", 2.0),
         )
 
+    def test_regularized_coulomb_effort_matches_portable_contract(self) -> None:
+        self.assertEqual(regularized_coulomb_effort(0.4, 0.02, 0.0), 0.0)
+        positive = regularized_coulomb_effort(0.4, 0.02, 0.02)
+        self.assertLess(positive, 0.0)
+        self.assertAlmostEqual(positive, -regularized_coulomb_effort(0.4, 0.02, -0.02))
+        self.assertLess(abs(positive), 0.4)
+        config = effort_config()
+        config["plant_coulomb_friction_nm"] = [0.1, 0.0, 0.0]
+        config["plant_coulomb_transition_velocity_rad_s"] = [0.0, 0.0, 0.0]
+        with self.assertRaisesRegex(ValueError, "transition velocity"):
+            validate_actuation(config, 3)
+
     def test_diagnostic_reports_actual_substep_effort_and_saturation(self) -> None:
         config = effort_config()
         accumulator = ActuationDiagnosticAccumulator(1)
@@ -81,7 +94,7 @@ class OpenArmActuationTests(unittest.TestCase):
             config, "effort_pd", frozenset({0}), 0, 0.1, 0.0, 0.0
         )
         accumulator.record(0, first, 1.0, 3.0, 1.0)
-        accumulator.record(0, second, 0.1, -2.0, 0.5)
+        accumulator.record(0, second, 0.1, -2.0, 0.5, 0.2, 1.2)
         diagnostic = accumulator.finish(2, [0.05])
         self.assertEqual(diagnostic["joint_command_kind"], ["effort_nm"])
         self.assertEqual(diagnostic["joint_raw_command_peak_abs"], [10.0])
@@ -94,6 +107,8 @@ class OpenArmActuationTests(unittest.TestCase):
         self.assertEqual(
             diagnostic["joint_derivative_feedback_velocity_peak_abs_rad_s"], [1.0]
         )
+        self.assertEqual(diagnostic["joint_passive_coulomb_effort_mean_nm"], [0.1])
+        self.assertEqual(diagnostic["joint_backend_command_mean"], [2.6])
 
     def test_diagnostic_rejects_missing_substeps(self) -> None:
         accumulator = ActuationDiagnosticAccumulator(1)

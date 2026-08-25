@@ -20,6 +20,7 @@ import gz.sim8 as gz_sim
 from openarm_actuation import (
     ActuationDiagnosticAccumulator,
     low_pass_velocity,
+    regularized_coulomb_effort,
     realize_joint_command_diagnostic,
     validate_actuation,
 )
@@ -276,6 +277,20 @@ class GazeboOpenArmAdapter:
                 current,
                 feedback_velocity,
             )
+            passive_coulomb_effort_nm = 0.0
+            backend_command = realized.applied
+            if realized.kind == "effort_nm":
+                friction = self.config.get(
+                    "plant_coulomb_friction_nm", [0.0] * self.action_width
+                )[index]
+                transition = self.config.get(
+                    "plant_coulomb_transition_velocity_rad_s",
+                    [0.0] * self.action_width,
+                )[index]
+                passive_coulomb_effort_nm = regularized_coulomb_effort(
+                    friction, transition, current_velocity
+                )
+                backend_command += passive_coulomb_effort_nm
             if self.current_actuation_diagnostic is not None:
                 self.current_actuation_diagnostic.record(
                     index,
@@ -283,9 +298,11 @@ class GazeboOpenArmAdapter:
                     target - current,
                     current_velocity,
                     feedback_velocity,
+                    passive_coulomb_effort_nm,
+                    backend_command,
                 )
             if realized.kind == "effort_nm":
-                joint.set_force(ecm, [realized.applied])
+                joint.set_force(ecm, [backend_command])
             else:
                 joint.set_velocity(ecm, [realized.applied])
 
@@ -354,7 +371,7 @@ class GazeboOpenArmAdapter:
         if self.actuation_diagnostics_output is not None:
             output = {
                 "kind": "rne_gazebo_actuation_diagnostics",
-                "schema_version": 1,
+                "schema_version": 2,
                 "joint_order": self.joint_names,
                 "actuation_mode": self.actuation_mode,
                 "physics_substeps_per_control_step": self.physics_substeps,

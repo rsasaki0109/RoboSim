@@ -48,6 +48,27 @@ def validate_actuation(
             )
         ):
             raise ValueError(f"invalid effort-PD field {key}")
+    friction = config.get("plant_coulomb_friction_nm", [0.0] * joint_count)
+    transition = config.get(
+        "plant_coulomb_transition_velocity_rad_s", [0.0] * joint_count
+    )
+    for key, values in (
+        ("plant_coulomb_friction_nm", friction),
+        ("plant_coulomb_transition_velocity_rad_s", transition),
+    ):
+        if (
+            not isinstance(values, list)
+            or len(values) != joint_count
+            or not all(
+                isinstance(value, (int, float))
+                and math.isfinite(value)
+                and value >= 0.0
+                for value in values
+            )
+        ):
+            raise ValueError(f"invalid effort-PD field {key}")
+    if any(magnitude > 0.0 and width <= 0.0 for magnitude, width in zip(friction, transition)):
+        raise ValueError("nonzero Coulomb friction requires a positive transition velocity")
     effort_joint_indices = config.get("effort_joint_indices")
     if (
         not isinstance(effort_joint_indices, list)
@@ -59,7 +80,28 @@ def validate_actuation(
         or len(set(effort_joint_indices)) != len(effort_joint_indices)
     ):
         raise ValueError("invalid effort-controlled joint indices")
+    if any(
+        magnitude > 0.0 and index not in effort_joint_indices
+        for index, magnitude in enumerate(friction)
+    ):
+        raise ValueError("Coulomb friction requires an effort-controlled joint")
     return mode, substeps, frozenset(effort_joint_indices)
+
+
+def regularized_coulomb_effort(
+    magnitude_nm: float, transition_velocity_rad_s: float, velocity_rad_s: float
+) -> float:
+    """Returns `-magnitude*tanh(velocity/transition)` in newton-metres."""
+    if not all(
+        isinstance(value, (int, float)) and math.isfinite(value)
+        for value in (magnitude_nm, transition_velocity_rad_s, velocity_rad_s)
+    ) or magnitude_nm < 0.0 or transition_velocity_rad_s < 0.0:
+        raise ValueError("invalid regularized Coulomb-friction input")
+    if magnitude_nm == 0.0:
+        return 0.0
+    if transition_velocity_rad_s == 0.0:
+        raise ValueError("nonzero Coulomb friction requires a positive transition velocity")
+    return -magnitude_nm * math.tanh(velocity_rad_s / transition_velocity_rad_s)
 
 
 def realize_joint_command(
@@ -161,6 +203,8 @@ class ActuationDiagnosticAccumulator:
     initial_position_error_rad: list[float | None] = field(init=False)
     measured_velocities_rad_s: list[list[float]] = field(init=False)
     feedback_velocities_rad_s: list[list[float]] = field(init=False)
+    passive_coulomb_efforts_nm: list[list[float]] = field(init=False)
+    backend_commands: list[list[float]] = field(init=False)
 
     def __post_init__(self) -> None:
         self.kinds = [None] * self.joint_count
@@ -170,6 +214,8 @@ class ActuationDiagnosticAccumulator:
         self.initial_position_error_rad = [None] * self.joint_count
         self.measured_velocities_rad_s = [[] for _ in range(self.joint_count)]
         self.feedback_velocities_rad_s = [[] for _ in range(self.joint_count)]
+        self.passive_coulomb_efforts_nm = [[] for _ in range(self.joint_count)]
+        self.backend_commands = [[] for _ in range(self.joint_count)]
 
     def record(
         self,
@@ -178,6 +224,8 @@ class ActuationDiagnosticAccumulator:
         position_error_rad: float,
         measured_velocity_rad_s: float,
         feedback_velocity_rad_s: float,
+        passive_coulomb_effort_nm: float = 0.0,
+        backend_command: float | None = None,
     ) -> None:
         """Records one pre-update realization for one joint."""
         if not 0 <= index < self.joint_count:
@@ -191,6 +239,10 @@ class ActuationDiagnosticAccumulator:
         self.saturation_counts[index] += int(command.saturated)
         self.measured_velocities_rad_s[index].append(measured_velocity_rad_s)
         self.feedback_velocities_rad_s[index].append(feedback_velocity_rad_s)
+        self.passive_coulomb_efforts_nm[index].append(passive_coulomb_effort_nm)
+        self.backend_commands[index].append(
+            command.applied if backend_command is None else backend_command
+        )
         if self.initial_position_error_rad[index] is None:
             self.initial_position_error_rad[index] = position_error_rad
 
@@ -207,7 +259,7 @@ class ActuationDiagnosticAccumulator:
         if any(kind is None for kind in self.kinds):
             raise ValueError("missing realized joint command diagnostic")
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "substep_count": expected_substeps,
             "joint_command_kind": self.kinds,
             "joint_initial_position_error_rad": self.initial_position_error_rad,
@@ -231,5 +283,19 @@ class ActuationDiagnosticAccumulator:
             "joint_derivative_feedback_velocity_peak_abs_rad_s": [
                 max(abs(value) for value in values)
                 for values in self.feedback_velocities_rad_s
+            ],
+            "joint_passive_coulomb_effort_min_nm": [
+                min(values) for values in self.passive_coulomb_efforts_nm
+            ],
+            "joint_passive_coulomb_effort_max_nm": [
+                max(values) for values in self.passive_coulomb_efforts_nm
+            ],
+            "joint_passive_coulomb_effort_mean_nm": [
+                sum(values) / len(values) for values in self.passive_coulomb_efforts_nm
+            ],
+            "joint_backend_command_min": [min(values) for values in self.backend_commands],
+            "joint_backend_command_max": [max(values) for values in self.backend_commands],
+            "joint_backend_command_mean": [
+                sum(values) / len(values) for values in self.backend_commands
             ],
         }

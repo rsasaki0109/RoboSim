@@ -12,6 +12,11 @@ use rne_physics::{
 use rne_robot::{Actuator, ActuatorLimits, ActuatorTarget, ControlMode, Joint};
 use std::collections::HashSet;
 
+/// Explicit regularization velocity assigned to URDF revolute-joint friction.
+pub const URDF_COULOMB_TRANSITION_VELOCITY_RAD_S: f64 = 0.01;
+/// Explicit regularization velocity assigned to URDF prismatic-joint friction.
+pub const URDF_COULOMB_TRANSITION_VELOCITY_M_S: f64 = 0.01;
+
 /// Configuration for [`attach_urdf_articulation`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UrdfArticulationConfig {
@@ -117,6 +122,8 @@ pub fn attach_urdf_articulation(
                         .insert(JointPassiveDynamics::Revolute {
                             viscous_damping_nm_s_per_rad: dynamics.damping,
                             coulomb_friction_nm: dynamics.friction,
+                            coulomb_transition_velocity_rad_s:
+                                URDF_COULOMB_TRANSITION_VELOCITY_RAD_S,
                         });
                 }
                 attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
@@ -145,6 +152,7 @@ pub fn attach_urdf_articulation(
                         .insert(JointPassiveDynamics::Prismatic {
                             viscous_damping_n_s_per_m: dynamics.damping,
                             coulomb_friction_n: dynamics.friction,
+                            coulomb_transition_velocity_m_s: URDF_COULOMB_TRANSITION_VELOCITY_M_S,
                         });
                 }
                 attach_joint_actuator(world, spawned.robot, spawned.joints[&joint.name]);
@@ -388,6 +396,7 @@ mod tests {
             Some(JointPassiveDynamics::Prismatic {
                 viscous_damping_n_s_per_m: 3.5,
                 coulomb_friction_n: 0.25,
+                coulomb_transition_velocity_m_s: URDF_COULOMB_TRANSITION_VELOCITY_M_S,
             })
         );
     }

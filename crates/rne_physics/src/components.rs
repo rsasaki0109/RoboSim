@@ -384,10 +384,10 @@ pub enum JointMotorGainModel {
 /// Backend-neutral passive dynamics of a single-degree-of-freedom joint.
 ///
 /// The component describes plant loss independently from actuator servo gains.
-/// Physics backends apply viscous damping against joint velocity. Coulomb
-/// coefficients are retained as typed plant input, but a backend must reject a
-/// nonzero value until it can implement the declared static/kinetic transition
-/// without substituting undocumented native semantics.
+/// Physics backends apply viscous damping against joint velocity. Coulomb loss
+/// uses the backend-neutral regularization `-magnitude * tanh(velocity /
+/// transition_velocity)`. This is a smooth kinetic-friction model, not a claim
+/// of true set-valued static friction or breakaway behavior.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum JointPassiveDynamics {
@@ -397,6 +397,9 @@ pub enum JointPassiveDynamics {
         viscous_damping_nm_s_per_rad: f64,
         /// Requested Coulomb-friction magnitude in newton-metres.
         coulomb_friction_nm: f64,
+        /// Velocity scale of the smooth Coulomb transition in radians per second.
+        #[serde(default)]
+        coulomb_transition_velocity_rad_s: f64,
     },
     /// Passive dynamics of a prismatic joint.
     Prismatic {
@@ -404,6 +407,9 @@ pub enum JointPassiveDynamics {
         viscous_damping_n_s_per_m: f64,
         /// Requested Coulomb-friction magnitude in newtons.
         coulomb_friction_n: f64,
+        /// Velocity scale of the smooth Coulomb transition in metres per second.
+        #[serde(default)]
+        coulomb_transition_velocity_m_s: f64,
     },
 }
 
@@ -414,13 +420,55 @@ impl JointPassiveDynamics {
             Self::Revolute {
                 viscous_damping_nm_s_per_rad,
                 coulomb_friction_nm,
-            } => non_negative(viscous_damping_nm_s_per_rad) && non_negative(coulomb_friction_nm),
+                coulomb_transition_velocity_rad_s,
+            } => {
+                non_negative(viscous_damping_nm_s_per_rad)
+                    && valid_coulomb_transition(
+                        coulomb_friction_nm,
+                        coulomb_transition_velocity_rad_s,
+                    )
+            }
             Self::Prismatic {
                 viscous_damping_n_s_per_m,
                 coulomb_friction_n,
-            } => non_negative(viscous_damping_n_s_per_m) && non_negative(coulomb_friction_n),
+                coulomb_transition_velocity_m_s,
+            } => {
+                non_negative(viscous_damping_n_s_per_m)
+                    && valid_coulomb_transition(coulomb_friction_n, coulomb_transition_velocity_m_s)
+            }
         }
     }
+
+    /// Computes the signed generalized Coulomb-loss effort opposing `velocity`.
+    ///
+    /// Callers must first require [`Self::has_valid_values`] and a finite
+    /// velocity. The result is a torque in newton-metres for revolute joints and
+    /// a force in newtons for prismatic joints.
+    pub fn regularized_coulomb_effort(self, velocity: f64) -> f64 {
+        let (magnitude, transition_velocity) = match self {
+            Self::Revolute {
+                coulomb_friction_nm,
+                coulomb_transition_velocity_rad_s,
+                ..
+            } => (coulomb_friction_nm, coulomb_transition_velocity_rad_s),
+            Self::Prismatic {
+                coulomb_friction_n,
+                coulomb_transition_velocity_m_s,
+                ..
+            } => (coulomb_friction_n, coulomb_transition_velocity_m_s),
+        };
+        if magnitude == 0.0 {
+            0.0
+        } else {
+            -magnitude * (velocity / transition_velocity).tanh()
+        }
+    }
+}
+
+fn valid_coulomb_transition(magnitude: f64, transition_velocity: f64) -> bool {
+    non_negative(magnitude)
+        && non_negative(transition_velocity)
+        && (magnitude == 0.0 || transition_velocity > 0.0)
 }
 
 /// Unit-explicit actuation command for a one-degree-of-freedom joint.
@@ -645,18 +693,43 @@ mod tests {
         assert!(JointPassiveDynamics::Revolute {
             viscous_damping_nm_s_per_rad: 2.5,
             coulomb_friction_nm: 0.4,
+            coulomb_transition_velocity_rad_s: 0.01,
         }
         .has_valid_values());
         assert!(!JointPassiveDynamics::Prismatic {
             viscous_damping_n_s_per_m: f64::NAN,
             coulomb_friction_n: 0.0,
+            coulomb_transition_velocity_m_s: 0.0,
         }
         .has_valid_values());
         assert!(!JointPassiveDynamics::Revolute {
             viscous_damping_nm_s_per_rad: 0.0,
             coulomb_friction_nm: -0.1,
+            coulomb_transition_velocity_rad_s: 0.01,
         }
         .has_valid_values());
+        assert!(!JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: 0.1,
+            coulomb_transition_velocity_rad_s: 0.0,
+        }
+        .has_valid_values());
+    }
+
+    #[test]
+    fn regularized_coulomb_effort_is_smooth_bounded_and_opposes_motion() {
+        let dynamics = JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: 0.4,
+            coulomb_transition_velocity_rad_s: 0.02,
+        };
+        assert_eq!(dynamics.regularized_coulomb_effort(0.0), 0.0);
+        let positive = dynamics.regularized_coulomb_effort(0.02);
+        let negative = dynamics.regularized_coulomb_effort(-0.02);
+        assert!(positive < 0.0);
+        assert_eq!(positive, -negative);
+        assert!(positive.abs() < 0.4);
+        assert!(dynamics.regularized_coulomb_effort(1.0).abs() <= 0.4);
     }
 
     #[test]

@@ -411,9 +411,12 @@ actuator-authority envelope. The next slices are:
    and before backend actuation;
 2. **In progress:** the physical command slew-rate, command-deadband, and
    viscous joint-damping boundaries are complete, including controller
-   retuning at the predeclared damping limit; continue the actuator and plant
-   envelope with Coulomb friction, inertia, and transmission-efficiency sweeps,
-   retaining the smallest failing value for each mechanism;
+   retuning at the predeclared damping limit. The shared smooth Coulomb law,
+   explicit transition velocity, Rapier/MuJoCo realization, and Gazebo
+   substep-level effort diagnostics are implemented; complete its fixed sweep,
+   browser report, replay, and capsule before continuing with inertia and
+   transmission-efficiency, retaining the smallest failing value for each
+   mechanism;
 3. expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
@@ -648,8 +651,9 @@ delta. The declared 10-point now passes at `0.013450`, `0.017185`, and
 `0.02 rad` RMSE contract on all three at `0.021962`, `0.024173`, and
 `0.021684 rad`. The browser report is `passed` and classifies those three rows
 as `expected_boundary_failure`; the step-3600 replay retains the first Rapier
-boundary failure. Coulomb friction, inertia, and transmission-efficiency
-dimensions remain open.
+boundary failure. The portable regularized-Coulomb implementation is now
+present, while its cross-backend sweep and capsule remain open; inertia and
+transmission-efficiency dimensions also remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

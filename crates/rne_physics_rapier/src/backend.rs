@@ -856,6 +856,7 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
         apply_motor_command(world, *entity, axis, &mut link.joint.data)?;
     }
     apply_direct_joint_efforts(world, state)?;
+    apply_passive_coulomb_friction(world, state)?;
     Ok(())
 }
 
@@ -1013,29 +1014,102 @@ fn apply_direct_joint_efforts(
                 "non-finite effort or negative limit",
             ));
         }
-        let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
-        if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
-            return Err(invalid_actuation(
+        apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
+    }
+    Ok(())
+}
+
+fn apply_passive_coulomb_friction(
+    world: &World,
+    state: &mut RapierWorldState,
+) -> Result<(), PhysicsError> {
+    for entity in sorted_entities(world) {
+        let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied() else {
+            continue;
+        };
+        if !dynamics.has_valid_values() {
+            return Err(invalid_passive_dynamics(
                 entity,
-                "joint axis is zero or non-finite",
+                "non-finite, negative, or zero-width nonzero Coulomb coefficient",
             ));
         }
-        for (target, sign) in [(entity, 1.0), (parent, -1.0)] {
-            let Some(handle) = state.entity_to_body.get(&target).copied() else {
-                continue;
-            };
-            let Some(body) = state.bodies.get_mut(handle) else {
-                continue;
-            };
-            let vector = vec3_to_rapier(axis_world * (effort * sign));
-            if revolute {
-                body.add_torque(vector, true);
-            } else {
-                body.add_force(vector, true);
+        let (parent, axis_local, revolute, magnitude) = match dynamics {
+            JointPassiveDynamics::Revolute {
+                coulomb_friction_nm,
+                ..
+            } => {
+                let Some(desc) = world.get::<RevoluteJointDesc>(entity) else {
+                    return Err(invalid_passive_dynamics(
+                        entity,
+                        "revolute dynamics on non-revolute joint",
+                    ));
+                };
+                (desc.parent, desc.axis, true, coulomb_friction_nm)
             }
-            if !state.impulse_forced.contains(&handle) {
-                state.impulse_forced.push(handle);
+            JointPassiveDynamics::Prismatic {
+                coulomb_friction_n, ..
+            } => {
+                let Some(desc) = world.get::<PrismaticJointDesc>(entity) else {
+                    return Err(invalid_passive_dynamics(
+                        entity,
+                        "prismatic dynamics on non-prismatic joint",
+                    ));
+                };
+                (desc.parent, desc.axis, false, coulomb_friction_n)
             }
+        };
+        if magnitude == 0.0 {
+            continue;
+        }
+        let Some((_, velocity)) = multibody_joint_coordinate(state, entity) else {
+            return Err(invalid_passive_dynamics(
+                entity,
+                "regularized Coulomb friction requires a single-DoF multibody articulation",
+            ));
+        };
+        if !velocity.is_finite() {
+            return Err(invalid_passive_dynamics(
+                entity,
+                "joint velocity is non-finite",
+            ));
+        }
+        let effort = dynamics.regularized_coulomb_effort(velocity);
+        apply_generalized_effort(world, state, entity, parent, axis_local, effort, revolute)?;
+    }
+    Ok(())
+}
+
+fn apply_generalized_effort(
+    world: &World,
+    state: &mut RapierWorldState,
+    entity: Entity,
+    parent: Entity,
+    axis_local: Vec3,
+    effort: f64,
+    revolute: bool,
+) -> Result<(), PhysicsError> {
+    let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
+    if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
+        return Err(invalid_actuation(
+            entity,
+            "joint axis is zero or non-finite",
+        ));
+    }
+    for (target, sign) in [(entity, 1.0), (parent, -1.0)] {
+        let Some(handle) = state.entity_to_body.get(&target).copied() else {
+            continue;
+        };
+        let Some(body) = state.bodies.get_mut(handle) else {
+            continue;
+        };
+        let vector = vec3_to_rapier(axis_world * (effort * sign));
+        if revolute {
+            body.add_torque(vector, true);
+        } else {
+            body.add_force(vector, true);
+        }
+        if !state.impulse_forced.contains(&handle) {
+            state.impulse_forced.push(handle);
         }
     }
     Ok(())
@@ -1051,21 +1125,6 @@ fn passive_viscous_damping(world: &World, entity: Entity) -> Result<f64, Physics
         return Err(invalid_passive_dynamics(
             entity,
             "non-finite or negative coefficient",
-        ));
-    }
-    let coulomb_friction = match dynamics {
-        JointPassiveDynamics::Revolute {
-            coulomb_friction_nm,
-            ..
-        } => coulomb_friction_nm,
-        JointPassiveDynamics::Prismatic {
-            coulomb_friction_n, ..
-        } => coulomb_friction_n,
-    };
-    if coulomb_friction != 0.0 {
-        return Err(invalid_passive_dynamics(
-            entity,
-            "nonzero Coulomb friction is not yet portable",
         ));
     }
     match dynamics {
@@ -1795,12 +1854,14 @@ mod tests {
         let damped = coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
             viscous_damping_nm_s_per_rad: 0.2,
             coulomb_friction_nm: 0.0,
+            coulomb_transition_velocity_rad_s: 0.0,
         }))
         .unwrap();
         let strongly_damped =
             coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
                 viscous_damping_nm_s_per_rad: 20.0,
                 coulomb_friction_nm: 0.0,
+                coulomb_transition_velocity_rad_s: 0.0,
             }))
             .unwrap();
         assert!(
@@ -1814,13 +1875,18 @@ mod tests {
     }
 
     #[test]
-    fn nonzero_coulomb_friction_fails_before_rapier_step() {
-        let error = coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
+    fn regularized_coulomb_friction_reduces_coast_velocity() {
+        let undamped = coast_velocity_with_passive_loss(None).unwrap();
+        let friction = coast_velocity_with_passive_loss(Some(JointPassiveDynamics::Revolute {
             viscous_damping_nm_s_per_rad: 0.0,
             coulomb_friction_nm: 0.1,
+            coulomb_transition_velocity_rad_s: 0.01,
         }))
-        .unwrap_err();
-        assert!(matches!(error, PhysicsError::InvalidPassiveDynamics { .. }));
+        .unwrap();
+        assert!(
+            friction < undamped,
+            "regularized Coulomb loss should reduce coast velocity: undamped={undamped}, friction={friction}"
+        );
     }
 
     #[test]

@@ -91,8 +91,16 @@ independently parsed URDF realization, and every model/config/runtime hash. The
 zero case is byte-identical to the source model. Nonzero cases add exactly one
 joint-5 `<dynamics>` declaration. Plant damping and the existing joint-5 servo
 damping remain separate unit-bearing report fields.
-Nonzero Coulomb friction is intentionally rejected before stepping until the
-Rapier and MuJoCo static/kinetic transition semantics can be made identical.
+This viscous-only grid still holds Coulomb friction at zero so its existing
+boundary evidence remains one-dimensional. The portable Coulomb successor uses
+`-magnitude*tanh(velocity/transition_velocity)` rather than backend-native
+static-friction settings. Rapier and MuJoCo consume the typed plant component;
+the Gazebo effort adapter consumes explicit per-joint
+`plant_coulomb_friction_nm` and
+`plant_coulomb_transition_velocity_rad_s` arrays, adds passive loss after
+actuator saturation, and records passive effort plus the total force sent on
+every physics substep. This model is smooth kinetic loss and makes no stiction
+or breakaway claim.
 
 The controller tuning manifest freezes the `[0.04, 0.05, 0.06, 0.08] rad`
 state-feedback correction-limit candidates before execution. Run only the

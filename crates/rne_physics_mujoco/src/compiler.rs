@@ -376,21 +376,6 @@ fn validate_passive_dynamics(body: &BodyInput, joint: JointSpec) -> Result<(), C
             reason: "non-finite or negative coefficient",
         });
     }
-    let coulomb_friction = match dynamics {
-        JointPassiveDynamics::Revolute {
-            coulomb_friction_nm,
-            ..
-        } => coulomb_friction_nm,
-        JointPassiveDynamics::Prismatic {
-            coulomb_friction_n, ..
-        } => coulomb_friction_n,
-    };
-    if coulomb_friction != 0.0 {
-        return Err(CompileError::InvalidPassiveDynamics {
-            entity_index: body.entity.index(),
-            reason: "nonzero Coulomb friction is not yet portable",
-        });
-    }
     let compatible = matches!(
         (dynamics, joint),
         (
@@ -1147,6 +1132,7 @@ mod tests {
             JointPassiveDynamics::Revolute {
                 viscous_damping_nm_s_per_rad: 2.5,
                 coulomb_friction_nm: 0.0,
+                coulomb_transition_velocity_rad_s: 0.0,
             },
         ));
 
@@ -1164,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn nonzero_coulomb_friction_fails_before_native_model_creation() {
+    fn regularized_coulomb_friction_stays_out_of_native_model_semantics() {
         let mut world = World::new();
         let root = body(&mut world, "root", RigidBodyType::Fixed, Vec3::ZERO);
         let child = body(&mut world, "child", RigidBodyType::Dynamic, Vec3::Y);
@@ -1180,12 +1166,12 @@ mod tests {
             JointPassiveDynamics::Revolute {
                 viscous_damping_nm_s_per_rad: 0.0,
                 coulomb_friction_nm: 0.1,
+                coulomb_transition_velocity_rad_s: 0.01,
             },
         ));
-        assert!(matches!(
-            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666),
-            Err(CompileError::InvalidPassiveDynamics { .. })
-        ));
+        let compiled =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.016_666_666).unwrap();
+        assert!(!compiled.mjcf.contains("frictionloss="));
     }
 
     #[test]
