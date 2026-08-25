@@ -304,6 +304,13 @@ means zero declared plant loss. Rapier multibodies and MuJoCo integrate viscous
 damping implicitly; Rapier impulse-joint fixtures reject nonzero damping rather
 than using an unstable explicit approximation.
 
+A `.rne.robot.toml` URDF section may replace only that unrepresentable policy
+value with `[[urdf.joint_passive_dynamics]]`, a joint name, and exactly one of
+`coulomb_transition_velocity_rad_s` or
+`coulomb_transition_velocity_m_s`. The override is content-addressed with the
+robot asset, requires a matching joint kind and an existing URDF dynamics
+declaration, and does not replace the URDF damping or friction magnitude.
+
 Portable Coulomb loss is the smooth generalized effort
 `-magnitude*tanh(velocity/transition_velocity)`, evaluated from the pre-step
 joint velocity. It approaches the requested kinetic-friction magnitude but is

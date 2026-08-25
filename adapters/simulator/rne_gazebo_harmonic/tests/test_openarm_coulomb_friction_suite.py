@@ -67,6 +67,8 @@ class OpenArmCoulombFrictionSuiteTests(unittest.TestCase):
             self.assertEqual(sum(config["plant_coulomb_friction_nm"]), 2.0)
             robot = (case_dir / "openarm_payload.rne.robot.toml").read_text()
             self.assertIn('path = "openarm_v2_right.coulomb.urdf"', robot)
+            self.assertIn('joint = "openarm_right_joint5"', robot)
+            self.assertIn("coulomb_transition_velocity_rad_s = 0.01", robot)
             runtime = json.loads((case_dir / "runtime.json").read_text())
             self.assertEqual(
                 [item["file"] for item in runtime["artifacts"] if item["role"] == "robot_model"],

@@ -172,6 +172,26 @@ recover the limit, so transition-width/integration sensitivity is the next
 predeclared tuning dimension. The supported envelope and tolerance are not
 changed after observing this result.
 
+URDF cannot encode that transition width. Portable fixtures therefore bind it
+in the hashed robot asset rather than a runner-only argument:
+
+```toml
+[[urdf.joint_passive_dynamics]]
+joint = "openarm_right_joint5"
+coulomb_transition_velocity_rad_s = 0.01
+```
+
+The asset loader requires articulation, a unique known joint, exactly one
+revolute or prismatic unit field, and a finite positive value. It preserves the
+URDF damping and Coulomb magnitude and overrides only the unrepresentable
+transition velocity. The predeclared Rapier tuning grid
+`[0.01, 0.02, 0.04, 0.05] rad/s` also requires at least 95% of the requested
+kinetic loss at 0.1 rad/s. All four candidates retain exact replay and exact
+realization but fail the fixed RMSE limit at `0.036139`, `0.041792`, `0.044637`,
+and `0.038900 rad`. No transition is selected; the browser report remains
+`needs_tuning`, and physics-substep sensitivity is the next predeclared
+experiment.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

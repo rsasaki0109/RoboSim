@@ -10,13 +10,15 @@ use crate::scene::{
 use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, ColliderShape, PhysicsMaterial, RigidBody, RigidBodyType};
+use rne_physics::{
+    Collider, ColliderShape, JointPassiveDynamics, PhysicsMaterial, RigidBody, RigidBodyType,
+};
 use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
     attach_urdf_articulation, attach_urdf_visuals, parse_urdf_document, parse_urdf_document_file,
-    parse_urdf_file, spawn_urdf_document_with_config, UrdfDocument,
+    parse_urdf_file, spawn_urdf_document_with_config, SpawnedUrdfRobot, UrdfDocument,
 };
 use rne_world::{
     spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
@@ -193,6 +195,14 @@ pub fn spawn_robot_asset_with_sources(
                         format!("urdf articulation failed: {error}"),
                     )
                 })?;
+
+                apply_urdf_passive_dynamics_overrides(
+                    world,
+                    asset_path,
+                    &document,
+                    &spawned,
+                    &section.joint_passive_dynamics,
+                )?;
             }
 
             world
@@ -225,6 +235,95 @@ pub fn spawn_robot_asset_with_sources(
             ))
         }
     }
+}
+
+fn apply_urdf_passive_dynamics_overrides(
+    world: &mut World,
+    asset_path: &Path,
+    document: &UrdfDocument,
+    spawned: &SpawnedUrdfRobot,
+    overrides: &[crate::robot::UrdfJointPassiveDynamicsAsset],
+) -> Result<(), AssetError> {
+    for override_spec in overrides {
+        let joint = document
+            .robot
+            .joints
+            .iter()
+            .find(|joint| joint.name == override_spec.joint)
+            .ok_or_else(|| {
+                AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!(
+                        "passive-dynamics override names unknown joint `{}`",
+                        override_spec.joint
+                    ),
+                )
+            })?;
+        let entity = *spawned.links.get(&joint.child).ok_or_else(|| {
+            AssetError::invalid(
+                asset_path.display().to_string(),
+                format!(
+                    "passive-dynamics override joint `{}` has no child link",
+                    joint.name
+                ),
+            )
+        })?;
+        let current = world
+            .get::<JointPassiveDynamics>(entity)
+            .copied()
+            .ok_or_else(|| {
+                AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!(
+                        "passive-dynamics override joint `{}` has no URDF dynamics",
+                        joint.name
+                    ),
+                )
+            })?;
+        let updated = match (
+            current,
+            override_spec.coulomb_transition_velocity_rad_s,
+            override_spec.coulomb_transition_velocity_m_s,
+        ) {
+            (
+                JointPassiveDynamics::Revolute {
+                    viscous_damping_nm_s_per_rad,
+                    coulomb_friction_nm,
+                    ..
+                },
+                Some(coulomb_transition_velocity_rad_s),
+                None,
+            ) => JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad,
+                coulomb_friction_nm,
+                coulomb_transition_velocity_rad_s,
+            },
+            (
+                JointPassiveDynamics::Prismatic {
+                    viscous_damping_n_s_per_m,
+                    coulomb_friction_n,
+                    ..
+                },
+                None,
+                Some(coulomb_transition_velocity_m_s),
+            ) => JointPassiveDynamics::Prismatic {
+                viscous_damping_n_s_per_m,
+                coulomb_friction_n,
+                coulomb_transition_velocity_m_s,
+            },
+            _ => {
+                return Err(AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!(
+                        "passive-dynamics override units do not match joint `{}`",
+                        joint.name
+                    ),
+                ));
+            }
+        };
+        world.entity_mut(entity).insert(updated);
+    }
+    Ok(())
 }
 
 /// Spawns a scene and its referenced diff-drive robots.
@@ -725,7 +824,7 @@ mod tests {
     use crate::{load_and_spawn_scene, spawn_robot_asset};
     use rne_ecs::World;
     use rne_math::{Quat, Vec3};
-    use rne_physics::RigidBody;
+    use rne_physics::{JointPassiveDynamics, RigidBody};
     use rne_robot::Link;
     use rne_sensor::Sensor;
     use rne_world::{Transform3, WorldEntity, WorldRandom};
@@ -851,6 +950,62 @@ mod tests {
         let mut world = World::new();
         let (spawned, _) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
         assert!(world.get::<rne_render::Visual>(spawned.base_link).is_some());
+    }
+
+    #[test]
+    fn urdf_robot_applies_unit_bearing_passive_dynamics_override() {
+        let urdf_text = r#"
+<robot name="arm">
+  <link name="base"/>
+  <link name="arm_link"/>
+  <joint name="joint5" type="revolute">
+    <parent link="base"/>
+    <child link="arm_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="2" velocity="2"/>
+    <dynamics damping="1.5" friction="0.25"/>
+  </joint>
+</robot>
+"#;
+        let robot_text = r#"
+kind = "urdf"
+model_name = "arm"
+
+[urdf]
+path = "arm.urdf"
+articulation = true
+multibody = true
+
+[[urdf.joint_passive_dynamics]]
+joint = "joint5"
+coulomb_transition_velocity_rad_s = 0.04
+"#;
+        let directory = std::env::temp_dir().join(format!(
+            "rne_assets_passive_override_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let urdf_path = directory.join("arm.urdf");
+        let robot_path = directory.join("arm.rne.robot.toml");
+        std::fs::write(&urdf_path, urdf_text).unwrap();
+        std::fs::write(&robot_path, robot_text).unwrap();
+
+        let asset = crate::load_robot_asset(&robot_path).unwrap();
+        let mut world = World::new();
+        let (spawned, _) = spawn_robot_asset(&mut world, &robot_path, &asset, None).unwrap();
+        let links = collect_robot_links(&mut world, spawned.robot);
+        assert_eq!(
+            world
+                .get::<JointPassiveDynamics>(links["arm_link"])
+                .copied(),
+            Some(JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 1.5,
+                coulomb_friction_nm: 0.25,
+                coulomb_transition_velocity_rad_s: 0.04,
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

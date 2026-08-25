@@ -658,10 +658,15 @@ exact in every row, but the report is honestly `needs_tuning`: Rapier first
 misses the fixed `0.02 rad` RMSE contract at the supported 0.25 N*m point
 (`0.038961 rad`). MuJoCo and Gazebo pass through 0.5 N*m. A predeclared
 controller-correction diagnostic at the Rapier 0.5 N*m point did not close the
-gap, making transition-width/integration sensitivity—not a post-hoc relaxed
-tolerance—the next experiment. A replay captures the first deviation; the
-verified capsule remains open. Inertia and transmission-efficiency dimensions
-also remain open.
+gap. Transition width is now a unit-bearing, hashed `.rne.robot.toml` override
+because URDF cannot represent it. The predeclared
+`[0.01, 0.02, 0.04, 0.05] rad/s` Rapier grid keeps at least 95% kinetic loss at
+0.1 rad/s, but every candidate still fails at `0.036139-0.044637 rad` RMSE.
+No candidate is selected and no tolerance is relaxed. This rules out transition
+regularization as the primary cause and advances the next experiment to
+physics-substep sensitivity with controller and plant held fixed. A verified
+Failure Capsule captures the first deviation. Inertia and
+transmission-efficiency dimensions also remain open.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

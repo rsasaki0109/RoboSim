@@ -104,11 +104,19 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise ValueError("unsupported Coulomb-friction experiment manifest")
 
 
-def portable_robot_config(source: str) -> str:
+def portable_robot_config(source: str, joint_name: str, transition_rad_s: float) -> str:
     needle = f'path = "{SOURCE_MODEL_FILE}"'
-    if source.count(needle) != 1:
-        raise ValueError("baseline robot config does not name the source model exactly once")
-    return source.replace(needle, f'path = "{PORTABLE_MODEL_FILE}"')
+    if source.count(needle) != 1 or "[[urdf.joint_passive_dynamics]]" in source:
+        raise ValueError(
+            "baseline robot config must name the source model exactly once and have no passive override"
+        )
+    portable = source.replace(needle, f'path = "{PORTABLE_MODEL_FILE}"').rstrip()
+    return (
+        portable
+        + "\n\n[[urdf.joint_passive_dynamics]]\n"
+        + f'joint = "{joint_name}"\n'
+        + f"coulomb_transition_velocity_rad_s = {transition_rad_s:.17g}\n"
+    )
 
 
 def adapter_config(
@@ -178,7 +186,9 @@ def compile_suite(
         portable_path.write_bytes(build_urdf(source_bytes, joint_name, damping, friction))
         gazebo_path = directory / GAZEBO_MODEL_FILE
         gazebo_path.write_bytes(build_urdf(source_bytes, joint_name, damping, 0.0))
-        robot_text = portable_robot_config((baseline / ROBOT_FILE).read_text(encoding="utf-8"))
+        robot_text = portable_robot_config(
+            (baseline / ROBOT_FILE).read_text(encoding="utf-8"), joint_name, transition
+        )
         (directory / ROBOT_FILE).write_text(robot_text, encoding="utf-8")
         write_json(directory / ADAPTER_FILE, adapter_config(baseline_adapter, joint_name, friction, transition))
 
