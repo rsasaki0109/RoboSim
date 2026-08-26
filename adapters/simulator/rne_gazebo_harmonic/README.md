@@ -614,6 +614,41 @@ cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-dropout-robustness-lab
 ```
 
+## Sweep OpenArm controller-ingress sensor latency
+
+The next sensor-timing dimension keeps every typed joint-feedback publication
+and its original capture timestamp, then adds a deterministic delay only
+between DataBus availability and controller ingress:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_ingress_latency \
+  --output artifacts/openarm-sensor-latency-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-control-period grid produces total
+controller-visible ages of one through five periods. The declared supported
+additional delay is zero periods: Rapier, native MuJoCo, and Gazebo all pass
+that case and all identify one additional period as the first unsupported
+case. The report independently verifies the retained capture sequence, exact
+age, and controller-visible values. Rapier and MuJoCo also show the associated
+joint-5 RMSE increase at one period; Gazebo remains performance-green, so the
+portable boundary is the explicit ingress-latency contract rather than an
+overgeneralized solver-performance claim. At three and four additional periods,
+the three-period maximum-age policy rejects stale observations, holds the last
+accepted target, and freezes controller state.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-latency-robustness-lab \
+  --output artifacts/openarm-sensor-latency-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-latency-robustness-lab/report/openarm-sensor-latency-robustness-report.json \
+  --trace artifacts/openarm-sensor-latency-robustness-lab/sensor-latency-001frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-latency-robustness-lab/report/minimum-sensor-latency-failure.rne-replay
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

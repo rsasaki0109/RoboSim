@@ -104,6 +104,7 @@ fn run() -> Result<()> {
     let trace_sha256 = sha256(&trace_bytes);
     let dimension_id = required_str(&report, "dimension_id")?;
     let availability_failure = dimension_id == "joint_feedback_publication_dropout";
+    let latency_failure = dimension_id == "joint_feedback_controller_ingress_latency";
     let command_delay_failure = dimension_id == "actuator_command_delay";
     let command_rate_limit_failure = dimension_id == "actuator_command_rate_limit";
     let command_deadband_failure = dimension_id == "actuator_command_deadband";
@@ -118,6 +119,7 @@ fn run() -> Result<()> {
         "joint_feedback_publication_dropout" => {
             required_u64(&report["dimension"], "start_capture_sequence")?
         }
+        "joint_feedback_controller_ingress_latency" => 1,
         _ => bail!("unsupported robustness dimension"),
     };
     let requirement_limit = required_f64(
@@ -158,7 +160,8 @@ fn run() -> Result<()> {
             } else if observation.step >= disturbance_start_step {
                 consecutive_dropout_frames = 0;
             }
-        } else if !command_delay_failure
+        } else if !latency_failure
+            && !command_delay_failure
             && !command_rate_limit_failure
             && !command_deadband_failure
             && observation.step >= disturbance_start_step
@@ -236,8 +239,9 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
+                "controller_ingress_delay_frames": latency_failure.then(|| dimension_value(failure)).transpose()?,
                 "actuator_delay_steps": delay_steps,
                 "actuator_source_step": source_step,
                 "expected_source_controller_target_rad": expected_source_target_rad,
@@ -266,6 +270,21 @@ fn run() -> Result<()> {
         );
         format!(
             "OpenArm joint-feedback publication reached {observed:.0} consecutive dropped frames at step {failure_step}, exceeding the fixed {requirement_limit:.0}-frame requirement"
+        )
+    } else if latency_failure {
+        let delay_frames = observed as u64;
+        let expected_sequence = failure_step
+            .checked_sub(delay_frames + 2)
+            .context("latency failure has no delayed source observation")?;
+        let expected_age_ticks = (delay_frames + 1) * trace.fixed_delta_ticks;
+        anyhow::ensure!(
+            observed == dimension_value(failure)?
+                && failure_observation.controller_observation_sequence == Some(expected_sequence)
+                && failure_observation.controller_observation_age_ticks == Some(expected_age_ticks),
+            "replayed controller-ingress latency differs from the report"
+        );
+        format!(
+            "OpenArm joint-feedback controller ingress reached {observed:.0} additional control period at step {failure_step}, preserving capture sequence {expected_sequence} and exceeding the fixed {requirement_limit:.0}-period requirement"
         )
     } else if command_delay_failure {
         let source_step = required_u64(failure, "source_step")?;
@@ -381,6 +400,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
                 | "actuator_command_deadband"
                 | "joint_position_measurement_bias"
                 | "joint_feedback_publication_dropout"
+                | "joint_feedback_controller_ingress_latency"
         ),
         "unsupported robustness dimension"
     );
@@ -388,6 +408,9 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
     let expected_requirement = match dimension_id {
         "joint_feedback_publication_dropout" => {
             "controller.sensor.maximum_consecutive_dropout_frames"
+        }
+        "joint_feedback_controller_ingress_latency" => {
+            "controller.sensor.maximum_controller_ingress_delay_frames"
         }
         "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
         "actuator_command_rate_limit" => "controller.actuator.minimum_command_slew_rate_rad_s",

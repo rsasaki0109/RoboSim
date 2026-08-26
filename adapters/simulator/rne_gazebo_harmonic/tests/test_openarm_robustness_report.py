@@ -359,6 +359,71 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(metrics["first_recovered_step"], 6)
         self.assertIsNone(metrics["first_controller_source_mismatch"])
 
+    def test_latency_metrics_preserve_capture_time_and_find_ingress_boundary(self) -> None:
+        observations = []
+        for step in range(1, 7):
+            sequence = None if step <= 3 else step - 3
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": True,
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": None if sequence is None else 20,
+                    "controller_bootstrap": sequence is None,
+                    "controller_rejected": False,
+                    "joint_position_rad": [step / 100.0],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [0.1],
+                    "joint_integral_correction_rad": [0.0],
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_controller_ingress_delay_v1",
+                "delay_frames": 1,
+            }
+        }
+        metrics = MODULE.latency_metrics(controller, observations, 0, 10)
+        self.assertIsNotNone(metrics)
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        self.assertEqual(metrics["bootstrap_decision_count"], 3)
+        self.assertEqual(metrics["maximum_controller_observation_age_ticks"], 20)
+        self.assertAlmostEqual(
+            metrics["controlled_joint_rmse_rad"],
+            (91 / 6) ** 0.5 / 100,
+        )
+        requirements = {
+            "controller.sensor.maximum_controller_ingress_delay_frames": {
+                "id": "ingress",
+                "unit": "control_period_count",
+                "maximum": 0,
+            },
+            "controller.sensor.maximum_observation_age_ticks": {
+                "id": "age",
+                "unit": "tick",
+                "maximum": 30,
+            },
+            "controller.sensor_latency.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_latency.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_latency_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "ingress")
+        self.assertEqual(violation["step"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

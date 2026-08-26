@@ -65,6 +65,7 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertEqual(MODULE.deadband_case_id(0.001), "deadband-1000urad")
         with self.assertRaisesRegex(ValueError, "whole microradians"):
             MODULE.deadband_case_id(0.0000005)
+        self.assertEqual(MODULE.sensor_latency_case_id(3), "sensor-latency-003frames")
 
     def test_sensor_bias_grid_preserves_raw_sensor_and_disables_actuator_bias(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
@@ -179,6 +180,42 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
                 if index != joint_index
             )
         )
+
+    def test_sensor_latency_grid_retains_capture_time_and_bounded_age_policy(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_controller_ingress_latency",
+        )
+        self.assertEqual(
+            suite["dimension_id"], "joint_feedback_controller_ingress_latency"
+        )
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"]["delay_frames"]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["sensor-latency-003frames"]
+        self.assertEqual(
+            controller["measurement_fault_contract"]["controller_visibility"],
+            "delayed_nominal_publication_with_original_capture_timestamp",
+        )
+        self.assertEqual(
+            controller["observation_contract"]["maximum_age_ticks"],
+            3 * 16_666_667,
+        )
+        self.assertEqual(
+            controller["observation_contract"]["stale_observation_policy"],
+            "hold_last_accepted_target_and_freeze_state",
+        )
+        RUNNER.validate_measurement_fault(controller, 3600)
+        self.assertEqual(RUNNER.controller_ingress_delay_frames(controller), 3)
 
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(

@@ -137,6 +137,13 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_feedback_controller_ingress_delay_v1")]
+    JointFeedbackControllerIngressDelayV1 {
+        classification: String,
+        delay_frames: u64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -819,6 +826,20 @@ fn validate(
                     && application_order == "after_typed_sensor_capture_before_controller_ingress",
                 "invalid OpenArm measurement-dropout contract"
             ),
+            MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 {
+                classification,
+                delay_frames,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_transport_latency"
+                    && *delay_frames <= actions.actions.len() as u64
+                    && controller_visibility
+                        == "delayed_nominal_publication_with_original_capture_timestamp"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_ingress",
+                "invalid OpenArm controller-ingress latency contract"
+            ),
         }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
@@ -829,7 +850,7 @@ fn validate(
                     && contract.sample_period_ticks == FIXED_DELTA_TICKS
                     && contract.phase_offset_ticks == FIXED_DELTA_TICKS
                     && contract.latency_ticks == FIXED_DELTA_TICKS
-                    && if has_dropout_fault(controller) {
+                    && if has_availability_fault(controller) {
                         contract.maximum_age_ticks == 3 * FIXED_DELTA_TICKS
                             && contract.stale_observation_policy.as_deref()
                                 == Some("hold_last_accepted_target_and_freeze_state")
@@ -1044,7 +1065,7 @@ fn rollout(
     let mut observations = Vec::with_capacity(actions.len());
     let mut state_hashes = Vec::with_capacity(actions.len());
     let mut decisions = Vec::with_capacity(actions.len());
-    let mut latest_controller_observation = None;
+    let mut controller_observation_history: Vec<ControllerObservation> = Vec::new();
     let mut controller_state = ControllerState::new(controller.action_joint_order.len());
     let mut controller_target_history = Vec::with_capacity(actions.len());
     let mut applied_target_history = Vec::with_capacity(actions.len());
@@ -1059,11 +1080,22 @@ fn rollout(
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
     for action in actions {
+        let ingress_delay_ticks = controller_ingress_delay_ticks(controller);
+        let visible_controller_observation =
+            controller_observation_history
+                .iter()
+                .rev()
+                .find(|observation| {
+                    observation
+                        .available_time_ticks
+                        .saturating_add(ingress_delay_ticks)
+                        <= sim.sim_time.ticks()
+                });
         let decision = bounded_controller_decision(
             controller,
             &action.joint_position_target_rad,
             &mut controller_state,
-            latest_controller_observation.as_ref(),
+            visible_controller_observation,
             sim.sim_time.ticks(),
             &last_accepted_target_rad,
             recovering_from_rejection,
@@ -1111,7 +1143,7 @@ fn rollout(
             if frame.sequence > last_observation_sequence {
                 let published = sensor_sample_published(controller, frame.sequence);
                 if published {
-                    latest_controller_observation = Some(controller_observation(&frame)?);
+                    controller_observation_history.push(controller_observation(&frame)?);
                 }
                 observations.push(observation_frame(
                     frame,
@@ -1739,7 +1771,7 @@ fn bounded_controller_decision(
                 return Err(error);
             };
             let age_ticks = consumed_at_ticks.saturating_sub(observation.capture_time_ticks);
-            if !has_dropout_fault(controller)
+            if !has_availability_fault(controller)
                 || observation.status != contract.required_status
                 || observation.available_time_ticks > consumed_at_ticks
                 || age_ticks <= contract.maximum_age_ticks
@@ -1775,11 +1807,24 @@ fn bounded_controller_decision(
     }
 }
 
-fn has_dropout_fault(controller: &ControllerSpec) -> bool {
+fn has_availability_fault(controller: &ControllerSpec) -> bool {
     matches!(
         controller.measurement_fault_contract.as_ref(),
-        Some(MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 { .. })
+        Some(
+            MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 { .. }
+                | MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 { .. }
+        )
     )
+}
+
+fn controller_ingress_delay_ticks(controller: &ControllerSpec) -> u64 {
+    match controller.measurement_fault_contract.as_ref() {
+        Some(MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 {
+            delay_frames,
+            ..
+        }) => delay_frames.saturating_mul(FIXED_DELTA_TICKS),
+        _ => 0,
+    }
 }
 
 fn sensor_sample_published(controller: &ControllerSpec, sequence: u64) -> bool {

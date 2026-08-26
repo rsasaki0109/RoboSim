@@ -17,7 +17,7 @@ from typing import Any
 HOST_KIND = "rne_simulator_host_frame"
 ADAPTER_KIND = "rne_simulator_adapter_frame"
 FIXED_DELTA_TICKS = 16_666_667
-RESPONSE_TIMEOUT_S = 15.0
+RESPONSE_TIMEOUT_S = 30.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,7 +103,9 @@ class AdapterProcess:
         self.process.stdin.write(json.dumps(frame, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
         if not self.selector.select(RESPONSE_TIMEOUT_S):
-            raise TimeoutError("Gazebo adapter response exceeded 15 seconds")
+            raise TimeoutError(
+                f"Gazebo adapter response exceeded {RESPONSE_TIMEOUT_S:g} seconds"
+            )
         line = self.process.stdout.readline()
         if not line:
             raise RuntimeError(f"Gazebo adapter exited with {self.process.poll()}")
@@ -343,6 +345,25 @@ def dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def latency_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind") == "joint_feedback_controller_ingress_delay_v1"
+    ):
+        return contract
+    return None
+
+
+def availability_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    return dropout_contract(controller) or latency_contract(controller)
+
+
+def controller_ingress_delay_frames(controller: dict[str, Any]) -> int:
+    contract = latency_contract(controller)
+    return 0 if contract is None else contract["delay_frames"]
+
+
 def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
     contract = dropout_contract(controller)
     if contract is None:
@@ -354,6 +375,28 @@ def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
 def validate_measurement_fault(controller: dict[str, Any], action_count: int) -> None:
     contract = controller.get("measurement_fault_contract")
     if contract is None or contract.get("kind") == "additive_joint_position_bias_pulse_v1":
+        return
+    if contract.get("kind") == "joint_feedback_controller_ingress_delay_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "delay_frames",
+            "controller_visibility",
+            "application_order",
+        }
+        delay = contract.get("delay_frames")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_transport_latency"
+            or not isinstance(delay, int)
+            or isinstance(delay, bool)
+            or not 0 <= delay <= action_count
+            or contract.get("controller_visibility")
+            != "delayed_nominal_publication_with_original_capture_timestamp"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_before_controller_ingress"
+        ):
+            raise ValueError("invalid OpenArm controller-ingress latency contract")
         return
     expected_keys = {
         "kind",
@@ -394,7 +437,7 @@ def bounded_controller_decision(
     recovering_from_rejection: bool,
 ) -> dict[str, Any]:
     contract = controller.get("observation_contract")
-    if observation is not None and dropout_contract(controller) is not None:
+    if observation is not None and availability_contract(controller) is not None:
         age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
         if age_ticks > contract["maximum_age_ticks"]:
             if len(last_accepted_target) != len(reference):
@@ -448,7 +491,10 @@ def apply_measurement_bias(
     contract = controller.get("measurement_fault_contract")
     if contract is None:
         return positions, bias
-    if contract.get("kind") == "joint_feedback_publication_dropout_burst_v1":
+    if contract.get("kind") in {
+        "joint_feedback_publication_dropout_burst_v1",
+        "joint_feedback_controller_ingress_delay_v1",
+    }:
         return positions, bias
     expected_keys = {
         "kind",
@@ -632,12 +678,14 @@ def run_success(
     recovering_from_rejection = False
     for action in action_artifact["actions"]:
         consumed_at_ticks = (action["step"] - 1) * FIXED_DELTA_TICKS
+        ingress_delay_ticks = controller_ingress_delay_frames(controller) * FIXED_DELTA_TICKS
         delayed_observation = next(
             (
                 frame
                 for frame in reversed(observations)
                 if frame["sensor_sample_published"]
-                and frame["sim_time_ticks"] + FIXED_DELTA_TICKS <= consumed_at_ticks
+                and frame["sim_time_ticks"] + FIXED_DELTA_TICKS + ingress_delay_ticks
+                <= consumed_at_ticks
             ),
             None,
         )
@@ -924,7 +972,7 @@ def main() -> int:
     )
     feedback_enabled = contract is not None or law is not None
     validate_measurement_fault(controller, len(actions["actions"]))
-    availability_fault = dropout_contract(controller)
+    availability_fault = availability_contract(controller)
     if feedback_enabled and (
         not isinstance(contract, dict)
         or not isinstance(law, dict)

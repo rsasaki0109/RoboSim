@@ -466,9 +466,12 @@ actuator-authority envelope. The next slices are:
    with nonphysical multipliers. The next inertia experiment must excite a
    dynamically sensitive joint/coupled mode or vary a physically sourced
    payload/link inertia with positive-definite tensor checks;
-4. **Next:** expand sensor timing evidence from the completed fixed dropout case to
-   latency, deterministic jitter, stale age, burst dropout, recovery policy,
-   quantization, saturation, and stuck-value envelopes;
+4. **Latency complete; jitter next:** controller-ingress latency now has a fixed
+   `[0, 1, 2, 3, 4]`-period sweep with original capture timestamps, exact
+   controller-visible age, cross-backend 0/1-period boundary evidence, stale-age
+   hold/freeze behavior, and a minimum failure replay. Continue with
+   deterministic jitter, independently varied stale age, burst patterns,
+   recovery policy, quantization, saturation, and stuck-value envelopes;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -684,7 +687,16 @@ drops and first fail three. At the failing boundary they reject exactly decision
 3244 at `66,666,668 ticks`, freeze state, hold the previous accepted target with
 zero delta, and recover in one decision on fresh sequence 3243. The earliest
 violation is still capture sequence 3242, where the third consecutive
-publication is absent; the minimum replay stops there. Physical parameter
+publication is absent; the minimum replay stops there. The controller-ingress
+latency dimension retains every publication and capture timestamp while adding
+`[0, 1, 2, 3, 4]` periods after typed availability. Total visible age is
+therefore one through five periods. All three backends pass zero added periods
+and first leave the declared envelope at one; Rapier and MuJoCo also fail the
+fixed joint-5 performance gates there, while Gazebo remains performance-green.
+At three and four added periods, the three-period maximum-age policy rejects
+stale observations and proves zero-delta target hold with frozen controller
+state. The portable first failure is localized to the first delayed controller
+consumption at step 4 and retained as a minimum replay. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.
