@@ -279,7 +279,7 @@ class GazeboOpenArmAdapter:
                 feedback_velocity,
             )
             passive_coulomb_effort_nm = 0.0
-            backend_command = realized.applied
+            backend_command = realized.transmitted
             if realized.kind == "effort_nm":
                 friction = self.config.get(
                     "plant_coulomb_friction_nm", [0.0] * self.action_width

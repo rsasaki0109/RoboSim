@@ -236,6 +236,8 @@ struct JointActuationConfig {
     damping_nm_s_per_rad: f64,
     max_effort_nm: f64,
     max_velocity_rad_s: f64,
+    #[serde(default = "unit_transmission_efficiency")]
+    transmission_efficiency: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -912,12 +914,15 @@ fn validate(
                 joint.damping_nm_s_per_rad,
                 joint.max_effort_nm,
                 joint.max_velocity_rad_s,
+                joint.transmission_efficiency,
             ]
             .iter()
             .all(|value| value.is_finite() && *value >= 0.0)
                 && joint.max_velocity_rad_s > 0.0
+                && joint.transmission_efficiency > 0.0
+                && joint.transmission_efficiency <= 1.0
         }),
-        "RNE actuation configuration has invalid gains, effort, or velocity limits"
+        "RNE actuation configuration has invalid gains, effort, velocity, or transmission efficiency"
     );
     Ok(())
 }
@@ -1855,6 +1860,7 @@ fn rollout(
                     damping_nm_s_per_rad: joint.damping_nm_s_per_rad,
                     max_effort_nm: joint.max_effort_nm,
                     max_velocity_rad_s: joint.max_velocity_rad_s,
+                    transmission_efficiency: joint.transmission_efficiency,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1866,7 +1872,10 @@ fn rollout(
             .context("step OpenArm portable PD effort physics substeps")?;
         let applied_actuation = AppliedActuation {
             target_position_rad: applied_target,
-            limited_effort_command_nm: applied.iter().map(|value| value.effort_nm).collect(),
+            limited_effort_command_nm: applied
+                .iter()
+                .map(|value| value.motor_effort_command_nm)
+                .collect(),
             effort_saturated: applied.iter().map(|value| value.saturated).collect(),
         };
         applied_actuation_history.push(applied_actuation);
@@ -1968,6 +1977,10 @@ fn rollout(
 
 fn default_physics_substeps_per_control_step() -> usize {
     1
+}
+
+fn unit_transmission_efficiency() -> f64 {
+    1.0
 }
 
 fn feedback_bounds(controller: &ControllerSpec) -> (Vec<f64>, Vec<f64>) {

@@ -455,9 +455,18 @@ actuator-authority envelope. The next slices are:
    slice includes predeclared controller selection, a fixed 15-run
    Rapier/MuJoCo/Gazebo sweep, exact replay, a browser report, a minimum failure
    replay, and a verified Failure Capsule;
-3. **Next:** add inertia and transmission-efficiency boundaries, retaining the
-   smallest failing value for each mechanism;
-4. expand sensor timing evidence from the completed fixed dropout case to
+3. **Transmission complete; inertia pilot complete:** the motor-to-joint
+   transmission-efficiency slice now separates bounded motor command from
+   joint-side transmitted and measured effort across Rapier, MuJoCo, and
+   Gazebo. Its fixed 15-run grid supports efficiency `>= 0.90`, retains `0.75`
+   as the first predeclared-RMSE boundary failure, and emits exact replay, a
+   browser report, and a verified Failure Capsule. A link-5-only inertia-tensor
+   multiplier pilot over `[1, 2, 4, 8, 16]` remained performance-green and
+   showed weak sensitivity on this trajectory; do not manufacture a boundary
+   with nonphysical multipliers. The next inertia experiment must excite a
+   dynamically sensitive joint/coupled mode or vary a physically sourced
+   payload/link inertia with positive-definite tensor checks;
+4. **Next:** expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region

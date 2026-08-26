@@ -93,6 +93,21 @@ class OpenArmActuationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "maximum_velocity"):
             validate_actuation(config, 3)
 
+    def test_transmission_efficiency_is_applied_after_motor_limits(self) -> None:
+        config = effort_config()
+        config["transmission_efficiency_by_joint"] = [0.5, 1.0, 1.0]
+        validate_actuation(config, 3)
+        command = realize_joint_command_diagnostic(
+            config, "effort_pd", frozenset({0, 1}), 0, 1.0, 0.0, 0.0
+        )
+        self.assertEqual(command.raw, 10.0)
+        self.assertEqual(command.applied, 4.0)
+        self.assertEqual(command.transmitted, 2.0)
+        self.assertTrue(command.saturated)
+        config["transmission_efficiency_by_joint"][0] = 0.0
+        with self.assertRaisesRegex(ValueError, "transmission_efficiency"):
+            validate_actuation(config, 3)
+
     def test_non_effort_joints_retain_bounded_velocity_servo(self) -> None:
         config = effort_config()
         self.assertEqual(
@@ -129,6 +144,7 @@ class OpenArmActuationTests(unittest.TestCase):
         self.assertEqual(diagnostic["joint_command_kind"], ["effort_nm"])
         self.assertEqual(diagnostic["joint_raw_command_peak_abs"], [10.0])
         self.assertEqual(diagnostic["joint_applied_command_mean"], [2.5])
+        self.assertEqual(diagnostic["joint_transmitted_effort_mean_nm"], [2.5])
         self.assertEqual(diagnostic["joint_saturation_substep_count"], [1])
         self.assertEqual(diagnostic["joint_saturation_fraction"], [0.5])
         self.assertEqual(diagnostic["joint_initial_position_error_rad"], [1.0])

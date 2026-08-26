@@ -252,6 +252,8 @@ struct JointActuationConfig {
     damping_nm_s_per_rad: f64,
     max_effort_nm: f64,
     max_velocity_rad_s: f64,
+    #[serde(default = "unit_transmission_efficiency")]
+    transmission_efficiency: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -518,21 +520,22 @@ impl MujocoOpenArmSim {
                 let raw_effort_nm = joint.stiffness_nm_per_rad * (target - position_rad)
                     - joint.damping_nm_s_per_rad * velocity_rad_s;
                 let clamped_effort_nm = raw_effort_nm.clamp(-max_effort_nm, max_effort_nm);
-                let limited_effort_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
+                let motor_effort_command_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
                     let drive_fraction =
                         (1.0 - velocity_rad_s.abs() / joint.max_velocity_rad_s).clamp(0.0, 1.0);
                     clamped_effort_nm * drive_fraction
                 } else {
                     clamped_effort_nm
                 };
+                let joint_effort_nm = motor_effort_command_nm * joint.transmission_efficiency;
                 self.world
                     .entity_mut(entity)
                     .insert(JointActuation::RevoluteEffort {
-                        effort_nm: limited_effort_nm,
+                        effort_nm: joint_effort_nm,
                         max_effort_nm,
                     });
-                efforts.push(limited_effort_nm);
-                saturated.push(raw_effort_nm != limited_effort_nm);
+                efforts.push(motor_effort_command_nm);
+                saturated.push(raw_effort_nm != motor_effort_command_nm);
             }
             self.backend
                 .sync_from_ecs(&mut self.world, self.physics_world)
@@ -884,12 +887,15 @@ fn validate(
                 joint.damping_nm_s_per_rad,
                 joint.max_effort_nm,
                 joint.max_velocity_rad_s,
+                joint.transmission_efficiency,
             ]
             .iter()
             .all(|value| value.is_finite() && *value >= 0.0)
                 && joint.max_velocity_rad_s > 0.0
+                && joint.transmission_efficiency > 0.0
+                && joint.transmission_efficiency <= 1.0
         }),
-        "native actuation configuration has invalid gains, effort, or velocity limits"
+        "native actuation configuration has invalid gains, effort, velocity, or transmission efficiency"
     );
     anyhow::ensure!(
         actions.kind == "rne_controller_action_trace"
@@ -1153,6 +1159,10 @@ fn rollout(
 
 fn default_physics_substeps_per_control_step() -> usize {
     1
+}
+
+fn unit_transmission_efficiency() -> f64 {
+    1.0
 }
 
 fn intentional_failure(

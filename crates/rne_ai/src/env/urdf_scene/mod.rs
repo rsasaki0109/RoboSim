@@ -267,11 +267,15 @@ pub struct UrdfJointPdEffortTarget<'a> {
     pub max_effort_nm: f64,
     /// No-load actuator speed ceiling in rad/s.
     pub max_velocity_rad_s: f64,
+    /// Motor-to-joint effort transmission efficiency in `(0, 1]`.
+    pub transmission_efficiency: f64,
 }
 
 /// Applied output of a portable PD-to-effort command.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UrdfJointAppliedEffort {
+    /// Bounded motor-side command before transmission loss in N·m.
+    pub motor_effort_command_nm: f64,
     /// Clamped torque delivered to the backend in N·m.
     pub effort_nm: f64,
     /// Whether the unclamped PD output exceeded its configured ceiling.
@@ -1677,6 +1681,7 @@ impl UrdfSceneSim {
                 target.damping_nm_s_per_rad,
                 target.max_effort_nm,
                 target.max_velocity_rad_s,
+                target.transmission_efficiency,
             ]
             .iter()
             .all(|value| value.is_finite())
@@ -1684,6 +1689,8 @@ impl UrdfSceneSim {
                 && target.damping_nm_s_per_rad >= 0.0
                 && target.max_effort_nm >= 0.0
                 && target.max_velocity_rad_s > 0.0
+                && target.transmission_efficiency > 0.0
+                && target.transmission_efficiency <= 1.0
         }) {
             return Err(AssetError::Invalid {
                 path: self.scene_path.display().to_string(),
@@ -1728,13 +1735,14 @@ impl UrdfSceneSim {
                     - target.damping_nm_s_per_rad * velocity_rad_s;
                 let clamped_effort_nm =
                     raw_effort_nm.clamp(-target.max_effort_nm, target.max_effort_nm);
-                let effort_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
+                let motor_effort_command_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
                     let drive_fraction =
                         (1.0 - velocity_rad_s.abs() / target.max_velocity_rad_s).clamp(0.0, 1.0);
                     clamped_effort_nm * drive_fraction
                 } else {
                     clamped_effort_nm
                 };
+                let effort_nm = motor_effort_command_nm * target.transmission_efficiency;
                 self.world
                     .entity_mut(entity)
                     .insert(JointActuation::RevoluteEffort {
@@ -1742,8 +1750,9 @@ impl UrdfSceneSim {
                         max_effort_nm: target.max_effort_nm,
                     });
                 applied.push(UrdfJointAppliedEffort {
+                    motor_effort_command_nm,
                     effort_nm,
-                    saturated: raw_effort_nm != effort_nm,
+                    saturated: raw_effort_nm != motor_effort_command_nm,
                 });
             }
             self.step_physics_with_delta(delta);
@@ -2353,13 +2362,31 @@ mod tests {
                     damping_nm_s_per_rad: 0.5,
                     max_effort_nm: 1.0,
                     max_velocity_rad_s: 5.0,
+                    transmission_efficiency: 1.0,
                 }],
                 2,
             )
             .expect("step portable PD effort actuation");
         assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].motor_effort_command_nm, 1.0);
         assert_eq!(applied[0].effort_nm, 1.0);
         assert!(applied[0].saturated);
+        let lossy = pd_sim
+            .step_joint_pd_effort_targets_substeps(
+                &[UrdfJointPdEffortTarget {
+                    link_name: "shoulder_link",
+                    target_position_rad: 10.0,
+                    stiffness_nm_per_rad: 4.0,
+                    damping_nm_s_per_rad: 0.5,
+                    max_effort_nm: 1.0,
+                    max_velocity_rad_s: 5.0,
+                    transmission_efficiency: 0.5,
+                }],
+                1,
+            )
+            .expect("step lossy portable PD effort actuation");
+        assert_eq!(lossy[0].motor_effort_command_nm, 1.0);
+        assert_eq!(lossy[0].effort_nm, 0.5);
         assert!(!sim.configure_named_revolute_effort_actuation("shoulder_link", f64::NAN,));
         assert!(sim
             .step_joint_effort_actuation_targets_substeps(&[], 0)

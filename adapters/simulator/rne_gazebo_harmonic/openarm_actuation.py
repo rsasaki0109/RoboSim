@@ -72,6 +72,20 @@ def validate_actuation(
         )
     ):
         raise ValueError("invalid effort-PD field maximum_velocity_rad_s_by_joint")
+    transmission_efficiency = config.get(
+        "transmission_efficiency_by_joint", [1.0] * joint_count
+    )
+    if (
+        not isinstance(transmission_efficiency, list)
+        or len(transmission_efficiency) != joint_count
+        or not all(
+            isinstance(value, (int, float))
+            and math.isfinite(value)
+            and 0.0 < value <= 1.0
+            for value in transmission_efficiency
+        )
+    ):
+        raise ValueError("invalid effort-PD field transmission_efficiency_by_joint")
     friction = config.get("plant_coulomb_friction_nm", [0.0] * joint_count)
     transition = config.get(
         "plant_coulomb_transition_velocity_rad_s", [0.0] * joint_count
@@ -156,6 +170,7 @@ class RealizedJointCommand:
     kind: str
     raw: float
     applied: float
+    transmitted: float
     limit: float
     saturated: bool
 
@@ -217,10 +232,16 @@ def realize_joint_command_diagnostic(
             0.0, min(1.0, 1.0 - abs(velocity_rad_s) / velocity_limits[index])
         )
         applied *= drive_fraction
+    transmitted = applied
+    if kind == "effort_nm":
+        transmitted *= config.get(
+            "transmission_efficiency_by_joint", [1.0] * len(config["stiffness_nm_per_rad"])
+        )[index]
     return RealizedJointCommand(
         kind=kind,
         raw=raw,
         applied=applied,
+        transmitted=transmitted,
         limit=limit,
         saturated=abs(raw) > limit or applied != raw,
     )
@@ -234,6 +255,7 @@ class ActuationDiagnosticAccumulator:
     kinds: list[str | None] = field(init=False)
     raw_commands: list[list[float]] = field(init=False)
     applied_commands: list[list[float]] = field(init=False)
+    transmitted_commands: list[list[float]] = field(init=False)
     saturation_counts: list[int] = field(init=False)
     initial_position_error_rad: list[float | None] = field(init=False)
     measured_velocities_rad_s: list[list[float]] = field(init=False)
@@ -245,6 +267,7 @@ class ActuationDiagnosticAccumulator:
         self.kinds = [None] * self.joint_count
         self.raw_commands = [[] for _ in range(self.joint_count)]
         self.applied_commands = [[] for _ in range(self.joint_count)]
+        self.transmitted_commands = [[] for _ in range(self.joint_count)]
         self.saturation_counts = [0] * self.joint_count
         self.initial_position_error_rad = [None] * self.joint_count
         self.measured_velocities_rad_s = [[] for _ in range(self.joint_count)]
@@ -271,6 +294,7 @@ class ActuationDiagnosticAccumulator:
         self.kinds[index] = command.kind
         self.raw_commands[index].append(command.raw)
         self.applied_commands[index].append(command.applied)
+        self.transmitted_commands[index].append(command.transmitted)
         self.saturation_counts[index] += int(command.saturated)
         self.measured_velocities_rad_s[index].append(measured_velocity_rad_s)
         self.feedback_velocities_rad_s[index].append(feedback_velocity_rad_s)
@@ -306,6 +330,15 @@ class ActuationDiagnosticAccumulator:
             "joint_applied_command_max": [max(values) for values in self.applied_commands],
             "joint_applied_command_mean": [
                 sum(values) / len(values) for values in self.applied_commands
+            ],
+            "joint_transmitted_effort_min_nm": [
+                min(values) for values in self.transmitted_commands
+            ],
+            "joint_transmitted_effort_max_nm": [
+                max(values) for values in self.transmitted_commands
+            ],
+            "joint_transmitted_effort_mean_nm": [
+                sum(values) / len(values) for values in self.transmitted_commands
             ],
             "joint_saturation_substep_count": self.saturation_counts,
             "joint_saturation_fraction": [

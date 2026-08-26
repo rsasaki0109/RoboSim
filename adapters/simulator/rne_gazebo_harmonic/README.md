@@ -243,6 +243,52 @@ file and atomically replaced on close. This keeps the unchanged 15-second wire
 response timeout viable on WSL shared mounts and prevents a killed adapter from
 leaving a valid-looking partial sidecar.
 
+## Sweep motor-to-joint transmission efficiency
+
+The transmission lab holds the qualified `0.5 N*m` regularized-Coulomb plant,
+TaskSpec, controller, model geometry, mass, center of mass, inertia, limits,
+world, and scene fixed. It changes only right joint 5's dimensionless
+transmission efficiency over `[1.00, 0.90, 0.75, 0.50, 0.25]`. The portable
+actuation order is explicit: motor-side PD, motor effort/speed limits,
+efficiency multiplication, joint-side effort, then passive Coulomb loss.
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_transmission_efficiency_suite.py \
+  --baseline-fixture artifacts/openarm-coulomb/fixtures/joint5-coulomb-0500mn \
+  --output artifacts/openarm-transmission/fixtures
+
+# Run every fixture through the Rapier and MuJoCo trace binaries and the Gazebo
+# adapter, retaining CASE/{rapier,mujoco,gazebo}. Then build the fixed-grid report:
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_transmission_efficiency_report.py \
+  --fixture-root artifacts/openarm-transmission/fixtures \
+  --trace-root artifacts/openarm-transmission/runs \
+  --controller artifacts/openarm-coulomb-controller-poles/candidates/openarm-coulomb-poles-fast.controller.json \
+  --output artifacts/openarm-transmission/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-transmission/report/transmission-efficiency-report.json \
+  --trace artifacts/openarm-transmission/runs/joint5-efficiency-075pct/rapier/rapier-success-trace.json \
+  --output artifacts/openarm-transmission/report/transmission-efficiency-failure.rne-replay
+```
+
+The pilot rejected the initial `0.75` support hypothesis without changing the
+predeclared `0.02 rad` RMSE requirement: Rapier and native MuJoCo measure
+approximately `0.022008` and `0.022010 rad`. The declared production envelope
+therefore starts at `0.90`. At that supported boundary Rapier, MuJoCo, and
+Gazebo measure `0.018792`, `0.018792`, and `0.008468 rad`; all pass. The first
+outside case, `0.75`, is retained as an expected boundary failure because the
+two native paths fail while Gazebo remains performance-green at `0.011672 rad`.
+
+All 15 rows use the same action hash and exact same-runtime replay. Native
+traces retain the bounded motor command separately from backend-measured joint
+effort. Gazebo diagnostics retain motor-side `joint_applied_command_*` and
+joint-side `joint_transmitted_effort_*` independently. At `0.75`, Gazebo's
+`7.0 N*m` motor ceiling becomes a `5.25 N*m` joint-side ceiling; it is not
+misreported as motor saturation. The browser report binds fixture, model,
+configuration, controller, action, trace, and diagnostic hashes, and the first
+Rapier RMSE failure converts into a portable behavior replay and verified
+Failure Capsule.
+
 ## Run conformance
 
 From the repository root on Ubuntu:

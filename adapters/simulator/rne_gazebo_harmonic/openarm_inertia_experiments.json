@@ -1,0 +1,22 @@
+{
+  "kind": "rne_openarm_inertia_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.joint5_child_link_inertia.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "inertia_link": "openarm_right_link5",
+  "inertia_scale_grid": [1.0, 2.0, 4.0, 8.0, 16.0],
+  "declared_supported_inertia_scale": 2.0,
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "requirements": [
+    {"id": "inertia.maximum_tensor_realization_delta_kg_m2", "unit": "kg*m^2", "maximum": 0.000000000001},
+    {"id": "inertia.maximum_fixed_mass_delta_kg", "unit": "kg", "maximum": 0.000000000001},
+    {"id": "inertia.maximum_fixed_com_delta_m", "unit": "m", "maximum": 0.000000000001},
+    {"id": "inertia.maximum_bounded_actuator_effort_excess_nm", "unit": "N*m", "maximum": 0.000000000001},
+    {"id": "inertia.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
+    {"id": "inertia.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
+    {"id": "inertia.maximum_supported_scale", "unit": "1", "maximum": 2.0},
+    {"id": "inertia.requires_exact_replay", "unit": "bool", "required": true}
+  ],
+  "parameter_semantics": "uniform_scale_of_joint5_child_link_com_frame_inertia_tensor_with_mass_com_geometry_friction_and_actuation_fixed",
+  "boundary_rule": "smallest_scale_with_any_predeclared_non_capacity_requirement_failure"
+}

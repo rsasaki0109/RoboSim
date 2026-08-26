@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 const JOINT_LOSS_PERFORMANCE_REQUIREMENT: &str = "joint_loss.maximum_controlled_joint_rmse_rad";
 const COULOMB_PERFORMANCE_REQUIREMENT: &str = "coulomb.maximum_controlled_joint_rmse_rad";
+const TRANSMISSION_PERFORMANCE_REQUIREMENT: &str = "transmission.maximum_controlled_joint_rmse_rad";
 const RMSE_RECOMPUTE_TOLERANCE_RAD: f64 = 1.0e-12;
 
 #[derive(Debug, Deserialize)]
@@ -29,11 +30,14 @@ struct JointLossReport {
 struct Outcome {
     backend_id: String,
     case_id: String,
+    #[serde(default)]
     plant_viscous_damping_nm_s_per_rad: f64,
     #[serde(default)]
     plant_coulomb_friction_nm: Option<f64>,
     #[serde(default)]
     plant_coulomb_transition_velocity_rad_s: Option<f64>,
+    #[serde(default)]
+    transmission_efficiency: Option<f64>,
     status: String,
     trace_sha256: String,
     metrics: Metrics,
@@ -131,6 +135,7 @@ fn run() -> Result<()> {
             "plant_viscous_damping_nm_s_per_rad": outcome.plant_viscous_damping_nm_s_per_rad,
             "plant_coulomb_friction_nm": outcome.plant_coulomb_friction_nm,
             "plant_coulomb_transition_velocity_rad_s": outcome.plant_coulomb_transition_velocity_rad_s,
+            "transmission_efficiency": outcome.transmission_efficiency,
             "report_sha256": report_sha256,
             "trace_sha256": trace_sha256,
             "requirement_id": requirement.requirement_id,
@@ -163,7 +168,9 @@ fn run() -> Result<()> {
     let maximum = requirement
         .maximum
         .context("failed RMSE requirement has no maximum")?;
-    let loss_parameters = if let (Some(friction), Some(transition)) = (
+    let loss_parameters = if let Some(efficiency) = outcome.transmission_efficiency {
+        format!("motor-to-joint transmission efficiency {efficiency:.6}")
+    } else if let (Some(friction), Some(transition)) = (
         outcome.plant_coulomb_friction_nm,
         outcome.plant_coulomb_transition_velocity_rad_s,
     ) {
@@ -206,11 +213,12 @@ fn run() -> Result<()> {
     )?;
     replay.write_json(&output_path)?;
     println!(
-        "OpenArm joint-loss failure replay: backend={} damping={} friction={:?} transition={:?} requirement={} step={} report_sha256={report_sha256}",
+        "OpenArm joint-loss failure replay: backend={} damping={} friction={:?} transition={:?} efficiency={:?} requirement={} step={} report_sha256={report_sha256}",
         outcome.backend_id,
         outcome.plant_viscous_damping_nm_s_per_rad,
         outcome.plant_coulomb_friction_nm,
         outcome.plant_coulomb_transition_velocity_rad_s,
+        outcome.transmission_efficiency,
         requirement.requirement_id,
         final_observation.step
     );
@@ -225,6 +233,7 @@ fn validate_inputs<'a>(
     let performance_requirement = match report.kind.as_str() {
         "rne_openarm_joint_loss_report" => JOINT_LOSS_PERFORMANCE_REQUIREMENT,
         "rne_openarm_coulomb_friction_report" => COULOMB_PERFORMANCE_REQUIREMENT,
+        "rne_openarm_transmission_efficiency_report" => TRANSMISSION_PERFORMANCE_REQUIREMENT,
         _ => bail!("report is not a supported OpenArm joint-loss envelope report"),
     };
     anyhow::ensure!(
@@ -306,6 +315,9 @@ fn validate_inputs<'a>(
 }
 
 fn loss_parameter(outcome: &Outcome) -> f64 {
+    if let Some(efficiency) = outcome.transmission_efficiency {
+        return -efficiency;
+    }
     outcome
         .plant_coulomb_friction_nm
         .unwrap_or(outcome.plant_viscous_damping_nm_s_per_rad)
